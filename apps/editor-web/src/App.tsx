@@ -51,7 +51,8 @@ interface EditorPanelContextValue {
     value: number,
   ) => void;
   readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
-  readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
+  readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly transcriptionError: string | undefined;
   readonly undo: () => void;
   readonly redo: () => void;
 }
@@ -61,6 +62,7 @@ export function App() {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [transcriptionError, setTranscriptionError] = useState<string>();
   const [, setRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
@@ -125,14 +127,20 @@ export function App() {
     [session],
   );
   const transcribe = useCallback(
-    (documentId: string, language: 'fa-IR' | 'en-US') => {
-      void transcribeReferenceCaption(documentId, language).then((document) => {
+    async (documentId: string, language: 'fa-IR' | 'en-US') => {
+      try {
+        const document = await transcribeReferenceCaption(documentId, language);
         session.dispatchVisualObjects({
           label: `Transcribe ${language}`,
           commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
         });
+        setTranscriptionError(undefined);
         setRevision((revision) => revision + 1);
-      });
+      } catch (error) {
+        setTranscriptionError(
+          error instanceof Error ? error.message : 'Local transcription is unavailable.',
+        );
+      }
     },
     [session],
   );
@@ -217,6 +225,7 @@ export function App() {
           updateVisualProperty,
           dispatchProject,
           transcribe,
+          transcriptionError,
           undo,
           redo,
         }}
@@ -273,6 +282,7 @@ function Panel({ api }: IDockviewPanelProps) {
         onSeek={context.seek}
         onDispatch={context.dispatchProject}
         onTranscribe={context.transcribe}
+        transcriptionError={context.transcriptionError}
       />
     );
   if (api.id === 'timeline')

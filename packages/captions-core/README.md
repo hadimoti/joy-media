@@ -1,6 +1,6 @@
 # captions-core
 
-> **Status: WP-03.3 done.** Schemas in project-schema v1; this package owns direction resolution, editing commands, SRT/WebVTT interchange, the JOY template registry, responsive safe-area layout, and karaoke spans into Render IR.
+> **Status: P03 done.** Schemas in project-schema v1; this package owns direction resolution, editing commands, SRT/WebVTT interchange, the JOY template registry, responsive safe-area layout, and karaoke spans into Render IR.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §20.5, §2.7 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Subtitle document model (words/segments/speakers), layout, templates, animation, RTL/Persian rules.

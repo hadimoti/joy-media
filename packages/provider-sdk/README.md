@@ -1,6 +1,6 @@
 # provider-sdk
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P03 minimum implemented.** Provider manifests, typed capability invocation, local Whisper-family executor seams, normalized word/speaker results, provenance, and typed unavailability errors are covered by tests. P05 extends this into the full provider system.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §21 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** AI/media capability contracts: manifests, capability requests, normalized results, provenance.

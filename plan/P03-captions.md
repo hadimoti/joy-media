@@ -1,6 +1,6 @@
 # P03 — Captions and Transcript-First Editing
 
-**Status:** in-progress · **Gate to enter:** owner authorized early start; P02 completion remains tracked · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
+**Status:** done · **Gate to enter:** owner authorized early start; P02 completion remains tracked · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
 **Goal:** captions become a first-class reason to use JOY — structured language data, Persian/RTL first-class, transcription as a replaceable adapter.
 
 **Decisions needed:** Q7 (Persian quality benchmarks), Q12 (brand kit draft).
@@ -15,9 +15,9 @@
 
 ## Exit criteria (§36 Phase 3)
 
-- [ ] Transcribe a reference Persian AND English project locally.
-- [ ] Edit transcript text/timing without corrupting source tokens.
-- [ ] Apply at least three original JOY caption templates.
-- [ ] Export burned-in and sidecar captions.
-- [ ] Captions stay inside configured safe areas across long/RTL/emoji stress fixtures.
-- [ ] Model unavailability does not break manual caption editing.
+- [x] Transcribe a reference Persian AND English project locally. _(local adapter normalization + Chrome verification)_
+- [x] Edit transcript text/timing without corrupting source tokens. _(durable command/inverse tests)_
+- [x] Apply at least three original JOY caption templates. _(template-registry tests)_
+- [x] Export burned-in and sidecar captions. _(shared preview/headless Render IR plus SRT/WebVTT tests)_
+- [x] Captions stay inside configured safe areas across long/RTL/emoji stress fixtures. _(golden-render tests)_
+- [x] Model unavailability does not break manual caption editing. _(typed provider failure and non-blocking panel status)_

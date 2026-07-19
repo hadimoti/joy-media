@@ -35,12 +35,14 @@ export function CaptionsPanel({
   onSeek,
   onDispatch,
   onTranscribe,
+  transcriptionError,
 }: {
   readonly project: JoyProjectV1;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
-  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
+  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly transcriptionError: string | undefined;
 }) {
   const [query, setQuery] = useState('');
   const composition = project.compositions[project.rootCompositionId];
@@ -56,6 +58,11 @@ export function CaptionsPanel({
   return (
     <article className="captions-panel">
       <CaptionPreview project={project} playheadUs={playheadUs} />
+      {transcriptionError !== undefined && (
+        <p className="caption-warning" role="status">
+          {transcriptionError} You can continue editing captions manually.
+        </p>
+      )}
       <input
         aria-label="Search transcript"
         type="search"
@@ -168,7 +175,7 @@ function CaptionSlotEditor({
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
-  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
+  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
 }) {
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -264,8 +271,8 @@ function CaptionSlotEditor({
           }}
         />
         <button onClick={addSegment}>Add caption</button>
-        <button onClick={() => onTranscribe(document.id, 'fa-IR')}>Transcribe Persian</button>
-        <button onClick={() => onTranscribe(document.id, 'en-US')}>Transcribe English</button>
+        <button onClick={() => void onTranscribe(document.id, 'fa-IR')}>Transcribe Persian</button>
+        <button onClick={() => void onTranscribe(document.id, 'en-US')}>Transcribe English</button>
       </header>
       {importIssues > 0 && (
         <p className="caption-warning">
