@@ -1,6 +1,6 @@
 # commands
 
-> **Status: spike implemented (WP-00.2)** — pure command application, semantic inverses, atomic transactions, and linear undo/redo are implemented over the P00 spike model. This README is this folder's slice of the JOY Media plan.
+> **Status: core hardening underway (WP-01.1)** — pure command application, semantic inverses, atomic transactions, linear undo/redo, and continuous-interaction coalescing are implemented over the validated project boundary. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §11 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Command registry, validation, inversion, transactions, undo/redo history.

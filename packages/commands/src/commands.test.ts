@@ -9,7 +9,7 @@ import {
   withClips,
 } from '@joy-media/test-fixtures';
 import type { SpikeCommand } from './commands.js';
-import { applyCommand, CommandError } from './commands.js';
+import { applyCommand, COMMAND_REGISTRY, CommandError } from './commands.js';
 
 const TARGET = { compositionId: 'root', trackId: 'track-0' } as const;
 
@@ -42,6 +42,18 @@ function clipsOf(
 }
 
 describe('applyCommand', () => {
+  it('publishes every supported command through the registry', () => {
+    expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
+      'property.setTrackEnabled',
+      'timeline.insertClip',
+      'timeline.joinClips',
+      'timeline.moveClip',
+      'timeline.removeClip',
+      'timeline.splitClip',
+      'timeline.trimClipEnd',
+      'timeline.trimClipStart',
+    ]);
+  });
   it('inserts a clip into a gap and inverts to a remove', () => {
     const project = baseProject();
     const command: SpikeCommand = {

@@ -1,13 +1,13 @@
 # P01 — Platform Foundation
 
-**Status:** not-started · **Gate to enter:** P00 exit criteria all checked · **Master plan:** §36 Phase 1, §39 items 1–39 (foundation/workspace/asset-worker groups), §9, §12, §27
+**Status:** in-progress · **Gate to enter:** P00 exit criteria all checked · **Master plan:** §36 Phase 1, §39 items 1–39 (foundation/workspace/asset-worker groups), §9, §12, §27
 **Goal:** durable creative core, editor shell, local persistence, minimal control plane + Worker skeleton. At exit, JOY Media is a real (if tiny) product skeleton, not spikes.
 
 **Decisions needed at entry:** Q1 (target surface), Q3 (sync default), Q9 (single-user), Q10 (identity), Q16 (repo split). See DECISIONS.md.
 
 ## Work packages
 
-- [ ] **WP-01.1 — Creative core hardening.** Promote spike results to production packages: project schema v1 + migration harness + v0 fixture; runtime validators; command registry with inverse tests; transactions/coalescing/undo-redo. _(§39-2…9, §10–§12)_
+- [x] **WP-01.1 — Creative core hardening** _(done 2026-07-19)_. Added a runtime-validated v1 project subset, pure v0→v1 migration harness and fixture, command registry coverage, and coalesced continuous history interactions while retaining semantic inverses/undo-redo. _(§39-2…9, §10–§12)_
 - [ ] **WP-01.2 — Local persistence + recovery.** Snapshot + command-log storage (IndexedDB/desktop); crash recovery; two-tab/project-lock handling; autosave states per §12.3. _(§39-10,11)_
 - [ ] **WP-01.3 — Evaluator + Render IR v1 + minimal Pixi adapter.** Active-interval queries, static property evaluation, IR for sprite/video-frame/text/group, editor-overlay separation, deterministic render-host harness with golden frame. _(§39-12…16, §14–§15)_
 - [ ] **WP-01.4 — Editor shell.** React/Vite app, error boundary, theme/ui-kit baseline, Dockview default workspace + layout recovery, command palette + shortcut registry, ephemeral selection/playhead state, schema-driven Inspector for transform/opacity, History + diagnostics panels. _(§39-17…21,26, §17–§18)_

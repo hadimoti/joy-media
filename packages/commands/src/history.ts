@@ -14,6 +14,8 @@ import { applyCommand, CommandError } from './commands.js';
 export interface CommandTransaction {
   readonly label: string;
   readonly commands: readonly SpikeCommand[];
+  /** Continuous interactions with the same key collapse into one undo entry. */
+  readonly coalesceKey?: string;
 }
 
 export interface TransactionRecord {
@@ -21,6 +23,7 @@ export interface TransactionRecord {
   readonly commands: readonly SpikeCommand[];
   /** Inverses in application order for undo (i.e. already reversed). */
   readonly inverses: readonly SpikeCommand[];
+  readonly coalesceKey?: string;
 }
 
 export interface TransactionResult {
@@ -45,7 +48,12 @@ export function applyTransaction(
   }
   return {
     project: current,
-    record: { label: transaction.label, commands: [...transaction.commands], inverses },
+    record: {
+      label: transaction.label,
+      commands: [...transaction.commands],
+      inverses,
+      ...(transaction.coalesceKey === undefined ? {} : { coalesceKey: transaction.coalesceKey }),
+    },
   };
 }
 
@@ -79,7 +87,21 @@ export class ProjectHistory {
   apply(transaction: CommandTransaction): SpikeProject {
     const result = applyTransaction(this.#present, transaction);
     this.#present = result.project;
-    this.#undo.push(result.record);
+    const previous = this.#undo[this.#undo.length - 1];
+    if (
+      result.record.coalesceKey !== undefined &&
+      previous !== undefined &&
+      previous.coalesceKey === result.record.coalesceKey
+    ) {
+      this.#undo[this.#undo.length - 1] = {
+        label: result.record.label,
+        commands: [...previous.commands, ...result.record.commands],
+        inverses: [...result.record.inverses, ...previous.inverses],
+        coalesceKey: result.record.coalesceKey,
+      };
+    } else {
+      this.#undo.push(result.record);
+    }
     this.#redo.length = 0;
     return this.#present;
   }

@@ -21,7 +21,7 @@ export type {
   JoinClipsPayload,
   SetTrackEnabledPayload,
 } from './commands.js';
-export { applyCommand, CommandError } from './commands.js';
+export { applyCommand, CommandError, COMMAND_REGISTRY } from './commands.js';
 
 export type { CommandTransaction, TransactionRecord, TransactionResult } from './history.js';
 export { applyTransaction, ProjectHistory } from './history.js';

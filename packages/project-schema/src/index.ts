@@ -37,3 +37,18 @@ export type {
   ProjectDiagnostic,
 } from './model.js';
 export { validateSpikeProject } from './model.js';
+
+export type {
+  JoyProjectV1,
+  CompositionV1,
+  TrackV1,
+  ClipV1,
+  VideoClipV1,
+  CompositionClipV1,
+  AssetRecordV1,
+  MarkerV1,
+  JsonValue,
+} from './v1.js';
+export { validateJoyProjectV1 } from './v1.js';
+export type { MigrationReport, MigrationResult } from './migration.js';
+export { migrateV0ToV1 } from './migration.js';

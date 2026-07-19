@@ -81,6 +81,20 @@ export type SpikeCommand =
 
 export type SpikeCommandType = SpikeCommand['type'];
 
+/** Discoverable command registry used by UI/agent tooling; handlers remain pure below. */
+export const COMMAND_REGISTRY: Readonly<
+  Record<SpikeCommandType, { readonly description: string }>
+> = {
+  'timeline.insertClip': { description: 'Insert a non-overlapping clip into a track.' },
+  'timeline.removeClip': { description: 'Remove a clip while preserving it in the inverse.' },
+  'timeline.moveClip': { description: 'Move a clip within its track.' },
+  'timeline.trimClipStart': { description: 'Trim a clip start and shift its source offset.' },
+  'timeline.trimClipEnd': { description: 'Trim a clip end.' },
+  'timeline.splitClip': { description: 'Split a clip into source-continuous halves.' },
+  'timeline.joinClips': { description: 'Join adjacent source-continuous clips.' },
+  'property.setTrackEnabled': { description: 'Set a track enabled state.' },
+};
+
 export interface ApplyResult {
   readonly project: SpikeProject;
   readonly inverse: SpikeCommand;

@@ -3,25 +3,28 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-| Part                       | Status      | WPs done | Last session | Next action                                            |
-| -------------------------- | ----------- | -------- | ------------ | ------------------------------------------------------ |
-| P00 architecture proofs    | gate-review | 8/8      | 2026-07-19   | verify exit evidence; owner vertical-slice UX approval |
-| P01 platform foundation    | not-started | 0/6      | —            | gated on P00 exit criteria                             |
-| P02 editing slice          | not-started | 0/6      | —            | gated on P01                                           |
-| P03 captions               | not-started | 0/5      | —            | gated on P02                                           |
-| P04 motion + HTML scenes   | not-started | 0/5      | —            | gated on P02                                           |
-| P05 audio + providers      | not-started | 0/5      | —            | gated on P02 (+provider-sdk min from P03)              |
-| P06 agent                  | not-started | 0/5      | —            | gated on P02+P03                                       |
-| P07 workflows              | not-started | 0/4      | —            | gated on P06 partial                                   |
-| P08 plugin SDK + templates | not-started | 0/5      | —            | gated on P04–P07 contracts                             |
-| P09 marketplace/collab     | not-started | 0/0      | —            | **owner approval required to open**                    |
-| P10 advanced               | not-started | 0/0      | —            | not scoped                                             |
-| X01 VPS control plane      | not-started | 0/4      | —            | activates with P01; skeleton dir exists on VPS         |
+| Part                       | Status      | WPs done | Last session | Next action                                    |
+| -------------------------- | ----------- | -------- | ------------ | ---------------------------------------------- |
+| P00 architecture proofs    | done        | 8/8      | 2026-07-19   | P01 opened after owner UX approval             |
+| P01 platform foundation    | in-progress | 1/6      | 2026-07-19   | WP-01.2 local persistence + recovery           |
+| P02 editing slice          | not-started | 0/6      | —            | gated on P01                                   |
+| P03 captions               | not-started | 0/5      | —            | gated on P02                                   |
+| P04 motion + HTML scenes   | not-started | 0/5      | —            | gated on P02                                   |
+| P05 audio + providers      | not-started | 0/5      | —            | gated on P02 (+provider-sdk min from P03)      |
+| P06 agent                  | not-started | 0/5      | —            | gated on P02+P03                               |
+| P07 workflows              | not-started | 0/4      | —            | gated on P06 partial                           |
+| P08 plugin SDK + templates | not-started | 0/5      | —            | gated on P04–P07 contracts                     |
+| P09 marketplace/collab     | not-started | 0/0      | —            | **owner approval required to open**            |
+| P10 advanced               | not-started | 0/0      | —            | not scoped                                     |
+| X01 VPS control plane      | not-started | 0/4      | —            | activates with P01; skeleton dir exists on VPS |
 
 ## Session log (newest first)
 
 | Date       | Part | What happened                                                                                                                                                                                                                                                                                                                                                                             |
 | ---------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-19 | P01  | **WP-01.1 done (creative core hardening).** v0 spike projects migrate purely to a runtime-validated v1 subset; command registry coverage and continuous-history coalescing added while preserving semantic inverse/undo behavior.                                                                                                                                                         |
+| 2026-07-19 | P01  | **Opened.** Owner approved the P00 vertical-slice UX direction after gate review. WP-01.1 starts: schema v1/migrations/validators and hardened command history.                                                                                                                                                                                                                           |
+| 2026-07-19 | P00  | **Done.** Owner approved the vertical-slice UX direction after the documented P00 gate review; all exit criteria are now checked.                                                                                                                                                                                                                                                         |
 | 2026-07-19 | P00  | **WP-00.7 done (audio-sync spike); P00 enters gate review.** Deterministic PCM waveform/seek/WAV export and serialized fixture reopen checks pass. One-hour 48 kHz drift stays within one sample (≤21 µs). ADR-0010 records snapshot + validated command-log persistence; remaining P00 exits include evidence review and owner UX approval.                                              |
 | 2026-07-19 | P00  | **WP-00.6 done (browser/desktop asset spike).** ADR-0007 separates browser, desktop bridge, Worker, and VPS roles; ADR-0008 separates AssetId from private locations. A simulated 8 GiB selection registers as an opaque Worker location and yields local thumbnail/proxy references without sending original path or bytes to public/control-plane records.                              |
 | 2026-07-19 | P00  | **WP-00.5 done (Worker spike).** ADR-0009 fixes Worker-initiated pairing/hello and local-only job routing. The `asset.thumbnail` proof has typed capability matching, opaque asset IDs only, progress, cancellation delivery, bounded retry, and path rejection; it sends neither source paths nor bytes.                                                                                 |

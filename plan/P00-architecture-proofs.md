@@ -1,6 +1,6 @@
 # P00 — Architecture Proofs and Risk Retirement
 
-**Status:** gate-review · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
+**Status:** done · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
 **Goal:** prove the hardest boundaries with minimal spikes _before_ building a large UI. Spikes may be throwaway, but their ADRs and golden fixtures are permanent.
 
 ## Work packages
@@ -26,4 +26,4 @@ Each WP ≈ one session. WP-00.0 first; the seven spikes afterward in any order 
 - [x] A saved spike project reproduces the same reference frames and audio alignment on re-open. Evidence: serialized command/replay, RenderFrameIR reopen, and PCM fixture reopen tests; see [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
 - [x] No spike put Pixi objects, raw paths, or provider-specific fields into the project schema. Evidence: schema/bridge boundary review in [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
 - [x] Known preview/export differences measured and documented. See [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
-- [ ] Owner has seen and approved the vertical-slice user experience direction.
+- [x] Owner has seen and approved the vertical-slice user experience direction (2026-07-19).

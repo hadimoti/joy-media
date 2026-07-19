@@ -89,6 +89,23 @@ describe('ProjectHistory', () => {
     expect(history.canRedo).toBe(false);
   });
 
+  it('coalesces matching continuous interactions into one semantic undo step', () => {
+    const history = new ProjectHistory(emptySpikeProject());
+    history.apply({
+      label: 'Disable track',
+      coalesceKey: 'track-0-enabled',
+      commands: [{ type: 'property.setTrackEnabled', payload: { ...TARGET, enabled: false } }],
+    });
+    history.apply({
+      label: 'Enable track',
+      coalesceKey: 'track-0-enabled',
+      commands: [{ type: 'property.setTrackEnabled', payload: { ...TARGET, enabled: true } }],
+    });
+    expect(history.undoLabel).toBe('Enable track');
+    expect(history.undo()).toEqual(emptySpikeProject());
+    expect(history.canUndo).toBe(false);
+  });
+
   it('throws coded errors when stacks are empty', () => {
     const history = new ProjectHistory(emptySpikeProject());
     expect(() => history.undo()).toThrow(CommandError);
