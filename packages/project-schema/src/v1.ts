@@ -145,6 +145,12 @@ export interface CaptionDocumentV1 {
   /** Style/animation registries land with WP-03.3; references stay stable now. */
   readonly styleRef?: string;
   readonly animationRef?: string;
+  /** Normalized provider/model record; never provider-specific runtime data. */
+  readonly provenance?: {
+    readonly providerId: string;
+    readonly modelId: string;
+    readonly createdAt: string;
+  };
 }
 
 export interface AssetRecordV1 {

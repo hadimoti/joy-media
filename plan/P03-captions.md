@@ -11,7 +11,7 @@
 - [x] **WP-03.2 — Editing surfaces.** Transcript/caption panel; manual timing/text editing that preserves source tokens; search; confidence warnings; transcript↔timeline selection primitives. _(§39-53, §20.5)_
 - [x] **WP-03.3 — Interchange + styling.** SRT/WebVTT import/export; schema-driven caption style registry; safe-area/responsive line layout; ≥3 original JOY caption templates; active-word karaoke animation. _(§39-54,56,57)_
 - [x] **WP-03.4 — Persian/RTL fixtures** _(done 2026-07-19)_. Versioned mixed-script, RTL, emoji, and long-text Persian fixtures run through the shared templated layout into identical preview/headless Render IR frames; tests enforce logical RTL start alignment, safe-area bounds, karaoke span integrity, and no display-text loss. _(§39-58)_
-- [ ] **WP-03.5 — Local transcription adapter.** `provider-sdk` minimum (manifest/capability/result contracts); one local Whisper-family adapter behind `speech.transcribe` via `provider.invoke`; word alignment + speaker metadata when supported; insert-result transaction with provenance. _(§39-59…61, §21)_
+- [x] **WP-03.5 — Local transcription adapter** _(done 2026-07-19)_. Provider manifest/invocation/result contracts and a local Whisper-family executor seam normalize aligned words, speakers, and provenance into a durable `caption.replaceDocument` payload. Missing local models become typed availability errors and leave manual caption editing untouched. _(§39-59…61, §21)_
 
 ## Exit criteria (§36 Phase 3)
 
