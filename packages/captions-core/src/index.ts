@@ -61,6 +61,7 @@ export {
   layoutTemplatedCaptionNodes,
   resolveCaptionTemplate,
 } from './styling.js';
+export { RTL_STRESS_DOCUMENTS, rtlStressCues } from './rtl-fixtures.js';
 
 /** Strong RTL ranges: Hebrew, Arabic (+supplements/extended), presentation forms. */
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;

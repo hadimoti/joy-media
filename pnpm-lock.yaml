@@ -241,6 +241,9 @@ importers:
 
   tooling/golden-render:
     dependencies:
+      '@joy-media/captions-core':
+        specifier: workspace:*
+        version: link:../../packages/captions-core
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../../packages/render-ir
