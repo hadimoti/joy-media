@@ -1,5 +1,6 @@
 import type {
   JoyProjectV1,
+  MarkerV1,
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
@@ -49,17 +50,25 @@ export function setVisualProperty(
   );
 }
 
-export type VisualObjectCommand = {
-  readonly type: 'object.setTransformProperty';
-  readonly payload: {
-    readonly objectId: string;
-    readonly key: Exclude<keyof TransformProperties, 'crop'>;
-    readonly value: number;
-  };
-};
+export type NumericTransformProperty = Exclude<keyof TransformProperties, 'crop'>;
+export type VisualObjectCommand =
+  | {
+      readonly type: 'object.setTransformProperty';
+      readonly payload: {
+        readonly objectId: string;
+        readonly key: NumericTransformProperty;
+        readonly value: number;
+      };
+    }
+  | {
+      readonly type: 'object.setCrop';
+      readonly payload: { readonly objectId: string; readonly crop: TransformProperties['crop'] };
+    }
+  | { readonly type: 'marker.add'; readonly payload: { readonly marker: MarkerV1 } }
+  | { readonly type: 'marker.remove'; readonly payload: { readonly markerId: string } };
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
-  readonly inverse: VisualObjectCommand;
+  readonly inverse: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>;
 }
 
 export interface VisualObjectProjectApplyResult {
@@ -78,9 +87,46 @@ export function applyVisualObjectProjectCommand(
   project: JoyProjectV1,
   command: VisualObjectCommand,
 ): VisualObjectProjectApplyResult {
+  if (command.type === 'marker.add') {
+    if (project.markers.some((marker) => marker.id === command.payload.marker.id))
+      throw new RangeError(`marker "${command.payload.marker.id}" already exists`);
+    return {
+      project: { ...project, markers: [...project.markers, command.payload.marker] },
+      inverse: { type: 'marker.remove', payload: { markerId: command.payload.marker.id } },
+    };
+  }
+  if (command.type === 'marker.remove') {
+    const marker = project.markers.find((item) => item.id === command.payload.markerId);
+    if (marker === undefined) throw new RangeError(`unknown marker "${command.payload.markerId}"`);
+    return {
+      project: {
+        ...project,
+        markers: project.markers.filter((item) => item.id !== command.payload.markerId),
+      },
+      inverse: { type: 'marker.add', payload: { marker } },
+    };
+  }
   const object = project.visualObjects[command.payload.objectId];
   if (object === undefined)
     throw new RangeError(`unknown visual object ${command.payload.objectId}`);
+  if (command.type === 'object.setCrop') {
+    const crop = command.payload.crop;
+    if (![crop.left, crop.top, crop.right, crop.bottom].every(Number.isFinite))
+      throw new RangeError('crop edges must be finite');
+    return {
+      project: {
+        ...project,
+        visualObjects: {
+          ...project.visualObjects,
+          [object.id]: { ...object, transform: { ...object.transform, crop } },
+        },
+      },
+      inverse: {
+        type: 'object.setCrop',
+        payload: { objectId: object.id, crop: object.transform.crop },
+      },
+    };
+  }
   const applied = applyVisualObjectCommand([object], command);
   return {
     project: {
@@ -174,7 +220,7 @@ export class VisualObjectProjectHistory {
 /** Durable object mutation with an inverse captured from pre-state. */
 export function applyVisualObjectCommand(
   objects: readonly VisualObject[],
-  command: VisualObjectCommand,
+  command: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>,
 ): VisualObjectApplyResult {
   const object = objects.find((item) => item.id === command.payload.objectId);
   if (object === undefined)
@@ -204,8 +250,11 @@ export function applyVisualObjectTransaction(
 ): VisualObjectProject {
   if (transaction.commands.length === 0) throw new RangeError('object transaction cannot be empty');
   let objects = project.objects;
-  for (const command of transaction.commands)
+  for (const command of transaction.commands) {
+    if (command.type !== 'object.setTransformProperty')
+      throw new RangeError('legacy object collections support numeric transform commands only');
     objects = applyVisualObjectCommand(objects, command).objects;
+  }
   return { ...project, objects };
 }
 export function validateVisualObjectProject(

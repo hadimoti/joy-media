@@ -22,7 +22,9 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
       tracks: [],
     },
   },
-  assets: {},
+  assets: {
+    'product-still': { id: 'product-still', kind: 'image', displayName: 'Product still' },
+  },
   variables: {},
   markers: [],
   visualObjects: {
@@ -40,12 +42,40 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     },
+    'product-image': {
+      id: 'product-image',
+      kind: 'image',
+      assetId: 'product-still',
+      transform: {
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    },
+    'outro-shape': {
+      id: 'outro-shape',
+      kind: 'shape',
+      shape: 'rectangle',
+      transform: {
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    },
   },
   pluginData: {},
 };
 
 export const TIMELINE_OBJECT_IDS: Readonly<Record<string, readonly string[]>> = {
   intro: ['intro-title'],
-  product: ['intro-title'],
-  outro: ['intro-title'],
+  product: ['product-image'],
+  outro: ['outro-shape'],
 };
