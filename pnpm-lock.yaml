@@ -54,6 +54,9 @@ importers:
         specifier: ^19.1.1
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../../packages/test-fixtures
       '@vitejs/plugin-react':
         specifier: ^5.0.0
         version: 5.2.0(supports-color@7.2.0)(vite@7.3.6(@types/node@22.20.1))

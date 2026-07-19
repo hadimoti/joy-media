@@ -18,10 +18,29 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
   panels: ['media', 'monitor', 'timeline', 'inspector', 'history', 'diagnostics'],
 };
 
+export const WORKSPACE_STORAGE_KEY = 'joy-media.editor-workspace.v1';
+export interface WorkspaceStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
 /** Layout is a user preference, isolated from the creative project document. */
 export function recoverWorkspaceLayout(value: unknown): WorkspaceLayout {
   if (!isLayout(value)) return DEFAULT_WORKSPACE;
   return value;
+}
+
+export function loadWorkspacePreference(storage: WorkspaceStorage): WorkspaceLayout {
+  const saved = storage.getItem(WORKSPACE_STORAGE_KEY);
+  if (saved === null) return DEFAULT_WORKSPACE;
+  try {
+    return recoverWorkspaceLayout(JSON.parse(saved));
+  } catch {
+    return DEFAULT_WORKSPACE;
+  }
+}
+export function saveWorkspacePreference(storage: WorkspaceStorage, layout: WorkspaceLayout): void {
+  storage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(layout));
 }
 
 function isLayout(value: unknown): value is WorkspaceLayout {

@@ -21,6 +21,18 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
   const onReady = useCallback((event: DockviewReadyEvent) => {
+    const saved = window.localStorage.getItem('joy-media.dockview.v1');
+    if (saved !== null) {
+      try {
+        event.api.fromJSON(JSON.parse(saved), { reuseExistingPanels: false });
+      } catch {
+        window.localStorage.removeItem('joy-media.dockview.v1');
+      }
+    }
+    event.api.onDidLayoutChange(() => {
+      window.localStorage.setItem('joy-media.dockview.v1', JSON.stringify(event.api.toJSON()));
+    });
+    if (event.api.totalPanels > 0) return;
     for (const panel of DEFAULT_WORKSPACE.panels)
       event.api.addPanel({ id: panel, component: 'editor-panel', title: labels[panel] ?? panel });
   }, []);

@@ -7,5 +7,9 @@
     "jsx": "react-jsx"
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/commands" }, { "path": "../../packages/project-schema" }]
+  "references": [
+    { "path": "../../packages/commands" },
+    { "path": "../../packages/project-schema" },
+    { "path": "../../packages/test-fixtures" }
+  ]
 }
