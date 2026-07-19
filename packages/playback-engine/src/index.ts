@@ -1,4 +1,6 @@
 import { AudioPreviewClock } from '@joy-media/audio-core';
+export type { FrameDecoder, MediaSource } from './decoder.js';
+export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
 export interface DecodedFrame {
   readonly assetId: string;
   readonly sourceTimeUs: number;
