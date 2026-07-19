@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "apps/api" },
     { "path": "apps/editor-web" },
     { "path": "packages/project-schema" },
     { "path": "packages/commands" },

@@ -1,0 +1,14 @@
+{
+  "name": "@joy-media/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx src/server.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}
