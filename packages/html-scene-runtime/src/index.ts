@@ -43,6 +43,37 @@ export { createManifestResolver, findUnresolved, SceneAssetError } from './resol
 export type { CompiledScene, ScenePackageInput } from './compile.js';
 export { compileScenePackage } from './compile.js';
 
+export type {
+  ScenePreviewMessage,
+  ScenePreviewEvent,
+  ScenePreviewUpdate,
+  ScenePreviewLifecycle,
+  ScenePreviewReady,
+  ScenePreviewFailure,
+  ScenePreviewEndpoint,
+  SandboxedIframeDescriptor,
+} from './preview-protocol.js';
+export {
+  createSandboxedIframeDescriptor,
+  invalidPreviewMessageDiagnostic,
+  ScenePreviewSession,
+  validateScenePreviewEvent,
+  validateScenePreviewMessage,
+} from './preview-protocol.js';
+
+export type {
+  HeadlessCaptureRequest,
+  HeadlessSceneDriver,
+  HeadlessSurface,
+  SceneCaptureRequest,
+  CapturedSceneSurface,
+  CapturedSceneRegion,
+} from './headless.js';
+export { captureSceneRegion, captureSceneSurface, SceneCaptureCache } from './headless.js';
+
+export type { SceneDiagnosticPlaceholder } from './placeholder.js';
+export { createSceneDiagnosticPlaceholder } from './placeholder.js';
+
 export type { ScenePackageFiles, ScenePackageReport } from './cli.js';
 export { validateScenePackage } from './cli.js';
 
