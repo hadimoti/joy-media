@@ -12,6 +12,7 @@ describe('local control plane', () => {
     api.enqueue(owner, 'j', 'p', 'render', 100);
     expect(api.lease('w', 101, 10)).toMatchObject({ id: 'j', state: 'leased' });
     api.complete('w', 'j', 102);
+    expect(api.lease('w', 1_000)).toBeUndefined();
     expect(api.eventsAfter(owner, 'p', 1).map((event) => event.type)).toEqual([
       'leased',
       'completed',

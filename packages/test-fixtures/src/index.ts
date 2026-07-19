@@ -14,4 +14,15 @@ export {
   SECOND_US,
 } from './spike.js';
 export type { ReferenceProject } from './reference-project.js';
-export { REFERENCE_PROJECT } from './reference-project.js';
+export { buildReferenceSpikeProject, REFERENCE_PROJECT } from './reference-project.js';
+export type {
+  TimelineScaleClip,
+  TimelineScaleCounts,
+  TimelineScaleFixture,
+  TimelineScaleTrack,
+} from './benchmark.js';
+export {
+  createTimelineScaleFixture,
+  TIMELINE_SCALE_REFERENCE,
+  TIMELINE_SCALE_SCALED_DOWN,
+} from './benchmark.js';

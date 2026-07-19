@@ -5,6 +5,11 @@
   "references": [
     { "path": "../api" },
     { "path": "../../packages/export-core" },
-    { "path": "../../packages/job-protocol" }
+    { "path": "../../packages/job-protocol" },
+    { "path": "../../packages/commands" },
+    { "path": "../../packages/playback-engine" },
+    { "path": "../../packages/project-persistence" },
+    { "path": "../../packages/project-schema" },
+    { "path": "../../packages/test-fixtures" }
   ]
 }

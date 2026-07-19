@@ -14,6 +14,11 @@
   },
   "devDependencies": {
     "@joy-media/api": "workspace:*",
+    "@joy-media/commands": "workspace:*",
+    "@joy-media/playback-engine": "workspace:*",
+    "@joy-media/project-persistence": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/test-fixtures": "workspace:*",
     "tsx": "^4.20.0"
   }
 }

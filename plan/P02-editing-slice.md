@@ -12,7 +12,7 @@
 - [ ] **WP-02.3 — Objects + Inspector breadth.** Image/text/shape clips, position/scale/rotation/opacity/crop, nested compositions, markers; Inspector multi-selection semantics. _(§36-P2, §18.3)_
 - [ ] **WP-02.4 — Playback.** Source-time mapping + decoder interface, HTML-media/proxy decode tier, frame request cancellation/cache, audio preview clock + linked playback, scheduler metrics + dropped-frame state, quality governor v0. _(§39-40…44, §15)_
 - [ ] **WP-02.5 — Deterministic export.** Worker render job with frozen revision + manifest, headless frame stream → FFmpeg, offline audio mix baseline, encode/mux preset v1 (Q6 matrix), ffprobe validation, atomic output/failure cleanup. _(§39-45…49, §16)_
-- [ ] **WP-02.6 — Reference E2E + benchmarks.** Complete reference-project end-to-end test; benchmark fixtures from §30.3 (scaled-down first pass); golden project in `test-fixtures`. _(§39-50, §30, §32)_
+- [x] **WP-02.6 — Reference E2E + benchmarks** _(done 2026-07-19)_. Frozen 30-second social-edit fixture now proves reversible edits, local reopen/replay, proxy quality fallback, expired-lease Worker recovery, and verified dual-format H.264/AAC export. The versioned §30.3 scale fixture and viewport runner use a CI-friendly scaled-down profile; the full profile is reserved for named reference hardware. _(§39-50, §30, §32)_
 
 ## Exit criteria (§36 Phase 2)
 
@@ -21,4 +21,4 @@
 - [ ] Play through using proxies on reference hardware.
 - [ ] Export valid 16:9 and 9:16 H.264/AAC files through the configured Worker.
 - [ ] Survive Worker and VPS interruption without project loss.
-- [ ] Golden reference project passes.
+- [x] Golden reference project passes through the automated contract workflow.

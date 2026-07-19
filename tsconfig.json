@@ -21,6 +21,7 @@
     { "path": "packages/project-persistence" },
     { "path": "packages/job-protocol" },
     { "path": "packages/test-fixtures" },
-    { "path": "tooling/golden-render" }
+    { "path": "tooling/golden-render" },
+    { "path": "tooling/benchmark" }
   ]
 }

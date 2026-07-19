@@ -89,7 +89,9 @@ export class LocalControlPlane {
     const job = [...this.#jobs.values()].find(
       (item) =>
         item.state === 'queued' ||
-        (item.leaseExpiresAt !== undefined && item.leaseExpiresAt <= now),
+        (item.state === 'leased' &&
+          item.leaseExpiresAt !== undefined &&
+          item.leaseExpiresAt <= now),
     );
     if (job === undefined) return undefined;
     const leased: Job = {

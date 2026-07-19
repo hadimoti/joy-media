@@ -1,7 +1,8 @@
 {
-  "name": "@joy-media/playback-engine",
+  "name": "@joy-media/benchmark",
   "version": "0.0.0",
   "private": true,
+  "description": "Versioned JOY Media reference benchmark fixtures and runners",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@joy-media/audio-core": "workspace:*"
+    "@joy-media/test-fixtures": "workspace:*",
+    "@joy-media/timeline-engine": "workspace:*"
   }
 }
