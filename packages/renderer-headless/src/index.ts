@@ -3,8 +3,8 @@
  * consumes the same evaluated Render IR as the Pixi adapter.
  */
 
-import type { RenderFrameIR, RenderNode, Rgba } from '@joy-media/render-ir';
-import { validateRenderFrameIR } from '@joy-media/render-ir';
+import type { RenderFrameIR, Rgba, VisualRenderNode } from '@joy-media/render-ir';
+import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
 
@@ -20,7 +20,7 @@ export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
   const width = frame.viewport.width;
   const height = frame.viewport.height;
   const pixels = fillBackground(width, height, frame.background);
-  const orderedNodes = frame.nodes
+  const orderedNodes = flattenRenderNodes(frame.nodes)
     .map((node, position) => ({ node, position }))
     .sort((left, right) => left.node.zIndex - right.node.zIndex || left.position - right.position);
 
@@ -47,7 +47,7 @@ function drawSurface(
   pixels: Uint8Array,
   width: number,
   height: number,
-  node: Exclude<RenderNode, { kind: 'text' }>,
+  node: Exclude<VisualRenderNode, { kind: 'text' }>,
 ): void {
   rasterize(pixels, width, height, node, (u, v) =>
     u >= 0 && u < node.width && v >= 0 && v < node.height ? node.color : undefined,
@@ -58,7 +58,7 @@ function drawText(
   pixels: Uint8Array,
   width: number,
   height: number,
-  node: Extract<RenderNode, { kind: 'text' }>,
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
 ): void {
   rasterize(pixels, width, height, node, (u, v) => {
     const glyphColumn = Math.floor(u) % 4;
@@ -73,7 +73,7 @@ function rasterize(
   pixels: Uint8Array,
   width: number,
   height: number,
-  node: RenderNode,
+  node: VisualRenderNode,
   lookup: (u: number, v: number) => Rgba | undefined,
 ): void {
   for (let row = 0; row < height; row++) {

@@ -22,7 +22,7 @@ export function createParitySpikeFrame(timeUs: number): RenderFrameIR {
   }
   const progress = timeUs / US_PER_SECOND;
   return {
-    version: 0,
+    version: 1,
     compositionId: 'parity-spike',
     timeUs,
     viewport: { width: 32, height: 18, dpr: 1 },

@@ -1,9 +1,10 @@
 /**
- * Minimal, evaluated render intermediate representation for WP-00.3.
+ * Versioned, evaluated render intermediate representation.
  *
  * This is deliberately ephemeral and renderer-neutral: it carries evaluated
  * pixels/geometry for one frame, never project-model objects or renderer
- * instances. The full node taxonomy and property evaluator land in P01.
+ * instances. Editor-only overlays travel on a separate contract and cannot
+ * accidentally be rendered by export adapters.
  */
 
 export interface Rgba {
@@ -59,10 +60,17 @@ export interface TextNode extends RenderNodeBase {
   readonly color: Rgba;
 }
 
-export type RenderNode = SpriteNode | VideoFrameNode | TextNode;
+/** A transform/opacity container. Its children remain evaluated visual nodes. */
+export interface GroupNode extends RenderNodeBase {
+  readonly kind: 'group';
+  readonly children: readonly RenderNode[];
+}
+
+export type RenderNode = SpriteNode | VideoFrameNode | TextNode | GroupNode;
+export type VisualRenderNode = Exclude<RenderNode, GroupNode>;
 
 export interface RenderFrameIR {
-  readonly version: 0;
+  readonly version: 1;
   readonly compositionId: string;
   readonly timeUs: number;
   readonly viewport: Viewport;
@@ -70,8 +78,22 @@ export interface RenderFrameIR {
   readonly nodes: readonly RenderNode[];
 }
 
+/** Editor-only affordances; deliberately excluded from RenderFrameIR/export. */
+export interface EditorOverlayIR {
+  readonly version: 1;
+  readonly selections: readonly {
+    readonly nodeId: string;
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }[];
+}
+
 /** Fails fast at the execution boundary rather than allowing a renderer-specific crash. */
 export function validateRenderFrameIR(frame: RenderFrameIR): void {
+  if (frame.version !== 1)
+    throw new RangeError(`unsupported RenderFrameIR version ${frame.version}`);
   if (!Number.isSafeInteger(frame.timeUs) || frame.timeUs < 0) {
     throw new RangeError(`timeUs must be a non-negative safe integer, got ${frame.timeUs}`);
   }
@@ -85,8 +107,17 @@ export function validateRenderFrameIR(frame: RenderFrameIR): void {
   ) {
     throw new RangeError('viewport must have positive finite dimensions and dpr');
   }
-  const ids = new Set<string>();
-  for (const node of frame.nodes) {
+  validateNodes(frame.nodes, new Set<string>());
+  assertRgba(frame.background, 'background');
+}
+
+/** Resolves group transforms and opacity into adapter-ready, draw-ordered visual nodes. */
+export function flattenRenderNodes(nodes: readonly RenderNode[]): readonly VisualRenderNode[] {
+  return nodes.flatMap((node) => flattenNode(node, IDENTITY_TRANSFORM, 1));
+}
+
+function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
+  for (const node of nodes) {
     if (node.id.length === 0 || ids.has(node.id)) {
       throw new RangeError(`render node ids must be non-empty and unique; got "${node.id}"`);
     }
@@ -114,9 +145,41 @@ export function validateRenderFrameIR(frame: RenderFrameIR): void {
         throw new RangeError(`node "${node.id}" dimensions must be positive`);
       }
     }
-    assertRgba(node.color, `node "${node.id}" color`);
+    if (node.kind === 'group') {
+      validateNodes(node.children, ids);
+    } else {
+      assertRgba(node.color, `node "${node.id}" color`);
+    }
   }
-  assertRgba(frame.background, 'background');
+}
+
+const IDENTITY_TRANSFORM: Transform2D = {
+  translateX: 0,
+  translateY: 0,
+  scaleX: 1,
+  scaleY: 1,
+};
+
+function flattenNode(
+  node: RenderNode,
+  parentTransform: Transform2D,
+  parentOpacity: number,
+): readonly VisualRenderNode[] {
+  const transform = composeTransform(parentTransform, node.transform);
+  const opacity = parentOpacity * node.opacity;
+  if (node.kind === 'group') {
+    return node.children.flatMap((child) => flattenNode(child, transform, opacity));
+  }
+  return [{ ...node, transform, opacity }];
+}
+
+function composeTransform(parent: Transform2D, child: Transform2D): Transform2D {
+  return {
+    translateX: parent.translateX + child.translateX * parent.scaleX,
+    translateY: parent.translateY + child.translateY * parent.scaleY,
+    scaleX: parent.scaleX * child.scaleX,
+    scaleY: parent.scaleY * child.scaleY,
+  };
 }
 
 function assertRgba(color: Rgba, label: string): void {

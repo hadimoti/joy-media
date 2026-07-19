@@ -1,8 +1,7 @@
 /**
  * @joy-media/render-ir — Renderer-independent evaluated scene description.
  *
- * WP-00.3 state: a minimal evaluated frame IR for deterministic preview/export
- * parity. It contains no project-document, DOM, Pixi, or media-decoder values.
+ * WP-01.3 state: v1 visual nodes plus groups, and a separate editor-overlay contract.
  */
 export const PACKAGE_NAME = '@joy-media/render-ir' as const;
 
@@ -13,7 +12,10 @@ export type {
   SpriteNode,
   VideoFrameNode,
   TextNode,
+  GroupNode,
   RenderNode,
+  VisualRenderNode,
   RenderFrameIR,
+  EditorOverlayIR,
 } from './model.js';
-export { validateRenderFrameIR } from './model.js';
+export { flattenRenderNodes, validateRenderFrameIR } from './model.js';

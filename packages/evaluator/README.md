@@ -5,7 +5,7 @@
 
 **Role.** Time-based document evaluation into Render IR. Pure: no Pixi, DOM, FFmpeg, providers, or DB.
 
-**First built in part:** P00 (spike) then P01. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
+**Status:** P01.3 adds active-interval queries and static property evaluation. The package remains pure; renderer/host objects are excluded.
 
 **Must not:** Any I/O or renderer imports.
 

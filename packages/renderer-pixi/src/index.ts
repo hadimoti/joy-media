@@ -7,14 +7,14 @@
  * not project data, DOM nodes, or decoder state.
  */
 
-import type { RenderFrameIR, RenderNode, Rgba } from '@joy-media/render-ir';
-import { validateRenderFrameIR } from '@joy-media/render-ir';
+import type { EditorOverlayIR, RenderFrameIR, Rgba, VisualRenderNode } from '@joy-media/render-ir';
+import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
 
 export interface PreviewDrawCall {
   readonly nodeId: string;
-  readonly kind: RenderNode['kind'];
+  readonly kind: VisualRenderNode['kind'];
 }
 
 export interface PreviewFrame {
@@ -24,13 +24,18 @@ export interface PreviewFrame {
   readonly drawCalls: readonly PreviewDrawCall[];
 }
 
+/** Editor-only metadata is carried alongside preview pixels, never merged into RenderFrameIR. */
+export interface EditorPreviewFrame extends PreviewFrame {
+  readonly overlay: EditorOverlayIR;
+}
+
 /** Renders a fixed-setting preview surface from IR; no browser or GPU dependency. */
 export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
   validateRenderFrameIR(frame);
   const { width, height } = frame.viewport;
   const pixels = createSurface(width, height, frame.background);
   const drawCalls: PreviewDrawCall[] = [];
-  const nodes = frame.nodes
+  const nodes = flattenRenderNodes(frame.nodes)
     .map((node, index) => ({ node, index }))
     .sort((a, b) => a.node.zIndex - b.node.zIndex || a.index - b.index);
 
@@ -43,6 +48,19 @@ export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
     }
   }
   return { width, height, pixels, drawCalls };
+}
+
+/**
+ * Minimal render-host boundary: overlays may guide editing but cannot affect the
+ * content pixels consumed by export/golden renderers.
+ */
+export function renderPixiEditorPreview(
+  frame: RenderFrameIR,
+  overlay: EditorOverlayIR,
+): EditorPreviewFrame {
+  if (overlay.version !== 1)
+    throw new RangeError(`unsupported editor overlay version ${overlay.version}`);
+  return { ...renderPixiPreview(frame), overlay };
 }
 
 function createSurface(width: number, height: number, color: Rgba): Uint8Array {
@@ -60,7 +78,7 @@ function paintRect(
   pixels: Uint8Array,
   frameWidth: number,
   frameHeight: number,
-  node: Exclude<RenderNode, { kind: 'text' }>,
+  node: Exclude<VisualRenderNode, { kind: 'text' }>,
 ): void {
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) =>
     localX >= 0 && localX < node.width && localY >= 0 && localY < node.height ? node.color : null,
@@ -71,7 +89,7 @@ function paintText(
   pixels: Uint8Array,
   frameWidth: number,
   frameHeight: number,
-  node: Extract<RenderNode, { kind: 'text' }>,
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
 ): void {
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
     const x = Math.floor(localX);
@@ -86,7 +104,7 @@ function forEachLocalPixel(
   pixels: Uint8Array,
   frameWidth: number,
   frameHeight: number,
-  node: RenderNode,
+  node: VisualRenderNode,
   sample: (localX: number, localY: number) => Rgba | null,
 ): void {
   for (let y = 0; y < frameHeight; y++) {
