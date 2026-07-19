@@ -1,6 +1,6 @@
 # P00 — Architecture Proofs and Risk Retirement
 
-**Status:** in-progress · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
+**Status:** gate-review · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
 **Goal:** prove the hardest boundaries with minimal spikes _before_ building a large UI. Spikes may be throwaway, but their ADRs and golden fixtures are permanent.
 
 ## Work packages
@@ -14,7 +14,7 @@ Each WP ≈ one session. WP-00.0 first; the seven spikes afterward in any order 
 - [x] **WP-00.4 — HTML Scene spike** _(done 2026-07-19, ADR-0006)_. Parameterized React scene runtime with typed variables, JOY-controlled rational-frame time, frame-local seeded randomness, and deterministic 30/60 fps capture. P00's Node harness denies network, storage, wall clock, timers, host process, and module loading; ADR-0006 explicitly reserves real iframe/process isolation for P04. _(§36-P0-4, §2.3, §20.4)_
 - [x] **WP-00.5 — Worker spike** _(done 2026-07-19, ADR-0009)_. Worker-initiated pairing and capability hello; local-only `asset.thumbnail` job matched by opaque local asset ID and capability. In-memory coordinator proves progress, cancel delivery, bounded retry, raw-path rejection, and no original asset bytes in the protocol. _(§36-P0-5, §26)_
 - [x] **WP-00.6 — Browser/desktop asset spike** _(done 2026-07-19, ADR-0007 + ADR-0008)_. A permission-scoped local bridge registers a simulated 8 GiB selection with `AssetId` + opaque Worker location, then produces local thumbnail/proxy references. Public/control-plane records contain display metadata and opaque IDs only—no original path or bytes. _(§36-P0-6, §13.1)_
-- [ ] **WP-00.7 — Audio sync spike.** Waveform, playback, seek, simple Worker export; measure drift over a reference clip. _(§36-P0-7)_
+- [x] **WP-00.7 — Audio sync spike** _(done 2026-07-19)_. Deterministic PCM waveform min/max peaks; absolute-time seek/playback; mono PCM16 WAV export seam; serialized fixture reopen hash check; and a one-hour 48 kHz reference drift measurement bounded to one sample (≤21 µs). _(§36-P0-7, §20.6)_
 
 ## ADRs owed by this part (§41.1)
 
@@ -22,7 +22,7 @@ Each WP ≈ one session. WP-00.0 first; the seven spikes afterward in any order 
 
 ## Exit criteria (all must be evidenced before P01 opens)
 
-- [ ] ADRs above written and Accepted.
+- [x] ADRs above written and Accepted.
 - [ ] A saved spike project reproduces the same reference frames and audio alignment on re-open.
 - [ ] No spike put Pixi objects, raw paths, or provider-specific fields into the project schema.
 - [ ] Known preview/export differences measured and documented.
