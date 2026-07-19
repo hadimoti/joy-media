@@ -9,8 +9,8 @@ export interface ReferenceProject {
 export const REFERENCE_PROJECT: ReferenceProject = {
   id: 'golden-social-edit',
   revision: 1,
-  title: 'Golden social edit',
-  durationUs: 1_000_000,
+  title: 'Golden 30-second social edit',
+  durationUs: 30_000_000,
   formats: [
     { width: 1920, height: 1080 },
     { width: 1080, height: 1920 },
