@@ -4,8 +4,8 @@ interface State {
   readonly error?: Error;
 }
 export class EditorErrorBoundary extends Component<{ readonly children: ReactNode }, State> {
-  state: State = {};
-  static override getDerivedStateFromError(error: Error): State {
+  override state: State = {};
+  static getDerivedStateFromError(error: Error): State {
     return { error };
   }
   override componentDidCatch(_error: Error, _info: ErrorInfo): void {}
