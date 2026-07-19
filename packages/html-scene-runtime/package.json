@@ -6,6 +6,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "joy-scene": "./bin/joy-scene.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

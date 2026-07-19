@@ -1,6 +1,6 @@
 # html-scene-runtime
 
-> **Status: P00.4 runtime spike implemented.** Parameterized React scenes receive only typed variables, JOY time, and seeded randomness; a fixed Node test harness denies network and host globals. Browser/process isolation remains the production boundary described in ADR-0006. This README is this folder's slice of the JOY Media plan.
+> **Status: WP-04.3 scene package/runtime implemented.** Versioned manifests, typed variables, asset/font resolution, permission-derived CSP, deterministic compiler diagnostics, `joy-scene`, and a React starter package now build on the P00.4 runtime spike. Browser/process isolation remains the production boundary described in ADR-0006.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §2.3, §20.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Sandboxed scene SDK: deterministic clock, typed variables, asset/font resolvers, message protocol.
