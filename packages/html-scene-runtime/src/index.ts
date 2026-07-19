@@ -68,8 +68,22 @@ export type {
   SceneCaptureRequest,
   CapturedSceneSurface,
   CapturedSceneRegion,
+  SceneVisualTolerance,
+  SceneSurfaceComparison,
 } from './headless.js';
-export { captureSceneRegion, captureSceneSurface, SceneCaptureCache } from './headless.js';
+export {
+  captureSceneRegion,
+  captureSceneSurface,
+  compareSceneSurfaces,
+  SceneCaptureCache,
+} from './headless.js';
+
+export type { ChromiumSceneDriverOptions } from './chromium-driver.js';
+export {
+  createChromiumSceneDriver,
+  findChromiumExecutable,
+  readChromiumVersion,
+} from './chromium-driver.js';
 
 export type { SceneDiagnosticPlaceholder } from './placeholder.js';
 export { createSceneDiagnosticPlaceholder } from './placeholder.js';

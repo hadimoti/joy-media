@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import type { Rational, TimeUs } from '@joy-media/project-schema';
 import type { SandboxedReactScene } from './runtime.js';
+import type { SceneResolvers } from './resolver.js';
 
 export interface HeadlessCaptureRequest {
   readonly markup: string;
@@ -35,6 +36,9 @@ export interface SceneCaptureRequest<TVariables> {
   readonly seed: string;
   readonly variables: TVariables;
   readonly locale: string;
+  readonly resolvers?: SceneResolvers;
+  /** Immutable asset/font revision, required when resolver handles are supplied. */
+  readonly resolverKey?: string;
 }
 
 export interface CapturedSceneSurface {
@@ -55,6 +59,20 @@ export interface CapturedSceneRegion {
   readonly height: number;
   readonly rgba: Uint8Array;
   readonly sha256: string;
+}
+
+export interface SceneVisualTolerance {
+  /** Largest permitted absolute difference in a single RGBA channel. */
+  readonly maxChannelDelta: number;
+  /** Largest permitted count of pixels with any channel outside the delta. */
+  readonly maxDifferingPixels: number;
+}
+
+export interface SceneSurfaceComparison {
+  readonly matches: boolean;
+  readonly maxChannelDelta: number;
+  readonly differingPixels: number;
+  readonly totalPixels: number;
 }
 
 /** Bounded cache that returns defensive copies so callers cannot corrupt frames. */
@@ -100,7 +118,17 @@ export function captureSceneSurface<TVariables>(
   const key = frameKey(scene, request);
   const cached = cache.getFrame(key);
   if (cached !== undefined) return cached;
-  const frame = scene.render(request);
+  if (request.resolvers !== undefined && request.resolverKey === undefined) {
+    throw new RangeError('scene capture with resolvers requires an immutable resolverKey');
+  }
+  const frame = scene.render({
+    timeUs: request.timeUs,
+    frameRate: request.frameRate,
+    seed: request.seed,
+    variables: request.variables,
+    locale: request.locale,
+    ...(request.resolvers === undefined ? {} : { resolvers: request.resolvers }),
+  });
   const { width, height } = scene.manifest.viewport;
   const surface = driver.capture({
     markup: frame.markup,
@@ -126,6 +154,47 @@ export function captureSceneSurface<TVariables>(
   };
   cache.putFrame(result);
   return result;
+}
+
+/**
+ * Compares actual browser-captured scene surfaces. This is the shared preview
+ * versus final-export tolerance contract; it intentionally operates on pixels,
+ * never markup hashes or renderer-specific metadata.
+ */
+export function compareSceneSurfaces(
+  preview: CapturedSceneSurface,
+  finalRender: CapturedSceneSurface,
+  tolerance: SceneVisualTolerance = { maxChannelDelta: 0, maxDifferingPixels: 0 },
+): SceneSurfaceComparison {
+  if (preview.width !== finalRender.width || preview.height !== finalRender.height) {
+    throw new RangeError('scene surfaces must have identical dimensions for visual comparison');
+  }
+  if (
+    !Number.isSafeInteger(tolerance.maxChannelDelta) ||
+    tolerance.maxChannelDelta < 0 ||
+    !Number.isSafeInteger(tolerance.maxDifferingPixels) ||
+    tolerance.maxDifferingPixels < 0
+  ) {
+    throw new RangeError('scene visual tolerance values must be non-negative safe integers');
+  }
+  let maxChannelDelta = 0;
+  let differingPixels = 0;
+  for (let pixel = 0; pixel < preview.width * preview.height; pixel++) {
+    let pixelOutsideTolerance = false;
+    const base = pixel * 4;
+    for (let channel = 0; channel < 4; channel++) {
+      const delta = Math.abs(preview.rgba[base + channel]! - finalRender.rgba[base + channel]!);
+      maxChannelDelta = Math.max(maxChannelDelta, delta);
+      if (delta > tolerance.maxChannelDelta) pixelOutsideTolerance = true;
+    }
+    if (pixelOutsideTolerance) differingPixels++;
+  }
+  return {
+    matches: differingPixels <= tolerance.maxDifferingPixels,
+    maxChannelDelta,
+    differingPixels,
+    totalPixels: preview.width * preview.height,
+  };
 }
 
 export function captureSceneRegion(
@@ -168,6 +237,7 @@ function frameKey<TVariables>(
       seed: request.seed,
       locale: request.locale,
       variables: request.variables,
+      resolverKey: request.resolverKey ?? '',
     }),
   );
 }

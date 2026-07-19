@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
-import { ffmpegArgs, freezeManifest, renderFixture, verifyExport } from './index.js';
+import {
+  ffmpegArgs,
+  freezeManifest,
+  renderFixture,
+  renderRgbaFrames,
+  verifyExport,
+} from './index.js';
 describe('deterministic export contract', () => {
   const manifest = {
     projectId: 'p',
@@ -30,6 +36,17 @@ describe('deterministic export contract', () => {
       width: 64,
       height: 36,
     });
+  });
+  it('encodes evaluated RGBA pixels through the verified export path', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-rgba-export-'));
+    const output = join(directory, 'scene-reel.mp4');
+    const red = new Uint8Array(manifest.width * manifest.height * 4);
+    for (let offset = 0; offset < red.length; offset += 4) {
+      red[offset] = 220;
+      red[offset + 3] = 255;
+    }
+    renderRgbaFrames(manifest, [red, red], output);
+    expect(verifyExport(output)).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
   });
   it('exports both golden social formats from a frozen revision', () => {
     for (const format of REFERENCE_PROJECT.formats) {

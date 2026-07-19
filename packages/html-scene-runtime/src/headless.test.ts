@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import { createSandboxedReactScene } from './runtime.js';
-import { captureSceneRegion, captureSceneSurface, SceneCaptureCache } from './headless.js';
+import {
+  captureSceneRegion,
+  captureSceneSurface,
+  compareSceneSurfaces,
+  SceneCaptureCache,
+} from './headless.js';
 import { createSceneDiagnosticPlaceholder } from './placeholder.js';
 
 const scene = createSandboxedReactScene(
@@ -64,6 +69,26 @@ describe('deterministic headless scene capture', () => {
     expect(() => captureSceneRegion(surface, { x: 2, y: 0, width: 1, height: 1 }, cache)).toThrow(
       'inside the captured surface',
     );
+  });
+
+  it('compares browser surfaces with an explicit pixel tolerance', () => {
+    const base = {
+      key: 'frame',
+      timeUs: 0,
+      width: 2,
+      height: 1,
+      hasAlpha: true,
+      rgba: new Uint8Array([0, 1, 2, 3, 10, 11, 12, 13]),
+      sha256: 'a',
+    };
+    const near = { ...base, rgba: new Uint8Array([0, 2, 2, 3, 10, 11, 15, 13]), sha256: 'b' };
+    expect(compareSceneSurfaces(base, near)).toMatchObject({ matches: false, differingPixels: 2 });
+    expect(
+      compareSceneSurfaces(base, near, { maxChannelDelta: 3, maxDifferingPixels: 0 }),
+    ).toMatchObject({
+      matches: true,
+      maxChannelDelta: 3,
+    });
   });
 });
 

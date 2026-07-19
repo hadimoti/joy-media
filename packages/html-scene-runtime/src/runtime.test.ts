@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import { captureSceneFrames, createSandboxedReactScene, SceneSandboxError } from './runtime.js';
+import { createManifestResolver } from './resolver.js';
 import type { SceneManifest } from './runtime.js';
 
 const manifest: SceneManifest = {
@@ -85,6 +86,36 @@ describe('sandboxed React scene spike', () => {
         locale: 'en-US',
       }).markup,
     ).toBe('<p>undefined:undefined:undefined</p>');
+  });
+
+  it('injects only explicit asset/font resolvers into a scene context', () => {
+    const resolverScene = createSandboxedReactScene(
+      manifest,
+      `globalThis.__joyScene = (ctx) => React.createElement('p', null,
+        ctx.assets.resolve('logo') + ':' + ctx.fonts.resolve('JOY Sans'));`,
+    );
+    expect(
+      resolverScene.render({
+        timeUs: 500_000,
+        frameRate: rational(30, 1),
+        seed: 'fixed-seed',
+        variables: { title: 'Launch', tone: 'violet' },
+        locale: 'en-US',
+        resolvers: createManifestResolver(
+          { logo: 'data:image/png;base64,AA==' },
+          { 'JOY Sans': 'data:font/woff2;base64,AA==' },
+        ),
+      }).markup,
+    ).toContain('data:image/png;base64,AA==:data:font/woff2;base64,AA==');
+    expect(() =>
+      resolverScene.render({
+        timeUs: 500_000,
+        frameRate: rational(30, 1),
+        seed: 'fixed-seed',
+        variables: { title: 'Launch', tone: 'violet' },
+        locale: 'en-US',
+      }),
+    ).toThrow('unresolved asset "logo"');
   });
 
   it('rejects a source that attempts network access before rendering', () => {

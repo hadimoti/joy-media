@@ -1,22 +1,133 @@
 import { describe, expect, it } from 'vitest';
-import { compileScenePackage, FIRST_PARTY_SCENES } from '@joy-media/html-scene-runtime';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { rational } from '@joy-media/project-schema';
+import { renderRgbaFrames, verifyExport } from '@joy-media/export-core';
+import { renderHeadlessFrame } from '@joy-media/renderer-headless';
+import {
+  captureSceneSurface,
+  compareSceneSurfaces,
+  createChromiumSceneDriver,
+  createSandboxedReactScene,
+  findChromiumExecutable,
+  FIRST_PARTY_SCENES,
+  resolveFirstPartySceneInstance,
+  SceneCaptureCache,
+} from '@joy-media/html-scene-runtime';
+import { createParitySpikeFrame } from './index.js';
 
-describe('P04.5 first-party scene goldens', () => {
-  it('pins deterministic reference frames for every built-in scene', () => {
-    const hashes = FIRST_PARTY_SCENES.map((scene) => {
-      const compiled = compileScenePackage({
-        manifest: scene.manifest,
-        source: scene.source,
-        variableSchema: scene.variableSchema,
+describe.runIf(findChromiumExecutable() !== undefined)(
+  'P04.5 first-party scene pixel goldens',
+  () => {
+    it('pins real Chromium RGBA frames and proves preview/export pixel parity', () => {
+      const driver = createChromiumSceneDriver();
+      const hashes = FIRST_PARTY_SCENES.map((scene) => {
+        const instance = resolveFirstPartySceneInstance(scene.id);
+        expect(instance).toBeDefined();
+        const runtime = createSandboxedReactScene(scene.manifest, scene.source);
+        const request = {
+          timeUs: 1_000_000,
+          frameRate: rational(30, 1),
+          seed: `${scene.id}@${scene.manifest.version}`,
+          variables: instance!.variables,
+          locale: 'en',
+        };
+        const preview = captureSceneSurface(runtime, driver, request, new SceneCaptureCache());
+        const finalRender = captureSceneSurface(runtime, driver, request, new SceneCaptureCache());
+        expect(compareSceneSurfaces(preview, finalRender)).toEqual({
+          matches: true,
+          maxChannelDelta: 0,
+          differingPixels: 0,
+          totalPixels: scene.manifest.viewport.width * scene.manifest.viewport.height,
+        });
+        return preview.sha256;
       });
-      expect(compiled.diagnostics).toEqual([]);
-      return compiled.referenceFrameSha256;
-    });
-    expect(hashes).toEqual([
-      '40436c9b4ebdab3fcc13511c52045a37575606cfa9b686150fd58626d1909c98',
-      '019217e95000d611dd6aeed21660e6b2542ac66ea7f707d391087b1870f77c30',
-      'aec4bcd004037d4bf7dfed88b1d9183ce1a00b6800c1f698a3313318160e65f0',
-      'b85d09d8be8e3811b7e5ce878ce6df7dd10080e60acbd441d545c6da4d13fd73',
-    ]);
-  });
-});
+      expect(hashes).toEqual([
+        'b06f785aead71a2938a69705dda4321cbe5d28ccfcd32bd6107953def954615c',
+        'fae475841c204eb57745e97f2d02ca1c165b3f596b425658a5eaf2898c9741df',
+        'ff3d361f588e38c34e654c280d5bbfa639be6935b4d3bc97f14f86edfed235e7',
+        '871b995c0bba9015c6257b187b4d17c74827940bb92e840eecc05ece475cd752',
+      ]);
+    }, 60_000);
+
+    it('builds and exports a reel combining footage/caption motion with two scenes', () => {
+      const driver = createChromiumSceneDriver();
+      const title = FIRST_PARTY_SCENES[0]!;
+      const lowerThird = FIRST_PARTY_SCENES[2]!;
+      const instances = [title, lowerThird].map((scene) => {
+        const instance = resolveFirstPartySceneInstance(scene.id)!;
+        return {
+          runtime: createSandboxedReactScene(
+            { ...scene.manifest, viewport: { width: 16, height: 9 } },
+            scene.source,
+          ),
+          variables: instance.variables,
+        };
+      });
+      const frames = [0, 50_000, 100_000].map((timeUs) => {
+        const base = renderHeadlessFrame(createParitySpikeFrame(timeUs));
+        const surfaces = instances.map(({ runtime, variables }) =>
+          captureSceneSurface(
+            runtime,
+            driver,
+            { timeUs, frameRate: rational(30, 1), seed: 'p04-reel', variables, locale: 'en' },
+            new SceneCaptureCache(),
+          ),
+        );
+        return composite(base.pixels, base.width, base.height, surfaces[0]!, surfaces[1]!);
+      });
+      const directory = mkdtempSync(join(tmpdir(), 'joy-p04-reel-'));
+      const output = join(directory, 'p04-two-scenes.mp4');
+      renderRgbaFrames(
+        {
+          projectId: 'p04-scene-reel',
+          revision: 1,
+          width: 32,
+          height: 18,
+          frameRate: 30,
+          durationUs: 100_000,
+          preset: 'social-h264-aac',
+        },
+        frames,
+        output,
+      );
+      expect(existsSync(output)).toBe(true);
+      expect(verifyExport(output)).toMatchObject({
+        width: 32,
+        height: 18,
+        videoCodec: 'h264',
+        audioCodec: 'aac',
+      });
+    }, 60_000);
+  },
+);
+
+function composite(
+  base: Uint8Array,
+  width: number,
+  height: number,
+  left: { readonly width: number; readonly height: number; readonly rgba: Uint8Array },
+  right: { readonly width: number; readonly height: number; readonly rgba: Uint8Array },
+): Uint8Array {
+  const output = new Uint8Array(base);
+  for (const [surface, originX] of [
+    [left, 0],
+    [right, 16],
+  ] as const) {
+    for (let y = 0; y < surface.height && y < height; y++) {
+      for (let x = 0; x < surface.width && originX + x < width; x++) {
+        const source = (y * surface.width + x) * 4;
+        const target = (y * width + originX + x) * 4;
+        const alpha = surface.rgba[source + 3]! / 255;
+        for (let channel = 0; channel < 3; channel++) {
+          output[target + channel] = Math.round(
+            surface.rgba[source + channel]! * alpha + output[target + channel]! * (1 - alpha),
+          );
+        }
+        output[target + 3] = Math.round(alpha * 255 + output[target + 3]! * (1 - alpha));
+      }
+    }
+  }
+  return output;
+}

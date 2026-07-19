@@ -1,6 +1,6 @@
 # P04 — Motion System and HTML Scenes
 
-**Status:** in-progress · **Gate to enter:** P02 exit criteria (parallel-safe with P03) · **Master plan:** §36 Phase 4, §39 items 62–70, §20.3, §20.4, §2.3
+**Status:** done · **Gate to enter:** P02 exit criteria (parallel-safe with P03) · **Master plan:** §36 Phase 4, §39 items 62–70, §20.3, §20.4, §2.3
 **Goal:** JOY's strongest visual differentiator — universal keyframe motion plus deterministic, sandboxed HTML scenes as first-class timeline objects.
 
 **Decisions needed:** Q11 (scene authoring mode).
@@ -15,8 +15,8 @@
 
 ## Exit criteria (§36 Phase 4)
 
-- [ ] A reel combining footage, animated captions, keyframed objects, and two HTML scenes builds and exports.
-- [ ] Preview and final render stay within defined visual tolerance.
-- [ ] A scene with forbidden network/wall-clock behavior fails validation.
-- [ ] Scene variables work in manual edit, template instance, and headless render.
-- [ ] Missing scene/plugin shows a graceful placeholder, never a broken project.
+- [x] A reel combining footage, animated captions, keyframed objects, and two HTML scenes builds and exports.
+- [x] Preview and final render stay within defined visual tolerance.
+- [x] A scene with forbidden network/wall-clock behavior fails validation.
+- [x] Scene variables work in manual edit, template instance, and headless render.
+- [x] Missing scene/plugin shows a graceful placeholder, never a broken project.

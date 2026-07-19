@@ -13,6 +13,12 @@ import { frameIndexAtUs, frameStartUs, rational } from '@joy-media/project-schem
 import type { Rational, TimeUs } from '@joy-media/project-schema';
 import { createElement, isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createManifestResolver } from './resolver.js';
+import type { SceneResolvers } from './resolver.js';
+
+// A frame is still bounded, but 50 ms is below normal scheduling jitter when
+// the pinned browser capture tests run in parallel with the VM harness.
+const SCENE_EXECUTION_TIMEOUT_MS = 250;
 
 export interface SceneManifest {
   readonly formatVersion: 1;
@@ -23,7 +29,7 @@ export interface SceneManifest {
   readonly transparent: boolean;
   readonly durationUs: TimeUs;
   readonly permissions: { readonly network: readonly string[]; readonly storage: 'none' };
-  readonly determinism: { readonly seededRandom: true; readonly wallClock: false };
+  readonly determinism: { readonly seededRandom: boolean; readonly wallClock: boolean };
 }
 
 export interface JoySceneContext<TVariables> {
@@ -34,6 +40,10 @@ export interface JoySceneContext<TVariables> {
   readonly frameRate: Rational;
   readonly seed: string;
   readonly variables: Readonly<TVariables>;
+  /** Explicit, preflighted handles for package assets; never raw host paths. */
+  readonly assets: SceneResolvers['assets'];
+  /** Explicit, preflighted handles for package fonts; never host font access. */
+  readonly fonts: SceneResolvers['fonts'];
   /** Deterministic scene-local random stream; reset for every captured frame. */
   readonly random: () => number;
   readonly locale: string;
@@ -45,6 +55,11 @@ export interface SceneRenderRequest<TVariables> {
   readonly seed: string;
   readonly variables: TVariables;
   readonly locale: string;
+  /**
+   * Resource handles resolved by JOY before the scene runs. Omitted means an
+   * explicit empty resolver: accidental resource access fails loudly.
+   */
+  readonly resolvers?: SceneResolvers;
 }
 
 export interface CapturedSceneFrame {
@@ -86,7 +101,7 @@ export function createSandboxedReactScene<TVariables>(
     new Script(`'use strict';\n${source}`, { filename: `${manifest.id}.scene.js` }).runInContext(
       sandbox,
       {
-        timeout: 50,
+        timeout: SCENE_EXECUTION_TIMEOUT_MS,
       },
     );
   } catch (error) {
@@ -110,7 +125,7 @@ export function createSandboxedReactScene<TVariables>(
       try {
         new Script(
           'globalThis.__joyResult = globalThis.__joyScene(globalThis.__joyContext);',
-        ).runInContext(sandbox, { timeout: 50 });
+        ).runInContext(sandbox, { timeout: SCENE_EXECUTION_TIMEOUT_MS });
       } catch (error) {
         throw sceneFailure('SCENE_SANDBOX_EXECUTION_FAILED', error);
       } finally {
@@ -197,10 +212,14 @@ function createJoyContext<TVariables>(
     frameRate: request.frameRate,
     seed: request.seed,
     variables: deepFreeze(structuredClone(request.variables)),
+    assets: (request.resolvers ?? EMPTY_RESOLVERS).assets,
+    fonts: (request.resolvers ?? EMPTY_RESOLVERS).fonts,
     random,
     locale: request.locale,
   });
 }
+
+const EMPTY_RESOLVERS: SceneResolvers = createManifestResolver();
 
 function validateManifest(manifest: SceneManifest): void {
   if (manifest.formatVersion !== 1 || manifest.runtime !== 'joy-html-scene-1') {

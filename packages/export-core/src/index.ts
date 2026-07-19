@@ -71,6 +71,68 @@ export function renderFixture(manifest: RenderManifest, outputPath: string): voi
     throw error;
   }
 }
+
+/**
+ * Encodes already-evaluated RGBA frames through the same verified FFmpeg path
+ * used by exports. It is the scene/reel boundary: callers provide pixels, not
+ * DOM or project objects, and FFmpeg receives raw video over stdin.
+ */
+export function renderRgbaFrames(
+  manifest: RenderManifest,
+  frames: readonly Uint8Array[],
+  outputPath: string,
+): void {
+  const frozen = freezeManifest(manifest);
+  if (frames.length === 0) throw new RangeError('at least one RGBA frame is required for export');
+  const bytesPerFrame = frozen.width * frozen.height * 4;
+  if (frames.some((frame) => frame.length !== bytesPerFrame)) {
+    throw new RangeError(`every RGBA frame must contain exactly ${bytesPerFrame} bytes`);
+  }
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
+  );
+  try {
+    const result = spawnSync(
+      'ffmpeg',
+      [
+        '-y',
+        '-f',
+        'rawvideo',
+        '-pixel_format',
+        'rgba',
+        '-video_size',
+        `${frozen.width}x${frozen.height}`,
+        '-framerate',
+        String(frozen.frameRate),
+        '-i',
+        'pipe:0',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=r=48000:cl=stereo',
+        '-frames:v',
+        String(frames.length),
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-movflags',
+        '+faststart',
+        temporaryPath,
+      ],
+      { shell: false, input: Buffer.concat(frames.map((frame) => Buffer.from(frame))) },
+    );
+    if (result.status !== 0)
+      throw new Error(`ffmpeg RGBA export failed: ${result.stderr.toString()}`);
+    renameSync(temporaryPath, outputPath);
+  } catch (error) {
+    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
 export interface ExportProbe {
   readonly videoCodec: string;
   readonly audioCodec: string;

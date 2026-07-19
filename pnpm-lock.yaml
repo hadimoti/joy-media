@@ -268,9 +268,15 @@ importers:
       '@joy-media/captions-core':
         specifier: workspace:*
         version: link:../../packages/captions-core
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../../packages/export-core
       '@joy-media/html-scene-runtime':
         specifier: workspace:*
         version: link:../../packages/html-scene-runtime
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../../packages/project-schema
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../../packages/render-ir

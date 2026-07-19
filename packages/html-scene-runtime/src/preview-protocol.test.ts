@@ -14,7 +14,15 @@ describe('sandboxed scene preview protocol', () => {
     expect(descriptor.sandbox).toBe('allow-scripts');
     expect(descriptor.srcDoc).toContain('Content-Security-Policy');
     expect(descriptor.srcDoc).toContain('blob:joy-scene-bundle');
+    expect(descriptor.srcDoc).toContain("window.addEventListener('message', receive)");
+    expect(descriptor.srcDoc).toContain('event.source !== window.parent');
+    expect(descriptor.srcDoc).toContain('joy.scene.update.v1');
+    expect(descriptor.csp).toContain('script-src');
+    expect(descriptor.csp).toContain('blob:');
     expect(descriptor.csp).toContain("connect-src 'none'");
+    expect(() =>
+      createSandboxedIframeDescriptor(starterManifest(), 'https://untrusted.invalid/a.js'),
+    ).toThrow('controlled blob:');
   });
 
   it('accepts only well-formed preview messages and events', () => {
@@ -51,11 +59,15 @@ describe('sandboxed scene preview protocol', () => {
     expect(session.update(1, { title: 'hidden' })).toBe(false);
     session.resume();
     expect(session.update(2, { title: 'back' })).toBe(true);
+    expect(() => session.update(-1, {})).toThrow('non-negative safe integer');
     expect(sent.map((message) => message.type)).toEqual([
       'joy.scene.update.v1',
       'joy.scene.suspend.v1',
       'joy.scene.resume.v1',
       'joy.scene.update.v1',
     ]);
+    expect(() => new ScenePreviewSession('', { postMessage: () => undefined })).toThrow(
+      'non-empty',
+    );
   });
 });

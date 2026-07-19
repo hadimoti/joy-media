@@ -15,6 +15,7 @@ import { validateSceneManifest } from './manifest.js';
 import type { SceneManifestV1 } from './manifest.js';
 import { resolveSceneVariables, validateVariableSchema } from './variables.js';
 import type { SceneVariableSchema, SceneVariableValue } from './variables.js';
+import type { SceneResolvers } from './resolver.js';
 import { createSandboxedReactScene } from './runtime.js';
 import type { SceneManifest } from './runtime.js';
 
@@ -23,6 +24,8 @@ export interface ScenePackageInput {
   readonly source: string;
   readonly variableSchema?: SceneVariableSchema;
   readonly variables?: Readonly<Record<string, unknown>>;
+  /** Resolver handles used for the deterministic reference frame, if needed. */
+  readonly resolvers?: SceneResolvers;
 }
 
 export interface CompiledScene {
@@ -81,6 +84,7 @@ export function compileScenePackage(input: ScenePackageInput): CompiledScene {
         seed: `${input.manifest.id}@${input.manifest.version}`,
         variables: resolved.values,
         locale: 'en',
+        ...(input.resolvers === undefined ? {} : { resolvers: input.resolvers }),
       });
       referenceFrameSha256 = frame.sha256;
     } catch (error) {

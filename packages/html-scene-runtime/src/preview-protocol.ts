@@ -42,6 +42,47 @@ export interface SandboxedIframeDescriptor {
   readonly csp: string;
 }
 
+const SAFE_BUNDLE_URL = /^(blob:|data:text\/javascript(?:;[^,]*)?,)/i;
+
+/**
+ * The only host↔scene bridge admitted into the opaque iframe. Scene bundles
+ * subscribe to the DOM events below (or read `window.__joySceneContext`) and
+ * must not expect a host object, DOM handle, or arbitrary command channel.
+ */
+const PREVIEW_BOOTSTRAP = `(function () {
+  'use strict';
+  var instanceId = null;
+  var suspended = false;
+  function validVariables(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return Object.keys(value).every(function (key) {
+      var item = value[key];
+      return typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean';
+    });
+  }
+  function receive(event) {
+    if (event.source !== window.parent) return;
+    var message = event.data;
+    if (!message || typeof message !== 'object' || typeof message.type !== 'string' ||
+        typeof message.instanceId !== 'string') return;
+    if (instanceId !== null && message.instanceId !== instanceId) return;
+    instanceId = message.instanceId;
+    if (message.type === 'joy.scene.suspend.v1') { suspended = true; return; }
+    if (message.type === 'joy.scene.resume.v1') { suspended = false; return; }
+    if (message.type !== 'joy.scene.update.v1' || suspended ||
+        !Number.isSafeInteger(message.timeUs) || message.timeUs < 0 ||
+        !validVariables(message.variables)) return;
+    var context = Object.freeze({
+      timeUs: message.timeUs,
+      variables: Object.freeze(Object.assign({}, message.variables))
+    });
+    window.__joySceneContext = context;
+    window.dispatchEvent(new CustomEvent('joy.scene.update.v1', { detail: context }));
+  }
+  window.addEventListener('message', receive);
+  window.parent.postMessage({ type: 'joy.scene.ready.v1', instanceId: '' }, '*');
+}());`;
+
 export interface ScenePreviewEndpoint {
   postMessage(message: ScenePreviewMessage, targetOrigin: '*'): void;
 }
@@ -54,6 +95,9 @@ export function createSandboxedIframeDescriptor(
   manifest: SceneManifestV1,
   bundleUrl: string,
 ): SandboxedIframeDescriptor {
+  if (!SAFE_BUNDLE_URL.test(bundleUrl)) {
+    throw new RangeError('scene bundle URL must be a controlled blob: or data:text/javascript URL');
+  }
   const csp = generateSceneCsp(manifest.permissions);
   const escapedCsp = csp.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
   const escapedBundleUrl = bundleUrl.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
@@ -65,6 +109,7 @@ export function createSandboxedIframeDescriptor(
       '<html><head>',
       `<meta http-equiv="Content-Security-Policy" content="${escapedCsp}">`,
       '</head><body><div id="joy-scene-root"></div>',
+      `<script>${PREVIEW_BOOTSTRAP}</script>`,
       `<script type="module" src="${escapedBundleUrl}"></script>`,
       '</body></html>',
     ].join(''),
@@ -78,13 +123,18 @@ export class ScenePreviewSession {
   constructor(
     readonly instanceId: string,
     private readonly endpoint: ScenePreviewEndpoint,
-  ) {}
+  ) {
+    if (instanceId.length === 0) throw new RangeError('scene preview instanceId must be non-empty');
+  }
 
   get suspended(): boolean {
     return this.#suspended;
   }
 
   update(timeUs: number, variables: ScenePreviewUpdate['variables']): boolean {
+    if (!Number.isSafeInteger(timeUs) || timeUs < 0) {
+      throw new RangeError('scene preview timeUs must be a non-negative safe integer');
+    }
     if (this.#suspended) return false;
     this.endpoint.postMessage(
       { type: 'joy.scene.update.v1', instanceId: this.instanceId, timeUs, variables },

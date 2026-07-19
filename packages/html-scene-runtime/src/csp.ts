@@ -18,10 +18,15 @@ export function generateSceneCsp(permissions: ScenePermissionsV1): string {
   // by the scene reaching out on its own — so img/font/media stay off the network.
   const directives = [
     "default-src 'none'",
-    "script-src 'self' 'unsafe-inline'",
+    // Preview packages are delivered by JOY as revocable blob: URLs. A data:
+    // URL is accepted too for self-contained/offline packages. Neither opens a
+    // network origin, and both still execute inside the allow-scripts-only
+    // opaque-origin iframe. `unsafe-inline` is limited to JOY's generated
+    // bootstrap bridge in that iframe.
+    "script-src 'unsafe-inline' blob: data:",
     "style-src 'unsafe-inline'",
     'img-src data: blob:',
-    'font-src data:',
+    'font-src data: blob:',
     'media-src data: blob:',
     `connect-src ${connectSrc}`,
     "base-uri 'none'",

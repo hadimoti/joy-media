@@ -7,6 +7,8 @@
   "include": ["src"],
   "references": [
     { "path": "../../packages/captions-core" },
+    { "path": "../../packages/export-core" },
+    { "path": "../../packages/project-schema" },
     { "path": "../../packages/html-scene-runtime" },
     {
       "path": "../../packages/render-ir"
