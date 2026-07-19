@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyVisualObjectCommand,
+  applyVisualObjectTransaction,
   setVisualProperty,
+  validateVisualObjectProject,
   VISUAL_INSPECTOR,
   sharedValue,
 } from './index.js';
@@ -58,5 +60,39 @@ describe('visual property schemas', () => {
     });
     expect(applied.objects[0]!.transform.rotationDeg).toBe(45);
     expect(applyVisualObjectCommand(applied.objects, applied.inverse).objects).toEqual([object]);
+  });
+  it('applies serializable object transactions and validates project identity', () => {
+    const project = {
+      schemaVersion: 1,
+      id: 'objects',
+      objects: [
+        {
+          id: 'a',
+          kind: 'shape',
+          shape: 'rectangle',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+        },
+      ],
+    } as const;
+    expect(
+      applyVisualObjectTransaction(project, {
+        label: 'Fade',
+        commands: [
+          {
+            type: 'object.setTransformProperty',
+            payload: { objectId: 'a', key: 'opacity', value: 0.5 },
+          },
+        ],
+      }).objects[0]!.transform.opacity,
+    ).toBe(0.5);
+    expect(validateVisualObjectProject(project)).toEqual([]);
   });
 });

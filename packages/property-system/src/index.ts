@@ -92,3 +92,32 @@ export function applyVisualObjectCommand(
     },
   };
 }
+
+export interface VisualObjectProject {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly objects: readonly VisualObject[];
+}
+export interface VisualObjectTransaction {
+  readonly label: string;
+  readonly commands: readonly VisualObjectCommand[];
+}
+export function applyVisualObjectTransaction(
+  project: VisualObjectProject,
+  transaction: VisualObjectTransaction,
+): VisualObjectProject {
+  if (transaction.commands.length === 0) throw new RangeError('object transaction cannot be empty');
+  let objects = project.objects;
+  for (const command of transaction.commands)
+    objects = applyVisualObjectCommand(objects, command).objects;
+  return { ...project, objects };
+}
+export function validateVisualObjectProject(
+  project: VisualObjectProject,
+): readonly { readonly code: string; readonly message: string }[] {
+  if (project.id.length === 0)
+    return [{ code: 'OBJECT_PROJECT_ID', message: 'project id is required' }];
+  if (new Set(project.objects.map((object) => object.id)).size !== project.objects.length)
+    return [{ code: 'OBJECT_PROJECT_DUPLICATE', message: 'object ids must be unique' }];
+  return [];
+}
