@@ -1,6 +1,6 @@
 # media-core
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P00.6 local-first asset spike implemented.** The trusted local bridge registers selected files as opaque Worker locations and creates local thumbnail/proxy derivatives without exposing originals to project or control-plane records. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §13 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Asset identity/location model, media descriptors, proxy profiles, relink scoring, conform rules.

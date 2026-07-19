@@ -66,6 +66,8 @@ importers:
 
   packages/job-protocol: {}
 
+  packages/media-core: {}
+
   packages/project-schema: {}
 
   packages/render-ir: {}

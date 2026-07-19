@@ -1,6 +1,6 @@
 # ADRs
 
-> **Status: active.** ADR-0001 through ADR-0006 and ADR-0009 are accepted; ADR-0007/0008 are reserved for WP-00.6. This README is this folder's slice of the JOY Media plan.
+> **Status: active.** ADR-0001 through ADR-0009 are accepted; this README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §41 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Architecture Decision Records. Template in 0000-template.md; required early ADRs listed in §41.1.
