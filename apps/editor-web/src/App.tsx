@@ -84,7 +84,7 @@ function Panel({
   if (params.id === 'inspector')
     return (
       <article>
-        {TRANSFORM_INSPECTOR.map((property) => (
+        {TRANSFORM_INSPECTOR.filter((property) => property.kind === 'number').map((property) => (
           <label key={property.key}>
             {property.label}
             <input

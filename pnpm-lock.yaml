@@ -50,6 +50,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema
+      '@joy-media/property-system':
+        specifier: workspace:*
+        version: link:../../packages/property-system
       dockview:
         specifier: ^4.10.0
         version: 4.13.1(react@19.2.7)
