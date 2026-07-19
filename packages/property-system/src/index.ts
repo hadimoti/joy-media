@@ -6,6 +6,8 @@ import type {
 } from '@joy-media/project-schema';
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { CaptionCommand } from '@joy-media/captions-core';
+import { applyMotionProjectCommand } from '@joy-media/motion-core';
+import type { MotionCommand } from '@joy-media/motion-core';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type TransformProperties = VisualObjectTransformV1;
@@ -68,7 +70,8 @@ export type VisualObjectCommand =
     }
   | { readonly type: 'marker.add'; readonly payload: { readonly marker: MarkerV1 } }
   | { readonly type: 'marker.remove'; readonly payload: { readonly markerId: string } }
-  | CaptionCommand;
+  | CaptionCommand
+  | MotionCommand;
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
   readonly inverse: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>;
@@ -99,6 +102,8 @@ export function applyVisualObjectProjectCommand(
     case 'caption.setStyle':
     case 'caption.replaceDocument':
       return applyCaptionProjectCommand(project, command);
+    case 'object.replaceAnimation':
+      return applyMotionProjectCommand(project, command);
     default:
       break;
   }

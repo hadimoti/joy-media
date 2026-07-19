@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateStaticProperty, queryActiveIntervals } from './properties.js';
+import type { VisualObjectV1 } from '@joy-media/project-schema';
+import {
+  evaluateAnimatedTransform,
+  evaluateStaticProperty,
+  queryActiveIntervals,
+} from './properties.js';
 
 describe('active intervals and static properties', () => {
   it('uses end-exclusive intervals and stable timeline order', () => {
@@ -27,5 +32,34 @@ describe('active intervals and static properties', () => {
   it('evaluates static properties without renderer state', () => {
     expect(evaluateStaticProperty({ value: 0.75 })).toBe(0.75);
     expect(evaluateStaticProperty({ value: 0.75, enabled: false })).toBeUndefined();
+  });
+
+  it('resolves an animated transform, sampling only keyframed channels', () => {
+    const object: VisualObjectV1 = {
+      id: 'obj-1',
+      kind: 'text',
+      transform: {
+        x: 0,
+        y: 42,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+      animations: {
+        x: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' },
+            { timeUs: 1_000_000, value: 200, interpolation: 'linear' },
+          ],
+        },
+      },
+    };
+    expect(evaluateAnimatedTransform(object, 500_000).x).toBeCloseTo(100, 6);
+    expect(evaluateAnimatedTransform(object, 500_000).y).toBe(42);
+    // No animation → the static transform passes through by reference.
+    const staticObject: VisualObjectV1 = { id: 'o', kind: 'shape', transform: object.transform };
+    expect(evaluateAnimatedTransform(staticObject, 500_000)).toBe(object.transform);
   });
 });

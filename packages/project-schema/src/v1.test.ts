@@ -178,4 +178,84 @@ describe('v1 project schema and migration harness', () => {
     // Caption clip on a video track referencing a missing document.
     expect(codes.filter((code) => code === 'PROJECT_SCHEMA_V1_CAPTION_CLIP')).toHaveLength(2);
   });
+
+  it('accepts a visual object with a valid animation curve', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      visualObjects: {
+        'obj-1': {
+          id: 'obj-1',
+          kind: 'text',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+          animations: {
+            x: {
+              keyframes: [
+                { timeUs: 0, value: 0, interpolation: 'linear' },
+                {
+                  timeUs: 1_000_000,
+                  value: 100,
+                  interpolation: 'bezier',
+                  bezier: { x1: 0.2, y1: 0, x2: 0.8, y2: 1 },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('reports animation violations with coded diagnostics', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      visualObjects: {
+        'obj-1': {
+          id: 'obj-1',
+          kind: 'text',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+          animations: {
+            // non-animatable channel
+            zoom: { keyframes: [{ timeUs: 0, value: 1, interpolation: 'hold' }] },
+            // out-of-order times + a bezier keyframe missing its handles
+            y: {
+              keyframes: [
+                { timeUs: 1_000_000, value: 0, interpolation: 'bezier' },
+                { timeUs: 0, value: 1, interpolation: 'linear' },
+              ],
+            },
+            // empty curve
+            opacity: { keyframes: [] },
+          },
+        },
+      },
+    });
+    const codes = diagnostics.map((diagnostic) => diagnostic.code);
+    expect(codes.filter((code) => code === 'PROJECT_SCHEMA_V1_ANIMATION').length).toBeGreaterThan(
+      0,
+    );
+    const messages = diagnostics.map((diagnostic) => diagnostic.message);
+    expect(messages).toContain('"zoom" is not an animatable property');
+    expect(messages).toContain('bezier interpolation requires finite handles');
+    expect(messages).toContain('keyframe times must strictly increase');
+    expect(messages).toContain('curve must hold at least one keyframe');
+  });
 });

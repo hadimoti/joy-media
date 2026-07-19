@@ -50,6 +50,9 @@ importers:
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../../packages/motion-core
       '@joy-media/playback-engine':
         specifier: workspace:*
         version: link:../../packages/playback-engine
@@ -145,6 +148,9 @@ importers:
 
   packages/evaluator:
     dependencies:
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../motion-core
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
@@ -171,6 +177,12 @@ importers:
 
   packages/media-core: {}
 
+  packages/motion-core:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+
   packages/playback-engine: {}
 
   packages/project-persistence:
@@ -193,6 +205,9 @@ importers:
       '@joy-media/captions-core':
         specifier: workspace:*
         version: link:../captions-core
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../motion-core
     devDependencies:
       '@joy-media/project-persistence':
         specifier: workspace:*

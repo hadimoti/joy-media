@@ -33,6 +33,9 @@
       "path": "../../packages/captions-core"
     },
     {
+      "path": "../../packages/motion-core"
+    },
+    {
       "path": "../../packages/provider-sdk"
     },
     {

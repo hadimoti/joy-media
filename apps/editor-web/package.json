@@ -20,6 +20,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "@joy-media/captions-core": "workspace:*",
+    "@joy-media/motion-core": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
     "@joy-media/render-ir": "workspace:*"
   },

@@ -39,10 +39,53 @@ export interface VisualObjectTransformV1 {
   };
 }
 
+/** Universal animatable transform channels (§20.3); each maps to a scalar curve. */
+export type AnimatablePropertyV1 = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity';
+
+export const ANIMATABLE_PROPERTIES: readonly AnimatablePropertyV1[] = [
+  'x',
+  'y',
+  'scaleX',
+  'scaleY',
+  'rotationDeg',
+  'opacity',
+];
+
+/** Interpolation of the segment *leaving* a keyframe toward the next one. */
+export type KeyframeInterpolationV1 = 'hold' | 'linear' | 'eased' | 'bezier';
+
+/**
+ * Cubic-bezier temporal easing handles in normalized segment space: `x` is the
+ * time fraction in [0, 1], `y` the value fraction. Required only for the
+ * `'bezier'` interpolation mode.
+ */
+export interface BezierHandlesV1 {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+export interface KeyframeV1 {
+  /** Object-local (composition-local) time, integer microseconds. */
+  readonly timeUs: TimeUs;
+  readonly value: number;
+  readonly interpolation: KeyframeInterpolationV1;
+  /** Present iff `interpolation === 'bezier'`. */
+  readonly bezier?: BezierHandlesV1;
+}
+
+/** A scalar animation curve: at least one keyframe, strictly increasing in time. */
+export interface AnimationCurveV1 {
+  readonly keyframes: readonly KeyframeV1[];
+}
+
 export interface VisualObjectV1 {
   readonly id: string;
   readonly kind: 'image' | 'text' | 'shape';
   readonly transform: VisualObjectTransformV1;
+  /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
+  readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
   readonly assetId?: string;
   readonly text?: string;
   readonly shape?: 'rectangle' | 'ellipse';
@@ -469,6 +512,81 @@ function validateVisualObject(
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'crop edges must be finite', path),
     );
+  if (value.animations !== undefined) {
+    if (!isRecord(value.animations)) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_ANIMATION', 'animations must be an object', path),
+      );
+    } else {
+      for (const [property, curve] of Object.entries(value.animations)) {
+        if (!(ANIMATABLE_PROPERTIES as readonly string[]).includes(property))
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_ANIMATION',
+              `"${property}" is not an animatable property`,
+              `${path}.animations`,
+            ),
+          );
+        validateAnimationCurve(curve, `${path}.animations.${property}`, diagnostics);
+      }
+    }
+  }
+}
+
+const INTERPOLATION_MODES: readonly string[] = ['hold', 'linear', 'eased', 'bezier'];
+
+/** Validates a single scalar animation curve (§20.3): non-empty, strictly increasing, finite. */
+export function validateAnimationCurve(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  const code = 'PROJECT_SCHEMA_V1_ANIMATION';
+  if (!isRecord(value) || !Array.isArray(value.keyframes)) {
+    diagnostics.push(diagnostic(code, 'curve must carry a keyframes array', path));
+    return;
+  }
+  if (value.keyframes.length === 0) {
+    diagnostics.push(diagnostic(code, 'curve must hold at least one keyframe', path));
+    return;
+  }
+  let previousTimeUs = -1;
+  for (const [index, keyframe] of value.keyframes.entries()) {
+    const at = `${path}.keyframes[${index}]`;
+    if (!isRecord(keyframe)) {
+      diagnostics.push(diagnostic(code, 'keyframe must be an object', at));
+      continue;
+    }
+    if (!isNonNegativeSafeInteger(keyframe.timeUs))
+      diagnostics.push(diagnostic(code, 'keyframe timeUs must be a non-negative integer µs', at));
+    else if ((keyframe.timeUs as number) <= previousTimeUs)
+      diagnostics.push(diagnostic(code, 'keyframe times must strictly increase', at));
+    else previousTimeUs = keyframe.timeUs as number;
+    if (!Number.isFinite(keyframe.value))
+      diagnostics.push(diagnostic(code, 'keyframe value must be finite', at));
+    if (
+      typeof keyframe.interpolation !== 'string' ||
+      !INTERPOLATION_MODES.includes(keyframe.interpolation)
+    )
+      diagnostics.push(diagnostic(code, 'keyframe interpolation is invalid', at));
+    if (keyframe.interpolation === 'bezier') {
+      const bezier = keyframe.bezier;
+      if (
+        !isRecord(bezier) ||
+        !['x1', 'y1', 'x2', 'y2'].every((key) => Number.isFinite(bezier[key]))
+      )
+        diagnostics.push(diagnostic(code, 'bezier interpolation requires finite handles', at));
+      else if (
+        (bezier.x1 as number) < 0 ||
+        (bezier.x1 as number) > 1 ||
+        (bezier.x2 as number) < 0 ||
+        (bezier.x2 as number) > 1
+      )
+        diagnostics.push(diagnostic(code, 'bezier handle x must be within [0, 1]', at));
+    } else if (keyframe.bezier !== undefined) {
+      diagnostics.push(diagnostic(code, 'bezier handles only apply to bezier interpolation', at));
+    }
+  }
 }
 
 function validateComposition(

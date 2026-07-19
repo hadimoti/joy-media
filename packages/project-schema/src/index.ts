@@ -54,8 +54,13 @@ export type {
   MarkerV1,
   VisualObjectV1,
   VisualObjectTransformV1,
+  AnimatablePropertyV1,
+  KeyframeInterpolationV1,
+  BezierHandlesV1,
+  KeyframeV1,
+  AnimationCurveV1,
   JsonValue,
 } from './v1.js';
-export { validateJoyProjectV1 } from './v1.js';
+export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type { MigrationReport, MigrationResult } from './migration.js';
 export { migrateV0ToV1 } from './migration.js';

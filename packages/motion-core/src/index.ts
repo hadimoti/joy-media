@@ -1,0 +1,47 @@
+/**
+ * @joy-media/motion-core — universal keyframe motion (WP-04.1).
+ *
+ * Pure keyframes, curves, easing, spatial paths, and value scaling on top of the
+ * durable §20.3 animation schema in `@joy-media/project-schema`. This package
+ * owns interpolation and curve editing; it holds no renderer, no expressions
+ * (deferred, §20.3), and no wall-clock dependence. Dependency points inward
+ * (§9.1): motion-core → project-schema only.
+ */
+
+export const PACKAGE_NAME = '@joy-media/motion-core' as const;
+
+export type {
+  AnimatablePropertyV1,
+  AnimationCurveV1,
+  BezierHandlesV1,
+  KeyframeInterpolationV1,
+  KeyframeV1,
+} from '@joy-media/project-schema';
+export { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
+
+export {
+  cubicBezierEase,
+  EASED_HANDLES,
+  interpolateSegment,
+  segmentEaseFraction,
+} from './interpolation.js';
+
+export type { KeyframeClipboard } from './curve.js';
+export {
+  copyKeyframes,
+  hasKeyframeAt,
+  pasteKeyframes,
+  removeKeyframe,
+  sampleCurve,
+  scaleCurveValues,
+  setKeyframe,
+} from './curve.js';
+
+export type { SpatialKeyframe, Vec2 } from './spatial.js';
+export { sampleSpatialPath } from './spatial.js';
+
+export type { ObjectAnimations } from './transform.js';
+export { isAnimated, resolveAnimatedTransform, resolveObjectTransform } from './transform.js';
+
+export type { MotionApplyResult, MotionCommand, ReplaceAnimationCommand } from './commands.js';
+export { applyMotionProjectCommand, MotionCommandError } from './commands.js';

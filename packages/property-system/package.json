@@ -21,6 +21,7 @@
     "@joy-media/test-fixtures": "workspace:*"
   },
   "dependencies": {
-    "@joy-media/captions-core": "workspace:*"
+    "@joy-media/captions-core": "workspace:*",
+    "@joy-media/motion-core": "workspace:*"
   }
 }

@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/captions-core" },
+    { "path": "packages/motion-core" },
     { "path": "packages/provider-sdk" },
     { "path": "packages/export-core" },
     { "path": "packages/playback-engine" },

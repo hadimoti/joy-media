@@ -7,12 +7,12 @@ import type { CommandTransaction } from '@joy-media/commands';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
-import { TRANSFORM_INSPECTOR } from './inspector.js';
 import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
+import { InspectorPanel } from './InspectorPanel.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -248,30 +248,12 @@ function Panel({ api }: IDockviewPanelProps) {
     const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
     const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
     return (
-      <article>
-        <p>{object === undefined ? 'Select a visual clip to edit.' : `Editing ${object.id}`}</p>
-        {object !== undefined &&
-          TRANSFORM_INSPECTOR.filter((property) => property.kind === 'number').map((property) => (
-            <label key={property.key}>
-              {property.label}
-              <input
-                type="number"
-                min={property.min}
-                max={property.max}
-                value={object.transform[property.key as Exclude<typeof property.key, 'crop'>]}
-                onChange={(event) => {
-                  const value = event.currentTarget.valueAsNumber;
-                  if (Number.isFinite(value))
-                    updateVisualProperty(
-                      object.id,
-                      property.key as 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
-                      value,
-                    );
-                }}
-              />
-            </label>
-          ))}
-      </article>
+      <InspectorPanel
+        object={object}
+        playheadUs={state.playheadUs}
+        onSetStatic={updateVisualProperty}
+        onDispatch={context.dispatchProject}
+      />
     );
   }
   if (api.id === 'captions')
