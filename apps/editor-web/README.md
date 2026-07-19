@@ -1,6 +1,6 @@
 # editor-web
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P01.4 editor-shell baseline in progress.** React/Vite shell, recoverable user workspace preference, command palette/shortcuts, ephemeral selection/playhead state, and a schema-driven transform/opacity Inspector are in place.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §6.1, §8.1, §17 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** React/Vite editor application: workspace, timeline interaction, Inspector, preview controls, command dispatch, job monitoring.
