@@ -5,7 +5,9 @@ describe('local control plane', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };
     api.createProject(owner, 'p', 'Project');
-    expect(() => api.updateProject(owner, 'p', 'stale', 1)).toThrow(/REVISION_CONFLICT/);
+    expect(() => api.updateProject(owner, 'p', 'stale', 1)).toThrow(
+      expect.objectContaining({ code: 'REVISION_CONFLICT' }),
+    );
     api.pairWorker(owner, 'w');
     api.enqueue(owner, 'j', 'p', 'render', 100);
     expect(api.lease('w', 101, 10)).toMatchObject({ id: 'j', state: 'leased' });
@@ -15,6 +17,6 @@ describe('local control plane', () => {
       'completed',
     ]);
     api.revokeWorker(owner, 'w');
-    expect(() => api.lease('w')).toThrow(/WORKER_UNAUTHORIZED/);
+    expect(() => api.lease('w')).toThrow(expect.objectContaining({ code: 'WORKER_UNAUTHORIZED' }));
   });
 });
