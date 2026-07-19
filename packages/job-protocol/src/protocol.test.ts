@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest';
+import {
+  InMemoryWorkerCoordinator,
+  WorkerProtocolError,
+  WORKER_PROTOCOL_VERSION,
+} from './protocol.js';
+import type { ThumbnailJob, WorkerHello } from './protocol.js';
+
+const hello: WorkerHello = {
+  protocolVersion: WORKER_PROTOCOL_VERSION,
+  workerId: 'worker-local-1',
+  workerVersion: '0.0.0-spike',
+  platform: 'win32',
+  architecture: 'x64',
+  capabilities: ['asset.thumbnail'],
+  localAssetIds: ['asset-sha256-abc'],
+  maxConcurrentJobs: 1,
+};
+
+const job = (id = 'thumbnail-1'): ThumbnailJob => ({
+  protocolVersion: WORKER_PROTOCOL_VERSION,
+  jobId: id,
+  type: 'asset.thumbnail',
+  payload: { assetId: 'asset-sha256-abc', maxEdgePx: 720 },
+  requirements: { capabilities: ['asset.thumbnail'], privacy: 'local-only' },
+  idempotencyKey: `idem-${id}`,
+  maxAttempts: 2,
+});
+
+function pairedCoordinator(): { coordinator: InMemoryWorkerCoordinator; token: string } {
+  const coordinator = new InMemoryWorkerCoordinator();
+  coordinator.createPairingOffer('pair-123456', 1_000);
+  const grant = coordinator.acceptOutboundPair(
+    {
+      workerId: hello.workerId,
+      pairingCode: 'pair-123456',
+      publicKeyFingerprint: 'sha256-public-key',
+    },
+    500,
+  );
+  coordinator.receiveHello(grant.sessionToken, hello, 500);
+  return { coordinator, token: grant.sessionToken };
+}
+
+describe('Worker pairing and thumbnail job spike', () => {
+  it('accepts an outbound pair then stores a normalized capability report', () => {
+    const { coordinator } = pairedCoordinator();
+    expect(coordinator.capabilitySnapshot('worker-local-1')).toEqual({ hello, observedAtMs: 500 });
+  });
+
+  it('rejects expired pairing offers', () => {
+    const coordinator = new InMemoryWorkerCoordinator();
+    coordinator.createPairingOffer('pair-123456', 1_000);
+    expect(() =>
+      coordinator.acceptOutboundPair(
+        {
+          workerId: hello.workerId,
+          pairingCode: 'pair-123456',
+          publicKeyFingerprint: 'fingerprint',
+        },
+        1_001,
+      ),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_PAIRING_DENIED' }));
+  });
+
+  it('runs a local-only thumbnail job with progress and keeps paths/bytes out of the protocol', () => {
+    const { coordinator, token } = pairedCoordinator();
+    coordinator.enqueueThumbnail(job());
+    expect(coordinator.claimNextThumbnail(token)).toEqual({ job: job(), attempt: 1 });
+    coordinator.beginThumbnail(token, 'thumbnail-1');
+    coordinator.reportThumbnailProgress(token, 'thumbnail-1', 1, 2, 'decode local asset');
+    coordinator.reportThumbnailProgress(token, 'thumbnail-1', 2, 2, 'encode thumbnail');
+    coordinator.succeedThumbnail(token, 'thumbnail-1', 'derivative-thumb-abc');
+    expect(coordinator.jobSnapshot('thumbnail-1')).toMatchObject({
+      state: 'succeeded',
+      outputAssetId: 'derivative-thumb-abc',
+      progress: { completed: 2, total: 2 },
+    });
+    expect(JSON.stringify({ hello, job: job(), events: coordinator.events() })).not.toContain(
+      'C:\\Users\\Owner',
+    );
+  });
+
+  it('delivers cancellation to the owning Worker and records cancellation', () => {
+    const { coordinator, token } = pairedCoordinator();
+    coordinator.enqueueThumbnail(job());
+    coordinator.claimNextThumbnail(token);
+    coordinator.beginThumbnail(token, 'thumbnail-1');
+    coordinator.requestCancellation('thumbnail-1');
+    expect(coordinator.isCancellationRequested(token, 'thumbnail-1')).toBe(true);
+    coordinator.finishCanceled(token, 'thumbnail-1');
+    expect(coordinator.jobSnapshot('thumbnail-1').state).toBe('canceled');
+  });
+
+  it('requeues a failed thumbnail only within its retry budget', () => {
+    const { coordinator, token } = pairedCoordinator();
+    coordinator.enqueueThumbnail(job());
+    coordinator.claimNextThumbnail(token);
+    coordinator.beginThumbnail(token, 'thumbnail-1');
+    coordinator.failThumbnail(token, 'thumbnail-1', 'THUMBNAIL_DECODER_FAILED');
+    coordinator.retryThumbnail('thumbnail-1');
+    expect(coordinator.claimNextThumbnail(token)).toEqual({ job: job(), attempt: 2 });
+    expect(coordinator.events().map((event) => event.type)).toEqual([
+      'job.queued',
+      'job.assigned',
+      'job.failed',
+      'job.retried',
+      'job.assigned',
+    ]);
+  });
+
+  it('rejects raw paths in either asset identity field', () => {
+    const { coordinator } = pairedCoordinator();
+    expect(() =>
+      coordinator.enqueueThumbnail({
+        ...job(),
+        payload: { assetId: 'C:\\video.mp4', maxEdgePx: 720 },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_PROTOCOL_PATH_FORBIDDEN' }));
+    expect(() =>
+      coordinator.enqueueThumbnail({
+        ...job(),
+        payload: { assetId: '/video.mp4', maxEdgePx: 720 },
+      }),
+    ).toThrow(WorkerProtocolError);
+  });
+});
