@@ -1,6 +1,9 @@
 import { AudioPreviewClock } from '@joy-media/audio-core';
 export type { FrameDecoder, MediaSource } from './decoder.js';
 export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
+export type { HtmlVideoElementLike } from './html-decoder.js';
+export { createHtmlMediaDecoder } from './html-decoder.js';
+export { sourceTimeAtPlayhead } from './source-time.js';
 export interface DecodedFrame {
   readonly assetId: string;
   readonly sourceTimeUs: number;
@@ -29,6 +32,7 @@ export class PlaybackScheduler {
   readonly audio: AudioPreviewClock;
   #generation = 0;
   #droppedFrames = 0;
+  #decodedFrames = 0;
   constructor(sampleRate = 48_000) {
     this.audio = new AudioPreviewClock(sampleRate);
   }
@@ -41,11 +45,23 @@ export class PlaybackScheduler {
   }
   acceptFrame(token: number, onTime: boolean): boolean {
     if (token !== this.#generation) return false;
+    this.#decodedFrames++;
     if (!onTime) this.#droppedFrames++;
     return true;
   }
   get droppedFrames(): number {
     return this.#droppedFrames;
+  }
+  get metrics(): {
+    readonly decodedFrames: number;
+    readonly droppedFrames: number;
+    readonly quality: 'full' | 'proxy';
+  } {
+    return {
+      decodedFrames: this.#decodedFrames,
+      droppedFrames: this.#droppedFrames,
+      quality: this.quality(),
+    };
   }
   quality(): 'full' | 'proxy' {
     return this.#droppedFrames >= 3 ? 'proxy' : 'full';
