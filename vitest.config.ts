@@ -21,6 +21,7 @@ export default defineConfig({
       '@joy-media/export-core': pkg('./packages/export-core/src/index.ts'),
       '@joy-media/api': pkg('./apps/api/src/index.ts'),
       '@joy-media/property-system': pkg('./packages/property-system/src/index.ts'),
+      '@joy-media/timeline-engine': pkg('./packages/timeline-engine/src/index.ts'),
     },
   },
   test: {

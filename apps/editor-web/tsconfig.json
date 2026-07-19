@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../packages/commands" },
     { "path": "../../packages/property-system" },
+    { "path": "../../packages/timeline-engine" },
     { "path": "../../packages/project-schema" },
     { "path": "../../packages/test-fixtures" }
   ]

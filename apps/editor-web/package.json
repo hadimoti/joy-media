@@ -12,6 +12,7 @@
     "@joy-media/commands": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/property-system": "workspace:*",
+    "@joy-media/timeline-engine": "workspace:*",
     "dockview": "^4.10.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

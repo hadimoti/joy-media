@@ -3,6 +3,7 @@ import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { TRANSFORM_INSPECTOR } from './inspector.js';
+import { TimelinePanel } from './TimelinePanel.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
@@ -98,14 +99,7 @@ function Panel({
       </article>
     );
   if (params.id === 'timeline')
-    return (
-      <article>
-        <button onClick={advance}>Advance playhead</button>
-        <p>
-          {state.playheadUs} µs · {state.selectedIds.length} selected
-        </p>
-      </article>
-    );
+    return <TimelinePanel playheadUs={state.playheadUs} onAdvance={advance} />;
   return (
     <article>
       <p>
