@@ -135,3 +135,11 @@ label {
   color: #e9b949;
   white-space: nowrap;
 }
+.caption-preview {
+  position: relative;
+  overflow: hidden;
+  background: #05070f;
+  border: 1px solid #303a56;
+  border-radius: 0.25rem;
+  align-self: center;
+}

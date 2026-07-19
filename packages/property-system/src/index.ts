@@ -96,6 +96,8 @@ export function applyVisualObjectProjectCommand(
     case 'caption.setWordTiming':
     case 'caption.addSegment':
     case 'caption.removeSegment':
+    case 'caption.setStyle':
+    case 'caption.replaceDocument':
       return applyCaptionProjectCommand(project, command);
     default:
       break;

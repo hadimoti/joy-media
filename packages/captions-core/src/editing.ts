@@ -69,6 +69,22 @@ export type CaptionCommand =
         readonly documentId: string;
         readonly segmentId: string;
       };
+    }
+  | {
+      readonly type: 'caption.setStyle';
+      readonly payload: {
+        readonly documentId: string;
+        /** Template id from the style registry; undefined restores the default. */
+        readonly styleRef: string | undefined;
+      };
+    }
+  | {
+      readonly type: 'caption.replaceDocument';
+      readonly payload: {
+        readonly documentId: string;
+        /** Full replacement (SRT/WebVTT import, transcription insert). */
+        readonly document: CaptionDocumentV1;
+      };
     };
 
 export interface CaptionApplyResult {
@@ -196,6 +212,35 @@ export function applyCaptionProjectCommand(
         inverse: {
           type: 'caption.addSegment',
           payload: { documentId: document.id, segment },
+        },
+      };
+    }
+    case 'caption.setStyle': {
+      const withoutStyle = { ...document };
+      delete withoutStyle.styleRef;
+      const nextDocument: CaptionDocumentV1 =
+        command.payload.styleRef === undefined
+          ? withoutStyle
+          : { ...withoutStyle, styleRef: command.payload.styleRef };
+      return {
+        project: withDocument(project, nextDocument),
+        inverse: {
+          type: 'caption.setStyle',
+          payload: { documentId: document.id, styleRef: document.styleRef },
+        },
+      };
+    }
+    case 'caption.replaceDocument': {
+      if (command.payload.document.id !== command.payload.documentId)
+        throw new CaptionCommandError(
+          'CAPTION_COMMAND_DOCUMENT_ID_MISMATCH',
+          `replacement document id "${command.payload.document.id}" must match "${command.payload.documentId}"`,
+        );
+      return {
+        project: withDocument(project, command.payload.document),
+        inverse: {
+          type: 'caption.replaceDocument',
+          payload: { documentId: document.id, document },
         },
       };
     }

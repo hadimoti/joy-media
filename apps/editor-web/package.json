@@ -19,7 +19,8 @@
     "dockview": "^4.10.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "@joy-media/captions-core": "workspace:*"
+    "@joy-media/captions-core": "workspace:*",
+    "@joy-media/render-ir": "workspace:*"
   },
   "devDependencies": {
     "@joy-media/test-fixtures": "workspace:*",

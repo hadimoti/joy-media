@@ -12,6 +12,7 @@ export type {
   SpriteNode,
   VideoFrameNode,
   TextNode,
+  TextSpan,
   GroupNode,
   RenderNode,
   VisualRenderNode,

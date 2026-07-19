@@ -147,6 +147,42 @@ describe('caption commands', () => {
   });
 });
 
+describe('style and document replacement commands', () => {
+  it('applies a template styleRef with an inverse restoring the previous choice', () => {
+    const base = project();
+    const styled = applyCaptionProjectCommand(base, {
+      type: 'caption.setStyle',
+      payload: { documentId: 'doc', styleRef: 'joy-karaoke-pop' },
+    });
+    expect(styled.project.captionDocuments.doc!.styleRef).toBe('joy-karaoke-pop');
+    const reverted = applyCaptionProjectCommand(styled.project, styled.inverse);
+    expect(reverted.project.captionDocuments.doc).toEqual(document);
+  });
+
+  it('replaces a whole document atomically (import path) and inverts to the original', () => {
+    const base = project();
+    const replacement = {
+      ...document,
+      words: { n1: { id: 'n1', text: 'imported', startUs: 0, endUs: 900_000 } },
+      segments: [{ id: 'new-seg', startUs: 0, endUs: 900_000, wordIds: ['n1'] }],
+    };
+    const replaced = applyCaptionProjectCommand(base, {
+      type: 'caption.replaceDocument',
+      payload: { documentId: 'doc', document: replacement },
+    });
+    expect(replaced.project.captionDocuments.doc!.segments[0]!.id).toBe('new-seg');
+    expect(
+      applyCaptionProjectCommand(replaced.project, replaced.inverse).project.captionDocuments.doc,
+    ).toEqual(document);
+    expect(() =>
+      applyCaptionProjectCommand(base, {
+        type: 'caption.replaceDocument',
+        payload: { documentId: 'doc', document: { ...replacement, id: 'other' } },
+      }),
+    ).toThrowError(CaptionCommandError);
+  });
+});
+
 describe('editing surface helpers', () => {
   it('finds segments by display and source text, case-insensitively', () => {
     expect(searchCaptionSegments(document, 'دنیا').map((m) => m.segment.id)).toEqual(['seg-1']);

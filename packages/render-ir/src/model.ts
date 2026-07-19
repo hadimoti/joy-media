@@ -53,6 +53,14 @@ export interface VideoFrameNode extends RenderNodeBase {
   readonly color: Rgba;
 }
 
+/** An inline styled run inside a TextNode (karaoke/keyword emphasis). */
+export interface TextSpan {
+  readonly text: string;
+  readonly color: Rgba;
+  /** Marks the emphasized (e.g. active-word) run for renderers with effects. */
+  readonly emphasis?: boolean;
+}
+
 /** A text run rendered with the spike's pinned bitmap glyph set. */
 export interface TextNode extends RenderNodeBase {
   readonly kind: 'text';
@@ -64,6 +72,12 @@ export interface TextNode extends RenderNodeBase {
   readonly align?: 'left' | 'center' | 'right';
   /** Layout constraint in viewport pixels; renderers wrap/shrink within it. */
   readonly maxWidth?: number;
+  /** Evaluated glyph size in viewport pixels; renderer default when absent. */
+  readonly fontSizePx?: number;
+  /** Box drawn behind the run (caption plates). Absent = no box. */
+  readonly background?: Rgba;
+  /** Styled runs; when present their concatenated text MUST equal `text`. */
+  readonly spans?: readonly TextSpan[];
 }
 
 /** A transform/opacity container. Its children remain evaluated visual nodes. */
@@ -165,6 +179,21 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
       }
       if (node.maxWidth !== undefined && (!Number.isFinite(node.maxWidth) || node.maxWidth <= 0)) {
         throw new RangeError(`node "${node.id}" maxWidth must be positive`);
+      }
+      if (
+        node.fontSizePx !== undefined &&
+        (!Number.isFinite(node.fontSizePx) || node.fontSizePx <= 0)
+      ) {
+        throw new RangeError(`node "${node.id}" fontSizePx must be positive`);
+      }
+      if (node.background !== undefined)
+        assertRgba(node.background, `node "${node.id}" background`);
+      if (node.spans !== undefined) {
+        const joined = node.spans.map((span) => span.text).join('');
+        if (joined !== node.text) {
+          throw new RangeError(`node "${node.id}" spans must concatenate to its text`);
+        }
+        for (const span of node.spans) assertRgba(span.color, `node "${node.id}" span color`);
       }
     }
     if (node.kind === 'group') {

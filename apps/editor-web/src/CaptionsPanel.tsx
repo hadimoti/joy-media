@@ -1,8 +1,16 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
+  captionCuesAt,
   captionSlots,
+  DEFAULT_CAPTION_TEMPLATE_ID,
   DEFAULT_CONFIDENCE_WARNING_THRESHOLD,
+  formatSrt,
+  formatWebVtt,
+  JOY_CAPTION_TEMPLATES,
+  layoutTemplatedCaptionNodes,
+  parseSrt,
+  parseWebVtt,
   resolveCaptionDirection,
   searchCaptionSegments,
   segmentDisplayText,
@@ -11,12 +19,15 @@ import {
   segmentTimelineRange,
 } from '@joy-media/captions-core';
 import type { CaptionSlot } from '@joy-media/captions-core';
+import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 
 /**
- * Transcript-first caption editing (WP-03.2). Every durable change goes through
- * the shared v1 command history; text edits write display overrides only, so
- * transcription source tokens stay recoverable.
+ * Transcript-first caption editing (WP-03.2/03.3). Every durable change goes
+ * through the shared v1 command history; text edits write display overrides
+ * only, so transcription source tokens stay recoverable. Styling is applied by
+ * template reference, previewed live from the same templated layout the
+ * renderer consumes.
  */
 export function CaptionsPanel({
   project,
@@ -42,6 +53,7 @@ export function CaptionsPanel({
   }
   return (
     <article className="captions-panel">
+      <CaptionPreview project={project} playheadUs={playheadUs} />
       <input
         aria-label="Search transcript"
         type="search"
@@ -63,6 +75,83 @@ export function CaptionsPanel({
   );
 }
 
+/** Renders the templated caption layout at the playhead, scaled to a small stage. */
+function CaptionPreview({
+  project,
+  playheadUs,
+}: {
+  readonly project: JoyProjectV1;
+  readonly playheadUs: number;
+}) {
+  const composition = project.compositions[project.rootCompositionId]!;
+  const cues = captionCuesAt(composition, project.captionDocuments, playheadUs);
+  const nodes = layoutTemplatedCaptionNodes(cues, {
+    viewportWidth: composition.width,
+    viewportHeight: composition.height,
+  }) as readonly TextNode[];
+  const stageWidth = 360;
+  const scale = stageWidth / composition.width;
+  return (
+    <div
+      className="caption-preview"
+      style={{ width: stageWidth, height: composition.height * scale }}
+      aria-label="Caption preview"
+    >
+      {nodes.map((node) => (
+        <span
+          key={node.id}
+          dir={node.direction}
+          style={{
+            position: 'absolute',
+            top: node.transform.translateY * scale,
+            left: node.transform.translateX * scale,
+            transform:
+              node.align === 'center'
+                ? 'translateX(-50%)'
+                : node.align === 'right'
+                  ? 'translateX(-100%)'
+                  : undefined,
+            fontSize: (node.fontSizePx ?? 24) * scale,
+            lineHeight: 1.15,
+            whiteSpace: 'nowrap',
+            color: rgbaCss(node.color),
+            backgroundColor: node.background === undefined ? undefined : rgbaCss(node.background),
+            padding: node.background === undefined ? undefined : '0.05em 0.35em',
+            borderRadius: '0.15em',
+          }}
+        >
+          {node.spans === undefined
+            ? node.text
+            : node.spans.map((span, index) => (
+                <span
+                  key={index}
+                  style={{
+                    color: rgbaCss(span.color),
+                    fontWeight: span.emphasis === true ? 700 : undefined,
+                  }}
+                >
+                  {span.text}
+                </span>
+              ))}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function rgbaCss(color: { r: number; g: number; b: number; a: number }): string {
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${(color.a / 255).toFixed(3)})`;
+}
+
+function downloadTextFile(fileName: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const anchor = window.document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function CaptionSlotEditor({
   slot,
   query,
@@ -77,6 +166,8 @@ function CaptionSlotEditor({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const { clip, document } = slot;
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [importIssues, setImportIssues] = useState(0);
   const direction = resolveCaptionDirection(document);
   const matches =
     query.trim().length === 0
@@ -106,14 +197,74 @@ function CaptionSlotEditor({
       ],
     });
   };
+  const applyTemplate = (styleRef: string) => {
+    onDispatch({
+      label: 'Apply caption template',
+      commands: [{ type: 'caption.setStyle', payload: { documentId: document.id, styleRef } }],
+    });
+  };
+  const importFile = async (file: File) => {
+    const text = await file.text();
+    const parsed = file.name.toLowerCase().endsWith('.vtt')
+      ? parseWebVtt(text, { documentId: document.id, language: document.language })
+      : parseSrt(text, { documentId: document.id, language: document.language });
+    const imported =
+      document.styleRef === undefined
+        ? parsed.document
+        : { ...parsed.document, styleRef: document.styleRef };
+    setImportIssues(parsed.diagnostics.length);
+    onDispatch({
+      label: `Import ${file.name}`,
+      commands: [
+        {
+          type: 'caption.replaceDocument',
+          payload: { documentId: document.id, document: imported },
+        },
+      ],
+    });
+  };
   return (
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
         <strong>
           {document.language} · {direction.toUpperCase()}
         </strong>
+        <select
+          aria-label="Caption template"
+          value={document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID}
+          onChange={(event) => applyTemplate(event.target.value)}
+        >
+          {JOY_CAPTION_TEMPLATES.map((template) => (
+            <option key={template.id} value={template.id} title={template.description}>
+              {template.name}
+            </option>
+          ))}
+        </select>
+        <button onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}>
+          Export SRT
+        </button>
+        <button onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}>
+          Export VTT
+        </button>
+        <button onClick={() => fileInput.current?.click()}>Import…</button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".srt,.vtt"
+          hidden
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file !== undefined) void importFile(file);
+          }}
+        />
         <button onClick={addSegment}>Add caption</button>
       </header>
+      {importIssues > 0 && (
+        <p className="caption-warning">
+          Import skipped {importIssues} malformed cue{importIssues === 1 ? '' : 's'}.
+        </p>
+      )}
       {segments.length === 0 && <p>No matching captions.</p>}
       <ol className="captions-list">
         {segments.map((segment) => {

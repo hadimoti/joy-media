@@ -46,6 +46,22 @@ export {
   segmentTimelineRange,
 } from './editing.js';
 
+export type {
+  CaptionImportDiagnostic,
+  CaptionImportOptions,
+  CaptionImportResult,
+} from './interchange.js';
+export { formatSrt, formatWebVtt, parseSrt, parseWebVtt } from './interchange.js';
+
+export type { CaptionLine, CaptionTemplate, TemplatedCaptionLayoutOptions } from './styling.js';
+export {
+  breakCaptionLines,
+  DEFAULT_CAPTION_TEMPLATE_ID,
+  JOY_CAPTION_TEMPLATES,
+  layoutTemplatedCaptionNodes,
+  resolveCaptionTemplate,
+} from './styling.js';
+
 /** Strong RTL ranges: Hebrew, Arabic (+supplements/extended), presentation forms. */
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 /** Strong LTR: basic + extended Latin, Greek, Cyrillic, Armenian. */
