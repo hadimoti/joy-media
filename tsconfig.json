@@ -10,6 +10,7 @@
     { "path": "packages/html-scene-runtime" },
     { "path": "packages/media-core" },
     { "path": "packages/audio-core" },
+    { "path": "packages/project-persistence" },
     { "path": "packages/job-protocol" },
     { "path": "packages/test-fixtures" },
     { "path": "tooling/golden-render" }

@@ -17,6 +17,7 @@ export default defineConfig({
       '@joy-media/html-scene-runtime': pkg('./packages/html-scene-runtime/src/index.ts'),
       '@joy-media/media-core': pkg('./packages/media-core/src/index.ts'),
       '@joy-media/audio-core': pkg('./packages/audio-core/src/index.ts'),
+      '@joy-media/project-persistence': pkg('./packages/project-persistence/src/index.ts'),
     },
   },
   test: {

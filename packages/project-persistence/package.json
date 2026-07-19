@@ -1,0 +1,26 @@
+{
+  "name": "@joy-media/project-persistence",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local snapshot, command-log, recovery, and project-lock contracts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/commands": "workspace:*",
+    "@joy-media/project-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@joy-media/test-fixtures": "workspace:*"
+  }
+}

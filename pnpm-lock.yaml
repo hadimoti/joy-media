@@ -70,6 +70,19 @@ importers:
 
   packages/media-core: {}
 
+  packages/project-persistence:
+    dependencies:
+      '@joy-media/commands':
+        specifier: workspace:*
+        version: link:../commands
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+    devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
+
   packages/project-schema: {}
 
   packages/render-ir: {}
