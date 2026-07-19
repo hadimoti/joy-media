@@ -98,6 +98,8 @@ importers:
         specifier: workspace:*
         version: link:../project-schema
 
+  packages/export-core: {}
+
   packages/html-scene-runtime:
     dependencies:
       '@joy-media/project-schema':
