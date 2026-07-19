@@ -25,4 +25,10 @@ describe('@joy-media/golden-render', () => {
     expect(start.transform).toEqual({ translateX: 2, translateY: 2, scaleX: 1, scaleY: 1 });
     expect(end.transform).toEqual({ translateX: 8, translateY: 2, scaleX: 1.5, scaleY: 1.5 });
   });
+
+  it('reopens a serialized reference frame with the same preview/export result', () => {
+    const original = createParitySpikeFrame(500_000);
+    const reopened = JSON.parse(JSON.stringify(original)) as typeof original;
+    expect(compareGoldenFrame(reopened)).toEqual(compareGoldenFrame(original));
+  });
 });

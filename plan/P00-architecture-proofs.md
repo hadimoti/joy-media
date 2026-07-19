@@ -23,7 +23,7 @@ Each WP ≈ one session. WP-00.0 first; the seven spikes afterward in any order 
 ## Exit criteria (all must be evidenced before P01 opens)
 
 - [x] ADRs above written and Accepted.
-- [ ] A saved spike project reproduces the same reference frames and audio alignment on re-open.
-- [ ] No spike put Pixi objects, raw paths, or provider-specific fields into the project schema.
-- [ ] Known preview/export differences measured and documented.
+- [x] A saved spike project reproduces the same reference frames and audio alignment on re-open. Evidence: serialized command/replay, RenderFrameIR reopen, and PCM fixture reopen tests; see [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
+- [x] No spike put Pixi objects, raw paths, or provider-specific fields into the project schema. Evidence: schema/bridge boundary review in [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
+- [x] Known preview/export differences measured and documented. See [`p00-gate-review.md`](../docs/architecture/p00-gate-review.md).
 - [ ] Owner has seen and approved the vertical-slice user experience direction.
