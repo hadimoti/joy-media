@@ -3,8 +3,12 @@ import {
   commitMove,
   pixelToTime,
   previewMove,
+  rippleDelete,
   snapTime,
+  splitCommand,
   timeToPixel,
+  toggleSelection,
+  trimCommand,
   visibleRange,
 } from './index.js';
 describe('timeline coordinates', () => {
@@ -23,5 +27,28 @@ describe('timeline coordinates', () => {
       payload: { newStartUs: 1_000_000 },
     });
     expect(visibleRange(viewport, 250)).toEqual({ startUs: 0, endUs: 2_500_000 });
+  });
+  it('builds selection, trim/split, and atomic ripple-delete intent', () => {
+    expect(toggleSelection({ clipIds: ['a'] }, 'b')).toEqual({ clipIds: ['a', 'b'] });
+    expect(trimCommand('root', 't', 'a', 'end', 10)).toMatchObject({
+      type: 'timeline.trimClipEnd',
+    });
+    expect(splitCommand('root', 't', 'a', 5, 'a-2')).toMatchObject({ type: 'timeline.splitClip' });
+    expect(
+      rippleDelete(
+        'root',
+        't',
+        [
+          { id: 'a', startUs: 0, durationUs: 10 },
+          { id: 'b', startUs: 20, durationUs: 10 },
+        ],
+        'a',
+      ),
+    ).toMatchObject({
+      commands: [
+        { type: 'timeline.removeClip' },
+        { type: 'timeline.moveClip', payload: { clipId: 'b', newStartUs: 10 } },
+      ],
+    });
   });
 });

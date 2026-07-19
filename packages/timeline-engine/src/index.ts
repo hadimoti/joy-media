@@ -1,5 +1,5 @@
 import type { TimeUs } from '@joy-media/project-schema';
-import type { SpikeCommand } from '@joy-media/commands';
+import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
 export interface TimelineViewport {
   readonly originUs: TimeUs;
   readonly pixelsPerSecond: number;
@@ -69,4 +69,72 @@ export function visibleRange(
   widthPx: number,
 ): { readonly startUs: TimeUs; readonly endUs: TimeUs } {
   return { startUs: viewport.originUs, endUs: pixelToTime(widthPx, viewport) };
+}
+
+export interface TimelineSelection {
+  readonly clipIds: readonly string[];
+}
+export function toggleSelection(selection: TimelineSelection, clipId: string): TimelineSelection {
+  return selection.clipIds.includes(clipId)
+    ? { clipIds: selection.clipIds.filter((id) => id !== clipId) }
+    : { clipIds: [...selection.clipIds, clipId] };
+}
+export function trimCommand(
+  compositionId: string,
+  trackId: string,
+  clipId: string,
+  edge: 'start' | 'end',
+  timeUs: TimeUs,
+): SpikeCommand {
+  return edge === 'start'
+    ? {
+        type: 'timeline.trimClipStart',
+        payload: { compositionId, trackId, clipId, newStartUs: timeUs },
+      }
+    : {
+        type: 'timeline.trimClipEnd',
+        payload: { compositionId, trackId, clipId, newEndUs: timeUs },
+      };
+}
+export function splitCommand(
+  compositionId: string,
+  trackId: string,
+  clipId: string,
+  atUs: TimeUs,
+  newClipId: string,
+): SpikeCommand {
+  return {
+    type: 'timeline.splitClip',
+    payload: { compositionId, trackId, clipId, atUs, newClipId },
+  };
+}
+export interface TimedClip {
+  readonly id: string;
+  readonly startUs: TimeUs;
+  readonly durationUs: TimeUs;
+}
+export function rippleDelete(
+  compositionId: string,
+  trackId: string,
+  clips: readonly TimedClip[],
+  clipId: string,
+): CommandTransaction {
+  const target = clips.find((clip) => clip.id === clipId);
+  if (target === undefined) throw new RangeError(`unknown clip ${clipId}`);
+  const commands: SpikeCommand[] = [
+    { type: 'timeline.removeClip', payload: { compositionId, trackId, clipId } },
+  ];
+  for (const clip of clips
+    .filter((item) => item.startUs >= target.startUs + target.durationUs)
+    .sort((a, b) => a.startUs - b.startUs))
+    commands.push({
+      type: 'timeline.moveClip',
+      payload: {
+        compositionId,
+        trackId,
+        clipId: clip.id,
+        newStartUs: clip.startUs - target.durationUs,
+      },
+    });
+  return { label: 'Ripple delete', commands };
 }
