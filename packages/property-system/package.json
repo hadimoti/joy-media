@@ -16,6 +16,8 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@joy-media/project-persistence": "workspace:*"
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/project-persistence": "workspace:*",
+    "@joy-media/test-fixtures": "workspace:*"
   }
 }

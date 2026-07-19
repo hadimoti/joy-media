@@ -54,6 +54,7 @@ export function migrateV0ToV1(project: SpikeProject): MigrationResult {
     assets,
     variables: {},
     markers: [],
+    visualObjects: {},
     pluginData: {},
   };
   const diagnostics = validateJoyProjectV1(migrated);
@@ -70,6 +71,7 @@ export function migrateV0ToV1(project: SpikeProject): MigrationResult {
         'track.name',
         'track.locked',
         'project metadata',
+        'visualObjects',
       ],
     },
   };

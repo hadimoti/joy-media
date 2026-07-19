@@ -47,6 +47,8 @@ export type {
   CompositionClipV1,
   AssetRecordV1,
   MarkerV1,
+  VisualObjectV1,
+  VisualObjectTransformV1,
   JsonValue,
 } from './v1.js';
 export { validateJoyProjectV1 } from './v1.js';

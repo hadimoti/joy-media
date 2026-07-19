@@ -1,26 +1,12 @@
-export type ObjectKind = 'image' | 'text' | 'shape';
-export interface TransformProperties {
-  readonly x: number;
-  readonly y: number;
-  readonly scaleX: number;
-  readonly scaleY: number;
-  readonly rotationDeg: number;
-  readonly opacity: number;
-  readonly crop: {
-    readonly left: number;
-    readonly top: number;
-    readonly right: number;
-    readonly bottom: number;
-  };
-}
-export interface VisualObject {
-  readonly id: string;
-  readonly kind: ObjectKind;
-  readonly transform: TransformProperties;
-  readonly assetId?: string;
-  readonly text?: string;
-  readonly shape?: 'rectangle' | 'ellipse';
-}
+import type {
+  JoyProjectV1,
+  VisualObjectTransformV1,
+  VisualObjectV1,
+} from '@joy-media/project-schema';
+
+export type ObjectKind = VisualObjectV1['kind'];
+export type TransformProperties = VisualObjectTransformV1;
+export type VisualObject = VisualObjectV1;
 export interface PropertyDescriptor {
   readonly key: keyof TransformProperties;
   readonly label: string;
@@ -74,6 +60,41 @@ export type VisualObjectCommand = {
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
   readonly inverse: VisualObjectCommand;
+}
+
+export interface VisualObjectProjectApplyResult {
+  readonly project: JoyProjectV1;
+  readonly inverse: VisualObjectCommand;
+}
+
+/** Applies a visual-object command to the durable v1 project document. */
+export function applyVisualObjectProjectCommand(
+  project: JoyProjectV1,
+  command: VisualObjectCommand,
+): VisualObjectProjectApplyResult {
+  const object = project.visualObjects[command.payload.objectId];
+  if (object === undefined)
+    throw new RangeError(`unknown visual object ${command.payload.objectId}`);
+  const applied = applyVisualObjectCommand([object], command);
+  return {
+    project: {
+      ...project,
+      visualObjects: { ...project.visualObjects, [object.id]: applied.objects[0]! },
+    },
+    inverse: applied.inverse,
+  };
+}
+
+/** Applies an all-or-nothing transaction to the durable v1 project document. */
+export function applyVisualObjectProjectTransaction(
+  project: JoyProjectV1,
+  transaction: VisualObjectTransaction,
+): JoyProjectV1 {
+  if (transaction.commands.length === 0) throw new RangeError('object transaction cannot be empty');
+  let next = project;
+  for (const command of transaction.commands)
+    next = applyVisualObjectProjectCommand(next, command).project;
+  return next;
 }
 /** Durable object mutation with an inverse captured from pre-state. */
 export function applyVisualObjectCommand(

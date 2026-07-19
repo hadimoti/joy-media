@@ -67,6 +67,7 @@ describe('v1 project schema and migration harness', () => {
       assets: {},
       variables: {},
       markers: [],
+      visualObjects: {},
       pluginData: {},
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('PROJECT_SCHEMA_V1_ROOT');

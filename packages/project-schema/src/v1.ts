@@ -16,8 +16,34 @@ export interface JoyProjectV1 {
   readonly assets: Readonly<Record<string, AssetRecordV1>>;
   readonly variables: Readonly<Record<string, JsonValue>>;
   readonly markers: readonly MarkerV1[];
+  /** Visual objects are first-class project data, addressed globally by id. */
+  readonly visualObjects: Readonly<Record<string, VisualObjectV1>>;
   /** Namespaced JSON only; plugin runtime objects never enter the project. */
   readonly pluginData: Readonly<Record<string, JsonValue>>;
+}
+
+export interface VisualObjectTransformV1 {
+  readonly x: number;
+  readonly y: number;
+  readonly scaleX: number;
+  readonly scaleY: number;
+  readonly rotationDeg: number;
+  readonly opacity: number;
+  readonly crop: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  };
+}
+
+export interface VisualObjectV1 {
+  readonly id: string;
+  readonly kind: 'image' | 'text' | 'shape';
+  readonly transform: VisualObjectTransformV1;
+  readonly assetId?: string;
+  readonly text?: string;
+  readonly shape?: 'rectangle' | 'ellipse';
 }
 
 export interface CompositionV1 {
@@ -136,11 +162,71 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_MARKERS', 'markers must be an array', 'markers'),
     );
+  if (!isRecord(value.visualObjects))
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_VISUAL_OBJECTS',
+        'visualObjects must be an object',
+        'visualObjects',
+      ),
+    );
+  else {
+    for (const [objectId, object] of Object.entries(value.visualObjects))
+      validateVisualObject(object, `visualObjects.${objectId}`, diagnostics);
+  }
   if (!isRecord(value.pluginData))
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
   return diagnostics;
+}
+
+function validateVisualObject(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (!isRecord(value) || !isNonEmptyString(value.id)) {
+    diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object id is required', path));
+    return;
+  }
+  if (value.kind !== 'image' && value.kind !== 'text' && value.kind !== 'shape')
+    diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object kind is invalid', path));
+  if (!isRecord(value.transform)) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object transform is required', path),
+    );
+    return;
+  }
+  for (const key of ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg', 'opacity'] as const) {
+    if (!Number.isFinite(value.transform[key]))
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `transform ${key} must be finite`, path),
+      );
+  }
+  if (typeof value.transform.scaleX === 'number' && value.transform.scaleX <= 0)
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'scaleX must be positive', path),
+    );
+  if (typeof value.transform.scaleY === 'number' && value.transform.scaleY <= 0)
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'scaleY must be positive', path),
+    );
+  if (
+    typeof value.transform.opacity === 'number' &&
+    (value.transform.opacity < 0 || value.transform.opacity > 1)
+  )
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'opacity must be in [0, 1]', path),
+    );
+  const crop = value.transform.crop;
+  if (
+    !isRecord(crop) ||
+    !['left', 'top', 'right', 'bottom'].every((key) => Number.isFinite(crop[key]))
+  )
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'crop edges must be finite', path),
+    );
 }
 
 function validateComposition(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {

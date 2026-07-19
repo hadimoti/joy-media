@@ -164,6 +164,12 @@ importers:
       '@joy-media/project-persistence':
         specifier: workspace:*
         version: link:../project-persistence
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
 
   packages/render-ir: {}
 
