@@ -2,5 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
-  "references": [{ "path": "../../packages/job-protocol" }]
+  "references": [
+    { "path": "../../packages/export-core" },
+    { "path": "../../packages/job-protocol" }
+  ]
 }

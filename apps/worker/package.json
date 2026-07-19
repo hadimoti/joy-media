@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@joy-media/export-core": "workspace:*",
     "@joy-media/job-protocol": "workspace:*"
   },
   "devDependencies": {

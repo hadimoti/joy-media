@@ -72,6 +72,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../../packages/export-core
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
