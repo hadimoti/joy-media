@@ -3,6 +3,7 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
   "references": [
+    { "path": "../api" },
     { "path": "../../packages/export-core" },
     { "path": "../../packages/job-protocol" }
   ]
