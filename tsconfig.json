@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/property-system" },
     { "path": "packages/timeline-engine" },
     { "path": "apps/worker" },
     { "path": "apps/api" },

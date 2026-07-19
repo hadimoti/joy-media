@@ -129,6 +129,8 @@ importers:
 
   packages/project-schema: {}
 
+  packages/property-system: {}
+
   packages/render-ir: {}
 
   packages/renderer-headless:
