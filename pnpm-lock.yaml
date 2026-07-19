@@ -44,6 +44,9 @@ importers:
 
   apps/editor-web:
     dependencies:
+      '@joy-media/captions-core':
+        specifier: workspace:*
+        version: link:../../packages/captions-core
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
@@ -180,6 +183,10 @@ importers:
   packages/project-schema: {}
 
   packages/property-system:
+    dependencies:
+      '@joy-media/captions-core':
+        specifier: workspace:*
+        version: link:../captions-core
     devDependencies:
       '@joy-media/project-persistence':
         specifier: workspace:*

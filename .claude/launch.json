@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "editor-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@joy-media/editor-web", "dev"],
+      "port": 5173
+    }
+  ]
+}

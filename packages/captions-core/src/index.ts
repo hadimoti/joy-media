@@ -30,6 +30,22 @@ export type {
   CaptionClipV1,
 } from '@joy-media/project-schema';
 
+export type {
+  CaptionApplyResult,
+  CaptionCommand,
+  CaptionSearchMatch,
+  CaptionSlot,
+} from './editing.js';
+export {
+  applyCaptionProjectCommand,
+  CaptionCommandError,
+  captionSlots,
+  DEFAULT_CONFIDENCE_WARNING_THRESHOLD,
+  searchCaptionSegments,
+  segmentMinConfidence,
+  segmentTimelineRange,
+} from './editing.js';
+
 /** Strong RTL ranges: Hebrew, Arabic (+supplements/extended), presentation forms. */
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 /** Strong LTR: basic + extended Latin, Greek, Cyrillic, Armenian. */

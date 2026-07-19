@@ -19,5 +19,8 @@
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/project-persistence": "workspace:*",
     "@joy-media/test-fixtures": "workspace:*"
+  },
+  "dependencies": {
+    "@joy-media/captions-core": "workspace:*"
   }
 }

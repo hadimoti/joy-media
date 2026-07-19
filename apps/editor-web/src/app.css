@@ -97,3 +97,41 @@ label {
 .timeline-clip[aria-pressed='true'] {
   outline: 2px solid #e9b949;
 }
+.captions-panel {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+}
+.captions-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.captions-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.caption-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.caption-row.active {
+  outline: 2px solid #e9b949;
+  border-radius: 0.15rem;
+}
+.caption-row input[type='number'] {
+  width: 4.5rem;
+}
+.caption-row input:not([type]),
+.caption-row input[type='text'] {
+  flex: 1;
+}
+.caption-warning {
+  color: #e9b949;
+  white-space: nowrap;
+}

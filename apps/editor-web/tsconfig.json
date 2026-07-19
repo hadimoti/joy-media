@@ -8,12 +8,29 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../../packages/commands" },
-    { "path": "../../packages/property-system" },
-    { "path": "../../packages/timeline-engine" },
-    { "path": "../../packages/project-schema" },
-    { "path": "../../packages/test-fixtures" },
-    { "path": "../../packages/playback-engine" },
-    { "path": "../../packages/project-persistence" }
+    {
+      "path": "../../packages/commands"
+    },
+    {
+      "path": "../../packages/property-system"
+    },
+    {
+      "path": "../../packages/timeline-engine"
+    },
+    {
+      "path": "../../packages/project-schema"
+    },
+    {
+      "path": "../../packages/test-fixtures"
+    },
+    {
+      "path": "../../packages/playback-engine"
+    },
+    {
+      "path": "../../packages/project-persistence"
+    },
+    {
+      "path": "../../packages/captions-core"
+    }
   ]
 }

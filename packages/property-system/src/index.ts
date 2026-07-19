@@ -4,6 +4,8 @@ import type {
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { applyCaptionProjectCommand } from '@joy-media/captions-core';
+import type { CaptionCommand } from '@joy-media/captions-core';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type TransformProperties = VisualObjectTransformV1;
@@ -65,7 +67,8 @@ export type VisualObjectCommand =
       readonly payload: { readonly objectId: string; readonly crop: TransformProperties['crop'] };
     }
   | { readonly type: 'marker.add'; readonly payload: { readonly marker: MarkerV1 } }
-  | { readonly type: 'marker.remove'; readonly payload: { readonly markerId: string } };
+  | { readonly type: 'marker.remove'; readonly payload: { readonly markerId: string } }
+  | CaptionCommand;
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
   readonly inverse: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>;
@@ -87,6 +90,16 @@ export function applyVisualObjectProjectCommand(
   project: JoyProjectV1,
   command: VisualObjectCommand,
 ): VisualObjectProjectApplyResult {
+  switch (command.type) {
+    case 'caption.setSegmentText':
+    case 'caption.setSegmentTiming':
+    case 'caption.setWordTiming':
+    case 'caption.addSegment':
+    case 'caption.removeSegment':
+      return applyCaptionProjectCommand(project, command);
+    default:
+      break;
+  }
   if (command.type === 'marker.add') {
     if (project.markers.some((marker) => marker.id === command.payload.marker.id))
       throw new RangeError(`marker "${command.payload.marker.id}" already exists`);

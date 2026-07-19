@@ -12,6 +12,7 @@ import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js
 import { EditorSession } from './editor-session.js';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
+import { CaptionsPanel } from './CaptionsPanel.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
@@ -20,6 +21,7 @@ const labels: Readonly<Record<string, string>> = {
   media: 'Media',
   monitor: 'Program Monitor',
   timeline: 'Timeline',
+  captions: 'Captions',
   inspector: 'Inspector',
   history: 'History',
   diagnostics: 'Diagnostics',
@@ -47,6 +49,7 @@ interface EditorPanelContextValue {
     key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
     value: number,
   ) => void;
+  readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
   readonly undo: () => void;
   readonly redo: () => void;
 }
@@ -112,6 +115,13 @@ export function App() {
     },
     [session],
   );
+  const dispatchProject = useCallback(
+    (transaction: VisualObjectTransaction) => {
+      session.dispatchVisualObjects(transaction);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
   const undo = useCallback(() => {
     session.undo();
     setRevision((revision) => revision + 1);
@@ -140,9 +150,10 @@ export function App() {
     event.api.onDidLayoutChange(() => {
       window.localStorage.setItem('joy-media.dockview.v1', JSON.stringify(event.api.toJSON()));
     });
-    if (event.api.totalPanels > 0) return;
+    // Add any default panel a saved layout predates (e.g. Captions from P03).
     for (const panel of DEFAULT_WORKSPACE.panels)
-      event.api.addPanel({ id: panel, component: 'editor-panel', title: labels[panel] ?? panel });
+      if (event.api.getPanel(panel) === undefined)
+        event.api.addPanel({ id: panel, component: 'editor-panel', title: labels[panel] ?? panel });
   }, []);
   return (
     <main>
@@ -190,6 +201,7 @@ export function App() {
             })),
           dispatchTimeline,
           updateVisualProperty,
+          dispatchProject,
           undo,
           redo,
         }}
@@ -238,6 +250,15 @@ function Panel({ api }: IDockviewPanelProps) {
       </article>
     );
   }
+  if (api.id === 'captions')
+    return (
+      <CaptionsPanel
+        project={visualProject}
+        playheadUs={state.playheadUs}
+        onSeek={context.seek}
+        onDispatch={context.dispatchProject}
+      />
+    );
   if (api.id === 'timeline')
     return (
       <TimelinePanel
