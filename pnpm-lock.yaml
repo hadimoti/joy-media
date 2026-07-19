@@ -153,7 +153,11 @@ importers:
 
   packages/project-schema: {}
 
-  packages/property-system: {}
+  packages/property-system:
+    devDependencies:
+      '@joy-media/project-persistence':
+        specifier: workspace:*
+        version: link:../project-persistence
 
   packages/render-ir: {}
 
