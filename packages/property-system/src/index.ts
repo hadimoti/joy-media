@@ -62,3 +62,33 @@ export function setVisualProperty(
       : object,
   );
 }
+
+export type VisualObjectCommand = {
+  readonly type: 'object.setTransformProperty';
+  readonly payload: {
+    readonly objectId: string;
+    readonly key: Exclude<keyof TransformProperties, 'crop'>;
+    readonly value: number;
+  };
+};
+export interface VisualObjectApplyResult {
+  readonly objects: readonly VisualObject[];
+  readonly inverse: VisualObjectCommand;
+}
+/** Durable object mutation with an inverse captured from pre-state. */
+export function applyVisualObjectCommand(
+  objects: readonly VisualObject[],
+  command: VisualObjectCommand,
+): VisualObjectApplyResult {
+  const object = objects.find((item) => item.id === command.payload.objectId);
+  if (object === undefined)
+    throw new RangeError(`unknown visual object ${command.payload.objectId}`);
+  const previous = object.transform[command.payload.key];
+  return {
+    objects: setVisualProperty(objects, [object.id], command.payload.key, command.payload.value),
+    inverse: {
+      type: 'object.setTransformProperty',
+      payload: { objectId: object.id, key: command.payload.key, value: previous },
+    },
+  };
+}
