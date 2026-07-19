@@ -1,6 +1,6 @@
 # captions-core
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P03.1 started.** Structured words, segments, speakers, active-caption evaluation, and a renderer-neutral text-node mapping are implemented.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §20.5, §2.7 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Subtitle document model (words/segments/speakers), layout, templates, animation, RTL/Persian rules.

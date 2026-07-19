@@ -1,0 +1,13 @@
+{
+  "name": "@joy-media/captions-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/render-ir": "workspace:*"
+  }
+}

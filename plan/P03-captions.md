@@ -1,6 +1,6 @@
 # P03 — Captions and Transcript-First Editing
 
-**Status:** not-started · **Gate to enter:** P02 exit criteria · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
+**Status:** in-progress · **Gate to enter:** owner authorized early start; P02 completion remains tracked · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
 **Goal:** captions become a first-class reason to use JOY — structured language data, Persian/RTL first-class, transcription as a replaceable adapter.
 
 **Decisions needed:** Q7 (Persian quality benchmarks), Q12 (brand kit draft).

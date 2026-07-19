@@ -82,6 +82,12 @@ importers:
 
   packages/audio-core: {}
 
+  packages/captions-core:
+    dependencies:
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
+
   packages/commands:
     dependencies:
       '@joy-media/project-schema':

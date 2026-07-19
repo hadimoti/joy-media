@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/captions-core" },
     { "path": "packages/export-core" },
     { "path": "packages/playback-engine" },
     { "path": "packages/property-system" },
