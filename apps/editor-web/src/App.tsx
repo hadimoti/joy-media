@@ -1,12 +1,16 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
-import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
+import { PlaybackScheduler } from '@joy-media/playback-engine';
 import { toggleSelection } from '@joy-media/timeline-engine';
+import type { CommandTransaction } from '@joy-media/commands';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { TRANSFORM_INSPECTOR } from './inspector.js';
 import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js';
-import { applyVisualObjectProjectTransaction } from '@joy-media/property-system';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { EditorSession } from './editor-session.js';
+import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -21,38 +25,108 @@ const labels: Readonly<Record<string, string>> = {
   diagnostics: 'Diagnostics',
 };
 
+interface EditorRuntimeState {
+  readonly selectedIds: readonly string[];
+  readonly playheadUs: number;
+  readonly playing: boolean;
+}
+
 interface EditorPanelContextValue {
-  readonly state: typeof EMPTY_EDITOR_STATE;
-  readonly project: JoyProjectV1;
-  readonly advance: () => void;
+  readonly state: EditorRuntimeState;
+  readonly timelineProject: SpikeProject;
+  readonly visualProject: JoyProjectV1;
+  readonly playback: PlaybackScheduler['metrics'];
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly togglePlayback: () => void;
+  readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
+  readonly dispatchTimeline: (transaction: CommandTransaction) => void;
   readonly updateVisualProperty: (
     objectId: string,
     key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
     value: number,
   ) => void;
+  readonly undo: () => void;
+  readonly redo: () => void;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
 export function App() {
-  const [state, setState] = useState(EMPTY_EDITOR_STATE);
+  const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const project = useRef(INITIAL_EDITOR_PROJECT);
-  const [, setProjectRevision] = useState(0);
+  const [, setRevision] = useState(0);
+  const sessionRef = useRef<EditorSession | null>(null);
+  const scheduler = useRef(new PlaybackScheduler());
+  if (sessionRef.current === null)
+    sessionRef.current = new EditorSession(
+      window.localStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+  const session = sessionRef.current;
+  const seek = useCallback((timeUs: number) => {
+    scheduler.current.seek(timeUs);
+    setState((current) => ({ ...current, playheadUs: timeUs }));
+  }, []);
+  const advancePlayback = useCallback(() => {
+    setState((current) => {
+      const durationUs =
+        session.timelineProject.compositions.root?.durationUs ?? current.playheadUs;
+      const nextPlayhead = Math.min(durationUs, current.playheadUs + 250_000);
+      scheduler.current.seek(nextPlayhead);
+      const token = scheduler.current.requestToken();
+      scheduler.current.acceptFrame(token, true);
+      return { ...current, playheadUs: nextPlayhead, playing: nextPlayhead < durationUs };
+    });
+    setRevision((revision) => revision + 1);
+  }, [session]);
+  useEffect(() => {
+    if (!state.playing) return;
+    const timer = window.setInterval(advancePlayback, 250);
+    return () => window.clearInterval(timer);
+  }, [advancePlayback, state.playing]);
+  const togglePlayback = useCallback(() => {
+    setState((current) => ({ ...current, playing: !current.playing }));
+  }, []);
+  const dispatchTimeline = useCallback(
+    (transaction: CommandTransaction) => {
+      session.dispatchTimeline(transaction);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
   const updateVisualProperty = useCallback(
     (
       objectId: string,
       key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
       value: number,
     ) => {
-      project.current = applyVisualObjectProjectTransaction(project.current, {
+      const transaction: VisualObjectTransaction = {
         label: `Set ${key}`,
         commands: [{ type: 'object.setTransformProperty', payload: { objectId, key, value } }],
-      });
-      setProjectRevision((revision) => revision + 1);
+      };
+      session.dispatchVisualObjects(transaction);
+      setRevision((revision) => revision + 1);
     },
-    [],
+    [session],
+  );
+  const undo = useCallback(() => {
+    session.undo();
+    setRevision((revision) => revision + 1);
+  }, [session]);
+  const redo = useCallback(() => {
+    session.redo();
+    setRevision((revision) => revision + 1);
+  }, [session]);
+  const executeAction = useCallback(
+    (id: string) => {
+      if (id === 'history.undo') undo();
+      if (id === 'history.redo') redo();
+      setPaletteOpen(false);
+    },
+    [redo, undo],
   );
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const saved = window.localStorage.getItem('joy-media.dockview.v1');
@@ -74,7 +148,13 @@ export function App() {
     <main>
       <header>
         <strong>JOY Media</strong>
-        <span>Saved locally</span>
+        <span>Saved locally · {scheduler.current.metrics.quality} preview</span>
+        <button disabled={!session.canUndo} onClick={undo}>
+          Undo
+        </button>
+        <button disabled={!session.canRedo} onClick={redo}>
+          Redo
+        </button>
         <button onClick={() => setPaletteOpen(true)}>Commands ⌘K</button>
       </header>
       {paletteOpen && (
@@ -86,7 +166,7 @@ export function App() {
             placeholder="Search commands"
           />
           {searchActions(query).map((action) => (
-            <button key={action.id} onClick={() => setPaletteOpen(false)}>
+            <button key={action.id} onClick={() => executeAction(action.id)}>
               {action.title}
               <kbd>{action.shortcut}</kbd>
             </button>
@@ -96,15 +176,22 @@ export function App() {
       <EditorPanelContext.Provider
         value={{
           state,
-          project: project.current,
-          advance: () =>
-            setState((current) => ({ ...current, playheadUs: current.playheadUs + 1_000_000 })),
+          timelineProject: session.timelineProject,
+          visualProject: session.visualProject,
+          playback: scheduler.current.metrics,
+          canUndo: session.canUndo,
+          canRedo: session.canRedo,
+          togglePlayback,
+          seek,
           toggleSelection: (id) =>
             setState((current) => ({
               ...current,
-              ...toggleSelection({ clipIds: current.selectedIds }, id),
+              selectedIds: toggleSelection({ clipIds: current.selectedIds }, id).clipIds,
             })),
+          dispatchTimeline,
           updateVisualProperty,
+          undo,
+          redo,
         }}
       >
         <DockviewReact
@@ -120,10 +207,10 @@ export function App() {
 function Panel({ api }: IDockviewPanelProps) {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, advance, project, updateVisualProperty } = context;
+  const { state, visualProject, updateVisualProperty } = context;
   if (api.id === 'inspector') {
     const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
-    const object = objectId === undefined ? undefined : project.visualObjects[objectId];
+    const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
     return (
       <article>
         <p>{object === undefined ? 'Select a visual clip to edit.' : `Editing ${object.id}`}</p>
@@ -154,20 +241,43 @@ function Panel({ api }: IDockviewPanelProps) {
   if (api.id === 'timeline')
     return (
       <TimelinePanel
+        project={context.timelineProject}
         playheadUs={state.playheadUs}
+        playing={state.playing}
         selectedIds={state.selectedIds}
-        onAdvance={advance}
+        onTogglePlayback={context.togglePlayback}
+        onSeek={context.seek}
         onToggleSelection={context.toggleSelection}
+        onDispatch={context.dispatchTimeline}
       />
+    );
+  if (api.id === 'history')
+    return (
+      <article>
+        <p>Durable local command history</p>
+        <button disabled={!context.canUndo} onClick={context.undo}>
+          Undo
+        </button>
+        <button disabled={!context.canRedo} onClick={context.redo}>
+          Redo
+        </button>
+      </article>
+    );
+  if (api.id === 'diagnostics')
+    return (
+      <article>
+        <p>{context.playback.quality} proxy preview</p>
+        <p>
+          {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
+        </p>
+      </article>
     );
   return (
     <article>
       <p>
-        {api.id === 'history'
-          ? 'Durable command history appears here.'
-          : api.id === 'diagnostics'
-            ? 'No diagnostics.'
-            : `${labels[api.id] ?? api.id} panel`}
+        {api.id === 'media'
+          ? 'Reference media proxies are ready.'
+          : `${labels[api.id] ?? api.id} panel`}
       </p>
     </article>
   );

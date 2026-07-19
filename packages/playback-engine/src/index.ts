@@ -1,4 +1,27 @@
-import { AudioPreviewClock } from '@joy-media/audio-core';
+/** Browser-safe audio timeline clock; Worker-only hashing/export stays in audio-core. */
+class AudioPreviewClock {
+  #timeUs = 0;
+
+  constructor(readonly sampleRate: number) {
+    if (!Number.isSafeInteger(sampleRate) || sampleRate < 1)
+      throw new RangeError('sampleRate must be a positive integer');
+  }
+
+  get timeUs(): number {
+    return this.#timeUs;
+  }
+
+  get sampleIndex(): number {
+    return Number((BigInt(this.#timeUs) * BigInt(this.sampleRate)) / 1_000_000n);
+  }
+
+  seek(timeUs: number): number {
+    if (!Number.isSafeInteger(timeUs) || timeUs < 0)
+      throw new RangeError('timeUs must be a non-negative safe integer');
+    this.#timeUs = timeUs;
+    return this.sampleIndex;
+  }
+}
 export type { FrameDecoder, MediaSource } from './decoder.js';
 export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
 export type { HtmlVideoElementLike } from './html-decoder.js';

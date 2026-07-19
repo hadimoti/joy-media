@@ -45,5 +45,7 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
 };
 
 export const TIMELINE_OBJECT_IDS: Readonly<Record<string, readonly string[]>> = {
-  'intro-clip': ['intro-title'],
+  intro: ['intro-title'],
+  product: ['intro-title'],
+  outro: ['intro-title'],
 };

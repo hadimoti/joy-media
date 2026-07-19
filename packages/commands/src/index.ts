@@ -23,5 +23,10 @@ export type {
 } from './commands.js';
 export { applyCommand, CommandError, COMMAND_REGISTRY } from './commands.js';
 
-export type { CommandTransaction, TransactionRecord, TransactionResult } from './history.js';
+export type {
+  CommandTransaction,
+  HistoryMutation,
+  TransactionRecord,
+  TransactionResult,
+} from './history.js';
 export { applyTransaction, ProjectHistory } from './history.js';

@@ -15,6 +15,7 @@ import {
 } from './persistence.js';
 import type { PersistenceAdapter } from './persistence.js';
 import { JsonFileProjectStore } from './desktop-store.js';
+import { BrowserProjectStore } from './browser-store.js';
 
 const adapter: PersistenceAdapter<SpikeProject, CommandTransaction> = {
   projectId: (project) => project.id,
@@ -81,6 +82,26 @@ describe('local project persistence', () => {
     expect(existsSync(filePath)).toBe(true);
     const reopened = new LocalProjectPersistence(
       new JsonFileProjectStore<SpikeProject, CommandTransaction>(filePath),
+      adapter,
+    );
+    expect(reopened.recover(initial.id)).toMatchObject({ project: expected, revision: 1 });
+  });
+
+  it('persists a browser-local snapshot plus log across a fresh store instance', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const initial = emptySpikeProject();
+    const first = new LocalProjectPersistence(
+      new BrowserProjectStore<SpikeProject, CommandTransaction>(storage, 'timeline'),
+      adapter,
+    );
+    first.initialize(initial);
+    const expected = first.saveTransaction(initial, insert('clip-1'), false);
+    const reopened = new LocalProjectPersistence(
+      new BrowserProjectStore<SpikeProject, CommandTransaction>(storage, 'timeline'),
       adapter,
     );
     expect(reopened.recover(initial.id)).toMatchObject({ project: expected, revision: 1 });

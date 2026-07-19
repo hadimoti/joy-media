@@ -1,4 +1,5 @@
-/** @joy-media/project-persistence — local snapshots, logs, recovery, and locks (WP-01.2). */
+/** Browser-safe persistence entry point. Desktop filesystem adapters are excluded. */
+
 export type {
   AutosaveState,
   PersistenceAdapter,

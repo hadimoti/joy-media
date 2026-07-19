@@ -31,6 +31,11 @@ export interface TransactionResult {
   readonly record: TransactionRecord;
 }
 
+export interface HistoryMutation {
+  readonly project: SpikeProject;
+  readonly record: TransactionRecord;
+}
+
 /** Applies all commands atomically. Throws (leaving the input untouched) if any command fails. */
 export function applyTransaction(
   project: SpikeProject,
@@ -107,6 +112,11 @@ export class ProjectHistory {
   }
 
   undo(): SpikeProject {
+    return this.undoWithRecord().project;
+  }
+
+  /** Exposes the applied inverses so a durable editor log can record an undo. */
+  undoWithRecord(): HistoryMutation {
     const record = this.#undo.pop();
     if (record === undefined) {
       throw new CommandError('COMMAND_HISTORY_EMPTY', 'nothing to undo');
@@ -117,10 +127,15 @@ export class ProjectHistory {
     }
     this.#present = current;
     this.#redo.push(record);
-    return this.#present;
+    return { project: this.#present, record };
   }
 
   redo(): SpikeProject {
+    return this.redoWithRecord().project;
+  }
+
+  /** Exposes the reapplied commands so a durable editor log can record a redo. */
+  redoWithRecord(): HistoryMutation {
     const record = this.#redo.pop();
     if (record === undefined) {
       throw new CommandError('COMMAND_HISTORY_EMPTY', 'nothing to redo');
@@ -131,6 +146,6 @@ export class ProjectHistory {
     }
     this.#present = current;
     this.#undo.push(record);
-    return this.#present;
+    return { project: this.#present, record };
   }
 }

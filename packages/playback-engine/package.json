@@ -14,8 +14,5 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@joy-media/audio-core": "workspace:*"
   }
 }
