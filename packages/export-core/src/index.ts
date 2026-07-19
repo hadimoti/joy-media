@@ -1,4 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 export interface RenderManifest {
   readonly projectId: string;
   readonly revision: number;
@@ -52,11 +55,21 @@ export function ffmpegArgs(manifest: RenderManifest, outputPath: string): readon
   ];
 }
 export function renderFixture(manifest: RenderManifest, outputPath: string): void {
-  const result = spawnSync('ffmpeg', ffmpegArgs(manifest, outputPath), {
-    shell: false,
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) throw new Error(`ffmpeg export failed: ${result.stderr}`);
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
+  );
+  try {
+    const result = spawnSync('ffmpeg', ffmpegArgs(manifest, temporaryPath), {
+      shell: false,
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) throw new Error(`ffmpeg export failed: ${result.stderr}`);
+    renameSync(temporaryPath, outputPath);
+  } catch (error) {
+    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 export interface ExportProbe {
   readonly videoCodec: string;
@@ -91,6 +104,8 @@ export function verifyExport(outputPath: string): ExportProbe {
     video.height === undefined
   )
     throw new Error('export is missing required H.264/AAC streams');
+  if (video.codec_name !== 'h264' || audio.codec_name !== 'aac')
+    throw new Error(`export codecs must be h264/aac, got ${video.codec_name}/${audio.codec_name}`);
   return {
     videoCodec: video.codec_name,
     audioCodec: audio.codec_name,

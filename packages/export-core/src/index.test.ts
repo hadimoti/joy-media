@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,8 +19,11 @@ describe('deterministic export contract', () => {
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
   });
   it('produces a verified H.264/AAC fixture through ffmpeg', () => {
-    const output = join(mkdtempSync(join(tmpdir(), 'joy-media-export-')), 'fixture.mp4');
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-export-'));
+    const output = join(directory, 'fixture.mp4');
     renderFixture(manifest, output);
+    expect(existsSync(output)).toBe(true);
+    expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
     expect(verifyExport(output)).toMatchObject({
       videoCodec: 'h264',
       audioCodec: 'aac',

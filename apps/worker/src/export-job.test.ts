@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -24,5 +24,28 @@ describe('leased export job', () => {
     );
     expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(calls).toEqual(['worker-1:job-1']);
+  });
+  it('does not complete a lease and removes output when rendering fails', () => {
+    const calls: string[] = [];
+    const output = join(mkdtempSync(join(tmpdir(), 'joy-media-leased-export-')), 'out.mp4');
+    expect(() =>
+      executeLeasedExport(
+        { complete: (_workerId, jobId) => calls.push(jobId) },
+        'worker-1',
+        'job-1',
+        {
+          projectId: 'p',
+          revision: 1,
+          width: 0,
+          height: 36,
+          frameRate: 30,
+          durationUs: 100_000,
+          preset: 'social-h264-aac',
+        },
+        output,
+      ),
+    ).toThrow(/manifest/);
+    expect(calls).toEqual([]);
+    expect(existsSync(output)).toBe(false);
   });
 });
