@@ -138,3 +138,29 @@ export function rippleDelete(
     });
   return { label: 'Ripple delete', commands };
 }
+
+export interface TimelineTrackView {
+  readonly id: string;
+  readonly heightPx: number;
+  readonly locked: boolean;
+  readonly muted: boolean;
+  readonly solo: boolean;
+}
+export function virtualTracks(
+  tracks: readonly TimelineTrackView[],
+  scrollTopPx: number,
+  viewportHeightPx: number,
+): readonly TimelineTrackView[] {
+  let offset = 0;
+  return tracks.filter((track) => {
+    const top = offset;
+    offset += track.heightPx;
+    return top + track.heightPx >= scrollTopPx && top <= scrollTopPx + viewportHeightPx;
+  });
+}
+export function toggleTrackFlag(
+  track: TimelineTrackView,
+  flag: 'locked' | 'muted' | 'solo',
+): TimelineTrackView {
+  return { ...track, [flag]: !track[flag] };
+}

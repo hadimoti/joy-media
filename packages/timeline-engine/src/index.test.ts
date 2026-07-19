@@ -9,6 +9,8 @@ import {
   timeToPixel,
   toggleSelection,
   trimCommand,
+  toggleTrackFlag,
+  virtualTracks,
   visibleRange,
 } from './index.js';
 describe('timeline coordinates', () => {
@@ -50,5 +52,14 @@ describe('timeline coordinates', () => {
         { type: 'timeline.moveClip', payload: { clipId: 'b', newStartUs: 10 } },
       ],
     });
+  });
+  it('virtualizes visible track rows and keeps track controls ephemeral', () => {
+    const tracks = [
+      { id: 'a', heightPx: 20, locked: false, muted: false, solo: false },
+      { id: 'b', heightPx: 20, locked: false, muted: false, solo: false },
+      { id: 'c', heightPx: 20, locked: false, muted: false, solo: false },
+    ];
+    expect(virtualTracks(tracks, 20, 20).map((track) => track.id)).toEqual(['a', 'b', 'c']);
+    expect(toggleTrackFlag(tracks[0]!, 'muted').muted).toBe(true);
   });
 });
