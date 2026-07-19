@@ -114,6 +114,12 @@ importers:
 
   packages/media-core: {}
 
+  packages/playback-engine:
+    dependencies:
+      '@joy-media/audio-core':
+        specifier: workspace:*
+        version: link:../audio-core
+
   packages/project-persistence:
     dependencies:
       '@joy-media/commands':
