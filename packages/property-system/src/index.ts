@@ -43,3 +43,22 @@ export function sharedValue<T>(values: readonly T[]): T | undefined {
     ? values[0]
     : undefined;
 }
+
+export function setVisualProperty(
+  objects: readonly VisualObject[],
+  ids: readonly string[],
+  key: Exclude<keyof TransformProperties, 'crop'>,
+  value: number,
+): readonly VisualObject[] {
+  if (!Number.isFinite(value)) throw new RangeError(`property ${key} must be finite`);
+  if (key === 'opacity' && (value < 0 || value > 1))
+    throw new RangeError('opacity must be in [0, 1]');
+  if ((key === 'scaleX' || key === 'scaleY') && value <= 0)
+    throw new RangeError('scale must be positive');
+  const selected = new Set(ids);
+  return objects.map((object) =>
+    selected.has(object.id)
+      ? { ...object, transform: { ...object.transform, [key]: value } }
+      : object,
+  );
+}
