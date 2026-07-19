@@ -18,6 +18,8 @@ export interface JoyProjectV1 {
   readonly markers: readonly MarkerV1[];
   /** Visual objects are first-class project data, addressed globally by id. */
   readonly visualObjects: Readonly<Record<string, VisualObjectV1>>;
+  /** Structured language data (§20.5); caption clips reference documents by id. */
+  readonly captionDocuments: Readonly<Record<string, CaptionDocumentV1>>;
   /** Namespaced JSON only; plugin runtime objects never enter the project. */
   readonly pluginData: Readonly<Record<string, JsonValue>>;
 }
@@ -86,7 +88,64 @@ export interface CompositionClipV1 extends ClipV1Base {
   readonly childOffsetUs: TimeUs;
 }
 
-export type ClipV1 = VideoClipV1 | CompositionClipV1;
+/**
+ * Caption clip: places a caption document on a caption track. Document times
+ * are clip-relative — moving the clip moves every cue with it.
+ */
+export interface CaptionClipV1 extends ClipV1Base {
+  readonly kind: 'caption';
+  readonly captionDocumentId: string;
+}
+
+export type ClipV1 = VideoClipV1 | CompositionClipV1 | CaptionClipV1;
+
+/**
+ * Caption model (§20.5): captions are structured language data before they are
+ * graphics. Words are the immutable source tokens, addressed by id at document
+ * level; segments group word ids and may carry a display-text override without
+ * ever mutating the tokens themselves (§20.5 "AI edits must preserve source
+ * text and timing history").
+ */
+export interface CaptionWordV1 {
+  readonly id: string;
+  readonly text: string;
+  /** Clip-relative time, end-exclusive like every other durable range. */
+  readonly startUs: TimeUs;
+  readonly endUs: TimeUs;
+  /** Recognition confidence in [0, 1] when a transcription provider supplied it. */
+  readonly confidence?: number;
+  readonly speakerId?: string;
+}
+
+export interface CaptionSegmentV1 {
+  readonly id: string;
+  readonly startUs: TimeUs;
+  readonly endUs: TimeUs;
+  /** Ordered references into the document's word table. */
+  readonly wordIds: readonly string[];
+  /** Edited display text; source tokens in `wordIds` stay untouched. */
+  readonly textOverride?: string;
+  readonly speakerId?: string;
+}
+
+export interface CaptionSpeakerV1 {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface CaptionDocumentV1 {
+  readonly id: string;
+  /** BCP-47 language tag, e.g. "fa-IR". */
+  readonly language: string;
+  /** 'auto' resolves from the first strong directional character at layout time. */
+  readonly direction: 'ltr' | 'rtl' | 'auto';
+  readonly speakers: readonly CaptionSpeakerV1[];
+  readonly words: Readonly<Record<string, CaptionWordV1>>;
+  readonly segments: readonly CaptionSegmentV1[];
+  /** Style/animation registries land with WP-03.3; references stay stable now. */
+  readonly styleRef?: string;
+  readonly animationRef?: string;
+}
 
 export interface AssetRecordV1 {
   readonly id: string;
@@ -147,9 +206,17 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
       ),
     );
   }
+  const captionDocumentIds = new Set<string>(
+    isRecord(value.captionDocuments) ? Object.keys(value.captionDocuments) : [],
+  );
   if (isRecord(value.compositions)) {
     for (const [compositionId, composition] of Object.entries(value.compositions)) {
-      validateComposition(composition, `compositions.${compositionId}`, diagnostics);
+      validateComposition(
+        composition,
+        `compositions.${compositionId}`,
+        diagnostics,
+        captionDocumentIds,
+      );
     }
   }
   if (!isRecord(value.assets))
@@ -174,11 +241,180 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     for (const [objectId, object] of Object.entries(value.visualObjects))
       validateVisualObject(object, `visualObjects.${objectId}`, diagnostics);
   }
+  if (!isRecord(value.captionDocuments))
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_CAPTION_DOCUMENTS',
+        'captionDocuments must be an object',
+        'captionDocuments',
+      ),
+    );
+  else {
+    for (const [documentId, document] of Object.entries(value.captionDocuments))
+      validateCaptionDocument(document, `captionDocuments.${documentId}`, diagnostics);
+  }
   if (!isRecord(value.pluginData))
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
   return diagnostics;
+}
+
+function validateCaptionDocument(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (!isRecord(value) || !isNonEmptyString(value.id)) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_CAPTION_DOCUMENT', 'caption document id is required', path),
+    );
+    return;
+  }
+  if (!isNonEmptyString(value.language))
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_CAPTION_DOCUMENT', 'caption language is required', path),
+    );
+  if (value.direction !== 'ltr' && value.direction !== 'rtl' && value.direction !== 'auto')
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_CAPTION_DOCUMENT',
+        'caption direction must be ltr, rtl, or auto',
+        path,
+      ),
+    );
+  const speakerIds = new Set<string>();
+  if (!Array.isArray(value.speakers))
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_CAPTION_SPEAKER', 'speakers must be an array', path),
+    );
+  else {
+    for (const speaker of value.speakers) {
+      if (
+        !isRecord(speaker) ||
+        !isNonEmptyString(speaker.id) ||
+        !isNonEmptyString(speaker.name) ||
+        speakerIds.has(speaker.id)
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_SPEAKER',
+            'speakers need unique ids and names',
+            `${path}.speakers`,
+          ),
+        );
+        continue;
+      }
+      speakerIds.add(speaker.id);
+    }
+  }
+  const wordIds = new Set<string>();
+  if (!isRecord(value.words))
+    diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_CAPTION_WORD', 'words must be an object', path));
+  else {
+    for (const [wordKey, word] of Object.entries(value.words)) {
+      const wordPath = `${path}.words.${wordKey}`;
+      if (!isRecord(word) || word.id !== wordKey || typeof word.text !== 'string') {
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_WORD',
+            'word entries must match their key and carry text',
+            wordPath,
+          ),
+        );
+        continue;
+      }
+      wordIds.add(wordKey);
+      validateCaptionRange(word, wordPath, 'PROJECT_SCHEMA_V1_CAPTION_WORD', diagnostics);
+      if (
+        word.confidence !== undefined &&
+        (typeof word.confidence !== 'number' || word.confidence < 0 || word.confidence > 1)
+      )
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_WORD',
+            'word confidence must be in [0, 1]',
+            wordPath,
+          ),
+        );
+      if (word.speakerId !== undefined && !speakerIds.has(word.speakerId as string))
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_WORD',
+            `word references unknown speaker "${String(word.speakerId)}"`,
+            wordPath,
+          ),
+        );
+    }
+  }
+  if (!Array.isArray(value.segments)) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_CAPTION_SEGMENT', 'segments must be an array', path),
+    );
+    return;
+  }
+  const segmentIds = new Set<string>();
+  for (const segment of value.segments) {
+    if (!isRecord(segment) || !isNonEmptyString(segment.id) || segmentIds.has(segment.id)) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CAPTION_SEGMENT',
+          'segments need unique non-empty ids',
+          `${path}.segments`,
+        ),
+      );
+      continue;
+    }
+    segmentIds.add(segment.id);
+    const segmentPath = `${path}.segments.${segment.id}`;
+    validateCaptionRange(segment, segmentPath, 'PROJECT_SCHEMA_V1_CAPTION_SEGMENT', diagnostics);
+    if (!Array.isArray(segment.wordIds))
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_CAPTION_SEGMENT', 'wordIds must be an array', segmentPath),
+      );
+    else {
+      for (const wordId of segment.wordIds) {
+        if (typeof wordId !== 'string' || !wordIds.has(wordId))
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_CAPTION_SEGMENT',
+              `segment references unknown word "${String(wordId)}"`,
+              segmentPath,
+            ),
+          );
+      }
+    }
+    if (segment.textOverride !== undefined && typeof segment.textOverride !== 'string')
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CAPTION_SEGMENT',
+          'textOverride must be a string',
+          segmentPath,
+        ),
+      );
+    if (segment.speakerId !== undefined && !speakerIds.has(segment.speakerId as string))
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CAPTION_SEGMENT',
+          `segment references unknown speaker "${String(segment.speakerId)}"`,
+          segmentPath,
+        ),
+      );
+  }
+}
+
+function validateCaptionRange(
+  value: Record<string, unknown>,
+  path: string,
+  code: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (
+    !isNonNegativeSafeInteger(value.startUs) ||
+    !isNonNegativeSafeInteger(value.endUs) ||
+    (value.endUs as number) <= (value.startUs as number)
+  )
+    diagnostics.push(diagnostic(code, 'startUs/endUs must satisfy 0 <= startUs < endUs', path));
 }
 
 function validateVisualObject(
@@ -229,7 +465,12 @@ function validateVisualObject(
     );
 }
 
-function validateComposition(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {
+function validateComposition(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+  captionDocumentIds: ReadonlySet<string>,
+): void {
   if (!isRecord(value)) {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_COMPOSITION', 'composition must be an object', path),
@@ -265,10 +506,16 @@ function validateComposition(value: unknown, path: string, diagnostics: ProjectD
     );
     return;
   }
-  for (const track of value.tracks) validateTrack(track, `${path}.tracks`, diagnostics);
+  for (const track of value.tracks)
+    validateTrack(track, `${path}.tracks`, diagnostics, captionDocumentIds);
 }
 
-function validateTrack(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {
+function validateTrack(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+  captionDocumentIds: ReadonlySet<string>,
+): void {
   if (!isRecord(value) || !isNonEmptyString(value.id) || !Array.isArray(value.clips)) {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_TRACK', 'track id and clips are required', path),
@@ -301,6 +548,28 @@ function validateTrack(value: unknown, path: string, diagnostics: ProjectDiagnos
           `${path}.${value.id}.clips.${clip.id}`,
         ),
       );
+    }
+    if (clip.kind === 'caption') {
+      const clipPath = `${path}.${value.id}.clips.${clip.id}`;
+      if (value.kind !== 'caption')
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_CLIP',
+            'caption clips are only valid on caption tracks',
+            clipPath,
+          ),
+        );
+      if (
+        !isNonEmptyString(clip.captionDocumentId) ||
+        !captionDocumentIds.has(clip.captionDocumentId)
+      )
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_CAPTION_CLIP',
+            `caption clip references unknown document "${String(clip.captionDocumentId)}"`,
+            clipPath,
+          ),
+        );
     }
   }
 }

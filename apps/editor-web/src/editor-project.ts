@@ -71,6 +71,7 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
       },
     },
   },
+  captionDocuments: {},
   pluginData: {},
 };
 

@@ -7,7 +7,7 @@
 
 ## Work packages
 
-- [ ] **WP-03.1 — Caption core.** `captions-core` document/word/segment/speaker schemas; caption track timeline integration; caption layout → Render IR nodes. _(§39-51,52,55)_
+- [x] **WP-03.1 — Caption core.** `captions-core` document/word/segment/speaker schemas; caption track timeline integration; caption layout → Render IR nodes. _(§39-51,52,55)_
 - [ ] **WP-03.2 — Editing surfaces.** Transcript/caption panel; manual timing/text editing that preserves source tokens; search; confidence warnings; transcript↔timeline selection primitives. _(§39-53, §20.5)_
 - [ ] **WP-03.3 — Interchange + styling.** SRT/WebVTT import/export; schema-driven caption style registry; safe-area/responsive line layout; ≥3 original JOY caption templates; active-word karaoke animation. _(§39-54,56,57)_
 - [ ] **WP-03.4 — Persian/RTL fixtures.** Mixed-script, RTL, emoji, long-text stress fixtures rendered in preview AND headless export; right-aligned templates; §33.4 checklist as tests. _(§39-58)_

@@ -72,5 +72,110 @@ describe('v1 project schema and migration harness', () => {
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('PROJECT_SCHEMA_V1_ROOT');
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('PROJECT_SCHEMA_V1_ID');
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'PROJECT_SCHEMA_V1_CAPTION_DOCUMENTS',
+    );
+  });
+
+  it('accepts a valid caption document and caption clip on a caption track', () => {
+    const project = {
+      ...migrateV0ToV1(v0Fixture()).project,
+      captionDocuments: {
+        'doc-fa': {
+          id: 'doc-fa',
+          language: 'fa-IR',
+          direction: 'rtl',
+          speakers: [{ id: 's1', name: 'راوی' }],
+          words: {
+            w1: {
+              id: 'w1',
+              text: 'سلام',
+              startUs: 0,
+              endUs: 500_000,
+              confidence: 0.9,
+              speakerId: 's1',
+            },
+          },
+          segments: [{ id: 'seg-1', startUs: 0, endUs: 500_000, wordIds: ['w1'], speakerId: 's1' }],
+        },
+      },
+    };
+    const withCaptionTrack = {
+      ...project,
+      compositions: {
+        root: {
+          ...project.compositions.root!,
+          tracks: [
+            ...project.compositions.root!.tracks,
+            {
+              id: 'captions',
+              kind: 'caption' as const,
+              name: 'Captions',
+              order: 1,
+              enabled: true,
+              locked: false,
+              clips: [
+                {
+                  kind: 'caption' as const,
+                  id: 'caption-clip',
+                  startUs: 0,
+                  durationUs: 500_000,
+                  captionDocumentId: 'doc-fa',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(validateJoyProjectV1(withCaptionTrack)).toEqual([]);
+  });
+
+  it('reports caption structure violations with coded diagnostics', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      captionDocuments: {
+        broken: {
+          id: 'broken',
+          language: 'en',
+          direction: 'sideways',
+          speakers: [],
+          words: {
+            w1: { id: 'w1', text: 'hi', startUs: 500_000, endUs: 500_000 },
+            w2: { id: 'other-id', text: 'oops', startUs: 0, endUs: 100_000 },
+          },
+          segments: [
+            { id: 'seg', startUs: 0, endUs: 100_000, wordIds: ['missing'], speakerId: 'ghost' },
+          ],
+        },
+      },
+      compositions: {
+        root: {
+          ...base.compositions.root!,
+          tracks: [
+            {
+              ...base.compositions.root!.tracks[0]!,
+              clips: [
+                ...base.compositions.root!.tracks[0]!.clips,
+                {
+                  kind: 'caption',
+                  id: 'misplaced',
+                  startUs: 0,
+                  durationUs: 100_000,
+                  captionDocumentId: 'nope',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const codes = diagnostics.map((diagnostic) => diagnostic.code);
+    expect(codes).toContain('PROJECT_SCHEMA_V1_CAPTION_DOCUMENT'); // bad direction
+    expect(codes).toContain('PROJECT_SCHEMA_V1_CAPTION_WORD'); // empty range + key mismatch
+    expect(codes).toContain('PROJECT_SCHEMA_V1_CAPTION_SEGMENT'); // unknown word + speaker
+    // Caption clip on a video track referencing a missing document.
+    expect(codes.filter((code) => code === 'PROJECT_SCHEMA_V1_CAPTION_CLIP')).toHaveLength(2);
   });
 });

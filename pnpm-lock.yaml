@@ -117,6 +117,9 @@ importers:
 
   packages/captions-core:
     dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../render-ir
