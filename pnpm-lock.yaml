@@ -151,6 +151,9 @@ importers:
 
   packages/timeline-engine:
     dependencies:
+      '@joy-media/commands':
+        specifier: workspace:*
+        version: link:../commands
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema

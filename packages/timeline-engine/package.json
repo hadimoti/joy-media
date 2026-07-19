@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@joy-media/commands": "workspace:*",
     "@joy-media/project-schema": "workspace:*"
   }
 }
