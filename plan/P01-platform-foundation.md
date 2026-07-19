@@ -12,7 +12,7 @@
 - [x] **WP-01.3 — Evaluator + Render IR v1 + minimal Pixi adapter** _(done 2026-07-19)_. Pure active-interval/static-property helpers; v1 sprite/video-frame/text/group IR; separate editor overlays; group-flattening preview host; pinned deterministic preview/headless golden frames. _(§39-12…16, §14–§15)_
 - [x] **WP-01.4 — Editor shell** _(done 2026-07-19)_. React/Vite/Dockview shell with error containment, recoverable local layout, command palette/shortcuts, ephemeral selection/playhead state, transform/opacity schema descriptors, and History/Diagnostics panels; durable mutations stay behind the command-history controller. _(§39-17…21,26, §17–§18)_
 - [x] **WP-01.5 — Control plane skeleton** _(done 2026-07-19)_. Local API runner plus authenticated project revisions, Worker pairing/revocation, expiring job leases, PostgreSQL job/attempt/event DDL, and cursor-based event protocol. VPS deployment remains reserved for X01. _(§39-29…32, §27)_
-- [ ] **WP-01.6 — Worker skeleton.** Tray/service skeleton, device identity, heartbeat/capability handshake, job runner with cancellation/bounded logs/temp dirs, ffprobe/FFmpeg detection, structured logs. _(§39-30…34, §26)_
+- [x] **WP-01.6 — Worker skeleton** _(done 2026-07-19)_. Local runtime has device identity, capability hello, cancellable bounded-log jobs with temp workspaces, and argument-safe FFmpeg/ffprobe detection. Service/tray integration follows desktop packaging. _(§39-30…34, §26)_
 
 ## Exit criteria (§36 Phase 1)
 

@@ -1,6 +1,6 @@
 # worker
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P01.6 Worker runtime skeleton implemented.** Device identity, tool detection, capability hello, cancellable bounded-log jobs, and per-job temp directories are locally testable.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §26, §8.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Local/GPU worker daemon: probing, proxies, waveforms, FFmpeg, deterministic export, provider execution, resource governor.
