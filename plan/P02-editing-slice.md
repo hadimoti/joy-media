@@ -1,6 +1,6 @@
 # P02 — Usable Editing Vertical Slice
 
-**Status:** not-started · **Gate to enter:** P01 exit criteria · **Master plan:** §36 Phase 2, §39 items 22–50, §13, §15, §16, §19
+**Status:** in-progress · **Gate to enter:** P01 reviewed; owner authorized start with live API/Worker integration tracked · **Master plan:** §36 Phase 2, §39 items 22–50, §13, §15, §16, §19
 **Goal:** a small but coherent manual editor: import local media → multi-track edit → deterministic local 1080p export. This part makes JOY Media _usable_.
 
 **Decisions needed:** Q4 (VPS media retention), Q5 (browsers), Q6 (codec matrix).

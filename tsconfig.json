@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/timeline-engine" },
     { "path": "apps/worker" },
     { "path": "apps/api" },
     { "path": "apps/editor-web" },

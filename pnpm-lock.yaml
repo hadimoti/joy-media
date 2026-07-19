@@ -149,6 +149,12 @@ importers:
         specifier: workspace:*
         version: link:../project-schema
 
+  packages/timeline-engine:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+
   tooling/golden-render:
     dependencies:
       '@joy-media/render-ir':

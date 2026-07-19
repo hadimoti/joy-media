@@ -1,6 +1,6 @@
 # timeline-engine
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: WP-02.1 started.** Pure timeline coordinate conversion and pixel-threshold snapping are implemented; rendering stays in the editor app.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §19 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Editing semantics: intervals, trim/slip/slide/roll/ripple, snapping, linked clips, virtualization models. Owns semantics, not drawing.
