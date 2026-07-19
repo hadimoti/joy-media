@@ -258,4 +258,67 @@ describe('v1 project schema and migration harness', () => {
     expect(messages).toContain('keyframe times must strictly increase');
     expect(messages).toContain('curve must hold at least one keyframe');
   });
+
+  it('accepts a null controller with a valid child parent link and motion blur', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const project = {
+      ...base,
+      visualObjects: {
+        controller: { id: 'controller', kind: 'null', transform },
+        child: {
+          id: 'child',
+          kind: 'text',
+          transform,
+          parentId: 'controller',
+          motionBlur: { enabled: true, shutterAngleDeg: 180, samples: 8 },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('reports parenting and motion-blur violations with coded diagnostics', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      visualObjects: {
+        // parent that does not exist
+        orphan: { id: 'orphan', kind: 'text', transform, parentId: 'ghost' },
+        // mutual cycle
+        a: { id: 'a', kind: 'null', transform, parentId: 'b' },
+        b: { id: 'b', kind: 'null', transform, parentId: 'a' },
+        // out-of-range shutter angle
+        blurry: {
+          id: 'blurry',
+          kind: 'shape',
+          transform,
+          motionBlur: { enabled: true, shutterAngleDeg: 720, samples: 0 },
+        },
+      },
+    });
+    const messages = diagnostics.map((diagnostic) => diagnostic.message);
+    const codes = diagnostics.map((diagnostic) => diagnostic.code);
+    expect(messages).toContain('parent "ghost" does not exist');
+    expect(codes).toContain('PROJECT_SCHEMA_V1_OBJECT_PARENT');
+    expect(messages).toContain('parenting graph contains a cycle');
+    expect(messages).toContain('motionBlur config is invalid');
+  });
 });

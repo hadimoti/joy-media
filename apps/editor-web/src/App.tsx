@@ -13,6 +13,7 @@ import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
+import { MotionPanel } from './MotionPanel.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -24,6 +25,7 @@ const labels: Readonly<Record<string, string>> = {
   timeline: 'Timeline',
   captions: 'Captions',
   inspector: 'Inspector',
+  motion: 'Motion',
   history: 'History',
   diagnostics: 'Diagnostics',
 };
@@ -252,6 +254,20 @@ function Panel({ api }: IDockviewPanelProps) {
         object={object}
         playheadUs={state.playheadUs}
         onSetStatic={updateVisualProperty}
+        onDispatch={context.dispatchProject}
+      />
+    );
+  }
+  if (api.id === 'motion') {
+    const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+    const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+    return (
+      <MotionPanel
+        object={object}
+        allObjects={visualProject.visualObjects}
+        compositionDurationUs={context.timelineProject.compositions.root?.durationUs ?? 30_000_000}
+        playheadUs={state.playheadUs}
+        onSeek={context.seek}
         onDispatch={context.dispatchProject}
       />
     );

@@ -68,6 +68,8 @@ describe('applyMotionProjectCommand', () => {
       type: 'object.replaceAnimation',
       payload: { objectId: 'obj-1', property: 'x', curve: replacement },
     });
+    expect(result.inverse.type).toBe('object.replaceAnimation');
+    if (result.inverse.type !== 'object.replaceAnimation') throw new Error('unexpected inverse');
     expect(result.inverse.payload.curve).toEqual(curve);
   });
 
@@ -106,5 +108,55 @@ describe('applyMotionProjectCommand', () => {
         payload: { objectId: 'obj-1', property: 'x', curve: bad },
       }),
     ).toThrow(MotionCommandError);
+  });
+});
+
+describe('applyMotionProjectCommand — object.setParent', () => {
+  const twoObjects: JoyProjectV1 = {
+    ...project,
+    visualObjects: {
+      'obj-1': object,
+      controller: { ...object, id: 'controller', kind: 'null' },
+    },
+  };
+
+  it('sets a parent and inverts by clearing it', () => {
+    const result = applyMotionProjectCommand(twoObjects, {
+      type: 'object.setParent',
+      payload: { objectId: 'obj-1', parentId: 'controller' },
+    });
+    expect(result.project.visualObjects['obj-1']!.parentId).toBe('controller');
+    expect(result.inverse).toEqual({
+      type: 'object.setParent',
+      payload: { objectId: 'obj-1' },
+    });
+    const undone = applyMotionProjectCommand(result.project, result.inverse);
+    expect(undone.project.visualObjects['obj-1']!.parentId).toBeUndefined();
+  });
+
+  it('rejects self-parenting, unknown parents, and cycles', () => {
+    expect(() =>
+      applyMotionProjectCommand(twoObjects, {
+        type: 'object.setParent',
+        payload: { objectId: 'obj-1', parentId: 'obj-1' },
+      }),
+    ).toThrow(/own parent/);
+    expect(() =>
+      applyMotionProjectCommand(twoObjects, {
+        type: 'object.setParent',
+        payload: { objectId: 'obj-1', parentId: 'ghost' },
+      }),
+    ).toThrow(/unknown parent/);
+    // controller -> obj-1, then obj-1 -> controller would cycle.
+    const parented = applyMotionProjectCommand(twoObjects, {
+      type: 'object.setParent',
+      payload: { objectId: 'controller', parentId: 'obj-1' },
+    }).project;
+    expect(() =>
+      applyMotionProjectCommand(parented, {
+        type: 'object.setParent',
+        payload: { objectId: 'obj-1', parentId: 'controller' },
+      }),
+    ).toThrow(/cycle/);
   });
 });

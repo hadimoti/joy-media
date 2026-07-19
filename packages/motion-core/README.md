@@ -1,6 +1,6 @@
 # motion-core
 
-> **Status: WP-04.1 built.** Universal keyframe motion engine.
+> **Status: WP-04.1 + WP-04.2 built.** Universal keyframe motion engine.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §20.3 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Keyframes, curves, easing, spatial paths, and value scaling on top of the
@@ -20,6 +20,10 @@ durable §20.3 animation schema (`AnimationCurveV1` / `KeyframeV1`) that lives i
 - The durable `object.replaceAnimation` command with a pre-state inverse
   (`commands.ts`), routed through `@joy-media/property-system` onto the shared
   v1 history for undo/redo and persistence.
+- Parenting / null-object world-transform composition with a cycle guard
+  (`parenting.ts`) plus the undoable `object.setParent` command.
+- Original JOY motion presets (`presets.ts`), text animation scopes
+  (`text.ts`), and basic motion-blur shutter sampling (`blur.ts`).
 
 **Must not:** Expressions (deferred, §20.3); wall-clock or randomness; any renderer
 or I/O. Dependency points inward (§9.1): motion-core → project-schema only.

@@ -59,6 +59,7 @@ export type {
   BezierHandlesV1,
   KeyframeV1,
   AnimationCurveV1,
+  MotionBlurV1,
   JsonValue,
 } from './v1.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';

@@ -4,6 +4,7 @@ export const PANEL_IDS = [
   'timeline',
   'captions',
   'inspector',
+  'motion',
   'history',
   'diagnostics',
 ] as const;
@@ -16,7 +17,16 @@ export interface WorkspaceLayout {
 
 export const DEFAULT_WORKSPACE: WorkspaceLayout = {
   version: 1,
-  panels: ['media', 'monitor', 'timeline', 'captions', 'inspector', 'history', 'diagnostics'],
+  panels: [
+    'media',
+    'monitor',
+    'timeline',
+    'captions',
+    'inspector',
+    'motion',
+    'history',
+    'diagnostics',
+  ],
 };
 
 export const WORKSPACE_STORAGE_KEY = 'joy-media.editor-workspace.v1';

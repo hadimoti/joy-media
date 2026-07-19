@@ -182,3 +182,73 @@ label {
   background: #e9b949;
   border-color: #e9b949;
 }
+.motion-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.motion-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.motion-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: #8a93ad;
+}
+.motion-field select {
+  min-width: 8rem;
+}
+.motion-empty {
+  color: #8a93ad;
+  font-size: 0.85rem;
+}
+.motion-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.motion-lane {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.motion-lane-label {
+  width: 5rem;
+  text-align: right;
+  background: transparent;
+  border: none;
+  color: #8a93ad;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+}
+.motion-lane-label.active {
+  color: #e9b949;
+}
+.motion-lane-track {
+  background: #05070f;
+  border: 1px solid #303a56;
+  border-radius: 0.15rem;
+}
+.motion-graph {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+.motion-graph svg {
+  background: #05070f;
+  border: 1px solid #303a56;
+  border-radius: 0.2rem;
+}
+.motion-graph-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #8a93ad;
+}

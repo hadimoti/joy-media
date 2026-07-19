@@ -80,12 +80,30 @@ export interface AnimationCurveV1 {
   readonly keyframes: readonly KeyframeV1[];
 }
 
+/** Basic motion blur (§20.3): a shutter interval sampled at a quality level. */
+export interface MotionBlurV1 {
+  readonly enabled: boolean;
+  /** Shutter opening in degrees, [0, 360]; 180 is the film-standard half-frame. */
+  readonly shutterAngleDeg: number;
+  /** Sample count across the shutter interval; the quality knob, integer >= 1. */
+  readonly samples: number;
+}
+
+/**
+ * A visual object. `kind: 'null'` is a controller ("null object"): it renders
+ * nothing but contributes a transform that its children inherit (§20.3
+ * parenting). `parentId` links an object to its parent for transform
+ * inheritance; the graph must stay acyclic.
+ */
 export interface VisualObjectV1 {
   readonly id: string;
-  readonly kind: 'image' | 'text' | 'shape';
+  readonly kind: 'image' | 'text' | 'shape' | 'null';
   readonly transform: VisualObjectTransformV1;
   /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
   readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
+  /** Parent object id for transform inheritance; must reference an existing, non-cyclic object. */
+  readonly parentId?: string;
+  readonly motionBlur?: MotionBlurV1;
   readonly assetId?: string;
   readonly text?: string;
   readonly shape?: 'rectangle' | 'ellipse';
@@ -289,6 +307,7 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
   else {
     for (const [objectId, object] of Object.entries(value.visualObjects))
       validateVisualObject(object, `visualObjects.${objectId}`, diagnostics);
+    validateObjectParenting(value.visualObjects, diagnostics);
   }
   if (!isRecord(value.captionDocuments))
     diagnostics.push(
@@ -475,8 +494,31 @@ function validateVisualObject(
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object id is required', path));
     return;
   }
-  if (value.kind !== 'image' && value.kind !== 'text' && value.kind !== 'shape')
+  if (
+    value.kind !== 'image' &&
+    value.kind !== 'text' &&
+    value.kind !== 'shape' &&
+    value.kind !== 'null'
+  )
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object kind is invalid', path));
+  if (value.parentId !== undefined && !isNonEmptyString(value.parentId))
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'parentId must be a non-empty string', path),
+    );
+  if (value.motionBlur !== undefined) {
+    const blur = value.motionBlur;
+    if (
+      !isRecord(blur) ||
+      typeof blur.enabled !== 'boolean' ||
+      !Number.isFinite(blur.shutterAngleDeg) ||
+      (blur.shutterAngleDeg as number) < 0 ||
+      (blur.shutterAngleDeg as number) > 360 ||
+      !isPositiveInteger(blur.samples)
+    )
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'motionBlur config is invalid', path),
+      );
+  }
   if (!isRecord(value.transform)) {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object transform is required', path),
@@ -529,6 +571,55 @@ function validateVisualObject(
           );
         validateAnimationCurve(curve, `${path}.animations.${property}`, diagnostics);
       }
+    }
+  }
+}
+
+/**
+ * Project-level parenting integrity (§20.3): every `parentId` must reference an
+ * existing object, an object cannot parent itself, and the parent graph must be
+ * acyclic. Cross-object checks live here because a single object can't see them.
+ */
+function validateObjectParenting(
+  visualObjects: Record<string, unknown>,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  const parentOf = new Map<string, string>();
+  for (const [objectId, object] of Object.entries(visualObjects)) {
+    if (!isRecord(object) || object.parentId === undefined) continue;
+    const parentId = object.parentId;
+    if (typeof parentId !== 'string') continue; // shape already reported per-object
+    const path = `visualObjects.${objectId}`;
+    if (parentId === objectId) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_OBJECT_PARENT', 'an object cannot be its own parent', path),
+      );
+      continue;
+    }
+    if (visualObjects[parentId] === undefined) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_OBJECT_PARENT', `parent "${parentId}" does not exist`, path),
+      );
+      continue;
+    }
+    parentOf.set(objectId, parentId);
+  }
+  for (const start of parentOf.keys()) {
+    const seen = new Set<string>([start]);
+    let current = parentOf.get(start);
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_OBJECT_PARENT',
+            'parenting graph contains a cycle',
+            `visualObjects.${start}`,
+          ),
+        );
+        break;
+      }
+      seen.add(current);
+      current = parentOf.get(current);
     }
   }
 }

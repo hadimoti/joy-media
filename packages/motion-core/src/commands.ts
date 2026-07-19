@@ -25,7 +25,16 @@ export interface ReplaceAnimationCommand {
   };
 }
 
-export type MotionCommand = ReplaceAnimationCommand;
+export interface SetParentCommand {
+  readonly type: 'object.setParent';
+  readonly payload: {
+    readonly objectId: string;
+    /** The new parent id, or `undefined` to unparent. */
+    readonly parentId?: string;
+  };
+}
+
+export type MotionCommand = ReplaceAnimationCommand | SetParentCommand;
 
 export interface MotionApplyResult {
   readonly project: JoyProjectV1;
@@ -56,26 +65,36 @@ function replaceChannel(
   return cleaned;
 }
 
-/** Applies a motion command to the durable v1 project, capturing a pre-state inverse. */
-export function applyMotionProjectCommand(
-  project: JoyProjectV1,
-  command: MotionCommand,
-): MotionApplyResult {
-  const { objectId, property, curve } = command.payload;
-  const object = project.visualObjects[objectId];
-  if (object === undefined) throw new MotionCommandError(`unknown visual object ${objectId}`);
-  if (curve !== undefined) {
-    const diagnostics: ProjectDiagnostic[] = [];
-    validateAnimationCurve(curve, `${objectId}.animations.${property}`, diagnostics);
-    if (diagnostics.length > 0) throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+function withParent(object: VisualObjectV1, parentId: string | undefined): VisualObjectV1 {
+  const cleaned = { ...object };
+  if (parentId === undefined) delete cleaned.parentId;
+  else cleaned.parentId = parentId;
+  return cleaned;
+}
+
+/** True when making `parentId` the parent of `objectId` would close a cycle. */
+function wouldCycle(
+  objectId: string,
+  parentId: string,
+  visualObjects: Readonly<Record<string, VisualObjectV1>>,
+): boolean {
+  let current: string | undefined = parentId;
+  const seen = new Set<string>();
+  while (current !== undefined) {
+    if (current === objectId) return true;
+    if (seen.has(current)) return false; // pre-existing cycle, not ours to judge here
+    seen.add(current);
+    current = visualObjects[current]?.parentId;
   }
-  const previous = object.animations?.[property];
-  const nextObject = replaceChannel(object, property, curve);
-  const inverse: MotionCommand = {
-    type: 'object.replaceAnimation',
-    payload:
-      previous === undefined ? { objectId, property } : { objectId, property, curve: previous },
-  };
+  return false;
+}
+
+function commit(
+  project: JoyProjectV1,
+  objectId: string,
+  nextObject: VisualObjectV1,
+  inverse: MotionCommand,
+): MotionApplyResult {
   return {
     project: {
       ...project,
@@ -83,4 +102,45 @@ export function applyMotionProjectCommand(
     },
     inverse,
   };
+}
+
+/** Applies a motion command to the durable v1 project, capturing a pre-state inverse. */
+export function applyMotionProjectCommand(
+  project: JoyProjectV1,
+  command: MotionCommand,
+): MotionApplyResult {
+  const { objectId } = command.payload;
+  const object = project.visualObjects[objectId];
+  if (object === undefined) throw new MotionCommandError(`unknown visual object ${objectId}`);
+
+  if (command.type === 'object.setParent') {
+    const parentId = command.payload.parentId;
+    if (parentId !== undefined) {
+      if (parentId === objectId) throw new MotionCommandError('an object cannot be its own parent');
+      if (project.visualObjects[parentId] === undefined)
+        throw new MotionCommandError(`unknown parent object ${parentId}`);
+      if (wouldCycle(objectId, parentId, project.visualObjects))
+        throw new MotionCommandError('parenting would create a cycle');
+    }
+    const previous = object.parentId;
+    const inverse: MotionCommand = {
+      type: 'object.setParent',
+      payload: previous === undefined ? { objectId } : { objectId, parentId: previous },
+    };
+    return commit(project, objectId, withParent(object, parentId), inverse);
+  }
+
+  const { property, curve } = command.payload;
+  if (curve !== undefined) {
+    const diagnostics: ProjectDiagnostic[] = [];
+    validateAnimationCurve(curve, `${objectId}.animations.${property}`, diagnostics);
+    if (diagnostics.length > 0) throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+  }
+  const previous = object.animations?.[property];
+  const inverse: MotionCommand = {
+    type: 'object.replaceAnimation',
+    payload:
+      previous === undefined ? { objectId, property } : { objectId, property, curve: previous },
+  };
+  return commit(project, objectId, replaceChannel(object, property, curve), inverse);
 }

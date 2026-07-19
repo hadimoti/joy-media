@@ -43,5 +43,21 @@ export { sampleSpatialPath } from './spatial.js';
 export type { ObjectAnimations } from './transform.js';
 export { isAnimated, resolveAnimatedTransform, resolveObjectTransform } from './transform.js';
 
-export type { MotionApplyResult, MotionCommand, ReplaceAnimationCommand } from './commands.js';
+export { composeTransforms, parentChain, resolveWorldTransform } from './parenting.js';
+
+export type { MotionPreset, MotionPresetOptions, PresetChannels } from './presets.js';
+export { buildPresetChannels, JOY_MOTION_PRESETS, resolveMotionPreset } from './presets.js';
+
+export type { TextAnimationScope, TextStaggerOptions } from './text.js';
+export { splitTextUnits, staggerOffsets } from './text.js';
+
+export type { MotionBlurV1 } from '@joy-media/project-schema';
+export { motionBlurSampleOffsetsUs } from './blur.js';
+
+export type {
+  MotionApplyResult,
+  MotionCommand,
+  ReplaceAnimationCommand,
+  SetParentCommand,
+} from './commands.js';
 export { applyMotionProjectCommand, MotionCommandError } from './commands.js';
