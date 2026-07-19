@@ -32,7 +32,11 @@ importers:
 
   packages/commands: {}
 
-  packages/evaluator: {}
+  packages/evaluator:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
 
   packages/job-protocol: {}
 

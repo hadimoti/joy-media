@@ -1,6 +1,6 @@
 # P00 — Architecture Proofs and Risk Retirement
 
-**Status:** not-started · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
+**Status:** in-progress · **Gate to enter:** none (first part) · **Master plan:** §36 Phase 0, §39 items 1–16 partially, §41.1
 **Goal:** prove the hardest boundaries with minimal spikes _before_ building a large UI. Spikes may be throwaway, but their ADRs and golden fixtures are permanent.
 
 ## Work packages
@@ -8,7 +8,7 @@
 Each WP ≈ one session. WP-00.0 first; the seven spikes afterward in any order (00.3 needs 00.1's time utilities).
 
 - [x] **WP-00.0 — Repo bootstrap** _(done 2026-07-19)_. Standalone `joy-media` repo created (Q16 DECIDED); pnpm workspace, strict TypeScript, ESLint+Prettier, Vitest, `pnpm check` script + GitHub Actions CI, package scaffolds ONLY for packages the spikes touch (`project-schema`, `commands`, `evaluator`, `render-ir`, `job-protocol`, `test-fixtures`, `tooling/golden-render`). _(§39-1, §45.2)_
-- [ ] **WP-00.1 — Time/evaluation spike.** Integer-`TimeUs` + rational frame-rate utilities; two video clips, source ranges, one nested composition; exact frame evaluation tests. _(§36-P0-1, §10.5)_
+- [x] **WP-00.1 — Time/evaluation spike** _(done 2026-07-19, ADR-0002)_. Integer-`TimeUs` + rational frame-rate utilities with exact BigInt ceil/floor frame mapping (`project-schema/src/time.ts`); spike model with two video clips, source ranges, one nested composition + cycle detection (`model.ts`); pure evaluator with exact NTSC frame evaluation tests (`evaluator/src/evaluate.ts`). 38 tests green. _(§36-P0-1, §10.5)_
 - [ ] **WP-00.2 — Command spike.** insert/move/trim/split/property-change; transaction, undo/redo, serialization/replay; randomized invariant tests (command+inverse restores state). _(§36-P0-2, §11)_
 - [ ] **WP-00.3 — Preview/export parity spike.** One image, one video frame, one text object, transform animation → Pixi preview AND pinned headless output; first golden-frame comparison in `tooling/golden-render`. _(§36-P0-3, §16.6)_
 - [ ] **WP-00.4 — HTML Scene spike.** Parameterized React scene; sandboxed preview; deterministic 30/60 fps frame capture; no-network test; seeded randomness. _(§36-P0-4, §2.3, §20.4)_
