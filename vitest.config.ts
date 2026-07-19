@@ -14,6 +14,7 @@ export default defineConfig({
       '@joy-media/render-ir': pkg('./packages/render-ir/src/index.ts'),
       '@joy-media/renderer-pixi': pkg('./packages/renderer-pixi/src/index.ts'),
       '@joy-media/renderer-headless': pkg('./packages/renderer-headless/src/index.ts'),
+      '@joy-media/html-scene-runtime': pkg('./packages/html-scene-runtime/src/index.ts'),
     },
   },
   test: {

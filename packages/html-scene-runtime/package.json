@@ -1,0 +1,24 @@
+{
+  "name": "@joy-media/html-scene-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sandboxed deterministic React HTML scene runtime spike",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/project-schema": "workspace:*",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}
