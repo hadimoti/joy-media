@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
+import { toggleSelection } from '@joy-media/timeline-engine';
 import { TRANSFORM_INSPECTOR } from './inspector.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
@@ -68,6 +69,9 @@ export function App() {
               {...props}
               state={state}
               advance={() => setState({ ...state, playheadUs: state.playheadUs + 1_000_000 })}
+              toggleSelection={(id) =>
+                setState({ ...state, ...toggleSelection({ clipIds: state.selectedIds }, id) })
+              }
             />
           ),
         }}
@@ -81,7 +85,12 @@ function Panel({
   params,
   state,
   advance,
-}: IDockviewPanelProps & { state: typeof EMPTY_EDITOR_STATE; advance: () => void }) {
+  toggleSelection: toggleClipSelection,
+}: IDockviewPanelProps & {
+  state: typeof EMPTY_EDITOR_STATE;
+  advance: () => void;
+  toggleSelection: (id: string) => void;
+}) {
   if (params.id === 'inspector')
     return (
       <article>
@@ -99,7 +108,14 @@ function Panel({
       </article>
     );
   if (params.id === 'timeline')
-    return <TimelinePanel playheadUs={state.playheadUs} onAdvance={advance} />;
+    return (
+      <TimelinePanel
+        playheadUs={state.playheadUs}
+        selectedIds={state.selectedIds}
+        onAdvance={advance}
+        onToggleSelection={toggleClipSelection}
+      />
+    );
   return (
     <article>
       <p>

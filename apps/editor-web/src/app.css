@@ -94,3 +94,6 @@ label {
   background: #273452;
   border-radius: 0.15rem;
 }
+.timeline-clip[aria-pressed='true'] {
+  outline: 2px solid #e9b949;
+}

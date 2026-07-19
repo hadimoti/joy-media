@@ -10,10 +10,14 @@ const INITIAL_TRACKS: readonly TimelineTrackView[] = [
 
 export function TimelinePanel({
   playheadUs,
+  selectedIds,
   onAdvance,
+  onToggleSelection,
 }: {
   readonly playheadUs: number;
+  readonly selectedIds: readonly string[];
   readonly onAdvance: () => void;
+  readonly onToggleSelection: (id: string) => void;
 }) {
   const [tracks, setTracks] = useState(INITIAL_TRACKS);
   const visible = useMemo(() => virtualTracks(tracks, 0, 180), [tracks]);
@@ -39,7 +43,17 @@ export function TimelinePanel({
           <button aria-pressed={track.solo} onClick={() => toggle(track.id, 'solo')}>
             Solo
           </button>
-          <span className="timeline-lane" />
+          <span className="timeline-lane">
+            {track.id === 'V1' && (
+              <button
+                className="timeline-clip"
+                aria-pressed={selectedIds.includes('intro-clip')}
+                onClick={() => onToggleSelection('intro-clip')}
+              >
+                Intro clip
+              </button>
+            )}
+          </span>
         </div>
       ))}
     </article>
