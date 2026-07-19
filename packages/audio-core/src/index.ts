@@ -11,3 +11,4 @@ export {
   exportPcm16Wav,
   measureAudioClockDrift,
 } from './audio.js';
+export { decodeWaveformPeaks, encodeWaveformPeaks } from './peaks.js';

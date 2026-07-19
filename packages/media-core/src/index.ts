@@ -16,3 +16,5 @@ export type {
   LocalDerivativeExecutor,
 } from './assets.js';
 export { AssetBridgeError, LocalAssetBridge } from './assets.js';
+export type { ImportRequest } from './import.js';
+export { importLocalAsset } from './import.js';
