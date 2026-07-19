@@ -13,6 +13,7 @@ import { EditorSession } from './editor-session.js';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
+import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
@@ -50,6 +51,7 @@ interface EditorPanelContextValue {
     value: number,
   ) => void;
   readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
+  readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
   readonly undo: () => void;
   readonly redo: () => void;
 }
@@ -119,6 +121,18 @@ export function App() {
     (transaction: VisualObjectTransaction) => {
       session.dispatchVisualObjects(transaction);
       setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
+  const transcribe = useCallback(
+    (documentId: string, language: 'fa-IR' | 'en-US') => {
+      void transcribeReferenceCaption(documentId, language).then((document) => {
+        session.dispatchVisualObjects({
+          label: `Transcribe ${language}`,
+          commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
+        });
+        setRevision((revision) => revision + 1);
+      });
     },
     [session],
   );
@@ -202,6 +216,7 @@ export function App() {
           dispatchTimeline,
           updateVisualProperty,
           dispatchProject,
+          transcribe,
           undo,
           redo,
         }}
@@ -257,6 +272,7 @@ function Panel({ api }: IDockviewPanelProps) {
         playheadUs={state.playheadUs}
         onSeek={context.seek}
         onDispatch={context.dispatchProject}
+        onTranscribe={context.transcribe}
       />
     );
   if (api.id === 'timeline')

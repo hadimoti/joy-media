@@ -34,11 +34,13 @@ export function CaptionsPanel({
   playheadUs,
   onSeek,
   onDispatch,
+  onTranscribe,
 }: {
   readonly project: JoyProjectV1;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
 }) {
   const [query, setQuery] = useState('');
   const composition = project.compositions[project.rootCompositionId];
@@ -69,6 +71,7 @@ export function CaptionsPanel({
           playheadUs={playheadUs}
           onSeek={onSeek}
           onDispatch={onDispatch}
+          onTranscribe={onTranscribe}
         />
       ))}
     </article>
@@ -158,12 +161,14 @@ function CaptionSlotEditor({
   playheadUs,
   onSeek,
   onDispatch,
+  onTranscribe,
 }: {
   readonly slot: CaptionSlot;
   readonly query: string;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => void;
 }) {
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -259,6 +264,8 @@ function CaptionSlotEditor({
           }}
         />
         <button onClick={addSegment}>Add caption</button>
+        <button onClick={() => onTranscribe(document.id, 'fa-IR')}>Transcribe Persian</button>
+        <button onClick={() => onTranscribe(document.id, 'en-US')}>Transcribe English</button>
       </header>
       {importIssues > 0 && (
         <p className="caption-warning">

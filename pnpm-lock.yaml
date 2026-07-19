@@ -62,6 +62,9 @@ importers:
       '@joy-media/property-system':
         specifier: workspace:*
         version: link:../../packages/property-system
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../../packages/provider-sdk
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../../packages/render-ir
