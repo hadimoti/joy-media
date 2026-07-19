@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/project-schema" },
+    { "path": "packages/commands" },
+    { "path": "packages/evaluator" },
+    { "path": "packages/render-ir" },
+    { "path": "packages/job-protocol" },
+    { "path": "packages/test-fixtures" },
+    { "path": "tooling/golden-render" }
+  ]
+}
