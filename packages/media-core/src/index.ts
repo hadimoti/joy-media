@@ -18,3 +18,5 @@ export type {
 export { AssetBridgeError, LocalAssetBridge } from './assets.js';
 export type { ImportRequest } from './import.js';
 export { importLocalAsset } from './import.js';
+export type { ProxyJobRequest } from './proxy-cache.js';
+export { ProxyCache } from './proxy-cache.js';

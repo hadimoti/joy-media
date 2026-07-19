@@ -8,7 +8,7 @@
 ## Work packages
 
 - [ ] **WP-02.1 — Timeline editing.** Ruler/viewport coordinates, virtualized track/clip view, selection/drag-preview/snapping with command commit, zoom/pan/playhead/markers, move/split/trim/ripple-delete, track enable/lock/mute/solo, linked video+audio. _(§39-22…25, §19)_
-- [ ] **WP-02.2 — Media pipeline.** Asset record/location/derivative schemas in practice: browser import registration, missing-asset states, ffprobe descriptor normalization, thumbnails, waveform peak format + timeline display, proxy profile/job/cache invalidation, exact-hash relink. _(§39-27…39, §13)_
+- [x] **WP-02.2 — Media pipeline** _(done 2026-07-19)_. Local import registration creates opaque thumbnail/proxy derivatives; normalized probe metadata, missing/exact-hash relink, portable waveform peaks, and profile-keyed proxy cache contracts are tested. _(§39-27…39, §13)_
 - [ ] **WP-02.3 — Objects + Inspector breadth.** Image/text/shape clips, position/scale/rotation/opacity/crop, nested compositions, markers; Inspector multi-selection semantics. _(§36-P2, §18.3)_
 - [ ] **WP-02.4 — Playback.** Source-time mapping + decoder interface, HTML-media/proxy decode tier, frame request cancellation/cache, audio preview clock + linked playback, scheduler metrics + dropped-frame state, quality governor v0. _(§39-40…44, §15)_
 - [ ] **WP-02.5 — Deterministic export.** Worker render job with frozen revision + manifest, headless frame stream → FFmpeg, offline audio mix baseline, encode/mux preset v1 (Q6 matrix), ffprobe validation, atomic output/failure cleanup. _(§39-45…49, §16)_
