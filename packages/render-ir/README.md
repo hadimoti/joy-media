@@ -1,6 +1,6 @@
 # render-ir
 
-> **Status: scaffolded (WP-00.0)** — contracts land with this package's spike WP. This README is this folder's slice of the JOY Media plan.
+> **Status: minimal frame IR implemented (WP-00.3)** — an evaluated, renderer-neutral frame contract backs the preview/export parity spike. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §14.2 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Ephemeral, versioned renderer-independent scene description shared by preview and export.

@@ -1,6 +1,6 @@
 # renderer-pixi
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P00.3 parity adapter implemented.** A fixed-setting, software test mode consumes Render IR and records Pixi-facing draw calls; retained PixiJS object management lands in P02. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §15, §2.1 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Interactive preview adapter mapping Render IR to a retained Pixi scene graph.

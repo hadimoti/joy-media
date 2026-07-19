@@ -9,6 +9,11 @@ export default defineConfig({
     alias: {
       '@joy-media/project-schema': pkg('./packages/project-schema/src/index.ts'),
       '@joy-media/evaluator': pkg('./packages/evaluator/src/index.ts'),
+      '@joy-media/commands': pkg('./packages/commands/src/index.ts'),
+      '@joy-media/test-fixtures': pkg('./packages/test-fixtures/src/index.ts'),
+      '@joy-media/render-ir': pkg('./packages/render-ir/src/index.ts'),
+      '@joy-media/renderer-pixi': pkg('./packages/renderer-pixi/src/index.ts'),
+      '@joy-media/renderer-headless': pkg('./packages/renderer-headless/src/index.ts'),
     },
   },
   test: {

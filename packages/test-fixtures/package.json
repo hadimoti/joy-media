@@ -15,5 +15,8 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/project-schema": "workspace:*"
   }
 }

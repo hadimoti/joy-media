@@ -4,5 +4,16 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../../packages/render-ir"
+    },
+    {
+      "path": "../../packages/renderer-pixi"
+    },
+    {
+      "path": "../../packages/renderer-headless"
+    }
+  ]
 }

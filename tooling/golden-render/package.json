@@ -15,5 +15,10 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/render-ir": "workspace:*",
+    "@joy-media/renderer-headless": "workspace:*",
+    "@joy-media/renderer-pixi": "workspace:*"
   }
 }

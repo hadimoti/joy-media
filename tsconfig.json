@@ -5,6 +5,8 @@
     { "path": "packages/commands" },
     { "path": "packages/evaluator" },
     { "path": "packages/render-ir" },
+    { "path": "packages/renderer-pixi" },
+    { "path": "packages/renderer-headless" },
     { "path": "packages/job-protocol" },
     { "path": "packages/test-fixtures" },
     { "path": "tooling/golden-render" }

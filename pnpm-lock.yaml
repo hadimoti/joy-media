@@ -30,7 +30,15 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)
 
-  packages/commands: {}
+  packages/commands:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+    devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
 
   packages/evaluator:
     dependencies:
@@ -44,9 +52,35 @@ importers:
 
   packages/render-ir: {}
 
-  packages/test-fixtures: {}
+  packages/renderer-headless:
+    dependencies:
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
 
-  tooling/golden-render: {}
+  packages/renderer-pixi:
+    dependencies:
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
+
+  packages/test-fixtures:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+
+  tooling/golden-render:
+    dependencies:
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../../packages/render-ir
+      '@joy-media/renderer-headless':
+        specifier: workspace:*
+        version: link:../../packages/renderer-headless
+      '@joy-media/renderer-pixi':
+        specifier: workspace:*
+        version: link:../../packages/renderer-pixi
 
 packages:
 

@@ -1,6 +1,6 @@
 # renderer-headless
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: P00.3 reference path implemented.** A pinned, deterministic software renderer consumes Render IR for the first golden-frame comparison; media decode and FFmpeg export land later. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §16 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Deterministic export adapter for the pinned render host; golden-frame reference path.

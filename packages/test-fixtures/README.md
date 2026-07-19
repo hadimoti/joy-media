@@ -1,11 +1,11 @@
 # test-fixtures
 
-> **Status: scaffolded (WP-00.0)** — contracts land with this package's spike WP. This README is this folder's slice of the JOY Media plan.
+> **Status: spike builders implemented (WP-00.2)** — reusable P00 spike-project and clip builders support command/evaluator tests. This README is this folder's slice of the JOY Media plan.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §32.2, §30.3 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Golden projects, redistributable media fixtures, plugin/provider fixtures, benchmark datasets.
 
-**First built in part:** P00 onward. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
+**First built in part:** P00 onward. Redistributable media, plugin/provider fixtures, and benchmark datasets land with their respective spikes.
 
 **Must not:** Copyrighted/non-redistributable media; production user data.
 

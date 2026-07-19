@@ -1,7 +1,19 @@
 /**
  * @joy-media/render-ir — Renderer-independent evaluated scene description.
  *
- * Scaffold only (WP-00.0). Real contracts land with this package's spike WP;
- * see plan/P00-architecture-proofs.md and this folder's README.
+ * WP-00.3 state: a minimal evaluated frame IR for deterministic preview/export
+ * parity. It contains no project-document, DOM, Pixi, or media-decoder values.
  */
 export const PACKAGE_NAME = '@joy-media/render-ir' as const;
+
+export type {
+  Rgba,
+  Viewport,
+  Transform2D,
+  SpriteNode,
+  VideoFrameNode,
+  TextNode,
+  RenderNode,
+  RenderFrameIR,
+} from './model.js';
+export { validateRenderFrameIR } from './model.js';
