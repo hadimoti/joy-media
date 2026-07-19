@@ -74,6 +74,17 @@ export { captureSceneRegion, captureSceneSurface, SceneCaptureCache } from './he
 export type { SceneDiagnosticPlaceholder } from './placeholder.js';
 export { createSceneDiagnosticPlaceholder } from './placeholder.js';
 
+export type {
+  FirstPartySceneId,
+  FirstPartyScenePackage,
+  ResolvedSceneInstance,
+} from './first-party.js';
+export {
+  findFirstPartyScene,
+  FIRST_PARTY_SCENES,
+  resolveFirstPartySceneInstance,
+} from './first-party.js';
+
 export type { ScenePackageFiles, ScenePackageReport } from './cli.js';
 export { validateScenePackage } from './cli.js';
 

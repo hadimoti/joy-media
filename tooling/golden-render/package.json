@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@joy-media/captions-core": "workspace:*",
+    "@joy-media/html-scene-runtime": "workspace:*",
     "@joy-media/render-ir": "workspace:*",
     "@joy-media/renderer-headless": "workspace:*",
     "@joy-media/renderer-pixi": "workspace:*"

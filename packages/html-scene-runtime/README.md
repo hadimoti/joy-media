@@ -1,6 +1,6 @@
 # html-scene-runtime
 
-> **Status: WP-04.4 scene preview/export boundary implemented.** Versioned manifests, typed variables, asset/font resolution, permission-derived CSP, deterministic compiler diagnostics, `joy-scene`, and a React starter now build on the P00.4 runtime spike; typed sandbox-preview messages, suspension, alpha capture, caches, and diagnostic placeholders define the production integration boundary. Browser/process isolation remains the production boundary described in ADR-0006.
+> **Status: WP-04.5 first-party scene library implemented.** Versioned manifests, typed variables, asset/font resolution, permission-derived CSP, deterministic compiler diagnostics, `joy-scene`, preview/capture boundaries, and four pinned first-party scene templates now build on the P00.4 runtime spike. Browser/process isolation remains the production boundary described in ADR-0006.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §2.3, §20.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Sandboxed scene SDK: deterministic clock, typed variables, asset/font resolvers, message protocol.
