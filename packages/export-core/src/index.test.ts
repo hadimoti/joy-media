@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import { ffmpegArgs, freezeManifest, renderFixture, verifyExport } from './index.js';
 describe('deterministic export contract', () => {
   const manifest = {
@@ -26,5 +27,24 @@ describe('deterministic export contract', () => {
       width: 64,
       height: 36,
     });
+  });
+  it('exports both golden social formats from a frozen revision', () => {
+    for (const format of REFERENCE_PROJECT.formats) {
+      const output = join(
+        mkdtempSync(join(tmpdir(), 'joy-media-reference-')),
+        `${format.width}x${format.height}.mp4`,
+      );
+      renderFixture(
+        {
+          ...manifest,
+          projectId: REFERENCE_PROJECT.id,
+          revision: REFERENCE_PROJECT.revision,
+          width: format.width,
+          height: format.height,
+        },
+        output,
+      );
+      expect(verifyExport(output)).toMatchObject(format);
+    }
   });
 });

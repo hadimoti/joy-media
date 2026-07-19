@@ -6,5 +6,8 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "devDependencies": {
+    "@joy-media/test-fixtures": "workspace:*"
   }
 }

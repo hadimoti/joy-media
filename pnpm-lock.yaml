@@ -98,7 +98,11 @@ importers:
         specifier: workspace:*
         version: link:../project-schema
 
-  packages/export-core: {}
+  packages/export-core:
+    devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
 
   packages/html-scene-runtime:
     dependencies:

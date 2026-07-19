@@ -13,3 +13,5 @@ export {
   withClips,
   SECOND_US,
 } from './spike.js';
+export type { ReferenceProject } from './reference-project.js';
+export { REFERENCE_PROJECT } from './reference-project.js';
