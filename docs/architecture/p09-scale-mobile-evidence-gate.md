@@ -1,7 +1,7 @@
 # P09 scale and mobile evidence gate
 
-**Status:** No scale/mobile initiative authorized (ADR-0014)  
-**Current measured demand:** None recorded  
+**Status:** No scale/mobile initiative authorized (ADR-0014)
+**Current measured demand:** None recorded
 **Implementation status:** No GPU pool, multi-region service, or mobile companion is planned or deployed by P09.
 
 ## Evidence register

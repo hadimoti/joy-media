@@ -1,7 +1,7 @@
 # P09 marketplace business gate
 
-**Status:** Commercial marketplace closed by default (ADR-0013)  
-**Owner authority:** Not yet supplied  
+**Status:** Commercial marketplace closed by default (ADR-0013)
+**Owner authority:** Not yet supplied
 **Implementation status:** No billing, public listing, payout, refund, tax, or moderation operation is implemented or authorized.
 
 ## Boundary
