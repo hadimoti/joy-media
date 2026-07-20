@@ -10,6 +10,7 @@ export { evaluateFrame } from './evaluate.js';
 export type { StaticProperty, TimedEntity } from './properties.js';
 export {
   evaluateAnimatedTransform,
+  evaluateCameraTransform,
   evaluateStaticProperty,
   queryActiveIntervals,
 } from './properties.js';

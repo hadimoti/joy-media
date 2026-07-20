@@ -47,6 +47,31 @@ describe('resolveAnimatedTransform', () => {
     expect(resolved.opacity).toBe(1);
     expect(resolved.scaleX).toBe(0.001);
   });
+
+  it('samples an animated positionZ depth (ADR-0015)', () => {
+    const resolved = resolveAnimatedTransform(
+      staticTransform,
+      {
+        positionZ: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' },
+            { timeUs: 1_000_000, value: -800, interpolation: 'linear' },
+          ],
+        },
+      },
+      500_000,
+    );
+    expect(resolved.positionZ).toBeCloseTo(-400, 6);
+  });
+
+  it('defaults an absent static positionZ to 0 when another channel animates', () => {
+    const resolved = resolveAnimatedTransform(
+      staticTransform,
+      { x: { keyframes: [{ timeUs: 0, value: 5, interpolation: 'hold' }] } },
+      0,
+    );
+    expect(resolved.positionZ).toBeUndefined();
+  });
 });
 
 describe('isAnimated / resolveObjectTransform', () => {

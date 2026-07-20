@@ -54,6 +54,7 @@ export type {
   MarkerV1,
   VisualObjectV1,
   VisualObjectTransformV1,
+  CameraParamsV1,
   AnimatablePropertyV1,
   KeyframeInterpolationV1,
   BezierHandlesV1,

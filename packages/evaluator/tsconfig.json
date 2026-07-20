@@ -10,6 +10,9 @@
       "path": "../motion-core"
     },
     {
+      "path": "../camera-core"
+    },
+    {
       "path": "../project-schema"
     }
   ]

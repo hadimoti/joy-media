@@ -42,13 +42,16 @@ export function resolveAnimatedTransform(
     scaleY: transform.scaleY,
     rotationDeg: transform.rotationDeg,
     opacity: transform.opacity,
+    positionZ: transform.positionZ ?? 0,
   };
   let touched = false;
+  let positionZTouched = false;
   for (const key of ANIMATABLE_PROPERTIES) {
     const curve = animations[key];
     if (curve === undefined) continue;
     sampled[key] = sampleCurve(curve, timeUs);
     touched = true;
+    if (key === 'positionZ') positionZTouched = true;
   }
   if (!touched) return transform;
   return {
@@ -59,6 +62,7 @@ export function resolveAnimatedTransform(
     scaleY: Math.max(0.001, sampled.scaleY),
     rotationDeg: sampled.rotationDeg,
     opacity: Math.min(1, Math.max(0, sampled.opacity)),
+    ...(positionZTouched ? { positionZ: sampled.positionZ } : {}),
   };
 }
 

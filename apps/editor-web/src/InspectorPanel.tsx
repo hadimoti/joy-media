@@ -21,7 +21,15 @@ import {
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
   readonly playheadUs: number;
-  readonly onSetStatic: (objectId: string, key: NumericTransformProperty, value: number) => void;
+  /**
+   * `positionZ` (ADR-0015) is not shown in this Inspector yet — it lands with
+   * the dedicated Camera panel (WP-10.2) — so it's excluded here too.
+   */
+  readonly onSetStatic: (
+    objectId: string,
+    key: Exclude<NumericTransformProperty, 'positionZ'>,
+    value: number,
+  ) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }
 
@@ -73,7 +81,7 @@ export function InspectorPanel({
       <p>Editing {object.id}</p>
       <p className="inspector-time">Playhead {(timeUs / 1_000_000).toFixed(2)}s</p>
       {NUMERIC_PROPERTIES.map((property) => {
-        const key = property.key as AnimatablePropertyV1;
+        const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
         const curve = object.animations?.[key];
         const animated = curve !== undefined;
         const keyed = animated && hasKeyframeAt(curve, timeUs);
@@ -110,7 +118,7 @@ export function InspectorPanel({
                     key,
                     setKeyframe(curve, { timeUs, value: next, interpolation: 'linear' }),
                   );
-                else onSetStatic(object.id, key as NumericTransformProperty, next);
+                else onSetStatic(object.id, key, next);
               }}
             />
           </label>

@@ -1,7 +1,30 @@
 # P10 — Advanced Professional Systems (Optional / LATER)
 
-**Status:** not-scoped. Master plan §36 Phase 10. Intentionally a parking lot — nothing here may leak into earlier parts without an ADR.
+**Status:** in-progress · **Gate to enter:** P09-era, owner approval per capability (ADR-0015) · **Master plan:** §36 Phase 10, §20.3
+**Goal:** Open exactly the P10 capabilities the owner selects, one ADR at a time; everything else in the parking lot stays closed.
 
-Parked capabilities: cameras/2.5D/3D · restricted expressions (§20.3 expression policy applies when opened) · multicam · advanced color/HDR pipeline · raster paint/vector tools · advanced audio restoration/multichannel · broad interchange formats (EDL/AAF/PSD round-trip) · render-farm optimization · publishing integrations · enterprise governance.
+**Scope opened 2026-07-20 (ADR-0015):** a bounded 2.5D depth camera and a restricted/sandboxed expression language. Both extend P04's motion system (§20.3 "later motion system").
 
-If a P0–P8 task appears to _require_ one of these, that is a §46.3 stop condition: halt and record the question in DECISIONS.md.
+## Work packages
+
+- [x] **WP-10.1 — Camera core** _(done 2026-07-20)_. `positionZ` depth joins `VisualObjectTransformV1` and the animatable-property set (keyframeable via the existing curve engine, no expression engine needed); `kind: 'camera'` objects carry a vertical field of view; compositions may declare an `activeCameraId`. New `camera-core` package composes parent-chain depth and a pure depth-only perspective projection (dolly/track/roll/zoom; **no yaw/pitch, no per-layer 3D tilt** — ADR-0015) that reduces to the existing `VisualObjectTransformV1` shape, so Render IR and every renderer adapter are untouched. The evaluator exposes `evaluateCameraTransform`; undoable `camera.create` and `composition.setActiveCamera` commands ride the shared v1 history. No active camera ⇒ byte-for-byte identical output to pre-P10 projects.
+- [ ] **WP-10.2 — Camera UI.** A Camera panel: create/select camera objects, numeric position/roll/FOV controls (reusing the Inspector's keyframe-toggle pattern for `positionZ`), and an active-camera picker per composition. Live preview must show parallax across depth-offset layers as the camera moves.
+- [ ] **WP-10.3 — Restricted expression engine.** A hand-written, non-Turing-complete expression parser/interpreter (no `eval`/`Function`, must run in-browser and headless) bound to animatable channels: arithmetic, comparisons, ternary, an allowlisted math/easing function set, explicit references to other channels/objects, seeded random, JOY time — no DOM/network/filesystem/process/wall-clock. Bounded evaluation (AST size limits, no user-defined functions/loops). Dependency cycle detection. Per-property diagnostics, never a thrown exception into the evaluator.
+- [ ] **WP-10.4 — Expression schema + evaluator + UI.** Durable per-channel expression storage (alternative to, or layered with, a keyframe curve) on `VisualObjectV1`; evaluator wiring with memoized pure evaluation; undoable `object.setExpression` command; per-property expression input + inline error display in the Inspector.
+- [ ] **WP-10.5 — Gate review.** Combined evidence: a reel using a moving 2.5D camera across depth-offset layers plus at least one restricted expression, rendered through the real export path; forbidden-expression-capability tests (no DOM/network/wall-clock reachable); cycle detection rejects a self-referential expression; a composition with no active camera renders identically to its pre-P10 output (regression guard).
+
+## Exit criteria (bounded scope only — ADR-0015)
+
+- [ ] A composition with a keyframed/dollying 2.5D camera renders correct parallax across depth-offset layers through the real render/export path.
+- [ ] A composition with no `activeCameraId` is byte-for-byte unaffected (no regression to any P00–P09 render or golden).
+- [ ] Restricted expressions cannot reach DOM/network/filesystem/process/wall-clock; a runaway or cyclic expression fails as a per-property diagnostic, never a crash or hang.
+- [ ] Expression and camera edits are undoable/redoable and survive reopen through the durable command log.
+
+## Still parked (no ADR yet — §46.3 stop condition if any P0–P9 task appears to need one)
+
+multicam · advanced color/HDR pipeline · advanced raster paint/vector tools ·
+advanced audio restoration/multichannel · broad interchange formats
+(EDL/AAF/PSD round-trip) · render-farm optimization/render-graph partitioning ·
+publishing integrations · enterprise governance. A true 3D camera (yaw/pitch,
+oriented layer planes) is also explicitly deferred past this scope — see
+ADR-0015 alternatives.

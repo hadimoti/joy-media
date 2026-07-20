@@ -1,8 +1,9 @@
-/** Pure active-interval and static-property evaluation (WP-01.3, WP-04.1). */
+/** Pure active-interval and static-property evaluation (WP-01.3, WP-04.1, WP-10.1). */
 
 import { rangeContainsUs } from '@joy-media/project-schema';
 import type { TimeUs, VisualObjectTransformV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { resolveObjectTransform } from '@joy-media/motion-core';
+import { resolveObjectTransformThroughCamera } from '@joy-media/camera-core';
 
 export interface TimedEntity {
   readonly id: string;
@@ -47,4 +48,21 @@ export function evaluateAnimatedTransform(
   timeUs: TimeUs,
 ): VisualObjectTransformV1 {
   return resolveObjectTransform(object, timeUs);
+}
+
+/**
+ * An object's effective transform at `timeUs`, composed under its parent chain
+ * and, when the composition has an `activeCameraId`, projected through that
+ * depth-only 2.5D camera (§20.3, ADR-0015, WP-10.1). `cameraId` undefined
+ * reproduces `evaluateAnimatedTransform`'s parenting-only behavior exactly, so
+ * compositions without a camera are unaffected.
+ */
+export function evaluateCameraTransform(
+  objectId: string,
+  cameraId: string | undefined,
+  objectsById: Readonly<Record<string, VisualObjectV1>>,
+  timeUs: TimeUs,
+  compHeight: number,
+): VisualObjectTransformV1 {
+  return resolveObjectTransformThroughCamera(objectId, cameraId, objectsById, timeUs, compHeight);
 }

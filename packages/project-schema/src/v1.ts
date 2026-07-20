@@ -31,6 +31,12 @@ export interface VisualObjectTransformV1 {
   readonly scaleY: number;
   readonly rotationDeg: number;
   readonly opacity: number;
+  /**
+   * Depth offset from the composition's z=0 plane (§36 P10, ADR-0015). Absent
+   * means 0 — a depth-only "2.5D" value with no per-layer 3D tilt; it only has
+   * a visual effect when a composition has an `activeCameraId`.
+   */
+  readonly positionZ?: number;
   readonly crop: {
     readonly left: number;
     readonly top: number;
@@ -39,8 +45,9 @@ export interface VisualObjectTransformV1 {
   };
 }
 
-/** Universal animatable transform channels (§20.3); each maps to a scalar curve. */
-export type AnimatablePropertyV1 = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity';
+/** Universal animatable transform channels (§20.3, extended by ADR-0015); each maps to a scalar curve. */
+export type AnimatablePropertyV1 =
+  'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity' | 'positionZ';
 
 export const ANIMATABLE_PROPERTIES: readonly AnimatablePropertyV1[] = [
   'x',
@@ -49,6 +56,7 @@ export const ANIMATABLE_PROPERTIES: readonly AnimatablePropertyV1[] = [
   'scaleY',
   'rotationDeg',
   'opacity',
+  'positionZ',
 ];
 
 /** Interpolation of the segment *leaving* a keyframe toward the next one. */
@@ -90,14 +98,27 @@ export interface MotionBlurV1 {
 }
 
 /**
+ * A depth-only 2.5D camera's own parameters (ADR-0015). Position/roll reuse the
+ * object's ordinary transform (`x`, `y`, `positionZ`, `rotationDeg`); this only
+ * carries the field of view. Deliberately no yaw/pitch — see ADR-0015.
+ */
+export interface CameraParamsV1 {
+  /** Vertical field of view in degrees, exclusive of (0, 170]. */
+  readonly fieldOfViewDeg: number;
+}
+
+/**
  * A visual object. `kind: 'null'` is a controller ("null object"): it renders
  * nothing but contributes a transform that its children inherit (§20.3
- * parenting). `parentId` links an object to its parent for transform
- * inheritance; the graph must stay acyclic.
+ * parenting). `kind: 'camera'` is a depth-only 2.5D camera controller (ADR-0015):
+ * it renders nothing but its resolved transform + `camera` params drive
+ * perspective projection for a composition's `activeCameraId`. `parentId` links
+ * an object to its parent for transform inheritance; the graph must stay
+ * acyclic.
  */
 export interface VisualObjectV1 {
   readonly id: string;
-  readonly kind: 'image' | 'text' | 'shape' | 'null';
+  readonly kind: 'image' | 'text' | 'shape' | 'null' | 'camera';
   readonly transform: VisualObjectTransformV1;
   /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
   readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
@@ -107,6 +128,8 @@ export interface VisualObjectV1 {
   readonly assetId?: string;
   readonly text?: string;
   readonly shape?: 'rectangle' | 'ellipse';
+  /** Present iff `kind === 'camera'` (ADR-0015). */
+  readonly camera?: CameraParamsV1;
 }
 
 export interface CompositionV1 {
@@ -119,6 +142,8 @@ export interface CompositionV1 {
   readonly durationUs: TimeUs;
   readonly background: string;
   readonly tracks: readonly TrackV1[];
+  /** The `kind: 'camera'` object driving this composition's projection (ADR-0015); absent = no camera. */
+  readonly activeCameraId?: string;
 }
 
 export interface TrackV1 {
@@ -308,6 +333,8 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     for (const [objectId, object] of Object.entries(value.visualObjects))
       validateVisualObject(object, `visualObjects.${objectId}`, diagnostics);
     validateObjectParenting(value.visualObjects, diagnostics);
+    if (isRecord(value.compositions))
+      validateActiveCameras(value.compositions, value.visualObjects, diagnostics);
   }
   if (!isRecord(value.captionDocuments))
     diagnostics.push(
@@ -498,9 +525,30 @@ function validateVisualObject(
     value.kind !== 'image' &&
     value.kind !== 'text' &&
     value.kind !== 'shape' &&
-    value.kind !== 'null'
+    value.kind !== 'null' &&
+    value.kind !== 'camera'
   )
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object kind is invalid', path));
+  if (value.kind === 'camera') {
+    const camera = value.camera;
+    if (
+      !isRecord(camera) ||
+      !Number.isFinite(camera.fieldOfViewDeg) ||
+      (camera.fieldOfViewDeg as number) <= 0 ||
+      (camera.fieldOfViewDeg as number) > 170
+    )
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CAMERA',
+          'camera objects require fieldOfViewDeg in (0, 170]',
+          path,
+        ),
+      );
+  } else if (value.camera !== undefined) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_CAMERA', 'only camera objects may carry camera params', path),
+    );
+  }
   if (value.parentId !== undefined && !isNonEmptyString(value.parentId))
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'parentId must be a non-empty string', path),
@@ -531,6 +579,10 @@ function validateVisualObject(
         diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', `transform ${key} must be finite`, path),
       );
   }
+  if (value.transform.positionZ !== undefined && !Number.isFinite(value.transform.positionZ))
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'transform positionZ must be finite', path),
+    );
   if (typeof value.transform.scaleX === 'number' && value.transform.scaleX <= 0)
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'scaleX must be positive', path),
@@ -620,6 +672,34 @@ function validateObjectParenting(
       }
       seen.add(current);
       current = parentOf.get(current);
+    }
+  }
+}
+
+/**
+ * Every composition's `activeCameraId` (ADR-0015), if present, must reference an
+ * existing `kind: 'camera'` object. Cross-object/cross-composition, so it lives
+ * at the project level like parenting integrity.
+ */
+function validateActiveCameras(
+  compositions: Record<string, unknown>,
+  visualObjects: Record<string, unknown>,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  for (const [compositionId, composition] of Object.entries(compositions)) {
+    if (!isRecord(composition) || composition.activeCameraId === undefined) continue;
+    const cameraId = composition.activeCameraId;
+    if (typeof cameraId !== 'string') continue; // shape already reported per-composition
+    const path = `compositions.${compositionId}.activeCameraId`;
+    const camera = visualObjects[cameraId];
+    if (camera === undefined) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_CAMERA', `camera "${cameraId}" does not exist`, path),
+      );
+    } else if (!isRecord(camera) || camera.kind !== 'camera') {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_CAMERA', `"${cameraId}" is not a camera object`, path),
+      );
     }
   }
 }
@@ -715,6 +795,14 @@ function validateComposition(
       diagnostic('PROJECT_SCHEMA_V1_COMPOSITION', 'composition rationals are invalid', path),
     );
   }
+  if (value.activeCameraId !== undefined && !isNonEmptyString(value.activeCameraId))
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_CAMERA',
+        'activeCameraId must be a non-empty string',
+        `${path}.activeCameraId`,
+      ),
+    );
   if (!Array.isArray(value.tracks)) {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_TRACKS', 'tracks must be an array', `${path}.tracks`),

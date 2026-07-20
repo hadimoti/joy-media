@@ -70,6 +70,11 @@ export type VisualObjectCommand =
     }
   | { readonly type: 'marker.add'; readonly payload: { readonly marker: MarkerV1 } }
   | { readonly type: 'marker.remove'; readonly payload: { readonly markerId: string } }
+  | {
+      /** Sets or clears a composition's depth-only 2.5D camera (§20.3, ADR-0015). */
+      readonly type: 'composition.setActiveCamera';
+      readonly payload: { readonly compositionId: string; readonly cameraId?: string };
+    }
   | CaptionCommand
   | MotionCommand;
 export interface VisualObjectApplyResult {
@@ -125,6 +130,30 @@ export function applyVisualObjectProjectCommand(
         markers: project.markers.filter((item) => item.id !== command.payload.markerId),
       },
       inverse: { type: 'marker.add', payload: { marker } },
+    };
+  }
+  if (command.type === 'composition.setActiveCamera') {
+    const { compositionId, cameraId } = command.payload;
+    const composition = project.compositions[compositionId];
+    if (composition === undefined) throw new RangeError(`unknown composition "${compositionId}"`);
+    if (cameraId !== undefined) {
+      const camera = project.visualObjects[cameraId];
+      if (camera === undefined) throw new RangeError(`unknown camera "${cameraId}"`);
+      if (camera.kind !== 'camera') throw new RangeError(`object "${cameraId}" is not a camera`);
+    }
+    const previous = composition.activeCameraId;
+    const nextComposition = { ...composition };
+    if (cameraId === undefined) delete nextComposition.activeCameraId;
+    else nextComposition.activeCameraId = cameraId;
+    return {
+      project: {
+        ...project,
+        compositions: { ...project.compositions, [compositionId]: nextComposition },
+      },
+      inverse: {
+        type: 'composition.setActiveCamera',
+        payload: previous === undefined ? { compositionId } : { compositionId, cameraId: previous },
+      },
     };
   }
   const object = project.visualObjects[command.payload.objectId];
@@ -246,7 +275,8 @@ export function applyVisualObjectCommand(
   const object = objects.find((item) => item.id === command.payload.objectId);
   if (object === undefined)
     throw new RangeError(`unknown visual object ${command.payload.objectId}`);
-  const previous = object.transform[command.payload.key];
+  // positionZ is optional (default 0, ADR-0015); every other channel is always present.
+  const previous = object.transform[command.payload.key] ?? 0;
   return {
     objects: setVisualProperty(objects, [object.id], command.payload.key, command.payload.value),
     inverse: {

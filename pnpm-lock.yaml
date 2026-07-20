@@ -166,6 +166,15 @@ importers:
 
   packages/audio-core: {}
 
+  packages/camera-core:
+    dependencies:
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../motion-core
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+
   packages/captions-core:
     dependencies:
       '@joy-media/project-schema':
@@ -192,6 +201,9 @@ importers:
 
   packages/evaluator:
     dependencies:
+      '@joy-media/camera-core':
+        specifier: workspace:*
+        version: link:../camera-core
       '@joy-media/motion-core':
         specifier: workspace:*
         version: link:../motion-core

@@ -321,4 +321,102 @@ describe('v1 project schema and migration harness', () => {
     expect(messages).toContain('parenting graph contains a cycle');
     expect(messages).toContain('motionBlur config is invalid');
   });
+
+  it('accepts a camera object with depth and an activeCameraId (ADR-0015)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      positionZ: -400,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const project = {
+      ...base,
+      compositions: {
+        root: { ...base.compositions.root!, activeCameraId: 'cam-1' },
+      },
+      visualObjects: {
+        'cam-1': {
+          id: 'cam-1',
+          kind: 'camera',
+          transform: { ...transform, positionZ: 0 },
+          camera: { fieldOfViewDeg: 54 },
+        },
+        layer: { id: 'layer', kind: 'text', transform },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('reports camera violations with coded diagnostics', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      compositions: {
+        root: { ...base.compositions.root!, activeCameraId: 'ghost-camera' },
+      },
+      visualObjects: {
+        // missing camera params
+        'cam-broken': { id: 'cam-broken', kind: 'camera', transform },
+        // out-of-range field of view
+        'cam-wide': {
+          id: 'cam-wide',
+          kind: 'camera',
+          transform,
+          camera: { fieldOfViewDeg: 200 },
+        },
+        // camera params on a non-camera object
+        stray: { id: 'stray', kind: 'text', transform, camera: { fieldOfViewDeg: 50 } },
+        // non-finite depth
+        deep: { id: 'deep', kind: 'text', transform: { ...transform, positionZ: NaN } },
+      },
+    });
+    const messages = diagnostics.map((diagnostic) => diagnostic.message);
+    const codes = diagnostics.map((diagnostic) => diagnostic.code);
+    expect(messages).toContain('camera "ghost-camera" does not exist');
+    expect(codes).toContain('PROJECT_SCHEMA_V1_CAMERA');
+    expect(
+      messages.filter((message) => message === 'camera objects require fieldOfViewDeg in (0, 170]'),
+    ).toHaveLength(2);
+    expect(messages).toContain('only camera objects may carry camera params');
+    expect(messages).toContain('transform positionZ must be finite');
+  });
+
+  it('reports an activeCameraId pointing at a non-camera object', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      compositions: {
+        root: { ...base.compositions.root!, activeCameraId: 'not-a-camera' },
+      },
+      visualObjects: {
+        'not-a-camera': { id: 'not-a-camera', kind: 'text', transform },
+      },
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.message)).toContain(
+      '"not-a-camera" is not a camera object',
+    );
+  });
 });
