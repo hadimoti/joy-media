@@ -1,11 +1,13 @@
 # workflow-engine
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: active — P07 (WP-07.1 landed).**
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §23 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Deterministic automation graphs: typed nodes/edges, checkpoints, idempotent runs, approval nodes.
 
-**First built in part:** P07. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
+**Landed (WP-07.1).** Versioned `JoyWorkflow` format (§23.3) with §23.2 node categories; DAG validation with coded issues and deterministic topological ordering; canonical-JSON sha-256 run keys (§23.5); a checkpointed synchronous runtime with retry policies, cooperative cancel, failure modes (`stop` / `continue-independent` / `manual`), and resume that never duplicates completed work (deterministic nodes reused by run key; nondeterministic reuse is policy-gated).
+
+**Next.** WP-07.2 node library v1 (incl. approval/wait nodes parking as `waiting_for_input`), WP-07.3 authoring/operations, WP-07.4 first-party workflows.
 
 **Must not:** Depending on free-form agent conversation for production automation (§2.10).
 

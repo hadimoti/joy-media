@@ -28,6 +28,7 @@ export default defineConfig({
       '@joy-media/adapter-voice-isolation': pkg('./packages/adapter-voice-isolation/src/index.ts'),
       '@joy-media/adapter-tts': pkg('./packages/adapter-tts/src/index.ts'),
       '@joy-media/agent-tools': pkg('./packages/agent-tools/src/index.ts'),
+      '@joy-media/workflow-engine': pkg('./packages/workflow-engine/src/index.ts'),
     },
   },
   test: {

@@ -22,6 +22,7 @@
     { "path": "packages/audio-core" },
     { "path": "packages/project-persistence" },
     { "path": "packages/job-protocol" },
+    { "path": "packages/workflow-engine" },
     { "path": "packages/test-fixtures" },
     { "path": "tooling/golden-render" },
     { "path": "tooling/benchmark" }
