@@ -217,6 +217,8 @@ importers:
         specifier: workspace:*
         version: link:../test-fixtures
 
+  packages/expression-core: {}
+
   packages/html-scene-runtime:
     dependencies:
       '@joy-media/project-schema':
