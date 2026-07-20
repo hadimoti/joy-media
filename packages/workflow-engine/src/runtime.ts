@@ -1,15 +1,47 @@
 /** P07 WP-07.1 — checkpointed workflow runtime: retry, cancel, resume, idempotent reuse (§23.5). */
+/** P07 WP-07.2 adds §23.6 human-in-the-loop parking: `waiting_for_input` without held resources. */
 
 import type { JoyWorkflow, RetryPolicy, WorkflowNode } from './definition.js';
 import { upstreamOf, validateWorkflow } from './definition.js';
 import { computeRunKey } from './run-key.js';
 
-export type NodeRunState = 'pending' | 'succeeded' | 'failed' | 'skipped' | 'canceled';
+export type NodeRunState =
+  'pending' | 'succeeded' | 'failed' | 'skipped' | 'canceled' | 'waiting_for_input';
 
 export type WorkflowRunState =
-  'succeeded' | 'failed' | 'canceled' | 'waiting_for_manual_intervention';
+  'succeeded' | 'failed' | 'canceled' | 'waiting_for_manual_intervention' | 'waiting_for_input';
 
 export const CHECKPOINT_VERSION = 1 as const;
+
+/** §23.6: the requests an approval node may make of a human reviewer. */
+export type HumanInputRequestKind =
+  | 'choose-candidates'
+  | 'confirm-cost'
+  | 'allow-remote-upload'
+  | 'approve-transcript'
+  | 'approve-voice-identity'
+  | 'accept-edit-diff'
+  | 'select-variant'
+  | 'approve-render';
+
+export const HUMAN_INPUT_REQUEST_KINDS: readonly HumanInputRequestKind[] = [
+  'choose-candidates',
+  'confirm-cost',
+  'allow-remote-upload',
+  'approve-transcript',
+  'approve-voice-identity',
+  'accept-edit-diff',
+  'select-variant',
+  'approve-render',
+];
+
+/** JSON-serializable description of what a parked node is waiting for (§23.6). */
+export interface HumanInputRequest {
+  readonly kind: HumanInputRequestKind;
+  readonly prompt: string;
+  /** Review payload (candidates, cost estimate, diff…). Must be JSON-serializable. */
+  readonly payload?: unknown;
+}
 
 export interface NodeCheckpoint {
   readonly runKey: string;
@@ -18,6 +50,10 @@ export interface NodeCheckpoint {
   readonly deterministic: boolean;
   readonly output?: unknown;
   readonly failureCode?: string;
+  /** Present while the node is parked as `waiting_for_input` (§23.6). */
+  readonly pendingRequest?: HumanInputRequest;
+  /** The human response a succeeded node consumed; keeps the decision authoritative on resume. */
+  readonly resolvedInput?: unknown;
 }
 
 /** Serializable run snapshot; resuming from it never duplicates completed work (§23.5). */
@@ -38,11 +74,18 @@ export interface NodeExecutionContext {
   readonly workflowInputs: unknown;
   readonly attempt: number;
   readonly runKey: string;
+  /** Identity of the enclosing run; lets composite nodes (map/batch) derive child run ids. */
+  readonly runId: string;
+  readonly projectRevision: string;
+  /** §23.6: the human response provided for this node, when one has been supplied. */
+  readonly humanInput?: unknown;
 }
 
 export type NodeResult =
   | { readonly ok: true; readonly output: unknown }
-  | { readonly ok: false; readonly failureCode: string; readonly retryable: boolean };
+  | { readonly ok: false; readonly failureCode: string; readonly retryable: boolean }
+  /** §23.6: park the node (and its dependents) until a human responds; holds no resources. */
+  | { readonly waiting: true; readonly request: HumanInputRequest };
 
 export type NodeHandler = (context: NodeExecutionContext) => NodeResult;
 
@@ -69,6 +112,8 @@ export interface ExecuteWorkflowOptions {
   readonly reuseNondeterministic?: boolean;
   /** Cooperative cancellation, checked before each node starts. */
   readonly shouldCancel?: () => boolean;
+  /** §23.6: human responses keyed by node id; supplied when resuming a parked run. */
+  readonly humanInputs?: Readonly<Record<string, unknown>>;
 }
 
 export interface ExecuteWorkflowResult {
@@ -86,6 +131,8 @@ interface MutableNodeRecord {
   deterministic: boolean;
   output?: unknown;
   failureCode?: string;
+  pendingRequest?: HumanInputRequest;
+  resolvedInput?: unknown;
 }
 
 function effectiveRetry(workflow: JoyWorkflow, node: WorkflowNode): RetryPolicy {
@@ -104,6 +151,8 @@ function toCheckpointNodes(
       deterministic: boolean;
       output?: unknown;
       failureCode?: string;
+      pendingRequest?: HumanInputRequest;
+      resolvedInput?: unknown;
     } = {
       runKey: record.runKey,
       state: record.state,
@@ -115,6 +164,12 @@ function toCheckpointNodes(
     }
     if (record.failureCode !== undefined) {
       entry.failureCode = record.failureCode;
+    }
+    if (record.pendingRequest !== undefined) {
+      entry.pendingRequest = record.pendingRequest;
+    }
+    if (record.resolvedInput !== undefined) {
+      entry.resolvedInput = record.resolvedInput;
     }
     nodes[id] = entry;
   }
@@ -154,6 +209,12 @@ function transitiveDependents(
  *   deterministic nodes always, nondeterministic only with `reuseNondeterministic`.
  * - Failure policy: `stop` skips dependents and fails; `continue-independent` keeps
  *   independent branches running; `manual` parks as `waiting_for_manual_intervention`.
+ * - §23.6: a `waiting` node result parks that node (and its dependents) as
+ *   `waiting_for_input`; independent branches keep executing, and the call returns —
+ *   no Worker resources are held while the human decides. Resume with `humanInputs`
+ *   re-runs only the parked node; a succeeded node that consumed a human response is
+ *   reused on later resumes (the recorded decision is authoritative) unless a new
+ *   response for it is supplied or its run key changed.
  */
 export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflowResult {
   const { workflow, resumeFrom } = options;
@@ -192,10 +253,13 @@ export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflo
 
   let runState: WorkflowRunState = 'succeeded';
   const blocked = new Set<string>();
+  /** Dependents of parked §23.6 nodes: they stay pending, but independent branches run. */
+  const waitingBlocked = new Set<string>();
 
   for (const nodeId of validation.order) {
     const node = nodesById.get(nodeId) as WorkflowNode;
     const parents = upstream.get(nodeId) ?? [];
+    const providedInput = options.humanInputs?.[nodeId];
 
     // Upstream slots are null (never undefined) when a parent has not produced output,
     // so run keys stay canonicalizable and checkpoints stay JSON-round-trippable.
@@ -213,7 +277,7 @@ export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflo
       projectRevision: options.projectRevision,
     });
 
-    if (runState !== 'succeeded' || blocked.has(nodeId)) {
+    if (runState !== 'succeeded' || blocked.has(nodeId) || waitingBlocked.has(nodeId)) {
       records.set(nodeId, {
         runKey,
         state: blocked.has(nodeId) ? 'skipped' : 'pending',
@@ -235,19 +299,26 @@ export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflo
     }
 
     const prior = resumeFrom?.nodes[nodeId];
+    // §23.6: a recorded human decision stays authoritative across resumes unless a new
+    // response for the node is supplied in this call (or its run key changed).
+    const humanResolved = prior?.resolvedInput !== undefined && providedInput === undefined;
     const reusable =
       prior !== undefined &&
       prior.state === 'succeeded' &&
       prior.runKey === runKey &&
-      (node.deterministic || options.reuseNondeterministic === true);
+      (node.deterministic || options.reuseNondeterministic === true || humanResolved);
     if (reusable) {
-      records.set(nodeId, {
+      const record: MutableNodeRecord = {
         runKey,
         state: 'succeeded',
         attempts: prior.attempts,
         deterministic: node.deterministic,
         output: prior.output,
-      });
+      };
+      if (prior.resolvedInput !== undefined) {
+        record.resolvedInput = prior.resolvedInput;
+      }
+      records.set(nodeId, record);
       reusedNodeIds.push(nodeId);
       continue;
     }
@@ -271,21 +342,44 @@ export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflo
         workflowInputs: options.workflowInputs,
         attempt: attempts,
         runKey,
+        runId: options.runId,
+        projectRevision: options.projectRevision,
+        humanInput: providedInput,
       });
-      if (final.ok || !final.retryable) {
+      if ('waiting' in final || final.ok || !final.retryable) {
         break;
       }
     }
     executedNodeIds.push(nodeId);
 
-    if (final !== undefined && final.ok) {
+    if (final !== undefined && 'waiting' in final) {
+      // §23.6: park the node; independent branches keep running and the call returns,
+      // so no Worker resources are consumed while the human decides.
       records.set(nodeId, {
+        runKey,
+        state: 'waiting_for_input',
+        attempts,
+        deterministic: node.deterministic,
+        pendingRequest: final.request,
+      });
+      for (const dependent of transitiveDependents(workflow, nodeId, upstream)) {
+        waitingBlocked.add(dependent);
+      }
+      continue;
+    }
+
+    if (final !== undefined && final.ok) {
+      const record: MutableNodeRecord = {
         runKey,
         state: 'succeeded',
         attempts,
         deterministic: node.deterministic,
         output: final.output === undefined ? null : final.output,
-      });
+      };
+      if (providedInput !== undefined) {
+        record.resolvedInput = providedInput;
+      }
+      records.set(nodeId, record);
       continue;
     }
 
@@ -308,15 +402,22 @@ export function executeWorkflow(options: ExecuteWorkflowOptions): ExecuteWorkflo
     // executing; the post-pass below reports the overall run as failed.
   }
 
-  // A continue-independent run that saw any failure reports failed overall.
+  // A continue-independent run that saw any failure reports failed overall; a run with
+  // no failure but a parked §23.6 node reports waiting_for_input.
   let sawFailure = false;
+  let sawWaiting = false;
   for (const record of records.values()) {
     if (record.state === 'failed') {
       sawFailure = true;
     }
+    if (record.state === 'waiting_for_input') {
+      sawWaiting = true;
+    }
   }
   if (runState === 'succeeded' && sawFailure) {
     runState = 'failed';
+  } else if (runState === 'succeeded' && sawWaiting) {
+    runState = 'waiting_for_input';
   }
 
   const checkpoint: RunCheckpoint = {
