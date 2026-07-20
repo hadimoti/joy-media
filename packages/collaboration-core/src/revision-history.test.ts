@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { RevisionHistory } from './revision-history.js';
+import { RevisionHistory, StaticRevisionHistoryAuthorization } from './revision-history.js';
+
+const authorization = new StaticRevisionHistoryAuthorization({
+  owner: ['revision.root.create', 'revision.accept', 'revision.reject'],
+  editor: ['revision.propose'],
+});
 
 describe('revision history', () => {
   it('accepts only fast-forward proposals and preserves a stale proposal as a conflict', () => {
-    const history = new RevisionHistory();
+    const history = new RevisionHistory(authorization);
     expect(
       history.createRoot({
         id: 'r0',
@@ -17,7 +22,7 @@ describe('revision history', () => {
         id: 'r1',
         projectId: 'project',
         baseRevisionId: 'r0',
-        actorId: 'a',
+        actorId: 'editor',
         snapshot: { title: 'B' },
       }),
     ).toMatchObject({ status: 'pending' });
@@ -26,12 +31,13 @@ describe('revision history', () => {
         id: 'stale',
         projectId: 'project',
         baseRevisionId: 'r0',
-        actorId: 'b',
+        actorId: 'editor',
         snapshot: { title: 'C' },
       }),
     ).toMatchObject({ status: 'pending' });
-    expect(history.accept('r1')).toMatchObject({ status: 'accepted' });
-    expect(history.accept('stale')).toMatchObject({ status: 'conflicted' });
+    expect(history.accept('editor', 'r1')).toBeUndefined();
+    expect(history.accept('owner', 'r1')).toMatchObject({ status: 'accepted' });
+    expect(history.accept('owner', 'stale')).toMatchObject({ status: 'conflicted' });
     expect(history.head('project')).toMatchObject({
       id: 'r1',
       parentId: 'r0',
@@ -41,14 +47,14 @@ describe('revision history', () => {
   });
 
   it('rejects proposals against a non-head base and lets a pending proposal be rejected explicitly', () => {
-    const history = new RevisionHistory();
+    const history = new RevisionHistory(authorization);
     history.createRoot({ id: 'r0', projectId: 'project', actorId: 'owner', snapshot: {} });
     expect(
       history.propose({
         id: 'bad',
         projectId: 'project',
         baseRevisionId: 'missing',
-        actorId: 'a',
+        actorId: 'editor',
         snapshot: {},
       }),
     ).toBeUndefined();
@@ -56,10 +62,13 @@ describe('revision history', () => {
       id: 'r1',
       projectId: 'project',
       baseRevisionId: 'r0',
-      actorId: 'a',
+      actorId: 'editor',
       snapshot: {},
     });
-    expect(history.reject('r1')).toMatchObject({ status: 'rejected' });
+    expect(history.reject('owner', 'r1')).toMatchObject({ status: 'rejected' });
     expect(history.head('project')).toMatchObject({ id: 'r0' });
+    const reopened = new RevisionHistory(authorization, history.snapshot());
+    expect(reopened.head('project')).toEqual(history.head('project'));
+    expect(reopened.audit()).toEqual(history.audit());
   });
 });

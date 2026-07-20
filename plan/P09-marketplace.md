@@ -1,6 +1,6 @@
 # P09 — Marketplace, Collaboration, and Scale
 
-**Status:** in-progress · **Gate:** P08 complete + owner approved opening on 2026-07-20. This plan records the staged, bounded scope.
+**Status:** done · **Gate:** reviewed and accepted for the bounded scope on 2026-07-20; commercial/scale/mobile work remains separately closed by ADR-0013/0014.
 
 ## Work packages
 
@@ -22,3 +22,5 @@
 1. Owner approval: recorded in ADR-0011.
 2. Exit criteria: defined above before implementation.
 3. Work packages: partitioned above; WP-09.1 starts first.
+
+Gate review accepted 2026-07-20; evidence in [`p09-gate-review.md`](../docs/architecture/p09-gate-review.md).

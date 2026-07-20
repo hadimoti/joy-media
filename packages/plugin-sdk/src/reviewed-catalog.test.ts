@@ -1,6 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { hashPluginPackage, ReviewedCatalog, signPluginPackage } from './index.js';
+import {
+  hashPluginPackage,
+  ReviewedCatalog,
+  signPluginPackage,
+  StaticCatalogAuthorization,
+} from './index.js';
 import type { PluginManifestV1 } from './index.js';
 describe('reviewed catalog', () =>
   it('admits only verified publishers and immutable signed releases, then revokes them', () => {
@@ -22,35 +27,67 @@ describe('reviewed catalog', () =>
       privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
     );
     expect(signature.packageSha256).toBe(hashPluginPackage(files));
-    const catalog = new ReviewedCatalog({
-      keys: { key: publicKey.export({ type: 'spki', format: 'pem' }).toString() },
+    const trust = { keys: { key: publicKey.export({ type: 'spki', format: 'pem' }).toString() } };
+    const authorization = new StaticCatalogAuthorization({
+      admin: ['publisher.register'],
+      example: ['release.submit'],
+      reviewer: ['release.review', 'release.revoke'],
     });
-    catalog.registerPublisher({
-      id: 'unverified',
-      displayName: 'Unverified',
-      verified: false,
-      signingKeyIds: ['key'],
-    });
-    expect(catalog.submit('unverified', { manifest, files, signature })).toBeUndefined();
-    catalog.registerPublisher({
-      id: 'example',
-      displayName: 'Example',
-      verified: true,
-      signingKeyIds: ['key'],
-    });
-    const release = catalog.submit('example', { manifest, files, signature })!;
+    const catalog = new ReviewedCatalog(trust, authorization);
+    expect(
+      catalog.registerPublisher('example', {
+        id: 'unverified',
+        displayName: 'Unverified',
+        verified: false,
+        signingKeyIds: ['key'],
+      }),
+    ).toBe(false);
+    expect(
+      catalog.registerPublisher('admin', {
+        id: 'example',
+        displayName: 'Example',
+        verified: true,
+        signingKeyIds: ['key'],
+      }),
+    ).toBe(true);
+    expect(
+      catalog.registerPublisher('admin', {
+        id: 'example',
+        displayName: 'Changed',
+        verified: true,
+        signingKeyIds: ['key'],
+      }),
+    ).toBe(false);
+    expect(catalog.submit('unverified', 'example', { manifest, files, signature })).toBeUndefined();
+    const release = catalog.submit('example', 'example', { manifest, files, signature })!;
     expect(release).toMatchObject({
       state: 'pending',
       permissions: [],
       compatibility: '>=1.0.0 <2.0.0',
     });
-    expect(catalog.submit('example', { manifest, files, signature })).toBeUndefined();
+    expect(catalog.submit('example', 'example', { manifest, files, signature })).toBeUndefined();
     expect(catalog.list(true)).toEqual([]);
     expect(
-      catalog.review('example', manifest.id, manifest.version, 'reviewer-a', true),
-    ).toMatchObject({ state: 'approved', reviewerId: 'reviewer-a' });
+      catalog.review('example', 'example', manifest.id, manifest.version, true),
+    ).toBeUndefined();
+    expect(
+      catalog.review('reviewer', 'example', manifest.id, manifest.version, true),
+    ).toMatchObject({ state: 'approved', reviewerId: 'reviewer' });
     expect(catalog.list(true)).toHaveLength(1);
     expect(
-      catalog.revoke('example', manifest.id, manifest.version, 'security incident', true),
+      catalog.revoke(
+        'reviewer',
+        'example',
+        manifest.id,
+        manifest.version,
+        'security incident',
+        true,
+      ),
     ).toMatchObject({ state: 'quarantined' });
+    expect(catalog.audit().some((entry) => entry.actorId === 'unverified' && !entry.allowed)).toBe(
+      true,
+    );
+    const reopened = new ReviewedCatalog(trust, authorization, catalog.snapshot());
+    expect(reopened.list()).toEqual(catalog.list());
+    expect(reopened.audit()).toEqual(catalog.audit());
   }));

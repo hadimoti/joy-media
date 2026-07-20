@@ -84,8 +84,16 @@ export type {
   TemplateQualityIssue,
 } from './templates.js';
 export { TeamTemplateCatalog, validateTeamTemplate } from './templates.js';
-export type { CatalogPublisher, CatalogReleaseState, ReviewedRelease } from './reviewed-catalog.js';
-export { ReviewedCatalog } from './reviewed-catalog.js';
+export type {
+  CatalogAuditRecord,
+  CatalogAuthorization,
+  CatalogPermission,
+  CatalogPublisher,
+  CatalogReleaseState,
+  ReviewedCatalogSnapshot,
+  ReviewedRelease,
+} from './reviewed-catalog.js';
+export { ReviewedCatalog, StaticCatalogAuthorization } from './reviewed-catalog.js';
 export {
   createPluginScaffold,
   pluginRenderSnapshot,
