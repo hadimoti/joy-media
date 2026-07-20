@@ -1,8 +1,7 @@
 {
-  "name": "@joy-media/commands",
+  "name": "@joy-media/adapter-noise-removal",
   "version": "0.0.0",
   "private": true,
-  "description": "Command registry, validation, inversion, transactions, undo/redo",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,10 +16,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@joy-media/audio-core": "workspace:*",
-    "@joy-media/project-schema": "workspace:*"
-  },
-  "devDependencies": {
-    "@joy-media/test-fixtures": "workspace:*"
+    "@joy-media/provider-sdk": "workspace:*"
   }
 }

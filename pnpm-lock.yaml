@@ -125,6 +125,30 @@ importers:
         specifier: ^4.20.0
         version: 4.23.1
 
+  packages/adapter-comfyui:
+    dependencies:
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
+  packages/adapter-noise-removal:
+    dependencies:
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
+  packages/adapter-tts:
+    dependencies:
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
+  packages/adapter-voice-isolation:
+    dependencies:
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
   packages/audio-core: {}
 
   packages/captions-core:
@@ -138,6 +162,9 @@ importers:
 
   packages/commands:
     dependencies:
+      '@joy-media/audio-core':
+        specifier: workspace:*
+        version: link:../audio-core
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema

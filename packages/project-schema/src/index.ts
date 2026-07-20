@@ -65,3 +65,11 @@ export type {
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type { MigrationReport, MigrationResult } from './migration.js';
 export { migrateV0ToV1 } from './migration.js';
+
+export type {
+  VoiceIdentity,
+  ConsentRecord,
+  ConsentCheckResult,
+  VoiceStatus,
+  ProviderVoiceRef,
+} from './voice-identity.js';
