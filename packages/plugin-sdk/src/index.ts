@@ -70,6 +70,19 @@ export type {
   PermissionSimulation,
   PluginFixture,
 } from './dev-kit.js';
+
+export type {
+  TemplateVariableValue,
+  TemplateSlotMedia,
+  TemplateFitPolicy,
+  TemplateDurationRule,
+  TemplateCatalogScope,
+  TeamTemplateVariable,
+  TeamTemplateSlot,
+  TeamTemplateV1,
+  TemplateQualityIssue,
+} from './templates.js';
+export { TeamTemplateCatalog, validateTeamTemplate } from './templates.js';
 export {
   createPluginScaffold,
   pluginRenderSnapshot,
