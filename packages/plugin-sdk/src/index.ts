@@ -63,3 +63,16 @@ export type {
   PluginUpdateResult,
 } from './lifecycle.js';
 export { PluginLifecycle } from './lifecycle.js';
+
+export type {
+  PluginScaffoldOptions,
+  PluginScaffold,
+  PermissionSimulation,
+  PluginFixture,
+} from './dev-kit.js';
+export {
+  createPluginScaffold,
+  pluginRenderSnapshot,
+  runPluginFixture,
+  simulatePluginPermissions,
+} from './dev-kit.js';
