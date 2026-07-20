@@ -2,3 +2,5 @@ dist/
 node_modules/
 coverage/
 pnpm-lock.yaml
+# Generated workflow artifacts: canonical format is workflowToJson (pinned by test).
+packages/workflow-engine/workflows/

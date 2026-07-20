@@ -118,3 +118,15 @@ export type {
 
 export { runWorkflowHeadless } from './headless.js';
 export type { HeadlessRunOptions, HeadlessRunResult } from './headless.js';
+
+// WP-07.4 — first-party workflows (§23.4)
+export {
+  FIRST_PARTY_WORKFLOWS_VERSION,
+  FIRST_PARTY_WORKFLOW_IDS,
+  buildFirstPartyWorkflows,
+  buildLongVideoDraftReelsWorkflow,
+  buildMultilingualPromoWorkflow,
+  buildPodcastCleanupWorkflow,
+  firstPartyDefinitionFiles,
+} from './first-party.js';
+export type { FirstPartyDefinitionFile, FirstPartyWorkflow } from './first-party.js';

@@ -1,0 +1,291 @@
+{
+  "formatVersion": 1,
+  "id": "joy.first-party.multilingual-promo",
+  "version": "1.0.0",
+  "name": "Multilingual restaurant promo",
+  "inputs": {
+    "type": "object",
+    "required": [
+      "rows"
+    ],
+    "properties": {
+      "rows": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object"
+        },
+        "description": "Menu rows: name, priceText, image, language, copy."
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "manifest"
+    ],
+    "properties": {
+      "manifest": {
+        "type": "object"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "rows",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "rows"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "approve-copy",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "approve-transcript",
+        "prompt": "Approve the promo copy for every row. Respond with {rows: [...]} where each row carries its final copy plus name, priceText, image, and language.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "rows"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "per-language",
+      "category": "control",
+      "type": "control.map",
+      "params": {
+        "workflow": {
+          "formatVersion": 1,
+          "id": "joy.first-party.multilingual-promo.item",
+          "version": "1.0.0",
+          "name": "Promo render per menu row and language",
+          "inputs": {
+            "type": "object",
+            "description": "One approved menu row: name, priceText, image, language, copy."
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "nodes": [
+            {
+              "id": "translate",
+              "category": "generation",
+              "type": "generation.translate",
+              "params": {
+                "textFrom": {
+                  "kind": "input",
+                  "path": "copy"
+                },
+                "targetLanguageFrom": {
+                  "kind": "input",
+                  "path": "language"
+                }
+              },
+              "deterministic": false
+            },
+            {
+              "id": "voice",
+              "category": "generation",
+              "type": "generation.speech",
+              "params": {
+                "voiceId": "joy.voice.promo",
+                "textFrom": {
+                  "kind": "upstream",
+                  "node": "translate",
+                  "path": "text"
+                }
+              },
+              "deterministic": false
+            },
+            {
+              "id": "captions",
+              "category": "transform",
+              "type": "transform.caption",
+              "params": {
+                "templateId": "joy.caption.clean",
+                "source": {
+                  "kind": "upstream",
+                  "node": "voice"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "assemble",
+              "category": "transform",
+              "type": "transform.compose",
+              "params": {
+                "fields": {
+                  "row": {
+                    "kind": "input"
+                  },
+                  "translation": {
+                    "kind": "upstream",
+                    "node": "translate"
+                  },
+                  "voiceOver": {
+                    "kind": "upstream",
+                    "node": "voice"
+                  },
+                  "captions": {
+                    "kind": "upstream",
+                    "node": "captions"
+                  }
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "scene",
+              "category": "transform",
+              "type": "transform.sceneTemplate",
+              "params": {
+                "templateId": "joy.scene.product-card",
+                "variablesFrom": {
+                  "kind": "upstream",
+                  "node": "assemble"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "render",
+              "category": "render",
+              "type": "render.final",
+              "params": {
+                "profile": "promo-vertical",
+                "source": {
+                  "kind": "upstream",
+                  "node": "scene"
+                }
+              },
+              "deterministic": true,
+              "retry": {
+                "maxAttempts": 2,
+                "backoffMs": 1000
+              }
+            },
+            {
+              "id": "save",
+              "category": "output",
+              "type": "output.folder",
+              "params": {
+                "folderId": "exports",
+                "source": {
+                  "kind": "upstream",
+                  "node": "render"
+                }
+              },
+              "deterministic": true
+            }
+          ],
+          "edges": [
+            {
+              "from": "translate",
+              "to": "voice"
+            },
+            {
+              "from": "voice",
+              "to": "captions"
+            },
+            {
+              "from": "translate",
+              "to": "assemble"
+            },
+            {
+              "from": "voice",
+              "to": "assemble"
+            },
+            {
+              "from": "captions",
+              "to": "assemble"
+            },
+            {
+              "from": "assemble",
+              "to": "scene"
+            },
+            {
+              "from": "scene",
+              "to": "render"
+            },
+            {
+              "from": "render",
+              "to": "save"
+            }
+          ],
+          "permissions": [],
+          "policy": {
+            "concurrency": 1,
+            "failure": "stop",
+            "defaultRetry": {
+              "maxAttempts": 1,
+              "backoffMs": 0
+            }
+          }
+        },
+        "itemsFrom": {
+          "kind": "upstream",
+          "node": "approve-copy",
+          "path": "response.rows"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "manifest",
+      "category": "output",
+      "type": "output.metadata",
+      "params": {
+        "folderId": "exports",
+        "fileName": "multilingual-promo-run.json",
+        "source": {
+          "kind": "upstream",
+          "node": "per-language"
+        }
+      },
+      "deterministic": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "rows",
+      "to": "approve-copy"
+    },
+    {
+      "from": "approve-copy",
+      "to": "per-language"
+    },
+    {
+      "from": "per-language",
+      "to": "manifest"
+    }
+  ],
+  "permissions": [
+    {
+      "capability": "provider.translate"
+    },
+    {
+      "capability": "provider.tts"
+    },
+    {
+      "capability": "render.final"
+    },
+    {
+      "capability": "output.write"
+    }
+  ],
+  "policy": {
+    "concurrency": 1,
+    "failure": "stop",
+    "defaultRetry": {
+      "maxAttempts": 1,
+      "backoffMs": 0
+    }
+  }
+}

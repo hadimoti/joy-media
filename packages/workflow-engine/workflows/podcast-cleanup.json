@@ -1,0 +1,431 @@
+{
+  "formatVersion": 1,
+  "id": "joy.first-party.podcast-cleanup",
+  "version": "1.0.0",
+  "name": "Podcast cleanup",
+  "inputs": {
+    "type": "object",
+    "required": [
+      "source"
+    ],
+    "properties": {
+      "source": {
+        "type": "object",
+        "description": "Opaque episode audio/video asset reference."
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "save-episode",
+      "manifest"
+    ],
+    "properties": {
+      "save-episode": {
+        "type": "object"
+      },
+      "manifest": {
+        "type": "object"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "ingest",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "source"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "speakers",
+      "category": "analysis",
+      "type": "analysis.speakers",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "ingest"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "confirm-speakers",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "choose-candidates",
+        "prompt": "Confirm or correct the detected speakers. Respond with {speakers: [...]}.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "speakers"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "denoise",
+      "category": "transform",
+      "type": "transform.denoise",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "ingest"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "normalize",
+      "category": "transform",
+      "type": "transform.normalizeAudio",
+      "params": {
+        "targetLufs": -16,
+        "source": {
+          "kind": "upstream",
+          "node": "denoise"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "silence",
+      "category": "analysis",
+      "type": "analysis.silence",
+      "params": {
+        "thresholdDb": -40,
+        "minSilenceMs": 1500,
+        "source": {
+          "kind": "upstream",
+          "node": "normalize"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "approve-edit-list",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "accept-edit-diff",
+        "prompt": "Approve the silence-removal edit list. Respond with {ranges: [...]}; exactly the approved ranges are removed.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "silence"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "trim",
+      "category": "transform",
+      "type": "transform.trim",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "normalize"
+        },
+        "rangesFrom": {
+          "kind": "upstream",
+          "node": "approve-edit-list",
+          "path": "response.ranges"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "transcribe",
+      "category": "analysis",
+      "type": "analysis.transcribe",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "trim"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "chapters",
+      "category": "analysis",
+      "type": "analysis.chapters",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "trim"
+        },
+        "transcriptFrom": {
+          "kind": "upstream",
+          "node": "transcribe"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "captions",
+      "category": "transform",
+      "type": "transform.caption",
+      "params": {
+        "templateId": "joy.caption.clean",
+        "source": {
+          "kind": "upstream",
+          "node": "transcribe"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "render-episode",
+      "category": "render",
+      "type": "render.final",
+      "params": {
+        "profile": "podcast-episode",
+        "source": {
+          "kind": "upstream",
+          "node": "captions"
+        }
+      },
+      "deterministic": true,
+      "retry": {
+        "maxAttempts": 2,
+        "backoffMs": 1000
+      }
+    },
+    {
+      "id": "save-episode",
+      "category": "output",
+      "type": "output.folder",
+      "params": {
+        "folderId": "exports",
+        "fileName": "episode",
+        "source": {
+          "kind": "upstream",
+          "node": "render-episode"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "clips",
+      "category": "control",
+      "type": "control.map",
+      "params": {
+        "workflow": {
+          "formatVersion": 1,
+          "id": "joy.first-party.podcast-cleanup.clip",
+          "version": "1.0.0",
+          "name": "Podcast clip per chapter",
+          "inputs": {
+            "type": "object",
+            "description": "One chapter (self-contained renderable reference)."
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "nodes": [
+            {
+              "id": "clip",
+              "category": "render",
+              "type": "render.final",
+              "params": {
+                "profile": "podcast-clip",
+                "source": {
+                  "kind": "input"
+                }
+              },
+              "deterministic": true,
+              "retry": {
+                "maxAttempts": 2,
+                "backoffMs": 1000
+              }
+            },
+            {
+              "id": "save",
+              "category": "output",
+              "type": "output.folder",
+              "params": {
+                "folderId": "exports",
+                "source": {
+                  "kind": "upstream",
+                  "node": "clip"
+                }
+              },
+              "deterministic": true
+            }
+          ],
+          "edges": [
+            {
+              "from": "clip",
+              "to": "save"
+            }
+          ],
+          "permissions": [],
+          "policy": {
+            "concurrency": 1,
+            "failure": "stop",
+            "defaultRetry": {
+              "maxAttempts": 1,
+              "backoffMs": 0
+            }
+          }
+        },
+        "itemsFrom": {
+          "kind": "upstream",
+          "node": "chapters",
+          "path": "chapters"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "audit",
+      "category": "transform",
+      "type": "transform.compose",
+      "params": {
+        "fields": {
+          "speakers": {
+            "kind": "upstream",
+            "node": "confirm-speakers",
+            "path": "response"
+          },
+          "editList": {
+            "kind": "upstream",
+            "node": "approve-edit-list",
+            "path": "response"
+          },
+          "chapters": {
+            "kind": "upstream",
+            "node": "chapters"
+          },
+          "clips": {
+            "kind": "upstream",
+            "node": "clips"
+          }
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "manifest",
+      "category": "output",
+      "type": "output.metadata",
+      "params": {
+        "folderId": "exports",
+        "fileName": "podcast-cleanup-run.json",
+        "source": {
+          "kind": "upstream",
+          "node": "audit"
+        }
+      },
+      "deterministic": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "ingest",
+      "to": "speakers"
+    },
+    {
+      "from": "speakers",
+      "to": "confirm-speakers"
+    },
+    {
+      "from": "ingest",
+      "to": "denoise"
+    },
+    {
+      "from": "denoise",
+      "to": "normalize"
+    },
+    {
+      "from": "normalize",
+      "to": "silence"
+    },
+    {
+      "from": "silence",
+      "to": "approve-edit-list"
+    },
+    {
+      "from": "normalize",
+      "to": "trim"
+    },
+    {
+      "from": "approve-edit-list",
+      "to": "trim"
+    },
+    {
+      "from": "trim",
+      "to": "transcribe"
+    },
+    {
+      "from": "trim",
+      "to": "chapters"
+    },
+    {
+      "from": "transcribe",
+      "to": "chapters"
+    },
+    {
+      "from": "transcribe",
+      "to": "captions"
+    },
+    {
+      "from": "captions",
+      "to": "render-episode"
+    },
+    {
+      "from": "render-episode",
+      "to": "save-episode"
+    },
+    {
+      "from": "chapters",
+      "to": "clips"
+    },
+    {
+      "from": "confirm-speakers",
+      "to": "audit"
+    },
+    {
+      "from": "approve-edit-list",
+      "to": "audit"
+    },
+    {
+      "from": "chapters",
+      "to": "audit"
+    },
+    {
+      "from": "clips",
+      "to": "audit"
+    },
+    {
+      "from": "audit",
+      "to": "manifest"
+    }
+  ],
+  "permissions": [
+    {
+      "capability": "provider.audio-cleanup"
+    },
+    {
+      "capability": "provider.transcribe"
+    },
+    {
+      "capability": "render.final"
+    },
+    {
+      "capability": "output.write"
+    }
+  ],
+  "policy": {
+    "concurrency": 1,
+    "failure": "stop",
+    "defaultRetry": {
+      "maxAttempts": 1,
+      "backoffMs": 0
+    }
+  }
+}

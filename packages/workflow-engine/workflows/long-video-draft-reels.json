@@ -1,0 +1,364 @@
+{
+  "formatVersion": 1,
+  "id": "joy.first-party.long-video-draft-reels",
+  "version": "1.0.0",
+  "name": "Long video → draft reels",
+  "inputs": {
+    "type": "object",
+    "required": [
+      "asset"
+    ],
+    "properties": {
+      "asset": {
+        "type": "object",
+        "description": "Opaque source video asset reference."
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "manifest"
+    ],
+    "properties": {
+      "manifest": {
+        "type": "object"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "ingest",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "asset"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "transcribe",
+      "category": "analysis",
+      "type": "analysis.transcribe",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "ingest"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "hooks",
+      "category": "analysis",
+      "type": "analysis.hooks",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "ingest"
+        },
+        "transcriptFrom": {
+          "kind": "upstream",
+          "node": "transcribe"
+        },
+        "maxCandidates": 5
+      },
+      "deterministic": true
+    },
+    {
+      "id": "approve-candidates",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "choose-candidates",
+        "prompt": "Choose which hook candidates become draft reels. Respond with {candidates: [...]}; each candidate must carry its source and subjectHints.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "hooks"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "draft-reels",
+      "category": "control",
+      "type": "control.map",
+      "params": {
+        "workflow": {
+          "formatVersion": 1,
+          "id": "joy.first-party.long-video-draft-reels.item",
+          "version": "1.0.0",
+          "name": "Draft reel per approved candidate",
+          "inputs": {
+            "type": "object",
+            "description": "One approved hook candidate; must carry its own source reference and subjectHints."
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "nodes": [
+            {
+              "id": "branch",
+              "category": "editor",
+              "type": "editor.createBranch",
+              "params": {
+                "name": "draft-reel",
+                "source": {
+                  "kind": "input"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "reframe",
+              "category": "transform",
+              "type": "transform.reframe",
+              "params": {
+                "aspect": "9:16",
+                "source": {
+                  "kind": "upstream",
+                  "node": "branch"
+                },
+                "subjectHintsFrom": {
+                  "kind": "input",
+                  "path": "subjectHints"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "caption",
+              "category": "transform",
+              "type": "transform.caption",
+              "params": {
+                "templateId": "joy.caption.clean",
+                "source": {
+                  "kind": "upstream",
+                  "node": "reframe"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "mix",
+              "category": "transform",
+              "type": "transform.normalizeAudio",
+              "params": {
+                "targetLufs": -14,
+                "duckMusic": true,
+                "source": {
+                  "kind": "upstream",
+                  "node": "caption"
+                }
+              },
+              "deterministic": true
+            },
+            {
+              "id": "preview",
+              "category": "render",
+              "type": "render.preview",
+              "params": {
+                "profile": "review-proxy",
+                "source": {
+                  "kind": "upstream",
+                  "node": "mix"
+                }
+              },
+              "deterministic": true
+            }
+          ],
+          "edges": [
+            {
+              "from": "branch",
+              "to": "reframe"
+            },
+            {
+              "from": "reframe",
+              "to": "caption"
+            },
+            {
+              "from": "caption",
+              "to": "mix"
+            },
+            {
+              "from": "mix",
+              "to": "preview"
+            }
+          ],
+          "permissions": [],
+          "policy": {
+            "concurrency": 1,
+            "failure": "stop",
+            "defaultRetry": {
+              "maxAttempts": 1,
+              "backoffMs": 0
+            }
+          }
+        },
+        "itemsFrom": {
+          "kind": "upstream",
+          "node": "approve-candidates",
+          "path": "response.candidates"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "approve-drafts",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "approve-render",
+        "prompt": "Review the draft previews. Respond with {approved: [...]} listing the drafts to render as finals; each entry must be a self-contained render source.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "draft-reels"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "final-reels",
+      "category": "control",
+      "type": "control.map",
+      "params": {
+        "workflow": {
+          "formatVersion": 1,
+          "id": "joy.first-party.long-video-draft-reels.final",
+          "version": "1.0.0",
+          "name": "Final reel per approved draft",
+          "inputs": {
+            "type": "object",
+            "description": "One approved draft (self-contained render source)."
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "nodes": [
+            {
+              "id": "final",
+              "category": "render",
+              "type": "render.final",
+              "params": {
+                "profile": "reel-vertical",
+                "source": {
+                  "kind": "input"
+                }
+              },
+              "deterministic": true,
+              "retry": {
+                "maxAttempts": 2,
+                "backoffMs": 1000
+              }
+            },
+            {
+              "id": "save",
+              "category": "output",
+              "type": "output.folder",
+              "params": {
+                "folderId": "exports",
+                "source": {
+                  "kind": "upstream",
+                  "node": "final"
+                }
+              },
+              "deterministic": true
+            }
+          ],
+          "edges": [
+            {
+              "from": "final",
+              "to": "save"
+            }
+          ],
+          "permissions": [],
+          "policy": {
+            "concurrency": 1,
+            "failure": "stop",
+            "defaultRetry": {
+              "maxAttempts": 1,
+              "backoffMs": 0
+            }
+          }
+        },
+        "itemsFrom": {
+          "kind": "upstream",
+          "node": "approve-drafts",
+          "path": "response.approved"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "manifest",
+      "category": "output",
+      "type": "output.metadata",
+      "params": {
+        "folderId": "exports",
+        "fileName": "long-video-draft-reels-run.json",
+        "source": {
+          "kind": "upstream",
+          "node": "final-reels"
+        }
+      },
+      "deterministic": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "ingest",
+      "to": "transcribe"
+    },
+    {
+      "from": "ingest",
+      "to": "hooks"
+    },
+    {
+      "from": "transcribe",
+      "to": "hooks"
+    },
+    {
+      "from": "hooks",
+      "to": "approve-candidates"
+    },
+    {
+      "from": "approve-candidates",
+      "to": "draft-reels"
+    },
+    {
+      "from": "draft-reels",
+      "to": "approve-drafts"
+    },
+    {
+      "from": "approve-drafts",
+      "to": "final-reels"
+    },
+    {
+      "from": "final-reels",
+      "to": "manifest"
+    }
+  ],
+  "permissions": [
+    {
+      "capability": "provider.transcribe"
+    },
+    {
+      "capability": "provider.highlights"
+    },
+    {
+      "capability": "render.final"
+    },
+    {
+      "capability": "output.write"
+    }
+  ],
+  "policy": {
+    "concurrency": 1,
+    "failure": "stop",
+    "defaultRetry": {
+      "maxAttempts": 1,
+      "backoffMs": 0
+    }
+  }
+}

@@ -1,4 +1,9 @@
-/** P07 WP-07.2 — node library v1: concrete node types for all nine §23.2 categories. */
+/**
+ * P07 WP-07.2 — node library v1: concrete node types for all nine §23.2 categories.
+ * Extended in WP-07.4 with the node types the §23.4 first-party workflows require
+ * (hooks/speakers/chapters analysis, reframe/denoise/normalize/scene/compose
+ * transforms, translate generation).
+ */
 
 import type { JoyWorkflow, WorkflowNodeCategory } from './definition.js';
 import { runMapBatch } from './map.js';
@@ -295,6 +300,26 @@ export interface AnalysisPorts {
     readonly minSilenceMs?: number;
   }) => unknown;
   readonly measureLoudness?: (args: { readonly source: unknown }) => unknown;
+  /**
+   * Proposes topic/hook candidates for short-form drafts (§23.4). Returned
+   * candidates should be self-contained (carry their source and subject hints)
+   * so approval responses can feed map/batch items directly.
+   */
+  readonly detectHighlights?: (args: {
+    readonly source: unknown;
+    readonly transcript?: unknown;
+    readonly maxCandidates?: number;
+  }) => unknown;
+  readonly detectSpeakers?: (args: { readonly source: unknown }) => unknown;
+  /**
+   * Generates chapter markers (§23.4 podcast cleanup). Each returned chapter
+   * should be a self-contained renderable reference so clip map items need no
+   * parent-scope access.
+   */
+  readonly generateChapters?: (args: {
+    readonly source: unknown;
+    readonly transcript?: unknown;
+  }) => unknown;
 }
 
 export interface TransformPorts {
@@ -302,6 +327,22 @@ export interface TransformPorts {
   readonly applyCaptionTemplate?: (args: {
     readonly source: unknown;
     readonly templateId: string;
+  }) => unknown;
+  readonly reframe?: (args: {
+    readonly source: unknown;
+    readonly aspect: string;
+    readonly subjectHints?: unknown;
+  }) => unknown;
+  readonly denoise?: (args: { readonly source: unknown; readonly strength?: number }) => unknown;
+  readonly normalizeAudio?: (args: {
+    readonly source: unknown;
+    readonly targetLufs?: number;
+    readonly duckMusic?: boolean;
+  }) => unknown;
+  /** Instantiates an HTML scene template (§20.4) with bound variables. */
+  readonly instantiateSceneTemplate?: (args: {
+    readonly templateId: string;
+    readonly variables: unknown;
   }) => unknown;
 }
 
@@ -312,6 +353,11 @@ export interface GenerationPorts {
     readonly language?: string;
   }) => unknown;
   readonly generateImage?: (args: { readonly prompt: string }) => unknown;
+  readonly translate?: (args: {
+    readonly text: string;
+    readonly targetLanguage: string;
+    readonly sourceLanguage?: string;
+  }) => unknown;
 }
 
 export interface EditorPorts {
@@ -608,6 +654,77 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
     ),
   );
 
+  register(
+    'analysis.hooks',
+    'analysis',
+    'Proposes topic/hook candidates for short-form drafts (§23.4 long-video→draft-reels).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      validateOptionalRef(params, 'transcriptFrom', issues);
+      const max = params['maxCandidates'];
+      if (max !== undefined && (typeof max !== 'number' || !Number.isInteger(max) || max < 1)) {
+        issues.push(paramIssue('maxCandidates', 'must be an integer >= 1'));
+      }
+      return issues;
+    },
+    portBacked(ports.analysis?.detectHighlights, 'analysis.detectHighlights', (port, ctx) => {
+      const transcriptRef = ctx.node.params['transcriptFrom'];
+      const transcript = isValueRef(transcriptRef)
+        ? resolveValueRef(transcriptRef, ctx)
+        : undefined;
+      const maxCandidates = optionalNumberParam(ctx, 'maxCandidates');
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          ...(transcript !== undefined ? { transcript } : {}),
+          ...(maxCandidates !== undefined ? { maxCandidates } : {}),
+        }),
+      );
+    }),
+  );
+
+  register(
+    'analysis.speakers',
+    'analysis',
+    'Detects speakers (diarization) in the source; confirm via decision.approval (§23.4).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      return issues;
+    },
+    portBacked(ports.analysis?.detectSpeakers, 'analysis.detectSpeakers', (port, ctx) =>
+      okResult(port({ source: resolveSource(ctx, 'source') })),
+    ),
+  );
+
+  register(
+    'analysis.chapters',
+    'analysis',
+    'Generates chapter markers from the source and optional transcript (§23.4 podcast cleanup).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      validateOptionalRef(params, 'transcriptFrom', issues);
+      return issues;
+    },
+    portBacked(ports.analysis?.generateChapters, 'analysis.generateChapters', (port, ctx) => {
+      const transcriptRef = ctx.node.params['transcriptFrom'];
+      const transcript = isValueRef(transcriptRef)
+        ? resolveValueRef(transcriptRef, ctx)
+        : undefined;
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          ...(transcript !== undefined ? { transcript } : {}),
+        }),
+      );
+    }),
+  );
+
   // --- transform ------------------------------------------------------------
   register(
     'transform.trim',
@@ -661,6 +778,156 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
     ),
   );
 
+  register(
+    'transform.reframe',
+    'transform',
+    'Reframes the source to a target aspect ratio using subject hints (§23.4).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      requireString(params, 'aspect', issues);
+      validateOptionalRef(params, 'source', issues);
+      validateOptionalRef(params, 'subjectHintsFrom', issues);
+      return issues;
+    },
+    portBacked(ports.transform?.reframe, 'transform.reframe', (port, ctx) => {
+      const hintsRef = ctx.node.params['subjectHintsFrom'];
+      const subjectHints = isValueRef(hintsRef) ? resolveValueRef(hintsRef, ctx) : undefined;
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          aspect: stringParam(ctx, 'aspect'),
+          ...(subjectHints !== undefined ? { subjectHints } : {}),
+        }),
+      );
+    }),
+  );
+
+  register(
+    'transform.denoise',
+    'transform',
+    'Removes noise from the source audio via local processing (§21, §23.4 podcast cleanup).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      const strength = params['strength'];
+      if (strength !== undefined && (typeof strength !== 'number' || !Number.isFinite(strength))) {
+        issues.push(paramIssue('strength', 'must be a finite number'));
+      }
+      return issues;
+    },
+    portBacked(ports.transform?.denoise, 'transform.denoise', (port, ctx) => {
+      const strength = optionalNumberParam(ctx, 'strength');
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          ...(strength !== undefined ? { strength } : {}),
+        }),
+      );
+    }),
+  );
+
+  register(
+    'transform.normalizeAudio',
+    'transform',
+    'Normalizes loudness toward a LUFS target; optionally ducks music (§23.4).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      const targetLufs = params['targetLufs'];
+      if (
+        targetLufs !== undefined &&
+        (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs))
+      ) {
+        issues.push(paramIssue('targetLufs', 'must be a finite number'));
+      }
+      const duckMusic = params['duckMusic'];
+      if (duckMusic !== undefined && typeof duckMusic !== 'boolean') {
+        issues.push(paramIssue('duckMusic', 'must be a boolean'));
+      }
+      return issues;
+    },
+    portBacked(ports.transform?.normalizeAudio, 'transform.normalizeAudio', (port, ctx) => {
+      const targetLufs = optionalNumberParam(ctx, 'targetLufs');
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          ...(targetLufs !== undefined ? { targetLufs } : {}),
+          ...(ctx.node.params['duckMusic'] === true ? { duckMusic: true } : {}),
+        }),
+      );
+    }),
+  );
+
+  register(
+    'transform.sceneTemplate',
+    'transform',
+    'Instantiates an HTML scene template with bound variables (§23.4 multilingual promo, §20.4).',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      requireString(params, 'templateId', issues);
+      validateOptionalRef(params, 'variablesFrom', issues);
+      if (params['variablesFrom'] === undefined && !('variables' in params)) {
+        issues.push(paramIssue('variables', 'is required when variablesFrom is not set'));
+      }
+      return issues;
+    },
+    portBacked(
+      ports.transform?.instantiateSceneTemplate,
+      'transform.instantiateSceneTemplate',
+      (port, ctx) => {
+        const varsRef = ctx.node.params['variablesFrom'];
+        const variables = isValueRef(varsRef)
+          ? resolveValueRef(varsRef, ctx)
+          : ctx.node.params['variables'];
+        return okResult(port({ templateId: stringParam(ctx, 'templateId'), variables }));
+      },
+    ),
+  );
+
+  register(
+    'transform.compose',
+    'transform',
+    'Builds one object from named value references — pure fan-in for multi-input downstream nodes.',
+    true,
+    (params) => {
+      const fields = params['fields'];
+      if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+        return [paramIssue('fields', 'must be an object of value references')];
+      }
+      const issues: NodeParamIssue[] = [];
+      for (const [key, ref] of Object.entries(fields)) {
+        if (!isValueRef(ref)) {
+          issues.push(paramIssue(`fields.${key}`, 'must be a value reference'));
+        }
+      }
+      return issues;
+    },
+    guarded((ctx) => {
+      const fields = ctx.node.params['fields'];
+      if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          `node "${ctx.node.id}" fields must be an object of value references`,
+        );
+      }
+      const out: Record<string, unknown> = {};
+      for (const [key, ref] of Object.entries(fields)) {
+        if (!isValueRef(ref)) {
+          throw new NodeLibraryError(
+            'workflow/invalid-ref',
+            `node "${ctx.node.id}" fields.${key} is not a value reference`,
+          );
+        }
+        out[key] = resolveValueRef(ref, ctx);
+      }
+      return okResult(out);
+    }),
+  );
+
   // --- generation (nondeterministic; §23.5 reuse only by policy) -----------
   register(
     'generation.speech',
@@ -710,6 +977,54 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
     portBacked(ports.generation?.generateImage, 'generation.generateImage', (port, ctx) =>
       okResult(port({ prompt: stringParam(ctx, 'prompt') })),
     ),
+  );
+
+  register(
+    'generation.translate',
+    'generation',
+    'Translates text via the provider system (§23.4 multilingual promo).',
+    false,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'textFrom', issues);
+      if (params['textFrom'] === undefined) {
+        requireString(params, 'text', issues);
+      }
+      validateOptionalRef(params, 'targetLanguageFrom', issues);
+      if (params['targetLanguageFrom'] === undefined) {
+        requireString(params, 'targetLanguage', issues);
+      }
+      optionalString(params, 'sourceLanguage', issues);
+      return issues;
+    },
+    portBacked(ports.generation?.translate, 'generation.translate', (port, ctx) => {
+      const textRef = ctx.node.params['textFrom'];
+      const text = isValueRef(textRef) ? resolveValueRef(textRef, ctx) : ctx.node.params['text'];
+      if (typeof text !== 'string' || text === '') {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          `node "${ctx.node.id}" resolved translation text is not a non-empty string`,
+        );
+      }
+      const langRef = ctx.node.params['targetLanguageFrom'];
+      const targetLanguage = isValueRef(langRef)
+        ? resolveValueRef(langRef, ctx)
+        : ctx.node.params['targetLanguage'];
+      if (typeof targetLanguage !== 'string' || targetLanguage === '') {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          `node "${ctx.node.id}" resolved target language is not a non-empty string`,
+        );
+      }
+      const sourceLanguage = optionalStringParam(ctx, 'sourceLanguage');
+      return okResult(
+        port({
+          text,
+          targetLanguage,
+          ...(sourceLanguage !== undefined ? { sourceLanguage } : {}),
+        }),
+      );
+    }),
   );
 
   // --- decision -------------------------------------------------------------
