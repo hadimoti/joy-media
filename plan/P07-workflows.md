@@ -1,6 +1,6 @@
 # P07 — Workflow Automation
 
-**Status:** gate-review · **Gate to enter:** commands/jobs stable (P06 in progress or done) · **Master plan:** §36 Phase 7, §23, §2.10
+**Status:** done · **Gate to enter:** commands/jobs stable (P06 in progress or done) · **Master plan:** §36 Phase 7, §23, §2.10
 **Goal:** proven creative operations become repeatable, durable, inspectable production systems — versioned graphs, not conversations.
 
 ## Work packages
@@ -12,8 +12,10 @@
 
 ## Exit criteria (§36 Phase 7)
 
-- [ ] Interrupted workflow resumes without duplicating completed work.
-- [ ] Approval waits without consuming Worker resources.
-- [ ] One input batch generates multiple _editable_ project variants.
-- [ ] Costs, remote transfers, and outputs are auditable.
-- [ ] Workflow versioning keeps old runs reproducible.
+- [x] Interrupted workflow resumes without duplicating completed work.
+- [x] Approval waits without consuming Worker resources.
+- [x] One input batch generates multiple _editable_ project variants.
+- [x] Costs, remote transfers, and outputs are auditable.
+- [x] Workflow versioning keeps old runs reproducible.
+
+Gate reviewed 2026-07-20; evidence recorded in `STATE.md` session log.
