@@ -155,6 +155,7 @@ export function pluginRenderSnapshot(value: unknown): string {
 }
 
 function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'undefined';
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   const record = value as Record<string, unknown>;

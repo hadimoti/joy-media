@@ -1,6 +1,6 @@
 /** Verification, update approval, tier gate, and safe-mode policy (§24.5, §29.7). */
 
-import { createHash, verify } from 'node:crypto';
+import { createHash, sign, verify } from 'node:crypto';
 import { executionTierFor, validatePluginManifest } from './manifest.js';
 import type {
   PluginEntrypoint,
@@ -60,6 +60,8 @@ export function hashPluginPackage(files: Readonly<Record<string, Uint8Array>>): 
   const digest = createHash('sha256');
   for (const path of Object.keys(files).sort()) {
     if (!isPackageFilePath(path)) throw new RangeError(`invalid plugin package path "${path}"`);
+    if (path === 'signature.json')
+      throw new RangeError('signature.json must not be part of signed files');
     digest.update(path, 'utf8');
     digest.update('\0', 'utf8');
     digest.update(files[path]!);
@@ -68,13 +70,41 @@ export function hashPluginPackage(files: Readonly<Record<string, Uint8Array>>): 
   return digest.digest('hex');
 }
 
+/** Creates an Ed25519 signature over the canonical immutable package hash. */
+export function signPluginPackage(
+  files: Readonly<Record<string, Uint8Array>>,
+  keyId: string,
+  privateKey: string,
+): PluginPackageSignatureV1 {
+  const packageSha256 = hashPluginPackage(files);
+  return {
+    algorithm: 'ed25519',
+    keyId,
+    packageSha256,
+    signatureBase64: sign(null, Buffer.from(packageSha256, 'utf8'), privateKey).toString('base64'),
+  };
+}
+
 /** Validates manifest, immutable hash, and trusted Ed25519 package signature. */
 export function verifyPluginPackage(
   pluginPackage: PluginPackageV1,
   trustStore: PluginTrustStore,
 ): PluginVerificationResult {
-  const validated = validatePluginManifest(pluginPackage.manifest);
-  const issues = validated.issues.map((entry) => `${entry.code}: ${entry.message}`);
+  const issues: string[] = [];
+  let signedManifest: unknown;
+  const manifestBytes = pluginPackage.files['plugin.json'];
+  if (manifestBytes === undefined) issues.push('plugin/manifest-file-missing');
+  else {
+    try {
+      signedManifest = JSON.parse(new TextDecoder().decode(manifestBytes));
+    } catch {
+      issues.push('plugin/manifest-file-invalid-json');
+    }
+  }
+  if (signedManifest !== undefined && !sameJson(signedManifest, pluginPackage.manifest))
+    issues.push('plugin/manifest-file-mismatch');
+  const validated = validatePluginManifest(signedManifest);
+  issues.push(...validated.issues.map((entry) => `${entry.code}: ${entry.message}`));
   let packageSha256 = '';
   try {
     packageSha256 = hashPluginPackage(pluginPackage.files);
@@ -150,4 +180,18 @@ function isPackageFilePath(value: string): boolean {
     !value.includes('\\') &&
     !value.split('/').some((part) => part === '' || part === '.' || part === '..')
   );
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
 }

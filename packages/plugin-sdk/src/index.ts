@@ -50,6 +50,7 @@ export {
   decidePluginExecution,
   diffPluginPermissions,
   hashPluginPackage,
+  signPluginPackage,
   verifyPluginPackage,
 } from './security.js';
 

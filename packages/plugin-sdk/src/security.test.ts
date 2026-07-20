@@ -1,9 +1,10 @@
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   decidePluginExecution,
   diffPluginPermissions,
   hashPluginPackage,
+  signPluginPackage,
   validatePluginManifest,
   verifyPluginPackage,
 } from './index.js';
@@ -44,16 +45,15 @@ describe('plugin packaging and security', () => {
       'data/pack.json': Buffer.from('{}'),
     };
     const packageSha256 = hashPluginPackage(files);
-    const signature = sign(null, Buffer.from(packageSha256), privateKey).toString('base64');
+    const signature = signPluginPackage(
+      files,
+      'example-key',
+      privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    );
     const pluginPackage = {
       manifest,
       files,
-      signature: {
-        algorithm: 'ed25519' as const,
-        keyId: 'example-key',
-        packageSha256,
-        signatureBase64: signature,
-      },
+      signature,
     };
     expect(
       verifyPluginPackage(pluginPackage, {
@@ -71,6 +71,12 @@ describe('plugin packaging and security', () => {
     ).toEqual(
       expect.arrayContaining(['plugin/package-hash-mismatch', 'plugin/signature-key-untrusted']),
     );
+    expect(
+      verifyPluginPackage(
+        { ...pluginPackage, manifest: { ...manifest, name: 'Tampered' } },
+        { keys: {} },
+      ).issues,
+    ).toContain('plugin/manifest-file-mismatch');
   });
 
   it('shows added permissions and requires approval before an update can proceed', () => {
