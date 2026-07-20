@@ -1,5 +1,8 @@
 /** @joy-media/collaboration-core — immutable libraries and asynchronous proxy review (P09.2). */
 
+export type { CollaborationRevision, RevisionProposal } from './revision-history.js';
+export { RevisionHistory } from './revision-history.js';
+
 export type TeamLibraryAssetKind = 'brand' | 'asset';
 export interface TeamLibraryAsset {
   readonly id: string;
