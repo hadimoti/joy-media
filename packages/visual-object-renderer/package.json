@@ -1,0 +1,28 @@
+{
+  "name": "@joy-media/visual-object-renderer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/render-ir": "workspace:*",
+    "@joy-media/evaluator": "workspace:*"
+  },
+  "devDependencies": {
+    "@joy-media/renderer-pixi": "workspace:*",
+    "@joy-media/renderer-headless": "workspace:*",
+    "@joy-media/golden-render": "workspace:*"
+  }
+}

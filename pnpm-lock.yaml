@@ -317,6 +317,28 @@ importers:
         specifier: workspace:*
         version: link:../project-schema
 
+  packages/visual-object-renderer:
+    dependencies:
+      '@joy-media/evaluator':
+        specifier: workspace:*
+        version: link:../evaluator
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
+    devDependencies:
+      '@joy-media/golden-render':
+        specifier: workspace:*
+        version: link:../../tooling/golden-render
+      '@joy-media/renderer-headless':
+        specifier: workspace:*
+        version: link:../renderer-headless
+      '@joy-media/renderer-pixi':
+        specifier: workspace:*
+        version: link:../renderer-pixi
+
   packages/workflow-engine: {}
 
   tooling/benchmark:
