@@ -5,6 +5,7 @@ export const PANEL_IDS = [
   'captions',
   'inspector',
   'motion',
+  'camera',
   'history',
   'diagnostics',
 ] as const;
@@ -24,6 +25,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'captions',
     'inspector',
     'motion',
+    'camera',
     'history',
     'diagnostics',
   ],

@@ -14,6 +14,7 @@ import { TimelinePanel } from './TimelinePanel.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
+import { CameraPanel } from './CameraPanel.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -26,6 +27,7 @@ const labels: Readonly<Record<string, string>> = {
   captions: 'Captions',
   inspector: 'Inspector',
   motion: 'Motion',
+  camera: 'Camera',
   history: 'History',
   diagnostics: 'Diagnostics',
 };
@@ -268,6 +270,17 @@ function Panel({ api }: IDockviewPanelProps) {
         compositionDurationUs={context.timelineProject.compositions.root?.durationUs ?? 30_000_000}
         playheadUs={state.playheadUs}
         onSeek={context.seek}
+        onDispatch={context.dispatchProject}
+      />
+    );
+  }
+  if (api.id === 'camera') {
+    const composition = visualProject.compositions[visualProject.rootCompositionId];
+    if (composition === undefined) return <p>No root composition.</p>;
+    return (
+      <CameraPanel
+        allObjects={visualProject.visualObjects}
+        composition={composition}
         onDispatch={context.dispatchProject}
       />
     );

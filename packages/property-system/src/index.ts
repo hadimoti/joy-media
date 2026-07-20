@@ -75,6 +75,20 @@ export type VisualObjectCommand =
       readonly type: 'composition.setActiveCamera';
       readonly payload: { readonly compositionId: string; readonly cameraId?: string };
     }
+  | {
+      /** Adds a new `kind: 'camera'` object (ADR-0015, WP-10.2). */
+      readonly type: 'camera.create';
+      readonly payload: { readonly object: VisualObjectV1 };
+    }
+  | {
+      /** Removes a camera object; rejected while it is still referenced (active camera or parent). */
+      readonly type: 'camera.remove';
+      readonly payload: { readonly objectId: string };
+    }
+  | {
+      readonly type: 'camera.setFieldOfView';
+      readonly payload: { readonly objectId: string; readonly fieldOfViewDeg: number };
+    }
   | CaptionCommand
   | MotionCommand;
 export interface VisualObjectApplyResult {
@@ -153,6 +167,67 @@ export function applyVisualObjectProjectCommand(
       inverse: {
         type: 'composition.setActiveCamera',
         payload: previous === undefined ? { compositionId } : { compositionId, cameraId: previous },
+      },
+    };
+  }
+  if (command.type === 'camera.create') {
+    const { object } = command.payload;
+    if (object.kind !== 'camera')
+      throw new RangeError('camera.create requires a camera-kind object');
+    if (project.visualObjects[object.id] !== undefined)
+      throw new RangeError(`visual object "${object.id}" already exists`);
+    return {
+      project: {
+        ...project,
+        visualObjects: { ...project.visualObjects, [object.id]: object },
+      },
+      inverse: { type: 'camera.remove', payload: { objectId: object.id } },
+    };
+  }
+  if (command.type === 'camera.remove') {
+    const { objectId } = command.payload;
+    const camera = project.visualObjects[objectId];
+    if (camera === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
+    if (camera.kind !== 'camera') throw new RangeError(`object "${objectId}" is not a camera`);
+    const activeIn = Object.values(project.compositions).find(
+      (composition) => composition.activeCameraId === objectId,
+    );
+    if (activeIn !== undefined)
+      throw new RangeError(
+        `camera "${objectId}" is still the active camera of composition "${activeIn.id}"`,
+      );
+    const parentOf = Object.values(project.visualObjects).find(
+      (candidate) => candidate.parentId === objectId,
+    );
+    if (parentOf !== undefined)
+      throw new RangeError(`camera "${objectId}" is still the parent of "${parentOf.id}"`);
+    const remaining = { ...project.visualObjects };
+    delete remaining[objectId];
+    return {
+      project: { ...project, visualObjects: remaining },
+      inverse: { type: 'camera.create', payload: { object: camera } },
+    };
+  }
+  if (command.type === 'camera.setFieldOfView') {
+    const { objectId, fieldOfViewDeg } = command.payload;
+    const camera = project.visualObjects[objectId];
+    if (camera === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
+    if (camera.kind !== 'camera' || camera.camera === undefined)
+      throw new RangeError(`object "${objectId}" is not a camera`);
+    if (!Number.isFinite(fieldOfViewDeg) || fieldOfViewDeg <= 0 || fieldOfViewDeg > 170)
+      throw new RangeError('fieldOfViewDeg must be in (0, 170]');
+    const previousFov = camera.camera.fieldOfViewDeg;
+    return {
+      project: {
+        ...project,
+        visualObjects: {
+          ...project.visualObjects,
+          [objectId]: { ...camera, camera: { fieldOfViewDeg } },
+        },
+      },
+      inverse: {
+        type: 'camera.setFieldOfView',
+        payload: { objectId, fieldOfViewDeg: previousFov },
       },
     };
   }

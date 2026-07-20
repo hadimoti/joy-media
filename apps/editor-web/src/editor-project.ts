@@ -57,6 +57,9 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
         scaleY: 1,
         rotationDeg: 0,
         opacity: 1,
+        // A shallow depth offset (ADR-0015): only visible once a composition
+        // has an activeCameraId — the default (no camera) render is unaffected.
+        positionZ: -200,
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     },
@@ -85,6 +88,9 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
         scaleY: 1,
         rotationDeg: 0,
         opacity: 1,
+        // Deep background layer for a parallax demo (ADR-0015): a camera dolly
+        // or pan shifts this far less than intro-title's shallow depth.
+        positionZ: 1500,
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     },

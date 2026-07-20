@@ -125,3 +125,131 @@ describe('composition.setActiveCamera on the shared v1 history', () => {
     ).toThrow(/is not a camera/);
   });
 });
+
+const newCamera: VisualObjectV1 = {
+  id: 'cam-new',
+  kind: 'camera',
+  transform: {
+    x: 0,
+    y: 0,
+    scaleX: 1,
+    scaleY: 1,
+    rotationDeg: 0,
+    opacity: 1,
+    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+  },
+  camera: { fieldOfViewDeg: 54 },
+};
+
+describe('camera.create / camera.remove on the shared v1 history', () => {
+  it('creates, undoes (removes), and redoes (re-creates) a camera object', () => {
+    const history = new VisualObjectProjectHistory(project);
+    const created = history.apply({
+      label: 'Create camera',
+      commands: [{ type: 'camera.create', payload: { object: newCamera } }],
+    });
+    expect(created.visualObjects['cam-new']).toEqual(newCamera);
+
+    const undone = history.undo().project;
+    expect(undone.visualObjects['cam-new']).toBeUndefined();
+
+    const redone = history.redo().project;
+    expect(redone.visualObjects['cam-new']).toEqual(newCamera);
+  });
+
+  it('rejects creating a non-camera object or a duplicate id', () => {
+    const history = new VisualObjectProjectHistory(project);
+    expect(() =>
+      history.apply({
+        label: 'Bad kind',
+        commands: [{ type: 'camera.create', payload: { object: { ...newCamera, kind: 'text' } } }],
+      }),
+    ).toThrow(/camera-kind/);
+    expect(() =>
+      history.apply({
+        label: 'Duplicate id',
+        commands: [{ type: 'camera.create', payload: { object: { ...newCamera, id: 'cam-1' } } }],
+      }),
+    ).toThrow(/already exists/);
+  });
+
+  it('rejects removing a camera that is still the active camera or still a parent', () => {
+    const history = new VisualObjectProjectHistory(project);
+    history.apply(setCamera); // cam-1 becomes root's active camera
+    expect(() =>
+      history.apply({
+        label: 'Remove active camera',
+        commands: [{ type: 'camera.remove', payload: { objectId: 'cam-1' } }],
+      }),
+    ).toThrow(/still the active camera/);
+
+    const historyWithChild = new VisualObjectProjectHistory({
+      ...project,
+      visualObjects: {
+        ...project.visualObjects,
+        child: { ...notACamera, id: 'child', parentId: 'cam-1' },
+      },
+    });
+    expect(() =>
+      historyWithChild.apply({
+        label: 'Remove parent camera',
+        commands: [{ type: 'camera.remove', payload: { objectId: 'cam-1' } }],
+      }),
+    ).toThrow(/still the parent/);
+  });
+
+  it('rejects removing an unknown or non-camera object', () => {
+    const history = new VisualObjectProjectHistory(project);
+    expect(() =>
+      history.apply({
+        label: 'Remove ghost',
+        commands: [{ type: 'camera.remove', payload: { objectId: 'ghost' } }],
+      }),
+    ).toThrow(/unknown visual object/);
+    expect(() =>
+      history.apply({
+        label: 'Remove non-camera',
+        commands: [{ type: 'camera.remove', payload: { objectId: 'title' } }],
+      }),
+    ).toThrow(/is not a camera/);
+  });
+});
+
+describe('camera.setFieldOfView on the shared v1 history', () => {
+  it('applies, undoes, and redoes a field-of-view change', () => {
+    const history = new VisualObjectProjectHistory(project);
+    const applied = history.apply({
+      label: 'Set FOV',
+      commands: [
+        { type: 'camera.setFieldOfView', payload: { objectId: 'cam-1', fieldOfViewDeg: 80 } },
+      ],
+    });
+    expect(applied.visualObjects['cam-1']!.camera?.fieldOfViewDeg).toBe(80);
+
+    const undone = history.undo().project;
+    expect(undone.visualObjects['cam-1']!.camera?.fieldOfViewDeg).toBe(54);
+
+    const redone = history.redo().project;
+    expect(redone.visualObjects['cam-1']!.camera?.fieldOfViewDeg).toBe(80);
+  });
+
+  it('rejects an out-of-range field of view and a non-camera target', () => {
+    const history = new VisualObjectProjectHistory(project);
+    expect(() =>
+      history.apply({
+        label: 'Bad FOV',
+        commands: [
+          { type: 'camera.setFieldOfView', payload: { objectId: 'cam-1', fieldOfViewDeg: 200 } },
+        ],
+      }),
+    ).toThrow(/fieldOfViewDeg must be in/);
+    expect(() =>
+      history.apply({
+        label: 'Not a camera',
+        commands: [
+          { type: 'camera.setFieldOfView', payload: { objectId: 'title', fieldOfViewDeg: 60 } },
+        ],
+      }),
+    ).toThrow(/is not a camera/);
+  });
+});

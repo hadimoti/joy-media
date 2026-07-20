@@ -252,3 +252,34 @@ label {
   font-size: 0.7rem;
   color: #8a93ad;
 }
+.camera-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.camera-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.camera-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: #8a93ad;
+}
+.camera-field select,
+.camera-field input {
+  min-width: 8rem;
+}
+.camera-empty {
+  color: #8a93ad;
+  font-size: 0.85rem;
+}
+.camera-hint {
+  color: #8a93ad;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
