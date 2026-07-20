@@ -175,6 +175,8 @@ importers:
         specifier: workspace:*
         version: link:../render-ir
 
+  packages/collaboration-core: {}
+
   packages/commands:
     dependencies:
       '@joy-media/audio-core':

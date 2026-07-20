@@ -24,6 +24,7 @@
     { "path": "packages/job-protocol" },
     { "path": "packages/workflow-engine" },
     { "path": "packages/plugin-sdk" },
+    { "path": "packages/collaboration-core" },
     { "path": "packages/test-fixtures" },
     { "path": "tooling/golden-render" },
     { "path": "tooling/benchmark" }
