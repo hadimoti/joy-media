@@ -18,3 +18,37 @@ export { PLUGIN_API_DEPRECATIONS, deprecationStatus } from './deprecation.js';
 
 export type { PluginCompatibilityFixture } from './fixtures.js';
 export { PLUGIN_COMPATIBILITY_FIXTURES } from './fixtures.js';
+
+export type {
+  PluginEntrypoint,
+  PluginExecutionTier,
+  PluginPermission,
+  PluginEntrypointMap,
+  PluginContributionsV1,
+  PluginManifestV1,
+  PluginManifestIssue,
+  ValidatedPluginManifest,
+} from './manifest.js';
+export {
+  PLUGIN_ENTRYPOINTS,
+  PLUGIN_EXECUTION_TIERS,
+  executionTierFor,
+  isPluginPermission,
+  validatePluginManifest,
+} from './manifest.js';
+
+export type {
+  PluginPackageSignatureV1,
+  PluginPackageV1,
+  PluginTrustStore,
+  PluginVerificationResult,
+  PluginPermissionDiff,
+  PluginExecutionPolicy,
+  PluginExecutionDecision,
+} from './security.js';
+export {
+  decidePluginExecution,
+  diffPluginPermissions,
+  hashPluginPackage,
+  verifyPluginPackage,
+} from './security.js';

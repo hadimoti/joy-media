@@ -6,7 +6,7 @@
 ## Work packages
 
 - [x] **WP-08.1 — SDK v1 freeze.** _(done 2026-07-20)_ Stable v1 subset freezes panel, data-only caption-pack, and provider-adapter capability contracts; capability detection is fail-closed; a documented comparator grammar and compatibility fixtures preserve supported v1 plugins; deprecation entries have explicit supported-until windows (§24.6).
-- [ ] **WP-08.2 — Packaging + security.** Package format, manifest validation, permission model (§24.4), signing/hash verification, execution tiers enforcement (§24.5), permission-diff-on-update UI, safe mode (§29.7).
+- [x] **WP-08.2 — Packaging + security.** _(done 2026-07-20)_ `plugin.json` is diagnostics-validated with package-relative entrypoints, granular permissions, capability/API compatibility, and tier prerequisites; canonical package hashes plus trusted Ed25519 signatures verify immutable content; runtime policy blocks unapproved permissions, server plugins by default, and all third-party entrypoints in safe mode; updates expose added/removed permission diffs and require approval for additions (§24.4, §24.5, §29.7).
 - [ ] **WP-08.3 — Lifecycle.** Install/validate/enable/update-with-migration/disable/uninstall; disabled plugin never deletes project data; missing-plugin degraded modes (§24.7).
 - [ ] **WP-08.4 — Dev kit.** Plugin CLI/scaffolder, typed SDK, local dev host, permission simulator, fixture runner, render snapshot tests, docs with focused examples (§24.8).
 - [ ] **WP-08.5 — Team/private template catalog.** Template package/variables/slots/dependencies (§25.2–25.4), quality checks (§25.7), private catalog — marketplace stages 1–2 only (§25.5).
