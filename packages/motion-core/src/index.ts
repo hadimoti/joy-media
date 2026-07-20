@@ -62,9 +62,14 @@ export type {
 } from './commands.js';
 export { applyMotionProjectCommand, MotionCommandError } from './commands.js';
 
-export type { ExpressionChannelDiagnostic, ObjectExpressionResolution } from './expression.js';
+export type {
+  ExpressionChannelDiagnostic,
+  ObjectExpressionResolution,
+  WorldExpressionResolution,
+} from './expression.js';
 export {
   buildExpressionReferenceGraph,
   expressionNodeKey,
   resolveObjectTransformWithExpressions,
+  resolveWorldTransformWithExpressions,
 } from './expression.js';

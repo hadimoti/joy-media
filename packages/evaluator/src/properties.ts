@@ -5,7 +5,10 @@ import type { TimeUs, VisualObjectTransformV1, VisualObjectV1 } from '@joy-media
 import { resolveObjectTransform } from '@joy-media/motion-core';
 import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core';
 import { resolveObjectTransformWithExpressions } from '@joy-media/motion-core';
-import { resolveObjectTransformThroughCamera } from '@joy-media/camera-core';
+import {
+  resolveObjectTransformThroughCamera,
+  resolveObjectTransformThroughCameraWithExpressions,
+} from '@joy-media/camera-core';
 
 export interface TimedEntity {
   readonly id: string;
@@ -79,8 +82,8 @@ export interface EvaluatedExpressionTransform {
  * expressions ahead of animation curves/static values (§20.3, ADR-0015,
  * WP-10.4). Never throws for a bad expression — a failing channel falls back
  * to its curve/static value and reports a diagnostic instead. Does **not**
- * compose camera projection (`evaluateCameraTransform`) — that integration is
- * a documented follow-on, not part of WP-10.4's scope.
+ * compose camera projection — use `evaluateCameraExpressionTransform` (WP-10.5)
+ * when both a camera and expressions are in play.
  */
 export function evaluateExpressionTransform(
   objectId: string,
@@ -88,4 +91,28 @@ export function evaluateExpressionTransform(
   timeUs: TimeUs,
 ): EvaluatedExpressionTransform {
   return resolveObjectTransformWithExpressions(objectId, objectsById, timeUs);
+}
+
+/**
+ * An object's effective transform at `timeUs`, composing parenting, per-channel
+ * restricted expressions (anywhere in the parent/camera chain), and — when
+ * `cameraId` is given — depth-only 2.5D camera projection, all together
+ * (§20.3, ADR-0015, WP-10.5). `cameraId` undefined reproduces
+ * `evaluateExpressionTransform`'s parenting+expression behavior exactly, so
+ * the no-camera regression guarantee holds for this entry point too.
+ */
+export function evaluateCameraExpressionTransform(
+  objectId: string,
+  cameraId: string | undefined,
+  objectsById: Readonly<Record<string, VisualObjectV1>>,
+  timeUs: TimeUs,
+  compHeight: number,
+): EvaluatedExpressionTransform {
+  return resolveObjectTransformThroughCameraWithExpressions(
+    objectId,
+    cameraId,
+    objectsById,
+    timeUs,
+    compHeight,
+  );
 }

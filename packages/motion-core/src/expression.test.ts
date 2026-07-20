@@ -4,6 +4,7 @@ import {
   buildExpressionReferenceGraph,
   expressionNodeKey,
   resolveObjectTransformWithExpressions,
+  resolveWorldTransformWithExpressions,
 } from './expression.js';
 
 const baseTransform = {
@@ -142,5 +143,52 @@ describe('buildExpressionReferenceGraph', () => {
     };
     const graph = buildExpressionReferenceGraph(objects);
     expect(graph[expressionNodeKey('a', 'x')]).toBeUndefined();
+  });
+});
+
+describe('resolveWorldTransformWithExpressions', () => {
+  it('composes a plain (non-expression) parent chain identically to resolveWorldTransform', () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      rig: { id: 'rig', kind: 'null', transform: { ...baseTransform, x: 100, y: 0 } },
+      child: {
+        id: 'child',
+        kind: 'text',
+        transform: { ...baseTransform, x: 10, y: 0 },
+        parentId: 'rig',
+      },
+    };
+    const result = resolveWorldTransformWithExpressions('child', objects, 0);
+    expect(result.transform.x).toBe(110); // 100 (rig) + 10 (child local)
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("honors an expression anywhere in the parent chain, including the ancestor's own channel", () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      rig: {
+        id: 'rig',
+        kind: 'null',
+        transform: baseTransform,
+        expressions: { x: '100 + 25' },
+      },
+      child: {
+        id: 'child',
+        kind: 'text',
+        transform: { ...baseTransform, x: 10 },
+        parentId: 'rig',
+      },
+    };
+    const result = resolveWorldTransformWithExpressions('child', objects, 0);
+    expect(result.transform.x).toBe(135); // rig's expression (125) + child's local x (10)
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('aggregates diagnostics from every ancestor in the chain, not just the target object', () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      rig: { id: 'rig', kind: 'null', transform: baseTransform, expressions: { x: 'mystery' } },
+      child: { id: 'child', kind: 'text', transform: baseTransform, parentId: 'rig' },
+    };
+    const result = resolveWorldTransformWithExpressions('child', objects, 0);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({ objectId: 'rig', property: 'x' });
   });
 });

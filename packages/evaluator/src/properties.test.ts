@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { VisualObjectV1 } from '@joy-media/project-schema';
 import {
   evaluateAnimatedTransform,
+  evaluateCameraExpressionTransform,
   evaluateCameraTransform,
   evaluateExpressionTransform,
   evaluateStaticProperty,
@@ -154,5 +155,65 @@ describe('active intervals and static properties', () => {
     expect(result.transform.x).toBe(10); // graceful fallback, never a crash
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]!.property).toBe('x');
+  });
+
+  it('evaluateCameraExpressionTransform: composes an expression-driven camera dolly with a layer expression (WP-10.5)', () => {
+    const baseTransform = {
+      x: 100,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      'cam-1': {
+        id: 'cam-1',
+        kind: 'camera',
+        transform: { ...baseTransform, x: 0, positionZ: 0 },
+        expressions: { positionZ: '-500 + sin(time) * 200' },
+        camera: { fieldOfViewDeg: 54 },
+      },
+      layer: {
+        id: 'layer',
+        kind: 'text',
+        transform: { ...baseTransform, positionZ: 200, opacity: 1 },
+        expressions: { opacity: 'clamp(time, 0, 1)' },
+      },
+    };
+    const atHalfSecond = evaluateCameraExpressionTransform(
+      'layer',
+      'cam-1',
+      objects,
+      500_000,
+      1080,
+    );
+    expect(atHalfSecond.transform.opacity).toBeCloseTo(0.5, 6);
+    expect(Number.isFinite(atHalfSecond.transform.x)).toBe(true);
+    expect(atHalfSecond.transform.scaleX).toBeGreaterThan(0);
+    expect(atHalfSecond.diagnostics).toEqual([]);
+  });
+
+  it('evaluateCameraExpressionTransform: no cameraId reproduces evaluateExpressionTransform exactly (no-regression guard)', () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      'obj-1': {
+        id: 'obj-1',
+        kind: 'text',
+        transform: {
+          x: 10,
+          y: 20,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+        expressions: { x: 'time * 100' },
+      },
+    };
+    expect(evaluateCameraExpressionTransform('obj-1', undefined, objects, 2_000_000, 1080)).toEqual(
+      evaluateExpressionTransform('obj-1', objects, 2_000_000),
+    );
   });
 });

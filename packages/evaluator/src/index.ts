@@ -10,6 +10,7 @@ export { evaluateFrame } from './evaluate.js';
 export type { EvaluatedExpressionTransform, StaticProperty, TimedEntity } from './properties.js';
 export {
   evaluateAnimatedTransform,
+  evaluateCameraExpressionTransform,
   evaluateCameraTransform,
   evaluateExpressionTransform,
   evaluateStaticProperty,

@@ -13,9 +13,12 @@ export type { CameraParamsV1 } from '@joy-media/project-schema';
 export type { CameraParams } from './projection.js';
 export { focalLengthPx, projectThroughCamera } from './projection.js';
 
+export type { CameraExpressionResolution, CameraParamsResolution } from './scene.js';
 export {
   CameraSceneError,
   resolveCameraParams,
+  resolveCameraParamsWithExpressions,
   resolveObjectTransformThroughCamera,
+  resolveObjectTransformThroughCameraWithExpressions,
   worldDepth,
 } from './scene.js';

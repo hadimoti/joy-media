@@ -1,15 +1,16 @@
 /**
  * Wires `@joy-media/expression-core` onto visual objects (§20.3, ADR-0015,
- * WP-10.4). A channel's expression, when present, overrides its keyframe
- * curve/static value — but only when it compiles and evaluates cleanly; any
- * failure falls back to the curve/static value and reports a diagnostic
- * instead of ever breaking the render. Compilation is memoized by source text
- * ("cache pure results", §20.3) since the same expression is evaluated once
- * per frame.
+ * WP-10.4/WP-10.5). A channel's expression, when present, overrides its
+ * keyframe curve/static value — but only when it compiles and evaluates
+ * cleanly; any failure falls back to the curve/static value and reports a
+ * diagnostic instead of ever breaking the render. Compilation is memoized by
+ * source text ("cache pure results", §20.3) since the same expression is
+ * evaluated once per frame.
  *
- * `camera-core`'s projection does not yet consume this expression-aware
- * resolver (it still calls the plain `resolveWorldTransform`) — that
- * integration is a documented follow-on, not part of WP-10.4's scope.
+ * `resolveWorldTransformWithExpressions` (WP-10.5) composes the parent chain
+ * using this expression-aware local resolution, so `camera-core` can project
+ * an expression-driven rig/camera/layer chain — see its own
+ * `resolveObjectTransformThroughCameraWithExpressions`.
  */
 
 import type {
@@ -30,6 +31,7 @@ import {
   ExpressionEvalError,
 } from '@joy-media/expression-core';
 import { resolveAnimatedTransform } from './transform.js';
+import { resolveWorldTransform } from './parenting.js';
 
 interface CompileCacheEntry {
   readonly compiled?: CompiledExpression;
@@ -200,4 +202,31 @@ export function buildExpressionReferenceGraph(
     }
   }
   return graph;
+}
+
+export interface WorldExpressionResolution {
+  readonly transform: VisualObjectTransformV1;
+  readonly diagnostics: readonly ExpressionChannelDiagnostic[];
+}
+
+/**
+ * An object's *world* transform at `timeUs` (WP-10.5): each ancestor's local
+ * transform is resolved expression-first (`resolveObjectTransformWithExpressions`)
+ * before composing up the parent chain, so an expression anywhere in the
+ * chain — including on a camera or its rig — is honored. `ref()` cross-object
+ * references still resolve the referenced object's *local* value, unchanged
+ * from `resolveObjectTransformWithExpressions`.
+ */
+export function resolveWorldTransformWithExpressions(
+  objectId: string,
+  objectsById: Readonly<Record<string, VisualObjectV1>>,
+  timeUs: TimeUs,
+): WorldExpressionResolution {
+  const diagnostics: ExpressionChannelDiagnostic[] = [];
+  const transform = resolveWorldTransform(objectId, objectsById, timeUs, (object, t) => {
+    const resolved = resolveObjectTransformWithExpressions(object.id, objectsById, t);
+    diagnostics.push(...resolved.diagnostics);
+    return resolved.transform;
+  });
+  return { transform, diagnostics };
 }
