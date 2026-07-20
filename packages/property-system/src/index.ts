@@ -123,6 +123,7 @@ export function applyVisualObjectProjectCommand(
       return applyCaptionProjectCommand(project, command);
     case 'object.replaceAnimation':
     case 'object.setParent':
+    case 'object.setExpression':
       return applyMotionProjectCommand(project, command);
     default:
       break;

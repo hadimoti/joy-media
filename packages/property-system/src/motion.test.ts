@@ -82,4 +82,24 @@ describe('motion commands on the shared v1 history', () => {
     expect(afterUndo.visualObjects['title']!.transform.y).toBe(0);
     expect(afterUndo.visualObjects['title']!.animations?.x).toEqual(curve);
   });
+
+  it('applies, undoes, and redoes an expression through the shared v1 history', () => {
+    const history = new VisualObjectProjectHistory(project);
+    const applied = history.apply({
+      label: 'Set expression',
+      commands: [
+        {
+          type: 'object.setExpression',
+          payload: { objectId: 'title', property: 'opacity', source: 'clamp(time, 0, 1)' },
+        },
+      ],
+    });
+    expect(applied.visualObjects['title']!.expressions?.opacity).toBe('clamp(time, 0, 1)');
+
+    const undone = history.undo().project;
+    expect(undone.visualObjects['title']!.expressions).toBeUndefined();
+
+    const redone = history.redo().project;
+    expect(redone.visualObjects['title']!.expressions?.opacity).toBe('clamp(time, 0, 1)');
+  });
 });

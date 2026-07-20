@@ -254,6 +254,7 @@ function Panel({ api }: IDockviewPanelProps) {
     return (
       <InspectorPanel
         object={object}
+        allObjects={visualProject.visualObjects}
         playheadUs={state.playheadUs}
         onSetStatic={updateVisualProperty}
         onDispatch={context.dispatchProject}

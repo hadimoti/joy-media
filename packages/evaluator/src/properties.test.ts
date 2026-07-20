@@ -3,6 +3,7 @@ import type { VisualObjectV1 } from '@joy-media/project-schema';
 import {
   evaluateAnimatedTransform,
   evaluateCameraTransform,
+  evaluateExpressionTransform,
   evaluateStaticProperty,
   queryActiveIntervals,
 } from './properties.js';
@@ -108,5 +109,50 @@ describe('active intervals and static properties', () => {
     expect(projected.x).not.toBe(100); // camera projection actually altered the layer
     expect(Number.isFinite(projected.x)).toBe(true);
     expect(projected.scaleX).toBeGreaterThan(0);
+  });
+
+  it('evaluateExpressionTransform: a channel expression overrides the static value', () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      'obj-1': {
+        id: 'obj-1',
+        kind: 'text',
+        transform: {
+          x: 10,
+          y: 20,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+        expressions: { x: 'time * 100' },
+      },
+    };
+    const result = evaluateExpressionTransform('obj-1', objects, 2_000_000);
+    expect(result.transform.x).toBeCloseTo(200, 6);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('evaluateExpressionTransform: falls back and reports a diagnostic on a bad expression', () => {
+    const objects: Readonly<Record<string, VisualObjectV1>> = {
+      'obj-1': {
+        id: 'obj-1',
+        kind: 'text',
+        transform: {
+          x: 10,
+          y: 20,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+        expressions: { x: 'not_a_thing' },
+      },
+    };
+    const result = evaluateExpressionTransform('obj-1', objects, 0);
+    expect(result.transform.x).toBe(10); // graceful fallback, never a crash
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]!.property).toBe('x');
   });
 });

@@ -182,6 +182,51 @@ label {
   background: #e9b949;
   border-color: #e9b949;
 }
+.inspector-row .kf:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.inspector-row input[type='number']:disabled {
+  opacity: 0.6;
+}
+.inspector-row .fx {
+  width: 1.6rem;
+  height: 1.4rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.7rem;
+  font-style: italic;
+  border: 1px solid #303a56;
+  border-radius: 0.2rem;
+  background: transparent;
+  color: #8a93ad;
+  cursor: pointer;
+}
+.inspector-row .fx-on {
+  color: #7cc4ff;
+  border-color: #7cc4ff;
+}
+.inspector-channel {
+  margin-bottom: 0.2rem;
+}
+.inspector-expression-editor {
+  margin: 0.1rem 0 0.3rem 1.8rem;
+}
+.inspector-expression-input {
+  width: calc(100% - 2rem);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  background: #05070f;
+  border: 1px solid #7cc4ff;
+  border-radius: 0.2rem;
+  color: #e5e9f5;
+  padding: 0.15rem 0.3rem;
+}
+.inspector-expression-error {
+  margin: 0 0 0.3rem 1.8rem;
+  color: #ff8080;
+  font-size: 0.75rem;
+}
 .motion-panel {
   display: flex;
   flex-direction: column;

@@ -419,4 +419,61 @@ describe('v1 project schema and migration harness', () => {
       '"not-a-camera" is not a camera object',
     );
   });
+
+  it('accepts a visual object with a valid expressions map (ADR-0015)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      visualObjects: {
+        'obj-1': {
+          id: 'obj-1',
+          kind: 'text',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+          expressions: { x: 'sin(time) * 10', opacity: 'clamp(time, 0, 1)' },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('reports expression shape violations with coded diagnostics', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      visualObjects: {
+        'obj-1': {
+          id: 'obj-1',
+          kind: 'text',
+          transform,
+          expressions: { zoom: 'sin(time)', x: '' },
+        },
+        'obj-2': { id: 'obj-2', kind: 'text', transform, expressions: 'not an object' },
+      },
+    });
+    const messages = diagnostics.map((diagnostic) => diagnostic.message);
+    const codes = diagnostics.map((diagnostic) => diagnostic.code);
+    expect(messages).toContain('"zoom" is not an animatable property');
+    expect(messages).toContain('expression for "x" must be a non-empty string');
+    expect(messages).toContain('expressions must be an object');
+    expect(codes.filter((code) => code === 'PROJECT_SCHEMA_V1_EXPRESSION').length).toBeGreaterThan(
+      0,
+    );
+  });
 });

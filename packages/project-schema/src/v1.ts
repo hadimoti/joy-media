@@ -122,6 +122,17 @@ export interface VisualObjectV1 {
   readonly transform: VisualObjectTransformV1;
   /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
   readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
+  /**
+   * Optional per-channel restricted expressions (§20.3, ADR-0015): source text
+   * evaluated by `@joy-media/expression-core`. A present channel overrides its
+   * keyframe curve/static value when it evaluates cleanly; project-schema only
+   * checks the shape here (non-empty string) since it cannot depend on the
+   * expression engine (§9.1 — dependency points inward). Compile/cycle
+   * validity is enforced at command time (`object.setExpression`); a stored
+   * expression that fails to compile or evaluate always falls back safely at
+   * evaluation time rather than breaking the render.
+   */
+  readonly expressions?: Readonly<Partial<Record<AnimatablePropertyV1, string>>>;
   /** Parent object id for transform inheritance; must reference an existing, non-cyclic object. */
   readonly parentId?: string;
   readonly motionBlur?: MotionBlurV1;
@@ -622,6 +633,32 @@ function validateVisualObject(
             ),
           );
         validateAnimationCurve(curve, `${path}.animations.${property}`, diagnostics);
+      }
+    }
+  }
+  if (value.expressions !== undefined) {
+    if (!isRecord(value.expressions)) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_EXPRESSION', 'expressions must be an object', path),
+      );
+    } else {
+      for (const [property, source] of Object.entries(value.expressions)) {
+        if (!(ANIMATABLE_PROPERTIES as readonly string[]).includes(property))
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_EXPRESSION',
+              `"${property}" is not an animatable property`,
+              `${path}.expressions`,
+            ),
+          );
+        if (!isNonEmptyString(source))
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_EXPRESSION',
+              `expression for "${property}" must be a non-empty string`,
+              `${path}.expressions`,
+            ),
+          );
       }
     }
   }

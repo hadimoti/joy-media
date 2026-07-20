@@ -13,7 +13,9 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { validateAnimationCurve } from '@joy-media/project-schema';
+import { compileExpression, detectExpressionCycle } from '@joy-media/expression-core';
 import type { ObjectAnimations } from './transform.js';
+import { buildExpressionReferenceGraph, expressionNodeKey } from './expression.js';
 
 export interface ReplaceAnimationCommand {
   readonly type: 'object.replaceAnimation';
@@ -34,7 +36,17 @@ export interface SetParentCommand {
   };
 }
 
-export type MotionCommand = ReplaceAnimationCommand | SetParentCommand;
+export interface SetExpressionCommand {
+  readonly type: 'object.setExpression';
+  readonly payload: {
+    readonly objectId: string;
+    readonly property: AnimatablePropertyV1;
+    /** The channel's new expression source, or `undefined` to clear it. */
+    readonly source?: string;
+  };
+}
+
+export type MotionCommand = ReplaceAnimationCommand | SetParentCommand | SetExpressionCommand;
 
 export interface MotionApplyResult {
   readonly project: JoyProjectV1;
@@ -62,6 +74,20 @@ function replaceChannel(
   const cleaned = { ...object };
   if (Object.keys(next).length === 0) delete cleaned.animations;
   else cleaned.animations = next as ObjectAnimations;
+  return cleaned;
+}
+
+function replaceExpression(
+  object: VisualObjectV1,
+  property: AnimatablePropertyV1,
+  source: string | undefined,
+): VisualObjectV1 {
+  const next: Record<string, string> = { ...(object.expressions ?? {}) };
+  if (source === undefined) delete next[property];
+  else next[property] = source;
+  const cleaned = { ...object };
+  if (Object.keys(next).length === 0) delete cleaned.expressions;
+  else cleaned.expressions = next;
   return cleaned;
 }
 
@@ -128,6 +154,33 @@ export function applyMotionProjectCommand(
       payload: previous === undefined ? { objectId } : { objectId, parentId: previous },
     };
     return commit(project, objectId, withParent(object, parentId), inverse);
+  }
+
+  if (command.type === 'object.setExpression') {
+    const { property, source } = command.payload;
+    if (source !== undefined) {
+      const { compiled, diagnostics } = compileExpression(source);
+      if (compiled === undefined)
+        throw new MotionCommandError(diagnostics[0]?.message ?? 'expression failed to compile', []);
+      const graph = buildExpressionReferenceGraph(project.visualObjects, {
+        objectId,
+        property,
+        source,
+      });
+      const targetKey = expressionNodeKey(objectId, property);
+      const cycle = detectExpressionCycle(graph);
+      if (cycle !== undefined && cycle.includes(targetKey))
+        throw new MotionCommandError(
+          `setting this expression would create a reference cycle: ${cycle.join(' -> ')}`,
+        );
+    }
+    const previous = object.expressions?.[property];
+    const inverse: MotionCommand = {
+      type: 'object.setExpression',
+      payload:
+        previous === undefined ? { objectId, property } : { objectId, property, source: previous },
+    };
+    return commit(project, objectId, replaceExpression(object, property, source), inverse);
   }
 
   const { property, curve } = command.payload;

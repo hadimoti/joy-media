@@ -160,3 +160,78 @@ describe('applyMotionProjectCommand — object.setParent', () => {
     ).toThrow(/cycle/);
   });
 });
+
+describe('applyMotionProjectCommand — object.setExpression', () => {
+  it('sets an expression and inverts by clearing it', () => {
+    const result = applyMotionProjectCommand(project, {
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-1', property: 'x', source: 'sin(time) * 10' },
+    });
+    expect(result.project.visualObjects['obj-1']!.expressions?.x).toBe('sin(time) * 10');
+    expect(result.inverse).toEqual({
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-1', property: 'x' },
+    });
+    const undone = applyMotionProjectCommand(result.project, result.inverse);
+    expect(undone.project.visualObjects['obj-1']!.expressions).toBeUndefined();
+  });
+
+  it('captures the prior source as the inverse when replacing an expression', () => {
+    const withX = applyMotionProjectCommand(project, {
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-1', property: 'x', source: 'time' },
+    }).project;
+    const result = applyMotionProjectCommand(withX, {
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-1', property: 'x', source: 'time * 2' },
+    });
+    expect(result.inverse).toEqual({
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-1', property: 'x', source: 'time' },
+    });
+  });
+
+  it('rejects an unknown object and a malformed expression', () => {
+    expect(() =>
+      applyMotionProjectCommand(project, {
+        type: 'object.setExpression',
+        payload: { objectId: 'ghost', property: 'x', source: 'time' },
+      }),
+    ).toThrow(MotionCommandError);
+    expect(() =>
+      applyMotionProjectCommand(project, {
+        type: 'object.setExpression',
+        payload: { objectId: 'obj-1', property: 'x', source: '1 +' },
+      }),
+    ).toThrow(MotionCommandError);
+  });
+
+  it('rejects an expression that would create a reference cycle', () => {
+    const twoObjects: JoyProjectV1 = {
+      ...project,
+      visualObjects: { 'obj-1': object, 'obj-2': { ...object, id: 'obj-2' } },
+    };
+    const withRef = applyMotionProjectCommand(twoObjects, {
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-2', property: 'x', source: 'ref("obj-1", "x")' },
+    }).project;
+    expect(() =>
+      applyMotionProjectCommand(withRef, {
+        type: 'object.setExpression',
+        payload: { objectId: 'obj-1', property: 'x', source: 'ref("obj-2", "x")' },
+      }),
+    ).toThrow(/reference cycle/);
+  });
+
+  it('allows a self-consistent, non-cyclic cross-object reference', () => {
+    const twoObjects: JoyProjectV1 = {
+      ...project,
+      visualObjects: { 'obj-1': object, 'obj-2': { ...object, id: 'obj-2' } },
+    };
+    const result = applyMotionProjectCommand(twoObjects, {
+      type: 'object.setExpression',
+      payload: { objectId: 'obj-2', property: 'x', source: 'ref("obj-1", "x") + 5' },
+    });
+    expect(result.project.visualObjects['obj-2']!.expressions?.x).toBe('ref("obj-1", "x") + 5');
+  });
+});

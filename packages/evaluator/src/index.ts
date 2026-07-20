@@ -7,10 +7,11 @@ export const PACKAGE_NAME = '@joy-media/evaluator' as const;
 
 export type { EvaluatedFrame, EvaluatedVideoFrame } from './evaluate.js';
 export { evaluateFrame } from './evaluate.js';
-export type { StaticProperty, TimedEntity } from './properties.js';
+export type { EvaluatedExpressionTransform, StaticProperty, TimedEntity } from './properties.js';
 export {
   evaluateAnimatedTransform,
   evaluateCameraTransform,
+  evaluateExpressionTransform,
   evaluateStaticProperty,
   queryActiveIntervals,
 } from './properties.js';

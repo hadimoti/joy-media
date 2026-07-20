@@ -1,8 +1,10 @@
-/** Pure active-interval and static-property evaluation (WP-01.3, WP-04.1, WP-10.1). */
+/** Pure active-interval and static-property evaluation (WP-01.3, WP-04.1, WP-10.1, WP-10.4). */
 
 import { rangeContainsUs } from '@joy-media/project-schema';
 import type { TimeUs, VisualObjectTransformV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { resolveObjectTransform } from '@joy-media/motion-core';
+import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core';
+import { resolveObjectTransformWithExpressions } from '@joy-media/motion-core';
 import { resolveObjectTransformThroughCamera } from '@joy-media/camera-core';
 
 export interface TimedEntity {
@@ -65,4 +67,25 @@ export function evaluateCameraTransform(
   compHeight: number,
 ): VisualObjectTransformV1 {
   return resolveObjectTransformThroughCamera(objectId, cameraId, objectsById, timeUs, compHeight);
+}
+
+export interface EvaluatedExpressionTransform {
+  readonly transform: VisualObjectTransformV1;
+  readonly diagnostics: readonly ExpressionChannelDiagnostic[];
+}
+
+/**
+ * An object's effective transform at `timeUs`, honoring per-channel restricted
+ * expressions ahead of animation curves/static values (§20.3, ADR-0015,
+ * WP-10.4). Never throws for a bad expression — a failing channel falls back
+ * to its curve/static value and reports a diagnostic instead. Does **not**
+ * compose camera projection (`evaluateCameraTransform`) — that integration is
+ * a documented follow-on, not part of WP-10.4's scope.
+ */
+export function evaluateExpressionTransform(
+  objectId: string,
+  objectsById: Readonly<Record<string, VisualObjectV1>>,
+  timeUs: TimeUs,
+): EvaluatedExpressionTransform {
+  return resolveObjectTransformWithExpressions(objectId, objectsById, timeUs);
 }

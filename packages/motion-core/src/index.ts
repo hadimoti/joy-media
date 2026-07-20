@@ -61,3 +61,10 @@ export type {
   SetParentCommand,
 } from './commands.js';
 export { applyMotionProjectCommand, MotionCommandError } from './commands.js';
+
+export type { ExpressionChannelDiagnostic, ObjectExpressionResolution } from './expression.js';
+export {
+  buildExpressionReferenceGraph,
+  expressionNodeKey,
+  resolveObjectTransformWithExpressions,
+} from './expression.js';

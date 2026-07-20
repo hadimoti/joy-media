@@ -237,6 +237,9 @@ importers:
 
   packages/motion-core:
     dependencies:
+      '@joy-media/expression-core':
+        specifier: workspace:*
+        version: link:../expression-core
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
