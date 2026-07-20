@@ -227,6 +227,8 @@ importers:
 
   packages/playback-engine: {}
 
+  packages/plugin-sdk: {}
+
   packages/project-persistence:
     dependencies:
       '@joy-media/commands':
@@ -295,6 +297,8 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
+
+  packages/workflow-engine: {}
 
   tooling/benchmark:
     dependencies:

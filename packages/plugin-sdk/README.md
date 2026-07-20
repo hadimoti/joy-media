@@ -1,6 +1,6 @@
 # plugin-sdk
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
+> **Status: WP-08.1 in progress.** The SDK v1 public surface now freezes API versioning, capability detection, deprecation-window mechanics, and compatibility fixtures. Package installation and execution tiers land in the following work packages.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §24, §2.8 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Versioned plugin API, manifest types, permission model, execution tiers. Contracts exist early (§2.8); public surface waits for P08.

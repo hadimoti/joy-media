@@ -1,0 +1,20 @@
+/** @joy-media/plugin-sdk — stable public JOY extension contracts (P08). */
+
+export const PACKAGE_NAME = '@joy-media/plugin-sdk' as const;
+
+export type { PluginCapability, PluginSdkHost } from './api.js';
+export {
+  PLUGIN_API_VERSION,
+  PLUGIN_CAPABILITIES,
+  PluginCapabilityUnavailableError,
+  createPluginSdkHost,
+} from './api.js';
+
+export type { PluginCompatibilityTarget, CompatibilityResult } from './compatibility.js';
+export { checkPluginCompatibility } from './compatibility.js';
+
+export type { PluginApiDeprecation, DeprecationStatus } from './deprecation.js';
+export { PLUGIN_API_DEPRECATIONS, deprecationStatus } from './deprecation.js';
+
+export type { PluginCompatibilityFixture } from './fixtures.js';
+export { PLUGIN_COMPATIBILITY_FIXTURES } from './fixtures.js';
