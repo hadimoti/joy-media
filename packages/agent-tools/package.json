@@ -1,0 +1,25 @@
+{
+  "name": "@joy-media/agent-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Agent-safe editor tools: bounded context, semantic queries, command-derived edit tools",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/audio-core": "workspace:*",
+    "@joy-media/commands": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/provider-sdk": "workspace:*"
+  }
+}

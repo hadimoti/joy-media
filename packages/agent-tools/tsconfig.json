@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../audio-core"
+    },
+    {
+      "path": "../commands"
+    },
+    {
+      "path": "../project-schema"
+    },
+    {
+      "path": "../provider-sdk"
+    }
+  ]
+}

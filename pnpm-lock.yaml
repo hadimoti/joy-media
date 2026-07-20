@@ -149,6 +149,21 @@ importers:
         specifier: workspace:*
         version: link:../provider-sdk
 
+  packages/agent-tools:
+    dependencies:
+      '@joy-media/audio-core':
+        specifier: workspace:*
+        version: link:../audio-core
+      '@joy-media/commands':
+        specifier: workspace:*
+        version: link:../commands
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
   packages/audio-core: {}
 
   packages/captions-core:

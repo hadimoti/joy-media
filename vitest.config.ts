@@ -25,10 +25,9 @@ export default defineConfig({
       '@joy-media/provider-sdk': pkg('./packages/provider-sdk/src/index.ts'),
       '@joy-media/adapter-comfyui': pkg('./packages/adapter-comfyui/src/index.ts'),
       '@joy-media/adapter-noise-removal': pkg('./packages/adapter-noise-removal/src/index.ts'),
-      '@joy-media/adapter-voice-isolation': pkg(
-        './packages/adapter-voice-isolation/src/index.ts',
-      ),
+      '@joy-media/adapter-voice-isolation': pkg('./packages/adapter-voice-isolation/src/index.ts'),
       '@joy-media/adapter-tts': pkg('./packages/adapter-tts/src/index.ts'),
+      '@joy-media/agent-tools': pkg('./packages/agent-tools/src/index.ts'),
     },
   },
   test: {
