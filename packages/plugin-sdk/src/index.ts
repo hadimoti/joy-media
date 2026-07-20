@@ -52,3 +52,14 @@ export {
   hashPluginPackage,
   verifyPluginPackage,
 } from './security.js';
+
+export type {
+  InstalledPluginState,
+  InstalledPlugin,
+  PluginProjectData,
+  ProjectPluginDependency,
+  ProjectPluginResolution,
+  PluginMigration,
+  PluginUpdateResult,
+} from './lifecycle.js';
+export { PluginLifecycle } from './lifecycle.js';
