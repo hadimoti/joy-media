@@ -79,3 +79,42 @@ export type {
 
 export { MAP_BATCH_VERSION, runMapBatch } from './map.js';
 export type { MapBatchState, MapItemRecord, RunMapBatchOptions, RunMapBatchResult } from './map.js';
+
+// WP-07.3 — authoring + operations
+export {
+  SUPPORTED_SCHEMA_KEYWORDS,
+  WorkflowAuthoringError,
+  WorkflowBuilder,
+  parseWorkflowJson,
+  validateAgainstSchema,
+  validateSchemaDeclaration,
+  workflowToJson,
+} from './authoring.js';
+export type {
+  AuthoringIssue,
+  ParseWorkflowResult,
+  SchemaIssue,
+  WorkflowBuilderOptions,
+} from './authoring.js';
+
+export {
+  RUN_ARTIFACT_KINDS,
+  RunRecorder,
+  buildRunDashboard,
+  instrumentHandlers,
+  isRunArtifactDeclaration,
+  renderRunDashboardText,
+} from './operations.js';
+export type {
+  BuildRunDashboardOptions,
+  RunArtifact,
+  RunArtifactDeclaration,
+  RunArtifactKind,
+  RunDashboard,
+  RunDashboardNode,
+  RunLogEntry,
+  RunLogLevel,
+} from './operations.js';
+
+export { runWorkflowHeadless } from './headless.js';
+export type { HeadlessRunOptions, HeadlessRunResult } from './headless.js';
