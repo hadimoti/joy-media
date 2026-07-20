@@ -1,6 +1,6 @@
 # ADR-0012 — Collaboration conflict model
 
-**Status:** Accepted  
+**Status:** Accepted
 **Date:** 2026-07-20
 
 ## Context
