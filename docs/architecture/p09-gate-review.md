@@ -1,6 +1,6 @@
 # P09 gate review
 
-**Reviewed:** 2026-07-20  
+**Reviewed:** 2026-07-20
 **Verdict:** Accepted for the bounded P09 scope.
 
 ## Evidence
