@@ -25,10 +25,15 @@ export function supportsCapability(provider: AnyProvider, capability: Capability
   if (isV2Provider(provider)) {
     return provider.manifest.capabilities.some((c) => c.id === capability);
   }
-  return capability === 'speech.transcribe' && provider.manifest.capabilities.includes('speech.transcribe');
+  return (
+    capability === 'speech.transcribe' &&
+    provider.manifest.capabilities.includes('speech.transcribe')
+  );
 }
 
-export function getExecution(provider: AnyProvider): 'worker-local' | 'remote-api' | 'server' | 'browser' {
+export function getExecution(
+  provider: AnyProvider,
+): 'worker-local' | 'remote-api' | 'server' | 'browser' {
   if (isV2Provider(provider)) {
     return provider.manifest.execution;
   }

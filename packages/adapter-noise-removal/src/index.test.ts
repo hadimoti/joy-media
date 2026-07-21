@@ -61,12 +61,12 @@ describe('createNoiseRemovalAdapter', () => {
   });
 
   it('throws on invalid strength', () => {
-    expect(() =>
-      createNoiseRemovalAdapter({ execution: 'worker-local', strength: 1.5 }),
-    ).toThrow(RangeError);
-    expect(() =>
-      createNoiseRemovalAdapter({ execution: 'worker-local', strength: -0.1 }),
-    ).toThrow(RangeError);
+    expect(() => createNoiseRemovalAdapter({ execution: 'worker-local', strength: 1.5 })).toThrow(
+      RangeError,
+    );
+    expect(() => createNoiseRemovalAdapter({ execution: 'worker-local', strength: -0.1 })).toThrow(
+      RangeError,
+    );
   });
 
   it('throws on invalid preserveFrequencies', () => {

@@ -12,7 +12,10 @@ export interface VoiceOverSession {
 
 export function createVoiceOverSession(sampleRate: number, channels: 1 | 2 = 1): VoiceOverSession {
   return {
-    sessionId: createHash('sha256').update(`${sampleRate}-${channels}-${Date.now()}`).digest('hex').slice(0, 16),
+    sessionId: createHash('sha256')
+      .update(`${sampleRate}-${channels}-${Date.now()}`)
+      .digest('hex')
+      .slice(0, 16),
     startedAt: new Date().toISOString(),
     sampleRate,
     channels,

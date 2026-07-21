@@ -47,11 +47,7 @@ export interface AudioRenderRequest {
   readonly destination: string;
 }
 
-function applyEffect(
-  samples: Float32Array,
-  effect: AudioEffect,
-  sampleRate: number,
-): Float32Array {
+function applyEffect(samples: Float32Array, effect: AudioEffect, sampleRate: number): Float32Array {
   switch (effect.kind) {
     case 'eq':
       return applyEq(samples, effect.bands, sampleRate);

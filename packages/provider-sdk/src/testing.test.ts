@@ -146,9 +146,7 @@ describe('validateManifest', () => {
 
     const result = validateManifest(manifest);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('capabilities[0].id must be a string'))).toBe(
-      true,
-    );
+    expect(result.errors.some((e) => e.includes('capabilities[0].id must be a string'))).toBe(true);
   });
 
   it('rejects invalid privacy', () => {

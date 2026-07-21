@@ -87,10 +87,7 @@ export interface AudioApplyResult {
   readonly inverse: AudioCommand;
 }
 
-export function applyAudioCommand(
-  state: AudioState,
-  command: AudioCommand,
-): AudioApplyResult {
+export function applyAudioCommand(state: AudioState, command: AudioCommand): AudioApplyResult {
   switch (command.type) {
     case 'audioClip.setGain':
       return applyClipSetGain(state, command.payload);
@@ -130,10 +127,7 @@ function applyClipSetGain(
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
   if (!clip) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown clip "${payload.clipId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
   const newClips = { ...state.clips, [payload.clipId]: { ...clip, gain: payload.gain } };
@@ -154,10 +148,7 @@ function applyClipSetPan(
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
   if (!clip) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown clip "${payload.clipId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
   const newClips = { ...state.clips, [payload.clipId]: { ...clip, pan: payload.pan } };
@@ -178,10 +169,7 @@ function applyClipSetMute(
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
   if (!clip) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown clip "${payload.clipId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
   const newClips = { ...state.clips, [payload.clipId]: { ...clip, mute: payload.mute } };
@@ -202,10 +190,7 @@ function applyClipSetSolo(
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
   if (!clip) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown clip "${payload.clipId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
   const newClips = { ...state.clips, [payload.clipId]: { ...clip, solo: payload.solo } };
@@ -230,10 +215,7 @@ function applyClipSetFade(
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
   if (!clip) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown clip "${payload.clipId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
   const newConfig: AudioClipConfig = {
@@ -299,23 +281,14 @@ function applyBusCreate(
   };
 }
 
-function applyBusRemove(
-  state: AudioState,
-  payload: { readonly busId: string },
-): AudioApplyResult {
+function applyBusRemove(state: AudioState, payload: { readonly busId: string }): AudioApplyResult {
   const busIndex = state.buses.findIndex((b) => b.id === payload.busId);
   if (busIndex === -1) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown bus "${payload.busId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown bus "${payload.busId}"`);
   }
 
   const bus = state.buses[busIndex]!;
-  const newBuses = [
-    ...state.buses.slice(0, busIndex),
-    ...state.buses.slice(busIndex + 1),
-  ];
+  const newBuses = [...state.buses.slice(0, busIndex), ...state.buses.slice(busIndex + 1)];
   const newState: AudioState = { ...state, buses: newBuses };
 
   return {
@@ -341,10 +314,7 @@ function applyBusSetGain(
 ): AudioApplyResult {
   const busIndex = state.buses.findIndex((b) => b.id === payload.busId);
   if (busIndex === -1) {
-    throw new AudioCommandError(
-      'AUDIO_COMMAND_UNKNOWN_TARGET',
-      `unknown bus "${payload.busId}"`,
-    );
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown bus "${payload.busId}"`);
   }
 
   const bus = state.buses[busIndex]!;

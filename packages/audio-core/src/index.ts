@@ -34,12 +34,7 @@ export type {
   LoudnessMeasurement,
   SilenceDetection,
 } from './analysis.js';
-export {
-  measurePeak,
-  detectClipping,
-  measureLoudness,
-  detectSilence,
-} from './analysis.js';
+export { measurePeak, detectClipping, measureLoudness, detectSilence } from './analysis.js';
 
 export type { AudioMeter } from './meter.js';
 export { computeMeter } from './meter.js';

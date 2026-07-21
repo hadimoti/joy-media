@@ -45,10 +45,7 @@ export async function synthesizeWithConsent(
 
   const voice = consentManager.getVoice(request.voiceId);
   if (!voice) {
-    throw new VoiceConsentError(
-      'VOICE_NOT_FOUND',
-      `Voice "${request.voiceId}" not found`,
-    );
+    throw new VoiceConsentError('VOICE_NOT_FOUND', `Voice "${request.voiceId}" not found`);
   }
 
   const consentCheck = consentManager.canUseVoice(request.voiceId, {

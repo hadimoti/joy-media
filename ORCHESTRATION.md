@@ -72,7 +72,7 @@ Recorded here so no session re-litigates them:
 
 ## 5. Standing facts (measured 2026-07-19)
 
-- **VPS:** `ssh sweden` · QEMU Virtual CPU 2.5+ with avx/avx2/sse4_2 · 8 GB RAM · 99 GB disk (43 free) · Node v22.23.1 · no PostgreSQL/Redis installed yet · Docker/containerd present.
+- **VPS:** `ssh sweden` → `46.249.103.142`, root, key `C:\Users\HadiMoti\.ssh\joy-vps.pem` (same as joy-vps project) · QEMU Virtual CPU 2.5+ with avx/avx2/sse4_2 · 8 GB RAM · 99 GB disk (43 free) · Node v22.23.1 · PostgreSQL 17 installed · Docker/containerd present.
 - **Ports in use on VPS:** 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825. **Reserved for JOY Media: 8790 (API/WS), 8791 (object gateway, optional).** Recorded in X01; re-verify before first bind.
 - **VPS skeleton:** `/opt/joy-media/` exists with a copy of the X01 plan; nothing runs there yet.
 - **VPS budget (DECIDED Q2):** ≤3 GB RAM, ≤2 CPU cores for JOY Media, flexible; owner re-evaluates after real usage.

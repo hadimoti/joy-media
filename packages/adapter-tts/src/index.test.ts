@@ -84,9 +84,9 @@ describe('createTTSAdapter', () => {
   });
 
   it('throws when remote engine used with local execution', () => {
-    expect(() =>
-      createTTSAdapter({ execution: 'worker-local', engine: 'elevenlabs' }),
-    ).toThrow(/requires remote-api execution/);
+    expect(() => createTTSAdapter({ execution: 'worker-local', engine: 'elevenlabs' })).toThrow(
+      /requires remote-api execution/,
+    );
   });
 
   it('uses engine name as modelId when modelId not provided', () => {

@@ -3,12 +3,7 @@ import { PreviewStemCache, computeStemHash } from './stems.js';
 import type { PreviewStem } from './stems.js';
 
 describe('preview stem cache', () => {
-  function createStem(
-    stemId: string,
-    clipId: string,
-    effectId: string,
-    hash: string,
-  ): PreviewStem {
+  function createStem(stemId: string, clipId: string, effectId: string, hash: string): PreviewStem {
     return {
       stemId,
       clipId,

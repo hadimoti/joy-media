@@ -82,10 +82,7 @@ function computeBiquadCoeffs(
   return { b0, b1, b2, a0, a1, a2 };
 }
 
-function processBiquad(
-  samples: Float32Array,
-  coeffs: BiquadCoeffs,
-): Float32Array {
+function processBiquad(samples: Float32Array, coeffs: BiquadCoeffs): Float32Array {
   const result = new Float32Array(samples.length);
   let x1 = 0,
     x2 = 0,

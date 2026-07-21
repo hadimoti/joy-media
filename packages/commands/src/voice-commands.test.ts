@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyVoiceCommand,
-  createInitialVoiceState,
-  VoiceCommandError,
-} from './voice-commands.js';
+import { applyVoiceCommand, createInitialVoiceState, VoiceCommandError } from './voice-commands.js';
 
 describe('Voice Commands', () => {
   describe('voiceIdentity.create', () => {

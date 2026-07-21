@@ -34,13 +34,5 @@ export { applyTransaction, ProjectHistory } from './history.js';
 export type { AudioState, AudioCommand, AudioApplyResult } from './audio-commands.js';
 export { applyAudioCommand, AudioCommandError } from './audio-commands.js';
 
-export type {
-  VoiceState,
-  VoiceCommand,
-  VoiceApplyResult,
-} from './voice-commands.js';
-export {
-  applyVoiceCommand,
-  VoiceCommandError,
-  createInitialVoiceState,
-} from './voice-commands.js';
+export type { VoiceState, VoiceCommand, VoiceApplyResult } from './voice-commands.js';
+export { applyVoiceCommand, VoiceCommandError, createInitialVoiceState } from './voice-commands.js';
