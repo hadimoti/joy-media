@@ -139,7 +139,7 @@ export function renderOfflineAudio(
     const targetBuffer = buses.length > 0 ? busBuffers.get(buses[0]!.id) : output;
     if (!targetBuffer) continue;
 
-    const mixLength = Math.min(processed.length, totalSamples - sampleOffset);
+    const mixLength = Math.min(left.length, totalSamples - sampleOffset);
     for (let i = 0; i < mixLength; i++) {
       targetBuffer[sampleOffset + i]! += (left[i]! + right[i]!) * 0.5;
     }

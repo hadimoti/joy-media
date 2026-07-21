@@ -31,8 +31,8 @@ export function normalizeDialogue(
   let processed = applyGain(samples, gainAdjustment);
 
   if (config.mode === 'compress' || config.mode === 'limit') {
-    const currentPeak = measurePeak(processed).peakDb;
-    const peakDiff = currentPeak - config.targetPeak;
+    const currentPeakDb = measurePeak(processed).peakDb;
+    const peakDiff = currentPeakDb - config.targetPeak;
 
     if (peakDiff > 0) {
       if (config.mode === 'compress') {

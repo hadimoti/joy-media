@@ -41,7 +41,11 @@ export function createMockProvider(
 
   return {
     manifest,
-    invoke: async (_capability: CapabilityId, _input: unknown): Promise<CapabilityResult> => ({
+    invoke: async (
+      _capability: CapabilityId,
+      _input: unknown,
+      request?: CapabilityRequest,
+    ): Promise<CapabilityResult> => ({
       requestId: `mock-${id}-${testCounter++}`,
       status: 'succeeded',
       outputs: [],
@@ -51,7 +55,7 @@ export function createMockProvider(
         adapterVersion: '1.0.0',
         createdAt: new Date().toISOString(),
         requestHash: 'mock-hash',
-        idempotencyKey: `mock-key-${testCounter}`,
+        idempotencyKey: request?.idempotencyKey ?? `mock-key-${testCounter}`,
         processingTimeMs: 0,
         execution: options?.execution ?? 'worker-local',
       },
@@ -154,7 +158,7 @@ export function simulateProviderFailure(
 ): ProviderV2 {
   return {
     manifest: provider.manifest,
-    invoke: async (_capability: CapabilityId, _input: unknown): Promise<CapabilityResult> => {
+    invoke: async (_capability: CapabilityId, _input: unknown, request?: CapabilityRequest): Promise<CapabilityResult> => {
       switch (errorType) {
         case 'unavailable':
           throw new ProviderUnavailableError('Simulated provider unavailable');
@@ -167,7 +171,7 @@ export function simulateProviderFailure(
             adapterVersion: '1.0.0',
             createdAt: new Date().toISOString(),
             requestHash: 'mock-hash',
-            idempotencyKey: `mock-key-${testCounter++}`,
+            idempotencyKey: request?.idempotencyKey ?? `mock-key-${testCounter++}`,
             processingTimeMs: 0,
             execution: provider.manifest.execution,
           };

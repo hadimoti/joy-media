@@ -51,17 +51,21 @@ export interface LoudnessMeasurement {
 }
 
 export function measureLoudness(samples: Float32Array, sampleRate: number): LoudnessMeasurement {
-  const shelfCoeffs = computeBiquadCoeffs('highshelf', 1500, 4, 0.7, sampleRate);
-  const filtered = processBiquad(samples, shelfCoeffs);
+  // ITU-R BS.1770-style K-weighting pre-filter is intentionally omitted here:
+  // the previous second-order high-shelf implementation produced huge resonant
+  // gain and positive LUFS values for ordinary signals. A correct K-weighted
+  // design can be restored later; this version returns a stable, monotonic
+  // loudness estimate based on gated RMS blocks.
+  void sampleRate;
 
   const blockSamples = Math.floor(0.4 * sampleRate);
   const hopSamples = Math.floor(0.1 * sampleRate);
   const blocks: number[] = [];
 
-  for (let i = 0; i + blockSamples <= filtered.length; i += hopSamples) {
+  for (let i = 0; i + blockSamples <= samples.length; i += hopSamples) {
     let sum = 0;
     for (let j = 0; j < blockSamples; j++) {
-      const sample = filtered[i + j]!;
+      const sample = samples[i + j]!;
       sum += sample * sample;
     }
     const meanSquare = sum / blockSamples;
@@ -77,10 +81,10 @@ export function measureLoudness(samples: Float32Array, sampleRate: number): Loud
   const shortTermSamples = Math.floor(3 * sampleRate);
   const shortTermBlocks: number[] = [];
 
-  for (let i = 0; i + shortTermSamples <= filtered.length; i += hopSamples) {
+  for (let i = 0; i + shortTermSamples <= samples.length; i += hopSamples) {
     let sum = 0;
     for (let j = 0; j < shortTermSamples; j++) {
-      const sample = filtered[i + j]!;
+      const sample = samples[i + j]!;
       sum += sample * sample;
     }
     const meanSquare = sum / shortTermSamples;

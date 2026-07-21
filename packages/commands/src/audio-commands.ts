@@ -34,6 +34,8 @@ export type AudioCommand =
         readonly clipId: string;
         readonly fadeInUs?: number;
         readonly fadeOutUs?: number;
+        readonly fadeInUsWasSet?: boolean;
+        readonly fadeOutUsWasSet?: boolean;
       };
     }
   | {
@@ -211,6 +213,8 @@ function applyClipSetFade(
     readonly clipId: string;
     readonly fadeInUs?: number;
     readonly fadeOutUs?: number;
+    readonly fadeInUsWasSet?: boolean;
+    readonly fadeOutUsWasSet?: boolean;
   },
 ): AudioApplyResult {
   const clip = state.clips[payload.clipId];
@@ -218,23 +222,50 @@ function applyClipSetFade(
     throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown clip "${payload.clipId}"`);
   }
 
+  // Determine whether each fade property should be updated:
+  // - If the property is explicitly provided in payload (fadeInUs !== undefined), set it to that value
+  // - If *WasSet is true but the property is undefined, that means "explicitly remove this fade" (set to undefined)
+  // - Otherwise, leave the existing value untouched
+  const hasFadeInInPayload = payload.fadeInUs !== undefined;
+  const hasFadeOutInPayload = payload.fadeOutUs !== undefined;
+  const shouldSetFadeIn = hasFadeInInPayload || payload.fadeInUsWasSet === true;
+  const shouldSetFadeOut = hasFadeOutInPayload || payload.fadeOutUsWasSet === true;
+  const shouldRemoveFadeIn = !hasFadeInInPayload && payload.fadeInUsWasSet === true;
+  const shouldRemoveFadeOut = !hasFadeOutInPayload && payload.fadeOutUsWasSet === true;
+
   const newConfig: AudioClipConfig = {
     ...clip,
-    ...(payload.fadeInUs !== undefined ? { fadeInUs: payload.fadeInUs } : {}),
-    ...(payload.fadeOutUs !== undefined ? { fadeOutUs: payload.fadeOutUs } : {}),
+    ...(shouldSetFadeIn && !shouldRemoveFadeIn ? { fadeInUs: payload.fadeInUs } : {}),
+    ...(shouldSetFadeOut && !shouldRemoveFadeOut ? { fadeOutUs: payload.fadeOutUs } : {}),
+    ...(shouldRemoveFadeIn ? { fadeInUs: undefined } : {}),
+    ...(shouldRemoveFadeOut ? { fadeOutUs: undefined } : {}),
   };
 
   const newClips = { ...state.clips, [payload.clipId]: newConfig };
   const newState: AudioState = { ...state, clips: newClips };
 
+  // Inverse payload: include original fade values AND flags indicating which were originally set.
+  // For inverse, we ALWAYS set WasSet=true for both fades so the inverse command explicitly
+  // restores/removes them. If the original clip didn't have a fade, fadeInUs will be undefined
+  // and WasSet=true means "explicitly remove this fade".
+  const inversePayload = {
+    clipId: payload.clipId,
+    fadeInUs: clip.fadeInUs,
+    fadeOutUs: clip.fadeOutUs,
+    fadeInUsWasSet: true,
+    fadeOutUsWasSet: true,
+  };
+
   return {
     state: newState,
     inverse: {
       type: 'audioClip.setFade',
-      payload: {
-        clipId: payload.clipId,
-        ...(clip.fadeInUs !== undefined ? { fadeInUs: clip.fadeInUs } : {}),
-        ...(clip.fadeOutUs !== undefined ? { fadeOutUs: clip.fadeOutUs } : {}),
+      payload: inversePayload as {
+        readonly clipId: string;
+        readonly fadeInUs?: number;
+        readonly fadeOutUs?: number;
+        readonly fadeInUsWasSet?: boolean;
+        readonly fadeOutUsWasSet?: boolean;
       },
     },
   };

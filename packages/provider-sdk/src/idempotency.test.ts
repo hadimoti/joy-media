@@ -17,8 +17,8 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const idempotencyKey = 'unique-key-12345';
       const request = createRequest(idempotencyKey);
 
-      const result1 = await provider.invoke(request.capability, request.input);
-      const result2 = await provider.invoke(request.capability, request.input);
+      const result1 = await provider.invoke(request.capability, request.input, request);
+      const result2 = await provider.invoke(request.capability, request.input, request);
 
       expect(result1.provenance.idempotencyKey).toBe(idempotencyKey);
       expect(result2.provenance.idempotencyKey).toBe(idempotencyKey);
@@ -30,7 +30,7 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const idempotencyKey = 'retry-key-67890';
       const request = createRequest(idempotencyKey);
 
-      const failedResult = await failedProvider.invoke(request.capability, request.input);
+      const failedResult = await failedProvider.invoke(request.capability, request.input, request);
 
       expect(failedResult.status).toBe('failed');
       expect(failedResult.provenance.idempotencyKey).toBe(idempotencyKey);
@@ -40,7 +40,7 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const provider = createMockProvider('test-provider', ['speech.transcribe']);
       const request = createRequest('separation-test-key');
 
-      const result = await provider.invoke(request.capability, request.input);
+      const result = await provider.invoke(request.capability, request.input, request);
 
       expect(result.requestId).toBeDefined();
       expect(result.provenance.idempotencyKey).toBe(request.idempotencyKey);
@@ -60,7 +60,7 @@ describe('Idempotency and Deduplication (§21.9)', () => {
 
       const results: CapabilityResult[] = [];
       for (let i = 0; i < 3; i++) {
-        results.push(await provider.invoke(request.capability, request.input));
+        results.push(await provider.invoke(request.capability, request.input, request));
       }
 
       const keys = results.map((r) => r.provenance.idempotencyKey);
@@ -75,7 +75,7 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const idempotencyKey = 'cancel-key-xyz';
       const request = createRequest(idempotencyKey);
 
-      const result = await provider.invoke(request.capability, request.input);
+      const result = await provider.invoke(request.capability, request.input, request);
 
       const canceledResult: CapabilityResult = {
         ...result,
@@ -93,8 +93,8 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const idempotencyKey = 'dedup-key-999';
       const request = createRequest(idempotencyKey);
 
-      const result1 = await provider.invoke(request.capability, request.input);
-      const result2 = await provider.invoke(request.capability, request.input);
+      const result1 = await provider.invoke(request.capability, request.input, request);
+      const result2 = await provider.invoke(request.capability, request.input, request);
 
       expect(result1.provenance.idempotencyKey).toBe(result2.provenance.idempotencyKey);
       expect(result1.provenance.requestHash).toBe(result2.provenance.requestHash);
@@ -105,8 +105,8 @@ describe('Idempotency and Deduplication (§21.9)', () => {
       const request1 = createRequest('key-1');
       const request2 = createRequest('key-2');
 
-      const result1 = await provider.invoke(request1.capability, request1.input);
-      const result2 = await provider.invoke(request2.capability, request2.input);
+      const result1 = await provider.invoke(request1.capability, request1.input, request1);
+      const result2 = await provider.invoke(request2.capability, request2.input, request2);
 
       expect(result1.provenance.idempotencyKey).not.toBe(result2.provenance.idempotencyKey);
     });

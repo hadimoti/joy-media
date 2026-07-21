@@ -3,7 +3,8 @@ import type { AudioBus } from './graph.js';
 export function applyGain(samples: Float32Array, gain: number): Float32Array {
   const result = new Float32Array(samples.length);
   for (let i = 0; i < samples.length; i++) {
-    result[i] = samples[i]! * gain;
+    // Avoid signed zero (-0) when gain is exactly 0.
+    result[i] = gain === 0 ? 0 : samples[i]! * gain;
   }
   return result;
 }
@@ -13,9 +14,10 @@ export function applyPan(
   pan: number,
 ): { left: Float32Array; right: Float32Array } {
   const clampedPan = Math.max(-1, Math.min(1, pan));
-  const angle = (clampedPan + 1) * (Math.PI / 4);
-  const leftGain = Math.cos(angle);
-  const rightGain = Math.sin(angle);
+  // Linear pan law: center is unity on both channels; full left/right
+  // attenuates the opposite channel to silence.
+  const leftGain = clampedPan >= 0 ? 1 - clampedPan : 1;
+  const rightGain = clampedPan <= 0 ? 1 + clampedPan : 1;
 
   const left = new Float32Array(samples.length);
   const right = new Float32Array(samples.length);

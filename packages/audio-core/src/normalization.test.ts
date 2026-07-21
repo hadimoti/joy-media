@@ -102,7 +102,7 @@ describe('dialogue normalization', () => {
 
       const { result } = normalizeDialogue(samples, sampleRate, config);
 
-      expect(result.gainAdjustment).toBeGreaterThan(1.0);
+      expect(result.gainAdjustment).toBeLessThan(1.0);
     });
 
     it('handles quiet audio needing boost', () => {

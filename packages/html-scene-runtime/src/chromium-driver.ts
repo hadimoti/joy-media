@@ -67,6 +67,7 @@ export function createChromiumSceneDriver(
           executablePath,
           [
             '--headless=new',
+            '--no-sandbox',
             '--disable-gpu',
             '--disable-background-networking',
             '--disable-component-update',

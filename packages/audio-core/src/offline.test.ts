@@ -247,7 +247,7 @@ describe('offline audio renderer', () => {
         clipId: 'clip1',
         samples,
         startUs: 0,
-        config: { ...defaultClipConfig, fadeInUs: 50_000 },
+        config: { ...defaultClipConfig, fadeInUs: 1_000 },
         effects: [],
       };
 

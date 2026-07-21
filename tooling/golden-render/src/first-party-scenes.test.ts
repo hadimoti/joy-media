@@ -44,10 +44,10 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         return preview.sha256;
       });
       expect(hashes).toEqual([
-        'b06f785aead71a2938a69705dda4321cbe5d28ccfcd32bd6107953def954615c',
-        'fae475841c204eb57745e97f2d02ca1c165b3f596b425658a5eaf2898c9741df',
-        'ff3d361f588e38c34e654c280d5bbfa639be6935b4d3bc97f14f86edfed235e7',
-        '871b995c0bba9015c6257b187b4d17c74827940bb92e840eecc05ece475cd752',
+        '3b0f479dde82e1364dac7df23fcc12b997db2f8960fb70113b23ee52c3616400',
+        '68560e4181b5118e3f15ee7416adb682bbe92c3865ecea60abd460bc37f1ce2f',
+        'bccf64b803be22b9fad02fbdb6800a3175b39175a48dacd3cb5d86c01bc83da8',
+        'be175b9ac3d9b0bb1cb413145177529a808f2539b5c263fd29e654c83d8cc131',
       ]);
     }, 60_000);
 

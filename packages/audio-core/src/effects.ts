@@ -174,20 +174,21 @@ export function applyLimiter(
   const ceilingLinear = Math.pow(10, ceiling / 20);
   const releaseCoeff = Math.exp(-1 / ((releaseUs * sampleRate) / 1_000_000));
 
-  let envelope = 0;
+  let envelope = 1;
 
   for (let i = 0; i < samples.length; i++) {
     const input = samples[i]!;
     const absInput = Math.abs(input);
 
     if (absInput > ceilingLinear) {
-      const targetGain = ceilingLinear / absInput;
-      envelope = releaseCoeff * envelope + (1 - releaseCoeff) * targetGain;
-    } else {
-      envelope = releaseCoeff * envelope + (1 - releaseCoeff) * 1;
+      // Instant attack: bring this sample under the ceiling immediately.
+      envelope = Math.min(envelope, ceilingLinear / absInput);
     }
 
-    result[i] = input * Math.min(1, envelope);
+    result[i] = input * envelope;
+
+    // Release the envelope back toward unity for future samples.
+    envelope = releaseCoeff * envelope + (1 - releaseCoeff) * 1;
   }
 
   return result;

@@ -6,7 +6,7 @@ describe('audio analysis', () => {
     it('measures peak amplitude', () => {
       const samples = new Float32Array([0.5, -0.8, 0.3, -0.2]);
       const result = measurePeak(samples);
-      expect(result.peak).toBe(0.8);
+      expect(result.peak).toBeCloseTo(0.8, 6);
       expect(result.peakDb).toBeCloseTo(20 * Math.log10(0.8), 2);
       expect(result.clipping).toBe(false);
     });
