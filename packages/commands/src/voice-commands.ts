@@ -1,8 +1,4 @@
-import type {
-  VoiceIdentity,
-  VoiceStatus,
-  ConsentRecord,
-} from '@joy-media/project-schema';
+import type { VoiceIdentity, VoiceStatus, ConsentRecord } from '@joy-media/project-schema';
 
 export interface VoiceState {
   readonly voices: Readonly<Record<string, VoiceIdentity>>;
@@ -90,10 +86,7 @@ export interface VoiceApplyResult {
   readonly inverse: VoiceCommand;
 }
 
-export function applyVoiceCommand(
-  state: VoiceState,
-  command: VoiceCommand,
-): VoiceApplyResult {
+export function applyVoiceCommand(state: VoiceState, command: VoiceCommand): VoiceApplyResult {
   switch (command.type) {
     case 'voiceIdentity.create':
       return applyVoiceCreate(state, command.payload);
@@ -196,18 +189,14 @@ function applyVoiceUpdate(
   const previousPayload: Record<string, unknown> = {};
   const updated: VoiceIdentity = {
     ...voice,
-    ...(payload.displayName !== undefined
-      ? { displayName: payload.displayName }
-      : {}),
+    ...(payload.displayName !== undefined ? { displayName: payload.displayName } : {}),
     ...(payload.allowedPurposes !== undefined
       ? { allowedPurposes: [...payload.allowedPurposes] }
       : {}),
     ...(payload.allowedUsersOrTeams !== undefined
       ? { allowedUsersOrTeams: [...payload.allowedUsersOrTeams] }
       : {}),
-    ...(payload.expiresAt !== undefined
-      ? { expiresAt: payload.expiresAt }
-      : {}),
+    ...(payload.expiresAt !== undefined ? { expiresAt: payload.expiresAt } : {}),
     ...(payload.metadata !== undefined
       ? { metadata: { ...voice.metadata, ...payload.metadata } }
       : {}),
@@ -215,8 +204,10 @@ function applyVoiceUpdate(
   };
 
   if (payload.displayName !== undefined) previousPayload.displayName = voice.displayName;
-  if (payload.allowedPurposes !== undefined) previousPayload.allowedPurposes = voice.allowedPurposes;
-  if (payload.allowedUsersOrTeams !== undefined) previousPayload.allowedUsersOrTeams = voice.allowedUsersOrTeams;
+  if (payload.allowedPurposes !== undefined)
+    previousPayload.allowedPurposes = voice.allowedPurposes;
+  if (payload.allowedUsersOrTeams !== undefined)
+    previousPayload.allowedUsersOrTeams = voice.allowedUsersOrTeams;
   if (payload.expiresAt !== undefined) previousPayload.expiresAt = voice.expiresAt;
   if (payload.metadata !== undefined) previousPayload.metadata = voice.metadata;
 

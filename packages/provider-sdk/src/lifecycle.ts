@@ -1,13 +1,5 @@
-import type {
-  AnyProvider,
-  ProviderLifecycleState,
-  ProviderStatus,
-} from './types.js';
-import {
-  getProviderId,
-  getAdapterVersion,
-  getModelVersions,
-} from './utils.js';
+import type { AnyProvider, ProviderLifecycleState, ProviderStatus } from './types.js';
+import { getProviderId, getAdapterVersion, getModelVersions } from './utils.js';
 
 interface ProviderStatusMutable {
   providerId: string;

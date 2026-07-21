@@ -82,10 +82,7 @@ function validateInput(input: unknown): { valid: boolean; diagnostics: Diagnosti
   return { valid: diagnostics.length === 0, diagnostics };
 }
 
-function processNoiseRemoval(
-  _config: NoiseRemovalConfig,
-  input: NoiseRemovalInput,
-): Uint8Array {
+function processNoiseRemoval(_config: NoiseRemovalConfig, input: NoiseRemovalInput): Uint8Array {
   const inputData = input.data ?? new Uint8Array(1024);
   const output = new Uint8Array(inputData.length);
 

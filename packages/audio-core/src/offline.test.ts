@@ -4,10 +4,15 @@ import type { AudioClipRenderSpec, OfflineRenderConfig } from './offline.js';
 import type { AudioBus, AudioClipConfig, AudioEffect } from './graph.js';
 
 describe('offline audio renderer', () => {
-  function generateSineWave(frequency: number, amplitude: number, duration: number, sampleRate: number): Float32Array {
+  function generateSineWave(
+    frequency: number,
+    amplitude: number,
+    duration: number,
+    sampleRate: number,
+  ): Float32Array {
     const samples = new Float32Array(sampleRate * duration);
     for (let i = 0; i < samples.length; i++) {
-      samples[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate) * amplitude;
+      samples[i] = Math.sin((2 * Math.PI * frequency * i) / sampleRate) * amplitude;
     }
     return samples;
   }

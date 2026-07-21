@@ -502,7 +502,9 @@ describe('VoiceConsentManager', () => {
 
       await manager.deleteVoice(voice.id);
 
-      await expect(manager.syncDeletionToProvider(voice.id, 'test-provider')).resolves.not.toThrow();
+      await expect(
+        manager.syncDeletionToProvider(voice.id, 'test-provider'),
+      ).resolves.not.toThrow();
     });
 
     it('throws when syncing non-deleted voice', async () => {

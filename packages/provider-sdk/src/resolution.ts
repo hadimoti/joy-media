@@ -53,7 +53,10 @@ export function resolveProvider(
     candidates = candidates.filter((p) => isLocalExecution(getExecution(p)));
   }
 
-  if (request.constraints.executionPreference && request.constraints.executionPreference.length > 0) {
+  if (
+    request.constraints.executionPreference &&
+    request.constraints.executionPreference.length > 0
+  ) {
     candidates = candidates.filter((p) => {
       const exec = getExecution(p);
       const isLocal = isLocalExecution(exec);
@@ -122,10 +125,7 @@ function resolveMaxCost(
   return requestCost ?? policyCost;
 }
 
-function rankCandidates(
-  candidates: AnyProvider[],
-  request: CapabilityRequest,
-): AnyProvider[] {
+function rankCandidates(candidates: AnyProvider[], request: CapabilityRequest): AnyProvider[] {
   return candidates.sort((a, b) => {
     const scoreA = computeScore(a, request);
     const scoreB = computeScore(b, request);

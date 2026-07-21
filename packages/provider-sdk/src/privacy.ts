@@ -88,7 +88,8 @@ export function computePrivacyPreflight(
   const execution = getExecution(provider);
   const isRemote = isRemoteExecution(execution);
 
-  const dataLeavesDevice = dataLeavesDeviceRaw === true || (dataLeavesDeviceRaw === 'depends' && isRemote);
+  const dataLeavesDevice =
+    dataLeavesDeviceRaw === true || (dataLeavesDeviceRaw === 'depends' && isRemote);
 
   const dataBeingSent = CAPABILITY_DATA_TYPES[request.capability] ?? ['unknown data'];
   const purpose = CAPABILITY_PURPOSES[request.capability] ?? `Execute ${request.capability}`;

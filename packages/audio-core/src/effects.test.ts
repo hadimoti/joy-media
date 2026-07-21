@@ -7,10 +7,14 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 1000 * i / sampleRate);
+        samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate);
       }
 
-      const output = applyEq(samples, [{ frequency: 500, gain: 0, q: 1, type: 'lowpass' }], sampleRate);
+      const output = applyEq(
+        samples,
+        [{ frequency: 500, gain: 0, q: 1, type: 'lowpass' }],
+        sampleRate,
+      );
       expect(output.length).toBe(samples.length);
 
       const inputRms = Math.sqrt(samples.reduce((sum, s) => sum + s * s, 0) / samples.length);
@@ -22,10 +26,14 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate);
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate);
       }
 
-      const output = applyEq(samples, [{ frequency: 1000, gain: 0, q: 1, type: 'highpass' }], sampleRate);
+      const output = applyEq(
+        samples,
+        [{ frequency: 1000, gain: 0, q: 1, type: 'highpass' }],
+        sampleRate,
+      );
       expect(output.length).toBe(samples.length);
 
       const inputRms = Math.sqrt(samples.reduce((sum, s) => sum + s * s, 0) / samples.length);
@@ -37,10 +45,14 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 1000 * i / sampleRate);
+        samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate);
       }
 
-      const output = applyEq(samples, [{ frequency: 1000, gain: 6, q: 1, type: 'peaking' }], sampleRate);
+      const output = applyEq(
+        samples,
+        [{ frequency: 1000, gain: 6, q: 1, type: 'peaking' }],
+        sampleRate,
+      );
       expect(output.length).toBe(samples.length);
 
       const inputRms = Math.sqrt(samples.reduce((sum, s) => sum + s * s, 0) / samples.length);
@@ -70,7 +82,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 0.8;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 0.8;
       }
 
       const output = applyCompressor(
@@ -90,7 +102,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 0.1;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 0.1;
       }
 
       const output = applyCompressor(
@@ -110,7 +122,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 1.5;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 1.5;
       }
 
       const output = applyLimiter(samples, -1, 10000, sampleRate);
@@ -124,7 +136,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 0.5;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 0.5;
       }
 
       const output = applyLimiter(samples, -1, 10000, sampleRate);
@@ -139,7 +151,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 0.01;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 0.01;
       }
 
       const output = applyGate(
@@ -157,7 +169,7 @@ describe('audio effects', () => {
       const sampleRate = 48000;
       const samples = new Float32Array(4800);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 100 * i / sampleRate) * 0.5;
+        samples[i] = Math.sin((2 * Math.PI * 100 * i) / sampleRate) * 0.5;
       }
 
       const output = applyGate(

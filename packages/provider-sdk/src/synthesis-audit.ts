@@ -22,9 +22,7 @@ export interface SynthesisAuditEntry {
 }
 
 export interface SynthesisAuditLog {
-  record(
-    entry: Omit<SynthesisAuditEntry, 'id' | 'timestamp'>,
-  ): SynthesisAuditEntry;
+  record(entry: Omit<SynthesisAuditEntry, 'id' | 'timestamp'>): SynthesisAuditEntry;
   getEntriesForVoice(voiceId: string): readonly SynthesisAuditEntry[];
   getEntriesForUser(userId: string): readonly SynthesisAuditEntry[];
   getEntriesInRange(start: string, end: string): readonly SynthesisAuditEntry[];
@@ -41,9 +39,7 @@ export function createSynthesisAuditLog(): SynthesisAuditLog {
   const entries: SynthesisAuditEntry[] = [];
 
   return {
-    record(
-      entry: Omit<SynthesisAuditEntry, 'id' | 'timestamp'>,
-    ): SynthesisAuditEntry {
+    record(entry: Omit<SynthesisAuditEntry, 'id' | 'timestamp'>): SynthesisAuditEntry {
       const auditEntry: SynthesisAuditEntry = {
         ...entry,
         id: generateAuditId(),

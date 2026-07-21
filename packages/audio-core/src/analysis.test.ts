@@ -65,7 +65,7 @@ describe('audio analysis', () => {
       const duration = 10;
       const samples = new Float32Array(sampleRate * duration);
       for (let i = 0; i < samples.length; i++) {
-        samples[i] = Math.sin(2 * Math.PI * 1000 * i / sampleRate) * 0.5;
+        samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.5;
       }
 
       const result = measureLoudness(samples, sampleRate);
@@ -83,8 +83,8 @@ describe('audio analysis', () => {
       const samples2 = new Float32Array(sampleRate * duration);
 
       for (let i = 0; i < samples1.length; i++) {
-        samples1[i] = Math.sin(2 * Math.PI * 1000 * i / sampleRate) * 0.3;
-        samples2[i] = Math.sin(2 * Math.PI * 1000 * i / sampleRate) * 0.6;
+        samples1[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.3;
+        samples2[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.6;
       }
 
       const result1 = measureLoudness(samples1, sampleRate);

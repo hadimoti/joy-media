@@ -11,11 +11,13 @@ Joy Media is a professional video editing application built with a modular, pack
 ### 1.1 Project Schema (`@joy-media/project-schema`)
 
 **Time Primitives:**
+
 - `TimeUs`: Integer microseconds (never floats)
 - `Rational`: Frame rates as `{ num, den }` (e.g., 30000/1001 for 29.97fps)
 - `TimeRange`: `{ startUs, durationUs }` - end-exclusive ranges
 
 **Document Model (v1):**
+
 ```typescript
 JoyProjectV1 {
   schemaVersion: 1
@@ -33,6 +35,7 @@ JoyProjectV1 {
 ```
 
 **Composition Structure:**
+
 ```typescript
 CompositionV1 {
   id, name, width, height
@@ -52,6 +55,7 @@ TrackV1 {
 ```
 
 **Clip Types:**
+
 ```typescript
 ClipV1 = VideoClipV1 | CompositionClipV1 | CaptionClipV1
 
@@ -72,6 +76,7 @@ CaptionClipV1 {
 ```
 
 **Visual Objects:**
+
 ```typescript
 VisualObjectV1 {
   id
@@ -92,6 +97,7 @@ AnimatablePropertyV1 = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacit
 ```
 
 **Animation System:**
+
 ```typescript
 AnimationCurveV1 {
   keyframes: KeyframeV1[]
@@ -110,6 +116,7 @@ BezierHandlesV1 {
 ```
 
 **Caption Model:**
+
 ```typescript
 CaptionDocumentV1 {
   id, language, direction: 'ltr' | 'rtl' | 'auto'
@@ -135,6 +142,7 @@ CaptionSegmentV1 {
 ### 1.2 Render IR (`@joy-media/render-ir`)
 
 **Renderer-Intermediate Representation:**
+
 ```typescript
 RenderFrameIR {
   version: 1
@@ -176,6 +184,7 @@ GroupNode {
 ### 1.3 Audio Core (`@joy-media/audio-core`)
 
 **Audio Types:**
+
 ```typescript
 WaveformBucket { min: number, max: number }
 
@@ -198,6 +207,7 @@ AudioPreviewClock {
 ### 1.4 Provider SDK (`@joy-media/provider-sdk`)
 
 **Provider Interface:**
+
 ```typescript
 Provider {
   manifest: ProviderManifest
@@ -225,6 +235,7 @@ TranscriptionWord {
 ### 1.5 Media Core (`@joy-media/media-core`)
 
 **Asset Management:**
+
 ```typescript
 AssetRecord {
   id, kind: 'video' | 'image'
@@ -253,6 +264,7 @@ MediaDescriptor {
 ### 1.6 Job Protocol (`@joy-media/job-protocol`)
 
 **Worker Communication:**
+
 ```typescript
 WorkerHello {
   protocolVersion: 1
@@ -288,8 +300,9 @@ ThumbnailJobSnapshot {
 **Core Principle:** All state mutations are expressed as commands that return both the new state and an inverse command for undo.
 
 **Timeline Commands (`@joy-media/commands`):**
+
 ```typescript
-SpikeCommand = 
+SpikeCommand =
   | { type: 'timeline.insertClip', payload: InsertClipPayload }
   | { type: 'timeline.removeClip', payload: RemoveClipPayload }
   | { type: 'timeline.moveClip', payload: MoveClipPayload }
@@ -301,6 +314,7 @@ SpikeCommand =
 ```
 
 **Visual Object Commands (`@joy-media/property-system`):**
+
 ```typescript
 VisualObjectCommand =
   | { type: 'object.setTransformProperty', payload: { objectId, key, value } }
@@ -312,6 +326,7 @@ VisualObjectCommand =
 ```
 
 **Caption Commands (`@joy-media/captions-core`):**
+
 ```typescript
 CaptionCommand =
   | { type: 'caption.setSegmentText', payload: { documentId, segmentId, textOverride } }
@@ -324,6 +339,7 @@ CaptionCommand =
 ```
 
 **Motion Commands (`@joy-media/motion-core`):**
+
 ```typescript
 MotionCommand =
   | { type: 'object.replaceAnimation', payload: { objectId, property, curve? } }
@@ -331,6 +347,7 @@ MotionCommand =
 ```
 
 **Command Application Pattern:**
+
 ```typescript
 function applyCommand(project: Project, command: Command): ApplyResult {
   // 1. Validate command
@@ -362,12 +379,13 @@ applyTransaction(project, transaction): TransactionResult {
 ### 2.3 History Pattern
 
 **Undo/Redo Stack:**
+
 ```typescript
 ProjectHistory {
   present: Project
   undo: TransactionRecord[]
   redo: TransactionRecord[]
-  
+
   apply(transaction): Project
   undo(): Project
   redo(): Project
@@ -379,6 +397,7 @@ ProjectHistory {
 ### 2.4 Persistence Pattern
 
 **Write-Ahead Log:**
+
 ```typescript
 LocalProjectPersistence<P, T> {
   initialize(project): void
@@ -395,6 +414,7 @@ PersistenceAdapter<P, T> {
 ```
 
 **Recovery Strategy:**
+
 1. Find latest valid snapshot (checksum verified)
 2. Replay transactions after snapshot
 3. Stop at first invalid transaction
@@ -403,11 +423,13 @@ PersistenceAdapter<P, T> {
 ### 2.5 Renderer-Agnostic Pattern
 
 **Evaluation Pipeline:**
+
 ```
 Project → Evaluator → Render IR → Renderer → Pixels
 ```
 
 **Evaluator (`@joy-media/evaluator`):**
+
 ```typescript
 evaluateFrame(project, compositionId, timeUs): EvaluatedFrame {
   compositionId, timeUs, frameIndex
@@ -421,6 +443,7 @@ EvaluatedVideoFrame {
 ```
 
 **Renderers:**
+
 - `@joy-media/renderer-headless`: Software rasterizer for testing
 - `@joy-media/renderer-pixi`: GPU-accelerated preview (production)
 
@@ -429,6 +452,7 @@ Both consume the same `RenderFrameIR` and produce pixel buffers.
 ### 2.6 Worker Pattern
 
 **Outbound Pairing:**
+
 ```typescript
 Worker → Coordinator: PairingRequest
 Coordinator → Worker: PairingGrant (session token)
@@ -436,6 +460,7 @@ Worker → Coordinator: WorkerHello (capabilities)
 ```
 
 **Job Lifecycle:**
+
 ```typescript
 Coordinator: enqueueThumbnail(job) → queued
 Worker: claimNextThumbnail() → assigned
@@ -449,6 +474,7 @@ Worker: succeedThumbnail() → succeeded
 ### 2.7 Provider Pattern
 
 **Capability-Based:**
+
 ```typescript
 Provider {
   manifest: { id, version, capabilities }
@@ -457,9 +483,11 @@ Provider {
 ```
 
 **Current Capabilities:**
+
 - `speech.transcribe`: Audio → CaptionDocument
 
 **Provider Implementation:**
+
 ```typescript
 createLocalWhisperProvider(execute, modelId): Provider {
   // Wraps execution function
@@ -509,6 +537,7 @@ Layer 6 (Applications):
 ```
 
 **Key Dependency Rules:**
+
 - Dependencies point inward (toward project-schema)
 - No circular dependencies
 - Renderers depend only on render-ir, never on project model
@@ -521,12 +550,15 @@ Layer 6 (Applications):
 ### 4.1 Audio Extensions
 
 **Current State:**
+
 - `AudioPreviewClock`: Timeline-synchronized audio clock
 - `buildWaveform`: Waveform visualization from PCM samples
 - `exportPcm16Wav`: Deterministic WAV export
 
 **Extension Points:**
+
 1. **Audio Clip Type:**
+
    ```typescript
    // Add to ClipV1 union
    AudioClipV1 {
@@ -538,12 +570,14 @@ Layer 6 (Applications):
    ```
 
 2. **Audio Track Kind:**
+
    ```typescript
    // Already defined in TrackV1
-   kind: 'audio'  // ready for implementation
+   kind: 'audio'; // ready for implementation
    ```
 
 3. **Audio Effects:**
+
    ```typescript
    // Add to VisualObjectV1 or create AudioEffectV1
    AudioEffectV1 {
@@ -554,6 +588,7 @@ Layer 6 (Applications):
    ```
 
 4. **Audio Mixer:**
+
    ```typescript
    // New package: @joy-media/audio-mixer
    AudioMixer {
@@ -572,22 +607,26 @@ Layer 6 (Applications):
 ### 4.2 Provider Extensions
 
 **Current State:**
+
 - `Provider` interface with `speech.transcribe` capability
 - `createLocalWhisperProvider` factory
 
 **Extension Points:**
+
 1. **New Capabilities:**
+
    ```typescript
-   type ProviderCapability = 
+   type ProviderCapability =
      | 'speech.transcribe'
-     | 'speech.synthesize'      // TTS
-     | 'image.generate'         // AI image generation
-     | 'video.analyze'          // Scene detection
-     | 'audio.separate'         // Stem separation
-     | 'caption.translate'      // Translation
+     | 'speech.synthesize' // TTS
+     | 'image.generate' // AI image generation
+     | 'video.analyze' // Scene detection
+     | 'audio.separate' // Stem separation
+     | 'caption.translate'; // Translation
    ```
 
 2. **Provider Registry:**
+
    ```typescript
    // New package: @joy-media/provider-registry
    ProviderRegistry {
@@ -598,6 +637,7 @@ Layer 6 (Applications):
    ```
 
 3. **Cloud Providers:**
+
    ```typescript
    createOpenAIWhisperProvider(apiKey): Provider
    createGoogleSpeechProvider(credentials): Provider
@@ -605,6 +645,7 @@ Layer 6 (Applications):
    ```
 
 4. **Provider Results:**
+
    ```typescript
    // Extend TranscriptionResult
    TranscriptionResult {
@@ -627,11 +668,13 @@ Layer 6 (Applications):
 ### 4.3 Clip Type Extensions
 
 **Current Clip Types:**
+
 - `VideoClipV1`
 - `CompositionClipV1`
 - `CaptionClipV1`
 
 **Potential Extensions:**
+
 ```typescript
 // Audio clip
 AudioClipV1 {
@@ -666,6 +709,7 @@ GeneratorClipV1 {
 ### 4.4 Track Type Extensions
 
 **Current Track Kinds:**
+
 - `video`
 - `audio` (defined but not implemented)
 - `caption`
@@ -673,25 +717,29 @@ GeneratorClipV1 {
 - `control`
 
 **Potential Extensions:**
+
 ```typescript
 // Adjustment layer
-kind: 'adjustment'
+kind: 'adjustment';
 
 // Effect track
-kind: 'effect'
+kind: 'effect';
 
 // Guide track (non-rendering)
-kind: 'guide'
+kind: 'guide';
 ```
 
 ### 4.5 Renderer Extensions
 
 **Current Renderers:**
+
 - Headless (software)
 - Pixi (GPU preview)
 
 **Extension Points:**
+
 1. **Export Renderer:**
+
    ```typescript
    // New package: @joy-media/renderer-export
    renderExportFrame(frame: RenderFrameIR): Uint8Array {
@@ -701,6 +749,7 @@ kind: 'guide'
    ```
 
 2. **WebGL Renderer:**
+
    ```typescript
    // New package: @joy-media/renderer-webgl
    createWebGLRenderer(canvas): Renderer
@@ -719,6 +768,7 @@ kind: 'guide'
 ### 4.6 Command Extensions
 
 **Adding New Commands:**
+
 1. Define command type in appropriate package
 2. Implement `apply*Command` function
 3. Compute inverse from pre-state
@@ -726,49 +776,59 @@ kind: 'guide'
 5. Update command registry (for UI discovery)
 
 **Example:**
+
 ```typescript
 // New command
 type SetAudioGainCommand = {
-  type: 'audio.setGain'
-  payload: { clipId: string, gain: number }
-}
+  type: 'audio.setGain';
+  payload: { clipId: string; gain: number };
+};
 
 // Implementation
-function applySetAudioGain(
-  project: JoyProjectV1,
-  command: SetAudioGainCommand
-): ApplyResult {
-  const clip = findClip(project, command.payload.clipId)
-  const previousGain = clip.gain ?? 1.0
-  
+function applySetAudioGain(project: JoyProjectV1, command: SetAudioGainCommand): ApplyResult {
+  const clip = findClip(project, command.payload.clipId);
+  const previousGain = clip.gain ?? 1.0;
+
   return {
     project: updateClip(project, clip.id, { gain: command.payload.gain }),
     inverse: {
       type: 'audio.setGain',
-      payload: { clipId: clip.id, gain: previousGain }
-    }
-  }
+      payload: { clipId: clip.id, gain: previousGain },
+    },
+  };
 }
 ```
 
 ### 4.7 Property System Extensions
 
 **Current Animatable Properties:**
+
 - `x`, `y`, `scaleX`, `scaleY`, `rotationDeg`, `opacity`
 
 **Extension Points:**
+
 1. **New Animatable Properties:**
+
    ```typescript
-   type AnimatablePropertyV1 = 
-     | 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity'
-     | 'crop.left' | 'crop.top' | 'crop.right' | 'crop.bottom'
-     | 'blur'           // motion blur amount
-     | 'hue'            // color adjustment
+   type AnimatablePropertyV1 =
+     | 'x'
+     | 'y'
+     | 'scaleX'
+     | 'scaleY'
+     | 'rotationDeg'
+     | 'opacity'
+     | 'crop.left'
+     | 'crop.top'
+     | 'crop.right'
+     | 'crop.bottom'
+     | 'blur' // motion blur amount
+     | 'hue' // color adjustment
      | 'saturation'
-     | 'brightness'
+     | 'brightness';
    ```
 
 2. **Custom Properties:**
+
    ```typescript
    // Add to VisualObjectV1
    customProperties?: Record<string, number | string | boolean>
@@ -779,32 +839,31 @@ function applySetAudioGain(
    // Extend VISUAL_INSPECTOR
    const VISUAL_INSPECTOR: PropertyDescriptor[] = [
      // ... existing
-     { key: 'blur', label: 'Blur', kind: 'number', min: 0, max: 100 }
-   ]
+     { key: 'blur', label: 'Blur', kind: 'number', min: 0, max: 100 },
+   ];
    ```
 
 ### 4.8 Export Extensions
 
 **Current Export:**
+
 - FFmpeg-based H.264/AAC export
 - Fixed preset: `social-h264-aac`
 
 **Extension Points:**
+
 1. **Export Presets:**
+
    ```typescript
-   type ExportPreset = 
-     | 'social-h264-aac'
-     | 'webm-vp9-opus'
-     | 'prores-422'
-     | 'h265-main10'
-     | 'gif'
-     | 'image-sequence'
+   type ExportPreset =
+     'social-h264-aac' | 'webm-vp9-opus' | 'prores-422' | 'h265-main10' | 'gif' | 'image-sequence';
    ```
 
 2. **Custom Encoders:**
+
    ```typescript
    interface Encoder {
-     encode(manifest: RenderManifest, frames: Uint8Array[]): Promise<Buffer>
+     encode(manifest: RenderManifest, frames: Uint8Array[]): Promise<Buffer>;
    }
    ```
 
@@ -819,6 +878,7 @@ function applySetAudioGain(
 ## 5. Data Flow
 
 ### 5.1 Editing Flow
+
 ```
 User Action
   ↓
@@ -838,6 +898,7 @@ UI Re-render
 ```
 
 ### 5.2 Playback Flow
+
 ```
 PlaybackScheduler.tick()
   ↓
@@ -855,6 +916,7 @@ Pixels → Canvas/Video Element
 ```
 
 ### 5.3 Export Flow
+
 ```
 ExportJob
   ↓
@@ -875,6 +937,7 @@ Output file
 ```
 
 ### 5.4 Transcription Flow
+
 ```
 User clicks "Transcribe"
   ↓
@@ -896,47 +959,55 @@ Project update
 ## 6. Key Design Decisions
 
 ### 6.1 Immutable Data
+
 - All project data is immutable (`readonly`)
 - Commands return new state, never mutate
 - Enables cheap undo/redo via inverse commands
 - Simplifies reasoning about state changes
 
 ### 6.2 Integer Microseconds
+
 - All time values are integer microseconds (`TimeUs`)
 - Never float seconds
 - Avoids floating-point drift in long timelines
 - Exact frame mapping via rational frame rates
 
 ### 6.3 Rational Frame Rates
+
 - Frame rates as `{ num, den }` (e.g., 30000/1001)
 - Exact representation of NTSC, PAL, etc.
 - Precise frame-to-time mapping
 
 ### 6.4 Renderer-Agnostic IR
+
 - Render IR is separate from project model
 - Renderers consume IR, never project data
 - Enables multiple renderer implementations
 - Clean separation of concerns
 
 ### 6.5 Command-Based State
+
 - All mutations are commands
 - Commands are serializable
 - Enables CRDT/ collaboration later
 - Audit trail of all changes
 
 ### 6.6 Local-First Persistence
+
 - Write-ahead log for crash recovery
 - Periodic snapshots for performance
 - Checksum verification
 - No server dependency for core functionality
 
 ### 6.7 Worker Isolation
+
 - Workers run in separate process
 - Communication via structured messages
 - Workers have local file access
 - Control plane has no path access
 
 ### 6.8 Provider Abstraction
+
 - Providers are capability-based
 - Providers are replaceable
 - Results are normalized
@@ -947,16 +1018,19 @@ Project update
 ## 7. Testing Strategy
 
 ### 7.1 Unit Tests
+
 - Every package has comprehensive tests
 - Pure functions are easy to test
 - Command tests verify both forward and inverse
 
 ### 7.2 Integration Tests
+
 - Worker control plane integration
 - Persistence recovery scenarios
 - End-to-end editing flows
 
 ### 7.3 Golden Tests
+
 - Renderer parity tests (headless vs Pixi)
 - Export verification (ffprobe)
 - Frame-exact evaluation tests
@@ -966,21 +1040,25 @@ Project update
 ## 8. Performance Considerations
 
 ### 8.1 Timeline Virtualization
+
 - Only visible tracks are rendered
 - `virtualTracks()` filters by viewport
 - Reduces DOM/Canvas load
 
 ### 8.2 Frame Caching
+
 - `FrameCache` stores decoded frames
 - LRU eviction policy
 - Reduces redundant decoding
 
 ### 8.3 Proxy Media
+
 - Low-resolution proxies for preview
 - Full resolution for export
 - `ProxyCache` tracks derivatives
 
 ### 8.4 Waveform Compression
+
 - `encodeWaveformPeaks()` compresses waveform data
 - int16 quantization
 - 4 bytes per bucket (min/max)
@@ -990,16 +1068,19 @@ Project update
 ## 9. Security Considerations
 
 ### 9.1 Opaque Identifiers
+
 - Asset locations use opaque IDs, never paths
 - Workers resolve paths locally
 - Control plane never sees filesystem paths
 
 ### 9.2 Provider Sandboxing
+
 - Providers run in isolated context
 - No direct file access
 - Results are validated
 
 ### 9.3 Input Validation
+
 - All external data is validated
 - Diagnostic-based error reporting
 - No exceptions for invalid data
@@ -1009,21 +1090,25 @@ Project update
 ## 10. Future Directions
 
 ### 10.1 Collaboration
+
 - CRDT-based merging
 - Real-time multi-user editing
 - Conflict resolution strategies
 
 ### 10.2 Cloud Integration
+
 - Cloud rendering
 - Asset synchronization
 - Provider marketplace
 
 ### 10.3 Plugin System
+
 - User-defined commands
 - Custom renderers
 - Third-party providers
 
 ### 10.4 Advanced Features
+
 - Audio mixing and effects
 - Color grading
 - 3D compositing
@@ -1045,6 +1130,7 @@ Joy Media is a professionally architected video editing system with:
 - **Extensive test coverage** at all levels
 
 The architecture is designed for:
+
 - **Correctness**: Pure functions, validation, diagnostics
 - **Performance**: Virtualization, caching, proxy media
 - **Extensibility**: Command pattern, provider abstraction, renderer IR

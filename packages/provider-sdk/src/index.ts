@@ -78,25 +78,15 @@ export {
 } from './utils.js';
 
 // Re-export voice consent (WP-05.5)
-export type {
-  VoiceConsentManager,
-  EnrollVoiceParams,
-} from './voice-consent.js';
+export type { VoiceConsentManager, EnrollVoiceParams } from './voice-consent.js';
 export { createVoiceConsentManager } from './voice-consent.js';
 
 // Re-export voice labels (WP-05.5)
 export type { VoiceUsageLabel } from './voice-labels.js';
-export {
-  extractVoiceUsage,
-  formatVoiceLabel,
-  attachVoiceMetadata,
-} from './voice-labels.js';
+export { extractVoiceUsage, formatVoiceLabel, attachVoiceMetadata } from './voice-labels.js';
 
 // Re-export synthesis audit (WP-05.5)
-export type {
-  SynthesisAuditLog,
-  SynthesisAuditEntry,
-} from './synthesis-audit.js';
+export type { SynthesisAuditLog, SynthesisAuditEntry } from './synthesis-audit.js';
 export { createSynthesisAuditLog } from './synthesis-audit.js';
 
 // ===== V1 Backward Compatibility =====

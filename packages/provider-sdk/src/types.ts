@@ -159,12 +159,7 @@ export interface ProviderResolution {
 // ===== Lifecycle Types =====
 
 export type ProviderLifecycleState =
-  | 'unconfigured'
-  | 'configured'
-  | 'healthy'
-  | 'degraded'
-  | 'offline'
-  | 'unauthorized';
+  'unconfigured' | 'configured' | 'healthy' | 'degraded' | 'offline' | 'unauthorized';
 
 export interface ProviderStatus {
   readonly providerId: string;

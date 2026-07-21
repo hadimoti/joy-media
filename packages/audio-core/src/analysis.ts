@@ -50,10 +50,7 @@ export interface LoudnessMeasurement {
   readonly range: number;
 }
 
-export function measureLoudness(
-  samples: Float32Array,
-  sampleRate: number,
-): LoudnessMeasurement {
+export function measureLoudness(samples: Float32Array, sampleRate: number): LoudnessMeasurement {
   const shelfCoeffs = computeBiquadCoeffs('highshelf', 1500, 4, 0.7, sampleRate);
   const filtered = processBiquad(samples, shelfCoeffs);
 
@@ -75,9 +72,7 @@ export function measureLoudness(
   const absoluteThreshold = -70;
   const gatedBlocks = blocks.filter((l) => l > absoluteThreshold);
   const integrated =
-    gatedBlocks.length > 0
-      ? gatedBlocks.reduce((sum, l) => sum + l, 0) / gatedBlocks.length
-      : -70;
+    gatedBlocks.length > 0 ? gatedBlocks.reduce((sum, l) => sum + l, 0) / gatedBlocks.length : -70;
 
   const shortTermSamples = Math.floor(3 * sampleRate);
   const shortTermBlocks: number[] = [];
@@ -121,10 +116,7 @@ export interface SilenceDetection {
   readonly silentRegions: readonly { readonly start: number; readonly end: number }[];
 }
 
-export function detectSilence(
-  samples: Float32Array,
-  thresholdDb: number,
-): SilenceDetection {
+export function detectSilence(samples: Float32Array, thresholdDb: number): SilenceDetection {
   const thresholdLinear = Math.pow(10, thresholdDb / 20);
   const silentRegions: { start: number; end: number }[] = [];
   let regionStart = -1;
@@ -146,7 +138,10 @@ export function detectSilence(
   }
 
   return {
-    silent: silentRegions.length > 0 && silentRegions[0]!.start === 0 && silentRegions[silentRegions.length - 1]!.end === samples.length,
+    silent:
+      silentRegions.length > 0 &&
+      silentRegions[0]!.start === 0 &&
+      silentRegions[silentRegions.length - 1]!.end === samples.length,
     silentRegions,
   };
 }

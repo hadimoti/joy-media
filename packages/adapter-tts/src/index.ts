@@ -249,9 +249,7 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
     secretFields,
     privacy: {
       dataLeavesDevice: !isLocal,
-      retentionDisclosure: isLocal
-        ? undefined
-        : 'Text sent to remote TTS service for synthesis',
+      retentionDisclosure: isLocal ? undefined : 'Text sent to remote TTS service for synthesis',
     },
   };
 

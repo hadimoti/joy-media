@@ -123,10 +123,7 @@ export function validateManifest(manifest: unknown): { valid: boolean; errors: s
     errors.push('privacy must be an object');
   } else {
     const privacy = m.privacy as Record<string, unknown>;
-    if (
-      typeof privacy.dataLeavesDevice !== 'boolean' &&
-      privacy.dataLeavesDevice !== 'depends'
-    ) {
+    if (typeof privacy.dataLeavesDevice !== 'boolean' && privacy.dataLeavesDevice !== 'depends') {
       errors.push('privacy.dataLeavesDevice must be boolean or "depends"');
     }
   }
@@ -134,10 +131,7 @@ export function validateManifest(manifest: unknown): { valid: boolean; errors: s
   return { valid: errors.length === 0, errors };
 }
 
-export function createTestRequest(
-  capability: CapabilityId,
-  input: unknown,
-): CapabilityRequest {
+export function createTestRequest(capability: CapabilityId, input: unknown): CapabilityRequest {
   testCounter++;
   return {
     requestVersion: 1,
