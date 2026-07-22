@@ -7,12 +7,15 @@ Date: 2026-07-22
 
 Q10 requires JOY Media to use the existing JOY login, remain disabled per user
 until an administrator enables it, and never ask the creator to maintain a
-second JOY Media password. WP-12's live audit found that the current
-`joy-admin-api` implementation is a non-version-controlled Flask service with
-one shared admin password. It has no user principal, per-user allow flag, or
-safe reusable identity contract. Sharing that password, importing its database,
-or accepting an arbitrary caller-supplied header would violate the isolation,
-audit, and least-privilege requirements in §§27–28 and X01.
+second JOY Media password. WP-12's live audit found that the active
+`/opt/joy-admin/webapp_api.py` is a stale, shared-password Flask deployment.
+The tracked source is instead the separate `joy-vps` repository's
+`bot/webapp_api.py` and `bot/webapp_auth.py`; it already has per-user web
+sessions and feature flags through `accounts_service`. It does not yet expose
+an audience-scoped JOY Media assertion or `joymedia_allowed` flag. Sharing the
+admin password, importing its database, or accepting an arbitrary
+caller-supplied header would violate the isolation, audit, and least-privilege
+requirements in §§27–28 and X01.
 
 ## Decision
 
@@ -20,9 +23,9 @@ JOY Media integrates with the JOY identity owner only through a documented,
 version-controlled signed assertion interface:
 
 1. The JOY identity owner remains responsible for login, user sessions, user
-   IDs, and an administrator-managed `joymedia_allowed` flag. Its own source
-   must move into a version-controlled deployment boundary before this work is
-   implemented.
+   IDs, and an administrator-managed `joymedia_allowed` flag. The existing
+   version-controlled `joy-vps` source is the only permitted implementation
+   target; no direct edit of the stale `/opt/joy-admin` copy is allowed.
 2. After normal JOY login, it issues a short-lived asymmetric signed token for
    the `joy-media` audience. Required claims are stable `sub`, `iss`, `aud`,
    `exp`, `iat`, and `joymedia_allowed`; the JOY Media API accepts only the
