@@ -26,7 +26,7 @@ describe('Worker runtime', () => {
     );
     expect(runtime.hello('win32', 'x64').capabilities).toEqual(['asset.thumbnail']);
   });
-  it('bounds logs and cooperatively cancels jobs', () => {
+  it('bounds logs and cooperatively cancels jobs', async () => {
     const log = new BoundedLog(2);
     log.write('a');
     log.write('b');
@@ -36,7 +36,9 @@ describe('Worker runtime', () => {
       { workerId: 'w', createdAt: 'now' },
       { ffmpeg: true, ffprobe: true },
     );
-    expect(runtime.run('j', () => true).state).toBe('canceled');
+    expect(
+      (await runtime.run('j', { cancelled: () => true, progress: async () => undefined })).state,
+    ).toBe('canceled');
   });
   it('persists identity and Worker session separately from the project data', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');

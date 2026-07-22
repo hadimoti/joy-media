@@ -42,6 +42,7 @@ import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
+import { JobsPanel } from './JobsPanel.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -66,6 +67,7 @@ const labels: Readonly<Record<string, string>> = {
   camera: 'Camera',
   history: 'History',
   diagnostics: 'Diagnostics',
+  jobs: 'Jobs',
 };
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
@@ -749,6 +751,8 @@ function Panel({ api }: IDockviewPanelProps) {
         onDispatch={context.dispatchTimeline}
       />
     );
+  if (api.id === 'jobs')
+    return <JobsPanel projectId={visualProject.id} projectTitle={visualProject.title} />;
   if (api.id === 'history')
     return (
       <article>

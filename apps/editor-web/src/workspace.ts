@@ -8,6 +8,7 @@ export const PANEL_IDS = [
   'camera',
   'history',
   'diagnostics',
+  'jobs',
 ] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
@@ -28,6 +29,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'camera',
     'history',
     'diagnostics',
+    'jobs',
   ],
 };
 

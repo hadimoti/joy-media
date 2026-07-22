@@ -74,11 +74,28 @@ async function route(
   }
 
   const workerLeaseMatch = /^\/v1\/workers\/([^/]+)\/leases$/.exec(url.pathname);
+  const workerHelloMatch = /^\/v1\/workers\/([^/]+)\/hello$/.exec(url.pathname);
+  const workerHeartbeatMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/heartbeat$/.exec(
+    url.pathname,
+  );
   const workerCompleteMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/complete$/.exec(
     url.pathname,
   );
-  if (request.method === 'POST' && (workerLeaseMatch !== null || workerCompleteMatch !== null)) {
-    const workerId = workerLeaseMatch?.[1] ?? workerCompleteMatch?.[1];
+  const workerFailMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/fail$/.exec(url.pathname);
+  if (
+    request.method === 'POST' &&
+    (workerLeaseMatch !== null ||
+      workerHelloMatch !== null ||
+      workerHeartbeatMatch !== null ||
+      workerCompleteMatch !== null ||
+      workerFailMatch !== null)
+  ) {
+    const workerId =
+      workerLeaseMatch?.[1] ??
+      workerHelloMatch?.[1] ??
+      workerHeartbeatMatch?.[1] ??
+      workerCompleteMatch?.[1] ??
+      workerFailMatch?.[1];
     const sessionWorkerId = await options.controlPlane.authenticateWorker(
       workerSessionHash(request),
     );
@@ -95,10 +112,44 @@ async function route(
       respondJson(response, 200, { data: job ?? null });
       return;
     }
+    if (workerHelloMatch !== null) {
+      const body = await readJson(request);
+      respondJson(response, 200, {
+        data: await options.controlPlane.helloWorker(
+          decodeURIComponent(workerId),
+          requiredStringArray(body, 'capabilities'),
+        ),
+      });
+      return;
+    }
+    if (workerHeartbeatMatch !== null) {
+      const body = await readJson(request);
+      respondJson(response, 200, {
+        data: await options.controlPlane.heartbeat(
+          decodeURIComponent(workerId),
+          decodeURIComponent(workerHeartbeatMatch[2]!),
+          requiredProgress(body),
+        ),
+      });
+      return;
+    }
+    if (workerFailMatch !== null) {
+      const body = await readJson(request);
+      respondJson(response, 200, {
+        data: await options.controlPlane.fail(
+          decodeURIComponent(workerId),
+          decodeURIComponent(workerFailMatch[2]!),
+          requiredString(body, 'error'),
+        ),
+      });
+      return;
+    }
     respondJson(response, 200, {
       data: await options.controlPlane.complete(
         decodeURIComponent(workerId),
         decodeURIComponent(workerCompleteMatch![2]!),
+        undefined,
+        optionalFixtureReceipt(await readJson(request)),
       ),
     });
     return;
@@ -106,6 +157,11 @@ async function route(
 
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  if (request.method === 'GET' && url.pathname === '/v1/workers') {
+    respondJson(response, 200, { data: await options.controlPlane.workersForOwner(actor) });
+    return;
+  }
 
   if (request.method === 'POST' && url.pathname === '/v1/projects') {
     const body = await readJson(request);
@@ -134,6 +190,12 @@ async function route(
   }
 
   const jobMatch = /^\/v1\/projects\/([^/]+)\/jobs$/.exec(url.pathname);
+  if (request.method === 'GET' && jobMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.jobsForProject(actor, decodeURIComponent(jobMatch[1]!)),
+    });
+    return;
+  }
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
     respondJson(response, 201, {
@@ -142,6 +204,29 @@ async function route(
         requiredString(body, 'id'),
         decodeURIComponent(jobMatch[1]!),
         requiredString(body, 'type'),
+      ),
+    });
+    return;
+  }
+
+  const cancelMatch = /^\/v1\/projects\/([^/]+)\/jobs\/([^/]+)\/cancel$/.exec(url.pathname);
+  if (request.method === 'POST' && cancelMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.cancel(
+        actor,
+        decodeURIComponent(cancelMatch[1]!),
+        decodeURIComponent(cancelMatch[2]!),
+      ),
+    });
+    return;
+  }
+  const retryMatch = /^\/v1\/projects\/([^/]+)\/jobs\/([^/]+)\/retry$/.exec(url.pathname);
+  if (request.method === 'POST' && retryMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.retry(
+        actor,
+        decodeURIComponent(retryMatch[1]!),
+        decodeURIComponent(retryMatch[2]!),
       ),
     });
     return;
@@ -191,6 +276,47 @@ function optionalPositiveInteger(body: Record<string, unknown>, field: string): 
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a positive integer`);
   return value;
+}
+
+function requiredProgress(body: Record<string, unknown>): number {
+  const progress = body.progress;
+  if (
+    typeof progress !== 'number' ||
+    !Number.isSafeInteger(progress) ||
+    progress < 0 ||
+    progress > 100
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'progress must be an integer from 0 to 100');
+  return progress;
+}
+
+function requiredStringArray(body: Record<string, unknown>, field: string): readonly string[] {
+  const value = body[field];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.length === 0))
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a string array`);
+  return value;
+}
+
+function optionalFixtureReceipt(
+  body: Record<string, unknown>,
+):
+  | { readonly kind: 'fixture.thumbnail'; readonly sha256: string; readonly bytes: number }
+  | undefined {
+  const value = body.result;
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', 'result must be an object');
+  const result = value as Record<string, unknown>;
+  if (
+    result.kind !== 'fixture.thumbnail' ||
+    typeof result.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(result.sha256) ||
+    typeof result.bytes !== 'number' ||
+    !Number.isSafeInteger(result.bytes) ||
+    result.bytes <= 0
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+  return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
 }
 
 function optionalCursor(value: string | null): number {

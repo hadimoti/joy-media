@@ -5,12 +5,16 @@ import {
   type ControlPlane,
   type Job,
   type JobEvent,
+  type JobResult,
   type ProjectMetadata,
   type WorkerPairingOffer,
   type WorkerRecord,
   type WorkerSession,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
+
+const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
+const FIXTURE_THUMBNAIL_BYTES = 14;
 
 interface ProjectRow {
   readonly id: string;
@@ -25,6 +29,8 @@ interface WorkerRow {
   readonly revoked_at: Date | null;
   readonly session_token_hash: string | null;
   readonly session_expires_at: Date | null;
+  readonly capabilities: readonly string[];
+  readonly last_seen_at: Date | null;
 }
 
 interface PairingOfferRow {
@@ -41,6 +47,12 @@ interface JobRow {
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
+  readonly progress: number;
+  readonly cancel_requested: boolean;
+  readonly result_kind: string | null;
+  readonly result_sha256: string | null;
+  readonly result_bytes: number | null;
+  readonly error: string | null;
 }
 
 interface EventRow {
@@ -147,7 +159,7 @@ export class PostgresControlPlane implements ControlPlane {
       [workerId, actor.id, pairingCodeHash, new Date(now)],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PAIRING_CODE_INVALID', workerId);
-    return { id: workerId, ownerId: actor.id, paired: false, revoked: false };
+    return { id: workerId, ownerId: actor.id, paired: false, revoked: false, capabilities: [] };
   }
 
   async claimWorkerSession(
@@ -187,6 +199,20 @@ export class PostgresControlPlane implements ControlPlane {
       [sessionTokenHash, new Date(now)],
     );
     return result.rows[0]?.id;
+  }
+
+  async helloWorker(
+    workerId: string,
+    capabilities: readonly string[],
+    now = Date.now(),
+  ): Promise<WorkerRecord> {
+    const result = await this.pool.query<WorkerRow>(
+      `UPDATE workers SET capabilities = $2::jsonb, last_seen_at = $3
+       WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
+      [workerId, JSON.stringify([...new Set(capabilities)].sort()), new Date(now)],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
+    return workerOf(result.rows[0]);
   }
 
   async revokeWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
@@ -240,7 +266,8 @@ export class PostgresControlPlane implements ControlPlane {
       const job = candidate.rows[0];
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
-        `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3
+        `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
+             cancel_requested = false
          WHERE id = $1 RETURNING *`,
         [job.id, workerId, new Date(now + durationMs)],
       );
@@ -253,13 +280,58 @@ export class PostgresControlPlane implements ControlPlane {
     });
   }
 
-  async complete(workerId: string, jobId: string, now = Date.now()): Promise<Job> {
+  async heartbeat(
+    workerId: string,
+    jobId: string,
+    progress: number,
+    now = Date.now(),
+    durationMs = 30_000,
+  ): Promise<{ readonly job: Job; readonly cancelRequested: boolean }> {
+    if (!Number.isSafeInteger(progress) || progress < 0 || progress > 100)
+      throw new ControlPlaneError('PROGRESS_INVALID', jobId);
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
-        `UPDATE jobs SET state = 'completed'
-         WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+        `UPDATE jobs SET progress = $3, lease_expires_at = $4
+         WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $5
+           AND progress <= $3
          RETURNING *`,
-        [jobId, workerId, new Date(now)],
+        [jobId, workerId, progress, new Date(now + durationMs), new Date(now)],
+      );
+      const job = result.rows[0];
+      if (job === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      await client.query('UPDATE workers SET last_seen_at = $2 WHERE id = $1', [
+        workerId,
+        new Date(now),
+      ]);
+      await this.event(client, jobId, `progress:${progress}`, now);
+      const value = jobOf(job);
+      return { job: value, cancelRequested: value.cancelRequested };
+    });
+  }
+
+  async complete(
+    workerId: string,
+    jobId: string,
+    now = Date.now(),
+    receipt?: JobResult,
+  ): Promise<Job> {
+    if (receipt !== undefined && !isFixtureReceipt(receipt))
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
+    return this.transaction(async (client) => {
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
+             result_kind = $4, result_sha256 = $5, result_bytes = $6
+         WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+           AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
+         RETURNING *`,
+        [
+          jobId,
+          workerId,
+          new Date(now),
+          receipt?.kind ?? null,
+          receipt?.sha256 ?? null,
+          receipt?.bytes ?? null,
+        ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
       await client.query(
@@ -271,6 +343,72 @@ export class PostgresControlPlane implements ControlPlane {
       await this.event(client, jobId, 'completed', now);
       return jobOf(result.rows[0]);
     });
+  }
+
+  async fail(workerId: string, jobId: string, error: string, now = Date.now()): Promise<Job> {
+    return this.transaction(async (client) => {
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = CASE WHEN $4 = 'canceled' THEN 'canceled' ELSE 'failed' END,
+             cancel_requested = false, error = CASE WHEN $4 = 'canceled' THEN NULL ELSE $4 END
+         WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+         RETURNING *`,
+        [jobId, workerId, new Date(now), error.slice(0, 500)],
+      );
+      if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      await this.event(client, jobId, error === 'canceled' ? 'canceled' : 'failed', now);
+      return jobOf(result.rows[0]);
+    });
+  }
+
+  async cancel(actor: Actor, projectId: string, jobId: string, now = Date.now()): Promise<Job> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = CASE WHEN state = 'queued' THEN 'canceled' ELSE state END,
+             cancel_requested = CASE WHEN state = 'leased' THEN true ELSE cancel_requested END
+         WHERE id = $1 AND project_id = $2 AND state IN ('queued', 'leased') RETURNING *`,
+        [jobId, projectId],
+      );
+      const job = result.rows[0];
+      if (job === undefined) throw new ControlPlaneError('JOB_NOT_CANCELABLE', jobId);
+      await this.event(client, jobId, job.cancel_requested ? 'cancel-requested' : 'canceled', now);
+      return jobOf(job);
+    });
+  }
+
+  async retry(actor: Actor, projectId: string, jobId: string, now = Date.now()): Promise<Job> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = 'queued', progress = 0, cancel_requested = false,
+             lease_owner = NULL, lease_expires_at = NULL, result_kind = NULL,
+             result_sha256 = NULL, result_bytes = NULL, error = NULL
+         WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
+         RETURNING *`,
+        [jobId, projectId],
+      );
+      if (result.rows[0] === undefined) throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+      await this.event(client, jobId, 'retried', now);
+      return jobOf(result.rows[0]);
+    });
+  }
+
+  async jobsForProject(actor: Actor, projectId: string): Promise<readonly Job[]> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<JobRow>(
+      'SELECT * FROM jobs WHERE project_id = $1 ORDER BY id',
+      [projectId],
+    );
+    return result.rows.map(jobOf);
+  }
+
+  async workersForOwner(actor: Actor): Promise<readonly WorkerRecord[]> {
+    assertActor(actor);
+    const result = await this.pool.query<WorkerRow>(
+      'SELECT * FROM workers WHERE owner_id = $1 ORDER BY id',
+      [actor.id],
+    );
+    return result.rows.map(workerOf);
   }
 
   async eventsAfter(actor: Actor, projectId: string, cursor: number): Promise<readonly JobEvent[]> {
@@ -347,6 +485,8 @@ function workerOf(row: WorkerRow): WorkerRecord {
     ownerId: row.owner_id,
     paired: row.revoked_at === null,
     revoked: row.revoked_at !== null,
+    capabilities: row.capabilities,
+    ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at.getTime() }),
   };
 }
 
@@ -356,9 +496,29 @@ function jobOf(row: JobRow): Job {
     projectId: row.project_id,
     type: row.type,
     state: row.state,
+    progress: row.progress,
+    cancelRequested: row.cancel_requested,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
+    ...(row.result_kind === null || row.result_sha256 === null || row.result_bytes === null
+      ? {}
+      : {
+          result: {
+            kind: row.result_kind as JobResult['kind'],
+            sha256: row.result_sha256,
+            bytes: row.result_bytes,
+          },
+        }),
+    ...(row.error === null ? {} : { error: row.error }),
   };
+}
+
+function isFixtureReceipt(value: JobResult): boolean {
+  return (
+    value.kind === 'fixture.thumbnail' &&
+    value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
+    value.bytes === FIXTURE_THUMBNAIL_BYTES
+  );
 }
 
 function databaseError(error: unknown, duplicateCode: string, id: string): ControlPlaneError {

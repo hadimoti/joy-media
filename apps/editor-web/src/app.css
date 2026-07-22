@@ -160,6 +160,31 @@ label {
   color: #e9b949;
   white-space: nowrap;
 }
+.jobs-panel,
+.jobs-pairing,
+.jobs-list,
+.jobs-workers {
+  display: grid;
+  gap: 0.5rem;
+}
+.jobs-list,
+.jobs-workers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.jobs-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid #303a56;
+}
+.jobs-status {
+  color: #9fb0c8;
+  margin: 0;
+}
 .caption-preview {
   position: relative;
   overflow: hidden;

@@ -53,7 +53,7 @@ describe('WorkerControlPlaneClient', () => {
       projectId: 'project-1',
       type: 'asset.thumbnail',
     });
-    await client.complete('job-1');
+    await client.complete('job-1', fixtureReceipt());
 
     expect(requests).toEqual([
       { pathname: '/v1/worker-pair/offers' },
@@ -144,7 +144,7 @@ describe('WorkerControlPlaneClient', () => {
         'joy-assertion',
       );
       await expect(client.lease()).resolves.toMatchObject({ id: 'job-1' });
-      await expect(client.complete('job-1')).resolves.toBeUndefined();
+      await expect(client.complete('job-1', fixtureReceipt())).resolves.toBeUndefined();
     } finally {
       await close(server);
     }
@@ -156,6 +156,10 @@ function response(status: number, value: unknown): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function fixtureReceipt() {
+  return { kind: 'fixture.thumbnail' as const, sha256: 'a'.repeat(64), bytes: 14 };
 }
 
 async function post(

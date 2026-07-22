@@ -14,6 +14,7 @@ export class WorkerDaemon {
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    await this.client.hello(this.runtime.hello(process.platform, process.arch).capabilities);
     while (!options.stopped()) {
       try {
         const job = await this.client.lease();
@@ -21,8 +22,16 @@ export class WorkerDaemon {
           await sleep(pollIntervalMs);
           continue;
         }
-        const result = this.runtime.run(job.id, () => options.stopped());
-        if (result.state === 'completed') await this.client.complete(job.id);
+        let cancelRequested = false;
+        const result = await this.runtime.run(job.id, {
+          cancelled: () => options.stopped() || cancelRequested,
+          progress: async (progress) => {
+            const heartbeat = await this.client.heartbeat(job.id, progress);
+            cancelRequested ||= heartbeat.cancelRequested;
+          },
+        });
+        if (result.state === 'completed') await this.client.complete(job.id, result.result);
+        else await this.client.fail(job.id, 'canceled');
       } catch (error) {
         this.runtime.log.write(`control-plane ${error instanceof Error ? error.message : 'error'}`);
         await sleep(pollIntervalMs);

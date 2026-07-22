@@ -12,6 +12,11 @@ export interface LeasedJob {
   readonly projectId: string;
   readonly type: string;
 }
+export interface WorkerJobResult {
+  readonly kind: 'fixture.thumbnail';
+  readonly sha256: string;
+  readonly bytes: number;
+}
 
 export interface WorkerControlPlaneClientOptions {
   readonly apiUrl: string;
@@ -68,10 +73,34 @@ export class WorkerControlPlaneClient {
     };
   }
 
-  async complete(jobId: string): Promise<void> {
+  async hello(capabilities: readonly string[]): Promise<void> {
+    await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/hello`,
+      { capabilities },
+    );
+  }
+
+  async heartbeat(jobId: string, progress: number): Promise<{ readonly cancelRequested: boolean }> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/heartbeat`,
+      { progress },
+    );
+    if (!isRecord(result) || typeof result.cancelRequested !== 'boolean')
+      throw new Error('Invalid Worker response: cancelRequested');
+    return { cancelRequested: result.cancelRequested };
+  }
+
+  async complete(jobId: string, result: WorkerJobResult): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/complete`,
-      {},
+      { result },
+    );
+  }
+
+  async fail(jobId: string, error: string): Promise<void> {
+    await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,
+      { error },
     );
   }
 

@@ -9,7 +9,8 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 
@@ -131,17 +132,49 @@ export class WorkerRuntime {
       maxConcurrentJobs: 1,
     };
   }
-  run(
+  async run(
     jobId: string,
-    cancelled: () => boolean,
-  ): { readonly tempDir: string; readonly state: 'completed' | 'canceled' } {
+    options: {
+      readonly cancelled: () => boolean;
+      readonly progress: (progress: number) => Promise<void>;
+    },
+  ): Promise<
+    | {
+        readonly tempDir: string;
+        readonly state: 'completed';
+        readonly result: FixtureThumbnailReceipt;
+      }
+    | { readonly tempDir: string; readonly state: 'canceled' }
+  > {
     const tempDir = mkdtempSync(join(tmpdir(), `joy-media-${jobId}-`));
     this.log.write(`job ${jobId} temp ${tempDir}`);
-    if (cancelled()) {
+    for (const progress of [5, 50, 90]) {
+      if (options.cancelled()) {
+        this.log.write(`job ${jobId} canceled`);
+        return { tempDir, state: 'canceled' };
+      }
+      await options.progress(progress);
+      await sleep(20);
+    }
+    if (options.cancelled()) {
       this.log.write(`job ${jobId} canceled`);
       return { tempDir, state: 'canceled' };
     }
+    const bytes = Buffer.from('P6\n1 1\n255\n\x20\x80\xe0', 'binary');
+    writeFileSync(join(tempDir, 'fixture-thumbnail.ppm'), bytes, { mode: 0o600 });
+    const result = {
+      kind: 'fixture.thumbnail' as const,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.length,
+    };
+    await options.progress(100);
     this.log.write(`job ${jobId} completed`);
-    return { tempDir, state: 'completed' };
+    return { tempDir, state: 'completed', result };
   }
+}
+
+export interface FixtureThumbnailReceipt {
+  readonly kind: 'fixture.thumbnail';
+  readonly sha256: string;
+  readonly bytes: number;
 }

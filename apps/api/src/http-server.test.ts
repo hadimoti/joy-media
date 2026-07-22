@@ -60,7 +60,19 @@ describe('control-plane HTTP transport', () => {
     expect(claim).toMatchObject({ status: 201, body: { data: { workerId: 'w' } } });
     const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
     expect(
-      await request(origin, 'POST', '/v1/projects/p/jobs', { id: 'j', type: 'asset.thumbnail' }),
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/hello',
+        { capabilities: ['asset.thumbnail'] },
+        workerToken,
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'w', capabilities: ['asset.thumbnail'] } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/jobs', { id: 'j', type: 'fixture.thumbnail' }),
     ).toMatchObject({
       status: 201,
       body: { data: { id: 'j', state: 'queued' } },
@@ -70,17 +82,71 @@ describe('control-plane HTTP transport', () => {
       body: { data: { id: 'j', state: 'leased', leaseOwner: 'w' } },
     });
     expect(
-      await request(origin, 'POST', '/v1/workers/w/jobs/j/complete', {}, workerToken),
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/j/heartbeat',
+        { progress: 50 },
+        workerToken,
+      ),
     ).toMatchObject({
       status: 200,
-      body: { data: { id: 'j', state: 'completed' } },
+      body: { data: { cancelRequested: false, job: { progress: 50 } } },
     });
-    expect(await request(origin, 'GET', '/v1/projects/p/events?cursor=0')).toMatchObject({
+    expect(await request(origin, 'POST', '/v1/projects/p/jobs/j/cancel', {})).toMatchObject({
       status: 200,
-      body: {
-        data: [{ type: 'queued' }, { type: 'leased' }, { type: 'completed' }],
-      },
+      body: { data: { cancelRequested: true } },
     });
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/j/heartbeat',
+        { progress: 60 },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 200, body: { data: { cancelRequested: true } } });
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/j/fail',
+        { error: 'canceled' },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 200, body: { data: { state: 'canceled' } } });
+    expect(await request(origin, 'POST', '/v1/projects/p/jobs/j/retry', {})).toMatchObject({
+      status: 200,
+      body: { data: { state: 'queued', progress: 0 } },
+    });
+    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/j/complete',
+        {
+          result: {
+            kind: 'fixture.thumbnail',
+            sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+            bytes: 14,
+          },
+        },
+        workerToken,
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'j', state: 'completed', progress: 100, result: { bytes: 14 } } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/p/jobs')).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'j', state: 'completed' }] },
+    });
+    const events = await request(origin, 'GET', '/v1/projects/p/events?cursor=0');
+    expect(events.status).toBe(200);
+    expect(
+      (events.body as { data: readonly { type: string }[] }).data.map((event) => event.type),
+    ).toEqual(expect.arrayContaining(['queued', 'cancel-requested', 'retried', 'completed']));
   });
 });
 
