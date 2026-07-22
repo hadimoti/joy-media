@@ -77,10 +77,11 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     api.pairWorker(owner, 'interrupted-worker');
     api.pairWorker(owner, 'recovery-worker');
     const outputDirectory = mkdtempSync(join(tmpdir(), 'joy-media-reference-e2e-'));
+    const now = Date.now();
 
-    api.enqueue(owner, 'landscape', REFERENCE_PROJECT.id, 'render.export', 0);
-    expect(api.lease('interrupted-worker', 1, 5)?.id).toBe('landscape');
-    expect(api.lease('recovery-worker', 6, 5)?.id).toBe('landscape');
+    api.enqueue(owner, 'landscape', REFERENCE_PROJECT.id, 'render.export', now);
+    expect(api.lease('interrupted-worker', now + 1, 5)?.id).toBe('landscape');
+    expect(api.lease('recovery-worker', now + 6, 30_000)?.id).toBe('landscape');
     const landscapeManifest = freezeManifest({
       projectId: REFERENCE_PROJECT.id,
       revision: REFERENCE_PROJECT.revision,
@@ -96,8 +97,8 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(verifyExport(landscapePath)).toMatchObject({ width: 64, height: 36 });
 
-    api.enqueue(owner, 'vertical', REFERENCE_PROJECT.id, 'render.export', 10);
-    expect(api.lease('recovery-worker', 11)?.id).toBe('vertical');
+    api.enqueue(owner, 'vertical', REFERENCE_PROJECT.id, 'render.export', now + 10);
+    expect(api.lease('recovery-worker', now + 11)?.id).toBe('vertical');
     const verticalManifest = freezeManifest({
       ...landscapeManifest,
       width: 36,

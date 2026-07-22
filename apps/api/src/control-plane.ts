@@ -354,14 +354,14 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('JOB_NOT_FOUND', jobId);
     if (job.state === 'leased' || job.state === 'queued')
       throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
-    const {
-      error: _error,
-      result: _result,
-      leaseOwner: _leaseOwner,
-      leaseExpiresAt: _leaseExpiresAt,
-      ...rest
-    } = job;
-    const retried: Job = { ...rest, state: 'queued', progress: 0, cancelRequested: false };
+    const retried: Job = {
+      id: job.id,
+      projectId: job.projectId,
+      type: job.type,
+      state: 'queued',
+      progress: 0,
+      cancelRequested: false,
+    };
     this.#jobs.set(jobId, retried);
     this.event(jobId, 'retried', now);
     return retried;

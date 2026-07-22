@@ -10,8 +10,9 @@ describe('Worker/control-plane export integration', () => {
     const owner = { id: 'owner' };
     api.createProject(owner, 'project', 'Reference');
     api.pairWorker(owner, 'worker');
-    api.enqueue(owner, 'job', 'project', 'render.export', 100);
-    expect(api.lease('worker', 101)?.id).toBe('job');
+    const now = Date.now();
+    api.enqueue(owner, 'job', 'project', 'render.export', now);
+    expect(api.lease('worker', now + 1)?.id).toBe('job');
     const output = join(mkdtempSync(join(tmpdir(), 'joy-media-integration-')), 'output.mp4');
     executeLeasedExport(
       api,
@@ -40,10 +41,11 @@ describe('Worker/control-plane export integration', () => {
     api.createProject(owner, 'project', 'Reference');
     api.pairWorker(owner, 'worker-old');
     api.pairWorker(owner, 'worker-new');
-    api.enqueue(owner, 'job', 'project', 'render.export', 0);
-    expect(api.lease('worker-old', 1, 5)?.leaseOwner).toBe('worker-old');
-    expect(api.lease('worker-new', 6, 5)?.leaseOwner).toBe('worker-new');
-    expect(() => api.complete('worker-old', 'job', 7)).toThrow(
+    const now = Date.now();
+    api.enqueue(owner, 'job', 'project', 'render.export', now);
+    expect(api.lease('worker-old', now + 1, 5)?.leaseOwner).toBe('worker-old');
+    expect(api.lease('worker-new', now + 6, 30_000)?.leaseOwner).toBe('worker-new');
+    expect(() => api.complete('worker-old', 'job', now + 7)).toThrow(
       expect.objectContaining({ code: 'LEASE_NOT_OWNED' }),
     );
     const output = join(mkdtempSync(join(tmpdir(), 'joy-media-recovered-export-')), 'output.mp4');
