@@ -47,6 +47,8 @@ describe('authorized derivative resolver', () => {
     const result = await new AuthorizedDerivativeResolver(cache, transport).resolve(request());
 
     expect(result).toMatchObject({ state: 'available-local', url: 'blob:derivative-1' });
+    expect(opfs.created).toHaveLength(1);
+    expect(opfs.created[0]?.type).toBe(derivative.mimeType);
     if (result.state === 'available-local') result.revoke();
     expect(opfs.revoked).toEqual(['blob:derivative-1']);
   });
@@ -134,9 +136,11 @@ function memoryOpfs(): {
   readonly root: OpfsDirectoryHandle;
   readonly urls: ObjectUrlApi;
   readonly revoked: string[];
+  readonly created: Blob[];
 } {
   const files = new Map<string, Blob>();
   const revoked: string[] = [];
+  const created: Blob[] = [];
   let nextUrl = 1;
   const root: OpfsDirectoryHandle = {
     async getDirectoryHandle() {
@@ -148,7 +152,9 @@ function memoryOpfs(): {
         async getFile() {
           const value = files.get(name);
           if (value === undefined) throw notFound();
-          return new File([value], name, { type: value.type });
+          // Chromium OPFS returns an empty MIME type for the neutral `.bin`
+          // cache filename. Keep the test double faithful to that behavior.
+          return new File([value], name);
         },
         async createWritable() {
           let pending: Blob | undefined;
@@ -172,10 +178,14 @@ function memoryOpfs(): {
   return {
     root,
     urls: {
-      createObjectURL: () => `blob:derivative-${nextUrl++}`,
+      createObjectURL: (value) => {
+        created.push(value);
+        return `blob:derivative-${nextUrl++}`;
+      },
       revokeObjectURL: (url) => revoked.push(url),
     },
     revoked,
+    created,
   };
 }
 

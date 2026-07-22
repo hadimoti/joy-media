@@ -91,13 +91,18 @@ export class OpfsDerivativeCache implements LocalDerivativeCache {
       if (isNotFound(error)) return { state: 'missing' };
       throw error;
     }
+    // OPFS preserves the bytes but not the Blob MIME type: getFile() for our
+    // intentionally-neutral `.bin` cache entry has an empty type in Chromium.
+    // Rehydrate the catalog MIME only after the cached bytes pass their
+    // length/hash checks, so a valid local derivative remains playable.
+    const localBlob = new Blob([file], { type: descriptor.mimeType });
     try {
-      await verifyBlob(descriptor, file, this.digest);
+      await verifyBlob(descriptor, localBlob, this.digest);
     } catch {
       await directory.removeEntry(name).catch(() => undefined);
       return { state: 'invalid' };
     }
-    const url = this.objectUrls.createObjectURL(file);
+    const url = this.objectUrls.createObjectURL(localBlob);
     let revoked = false;
     return {
       state: 'available-local',
