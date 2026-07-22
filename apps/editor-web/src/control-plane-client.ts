@@ -67,6 +67,16 @@ export class BrowserControlPlaneClient {
       {},
     );
   }
+  /** Fetches private derivative bytes only from the authenticated Media API. */
+  async derivativeBytes(projectId: string, assetId: string, derivativeId: string): Promise<Blob> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives/${encodeURIComponent(derivativeId)}/content`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    );
+    if (!response.ok) throw new Error(`private derivative request failed (${response.status})`);
+    return response.blob();
+  }
 
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });

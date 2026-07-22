@@ -163,6 +163,7 @@ async function verifyBlob(
   data: Blob,
   digest: (data: ArrayBuffer) => Promise<ArrayBuffer>,
 ): Promise<void> {
+  if (data.type !== descriptor.mimeType) throw new Error('derivative mime type mismatch');
   if (data.size !== descriptor.byteLength) throw new Error('derivative byte length mismatch');
   const hash = toHex(new Uint8Array(await digest(await data.arrayBuffer())));
   if (hash !== descriptor.sha256) throw new Error('derivative integrity mismatch');
