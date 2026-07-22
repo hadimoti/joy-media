@@ -1,6 +1,6 @@
 # M-MAD — Media Asset Delivery and Playable Derivatives
 
-**Status:** in progress (delivery decision required before implementation) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
+**Status:** in progress (WP-14.1 accepted; durable metadata next) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
 
 **Goal:** turn the WP-13 verified derivative receipt into a real, safely
 resolvable media asset that can be played in the editor without ever exposing a
@@ -14,46 +14,42 @@ finished; it is not a browser-playable proxy. The next vertical slice is asset
 identity plus a deliberately chosen delivery boundary—not another fixture job
 or an unsafe URL pointing at a local disk.
 
-## Decision gate — required before WP-14.2
+## Accepted delivery boundary
 
-Choose one delivery model and record it in a new ADR before writing transport
-or storage code:
+The owner selected the hybrid model in
+[`ADR-0017`](../docs/adr/0017-hybrid-opfs-private-object-storage.md):
 
-1. **Local Worker bridge (recommended for the local-first MVP).** A
-   permission-scoped localhost/desktop bridge resolves opaque Worker asset IDs
-   and streams a derivative only to the local editor. Requires strict origin,
-   pairing/session, loopback, and revocation tests; no VPS media bytes.
-2. **Browser/OPFS asset store.** Browser-selected source/derivative data lives
-   under browser permission and OPFS handles; a Worker may create metadata but
-   cannot become a raw-path resolver. Best for browser-only imports, but needs
-   quota/recovery and background-processing limits addressed.
-3. **Private object storage.** Worker uploads a derivative to a dedicated
-   private store; the API grants owner-scoped, short-lived retrieval. Requires
-   storage lifecycle, upload integrity, cost/retention, and additional VPS
-   operational approval.
+1. OPFS is the browser-profile-local, high-performance editing cache.
+2. Private object storage is an explicit per-project durable replica for
+   verified playable derivatives and second-device access.
+3. The API brokers owner-scoped, short-lived cloud authority; no public URL,
+   direct VPS-to-Worker connection, raw path, Worker credential, pairing code,
+   or browser assertion crosses this boundary.
 
-The default planning assumption is option 1 only; it is **not** an
-authorization to implement it until the owner selects it.
+Provider provisioning, bucket credentials, retention, and cost limits remain
+an operational gate before production cloud deployment. This decision is not
+authorization to upload all original source media or to make sharing public.
 
 ## Work packages
 
-- [ ] **WP-14.1 — Delivery ADR and threat contract.** Select the delivery
+- [x] **WP-14.1 — Delivery ADR and threat contract.** Selected the hybrid
       model; define asset/derivative identifiers, resolver authority, revocation,
       integrity checksum, retention, and recovery behavior. Explicitly reject raw
       paths, Worker sessions, pairing codes, browser assertions, and original bytes
-      from project/control-plane/API responses.
+      from project/control-plane/API responses. See ADR-0017.
 - [ ] **WP-14.2 — Durable asset and derivative metadata.** Add typed asset,
       media-descriptor, location, and derivative records with opaque references and
-      hash-based invalidation. Persist only metadata appropriate to the selected
-      boundary; never copy the entire creative project or physical location.
+      hash-based invalidation. Track OPFS and private-object availability through
+      opaque references only; never copy the entire creative project or physical
+      location.
 - [ ] **WP-14.3 — Real Worker derivative.** Replace the fixture-only output
       with a bounded actual thumbnail/proxy job, ffprobe-normalized descriptor, and
       independently verified output hash/byte count. Handle cancel, retry, Worker
-      loss, and cleanup without leaking temporary paths.
+      loss, cleanup, and explicit sync handoff without leaking temporary paths.
 - [ ] **WP-14.4 — Authorized resolver transport.** Implement the selected
-      local/OPFS/object-store resolver and test origin/owner/revocation/integrity
-      boundaries. No public URL, implicit cross-origin access, or direct VPS-to-
-      Worker connection.
+      OPFS-first/private-object-store resolver and test origin/owner/revocation/
+      integrity boundaries. No public URL, implicit cross-origin access, or direct
+      VPS-to-Worker connection.
 - [ ] **WP-14.5 — Editor asset UX and live gate.** Add an Asset Library and a
       playable derivative affordance with missing/pending/verified/revoked states.
       Browser/VPS proof must import or select a non-fixture asset, produce one real
