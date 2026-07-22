@@ -1,6 +1,6 @@
 # X01 — Live VPS Control Plane (deployment part)
 
-**Status:** infrastructure verified; product control-plane/Worker E2E unverified (see WP-12, 2026-07-22 audit) · **Activates with:** P01 (WP-01.5 produces the deployable) · **Master plan:** §27, §28, §35, §2.11
+**Status:** done; production isolation, authenticated control-plane/Worker E2E, and rollback restore verified (see WP-12, 2026-07-22) · **Activates with:** P01 (WP-01.5 produces the deployable) · **Master plan:** §27, §28, §35, §2.11
 **Scope rule:** this is the ONLY part allowed to touch the live VPS. Every other part builds and tests locally.
 
 ## SSH access

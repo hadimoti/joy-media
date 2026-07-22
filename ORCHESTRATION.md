@@ -23,6 +23,7 @@ Phase parts (dependency-ordered, from master plan §36) and cross-cutting parts 
 | **P10**   | [plan/P10-advanced.md](plan/P10-advanced.md)                                     | Advanced pro systems (3D, expressions, multicam…) — optional                        | P09-era                                  |
 | **WP-11** | [plan/WP-11-live-preview-canvas.md](plan/WP-11-live-preview-canvas.md)           | Live Preview Canvas: real GPU preview, browser decode, A/V sync, export-from-UI     | P10 (for WP-10.6 bridge) + P05 unblocked |
 | **WP-12** | [plan/WP-12-control-plane-worker-e2e.md](plan/WP-12-control-plane-worker-e2e.md) | Control Plane + Worker E2E: authenticated API, paired local Worker, observable jobs | P00 + WP-11 local integration evidence   |
+| **WP-13** | [plan/WP-13-project-worker-integration.md](plan/WP-13-project-worker-integration.md) | Bind persisted editor projects to safe Worker-result records instead of a fixture-only panel | WP-12 gate |
 | **X01**   | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)                   | Live-VPS deployment plan: isolation, ports, Postgres, health checks                 | activates with P01                       |
 
 ```mermaid
@@ -36,6 +37,7 @@ flowchart LR
     P08 --> P09 --> P10
     P01 -.deploys via.-> X01
     P10 -.optional / additive.-> WP11[WP-11<br/>Live Preview Canvas]
+    WP11 --> WP12[WP-12<br/>Control Plane + Worker E2E] --> WP13[WP-13<br/>Project + Worker Integration]
     P05 -.closes integration gap.-> WP11
     P04 -.closes integration gap.-> WP11
     P02 -.closes integration gap.-> WP11

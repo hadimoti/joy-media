@@ -20,11 +20,27 @@ export function JobsPanel({
   const [status, setStatus] = useState('Checking JOY Media connection…');
   const refresh = useCallback(async () => {
     try {
-      const [nextWorkers, nextJobs] = await Promise.all([client.workers(), client.jobs(projectId)]);
+      const nextWorkers = await client.workers();
+      let nextJobs: readonly BrowserJob[] = [];
+      let projectMissing = false;
+      try {
+        nextJobs = await client.jobs(projectId);
+      } catch (error) {
+        if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
+        // A local editor project has no control-plane record until its first
+        // submitted job. It is ready, not offline or unauthenticated.
+        projectMissing = true;
+      }
       setWorkers(nextWorkers);
       setJobs(nextJobs);
       setStatus(
-        nextWorkers.some(isConnected) ? 'Connected Worker available' : 'No connected Worker',
+        projectMissing
+          ? nextWorkers.some(isConnected)
+            ? 'Connected Worker available — queue a fixture to initialize this project.'
+            : 'No connected Worker — queue a fixture to initialize this project.'
+          : nextWorkers.some(isConnected)
+            ? 'Connected Worker available'
+            : 'No connected Worker',
       );
     } catch (error) {
       setStatus(`Offline or not signed in: ${message(error)}`);
