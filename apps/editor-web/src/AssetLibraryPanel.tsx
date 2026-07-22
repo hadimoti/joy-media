@@ -196,6 +196,20 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
       setStatus(`Could not enable private backup: ${message(error)}`);
     }
   }, [client, projectId]);
+  const queueThumbnail = useCallback(
+    async (asset: BrowserAsset) => {
+      try {
+        await client.enqueueAssetThumbnail(projectId, `thumbnail-${crypto.randomUUID()}`, asset.id);
+        setStatus(
+          `Thumbnail queued for ${asset.displayName}. A Worker with this asset ID can claim it.`,
+        );
+        await refresh();
+      } catch (error) {
+        setStatus(`Could not queue thumbnail: ${message(error)}`);
+      }
+    },
+    [client, projectId, refresh],
+  );
 
   return (
     <section className="asset-library" aria-label="Asset library">
@@ -356,6 +370,11 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
                   <p className={`asset-availability asset-availability-${status}`}>
                     {availabilityLabel(status)}
                   </p>
+                  {derivatives.length === 0 && (
+                    <button type="button" onClick={() => void queueThumbnail(asset)}>
+                      Generate thumbnail
+                    </button>
+                  )}
                   {derivative !== undefined && (
                     <button type="button" onClick={() => void openPreview(asset, derivative)}>
                       Preview verified {derivative.kind}

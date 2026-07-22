@@ -108,6 +108,7 @@ describe('BrowserControlPlaneClient', () => {
         locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
       });
       await client.setAssetSync('project-1', true);
+      await client.enqueueAssetThumbnail('project-1', 'job-1', 'asset-1');
     } finally {
       globalThis.fetch = original;
     }
@@ -120,6 +121,10 @@ describe('BrowserControlPlaneClient', () => {
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/asset-sync',
         body: '{"enabled":true}',
+      },
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
+        body: '{"id":"job-1","type":"asset.thumbnail","assetId":"asset-1"}',
       },
     ]);
     expect(JSON.stringify(requests)).not.toContain('C:\\');

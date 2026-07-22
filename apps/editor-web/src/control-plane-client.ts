@@ -110,6 +110,13 @@ export class BrowserControlPlaneClient {
       type: 'fixture.thumbnail',
     });
   }
+  async enqueueAssetThumbnail(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+      id,
+      type: 'asset.thumbnail',
+      assetId,
+    });
+  }
   async pairWorker(workerId: string, pairingCode: string): Promise<void> {
     await this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
   }
