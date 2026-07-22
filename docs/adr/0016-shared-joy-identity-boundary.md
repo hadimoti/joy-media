@@ -11,9 +11,9 @@ second JOY Media password. WP-12's live audit found that the active
 `/opt/joy-admin/webapp_api.py` is a stale, shared-password Flask deployment.
 The tracked source is instead the separate `joy-vps` repository's
 `bot/webapp_api.py` and `bot/webapp_auth.py`; it already has per-user web
-sessions and feature flags through `accounts_service`. It does not yet expose
-an audience-scoped JOY Media assertion or `joymedia_allowed` flag. Sharing the
-admin password, importing its database, or accepting an arbitrary
+sessions and feature flags through `accounts_service`. At decision time it did
+not expose an audience-scoped JOY Media assertion or `joymedia_allowed` flag.
+Sharing the admin password, importing its database, or accepting an arbitrary
 caller-supplied header would violate the isolation, audit, and least-privilege
 requirements in §§27–28 and X01.
 
@@ -52,6 +52,17 @@ identity owner must provide an immutable deployment/revision, JWKS URL, issuer
 identifier, audience, key rotation policy, and a test account whose allow flag
 can be toggled. X01 will then deploy the verifier configuration as a separate
 secret/public-key reference, never by copying an administrator password.
+
+## Implementation status (2026-07-22)
+
+The source-only issuer implementation is committed in the identity owner
+checkout as `joy-vps` revision `305e9b6`; it adds default-deny entitlement,
+an RS256 JWKS/assertion endpoint, an admin action, and key-rotation support.
+JOY Media's local `apps/api/src/joy-identity.ts` verifies the counterpart
+contract with Node's built-in crypto. Both sides have focused unit tests, but
+the issuer key has not been provisioned, neither component has been deployed,
+and no browser assertion exchange has been observed. Production `/v1` must
+remain disabled until those conditions and the persistence gate are met.
 
 ## Alternatives rejected
 
