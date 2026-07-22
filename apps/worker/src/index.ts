@@ -16,10 +16,16 @@ const apiUrl = process.env.JOY_MEDIA_API_URL;
 if (apiUrl !== undefined) {
   const client = new WorkerControlPlaneClient({ apiUrl, identity, sessionStore: store });
   if (store.loadWorkerSession() === undefined) {
-    const pairingCode = WorkerControlPlaneClient.createPairingCode();
-    await client.publishPairingOffer(pairingCode);
+    const pending = store.loadPendingPairing();
+    const pairingCode = pending?.code ?? WorkerControlPlaneClient.createPairingCode();
+    if (pending === undefined) {
+      const expiresAt = await client.publishPairingOffer(pairingCode);
+      store.savePendingPairing(pairingCode, expiresAt);
+    }
     console.log(`Approve this Worker in JOY Media with pairing code: ${pairingCode}`);
-    if (!(await client.claimPairing(pairingCode))) {
+    if (await client.claimPairing(pairingCode)) {
+      store.clearPendingPairing();
+    } else {
       console.log(
         'Waiting for approval; restart after the signed-in JOY user approves the pairing code.',
       );

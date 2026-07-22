@@ -26,6 +26,9 @@ export interface PersistentWorkerStore extends IdentityStore {
   loadWorkerSession(): string | undefined;
   saveWorkerSession(sessionToken: string): void;
   clearWorkerSession(): void;
+  loadPendingPairing(): { readonly code: string; readonly expiresAt: number } | undefined;
+  savePendingPairing(code: string, expiresAt: number): void;
+  clearPendingPairing(): void;
 }
 
 export class JsonFileWorkerStore implements PersistentWorkerStore {
@@ -47,8 +50,26 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
     const { identity } = this.read();
     this.write(identity === undefined ? {} : { identity });
   }
+  loadPendingPairing(): { readonly code: string; readonly expiresAt: number } | undefined {
+    const pending = this.read().pendingPairing;
+    return pending === undefined || pending.expiresAt <= Date.now() ? undefined : pending;
+  }
+  savePendingPairing(code: string, expiresAt: number): void {
+    this.write({ ...this.read(), pendingPairing: { code, expiresAt } });
+  }
+  clearPendingPairing(): void {
+    const { identity, sessionToken } = this.read();
+    this.write({
+      ...(identity === undefined ? {} : { identity }),
+      ...(sessionToken === undefined ? {} : { sessionToken }),
+    });
+  }
 
-  private read(): { readonly identity?: DeviceIdentity; readonly sessionToken?: string } {
+  private read(): {
+    readonly identity?: DeviceIdentity;
+    readonly sessionToken?: string;
+    readonly pendingPairing?: { readonly code: string; readonly expiresAt: number };
+  } {
     if (!existsSync(this.path)) return {};
     try {
       const value: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
@@ -58,6 +79,7 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
       return {
         ...(isDeviceIdentity(identity) ? { identity } : {}),
         ...(typeof raw.sessionToken === 'string' ? { sessionToken: raw.sessionToken } : {}),
+        ...(isPendingPairing(raw.pendingPairing) ? { pendingPairing: raw.pendingPairing } : {}),
       };
     } catch {
       return {};
@@ -67,6 +89,7 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
   private write(state: {
     readonly identity?: DeviceIdentity;
     readonly sessionToken?: string;
+    readonly pendingPairing?: { readonly code: string; readonly expiresAt: number };
   }): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const temporaryPath = `${this.path}.tmp-${randomUUID()}`;
@@ -110,6 +133,17 @@ function isDeviceIdentity(value: unknown): value is DeviceIdentity {
     typeof value === 'object' &&
     typeof (value as Record<string, unknown>).workerId === 'string' &&
     typeof (value as Record<string, unknown>).createdAt === 'string'
+  );
+}
+function isPendingPairing(
+  value: unknown,
+): value is { readonly code: string; readonly expiresAt: number } {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as Record<string, unknown>).code === 'string' &&
+    typeof (value as Record<string, unknown>).expiresAt === 'number' &&
+    Number.isSafeInteger((value as Record<string, unknown>).expiresAt)
   );
 }
 export class WorkerRuntime {

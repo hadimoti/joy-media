@@ -40,17 +40,21 @@ describe('Worker runtime', () => {
       (await runtime.run('j', { cancelled: () => true, progress: async () => undefined })).state,
     ).toBe('canceled');
   });
-  it('persists identity and Worker session separately from the project data', () => {
+  it('persists identity, Worker session, and a pending pairing separately from project data', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');
     const store = new JsonFileWorkerStore(path);
     const identity = getDeviceIdentity(store, new Date('2026-07-22T00:00:00.000Z'));
     store.saveWorkerSession('worker-session');
+    store.savePendingPairing('pairing-code', Date.now() + 60_000);
 
     const restarted = new JsonFileWorkerStore(path);
     expect(restarted.load()).toEqual(identity);
     expect(restarted.loadWorkerSession()).toBe('worker-session');
+    expect(restarted.loadPendingPairing()?.code).toBe('pairing-code');
     restarted.clearWorkerSession();
     expect(restarted.load()).toEqual(identity);
     expect(restarted.loadWorkerSession()).toBeUndefined();
+    restarted.clearPendingPairing();
+    expect(restarted.loadPendingPairing()).toBeUndefined();
   });
 });
