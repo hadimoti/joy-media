@@ -7,9 +7,13 @@
  * be evaluated in a Node test build.
  *
  * Mapping:
- * - `sprite` / `video-frame` nodes → a `Graphics` rectangle of the node's
- *   intrinsic size filled with the evaluated color and alpha. Real texture
- *   loading lands when decode integration (WP-11.2) is wired in.
+ * - `sprite` nodes → a `Graphics` rectangle of the node's intrinsic size
+ *   filled with the evaluated color and alpha.
+ * - `video-frame` nodes → a Pixi `Sprite` backed by the separately supplied
+ *   decoded RGBA buffer, or the same color rectangle when no buffer is
+ *   available. Pixels deliberately stay outside RenderFrameIR: the IR remains
+ *   serializable and renderer-neutral while this browser adapter owns the
+ *   transient GPU texture.
  * - `text` nodes → a `Text` object with fill color, the IR's `fontSizePx` /
  *   `maxWidth` constraints, and the resolved alignment. The IR does not
  *   currently expose rotation; the property is wired through so a future IR
@@ -22,7 +26,7 @@
  * that persist have their transform / opacity / zIndex updated in place.
  */
 
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type {
   Rgba,
   RenderFrameIR,
@@ -62,11 +66,21 @@ export interface BrowserPixiRenderStats {
   readonly created: number;
 }
 
+/** Structural browser-safe mirror of a decoded RGBA frame. */
+export interface BrowserVideoFrameBitmap {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8ClampedArray;
+}
+
 interface LayerContainer extends Container {
-  /** Backing child: a `Graphics` for rects, a `Text` for text. */
-  visual: Graphics | Text;
+  /** Backing child: a `Graphics` for rects, a `Sprite` for decoded video, or `Text`. */
+  visual: Graphics | Sprite | Text;
   /** Last kind observed for this layer — used to avoid reallocating on kind change. */
   kind: VisualRenderNode['kind'];
+  /** Persistent CPU canvas and GPU texture for a decoded video node. */
+  videoCanvas?: HTMLCanvasElement | undefined;
+  videoTexture?: Texture | undefined;
 }
 
 /**
@@ -81,7 +95,10 @@ export interface BrowserPixiRenderer {
   /** Current canvas CSS height in pixels (tracks the last rendered frame). */
   readonly height: number;
   /** Paints a {@link RenderFrameIR} into the canvas and returns per-frame stats. */
-  render(frame: RenderFrameIR): BrowserPixiRenderStats;
+  render(
+    frame: RenderFrameIR,
+    videoBitmaps?: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  ): BrowserPixiRenderStats;
   /** Tears down the Pixi Application and releases all GPU resources. */
   destroy(): void;
 }
@@ -138,6 +155,42 @@ export async function createBrowserPixiRenderer(
     return graphic;
   };
 
+  const paintVideoVisual = (
+    node: VideoFrameNode,
+    bitmap: BrowserVideoFrameBitmap,
+  ): Pick<LayerContainer, 'visual' | 'videoCanvas' | 'videoTexture'> => {
+    const canvas = document.createElement('canvas');
+    const texture = Texture.from(canvas, true);
+    const sprite = new Sprite(texture);
+    sprite.label = `video-frame:${node.id}`;
+    const layer = { visual: sprite, videoCanvas: canvas, videoTexture: texture };
+    updateVideoTexture(layer, node, bitmap);
+    return layer;
+  };
+
+  const updateVideoTexture = (
+    layer: Pick<LayerContainer, 'visual' | 'videoCanvas' | 'videoTexture'>,
+    node: VideoFrameNode,
+    bitmap: BrowserVideoFrameBitmap,
+  ): void => {
+    const canvas = layer.videoCanvas;
+    const texture = layer.videoTexture;
+    if (canvas === undefined || texture === undefined || !(layer.visual instanceof Sprite)) return;
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+    }
+    const context = canvas.getContext('2d');
+    if (context === null)
+      throw new Error(`${BROWSER_PACKAGE_ENTRY}: unable to create video texture canvas`);
+    const image = context.createImageData(bitmap.width, bitmap.height);
+    image.data.set(bitmap.data);
+    context.putImageData(image, 0, 0);
+    texture.source.update();
+    layer.visual.width = node.width;
+    layer.visual.height = node.height;
+  };
+
   const paintTextVisual = (node: TextNode): Text => {
     const text = new Text({
       text: node.text,
@@ -172,19 +225,42 @@ export async function createBrowserPixiRenderer(
     layer.zIndex = node.zIndex;
   };
 
-  const createLayer = (node: VisualRenderNode): LayerContainer => {
+  const createLayer = (
+    node: VisualRenderNode,
+    videoBitmap: BrowserVideoFrameBitmap | undefined,
+  ): LayerContainer => {
     const container = new Container() as LayerContainer;
     container.label = `layer:${node.id}`;
     container.zIndex = node.zIndex;
-    const visual = node.kind === 'text' ? paintTextVisual(node) : paintRectVisual(node);
-    container.addChild(visual);
-    container.visual = visual;
+    if (node.kind === 'video-frame' && videoBitmap !== undefined) {
+      const video = paintVideoVisual(node, videoBitmap);
+      container.addChild(video.visual);
+      container.visual = video.visual;
+      container.videoCanvas = video.videoCanvas;
+      container.videoTexture = video.videoTexture;
+    } else {
+      const visual = node.kind === 'text' ? paintTextVisual(node) : paintRectVisual(node);
+      container.addChild(visual);
+      container.visual = visual;
+    }
     container.kind = node.kind;
     updateLayerTransform(container, node);
     return container;
   };
 
-  const paint = (frame: RenderFrameIR): Omit<BrowserPixiRenderStats, 'width' | 'height'> => {
+  const replaceVisual = (layer: LayerContainer, visual: Graphics | Sprite | Text): void => {
+    layer.visual.destroy();
+    layer.removeChildren();
+    layer.addChild(visual);
+    layer.visual = visual;
+    layer.videoCanvas = undefined;
+    layer.videoTexture = undefined;
+  };
+
+  const paint = (
+    frame: RenderFrameIR,
+    videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+  ): Omit<BrowserPixiRenderStats, 'width' | 'height'> => {
     const drawNodes = flattenRenderNodes(frame.nodes)
       .map((node, index) => ({ node, index }))
       .sort((a, b) => a.node.zIndex - b.node.zIndex || a.index - b.index);
@@ -195,18 +271,33 @@ export async function createBrowserPixiRenderer(
     for (const { node } of drawNodes) {
       seen.add(node.id);
       const existing = spriteMap.get(node.id);
+      const videoBitmap = node.kind === 'video-frame' ? videoBitmaps.get(node.id) : undefined;
       if (existing === undefined) {
-        const layer = createLayer(node);
+        const layer = createLayer(node, videoBitmap);
         layers.addChild(layer);
         spriteMap.set(node.id, layer);
         created += 1;
       } else {
         if (existing.kind !== node.kind) {
-          existing.visual.destroy();
-          const visual = node.kind === 'text' ? paintTextVisual(node) : paintRectVisual(node);
-          existing.addChild(visual);
-          existing.visual = visual;
+          if (node.kind === 'video-frame' && videoBitmap !== undefined) {
+            const video = paintVideoVisual(node, videoBitmap);
+            replaceVisual(existing, video.visual);
+            existing.videoCanvas = video.videoCanvas;
+            existing.videoTexture = video.videoTexture;
+          } else
+            replaceVisual(
+              existing,
+              node.kind === 'text' ? paintTextVisual(node) : paintRectVisual(node),
+            );
           existing.kind = node.kind;
+        } else if (node.kind === 'video-frame' && videoBitmap !== undefined) {
+          if (existing.visual instanceof Sprite) updateVideoTexture(existing, node, videoBitmap);
+          else {
+            const video = paintVideoVisual(node, videoBitmap);
+            replaceVisual(existing, video.visual);
+            existing.videoCanvas = video.videoCanvas;
+            existing.videoTexture = video.videoTexture;
+          }
         }
         updateLayerTransform(existing, node);
         reused += 1;
@@ -232,7 +323,10 @@ export async function createBrowserPixiRenderer(
     get height() {
       return frameHeight;
     },
-    render(frame: RenderFrameIR): BrowserPixiRenderStats {
+    render(
+      frame: RenderFrameIR,
+      videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap> = new Map(),
+    ): BrowserPixiRenderStats {
       assertAlive();
       validateRenderFrameIR(frame);
       const { width, height, dpr } = frame.viewport;
@@ -242,7 +336,7 @@ export async function createBrowserPixiRenderer(
         .clear()
         .rect(0, 0, width, height)
         .fill({ color: rgbaToHex(frame.background), alpha: frame.background.a / 255 });
-      const { drawCalls, created, reused } = paint(frame);
+      const { drawCalls, created, reused } = paint(frame, videoBitmaps);
       if (options.autoStart !== true) app.renderer.render(app.stage);
       return { width: frameWidth, height: frameHeight, drawCalls, created, reused };
     },

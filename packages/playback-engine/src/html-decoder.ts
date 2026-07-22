@@ -26,8 +26,8 @@ export interface HtmlCanvas2DContextLike {
 
 /** Minimal canvas element boundary, mirroring `HTMLCanvasElement`. */
 export interface HtmlCanvasElementLike {
-  readonly width: number;
-  readonly height: number;
+  width: number;
+  height: number;
   getContext(kind: '2d'): HtmlCanvas2DContextLike | null;
 }
 
@@ -44,7 +44,7 @@ export interface HtmlCanvasElementLike {
  */
 export function createHtmlMediaDecoder(
   video: HtmlVideoElementLike,
-  canvas?: HtmlCanvasElementLike,
+  canvas?: HtmlCanvasElementLike | HTMLCanvasElement,
 ): FrameDecoder {
   return {
     async decode(sourceToken, sourceTimeUs, requestToken): Promise<DecodedFrame> {
@@ -64,12 +64,21 @@ export function createHtmlMediaDecoder(
 
 function captureBitmap(
   video: HtmlVideoElementLike,
-  canvas: HtmlCanvasElementLike | undefined,
+  canvas: HtmlCanvasElementLike | HTMLCanvasElement | undefined,
 ): ImageDataLike | undefined {
   if (canvas === undefined) return undefined;
   if (video.videoWidth === 0 || video.videoHeight === 0) return undefined;
-  const context = canvas.getContext('2d');
+  // HTMLCanvasElement has a wider DOM `drawImage` signature than our minimal
+  // test boundary. At runtime both expose exactly the operations below.
+  const context = canvas.getContext('2d') as HtmlCanvas2DContextLike | null;
   if (context === null) return undefined;
+  // A caller can provide a zero-sized canvas to opt into the source's
+  // intrinsic size. This is useful for editor preview because a newly-created
+  // DOM canvas otherwise defaults to 300×150 before media metadata is known.
+  if (canvas.width === 0 || canvas.height === 0) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
   const width = Math.min(canvas.width, video.videoWidth);
   const height = Math.min(canvas.height, video.videoHeight);
   context.drawImage(video, 0, 0, width, height);

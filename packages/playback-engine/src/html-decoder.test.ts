@@ -31,25 +31,26 @@ class FakeVideo implements HtmlVideoElementLike {
 
 class FakeContext implements HtmlCanvas2DContextLike {
   drawCalls: Array<{ dw: number; dh: number }> = [];
-  pixels: Uint8ClampedArray;
-  constructor(public readonly canvas: { width: number; height: number }) {
-    this.pixels = new Uint8ClampedArray(canvas.width * canvas.height * 4);
-  }
+  constructor(public readonly canvas: { width: number; height: number }) {}
   drawImage(_image: HtmlVideoElementLike, _dx: number, _dy: number, dw: number, dh: number): void {
     this.drawCalls.push({ dw, dh });
   }
   getImageData(_dx: number, _dy: number, _sw: number, _sh: number) {
-    return { width: this.canvas.width, height: this.canvas.height, data: this.pixels };
+    return {
+      width: this.canvas.width,
+      height: this.canvas.height,
+      data: new Uint8ClampedArray(this.canvas.width * this.canvas.height * 4),
+    };
   }
 }
 
 class FakeCanvas implements HtmlCanvasElementLike {
   readonly context: FakeContext;
   constructor(
-    public readonly width: number,
-    public readonly height: number,
+    public width: number,
+    public height: number,
   ) {
-    this.context = new FakeContext({ width, height });
+    this.context = new FakeContext(this);
   }
   getContext(kind: '2d'): HtmlCanvas2DContextLike | null {
     return kind === '2d' ? this.context : null;
@@ -78,6 +79,18 @@ describe('HTML media decoder tier', () => {
     expect(decoded.bitmap?.height).toBe(180);
     expect(decoded.bitmap?.data.length).toBe(320 * 180 * 4);
     expect(canvas.context.drawCalls).toEqual([{ dw: 320, dh: 180 }]);
+  });
+
+  it('sizes a zero-sized capture canvas to the decoded media dimensions', async () => {
+    const video = new FakeVideo();
+    video.videoWidth = 640;
+    video.videoHeight = 360;
+    const canvas = new FakeCanvas(0, 0);
+    const decoded = await createHtmlMediaDecoder(video, canvas).decode('proxy-url', 0, 4);
+    expect(canvas.width).toBe(640);
+    expect(canvas.height).toBe(360);
+    expect(decoded.bitmap?.width).toBe(640);
+    expect(decoded.bitmap?.height).toBe(360);
   });
 
   it('omits the bitmap when the video has no decoded frame yet', async () => {

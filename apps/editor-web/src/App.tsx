@@ -9,9 +9,11 @@ import {
   videoFrameNodeFromDecoded,
   withVideoFrameNode,
   type FrameDecoder,
+  type ImageDataLike,
   type MediaClock,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
+import type { VideoFrameNode } from '@joy-media/render-ir';
 import { toggleSelection } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
 import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
@@ -71,8 +73,15 @@ interface EditorRuntimeState {
   readonly playing: boolean;
 }
 
+/** A decoded browser frame kept outside the serializable RenderFrameIR. */
+interface DecodedPreviewFrame {
+  readonly node: VideoFrameNode;
+  readonly bitmap: ImageDataLike;
+}
+
 interface EditorPanelContextValue {
   readonly state: EditorRuntimeState;
+  readonly previewVideoFrame: DecodedPreviewFrame | undefined;
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
   readonly playback: PlaybackScheduler['metrics'];
@@ -109,6 +118,9 @@ export function App() {
   const [transcriptionError, setTranscriptionError] = useState<string>();
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
+  const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
+    undefined,
+  );
   const [, setRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
@@ -172,29 +184,14 @@ export function App() {
         .then((frame) => {
           const activeVideo = videoRef.current;
           const node = videoFrameNodeFromDecoded(clipSpec, frame, {
-            // WP-11.2: no capture canvas is wired yet (frame.bitmap is always
-            // undefined), so videoFrameNodeFromDecoded's own intrinsic-size
-            // fallback is what's actually used. Without this, it defaults to
-            // 0x0, which validateRenderFrameIR rejects — every decode was
-            // silently counted as a dropped frame despite succeeding.
+            // The bitmap supplies these dimensions in the normal display path.
+            // Keep the live-video fallback as a guard during first metadata load.
             width: activeVideo?.videoWidth ?? 0,
             height: activeVideo?.videoHeight ?? 0,
           });
-          const compositionV1 =
-            session.visualProject.compositions[session.visualProject.rootCompositionId];
-          const width = compositionV1?.width ?? 1920;
-          const height = compositionV1?.height ?? 1080;
-          withVideoFrameNode(
-            {
-              version: 1,
-              compositionId: compositionV1?.id ?? 'root',
-              timeUs: playheadUs,
-              viewport: { width, height, dpr: 1 },
-              background: { r: 0, g: 0, b: 0, a: 0 },
-              nodes: [],
-            },
-            node,
-          );
+          if (frame.bitmap === undefined)
+            throw new Error('HTML media decode returned metadata without a drawable bitmap');
+          setPreviewVideoFrame({ node, bitmap: frame.bitmap });
           scheduler.current.driveTick(clock, true);
         })
         .catch(() => {
@@ -414,6 +411,7 @@ export function App() {
       <EditorPanelContext.Provider
         value={{
           state,
+          previewVideoFrame,
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
           playback: scheduler.current.metrics,
@@ -551,7 +549,7 @@ function MonitorPanel() {
   const refs = useContext(EditorRefsContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
   if (refs === undefined) throw new Error('editor refs context is unavailable');
-  const { state, visualProject, timelineProject } = context;
+  const { state, previewVideoFrame, visualProject, timelineProject } = context;
   const { videoRef, onMediaReady } = refs;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
@@ -575,14 +573,22 @@ function MonitorPanel() {
         composition.height,
       ).transform,
     }));
-    const frame = buildRenderFrameIR(
+    const visualFrame = buildRenderFrameIR(
       composition.id,
       state.playheadUs,
       composition.width,
       composition.height,
       resolved,
     );
-    renderer.render(frame);
+    const frame =
+      previewVideoFrame === undefined
+        ? visualFrame
+        : withVideoFrameNode(visualFrame, previewVideoFrame.node);
+    const videoBitmaps =
+      previewVideoFrame === undefined
+        ? undefined
+        : new Map([[previewVideoFrame.node.id, previewVideoFrame.bitmap]]);
+    renderer.render(frame, videoBitmaps);
   };
 
   useEffect(() => {
@@ -613,7 +619,12 @@ function MonitorPanel() {
   useEffect(() => {
     const video = videoRef.current;
     if (video === null) return;
-    const decoder = createHtmlMediaDecoder(video);
+    const captureCanvas = document.createElement('canvas');
+    // A zero-sized canvas asks the decoder to size it to the decoded media on
+    // first use; this avoids treating the DOM default 300×150 as a proxy size.
+    captureCanvas.width = 0;
+    captureCanvas.height = 0;
+    const decoder = createHtmlMediaDecoder(video, captureCanvas);
     const clock = createHtmlVideoMediaClock(video);
     onMediaReady(decoder, clock);
     const firstClip = timelineProject.compositions.root?.tracks
@@ -626,7 +637,7 @@ function MonitorPanel() {
 
   useEffect(() => {
     paintRef.current();
-  }, [state.playheadUs, visualProject]);
+  }, [previewVideoFrame, state.playheadUs, visualProject]);
 
   return (
     <article className="monitor-panel">
