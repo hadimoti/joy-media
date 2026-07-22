@@ -8,21 +8,22 @@
 
 Phase parts (dependency-ordered, from master plan §36) and cross-cutting parts (X-prefixed):
 
-| Part      | File                                                                   | Goal in one line                                                                | Depends on                               |
-| --------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
-| **P00**   | [plan/P00-architecture-proofs.md](plan/P00-architecture-proofs.md)     | Seven spikes that retire the hardest risks before UI investment                 | —                                        |
-| **P01**   | [plan/P01-platform-foundation.md](plan/P01-platform-foundation.md)     | Creative core, editor shell, minimal control plane + Worker skeleton            | P00 gate                                 |
-| **P02**   | [plan/P02-editing-slice.md](plan/P02-editing-slice.md)                 | Usable manual editor with reliable deterministic 1080p export                   | P01 gate                                 |
-| **P03**   | [plan/P03-captions.md](plan/P03-captions.md)                           | Captions + transcript-first editing, Persian/RTL first-class                    | P02 gate                                 |
-| **P04**   | [plan/P04-motion-html-scenes.md](plan/P04-motion-html-scenes.md)       | Keyframe motion system + sandboxed HTML scenes                                  | P02 gate (P03 parallel-safe)             |
-| **P05**   | [plan/P05-audio-providers.md](plan/P05-audio-providers.md)             | Audio studio + full provider system (ComfyUI, TTS, consent)                     | P02 gate; provider-SDK minimum from P03  |
-| **P06**   | [plan/P06-agent.md](plan/P06-agent.md)                                 | Agent-assisted editing through the command bus                                  | P02+P03 gates; benefits from P04/P05     |
-| **P07**   | [plan/P07-workflows.md](plan/P07-workflows.md)                         | Deterministic workflow automation engine                                        | P06 partial (commands/jobs stable)       |
-| **P08**   | [plan/P08-plugin-sdk.md](plan/P08-plugin-sdk.md)                       | Public plugin SDK + team/private template catalog                               | P04–P07 contracts stable                 |
-| **P09**   | [plan/P09-marketplace.md](plan/P09-marketplace.md)                     | Marketplace, collaboration, scale — **gated, not automatic scope**              | P08 gate + owner approval                |
-| **P10**   | [plan/P10-advanced.md](plan/P10-advanced.md)                           | Advanced pro systems (3D, expressions, multicam…) — optional                    | P09-era                                  |
-| **WP-11** | [plan/WP-11-live-preview-canvas.md](plan/WP-11-live-preview-canvas.md) | Live Preview Canvas: real GPU preview, browser decode, A/V sync, export-from-UI | P10 (for WP-10.6 bridge) + P05 unblocked |
-| **X01**   | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)         | Live-VPS deployment plan: isolation, ports, Postgres, health checks             | activates with P01                       |
+| Part      | File                                                                             | Goal in one line                                                                    | Depends on                               |
+| --------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- |
+| **P00**   | [plan/P00-architecture-proofs.md](plan/P00-architecture-proofs.md)               | Seven spikes that retire the hardest risks before UI investment                     | —                                        |
+| **P01**   | [plan/P01-platform-foundation.md](plan/P01-platform-foundation.md)               | Creative core, editor shell, minimal control plane + Worker skeleton                | P00 gate                                 |
+| **P02**   | [plan/P02-editing-slice.md](plan/P02-editing-slice.md)                           | Usable manual editor with reliable deterministic 1080p export                       | P01 gate                                 |
+| **P03**   | [plan/P03-captions.md](plan/P03-captions.md)                                     | Captions + transcript-first editing, Persian/RTL first-class                        | P02 gate                                 |
+| **P04**   | [plan/P04-motion-html-scenes.md](plan/P04-motion-html-scenes.md)                 | Keyframe motion system + sandboxed HTML scenes                                      | P02 gate (P03 parallel-safe)             |
+| **P05**   | [plan/P05-audio-providers.md](plan/P05-audio-providers.md)                       | Audio studio + full provider system (ComfyUI, TTS, consent)                         | P02 gate; provider-SDK minimum from P03  |
+| **P06**   | [plan/P06-agent.md](plan/P06-agent.md)                                           | Agent-assisted editing through the command bus                                      | P02+P03 gates; benefits from P04/P05     |
+| **P07**   | [plan/P07-workflows.md](plan/P07-workflows.md)                                   | Deterministic workflow automation engine                                            | P06 partial (commands/jobs stable)       |
+| **P08**   | [plan/P08-plugin-sdk.md](plan/P08-plugin-sdk.md)                                 | Public plugin SDK + team/private template catalog                                   | P04–P07 contracts stable                 |
+| **P09**   | [plan/P09-marketplace.md](plan/P09-marketplace.md)                               | Marketplace, collaboration, scale — **gated, not automatic scope**                  | P08 gate + owner approval                |
+| **P10**   | [plan/P10-advanced.md](plan/P10-advanced.md)                                     | Advanced pro systems (3D, expressions, multicam…) — optional                        | P09-era                                  |
+| **WP-11** | [plan/WP-11-live-preview-canvas.md](plan/WP-11-live-preview-canvas.md)           | Live Preview Canvas: real GPU preview, browser decode, A/V sync, export-from-UI     | P10 (for WP-10.6 bridge) + P05 unblocked |
+| **WP-12** | [plan/WP-12-control-plane-worker-e2e.md](plan/WP-12-control-plane-worker-e2e.md) | Control Plane + Worker E2E: authenticated API, paired local Worker, observable jobs | P00 + WP-11 local integration evidence   |
+| **X01**   | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)                   | Live-VPS deployment plan: isolation, ports, Postgres, health checks                 | activates with P01                       |
 
 ```mermaid
 flowchart LR

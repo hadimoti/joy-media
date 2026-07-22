@@ -1,6 +1,6 @@
 # X01 — Live VPS Control Plane (deployment part)
 
-**Status:** verified (4/4 WPs done + all exit criteria met 2026-07-21; DNS CNAME `media.joyteam.ir` live, restore drill passed) · **Activates with:** P01 (WP-01.5 produces the deployable) · **Master plan:** §27, §28, §35, §2.11
+**Status:** infrastructure verified; product control-plane/Worker E2E unverified (see WP-12, 2026-07-22 audit) · **Activates with:** P01 (WP-01.5 produces the deployable) · **Master plan:** §27, §28, §35, §2.11
 **Scope rule:** this is the ONLY part allowed to touch the live VPS. Every other part builds and tests locally.
 
 ## SSH access
