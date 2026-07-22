@@ -12,6 +12,7 @@ import {
 import { createToolRegistry } from './registry.js';
 import { ApprovalEngine, createDefaultApprovalPolicy } from './approval.js';
 import type { PolicyLeakTestResult } from './benchmarks/policy-leak-test.js';
+import type { BenchmarkSuiteResult } from './benchmarks/index.js';
 
 describe('WP-06.5 Evaluation Suite', () => {
   describe('Benchmark Intents', () => {
@@ -136,8 +137,8 @@ describe('WP-06.5 Evaluation Suite', () => {
       const approvalEngine = new ApprovalEngine(createDefaultApprovalPolicy());
       const runner = createBenchmarkRunner(registry, approvalEngine);
 
-      const intent = BENCHMARK_INTENTS[0];
-      const project = BENCHMARK_PROJECTS[0];
+      const intent = BENCHMARK_INTENTS[0]!;
+      const project = BENCHMARK_PROJECTS[0]!;
 
       const metrics = await runner.runBenchmark(intent, project);
 
@@ -189,8 +190,8 @@ describe('WP-06.5 Evaluation Suite', () => {
       const approvalEngine = new ApprovalEngine(createDefaultApprovalPolicy());
       const runner = createBenchmarkRunner(registry, approvalEngine);
 
-      const intent = BENCHMARK_INTENTS[0];
-      const project = BENCHMARK_PROJECTS[0];
+      const intent = BENCHMARK_INTENTS[0]!;
+      const project = BENCHMARK_PROJECTS[0]!;
       const metrics = await runner.runBenchmark(intent, project);
 
       const validation = runner.validateResults(metrics, intent);
@@ -401,7 +402,7 @@ describe('WP-06.5 Evaluation Suite', () => {
       const intent = BENCHMARK_INTENTS.find((i) => i.id === 'bench-001');
       expect(intent).toBeDefined();
 
-      const project = BENCHMARK_PROJECTS[0];
+      const project = BENCHMARK_PROJECTS[0]!;
       const metrics = await runner.runBenchmark(intent!, project);
 
       const validation = runner.validateResults(metrics, intent!);
@@ -418,7 +419,7 @@ describe('WP-06.5 Evaluation Suite', () => {
       );
       expect(intent).toBeDefined();
 
-      const project = BENCHMARK_PROJECTS[0];
+      const project = BENCHMARK_PROJECTS[0]!;
       const metrics = await runner.runBenchmark(intent!, project);
 
       const validation = runner.validateResults(metrics, intent!);
@@ -433,7 +434,7 @@ describe('WP-06.5 Evaluation Suite', () => {
       const intent = BENCHMARK_INTENTS.find((i) => i.id === 'bench-008');
       expect(intent).toBeDefined();
 
-      const project = BENCHMARK_PROJECTS[0];
+      const project = BENCHMARK_PROJECTS[0]!;
       const metrics = await runner.runBenchmark(intent!, project);
 
       const validation = runner.validateResults(metrics, intent!);

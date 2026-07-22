@@ -63,7 +63,7 @@ export function createToolRegistry(): ToolRegistry {
     createAddEffectTool(),
   ];
 
-  const allTools = [...queryTools, ...editTools];
+  const allTools: readonly (QueryTool | EditTool)[] = [...queryTools, ...editTools];
   const toolMap = new Map<string, ToolDefinition>();
   const toolImplMap = new Map<string, QueryTool | EditTool>();
 

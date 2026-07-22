@@ -296,9 +296,7 @@ describe('Dry-Run Simulation', () => {
     const steps = [
       createTestStep({
         id: 'step-1',
-        preconditions: [
-          { type: 'entity-exists', entityId: undefined, message: 'Entity must exist' },
-        ],
+        preconditions: [{ type: 'entity-exists', message: 'Entity must exist' }],
       }),
     ];
     const plan = createPlan('Test goal', steps);
@@ -430,9 +428,7 @@ describe('Plan Executor', () => {
     const steps = [
       createTestStep({
         id: 'step-1',
-        preconditions: [
-          { type: 'entity-exists', entityId: undefined, message: 'Entity must exist' },
-        ],
+        preconditions: [{ type: 'entity-exists', message: 'Entity must exist' }],
       }),
     ];
     const plan = createPlan('Test goal', steps);

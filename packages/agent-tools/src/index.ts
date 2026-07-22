@@ -23,6 +23,8 @@ export type {
   ProviderSummary,
   ExportTargetContext,
   ContextOptions,
+  CommandDispatcher,
+  CommandDispatchResult,
 } from './context.js';
 export { buildEditorContext } from './context.js';
 

@@ -95,9 +95,10 @@ export function estimateStep(
 
   let privacy: PrivacyImpact | undefined;
   if (cost) {
+    const providerId = cost.localOnly ? undefined : _context.providers.availableProviders[0]?.id;
     privacy = {
       dataLeavesDevice: !cost.localOnly,
-      providerId: cost.localOnly ? undefined : _context.providers.availableProviders[0]?.id,
+      ...(providerId !== undefined && { providerId }),
       dataTypes: inferDataTypes(step.tool),
     };
   } else {
@@ -132,7 +133,10 @@ export function estimateStep(
     }
   }
 
-  return { cost, privacy };
+  return {
+    ...(cost !== undefined && { cost }),
+    ...(privacy !== undefined && { privacy }),
+  };
 }
 
 export function isPlanLocalOnly(

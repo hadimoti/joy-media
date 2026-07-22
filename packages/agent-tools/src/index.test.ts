@@ -65,7 +65,7 @@ const mockProject: SpikeProject = {
         },
         {
           id: 'track-2',
-          kind: 'audio',
+          kind: 'video',
           order: 1,
           enabled: true,
           clips: [],
@@ -107,9 +107,13 @@ describe('Context Builder', () => {
     expect(context.project.missingAssets).toContain('asset-2');
   });
 
-  it('detects captions and audio', () => {
+  it('reports no audio/captions for a SpikeProject, whose tracks are video-only by design', () => {
+    // model.ts's P00 spike `Track.kind` is `'video'` only (captions/audio live
+    // in the later JoyProjectV1 schema instead), so this can never be true for
+    // a SpikeProject — this test previously asserted the opposite against a
+    // fixture typed as `'audio'`, which never satisfied the real `Track` type.
     const context = buildEditorContext(mockProject);
-    expect(context.project.hasAudio).toBe(true);
+    expect(context.project.hasAudio).toBe(false);
     expect(context.project.hasCaptions).toBe(false);
   });
 });

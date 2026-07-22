@@ -17,6 +17,9 @@
     },
     {
       "path": "../provider-sdk"
+    },
+    {
+      "path": "../test-fixtures"
     }
   ]
 }

@@ -1,5 +1,27 @@
+import type { SpikeCommand } from '@joy-media/commands';
+import type { Clip } from '@joy-media/project-schema';
 import type { EditorContext } from './context.js';
 import type { JsonValue, Precondition, ToolDefinition, ToolDiff, ToolResult } from './types.js';
+
+/**
+ * Dispatches a real transaction when the context is bound to a live command
+ * bus (editor-web always binds one; planning/test contexts may not). Returns
+ * `undefined` when there is nothing to check (no dispatcher bound) so the
+ * caller falls back to its historical preview-shaped result; returns a real
+ * failure `ToolResult` when the bound bus rejects the transaction.
+ */
+function dispatchOrUndefined(
+  context: EditorContext,
+  commands: readonly SpikeCommand[],
+  label: string,
+): ToolResult | undefined {
+  if (!context.dispatch) return undefined;
+  const result = context.dispatch.dispatchTimeline(commands, label);
+  if (!result.success) {
+    return { success: false, error: result.error ?? `${label} failed` };
+  }
+  return undefined;
+}
 
 export interface EditTool {
   readonly name: string;
@@ -57,6 +79,27 @@ export function createInsertClipTool(): EditTool {
 
       if (!isRecord(input) || !isRecord(input.clip) || typeof input.clip.id !== 'string') {
         return { success: false, error: 'invalid clip structure' };
+      }
+
+      if (context.dispatch) {
+        if (typeof input.compositionId !== 'string' || typeof input.trackId !== 'string') {
+          return { success: false, error: 'compositionId and trackId are required to dispatch' };
+        }
+        const failure = dispatchOrUndefined(
+          context,
+          [
+            {
+              type: 'timeline.insertClip',
+              payload: {
+                compositionId: input.compositionId,
+                trackId: input.trackId,
+                clip: input.clip as unknown as Clip,
+              },
+            },
+          ],
+          `Insert clip ${input.clip.id}`,
+        );
+        if (failure) return failure;
       }
 
       return {
@@ -171,6 +214,27 @@ export function createRemoveClipTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
+      if (context.dispatch) {
+        if (typeof input.compositionId !== 'string' || typeof input.trackId !== 'string') {
+          return { success: false, error: 'compositionId and trackId are required to dispatch' };
+        }
+        const failure = dispatchOrUndefined(
+          context,
+          [
+            {
+              type: 'timeline.removeClip',
+              payload: {
+                compositionId: input.compositionId,
+                trackId: input.trackId,
+                clipId: input.clipId,
+              },
+            },
+          ],
+          `Remove clip ${input.clipId}`,
+        );
+        if (failure) return failure;
+      }
+
       return {
         success: true,
         stableIds: [input.clipId],
@@ -266,8 +330,34 @@ export function createMoveClipTool(): EditTool {
         };
       }
 
-      if (!isRecord(input) || typeof input.clipId !== 'string') {
+      if (
+        !isRecord(input) ||
+        typeof input.clipId !== 'string' ||
+        typeof input.newStartUs !== 'number'
+      ) {
         return { success: false, error: 'invalid input' };
+      }
+
+      if (context.dispatch) {
+        if (typeof input.compositionId !== 'string' || typeof input.trackId !== 'string') {
+          return { success: false, error: 'compositionId and trackId are required to dispatch' };
+        }
+        const failure = dispatchOrUndefined(
+          context,
+          [
+            {
+              type: 'timeline.moveClip',
+              payload: {
+                compositionId: input.compositionId,
+                trackId: input.trackId,
+                clipId: input.clipId,
+                newStartUs: input.newStartUs,
+              },
+            },
+          ],
+          `Move clip ${input.clipId}`,
+        );
+        if (failure) return failure;
       }
 
       return {
@@ -375,6 +465,39 @@ export function createTrimClipTool(): EditTool {
 
       if (!isRecord(input) || typeof input.clipId !== 'string') {
         return { success: false, error: 'invalid input' };
+      }
+
+      if (context.dispatch) {
+        if (typeof input.compositionId !== 'string' || typeof input.trackId !== 'string') {
+          return { success: false, error: 'compositionId and trackId are required to dispatch' };
+        }
+        const commands: SpikeCommand[] = [];
+        if (typeof input.newStartUs === 'number') {
+          commands.push({
+            type: 'timeline.trimClipStart',
+            payload: {
+              compositionId: input.compositionId,
+              trackId: input.trackId,
+              clipId: input.clipId,
+              newStartUs: input.newStartUs,
+            },
+          });
+        }
+        if (typeof input.newEndUs === 'number') {
+          commands.push({
+            type: 'timeline.trimClipEnd',
+            payload: {
+              compositionId: input.compositionId,
+              trackId: input.trackId,
+              clipId: input.clipId,
+              newEndUs: input.newEndUs,
+            },
+          });
+        }
+        if (commands.length > 0) {
+          const failure = dispatchOrUndefined(context, commands, `Trim clip ${input.clipId}`);
+          if (failure) return failure;
+        }
       }
 
       return {
@@ -505,6 +628,36 @@ export function createSplitClipTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
+      if (context.dispatch) {
+        if (
+          typeof input.compositionId !== 'string' ||
+          typeof input.trackId !== 'string' ||
+          typeof input.atUs !== 'number'
+        ) {
+          return {
+            success: false,
+            error: 'compositionId, trackId, and atUs are required to dispatch',
+          };
+        }
+        const failure = dispatchOrUndefined(
+          context,
+          [
+            {
+              type: 'timeline.splitClip',
+              payload: {
+                compositionId: input.compositionId,
+                trackId: input.trackId,
+                clipId: input.clipId,
+                atUs: input.atUs,
+                newClipId: input.newClipId,
+              },
+            },
+          ],
+          `Split clip ${input.clipId}`,
+        );
+        if (failure) return failure;
+      }
+
       return {
         success: true,
         stableIds: [input.clipId, input.newClipId],
@@ -626,6 +779,28 @@ export function createJoinClipsTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
+      if (context.dispatch) {
+        if (typeof input.compositionId !== 'string' || typeof input.trackId !== 'string') {
+          return { success: false, error: 'compositionId and trackId are required to dispatch' };
+        }
+        const failure = dispatchOrUndefined(
+          context,
+          [
+            {
+              type: 'timeline.joinClips',
+              payload: {
+                compositionId: input.compositionId,
+                trackId: input.trackId,
+                firstClipId: input.firstClipId,
+                secondClipId: input.secondClipId,
+              },
+            },
+          ],
+          `Join clips ${input.firstClipId} and ${input.secondClipId}`,
+        );
+        if (failure) return failure;
+      }
+
       return {
         success: true,
         stableIds: [input.firstClipId],
@@ -686,6 +861,11 @@ function checkJoinClipsPreconditions(
 
   return preconditions;
 }
+
+// The five audio tools below (setGain/setPan/setMute/setFade/addEffect) still
+// return a preview-shaped result unconditionally: editor-web has no live
+// AudioState/ProjectHistory-equivalent to dispatch into yet (a pre-existing
+// P05/editor-web gap, not introduced or silently fixed here — see WP-15 plan).
 
 export function createSetGainTool(): EditTool {
   const definition: ToolDefinition = {

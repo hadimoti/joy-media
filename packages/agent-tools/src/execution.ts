@@ -10,6 +10,19 @@ import { createIdempotencyStore } from './idempotency.js';
 import { generateTransactionLabel } from './transaction-naming.js';
 import type { AggregateDiff } from './dry-run.js';
 
+/** Mutable while accumulating; only ever exposed as the readonly `AggregateDiff` shape. */
+type MutableAggregateDiff = {
+  clipsCreated: number;
+  clipsModified: number;
+  clipsDeleted: number;
+  tracksAffected: string[];
+  timeRangesAffected: { startUs: number; endUs: number }[];
+  effectsAdded: number;
+  captionsAdded: number;
+  jobsRequired: number;
+  summary: string;
+};
+
 export interface ExecutionResult {
   readonly planId: string;
   readonly success: boolean;
@@ -94,7 +107,7 @@ export class PlanExecutor {
     const errors: string[] = [];
     const warnings: string[] = [];
     const completedSteps = new Set<string>();
-    const aggregateDiff = createEmptyAggregateDiff();
+    const aggregateDiff: MutableAggregateDiff = createEmptyAggregateDiff();
 
     let totalWorkerTimeMs = 0;
     let totalCostAmount = 0;
@@ -151,7 +164,7 @@ export class PlanExecutor {
         const result: ExecutionStepResult = {
           stepId,
           status: 'success',
-          toolResult: record?.result,
+          ...(record?.result !== undefined && { toolResult: record.result }),
           durationMs: 0,
           idempotencyKey,
         };
@@ -251,8 +264,9 @@ export class PlanExecutor {
       totalWorkerTimeMs > 0 || totalCostAmount > 0
         ? {
             workerTimeMs: totalWorkerTimeMs,
-            providerCost:
-              totalCostAmount > 0 ? { amount: totalCostAmount.toFixed(2), currency } : undefined,
+            ...(totalCostAmount > 0 && {
+              providerCost: { amount: totalCostAmount.toFixed(2), currency },
+            }),
             localOnly: true,
           }
         : undefined;
@@ -266,7 +280,7 @@ export class PlanExecutor {
         ...aggregateDiff,
         summary: generateAggregateSummary(aggregateDiff),
       },
-      actualCost,
+      ...(actualCost !== undefined && { actualCost }),
       durationMs,
       errors,
       warnings,
@@ -287,7 +301,7 @@ export class PlanExecutor {
       return {
         stepId: step.id,
         status: 'success',
-        toolResult: record?.result,
+        ...(record?.result !== undefined && { toolResult: record.result }),
         durationMs: 0,
         idempotencyKey,
       };
@@ -370,7 +384,7 @@ export class PlanExecutor {
   }
 }
 
-function createEmptyAggregateDiff(): AggregateDiff {
+function createEmptyAggregateDiff(): MutableAggregateDiff {
   return {
     clipsCreated: 0,
     clipsModified: 0,

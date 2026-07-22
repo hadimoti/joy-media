@@ -54,6 +54,9 @@ importers:
 
   apps/editor-web:
     dependencies:
+      '@joy-media/agent-tools':
+        specifier: workspace:*
+        version: link:../../packages/agent-tools
       '@joy-media/captions-core':
         specifier: workspace:*
         version: link:../../packages/captions-core
@@ -185,6 +188,10 @@ importers:
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../provider-sdk
+    devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
 
   packages/audio-core: {}
 

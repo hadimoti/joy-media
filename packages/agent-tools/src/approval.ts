@@ -197,7 +197,9 @@ export class ApprovalEngine {
 
   recordApproval(plan: AgentEditPlan, requestId: string, approved: boolean): AgentEditPlan {
     const updatedApprovals = plan.requiredApprovals.map((a) =>
-      a.id === requestId ? { ...a, status: (approved ? 'approved' : 'rejected') as const } : a,
+      a.id === requestId
+        ? { ...a, status: approved ? ('approved' as const) : ('rejected' as const) }
+        : a,
     );
     return { ...plan, requiredApprovals: updatedApprovals };
   }

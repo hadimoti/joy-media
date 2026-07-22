@@ -24,6 +24,8 @@ Phase parts (dependency-ordered, from master plan §36) and cross-cutting parts 
 | **WP-11** | [plan/WP-11-live-preview-canvas.md](plan/WP-11-live-preview-canvas.md)           | Live Preview Canvas: real GPU preview, browser decode, A/V sync, export-from-UI     | P10 (for WP-10.6 bridge) + P05 unblocked |
 | **WP-12** | [plan/WP-12-control-plane-worker-e2e.md](plan/WP-12-control-plane-worker-e2e.md) | Control Plane + Worker E2E: authenticated API, paired local Worker, observable jobs | P00 + WP-11 local integration evidence   |
 | **WP-13** | [plan/WP-13-project-worker-integration.md](plan/WP-13-project-worker-integration.md) | Bind persisted editor projects to safe Worker-result records instead of a fixture-only panel | WP-12 gate |
+| **WP-14** | [plan/WP-14-media-asset-delivery.md](plan/WP-14-media-asset-delivery.md)         | Media Asset Delivery: real playable derivatives via OPFS + private object storage  | WP-13 gate |
+| **WP-15** | [plan/WP-15-agent-editor-integration.md](plan/WP-15-agent-editor-integration.md) | Agent Wired Into the Real Editor: real command-bus dispatch, live UI, live gate     | P06 (unit-level) + WP-11 live editor |
 | **X01**   | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)                   | Live-VPS deployment plan: isolation, ports, Postgres, health checks                 | activates with P01                       |
 
 ```mermaid
@@ -37,13 +39,16 @@ flowchart LR
     P08 --> P09 --> P10
     P01 -.deploys via.-> X01
     P10 -.optional / additive.-> WP11[WP-11<br/>Live Preview Canvas]
-    WP11 --> WP12[WP-12<br/>Control Plane + Worker E2E] --> WP13[WP-13<br/>Project + Worker Integration]
+    WP11 --> WP12[WP-12<br/>Control Plane + Worker E2E] --> WP13[WP-13<br/>Project + Worker Integration] --> WP14[WP-14<br/>Media Asset Delivery]
+    WP15[WP-15<br/>Agent Wired Into Editor]
     P05 -.closes integration gap.-> WP11
     P04 -.closes integration gap.-> WP11
     P02 -.closes integration gap.-> WP11
     P01 -.closes integration gap.-> WP11
+    P06 -.closes integration gap.-> WP15
+    WP11 -.live editor prerequisite.-> WP15
     classDef opt fill:#fff7e6,stroke:#d48806,stroke-dasharray: 5 3
-    class WP11 opt
+    class WP11,WP15 opt
 ```
 
 Each part file contains **work packages (WPs)** — checkbox units sized for roughly one focused session. WPs inside a part may run in any order that respects their listed prerequisites.

@@ -4,6 +4,7 @@ import type { AgentEditPlan, AgentPlanStep } from '../plan.js';
 import type { EditorContext } from '../context.js';
 import type { ExecutionResult } from '../execution.js';
 import type { BenchmarkIntent, BenchmarkProject, ValidationCheck } from './types.js';
+import type { JsonValue } from '../types.js';
 import { createPlan } from '../plan.js';
 import { PlanExecutor } from '../execution.js';
 
@@ -195,7 +196,7 @@ export class BenchmarkRunner {
     });
   }
 
-  private createToolArguments(tool: string, context: EditorContext): Record<string, unknown> {
+  private createToolArguments(tool: string, context: EditorContext): Record<string, JsonValue> {
     const clipId = context.selection.selectedClipIds[0] ?? 'clip-1';
     const compositionId = context.timeline.compositions[0]?.id ?? 'comp-1';
     const trackId = context.selection.selectedTrackIds[0] ?? 'track-1';
@@ -323,9 +324,9 @@ export class BenchmarkRunner {
     projects: readonly BenchmarkProject[],
   ): BenchmarkProject {
     if (intent.id.includes('minimal')) {
-      return projects.find((p) => p.id.includes('minimal')) ?? projects[0];
+      return projects.find((p) => p.id.includes('minimal')) ?? projects[0]!;
     }
-    return projects[0];
+    return projects[0]!;
   }
 
   private validateCheck(

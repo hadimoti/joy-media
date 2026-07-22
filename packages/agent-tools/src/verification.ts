@@ -68,7 +68,8 @@ export function verifyEntitiesExist(plan: AgentEditPlan, projectState: unknown):
     .filter((step) => step.mode === 'command')
     .map((step) => {
       const args = step.arguments as Record<string, unknown>;
-      return args.clip?.id ?? args.entityId ?? args.trackId;
+      const clip = args.clip as { id?: unknown } | undefined;
+      return clip?.id ?? args.entityId ?? args.trackId;
     })
     .filter((id): id is string => typeof id === 'string');
 
@@ -127,8 +128,8 @@ export function verifyNoInvalidOverlaps(
     for (const track of c.tracks ?? []) {
       const clips = (track.clips ?? []).sort((a, b) => (a.startUs ?? 0) - (b.startUs ?? 0));
       for (let i = 0; i < clips.length - 1; i++) {
-        const current = clips[i];
-        const next = clips[i + 1];
+        const current = clips[i]!;
+        const next = clips[i + 1]!;
         const currentEnd = (current.startUs ?? 0) + (current.durationUs ?? 0);
         const nextStart = next.startUs ?? 0;
         if (currentEnd > nextStart) {

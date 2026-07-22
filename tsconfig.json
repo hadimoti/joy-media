@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/agent-tools" },
     { "path": "packages/captions-core" },
     { "path": "packages/motion-core" },
     { "path": "packages/camera-core" },

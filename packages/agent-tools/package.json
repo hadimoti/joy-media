@@ -21,5 +21,8 @@
     "@joy-media/commands": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@joy-media/test-fixtures": "workspace:*"
   }
 }

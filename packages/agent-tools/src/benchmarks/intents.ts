@@ -374,7 +374,6 @@ export const BENCHMARK_PROJECTS: readonly BenchmarkProject[] = [
         hasAudio: false,
         missingAssets: [],
       },
-      captions: undefined,
     }),
   },
 ];

@@ -3,6 +3,7 @@ import type { ApprovalEngine } from '../approval.js';
 import type { AgentEditPlan, AgentPlanStep } from '../plan.js';
 import type { EditorContext } from '../context.js';
 import type { BenchmarkIntent, BenchmarkProject } from './types.js';
+import type { JsonValue } from '../types.js';
 import { createPlan } from '../plan.js';
 import { isPlanLocalOnly } from '../estimation.js';
 
@@ -85,7 +86,7 @@ function createPlanFromIntent(intent: BenchmarkIntent, context: EditorContext): 
   });
 }
 
-function createToolArguments(tool: string, context: EditorContext): Record<string, unknown> {
+function createToolArguments(tool: string, context: EditorContext): Record<string, JsonValue> {
   const clipId = context.selection.selectedClipIds[0] ?? 'clip-1';
   const compositionId = context.timeline.compositions[0]?.id ?? 'comp-1';
   const trackId = context.selection.selectedTrackIds[0] ?? 'track-1';

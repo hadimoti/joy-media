@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProjectHistory } from '@joy-media/commands';
+import type { SpikeProject } from '@joy-media/project-schema';
 import {
   verifyAgentRun,
   verifyEntitiesExist,
@@ -101,6 +102,26 @@ function createMockExecutionResult(overrides?: Partial<ExecutionResult>): Execut
     warnings: [],
     rollbackAvailable: true,
     ...overrides,
+  };
+}
+
+/** A real, correctly-typed SpikeProject for `ProjectHistory`-backed revert tests. */
+function buildTestProject(): SpikeProject {
+  return {
+    schemaVersion: 0,
+    id: 'test',
+    rootCompositionId: 'comp-1',
+    compositions: {
+      'comp-1': {
+        id: 'comp-1',
+        name: 'Main',
+        width: 1920,
+        height: 1080,
+        frameRate: { num: 30, den: 1 },
+        durationUs: 60_000_000,
+        tracks: [{ id: 'track-1', kind: 'video', order: 0, enabled: true, clips: [] }],
+      },
+    },
   };
 }
 
@@ -627,30 +648,7 @@ describe('Branch Manager', () => {
 
 describe('Revert', () => {
   it('reverts an entire agent run as one action', () => {
-    const initialProject = {
-      schemaVersion: 0,
-      id: 'test',
-      title: 'Test',
-      rootCompositionId: 'comp-1',
-      compositions: {
-        'comp-1': {
-          id: 'comp-1',
-          name: 'Main',
-          width: 1920,
-          height: 1080,
-          frameRate: { num: 30, den: 1 },
-          durationUs: 60_000_000,
-          tracks: [
-            {
-              id: 'track-1',
-              kind: 'video',
-              clips: [],
-            },
-          ],
-        },
-      },
-      assets: {},
-    };
+    const initialProject = buildTestProject();
     const history = new ProjectHistory(initialProject);
 
     history.apply({
@@ -661,7 +659,14 @@ describe('Revert', () => {
           payload: {
             compositionId: 'comp-1',
             trackId: 'track-1',
-            clip: { id: 'clip-1', kind: 'video', startUs: 0, durationUs: 1_000_000 },
+            clip: {
+              id: 'clip-1',
+              kind: 'video',
+              startUs: 0,
+              durationUs: 1_000_000,
+              assetId: 'asset-1',
+              sourceInUs: 0,
+            },
           },
         },
       ],
@@ -675,30 +680,7 @@ describe('Revert', () => {
   });
 
   it('handles partial executions', () => {
-    const initialProject = {
-      schemaVersion: 0,
-      id: 'test',
-      title: 'Test',
-      rootCompositionId: 'comp-1',
-      compositions: {
-        'comp-1': {
-          id: 'comp-1',
-          name: 'Main',
-          width: 1920,
-          height: 1080,
-          frameRate: { num: 30, den: 1 },
-          durationUs: 60_000_000,
-          tracks: [
-            {
-              id: 'track-1',
-              kind: 'video',
-              clips: [],
-            },
-          ],
-        },
-      },
-      assets: {},
-    };
+    const initialProject = buildTestProject();
     const history = new ProjectHistory(initialProject);
 
     history.apply({
@@ -709,7 +691,14 @@ describe('Revert', () => {
           payload: {
             compositionId: 'comp-1',
             trackId: 'track-1',
-            clip: { id: 'clip-1', kind: 'video', startUs: 0, durationUs: 1_000_000 },
+            clip: {
+              id: 'clip-1',
+              kind: 'video',
+              startUs: 0,
+              durationUs: 1_000_000,
+              assetId: 'asset-1',
+              sourceInUs: 0,
+            },
           },
         },
       ],
@@ -722,30 +711,7 @@ describe('Revert', () => {
   });
 
   it('fails when no transactions found', () => {
-    const initialProject = {
-      schemaVersion: 0,
-      id: 'test',
-      title: 'Test',
-      rootCompositionId: 'comp-1',
-      compositions: {
-        'comp-1': {
-          id: 'comp-1',
-          name: 'Main',
-          width: 1920,
-          height: 1080,
-          frameRate: { num: 30, den: 1 },
-          durationUs: 60_000_000,
-          tracks: [
-            {
-              id: 'track-1',
-              kind: 'video',
-              clips: [],
-            },
-          ],
-        },
-      },
-      assets: {},
-    };
+    const initialProject = buildTestProject();
     const history = new ProjectHistory(initialProject);
 
     const result = revertAgentRun('plan-999', history, 'plan-999');
@@ -755,30 +721,7 @@ describe('Revert', () => {
   });
 
   it('checks if agent run can be reverted', () => {
-    const initialProject = {
-      schemaVersion: 0,
-      id: 'test',
-      title: 'Test',
-      rootCompositionId: 'comp-1',
-      compositions: {
-        'comp-1': {
-          id: 'comp-1',
-          name: 'Main',
-          width: 1920,
-          height: 1080,
-          frameRate: { num: 30, den: 1 },
-          durationUs: 60_000_000,
-          tracks: [
-            {
-              id: 'track-1',
-              kind: 'video',
-              clips: [],
-            },
-          ],
-        },
-      },
-      assets: {},
-    };
+    const initialProject = buildTestProject();
     const history = new ProjectHistory(initialProject);
 
     history.apply({
@@ -789,7 +732,14 @@ describe('Revert', () => {
           payload: {
             compositionId: 'comp-1',
             trackId: 'track-1',
-            clip: { id: 'clip-1', kind: 'video', startUs: 0, durationUs: 1_000_000 },
+            clip: {
+              id: 'clip-1',
+              kind: 'video',
+              startUs: 0,
+              durationUs: 1_000_000,
+              assetId: 'asset-1',
+              sourceInUs: 0,
+            },
           },
         },
       ],
@@ -797,30 +747,7 @@ describe('Revert', () => {
   });
 
   it('checks if agent run can be reverted', () => {
-    const initialProject = {
-      schemaVersion: 0,
-      id: 'test',
-      title: 'Test',
-      rootCompositionId: 'comp-1',
-      compositions: {
-        'comp-1': {
-          id: 'comp-1',
-          name: 'Main',
-          width: 1920,
-          height: 1080,
-          frameRate: { num: 30, den: 1 },
-          durationUs: 60_000_000,
-          tracks: [
-            {
-              id: 'track-1',
-              kind: 'video',
-              clips: [],
-            },
-          ],
-        },
-      },
-      assets: {},
-    };
+    const initialProject = buildTestProject();
     const history = new ProjectHistory(initialProject);
 
     history.apply({
@@ -831,7 +758,14 @@ describe('Revert', () => {
           payload: {
             compositionId: 'comp-1',
             trackId: 'track-1',
-            clip: { id: 'clip-1', kind: 'video', startUs: 0, durationUs: 1_000_000 },
+            clip: {
+              id: 'clip-1',
+              kind: 'video',
+              startUs: 0,
+              durationUs: 1_000_000,
+              assetId: 'asset-1',
+              sourceInUs: 0,
+            },
           },
         },
       ],

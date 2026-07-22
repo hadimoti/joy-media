@@ -31,12 +31,25 @@ export interface AggregateDiff {
   readonly clipsModified: number;
   readonly clipsDeleted: number;
   readonly tracksAffected: readonly string[];
-  readonly timeRangesAffected: readonly Array<{ startUs: number; endUs: number }>;
+  readonly timeRangesAffected: readonly { startUs: number; endUs: number }[];
   readonly effectsAdded: number;
   readonly captionsAdded: number;
   readonly jobsRequired: number;
   readonly summary: string;
 }
+
+/** Mutable while accumulating; only ever exposed as the readonly `AggregateDiff` shape above. */
+type MutableAggregateDiff = {
+  clipsCreated: number;
+  clipsModified: number;
+  clipsDeleted: number;
+  tracksAffected: string[];
+  timeRangesAffected: { startUs: number; endUs: number }[];
+  effectsAdded: number;
+  captionsAdded: number;
+  jobsRequired: number;
+  summary: string;
+};
 
 export function dryRunPlan(
   plan: AgentEditPlan,
@@ -143,8 +156,9 @@ export function dryRunPlan(
     totalWorkerTimeMs > 0 || totalCostAmount > 0
       ? {
           workerTimeMs: totalWorkerTimeMs,
-          providerCost:
-            totalCostAmount > 0 ? { amount: totalCostAmount.toFixed(2), currency } : undefined,
+          ...(totalCostAmount > 0 && {
+            providerCost: { amount: totalCostAmount.toFixed(2), currency },
+          }),
           localOnly: privacyImpacts.every((p) => !p.dataLeavesDevice),
         }
       : undefined;
@@ -159,7 +173,7 @@ export function dryRunPlan(
     },
     warnings,
     errors,
-    estimatedCost,
+    ...(estimatedCost !== undefined && { estimatedCost }),
     privacyImpacts,
   };
 }
@@ -195,7 +209,11 @@ function evaluatePrecondition(precondition: Precondition, context: EditorContext
   }
 }
 
-function aggregateDiffs(aggregate: AggregateDiff, diff: ToolDiff, step: AgentPlanStep): void {
+function aggregateDiffs(
+  aggregate: MutableAggregateDiff,
+  diff: ToolDiff,
+  step: AgentPlanStep,
+): void {
   aggregate.clipsCreated += diff.created.length;
   aggregate.clipsModified += diff.modified.length;
   aggregate.clipsDeleted += diff.deleted.length;
@@ -213,7 +231,7 @@ function aggregateDiffs(aggregate: AggregateDiff, diff: ToolDiff, step: AgentPla
   }
 }
 
-function createEmptyAggregateDiff(): AggregateDiff {
+function createEmptyAggregateDiff(): MutableAggregateDiff {
   return {
     clipsCreated: 0,
     clipsModified: 0,

@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@joy-media/agent-tools": "workspace:*",
     "@joy-media/commands": "workspace:*",
     "@joy-media/playback-engine": "workspace:*",
     "@joy-media/project-schema": "workspace:*",

@@ -1,4 +1,24 @@
 import type { Composition, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { SpikeCommand } from '@joy-media/commands';
+
+/**
+ * The live seam between an edit tool and the real, undoable command bus the
+ * human editor uses (WP-15.1). When bound, `EditTool.execute` dispatches a
+ * genuine `SpikeCommand` transaction instead of fabricating a preview diff;
+ * a real validation failure (unknown target, overlap, duplicate id, …) comes
+ * back as `success: false` with the underlying command's own error. When
+ * absent — planning/estimation/test contexts that never had a live project —
+ * tools fall back to their historical preview-shaped result.
+ */
+export interface CommandDispatcher {
+  /** Applies one or more commands as a single undoable transaction. */
+  dispatchTimeline(commands: readonly SpikeCommand[], label: string): CommandDispatchResult;
+}
+
+export interface CommandDispatchResult {
+  readonly success: boolean;
+  readonly error?: string;
+}
 
 export interface EditorContext {
   readonly project: ProjectSummary;
@@ -11,6 +31,7 @@ export interface EditorContext {
   readonly recentHistory: readonly string[];
   readonly exportTarget?: ExportTargetContext;
   readonly constraints: readonly string[];
+  readonly dispatch?: CommandDispatcher;
 }
 
 export interface ProjectSummary {
@@ -89,7 +110,11 @@ export interface ContextOptions {
   readonly includeProviderDetails?: boolean;
 }
 
-export function buildEditorContext(projectState: unknown, options?: ContextOptions): EditorContext {
+export function buildEditorContext(
+  projectState: unknown,
+  options?: ContextOptions,
+  dispatch?: CommandDispatcher,
+): EditorContext {
   const opts = {
     maxTimelineSummaryItems: 10,
     maxHistoryItems: 5,
@@ -115,6 +140,7 @@ export function buildEditorContext(projectState: unknown, options?: ContextOptio
     availableTools: [],
     recentHistory: [],
     constraints: [],
+    ...(dispatch && { dispatch }),
   };
 }
 
@@ -140,16 +166,20 @@ function extractProjectSummary(state: unknown): ProjectSummary {
   const rootComp = state.compositions[state.rootCompositionId];
   const durationUs = rootComp?.durationUs ?? 0;
 
-  const hasCaptions = tracks.some((t) => t.kind === 'caption');
-  const hasAudio = tracks.some((t) => t.kind === 'audio');
+  // A SpikeProject's `Track.kind` is `'video'` only (P00 spike, model.ts) —
+  // captions/audio live in the separate JoyProjectV1 document instead, so
+  // these are always false here rather than a dead cross-schema comparison.
+  const hasCaptions = false;
+  const hasAudio = false;
 
+  // SpikeProject has no declared asset catalog to check against (opaque
+  // `assetId` strings only), so nothing can be reported missing from it.
   const assetIds = new Set(clips.filter((c) => c.kind === 'video').map((c) => c.assetId));
-  const declaredAssets = new Set(Object.keys(state.assets ?? {}));
-  const missingAssets = [...assetIds].filter((id) => !declaredAssets.has(id));
+  const missingAssets = [...assetIds];
 
   return {
     id: state.id,
-    name: state.title,
+    name: state.id,
     durationUs,
     compositionCount: compositions.length,
     trackCount: tracks.length,
