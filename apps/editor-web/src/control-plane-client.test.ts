@@ -83,6 +83,47 @@ describe('BrowserControlPlaneClient', () => {
       },
     ]);
   });
+
+  it('registers only asset metadata and explicit sync consent through the owner API', async () => {
+    const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (url === 'https://joyteam.ir/identity') return json(200, { access_token: 'assertion' });
+      return json(201, { data: { id: 'asset-1', assetSyncEnabled: true } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        'https://joyteam.ir/identity',
+      );
+      await client.registerAsset('project-1', {
+        id: 'asset-1',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        sha256: 'a'.repeat(64),
+        bytes: 10,
+        descriptor: { mimeType: 'video/mp4' },
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
+      });
+      await client.setAssetSync('project-1', true);
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      { url: 'https://joyteam.ir/identity' },
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/project-1/assets',
+        body: expect.stringContaining('"displayName":"clip.mp4"'),
+      },
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/project-1/asset-sync',
+        body: '{"enabled":true}',
+      },
+    ]);
+    expect(JSON.stringify(requests)).not.toContain('C:\\');
+  });
 });
 
 function json(status: number, value: unknown): Response {

@@ -9,6 +9,7 @@ import {
   WorkerRuntime,
   detectMediaTools,
   getDeviceIdentity,
+  localAssetSourcesFromEnvironment,
 } from './runtime.js';
 describe('Worker runtime', () => {
   it('persists device identity and advertises only detected capabilities', () => {
@@ -149,5 +150,20 @@ describe('Worker runtime', () => {
     expect(restarted.loadWorkerSession()).toBeUndefined();
     restarted.clearPendingPairing();
     expect(restarted.loadPendingPairing()).toBeUndefined();
+  });
+
+  it('keeps source paths local while advertising configured opaque IDs only', () => {
+    const registry = localAssetSourcesFromEnvironment(
+      JSON.stringify({ 'asset-campaign': 'D:\\private\\campaign.mp4' }),
+      (sourcePath) => sourcePath === 'D:\\private\\campaign.mp4',
+    );
+    expect(registry?.assetIds()).toEqual(['asset-campaign']);
+    expect(registry?.resolve('asset-campaign')).toBe('D:\\private\\campaign.mp4');
+    expect(() => localAssetSourcesFromEnvironment('{"bad/id":"x"}', () => true)).toThrow(
+      'invalid asset ID',
+    );
+    expect(() => localAssetSourcesFromEnvironment('{"asset-a":"x"}', () => false)).toThrow(
+      'asset-a',
+    );
   });
 });

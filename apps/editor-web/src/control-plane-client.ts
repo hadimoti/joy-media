@@ -59,6 +59,16 @@ export interface BrowserDerivative {
   readonly verifiedAt: number;
 }
 
+export interface BrowserAssetRegistration {
+  readonly id: string;
+  readonly kind: BrowserAsset['kind'];
+  readonly displayName: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: BrowserMediaDescriptor;
+  readonly locations: readonly { readonly kind: 'opfs-cache'; readonly ref: string }[];
+}
+
 export class BrowserControlPlaneClient {
   #token: string | undefined;
   #tokenExpiresAt = 0;
@@ -81,6 +91,15 @@ export class BrowserControlPlaneClient {
     return this.get(
       `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
     );
+  }
+  async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
+  }
+  async setAssetSync(
+    projectId: string,
+    enabled: boolean,
+  ): Promise<{ readonly assetSyncEnabled: boolean }> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/asset-sync`, { enabled });
   }
   async createProject(id: string, title: string): Promise<void> {
     await this.post('/v1/projects', { id, title });
@@ -125,7 +144,7 @@ export class BrowserControlPlaneClient {
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }
-  private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  private async post<T>(path: string, body: object): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

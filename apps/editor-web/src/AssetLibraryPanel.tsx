@@ -3,6 +3,7 @@ import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
   type BrowserAsset,
+  type BrowserAssetRegistration,
   type BrowserDerivative,
 } from './control-plane-client.js';
 import {
@@ -14,6 +15,7 @@ import {
   type AssetSort,
 } from './asset-library-state.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
+import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 
 const categories: readonly { readonly id: AssetCategory; readonly label: string }[] = [
   { id: 'all', label: 'All assets' },
@@ -47,6 +49,7 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
       ),
     [client],
   );
+  const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [category, setCategory] = useState<AssetCategory>('all');
@@ -55,6 +58,9 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
   const [sort, setSort] = useState<AssetSort>('recent');
   const [status, setStatus] = useState('Loading asset catalog…');
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
+  const [assetId, setAssetId] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
+  const [syncEnabled, setSyncEnabled] = useState(false);
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -133,6 +139,63 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
     },
     [clearPreview, projectId, resolver],
   );
+  const registerSelectedAsset = useCallback(async () => {
+    if (selectedFile === undefined) {
+      setStatus('Choose a media file to register.');
+      return;
+    }
+    const normalizedId = assetId.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(normalizedId)) {
+      setStatus('Asset ID must use letters, numbers, dots, underscores, or hyphens.');
+      return;
+    }
+    try {
+      const kind = assetKind(selectedFile);
+      const mimeType = normalizedMimeType(selectedFile, kind);
+      setStatus(`Hashing and caching ${selectedFile.name} locally…`);
+      const sha256 = hex(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer())),
+      );
+      const registration: BrowserAssetRegistration = {
+        id: normalizedId,
+        kind,
+        displayName: selectedFile.name,
+        sha256,
+        bytes: selectedFile.size,
+        descriptor: { mimeType },
+        locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
+      };
+      await (
+        await originalAssetCache
+      ).put(
+        {
+          assetId: registration.id,
+          sha256: registration.sha256,
+          bytes: registration.bytes,
+          mimeType: registration.descriptor.mimeType,
+        },
+        selectedFile,
+      );
+      await client.registerAsset(projectId, registration);
+      setSelectedFile(undefined);
+      setAssetId('');
+      setStatus(
+        `Registered ${selectedFile.name}. Configure the same opaque ID on a local Worker before queuing a derivative.`,
+      );
+      await refresh();
+    } catch (error) {
+      setStatus(`Could not register asset: ${message(error)}`);
+    }
+  }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
+  const enableSync = useCallback(async () => {
+    try {
+      const result = await client.setAssetSync(projectId, true);
+      setSyncEnabled(result.assetSyncEnabled);
+      setStatus('Private derivative backup is enabled for this project.');
+    } catch (error) {
+      setStatus(`Could not enable private backup: ${message(error)}`);
+    }
+  }, [client, projectId]);
 
   return (
     <section className="asset-library" aria-label="Asset library">
@@ -205,7 +268,49 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
           >
             Refresh
           </button>
+          <button
+            type="button"
+            className="asset-sync"
+            disabled={syncEnabled}
+            onClick={() => void enableSync()}
+          >
+            {syncEnabled ? 'Private backup enabled' : 'Enable private backup'}
+          </button>
         </div>
+        <details className="asset-register">
+          <summary>Register local media</summary>
+          <p>
+            The selected file is hashed and cached only in this browser. Its opaque ID must match a
+            local Worker source mapping; a file path is never sent to JOY Media.
+          </p>
+          <div className="asset-register-fields">
+            <label>
+              Asset ID
+              <input
+                value={assetId}
+                onChange={(event) => setAssetId(event.target.value)}
+                placeholder="asset-campaign-intro"
+                aria-label="Asset ID"
+              />
+            </label>
+            <label>
+              Media file
+              <input
+                type="file"
+                accept="video/*,audio/*,image/*"
+                onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
+                aria-label="Media file"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={selectedFile === undefined || assetId.trim().length === 0}
+              onClick={() => void registerSelectedAsset()}
+            >
+              Register selected media
+            </button>
+          </div>
+        </details>
         <p className="asset-library-status" aria-live="polite">
           {status}
         </p>
@@ -307,4 +412,18 @@ function formatBytes(bytes: number): string {
 }
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function assetKind(file: File): BrowserAsset['kind'] {
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type.startsWith('image/')) return 'image';
+  throw new Error('selected file must be video, audio, or an image');
+}
+function normalizedMimeType(file: File, kind: BrowserAsset['kind']): string {
+  if (/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(file.type)) return file.type;
+  throw new Error(`${kind} file has no supported MIME type`);
+}
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

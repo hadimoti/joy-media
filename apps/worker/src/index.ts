@@ -5,11 +5,17 @@ import {
   JsonFileWorkerStore,
   WorkerRuntime,
   detectMediaTools,
+  localAssetSourcesFromEnvironment,
 } from './runtime.js';
 
 const store = new JsonFileWorkerStore(process.env.JOY_MEDIA_WORKER_STATE_PATH);
 const identity = getDeviceIdentity(store);
-const runtime = new WorkerRuntime(identity, detectMediaTools());
+const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);
+const runtime = new WorkerRuntime(
+  identity,
+  detectMediaTools(),
+  sources === undefined ? {} : { sources },
+);
 console.log(JSON.stringify(runtime.hello(process.platform, process.arch)));
 
 const apiUrl = process.env.JOY_MEDIA_API_URL;

@@ -502,6 +502,45 @@ label {
 .asset-refresh {
   min-height: 2.1rem;
 }
+.asset-sync {
+  min-height: 2.1rem;
+}
+.asset-register {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #303a56;
+  border-radius: 0.3rem;
+  background: #111622;
+}
+.asset-register summary {
+  color: #dce6ff;
+  cursor: pointer;
+}
+.asset-register p {
+  max-width: 54rem;
+  margin: 0.45rem 0;
+  color: #9fb0c8;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.asset-register-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+.asset-register-fields label {
+  margin: 0;
+  color: #9fb0c8;
+  font-size: 0.75rem;
+}
+.asset-register-fields input:not([type='file']) {
+  min-width: 12rem;
+}
+.asset-register-fields input[type='file'] {
+  max-width: 16rem;
+  color: #c5d1e8;
+  font-size: 0.75rem;
+}
 .asset-library-status,
 .asset-library-empty {
   margin: 0;

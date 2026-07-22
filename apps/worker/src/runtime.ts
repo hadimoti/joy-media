@@ -141,6 +141,39 @@ export class StaticLocalAssetSourceRegistry implements LocalAssetSourceRegistry 
     return this.#paths.get(assetId);
   }
 }
+
+/**
+ * Parses the Worker-only `JOY_MEDIA_LOCAL_ASSETS_JSON` map. Paths stay in this
+ * process: hello advertises only the opaque IDs and the API never receives a
+ * value from this map. Invalid or missing local files fail closed instead of
+ * advertising an asset the Worker cannot actually process.
+ */
+export function localAssetSourcesFromEnvironment(
+  value: string | undefined,
+  exists: (path: string) => boolean = existsSync,
+): LocalAssetSourceRegistry | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('JOY_MEDIA_LOCAL_ASSETS_JSON must be a JSON object');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('JOY_MEDIA_LOCAL_ASSETS_JSON must be a JSON object');
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > 1_000)
+    throw new Error('JOY_MEDIA_LOCAL_ASSETS_JSON must contain 1–1000 assets');
+  const sources: Record<string, string> = {};
+  for (const [assetId, sourcePath] of entries) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId))
+      throw new Error('JOY_MEDIA_LOCAL_ASSETS_JSON has an invalid asset ID');
+    if (typeof sourcePath !== 'string' || sourcePath.length === 0 || !exists(sourcePath))
+      throw new Error(`Worker source is unavailable for asset ${assetId}`);
+    sources[assetId] = sourcePath;
+  }
+  return new StaticLocalAssetSourceRegistry(sources);
+}
 export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolAvailability {
   return { ffmpeg: run('ffmpeg'), ffprobe: run('ffprobe') };
 }
