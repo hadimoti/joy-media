@@ -45,6 +45,53 @@ describe('control-plane HTTP transport', () => {
       body: { data: { id: 'p', revision: 0 } },
     });
     expect(
+      await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { assetSyncEnabled: true } },
+    });
+    const asset = {
+      id: 'asset-1',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: 8_589_934_592,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1920, height: 1080 },
+      locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
+    };
+    expect(await request(origin, 'POST', '/v1/projects/p/assets', asset)).toMatchObject({
+      status: 201,
+      body: { data: { id: 'asset-1', projectId: 'p', bytes: 8_589_934_592 } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/assets/asset-1/derivatives', {
+        id: 'derivative-1',
+        assetId: 'asset-1',
+        kind: 'proxy',
+        profile: 'h264-720p',
+        sha256: 'b'.repeat(64),
+        bytes: 1234,
+        descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1280, height: 720 },
+        availability: 'available-local',
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-d1' }],
+      }),
+    ).toMatchObject({
+      status: 201,
+      body: { data: { id: 'derivative-1', availability: 'available-local' } },
+    });
+    const metadata = await request(origin, 'GET', '/v1/projects/p/assets/asset-1/derivatives');
+    expect(metadata).toMatchObject({ status: 200, body: { data: [{ id: 'derivative-1' }] } });
+    expect(JSON.stringify(metadata.body)).not.toMatch(
+      /path|pairing|session|access_token|https?:\/\//i,
+    );
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/assets', {
+        ...asset,
+        id: 'asset-unsafe',
+        displayName: 'C:\\Users\\Hadi\\clip.mp4',
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'ASSET_INVALID' } } });
+    expect(
       await request(origin, 'POST', '/v1/worker-pair/offers', {
         workerId: 'w',
         pairingCode: 'pairing-code',

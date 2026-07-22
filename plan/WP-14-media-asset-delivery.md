@@ -37,11 +37,17 @@ authorization to upload all original source media or to make sharing public.
       integrity checksum, retention, and recovery behavior. Explicitly reject raw
       paths, Worker sessions, pairing codes, browser assertions, and original bytes
       from project/control-plane/API responses. See ADR-0017.
-- [ ] **WP-14.2 — Durable asset and derivative metadata.** Add typed asset,
-      media-descriptor, location, and derivative records with opaque references and
-      hash-based invalidation. Track OPFS and private-object availability through
-      opaque references only; never copy the entire creative project or physical
-      location.
+- [x] **WP-14.2 — Durable asset and derivative metadata.** Added owner-scoped,
+      PostgreSQL-durable typed asset and local-derivative records, descriptors,
+      SHA-256/byte-length integrity metadata, opaque OPFS/private-object
+      references, availability state, and explicit per-project sync consent.
+      Focused local/HTTP/PostgreSQL-restart coverage rejects paths, cross-owner
+      reads, untrusted cloud availability claims, and secret-shaped responses.
+      **Not yet verified:** production migration/deployment, actual OPFS writes,
+      real derivative bytes, or object-store transport; those remain WP-14.3–.5.
+      The catalog persists only metadata appropriate to the selected boundary;
+      never copies the entire creative project or physical location.
+
 - [ ] **WP-14.3 — Real Worker derivative.** Replace the fixture-only output
       with a bounded actual thumbnail/proxy job, ffprobe-normalized descriptor, and
       independently verified output hash/byte count. Handle cancel, retry, Worker

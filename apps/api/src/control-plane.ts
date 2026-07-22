@@ -6,6 +6,75 @@ export interface ProjectMetadata {
   readonly title: string;
   readonly revision: number;
   readonly ownerId: string;
+  /** Explicit opt-in prerequisite for private object-storage synchronization. */
+  readonly assetSyncEnabled: boolean;
+}
+export type MediaAssetKind = 'video' | 'audio' | 'image';
+export type DerivativeKind = 'thumbnail' | 'proxy';
+export type DerivativeAvailability =
+  'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
+
+/** An opaque browser/cache or private-store reference, never a path or URL. */
+export interface AssetLocationRecord {
+  readonly kind: 'opfs-cache' | 'private-object';
+  readonly ref: string;
+}
+
+/** Safe media facts that describe bytes without containing or locating them. */
+export interface MediaDescriptor {
+  readonly mimeType: string;
+  readonly durationUs?: number;
+  readonly width?: number;
+  readonly height?: number;
+}
+
+export interface MediaAssetRecord {
+  readonly id: string;
+  readonly projectId: string;
+  readonly kind: MediaAssetKind;
+  readonly displayName: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: MediaDescriptor;
+  readonly locations: readonly AssetLocationRecord[];
+  readonly createdAt: number;
+}
+
+export interface MediaDerivativeRecord {
+  readonly id: string;
+  readonly projectId: string;
+  readonly assetId: string;
+  readonly kind: DerivativeKind;
+  readonly profile: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: MediaDescriptor;
+  readonly availability: DerivativeAvailability;
+  readonly locations: readonly AssetLocationRecord[];
+  readonly verifiedAt: number;
+}
+
+export interface AssetRegistration {
+  readonly id: string;
+  readonly kind: MediaAssetKind;
+  readonly displayName: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: MediaDescriptor;
+  readonly locations: readonly AssetLocationRecord[];
+}
+
+/** The browser may only register a local/pending derivative; cloud state is API-owned later. */
+export interface LocalDerivativeRegistration {
+  readonly id: string;
+  readonly assetId: string;
+  readonly kind: DerivativeKind;
+  readonly profile: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: MediaDescriptor;
+  readonly availability: 'pending' | 'available-local';
+  readonly locations: readonly AssetLocationRecord[];
 }
 export interface WorkerRecord {
   readonly id: string;
@@ -74,6 +143,32 @@ export interface ControlPlane {
     title: string,
     baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
+  setAssetSync(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  registerAsset(
+    actor: Actor,
+    projectId: string,
+    asset: AssetRegistration,
+    now?: number,
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  assetsForProject(
+    actor: Actor,
+    projectId: string,
+  ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  registerLocalDerivative(
+    actor: Actor,
+    projectId: string,
+    derivative: LocalDerivativeRegistration,
+    now?: number,
+  ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
+  derivativesForAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): readonly MediaDerivativeRecord[] | Promise<readonly MediaDerivativeRecord[]>;
   pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   createPairingOffer(
     workerId: string,
@@ -162,6 +257,8 @@ export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
+  readonly #assets = new Map<string, MediaAssetRecord>();
+  readonly #derivatives = new Map<string, MediaDerivativeRecord>();
   readonly #events: JobEvent[] = [];
   readonly #pairingOffers = new Map<
     string,
@@ -174,7 +271,7 @@ export class LocalControlPlane implements ControlPlane {
   createProject(actor: Actor, id: string, title: string): ProjectMetadata {
     this.auth(actor);
     if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
-    const result = { id, title, revision: 0, ownerId: actor.id };
+    const result = { id, title, revision: 0, ownerId: actor.id, assetSyncEnabled: false };
     this.#projects.set(id, result);
     return result;
   }
@@ -188,6 +285,71 @@ export class LocalControlPlane implements ControlPlane {
     const next = { ...current, title, revision: current.revision + 1 };
     this.#projects.set(id, next);
     return next;
+  }
+  setAssetSync(actor: Actor, projectId: string, enabled: boolean): ProjectMetadata {
+    if (typeof enabled !== 'boolean')
+      throw new ControlPlaneError('ASSET_SYNC_INVALID', 'asset sync enabled must be boolean');
+    const current = this.project(actor, projectId);
+    const next = { ...current, assetSyncEnabled: enabled };
+    this.#projects.set(projectId, next);
+    return next;
+  }
+  registerAsset(
+    actor: Actor,
+    projectId: string,
+    asset: AssetRegistration,
+    now = Date.now(),
+  ): MediaAssetRecord {
+    this.project(actor, projectId);
+    validateAssetRegistration(asset);
+    if (this.#assets.has(asset.id)) throw new ControlPlaneError('ASSET_EXISTS', asset.id);
+    const record: MediaAssetRecord = {
+      ...cloneAssetRegistration(asset),
+      projectId,
+      createdAt: now,
+    };
+    this.#assets.set(record.id, record);
+    return cloneAsset(record);
+  }
+  assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
+    this.project(actor, projectId);
+    return [...this.#assets.values()]
+      .filter((asset) => asset.projectId === projectId)
+      .map(cloneAsset);
+  }
+  registerLocalDerivative(
+    actor: Actor,
+    projectId: string,
+    derivative: LocalDerivativeRegistration,
+    now = Date.now(),
+  ): MediaDerivativeRecord {
+    this.project(actor, projectId);
+    validateLocalDerivativeRegistration(derivative);
+    const asset = this.#assets.get(derivative.assetId);
+    if (asset === undefined || asset.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
+    if (this.#derivatives.has(derivative.id))
+      throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+    const record: MediaDerivativeRecord = {
+      ...cloneLocalDerivativeRegistration(derivative),
+      projectId,
+      verifiedAt: now,
+    };
+    this.#derivatives.set(record.id, record);
+    return cloneDerivative(record);
+  }
+  derivativesForAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): readonly MediaDerivativeRecord[] {
+    this.project(actor, projectId);
+    const asset = this.#assets.get(assetId);
+    if (asset === undefined || asset.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    return [...this.#derivatives.values()]
+      .filter((derivative) => derivative.assetId === assetId)
+      .map(cloneDerivative);
   }
   pairWorker(actor: Actor, workerId: string): WorkerRecord {
     this.auth(actor);
@@ -448,4 +610,112 @@ function derivativeOf(
     verifiedAt,
     ...receipt,
   };
+}
+
+export function validateAssetRegistration(value: AssetRegistration): void {
+  validateOpaqueId(value.id, 'asset id');
+  validateDisplayName(value.displayName);
+  if (!['video', 'audio', 'image'].includes(value.kind))
+    throw new ControlPlaneError('ASSET_INVALID', 'asset kind is invalid');
+  validateHashAndBytes(value.sha256, value.bytes, 'asset');
+  validateDescriptor(value.descriptor);
+  validateLocations(value.locations);
+}
+
+export function validateLocalDerivativeRegistration(value: LocalDerivativeRegistration): void {
+  validateOpaqueId(value.id, 'derivative id');
+  validateOpaqueId(value.assetId, 'asset id');
+  if (!['thumbnail', 'proxy'].includes(value.kind))
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
+  if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');
+  validateHashAndBytes(value.sha256, value.bytes, 'derivative');
+  validateDescriptor(value.descriptor);
+  validateLocations(value.locations);
+  if (value.availability !== 'pending' && value.availability !== 'available-local')
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative state is API-owned');
+  if (value.availability === 'available-local') {
+    if (!value.locations.some((location) => location.kind === 'opfs-cache'))
+      throw new ControlPlaneError(
+        'DERIVATIVE_INVALID',
+        'local derivative requires an OPFS reference',
+      );
+  }
+}
+
+function validateOpaqueId(value: string, label: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value))
+    throw new ControlPlaneError('ASSET_INVALID', `${label} must be an opaque identifier`);
+}
+
+function validateDisplayName(value: string): void {
+  if (value.length === 0 || value.length > 255 || /[\\/]/.test(value))
+    throw new ControlPlaneError('ASSET_INVALID', 'display name must not contain a path');
+}
+
+function validateHashAndBytes(hash: string, bytes: number, label: string): void {
+  if (!/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(bytes) || bytes < 1)
+    throw new ControlPlaneError('ASSET_INVALID', `${label} hash or byte length is invalid`);
+}
+
+function validateDescriptor(value: MediaDescriptor): void {
+  if (!/^(video|audio|image)\/[a-z0-9.+-]+$/.test(value.mimeType))
+    throw new ControlPlaneError('ASSET_INVALID', 'media MIME type is invalid');
+  for (const dimension of [value.durationUs, value.width, value.height]) {
+    if (dimension !== undefined && (!Number.isSafeInteger(dimension) || dimension < 1))
+      throw new ControlPlaneError('ASSET_INVALID', 'media descriptor is invalid');
+  }
+}
+
+function validateLocations(value: readonly AssetLocationRecord[]): void {
+  if (value.length === 0 || value.length > 2)
+    throw new ControlPlaneError('ASSET_INVALID', 'one or two opaque locations are required');
+  for (const location of value) {
+    if (
+      !['opfs-cache', 'private-object'].includes(location.kind) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(location.ref)
+    ) {
+      throw new ControlPlaneError('ASSET_INVALID', 'asset location is invalid');
+    }
+  }
+  if (new Set(value.map((location) => location.kind)).size !== value.length)
+    throw new ControlPlaneError('ASSET_INVALID', 'asset locations must not repeat a kind');
+}
+
+function cloneAssetRegistration(value: AssetRegistration): AssetRegistration {
+  return {
+    ...value,
+    descriptor: { ...value.descriptor },
+    locations: cloneLocations(value.locations),
+  };
+}
+
+function cloneLocalDerivativeRegistration(
+  value: LocalDerivativeRegistration,
+): LocalDerivativeRegistration {
+  return {
+    ...value,
+    descriptor: { ...value.descriptor },
+    locations: cloneLocations(value.locations),
+  };
+}
+
+function cloneAsset(value: MediaAssetRecord): MediaAssetRecord {
+  return {
+    ...value,
+    descriptor: { ...value.descriptor },
+    locations: cloneLocations(value.locations),
+  };
+}
+
+function cloneDerivative(value: MediaDerivativeRecord): MediaDerivativeRecord {
+  return {
+    ...value,
+    descriptor: { ...value.descriptor },
+    locations: cloneLocations(value.locations),
+  };
+}
+
+function cloneLocations(value: readonly AssetLocationRecord[]): readonly AssetLocationRecord[] {
+  return value.map((location) => ({ ...location }));
 }

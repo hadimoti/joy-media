@@ -1,6 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { ControlPlaneError, type Actor, type ControlPlane } from './control-plane.js';
+import {
+  ControlPlaneError,
+  type Actor,
+  type AssetRegistration,
+  type ControlPlane,
+  type LocalDerivativeRegistration,
+} from './control-plane.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -175,6 +181,21 @@ async function route(
     return;
   }
 
+  const assetSyncMatch = /^\/v1\/projects\/([^/]+)\/asset-sync$/.exec(url.pathname);
+  if (request.method === 'POST' && assetSyncMatch !== null) {
+    const body = await readJson(request);
+    if (typeof body.enabled !== 'boolean')
+      throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
+    respondJson(response, 200, {
+      data: await options.controlPlane.setAssetSync(
+        actor,
+        decodeURIComponent(assetSyncMatch[1]!),
+        body.enabled,
+      ),
+    });
+    return;
+  }
+
   const workerPairMatch = /^\/v1\/workers\/([^/]+)\/pair$/.exec(url.pathname);
   if (request.method === 'POST' && workerPairMatch !== null) {
     const [, workerId] = workerPairMatch;
@@ -195,6 +216,53 @@ async function route(
       data: await options.controlPlane.revokeWorker(
         actor,
         decodeURIComponent(workerRevokeMatch[1]!),
+      ),
+    });
+    return;
+  }
+
+  const assetMatch = /^\/v1\/projects\/([^/]+)\/assets$/.exec(url.pathname);
+  if (request.method === 'GET' && assetMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.assetsForProject(actor, decodeURIComponent(assetMatch[1]!)),
+    });
+    return;
+  }
+  if (request.method === 'POST' && assetMatch !== null) {
+    const body = await readJson(request);
+    respondJson(response, 201, {
+      data: await options.controlPlane.registerAsset(
+        actor,
+        decodeURIComponent(assetMatch[1]!),
+        assetRegistration(body),
+      ),
+    });
+    return;
+  }
+
+  const derivativeMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/derivatives$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && derivativeMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.derivativesForAsset(
+        actor,
+        decodeURIComponent(derivativeMatch[1]!),
+        decodeURIComponent(derivativeMatch[2]!),
+      ),
+    });
+    return;
+  }
+  if (request.method === 'POST' && derivativeMatch !== null) {
+    const body = await readJson(request);
+    const derivative = localDerivativeRegistration(body);
+    if (derivative.assetId !== decodeURIComponent(derivativeMatch[2]!))
+      throw new ControlPlaneError('REQUEST_INVALID', 'derivative assetId must match the route');
+    respondJson(response, 201, {
+      data: await options.controlPlane.registerLocalDerivative(
+        actor,
+        decodeURIComponent(derivativeMatch[1]!),
+        derivative,
       ),
     });
     return;
@@ -336,6 +404,102 @@ function optionalCursor(value: string | null): number {
   if (!Number.isSafeInteger(cursor) || cursor < 0)
     throw new ControlPlaneError('REQUEST_INVALID', 'cursor must be a non-negative integer');
   return cursor;
+}
+
+function assetRegistration(body: Record<string, unknown>): AssetRegistration {
+  return {
+    id: requiredString(body, 'id'),
+    kind: requiredAssetKind(body, 'kind'),
+    displayName: requiredString(body, 'displayName'),
+    sha256: requiredSha256(body, 'sha256'),
+    bytes: requiredPositiveInteger(body, 'bytes'),
+    descriptor: mediaDescriptor(body),
+    locations: assetLocations(body),
+  };
+}
+
+function localDerivativeRegistration(body: Record<string, unknown>): LocalDerivativeRegistration {
+  const availability = body.availability;
+  if (availability !== 'pending' && availability !== 'available-local')
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'availability must be pending or available-local',
+    );
+  const kind = body.kind;
+  if (kind !== 'thumbnail' && kind !== 'proxy')
+    throw new ControlPlaneError('REQUEST_INVALID', 'derivative kind is invalid');
+  return {
+    id: requiredString(body, 'id'),
+    assetId: requiredString(body, 'assetId'),
+    kind,
+    profile: requiredString(body, 'profile'),
+    sha256: requiredSha256(body, 'sha256'),
+    bytes: requiredPositiveInteger(body, 'bytes'),
+    descriptor: mediaDescriptor(body),
+    availability,
+    locations: assetLocations(body),
+  };
+}
+
+function mediaDescriptor(body: Record<string, unknown>): AssetRegistration['descriptor'] {
+  const value = requiredObject(body, 'descriptor');
+  const descriptor: AssetRegistration['descriptor'] = {
+    mimeType: requiredString(value, 'mimeType'),
+  };
+  const durationUs = optionalPositiveInteger(value, 'durationUs');
+  const width = optionalPositiveInteger(value, 'width');
+  const height = optionalPositiveInteger(value, 'height');
+  return {
+    ...descriptor,
+    ...(durationUs === undefined ? {} : { durationUs }),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+  };
+}
+
+function assetLocations(body: Record<string, unknown>): AssetRegistration['locations'] {
+  const value = body.locations;
+  if (!Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', 'locations must be an array');
+  return value.map((item) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item))
+      throw new ControlPlaneError('REQUEST_INVALID', 'location must be an object');
+    const location = item as Record<string, unknown>;
+    const kind = location.kind;
+    if (kind !== 'opfs-cache' && kind !== 'private-object')
+      throw new ControlPlaneError('REQUEST_INVALID', 'location kind is invalid');
+    return { kind, ref: requiredString(location, 'ref') };
+  });
+}
+
+function requiredAssetKind(
+  body: Record<string, unknown>,
+  field: string,
+): AssetRegistration['kind'] {
+  const value = body[field];
+  if (value !== 'video' && value !== 'audio' && value !== 'image')
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
+  return value;
+}
+
+function requiredSha256(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a SHA-256 hex digest`);
+  return value;
+}
+
+function requiredPositiveInteger(body: Record<string, unknown>, field: string): number {
+  const value = optionalPositiveInteger(body, field);
+  if (value === undefined) throw new ControlPlaneError('REQUEST_INVALID', `${field} is required`);
+  return value;
+}
+
+function requiredObject(body: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = body[field];
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be an object`);
+  return value as Record<string, unknown>;
 }
 
 function respondJson(response: ServerResponse, status: number, payload: unknown): void {

@@ -13,6 +13,11 @@ describe('PostgresControlPlane', () => {
     const owner = { id: 'joy-user-1' };
 
     await first.createProject(owner, 'project-1', 'Reference');
+    await expect(first.setAssetSync(owner, 'project-1', true)).resolves.toMatchObject({
+      assetSyncEnabled: true,
+    });
+    await first.registerAsset(owner, 'project-1', assetRegistration(), 99);
+    await first.registerLocalDerivative(owner, 'project-1', localDerivativeRegistration(), 100);
     await first.createPairingOffer('worker-1', 'pairing-hash', 10_000);
     await expect(
       first.approvePairing(owner, 'worker-1', 'pairing-hash', 100),
@@ -31,6 +36,14 @@ describe('PostgresControlPlane', () => {
     });
 
     const restarted = new PostgresControlPlane(pool, { skipLocked: false });
+    await expect(restarted.assetsForProject(owner, 'project-1')).resolves.toMatchObject([
+      { id: 'asset-1', bytes: 8_589_934_592, locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }] },
+    ]);
+    await expect(
+      restarted.derivativesForAsset(owner, 'project-1', 'asset-1'),
+    ).resolves.toMatchObject([
+      { id: 'derivative-1', availability: 'available-local', verifiedAt: 100 },
+    ]);
     await expect(
       restarted.complete('worker-1', 'job-1', 102, fixtureReceipt()),
     ).resolves.toMatchObject({
@@ -96,5 +109,33 @@ function fixtureReceipt() {
     kind: 'fixture.thumbnail' as const,
     sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
     bytes: 14,
+  };
+}
+
+const SHA256 = 'a'.repeat(64);
+
+function assetRegistration() {
+  return {
+    id: 'asset-1',
+    kind: 'video' as const,
+    displayName: 'clip.mp4',
+    sha256: SHA256,
+    bytes: 8_589_934_592,
+    descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1920, height: 1080 },
+    locations: [{ kind: 'opfs-cache' as const, ref: 'opfs-a1' }],
+  };
+}
+
+function localDerivativeRegistration() {
+  return {
+    id: 'derivative-1',
+    assetId: 'asset-1',
+    kind: 'proxy' as const,
+    profile: 'h264-720p',
+    sha256: SHA256,
+    bytes: 1234,
+    descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1280, height: 720 },
+    availability: 'available-local' as const,
+    locations: [{ kind: 'opfs-cache' as const, ref: 'opfs-d1' }],
   };
 }

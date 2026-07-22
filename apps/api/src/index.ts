@@ -1,8 +1,17 @@
 export type {
   Actor,
+  AssetLocationRecord,
+  AssetRegistration,
   ControlPlane,
+  DerivativeAvailability,
+  DerivativeKind,
   Job,
   JobEvent,
+  LocalDerivativeRegistration,
+  MediaAssetKind,
+  MediaAssetRecord,
+  MediaDerivativeRecord,
+  MediaDescriptor,
   ProjectMetadata,
   WorkerRecord,
 } from './control-plane.js';

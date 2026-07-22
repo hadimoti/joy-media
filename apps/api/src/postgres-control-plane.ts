@@ -1,8 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
 import {
   ControlPlaneError,
+  type AssetRegistration,
   type Actor,
   type ControlPlane,
+  type LocalDerivativeRegistration,
+  type MediaAssetRecord,
+  type MediaDerivativeRecord,
   type Job,
   type JobEvent,
   type WorkerResultReceipt,
@@ -10,6 +14,8 @@ import {
   type WorkerPairingOffer,
   type WorkerRecord,
   type WorkerSession,
+  validateAssetRegistration,
+  validateLocalDerivativeRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
@@ -21,6 +27,7 @@ interface ProjectRow {
   readonly owner_id: string;
   readonly title: string;
   readonly revision: number;
+  readonly asset_sync_enabled: boolean;
 }
 
 interface WorkerRow {
@@ -56,6 +63,32 @@ interface JobRow {
   readonly result_worker_ref: string | null;
   readonly result_verified_at: Date | null;
   readonly error: string | null;
+}
+
+interface MediaAssetRow {
+  readonly id: string;
+  readonly project_id: string;
+  readonly kind: MediaAssetRecord['kind'];
+  readonly display_name: string;
+  readonly sha256: string;
+  readonly byte_length: string | number;
+  readonly descriptor: unknown;
+  readonly locations: unknown;
+  readonly created_at: Date;
+}
+
+interface MediaDerivativeRow {
+  readonly id: string;
+  readonly project_id: string;
+  readonly asset_id: string;
+  readonly kind: MediaDerivativeRecord['kind'];
+  readonly profile: string;
+  readonly sha256: string;
+  readonly byte_length: string | number;
+  readonly descriptor: unknown;
+  readonly availability: MediaDerivativeRecord['availability'];
+  readonly locations: unknown;
+  readonly verified_at: Date;
 }
 
 interface EventRow {
@@ -116,6 +149,109 @@ export class PostgresControlPlane implements ControlPlane {
       'REVISION_CONFLICT',
       `expected ${baseRevision}, found ${current.revision}`,
     );
+  }
+
+  async setAssetSync(actor: Actor, projectId: string, enabled: boolean): Promise<ProjectMetadata> {
+    assertActor(actor);
+    if (typeof enabled !== 'boolean')
+      throw new ControlPlaneError('ASSET_SYNC_INVALID', 'asset sync enabled must be boolean');
+    const result = await this.pool.query<ProjectRow>(
+      `UPDATE projects SET asset_sync_enabled = $3
+       WHERE id = $1 AND owner_id = $2 RETURNING *`,
+      [projectId, actor.id, enabled],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+    return projectOf(result.rows[0]);
+  }
+
+  async registerAsset(
+    actor: Actor,
+    projectId: string,
+    asset: AssetRegistration,
+    now = Date.now(),
+  ): Promise<MediaAssetRecord> {
+    validateAssetRegistration(asset);
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      try {
+        const result = await client.query<MediaAssetRow>(
+          `INSERT INTO media_assets
+             (id, project_id, kind, display_name, sha256, byte_length, descriptor, locations, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9) RETURNING *`,
+          [
+            asset.id,
+            projectId,
+            asset.kind,
+            asset.displayName,
+            asset.sha256,
+            asset.bytes,
+            JSON.stringify(asset.descriptor),
+            JSON.stringify(asset.locations),
+            new Date(now),
+          ],
+        );
+        return mediaAssetOf(requiredRow(result.rows[0], 'ASSET_CREATE_FAILED'));
+      } catch (error) {
+        throw databaseError(error, 'ASSET_EXISTS', asset.id);
+      }
+    });
+  }
+
+  async assetsForProject(actor: Actor, projectId: string): Promise<readonly MediaAssetRecord[]> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<MediaAssetRow>(
+      'SELECT * FROM media_assets WHERE project_id = $1 ORDER BY id',
+      [projectId],
+    );
+    return result.rows.map(mediaAssetOf);
+  }
+
+  async registerLocalDerivative(
+    actor: Actor,
+    projectId: string,
+    derivative: LocalDerivativeRegistration,
+    now = Date.now(),
+  ): Promise<MediaDerivativeRecord> {
+    validateLocalDerivativeRegistration(derivative);
+    return this.transaction(async (client) => {
+      await this.asset(actor, projectId, derivative.assetId, client);
+      try {
+        const result = await client.query<MediaDerivativeRow>(
+          `INSERT INTO media_derivatives
+             (id, project_id, asset_id, kind, profile, sha256, byte_length, descriptor, availability, locations, verified_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11) RETURNING *`,
+          [
+            derivative.id,
+            projectId,
+            derivative.assetId,
+            derivative.kind,
+            derivative.profile,
+            derivative.sha256,
+            derivative.bytes,
+            JSON.stringify(derivative.descriptor),
+            derivative.availability,
+            JSON.stringify(derivative.locations),
+            new Date(now),
+          ],
+        );
+        return mediaDerivativeOf(requiredRow(result.rows[0], 'DERIVATIVE_CREATE_FAILED'));
+      } catch (error) {
+        throw databaseError(error, 'DERIVATIVE_EXISTS', derivative.id);
+      }
+    });
+  }
+
+  async derivativesForAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): Promise<readonly MediaDerivativeRecord[]> {
+    await this.asset(actor, projectId, assetId);
+    const result = await this.pool.query<MediaDerivativeRow>(
+      'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2 ORDER BY id',
+      [projectId, assetId],
+    );
+    return result.rows.map(mediaDerivativeOf);
   }
 
   async pairWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
@@ -449,6 +585,20 @@ export class PostgresControlPlane implements ControlPlane {
     return projectOf(result.rows[0]);
   }
 
+  private async asset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    client: Pool | PoolClient = this.pool,
+  ): Promise<void> {
+    await this.project(actor, projectId, client);
+    const result = await client.query<{ readonly id: string }>(
+      'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2',
+      [assetId, projectId],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+  }
+
   private async event(client: PoolClient, jobId: string, type: string, at: number): Promise<void> {
     await client.query('INSERT INTO job_events (job_id, type, created_at) VALUES ($1, $2, $3)', [
       jobId,
@@ -484,7 +634,13 @@ function requiredRow<T>(row: T | undefined, code: string): T {
 }
 
 function projectOf(row: ProjectRow): ProjectMetadata {
-  return { id: row.id, ownerId: row.owner_id, title: row.title, revision: row.revision };
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    title: row.title,
+    revision: row.revision,
+    assetSyncEnabled: row.asset_sync_enabled,
+  };
 }
 
 function workerOf(row: WorkerRow): WorkerRecord {
@@ -528,6 +684,55 @@ function jobOf(row: JobRow): Job {
         }),
     ...(row.error === null ? {} : { error: row.error }),
   };
+}
+
+function mediaAssetOf(row: MediaAssetRow): MediaAssetRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: row.kind,
+    displayName: row.display_name,
+    sha256: row.sha256,
+    bytes: safeByteLength(row.byte_length),
+    descriptor: jsonObject(row.descriptor) as unknown as MediaAssetRecord['descriptor'],
+    locations: jsonArray(row.locations) as MediaAssetRecord['locations'],
+    createdAt: row.created_at.getTime(),
+  };
+}
+
+function mediaDerivativeOf(row: MediaDerivativeRow): MediaDerivativeRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    assetId: row.asset_id,
+    kind: row.kind,
+    profile: row.profile,
+    sha256: row.sha256,
+    bytes: safeByteLength(row.byte_length),
+    descriptor: jsonObject(row.descriptor) as unknown as MediaDerivativeRecord['descriptor'],
+    availability: row.availability,
+    locations: jsonArray(row.locations) as MediaDerivativeRecord['locations'],
+    verifiedAt: row.verified_at.getTime(),
+  };
+}
+
+function safeByteLength(value: string | number): number {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 1)
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored media byte length is invalid');
+  return result;
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored media descriptor is invalid');
+  return value as Record<string, unknown>;
+}
+
+function jsonArray(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored media locations are invalid');
+  return value;
 }
 
 function isFixtureReceipt(value: WorkerResultReceipt): boolean {
