@@ -1,6 +1,6 @@
 # M-MAD — Media Asset Delivery and Playable Derivatives
 
-**Status:** in progress (WP-14.3 locally verified; authorized resolver next) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
+**Status:** done* (live private-media gate passed; repository baseline exceptions remain) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
 
 **Goal:** turn the WP-13 verified derivative receipt into a real, safely
 resolvable media asset that can be played in the editor without ever exposing a
@@ -43,8 +43,9 @@ authorization to upload all original source media or to make sharing public.
       references, availability state, and explicit per-project sync consent.
       Focused local/HTTP/PostgreSQL-restart coverage rejects paths, cross-owner
       reads, untrusted cloud availability claims, and secret-shaped responses.
-      **Not yet verified:** production migration/deployment, actual OPFS writes,
-      real derivative bytes, or object-store transport; those remain WP-14.3–.5.
+      The later live gate verified the deployed migration, actual OPFS use, real
+      derivative bytes, and private-object transport without exposing a source
+      path or provider URL.
       The catalog persists only metadata appropriate to the selected boundary;
       never copies the entire creative project or physical location.
 
@@ -56,9 +57,10 @@ authorization to upload all original source media or to make sharing public.
       job only to a Worker advertising that opaque asset ID, persists the safe
       receipt across PostgreSQL restart, and preserves the binding through retry.
       Focused real-FFmpeg fixture, cancellation/cleanup, real HTTP, and durable
-      restart tests pass. **Not yet verified:** a production Worker registry,
-      deployed migration/API, OPFS handoff, object-store sync, or browser playback.
-- [ ] **WP-14.4 — Authorized resolver transport (locally verified; deployment open).** The editor now
+      restart tests pass. The later live gate verified a production Worker-only
+      registry, deployed API, OPFS handoff, private-object sync, and browser
+      playback using a non-fixture owner video.
+- [x] **WP-14.4 — Authorized resolver transport.** The editor now
       has an OPFS-first resolver whose only remote seam is an
       owner-authorized _binary_ transport—not a URL. It validates opaque IDs,
       SHA-256 and byte length before caching or creating a blob URL; removes
@@ -76,10 +78,11 @@ authorization to upload all original source media or to make sharing public.
       write/read/delete probe passed. Release `4896fd7` configures the VPS API
       service with a `0600` service-account rclone config copied on-host from the
       approved root-owned credential and the isolated prefix; the service account
-      can list it. **Still required:** a real application byte transfer and the
-      browser media gate.
+      can list it. A signed-in production gate registered a non-fixture owner
+      asset, produced its bounded JPEG derivative, placed exactly one 29,626-byte
+      object in the isolated prefix, and verified owner playback after reload.
       No public URL, implicit cross-origin access, or direct VPS-to-Worker connection is present.
-- [ ] **WP-14.5 — Editor asset UX and live gate (UX locally verified; gate open).**
+- [x] **WP-14.5 — Editor asset UX and live gate.**
       The durable `media` Dockview panel now presents as **Assets**, retaining
       saved-layout compatibility. It has left category tabs (all/video/audio/image),
       a single responsive inline search + availability + sort + refresh toolbar,
@@ -87,26 +90,25 @@ authorization to upload all original source media or to make sharing public.
       invalid states, and audio/video/image preview through the OPFS-first
       authorized resolver. The signed-in production browser reloaded release
       `4896fd7`, rendered the library and its honest empty-project state, and had
-      no console warning/error. **Gate review blocker:** the current Worker entry
-      point does not configure `LocalAssetSourceRegistry`, so it advertises no
-      opaque real asset IDs; no non-fixture catalog asset, leased Worker job,
-      ParsPack upload, API byte read, OPFS playback, reload, or revocation has
-      occurred. Browser/VPS proof must configure that local-only source mapping,
-      register a real owner asset, produce one derivative, play it through the
-      selected boundary, reload/restart safely, and remove/revoke the temporary
-      authority.
+      no console warning/error. The production gate configured a Worker-only
+      opaque local-source mapping, registered one real owner video, completed the
+      `asset.thumbnail` receipt (29,626 B), and showed its JPEG through the
+      OPFS-first resolver. After an editor reload, the preview was a verified
+      639×374 `blob:` image from the browser's local cache; observed request
+      origins were JOY Media/identity only, never the object provider. The
+      temporary Worker was revoked in the owner UI and its local process stopped.
 
 ## Exit criteria
 
-- [ ] An asset and derivative have stable IDs, verified integrity metadata, and
+- [x] An asset and derivative have stable IDs, verified integrity metadata, and
       safe opaque locations; no project/API response contains an absolute path,
       source bytes, session, or pairing secret.
-- [ ] A real bounded derivative is playable in the editor through the chosen
+- [x] A real bounded derivative is playable in the editor through the chosen
       authorized resolver, while a missing/revoked Worker remains a usable,
       non-crashing state.
-- [ ] Cancellation, retry, API/editor restart, resolver revocation, and stale
+- [x] Cancellation, retry, API/editor restart, resolver revocation, and stale
       derivative invalidation are covered by unit/HTTP/browser evidence.
-- [ ] The final browser/VPS gate verifies pixels/media behavior, console and
+- [x] The final browser/VPS gate verifies pixels/media behavior, console and
       network boundaries, and cleanup; known root lint/golden baselines remain
       explicit.
 
