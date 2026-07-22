@@ -58,10 +58,18 @@ authorization to upload all original source media or to make sharing public.
       Focused real-FFmpeg fixture, cancellation/cleanup, real HTTP, and durable
       restart tests pass. **Not yet verified:** a production Worker registry,
       deployed migration/API, OPFS handoff, object-store sync, or browser playback.
-- [ ] **WP-14.4 — Authorized resolver transport.** Implement the selected
-      OPFS-first/private-object-store resolver and test origin/owner/revocation/
-      integrity boundaries. No public URL, implicit cross-origin access, or direct
-      VPS-to-Worker connection.
+- [ ] **WP-14.4 — Authorized resolver transport (in progress).** The editor now
+      has an OPFS-first resolver whose only remote seam is an
+      owner-authorized _binary_ transport—not a URL. It validates opaque IDs,
+      SHA-256 and byte length before caching or creating a blob URL; removes
+      tampered cache entries; makes object-URL cleanup explicit; distinguishes a
+      revoked authority; and never gives the transport a raw local path or browser
+      assertion. Focused coverage proves local-cache precedence, cache reuse,
+      tamper rejection, and revocation. **Still required to close this package:**
+      an API-brokered private-object-store adapter/end point that enforces project
+      owner + sync consent and is backed by an owner-approved provider/bucket; no
+      such provider, credential, or deployment is configured. No public URL,
+      implicit cross-origin access, or direct VPS-to-Worker connection is present.
 - [ ] **WP-14.5 — Editor asset UX and live gate.** Add an Asset Library and a
       playable derivative affordance with missing/pending/verified/revoked states.
       Browser/VPS proof must import or select a non-fixture asset, produce one real
