@@ -62,6 +62,16 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
         positionZ: -200,
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
+      // A visible reference-project motion cue: scrubbing now changes actual
+      // Monitor pixels, not merely the timeline selection state.
+      animations: {
+        x: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' },
+            { timeUs: 30_000_000, value: 300, interpolation: 'linear' },
+          ],
+        },
+      },
     },
     'product-image': {
       id: 'product-image',

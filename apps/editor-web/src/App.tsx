@@ -15,7 +15,12 @@ import {
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { toggleSelection } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  SpikeProject,
+  VideoClip,
+  VisualObjectV1,
+} from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { buildRenderFrameIR, type ResolvedObject } from '@joy-media/visual-object-renderer';
@@ -23,7 +28,6 @@ import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
 } from '@joy-media/renderer-pixi/browser';
-import { renderHeadlessFrame } from '@joy-media/renderer-headless';
 import {
   downloadBrowserMp4,
   type BrowserExportManifest,
@@ -45,10 +49,8 @@ import 'dockview/dist/styles/dockview.css';
 
 /**
  * WP-11.2: resolves a timeline clip's assetId to a real, browser-fetchable
- * URL for HTMLVideoElement decode. Only `asset-intro` has a real fixture
- * committed (`public/media/reference/asset-intro.mp4`, generated via
- * `ffmpeg -f lavfi -i testsrc`); other reference-project asset ids will 404,
- * which the decoder already treats as a dropped frame, not a crash.
+ * URL for HTMLVideoElement decode. The reference intro/product/outro clips
+ * each have a committed 30 s H.264/AAC fixture under `public/media/reference`.
  */
 function resolveReferenceMediaUrl(assetId: string): string {
   return `/media/reference/${assetId}.mp4`;
@@ -86,6 +88,65 @@ function activeVideoClipForSource(project: SpikeProject, sourceUrl: string) {
     .find(
       (clip) => clip.kind === 'video' && sourceUrl.endsWith(`/media/reference/${clip.assetId}.mp4`),
     );
+}
+
+function videoClipSpec(clip: VideoClip): VideoClipSpec {
+  return {
+    id: clip.assetId,
+    originalToken: resolveReferenceMediaUrl(clip.assetId),
+    startUs: clip.startUs,
+    durationUs: clip.durationUs,
+    sourceInUs: clip.sourceInUs,
+    transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+    opacity: 1,
+    zIndex: 0,
+  };
+}
+
+function loadDetachedVideo(video: HTMLVideoElement, sourceUrl: string): Promise<void> {
+  video.preload = 'auto';
+  video.playsInline = true;
+  video.muted = true;
+  video.src = sourceUrl;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('error', onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`Unable to load export media ${sourceUrl}`));
+    };
+    video.addEventListener('loadeddata', onLoaded, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    video.load();
+  });
+}
+
+function seekDetachedVideo(video: HTMLVideoElement, timeUs: number): Promise<void> {
+  const seconds = timeUs / 1_000_000;
+  if (Math.abs(video.currentTime - seconds) < 0.001) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
+    };
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`Unable to seek export media to ${seconds}s`));
+    };
+    video.addEventListener('seeked', onSeeked, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    video.currentTime = seconds;
+  });
 }
 
 interface EditorRuntimeState {
@@ -414,54 +475,118 @@ export function App() {
         );
         return buildRenderFrameIR(compositionV1?.id ?? 'root', timeUs, width, height, resolved);
       };
-      let mismatched = 0;
-      // The seeded reference composition has no time-varying visual-object
-      // properties. Detect that from the evaluated IR (excluding its time
-      // stamp) so its 900 identical frames are streamed without retaining a
-      // multi-gigabyte RGBA array or making the media clock run at render speed.
-      const frameSignature = (timeUs: number) => {
-        const frame = buildFrame(timeUs);
-        return JSON.stringify({
-          viewport: frame.viewport,
-          background: frame.background,
-          nodes: frame.nodes,
-        });
-      };
-      const staticReferenceFrame =
-        frameSignature(0) === frameSignature(Math.floor(durationUs / 2)) &&
-        frameSignature(0) === frameSignature(Math.max(0, durationUs - 1));
-      const firstExportFrame = renderHeadlessFrame(buildFrame(0)).pixels;
-      const firstPreviewDigest = await sha256Hex(renderHeadlessFrame(buildFrame(0)).pixels);
-      const firstExportDigest = await sha256Hex(firstExportFrame);
-      if (staticReferenceFrame && firstPreviewDigest !== firstExportDigest) mismatched++;
-      setExportStatus(`Encoding ${totalFrames} H.264/AAC frames…`);
-      const exportResult: BrowserExportResult = await downloadBrowserMp4({
-        manifest: {
-          width: manifest.width,
-          height: manifest.height,
-          frameRate: manifest.frameRate,
-          durationUs: manifest.durationUs,
-        },
-        frameCount: totalFrames,
-        renderFrame: async (index) => {
-          if (staticReferenceFrame) return firstExportFrame;
-          const timeUs = Math.floor((index * 1_000_000) / frameRate);
-          const exportFrame = renderHeadlessFrame(buildFrame(timeUs)).pixels;
-          const previewDigest = await sha256Hex(renderHeadlessFrame(buildFrame(timeUs)).pixels);
-          if (previewDigest !== (await sha256Hex(exportFrame))) mismatched++;
-          return exportFrame;
-        },
-        onProgress: (completed, total) => {
-          if (completed === total || completed % frameRate === 0)
-            setExportStatus(`Encoding H.264/AAC… ${completed}/${total} frames`);
-        },
-        filename: `joy-media-export-${Date.now()}.mp4`,
-      });
-      if (mismatched > 0)
-        throw new Error(`preview↔export digest mismatch on ${mismatched}/${totalFrames} frames`);
-      setExportStatus(
-        `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; H.264/AAC MP4).`,
+      const transitionTimes = Array.from(
+        new Set(
+          (compositionTimeline?.tracks.flatMap((track) => track.clips) ?? []).flatMap((clip) => [
+            clip.startUs,
+            clip.startUs + clip.durationUs,
+          ]),
+        ),
+      ).sort((left, right) => left - right);
+      const exportClips = transitionTimes
+        .map((timeUs) => activeVideoClipAt(session.timelineProject, timeUs))
+        .filter((clip): clip is VideoClip => clip?.kind === 'video')
+        .filter(
+          (clip, index, clips) =>
+            clips.findIndex((candidate) => candidate.id === clip.id) === index,
+        );
+      if (exportClips.length === 0)
+        throw new Error('No playable video clips are available for export');
+
+      setExportStatus('Preloading preview-equivalent video and audio…');
+      const audioContext = new AudioContext();
+      const audioDestination = audioContext.createMediaStreamDestination();
+      const exportMedia = await Promise.all(
+        exportClips.map(async (clip) => {
+          const video = document.createElement('video');
+          await loadDetachedVideo(video, resolveReferenceMediaUrl(clip.assetId));
+          await seekDetachedVideo(video, clip.sourceInUs);
+          const captureCanvas = document.createElement('canvas');
+          captureCanvas.width = 0;
+          captureCanvas.height = 0;
+          const audioResponse = await fetch(resolveReferenceMediaUrl(clip.assetId));
+          if (!audioResponse.ok)
+            throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
+          const audio = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
+          return {
+            clip,
+            video,
+            decoder: createHtmlMediaDecoder(video, captureCanvas),
+            audio,
+          };
+        }),
       );
+      const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
+      const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
+      if (exportAudioTrack === undefined)
+        throw new Error('Export audio mix did not produce a track');
+      const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
+      const startTimers: number[] = [];
+      const audioSources: AudioBufferSourceNode[] = [];
+      try {
+        await audioContext.resume();
+        setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
+        const exportResult: BrowserExportResult = await downloadBrowserMp4({
+          manifest,
+          frameCount: totalFrames,
+          canvas: renderer.canvas,
+          audioTrack: exportAudioTrack,
+          onRecordingStart: () => {
+            const startAt = audioContext.currentTime;
+            for (const media of exportMedia) {
+              const audioSource = audioContext.createBufferSource();
+              audioSource.buffer = media.audio;
+              audioSource.connect(audioDestination);
+              audioSource.start(
+                startAt + media.clip.startUs / 1_000_000,
+                media.clip.sourceInUs / 1_000_000,
+                media.clip.durationUs / 1_000_000,
+              );
+              audioSources.push(audioSource);
+              const startVideo = () => void media.video.play();
+              if (media.clip.startUs === 0) startVideo();
+              else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
+            }
+          },
+          paintFrame: (index) => {
+            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+            const clip = activeVideoClipAt(session.timelineProject, timeUs);
+            if (clip === undefined || clip.kind !== 'video')
+              throw new Error(`No active video clip at ${timeUs}µs during export`);
+            const media = mediaForClip.get(clip.id);
+            if (media === undefined)
+              throw new Error(`Export media for ${clip.id} was not prepared`);
+            const token = index + 1;
+            const decoded = media.decoder.captureCurrentFrame(token);
+            if (decoded.bitmap === undefined)
+              throw new Error(`Export media frame ${index} for ${clip.assetId} is not drawable`);
+            const node = videoFrameNodeFromDecoded(videoClipSpec(clip), decoded, {
+              width: media.video.videoWidth,
+              height: media.video.videoHeight,
+            });
+            renderer.render(
+              withVideoFrameNode(buildFrame(timeUs), node),
+              new Map([[node.id, decoded.bitmap]]),
+            );
+          },
+          onProgress: (completed, total) => {
+            if (completed === total || completed % frameRate === 0)
+              setExportStatus(
+                `Encoding preview-equivalent H.264/AAC… ${completed}/${total} frames`,
+              );
+          },
+          filename: `joy-media-export-${Date.now()}.mp4`,
+        });
+        setExportStatus(
+          `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; preview-equivalent H.264/AAC MP4).`,
+        );
+      } finally {
+        for (const timer of startTimers) window.clearTimeout(timer);
+        for (const source of audioSources) source.stop();
+        for (const media of exportMedia) media.video.pause();
+        renderer.destroy();
+        await audioContext.close();
+      }
     } catch (error) {
       setExportStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -748,6 +873,8 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   }
   return fallbackSha256Hex(bytes);
 }
+
+void sha256Hex;
 
 function fallbackSha256Hex(bytes: Uint8Array): string {
   // RFC 6234 SHA-256 — used only when SubtleCrypto is unavailable (e.g. older

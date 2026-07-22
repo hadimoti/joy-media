@@ -52,7 +52,16 @@ export const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
 export interface BrowserMp4ExportSource {
   readonly manifest: BrowserExportManifest;
   readonly frameCount: number;
-  readonly renderFrame: (index: number) => Uint8Array | Promise<Uint8Array>;
+  /** Draws one frame into `canvas`; this preserves the GPU preview path. */
+  readonly paintFrame?: (index: number) => void | Promise<void>;
+  /** CPU fallback that writes RGBA pixels into the recorder canvas. */
+  readonly renderFrame?: (index: number) => Uint8Array | Promise<Uint8Array>;
+  /** Optional canvas already owned by the preview renderer. */
+  readonly canvas?: HTMLCanvasElement;
+  /** Authored/program audio supplied by the caller, when available. */
+  readonly audioTrack?: MediaStreamTrack;
+  /** Runs immediately after recording starts, for synchronized media starts. */
+  readonly onRecordingStart?: () => void;
   readonly filename?: string;
   readonly onProgress?: (completedFrames: number, totalFrames: number) => void;
 }
@@ -76,6 +85,10 @@ export async function downloadBrowserMp4(
     throw new RangeError('manifest.height must be a positive integer');
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new RangeError('manifest.frameRate must be a positive finite number');
+  if (source.paintFrame === undefined && source.renderFrame === undefined)
+    throw new TypeError('paintFrame or renderFrame is required for browser MP4 export');
+  if (source.paintFrame !== undefined && source.renderFrame !== undefined)
+    throw new TypeError('provide either paintFrame or renderFrame, not both');
   if (
     typeof MediaRecorder === 'undefined' ||
     !MediaRecorder.isTypeSupported(BROWSER_MP4_MIME_TYPE)
@@ -83,23 +96,28 @@ export async function downloadBrowserMp4(
     throw new Error(`H.264/AAC MP4 recording is unavailable (${BROWSER_MP4_MIME_TYPE})`);
   }
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (context === null) throw new Error('2D canvas is unavailable for browser MP4 export');
+  const canvas = source.canvas ?? document.createElement('canvas');
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const context = source.renderFrame === undefined ? undefined : canvas.getContext('2d');
+  if (source.renderFrame !== undefined && context === null)
+    throw new Error('2D canvas is unavailable for browser MP4 export');
   const stream = canvas.captureStream(frameRate);
   const videoTrack = stream.getVideoTracks()[0] as
     (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
   if (videoTrack === undefined) throw new Error('canvas capture did not produce a video track');
 
-  const audioContext = new AudioContext();
-  const audioDestination = audioContext.createMediaStreamDestination();
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-  gain.gain.value = 0.00001;
-  oscillator.connect(gain).connect(audioDestination);
-  const audioTrack = audioDestination.stream.getAudioTracks()[0];
+  const fallbackAudio = source.audioTrack === undefined ? new AudioContext() : undefined;
+  const audioDestination = fallbackAudio?.createMediaStreamDestination();
+  const oscillator = fallbackAudio?.createOscillator();
+  const gain = fallbackAudio?.createGain();
+  if (oscillator !== undefined && gain !== undefined && audioDestination !== undefined) {
+    gain.gain.value = 0.00001;
+    oscillator.connect(gain).connect(audioDestination);
+  }
+  const audioTrack = source.audioTrack ?? audioDestination?.stream.getAudioTracks()[0];
   if (audioTrack === undefined)
     throw new Error('audio capture did not produce an AAC source track');
   stream.addTrack(audioTrack);
@@ -121,20 +139,24 @@ export async function downloadBrowserMp4(
   const bytesPerFrame = width * height * 4;
   const frameDurationMs = 1_000 / frameRate;
   try {
-    await audioContext.resume();
-    oscillator.start();
+    if (fallbackAudio !== undefined) await fallbackAudio.resume();
+    oscillator?.start();
     recorder.start();
+    source.onRecordingStart?.();
     let nextFrameAt = performance.now();
     for (let index = 0; index < frameCount; index++) {
-      const frame = await source.renderFrame(index);
-      if (frame.length !== bytesPerFrame) {
-        throw new RangeError(
-          `frame ${index} length ${frame.length} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
-        );
+      if (source.paintFrame !== undefined) await source.paintFrame(index);
+      else {
+        const frame = await source.renderFrame!(index);
+        if (frame.length !== bytesPerFrame) {
+          throw new RangeError(
+            `frame ${index} length ${frame.length} does not match ${bytesPerFrame} bytes (${width}x${height} RGBA)`,
+          );
+        }
+        const pixels = new Uint8ClampedArray(frame.length);
+        pixels.set(frame);
+        context!.putImageData(new ImageData(pixels, width, height), 0, 0);
       }
-      const pixels = new Uint8ClampedArray(frame.length);
-      pixels.set(frame);
-      context.putImageData(new ImageData(pixels, width, height), 0, 0);
       videoTrack.requestFrame?.();
       source.onProgress?.(index + 1, frameCount);
       nextFrameAt += frameDurationMs;
@@ -149,10 +171,10 @@ export async function downloadBrowserMp4(
     await stopped.catch(() => undefined);
     throw error;
   } finally {
-    if (oscillator.context.state !== 'closed') oscillator.stop();
+    if (oscillator !== undefined && oscillator.context.state !== 'closed') oscillator.stop();
     videoTrack.stop();
-    audioTrack.stop();
-    await audioContext.close();
+    if (source.audioTrack === undefined) audioTrack.stop();
+    if (fallbackAudio !== undefined) await fallbackAudio.close();
   }
 
   const blob = new Blob(chunks, { type: BROWSER_MP4_MIME_TYPE });
