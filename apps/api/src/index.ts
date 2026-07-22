@@ -18,6 +18,12 @@ export type {
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 export { ControlPlaneError, LocalControlPlane } from './control-plane.js';
 export {
+  PrivateObjectIntegrityError,
+  RclonePrivateObjectStore,
+  type PrivateObjectDescriptor,
+  type PrivateObjectStore,
+} from './private-object-store.js';
+export {
   PostgresControlPlane,
   type PostgresControlPlaneOptions,
 } from './postgres-control-plane.js';

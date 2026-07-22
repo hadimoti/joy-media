@@ -186,6 +186,12 @@ export interface ControlPlane {
     projectId: string,
     assetId: string,
   ): readonly MediaDerivativeRecord[] | Promise<readonly MediaDerivativeRecord[]>;
+  cloudDerivativeForOwner(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    derivativeId: string,
+  ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
   pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   createPairingOffer(
     workerId: string,
@@ -375,6 +381,24 @@ export class LocalControlPlane implements ControlPlane {
     return [...this.#derivatives.values()]
       .filter((derivative) => derivative.assetId === assetId)
       .map(cloneDerivative);
+  }
+  cloudDerivativeForOwner(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    derivativeId: string,
+  ): MediaDerivativeRecord {
+    const project = this.project(actor, projectId);
+    if (!project.assetSyncEnabled) throw new ControlPlaneError('ASSET_SYNC_DISABLED', projectId);
+    const derivative = this.derivativesForAsset(actor, projectId, assetId).find(
+      (candidate) => candidate.id === derivativeId,
+    );
+    if (derivative === undefined) throw new ControlPlaneError('DERIVATIVE_NOT_FOUND', derivativeId);
+    if (derivative.availability !== 'available-cloud')
+      throw new ControlPlaneError('DERIVATIVE_UNAVAILABLE', derivativeId);
+    if (!derivative.locations.some((location) => location.kind === 'private-object'))
+      throw new ControlPlaneError('DERIVATIVE_UNAVAILABLE', derivativeId);
+    return derivative;
   }
   pairWorker(actor: Actor, workerId: string): WorkerRecord {
     this.auth(actor);

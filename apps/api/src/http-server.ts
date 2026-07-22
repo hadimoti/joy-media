@@ -7,6 +7,7 @@ import {
   type ControlPlane,
   type LocalDerivativeRegistration,
 } from './control-plane.js';
+import type { PrivateObjectStore } from './private-object-store.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -15,6 +16,7 @@ export interface ApiAuthentication {
 export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
+  readonly privateObjectStore?: PrivateObjectStore;
 }
 
 /**
@@ -167,6 +169,41 @@ async function route(
 
   if (request.method === 'GET' && url.pathname === '/v1/workers') {
     respondJson(response, 200, { data: await options.controlPlane.workersForOwner(actor) });
+    return;
+  }
+
+  const derivativeContentMatch =
+    /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/derivatives\/([^/]+)\/content$/.exec(url.pathname);
+  if (request.method === 'GET' && derivativeContentMatch !== null) {
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const derivative = await options.controlPlane.cloudDerivativeForOwner(
+      actor,
+      decodeURIComponent(derivativeContentMatch[1]!),
+      decodeURIComponent(derivativeContentMatch[2]!),
+      decodeURIComponent(derivativeContentMatch[3]!),
+    );
+    const location = derivative.locations.find((candidate) => candidate.kind === 'private-object');
+    if (location === undefined)
+      throw new ControlPlaneError('DERIVATIVE_UNAVAILABLE', derivative.id);
+    const bytes = await store.get({
+      ref: location.ref,
+      sha256: derivative.sha256,
+      bytes: derivative.bytes,
+      mimeType: derivative.descriptor.mimeType,
+    });
+    response.writeHead(200, {
+      'content-type': derivative.descriptor.mimeType,
+      'content-length': String(bytes.byteLength),
+      'cache-control': 'private, no-store',
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(bytes);
     return;
   }
 

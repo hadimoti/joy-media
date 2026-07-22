@@ -3,6 +3,7 @@ import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
 import { JoyIdentityVerifier } from './joy-identity.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
+import { RclonePrivateObjectStore } from './private-object-store.js';
 
 await start();
 
@@ -24,6 +25,16 @@ async function start(): Promise<void> {
           ? undefined
           : identity.authenticate(request),
     },
+    ...(process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
+      ? {}
+      : {
+          privateObjectStore: new RclonePrivateObjectStore({
+            remotePrefix: process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX,
+            ...(process.env.JOY_MEDIA_RCLONE_COMMAND === undefined
+              ? {}
+              : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
+          }),
+        }),
   }).listen(Number(process.env.JOY_MEDIA_API_PORT ?? 8790));
   console.log('JOY Media API listening');
 }

@@ -279,6 +279,21 @@ export class WorkerRuntime {
   localAssetIds(): readonly string[] {
     return this.options.sources?.assetIds() ?? [];
   }
+
+  /** Reads a retained derivative only after re-checking its receipt integrity. */
+  readDerivative(result: RealThumbnailReceipt): Uint8Array {
+    if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef))
+      throw new Error('derivative local reference is invalid');
+    const directory =
+      this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+    const bytes = readFileSync(join(directory, `${result.localRef}.jpg`));
+    if (
+      bytes.length !== result.bytes ||
+      createHash('sha256').update(bytes).digest('hex') !== result.sha256
+    )
+      throw new Error('retained derivative integrity check failed');
+    return bytes;
+  }
 }
 
 export interface RealThumbnailReceipt {

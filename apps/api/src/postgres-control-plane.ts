@@ -262,6 +262,30 @@ export class PostgresControlPlane implements ControlPlane {
     return result.rows.map(mediaDerivativeOf);
   }
 
+  async cloudDerivativeForOwner(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    derivativeId: string,
+  ): Promise<MediaDerivativeRecord> {
+    const project = await this.project(actor, projectId);
+    if (!project.assetSyncEnabled) throw new ControlPlaneError('ASSET_SYNC_DISABLED', projectId);
+    await this.asset(actor, projectId, assetId);
+    const result = await this.pool.query<MediaDerivativeRow>(
+      'SELECT * FROM media_derivatives WHERE id = $1 AND project_id = $2 AND asset_id = $3',
+      [derivativeId, projectId, assetId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('DERIVATIVE_NOT_FOUND', derivativeId);
+    const derivative = mediaDerivativeOf(row);
+    if (
+      derivative.availability !== 'available-cloud' ||
+      !derivative.locations.some((location) => location.kind === 'private-object')
+    )
+      throw new ControlPlaneError('DERIVATIVE_UNAVAILABLE', derivativeId);
+    return derivative;
+  }
+
   async pairWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
     assertActor(actor);
     const result = await this.pool.query<WorkerRow>(
