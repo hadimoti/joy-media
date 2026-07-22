@@ -117,6 +117,7 @@ describe('dialogue normalization', () => {
       const { result } = normalizeDialogue(samples, sampleRate, config);
 
       expect(result.gainAdjustment).toBeGreaterThan(2.0);
+      expect(result.gainAdjustment).toBeLessThan(3.0);
       expect(result.outputLoudness).toBeCloseTo(-16, 0);
     });
 

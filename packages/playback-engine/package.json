@@ -14,5 +14,14 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@joy-media/render-ir": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@joy-media/render-ir": { "optional": true }
+  },
+  "devDependencies": {
+    "@joy-media/render-ir": "workspace:*"
   }
 }

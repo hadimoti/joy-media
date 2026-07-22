@@ -32,11 +32,15 @@ export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
 export type { HtmlVideoElementLike } from './html-decoder.js';
 export { createHtmlMediaDecoder } from './html-decoder.js';
 export { sourceTimeAtPlayhead } from './source-time.js';
+export { importedClipToMediaSource, videoFrameNodeFromDecoded, withVideoFrameNode, type VideoClipSpec } from './video-frame-node.js';
+import type { ImageDataLike } from './image-data.js';
+export type { ImageDataLike } from './image-data.js';
 
 export interface DecodedFrame {
   readonly assetId: string;
   readonly sourceTimeUs: number;
   readonly token: string;
+  readonly bitmap?: ImageDataLike;
 }
 
 export class FrameCache {

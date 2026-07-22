@@ -21,6 +21,7 @@ Phase parts (dependency-ordered, from master plan §36) and cross-cutting parts 
 | **P08** | [plan/P08-plugin-sdk.md](plan/P08-plugin-sdk.md)                   | Public plugin SDK + team/private template catalog                    | P04–P07 contracts stable                |
 | **P09** | [plan/P09-marketplace.md](plan/P09-marketplace.md)                 | Marketplace, collaboration, scale — **gated, not automatic scope**   | P08 gate + owner approval               |
 | **P10** | [plan/P10-advanced.md](plan/P10-advanced.md)                       | Advanced pro systems (3D, expressions, multicam…) — optional         | P09-era                                 |
+| **WP-11** | [plan/WP-11-live-preview-canvas.md](plan/WP-11-live-preview-canvas.md) | Live Preview Canvas: real GPU preview, browser decode, A/V sync, export-from-UI | P10 (for WP-10.6 bridge) + P05 unblocked |
 | **X01** | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)     | Live-VPS deployment plan: isolation, ports, Postgres, health checks  | activates with P01                      |
 
 ```mermaid
@@ -33,6 +34,13 @@ flowchart LR
     P06 --> P07 --> P08
     P08 --> P09 --> P10
     P01 -.deploys via.-> X01
+    P10 -.optional / additive.-> WP11[WP-11<br/>Live Preview Canvas]
+    P05 -.closes integration gap.-> WP11
+    P04 -.closes integration gap.-> WP11
+    P02 -.closes integration gap.-> WP11
+    P01 -.closes integration gap.-> WP11
+    classDef opt fill:#fff7e6,stroke:#d48806,stroke-dasharray: 5 3
+    class WP11 opt
 ```
 
 Each part file contains **work packages (WPs)** — checkbox units sized for roughly one focused session. WPs inside a part may run in any order that respects their listed prerequisites.

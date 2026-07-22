@@ -22,7 +22,11 @@
     "@joy-media/captions-core": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
-    "@joy-media/render-ir": "workspace:*"
+    "@joy-media/render-ir": "workspace:*",
+    "@joy-media/renderer-pixi": "workspace:*",
+    "@joy-media/renderer-headless": "workspace:*",
+    "@joy-media/evaluator": "workspace:*",
+    "@joy-media/visual-object-renderer": "workspace:*"
   },
   "devDependencies": {
     "@joy-media/test-fixtures": "workspace:*",

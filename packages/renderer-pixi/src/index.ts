@@ -5,6 +5,11 @@
  * This deterministic software surface is deliberately used only for parity
  * testing in Node: it proves that the Pixi-facing adapter consumes Render IR,
  * not project data, DOM nodes, or decoder state.
+ *
+ * Browser consumers should import the real Pixi.js preview from
+ * `@joy-media/renderer-pixi/browser` (resolved via the package's `browser`
+ * subpath export). Type-only re-exports of the browser surface are exposed
+ * below so editor code can reference the same types from either entry.
  */
 
 import type { EditorOverlayIR, RenderFrameIR, Rgba, VisualRenderNode } from '@joy-media/render-ir';
@@ -152,3 +157,15 @@ const GLYPHS: Readonly<Record<string, readonly string[]>> = {
 function glyph(character: string, x: number, y: number): boolean {
   return GLYPHS[character]?.[y]?.[x] === '1';
 }
+
+/**
+ * Type-only re-export of the browser Pixi surface. The runtime browser entry
+ * is reached via the package's `./browser` subpath export or the `browser`
+ * condition on the main export; a runtime re-export here would pull `pixi.js`
+ * into Node-only test builds and break parity testing.
+ */
+export type {
+  BrowserPixiRenderer,
+  BrowserPixiRendererOptions,
+  BrowserPixiRenderStats,
+} from './browser.js';

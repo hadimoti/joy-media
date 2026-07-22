@@ -40,6 +40,18 @@
     },
     {
       "path": "../../packages/render-ir"
+    },
+    {
+      "path": "../../packages/evaluator"
+    },
+    {
+      "path": "../../packages/visual-object-renderer"
+    },
+    {
+      "path": "../../packages/renderer-headless"
+    },
+    {
+      "path": "../../packages/export-core"
     }
   ]
 }
