@@ -43,6 +43,10 @@ import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
+import {
+  getOrCreateControlPlaneProjectBinding,
+  type ControlPlaneProjectBinding,
+} from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
@@ -168,6 +172,7 @@ interface EditorPanelContextValue {
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
+  readonly controlPlaneProject: ControlPlaneProjectBinding;
   readonly playback: PlaybackScheduler['metrics'];
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -200,6 +205,7 @@ export function App() {
   );
   const [, setRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
+  const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
@@ -211,6 +217,12 @@ export function App() {
       INITIAL_EDITOR_PROJECT,
     );
   const session = sessionRef.current;
+  const controlPlaneProject =
+    controlPlaneProjectRef.current ??
+    (controlPlaneProjectRef.current = getOrCreateControlPlaneProjectBinding(
+      window.localStorage,
+      session.visualProject,
+    ));
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
@@ -656,6 +668,7 @@ export function App() {
           previewVideoFrame,
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
+          controlPlaneProject,
           playback: scheduler.current.metrics,
           canUndo: session.canUndo,
           canRedo: session.canRedo,
@@ -688,7 +701,7 @@ export function App() {
 function Panel({ api }: IDockviewPanelProps) {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, visualProject, updateVisualProperty } = context;
+  const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
   if (api.id === 'inspector') {
     const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
     const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
@@ -752,7 +765,12 @@ function Panel({ api }: IDockviewPanelProps) {
       />
     );
   if (api.id === 'jobs')
-    return <JobsPanel projectId={visualProject.id} projectTitle={visualProject.title} />;
+    return (
+      <JobsPanel
+        projectId={controlPlaneProject.controlPlaneProjectId}
+        projectTitle={controlPlaneProject.title}
+      />
+    );
   if (api.id === 'history')
     return (
       <article>

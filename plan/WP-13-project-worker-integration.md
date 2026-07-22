@@ -1,6 +1,6 @@
 # M-PWI — Project and Worker Result Integration
 
-**Status:** prepared · **Gate to enter:** WP-12 complete · **Master plan:** §8, §26, §27, §35–§36
+**Status:** in progress (WP-13.1 locally implemented) · **Gate to enter:** WP-12 complete · **Master plan:** §8, §26, §27, §35–§36
 **Goal:** turn the proven fixture-only Jobs panel into a project-aware editor workflow: each persisted editor project has one owner-scoped control-plane record, and Worker-derived results appear as safe typed records without exposing a local path or source bytes.
 
 ## Why this is next
@@ -14,14 +14,14 @@ visible to the editor without expanding into uploads, provider jobs, or VPS
 rendering.
 
 The WP-12 gate review also found one small UX distinction to preserve: an
-editor project that has not yet created its control-plane record is *ready to
-initialize*, not unauthenticated or offline. That scoped correction shipped in
+editor project that has not yet created its control-plane record is _ready to
+initialize_, not unauthenticated or offline. That scoped correction shipped in
 the WP-12 closeout static release (`7bb3e93`); WP-13.1 adds its durable
 project-binding test coverage.
 
 ## Work packages
 
-- [ ] **WP-13.1 — Project identity bridge.** Define and test the one-way binding from the persisted editor project ID/title to an owner-scoped control-plane project. Creation must be idempotent; project selection/reopen must read the same job history; a missing record is rendered as ready-to-initialize, not an authentication failure. Do not copy the whole project document to PostgreSQL.
+- [x] **WP-13.1 — Project identity bridge.** A browser-persisted mapping now binds each local editor project ID to one opaque control-plane project ID and title. `App` passes that opaque ID to Jobs; `JobsPanel` already creates the record idempotently only when a job is submitted and renders a missing record as ready-to-initialize. Focused tests prove reopen/idempotence, distinct local projects, and malformed-storage recovery; editor production build and typecheck pass. **Not yet browser/VPS verified:** a real alternate persisted project or its remote job history; that remains WP-13.5.
 - [ ] **WP-13.2 — Safe Worker-result projection.** Add a typed derivative/result record that carries only the job ID, result kind, verified hash/byte count, timestamps, and opaque Worker/result references. Project UI can render pending/completed/failed states from it. Absolute local paths, original bytes, pairing codes, Worker sessions, and browser assertions remain prohibited from project state and API responses.
 - [ ] **WP-13.3 — Editor job UX.** Replace the fixture-only wording with project-scoped action/status affordances: explicit initialization, connected/disconnected/revoked Worker state, queued/progress/cancel/retry, and a visible verified derivative receipt. Maintain keyboard/accessibility labels and keep primary editor work usable when no Worker is connected.
 - [ ] **WP-13.4 — Durable recovery and contract tests.** Cover project reopen, API restart, Worker disconnect/revoke, cancel/retry, and receipt projection with unit/HTTP tests. Add a regression for the pre-initialization state so it cannot regress to “offline or not signed in.”
