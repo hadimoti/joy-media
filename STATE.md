@@ -13,7 +13,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P03 captions                     | in-progress | 5/5      | 2026-07-21   | Manual captions/RTL real in editor; transcription is a hardcoded stub                                             |
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
 | P05 audio + providers            | in-progress | 5/5      | 2026-07-22   | Original 33 failures fixed; one cross-Chromium golden remains, and providers remain stubs                         |
-| P06 agent                        | in-progress | 5/5      | 2026-07-22   | WP-15.1 real command-bus dispatch is wired and live-tested; UI/live gate open — see WP-15                         |
+|| P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
 | P07 workflows                    | in-progress | 4/4      | 2026-07-21   | Workflow engine + CLI unit-only; ports stubbed; not in editor                                                     |
 | P08 plugin SDK + templates       | in-progress | 5/5      | 2026-07-21   | SDK contracts/fixtures unit-only; no host wiring in editor                                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
@@ -22,7 +22,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-12 control plane + Worker E2E | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                |
 | WP-13 project/Worker integration | done        | 5/5      | 2026-07-22   | Gate passed: opaque project, safe receipt, API restart/reload, and revoked temporary Worker are live              |
 | WP-14 media asset delivery       | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified       |
-| WP-15 agent editor integration   | in-progress | 1/5      | 2026-07-22   | WP-15.1 real command-bus dispatch done and live-tested; UI, history/audit polish, approval gate, live gate remain |
+|| WP-15 agent editor integration   | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
 ## Session log (newest first)

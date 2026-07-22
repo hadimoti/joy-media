@@ -1,6 +1,6 @@
 # WP-15 — Agent Wired Into the Real Editor
 
-**Status:** in-progress (1/5) · **Gate to enter:** P06 exit criteria (unit-level) + WP-11 live editor · **Master plan:** §36 Phase 6, §22, §11.7, D-AGENT (plan/DECISIONS.md)
+**Status:** done (5/5) · **Gate to enter:** P06 exit criteria (unit-level) + WP-11 live editor · **Master plan:** §36 Phase 6, §22, §11.7, D-AGENT (plan/DECISIONS.md)
 
 **Goal:** turn `@joy-media/agent-tools` — a complete, unit-tested agent core
 that has never once touched a real project — into an agent that actually
@@ -11,15 +11,15 @@ no flattened output, exactly as P06's own goal statement already required.
 ## Why this is next
 
 STATE.md's P01–P10 status audit (2026-07-22) left one gap unlike the others:
-P06 ("Agent-Assisted Editing") shows 5/5 WPs done and every exit criterion
-checked in `plan/P06-agent.md`, yet the same table honestly flags "Command-bus
-logic unit-tested only; agent not wired into editor-web." A fresh read-only
+P06 (\"Agent-Assisted Editing\") shows 5/5 WPs done and every exit criterion
+checked in `plan/P06-agent.md`, yet the same table honestly flags \"Command-bus
+logic unit-tested only; agent not into editor-web.\" A fresh read-only
 audit for this WP confirmed the gap precisely, and found it was worse than
-"missing UI":
+\"missing UI\":
 
 - `apps/editor-web` had **zero** references to `@joy-media/agent-tools` —
   not in `package.json`, not in any import.
-- There was no chat box, command palette, or "Ask Hermes" surface anywhere in
+- There was no chat box, command palette, or \"Ask Hermes\" surface anywhere in
   the editor.
 - `EditTool.execute()` (the function an `AgentEditPlan` step actually calls)
   never touched a project at all: every one of the 11 edit tools
@@ -29,16 +29,16 @@ audit for this WP confirmed the gap precisely, and found it was worse than
   echoed `{ created: [input.clip.id] }` back, regardless of whether such a
   clip could legally exist. `PlanExecutor.execute(plan, context, _projectState)`
   took a project-state parameter and never read it (`_projectState: unknown`).
-  Naive shape-only preconditions ("is `trackId` a string?") were the only
+  Naive shape-only preconditions (\"is `trackId` a string?\") were the only
   validation; real domain rules (overlap, unknown track, duplicate id) were
   never checked because nothing was ever applied to a real project.
 
 This is exactly the kind of gap WP-11 (live preview canvas) and WP-12–14
 (control plane, Worker, media) each closed for their own subsystem: a part
-marked "done" at the unit level that had never actually reached the live
+marked \"done\" at the unit level that had never actually reached the live
 editor. D-AGENT (plan/DECISIONS.md) makes this the owner's standing highest
-priority ("everything becomes agentic … over time all operations should be
-executable by the agent"), so it is the correct next milestone rather than
+priority (\"everything becomes agentic … over time all operations should be
+executable by the agent\"), so it is the correct next milestone rather than
 the other flagged gaps (P07 workflows, P08 plugin host wiring, P03
 transcription stub), which remain separately open and untouched by this plan.
 
@@ -79,7 +79,7 @@ transcription stub), which remain separately open and untouched by this plan.
       root `tsconfig.json` never listed `packages/agent-tools` in its
       `references`, and nothing referenced the package before now — so root
       `tsc -b` had _never once_ type-checked this package since P06 began;
-      every prior "typecheck clean" claim in P06's session-log entries was
+      every prior \"typecheck clean\" claim in P06's session-log entries was
       against a build graph that silently excluded it. A clean rebuild
       surfaced real, pre-existing errors across `approval.ts`, `context.ts`,
       `dry-run.ts`, `estimation.ts`, `execution.ts`, `registry.ts`,
@@ -99,22 +99,22 @@ transcription stub), which remain separately open and untouched by this plan.
       on unmodified `main` — unrelated to this WP, not edited). Lint: the
       same 8 accepted `plugin-sdk`/foreign-worktree findings. Format: clean
       except the same pre-existing `ORCHESTRATION.md`.
-- [ ] **WP-15.2 — Editor agent UI surface.** A real panel in `editor-web`
+- [x] **WP-15.2 — Editor agent UI surface.** A real panel in `editor-web`
       (intent input → `AgentEditPlan` → dry-run diff → approve/reject →
       execute), using the context builder and the WP-15.1 bus. No natural-
       language model call is required to close this WP — a structured or
       templated intent surface is sufficient; NL parsing may ride an
       existing provider per Q13/Q14 as a later enhancement.
-- [ ] **WP-15.3 — History and audit visibility.** Every agent-run mutation is
+- [x] **WP-15.3 — History and audit visibility.** Every agent-run mutation is
       one ordinary entry in the same visible Undo/History UI the human uses
       (already true structurally per WP-15.1's `EditorSession` integration —
       this WP proves and polishes the on-screen presentation, including the
       audit-trail/one-action-revert surfaces `revert.ts`/`audit.ts` already
       implement at the unit level).
-- [ ] **WP-15.4 — Live approval gate.** Paid/remote/destructive actions
+- [x] **WP-15.4 — Live approval gate.** Paid/remote/destructive actions
       (`approval.ts`'s policy engine) actually block and prompt in the
       browser, not just in unit tests.
-- [ ] **WP-15.5 — Live gate.** Real signed-in browser session: type an
+- [x] **WP-15.5 — Live gate.** Real signed-in browser session: type an
       intent, see a real dry-run diff, approve, watch the real timeline
       mutate, undo it as one action, confirm History/audit show it, clean
       console/network. Evaluation suite (`benchmarks/`) run against the live
@@ -123,15 +123,15 @@ transcription stub), which remain separately open and untouched by this plan.
 
 ## Exit criteria (from P06 §36 Phase 6, now to be proven live not just in unit tests)
 
-- [ ] Agent completes real benchmark intents using ordinary commands against
+- [x] Agent completes real benchmark intents using ordinary commands against
       the live editor project, not a mock context.
-- [ ] Every agent mutation is visible in the real editor's History.
-- [ ] Paid/remote/destructive actions request approval correctly, live.
-- [ ] Failed plans leave the live project valid and recoverable (proven for
+- [x] Every agent mutation is visible in the real editor's History.
+- [x] Paid/remote/destructive actions request approval correctly, live.
+- [x] Failed plans leave the live project valid and recoverable (proven for
       the six timeline tools in WP-15.1; extends to WP-15.2+ scope as it
       grows).
-- [ ] An agent edit reverts as one named action, live.
-- [ ] No hidden flattened output ever substitutes for editable work.
+- [x] An agent edit reverts as one named action, live.
+- [x] No hidden flattened output ever substitutes for editable work.
 
 ## Scope boundaries
 
@@ -144,7 +144,7 @@ transcription stub), which remain separately open and untouched by this plan.
   `dispatchVisualObjects`) are not in this WP's scope; the agent's tool set
   today only covers the timeline (`SpikeProject`) side.
 - No natural-language model integration, Hermes-specific wiring, or D-HERMES
-  scope is implied; WP-15.2's "intent input" may be structured/templated.
+  scope is implied; WP-15.2's \"intent input\" may be structured/templated.
 - Do not weaken WP-11's render/export path, WP-12–14's control-plane/Worker/
   media boundaries, or turn the agent into a second, parallel mutation path
   outside `EditorSession`.
