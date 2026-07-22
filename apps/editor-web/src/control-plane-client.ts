@@ -1,3 +1,5 @@
+import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
+
 export interface BrowserWorker {
   readonly id: string;
   readonly paired: boolean;
@@ -25,6 +27,38 @@ export interface BrowserJob {
   };
 }
 
+/** Owner-safe catalog metadata. Locations are deliberately not exposed to the editor UI. */
+export interface BrowserAsset {
+  readonly id: string;
+  readonly projectId: string;
+  readonly kind: 'video' | 'audio' | 'image';
+  readonly displayName: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: BrowserMediaDescriptor;
+  readonly createdAt: number;
+}
+
+export interface BrowserMediaDescriptor {
+  readonly mimeType: string;
+  readonly durationUs?: number;
+  readonly width?: number;
+  readonly height?: number;
+}
+
+export interface BrowserDerivative {
+  readonly id: string;
+  readonly projectId: string;
+  readonly assetId: string;
+  readonly kind: 'thumbnail' | 'proxy';
+  readonly profile: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: BrowserMediaDescriptor;
+  readonly availability: 'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
+  readonly verifiedAt: number;
+}
+
 export class BrowserControlPlaneClient {
   #token: string | undefined;
   #tokenExpiresAt = 0;
@@ -39,6 +73,14 @@ export class BrowserControlPlaneClient {
   }
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/jobs`);
+  }
+  async assets(projectId: string): Promise<readonly BrowserAsset[]> {
+    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
+  }
+  async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
+    return this.get(
+      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
+    );
   }
   async createProject(id: string, title: string): Promise<void> {
     await this.post('/v1/projects', { id, title });
@@ -74,6 +116,8 @@ export class BrowserControlPlaneClient {
       `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives/${encodeURIComponent(derivativeId)}/content`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
     );
+    if (response.status === 401 || response.status === 403)
+      throw new DerivativeAuthorityRevokedError();
     if (!response.ok) throw new Error(`private derivative request failed (${response.status})`);
     return response.blob();
   }

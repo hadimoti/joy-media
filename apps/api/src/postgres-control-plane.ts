@@ -4,6 +4,7 @@ import {
   type AssetRegistration,
   type Actor,
   type AssetThumbnailReceipt,
+  type CloudDerivativeRegistration,
   type ControlPlane,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
@@ -16,6 +17,7 @@ import {
   type WorkerRecord,
   type WorkerSession,
   validateAssetRegistration,
+  validateCloudDerivativeRegistration,
   validateLocalDerivativeRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
@@ -220,7 +222,18 @@ export class PostgresControlPlane implements ControlPlane {
     derivative: LocalDerivativeRegistration,
     now = Date.now(),
   ): Promise<MediaDerivativeRecord> {
-    validateLocalDerivativeRegistration(derivative);
+    return this.registerDerivative(actor, projectId, derivative, now, false);
+  }
+
+  private async registerDerivative(
+    actor: Actor,
+    projectId: string,
+    derivative: LocalDerivativeRegistration | CloudDerivativeRegistration,
+    now: number,
+    cloud: boolean,
+  ): Promise<MediaDerivativeRecord> {
+    if (cloud) validateCloudDerivativeRegistration(derivative as CloudDerivativeRegistration);
+    else validateLocalDerivativeRegistration(derivative as LocalDerivativeRegistration);
     return this.transaction(async (client) => {
       await this.asset(actor, projectId, derivative.assetId, client);
       try {
@@ -247,6 +260,32 @@ export class PostgresControlPlane implements ControlPlane {
         throw databaseError(error, 'DERIVATIVE_EXISTS', derivative.id);
       }
     });
+  }
+
+  async registerWorkerCloudDerivative(
+    workerId: string,
+    jobId: string,
+    derivative: CloudDerivativeRegistration,
+    now = Date.now(),
+  ): Promise<MediaDerivativeRecord> {
+    validateCloudDerivativeRegistration(derivative);
+    const result = await this.pool.query<{
+      readonly project_id: string;
+      readonly asset_id: string | null;
+      readonly owner_id: string;
+      readonly asset_sync_enabled: boolean;
+    }>(
+      `SELECT jobs.project_id, jobs.asset_id, workers.owner_id, projects.asset_sync_enabled
+       FROM jobs JOIN workers ON workers.id = jobs.lease_owner
+       JOIN projects ON projects.id = jobs.project_id
+       WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
+         AND jobs.lease_expires_at > $3 AND workers.revoked_at IS NULL`,
+      [jobId, workerId, new Date(now)],
+    );
+    const job = result.rows[0];
+    if (job === undefined || job.asset_id !== derivative.assetId || !job.asset_sync_enabled)
+      throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
+    return this.registerDerivative({ id: job.owner_id }, job.project_id, derivative, now, true);
   }
 
   async derivativesForAsset(

@@ -108,6 +108,32 @@ export class WorkerControlPlaneClient {
     );
   }
 
+  async uploadDerivative(jobId: string, result: WorkerJobResult, bytes: Uint8Array): Promise<void> {
+    const sessionToken = this.options.sessionStore.loadWorkerSession();
+    if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const response = await this.#fetch(
+      `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          'content-type': result.descriptor.mimeType,
+          'x-joy-asset-id': result.assetId,
+          'x-joy-sha256': result.sha256,
+          'x-joy-bytes': String(result.bytes),
+          'x-joy-width': String(result.descriptor.width),
+          'x-joy-height': String(result.descriptor.height),
+        },
+        body: bytes,
+      },
+    );
+    if (response.status === 401) {
+      this.options.sessionStore.clearWorkerSession();
+      throw new Error('Worker session expired or was revoked');
+    }
+    if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
+  }
+
   async fail(jobId: string, error: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,

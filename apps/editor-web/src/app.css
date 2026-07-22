@@ -24,6 +24,17 @@ button,
 input {
   font: inherit;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .workspace {
   display: grid;
   min-height: calc(100vh - 56px);
@@ -404,4 +415,220 @@ label {
   color: #8a93ad;
   font-size: 0.75rem;
   line-height: 1.4;
+}
+.asset-library {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  min-height: 100%;
+  background: #151a28;
+}
+.asset-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem;
+  border-right: 1px solid #303a56;
+  background: #111622;
+}
+.asset-categories h2 {
+  padding: 0 0.25rem;
+}
+.asset-category-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: #b9c4db;
+  text-align: left;
+  cursor: pointer;
+}
+.asset-category-tab:hover,
+.asset-category-tab.active {
+  background: #273452;
+  border-color: #435171;
+  color: #eef2ff;
+}
+.asset-category-tab.active {
+  box-shadow: inset 2px 0 #7cc4ff;
+}
+.asset-category-tab small {
+  color: #8a93ad;
+}
+.asset-library-content {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.75rem;
+}
+.asset-library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.45rem;
+}
+.asset-library-toolbar label {
+  margin: 0;
+}
+.asset-search {
+  flex: 1 1 12rem;
+}
+.asset-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #435171;
+  border-radius: 0.25rem;
+  background: #0c101b;
+  color: #eef2ff;
+}
+.asset-filter {
+  min-width: 7.4rem;
+  color: #9fb0c8;
+  font-size: 0.72rem;
+}
+.asset-filter select {
+  min-height: 2.1rem;
+  border: 1px solid #435171;
+  border-radius: 0.25rem;
+  background: #0c101b;
+  color: #eef2ff;
+}
+.asset-refresh {
+  min-height: 2.1rem;
+}
+.asset-library-status,
+.asset-library-empty {
+  margin: 0;
+  color: #9fb0c8;
+  font-size: 0.82rem;
+}
+.asset-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  padding: 0.55rem;
+  border: 1px solid #5b816e;
+  border-radius: 0.3rem;
+  background: #10251f;
+}
+.asset-preview span {
+  display: block;
+  margin-top: 0.15rem;
+  color: #9fcbb0;
+  font-size: 0.75rem;
+}
+.asset-preview video,
+.asset-preview audio,
+.asset-preview img {
+  grid-column: 1 / -1;
+  max-width: 100%;
+  max-height: 15rem;
+}
+.asset-preview img {
+  justify-self: start;
+}
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  align-content: start;
+  gap: 0.55rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.asset-card {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  min-height: 8.3rem;
+  padding: 0.6rem;
+  border: 1px solid #303a56;
+  border-radius: 0.3rem;
+  background: #1b2233;
+}
+.asset-card-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.asset-card-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-card p {
+  margin: 0;
+  color: #9fb0c8;
+  font-size: 0.78rem;
+}
+.asset-kind,
+.asset-availability {
+  width: fit-content;
+  padding: 0.12rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.7rem;
+}
+.asset-kind {
+  background: #303a56;
+  color: #dce6ff;
+}
+.asset-kind-video {
+  background: #3e345d;
+}
+.asset-kind-audio {
+  background: #174b56;
+}
+.asset-kind-image {
+  background: #514124;
+}
+.asset-availability-available-cloud {
+  color: #9fd8b3 !important;
+  background: #173d2e;
+}
+.asset-availability-available-local {
+  color: #9fd6f4 !important;
+  background: #14394a;
+}
+.asset-availability-pending {
+  color: #f2ce79 !important;
+  background: #463916;
+}
+.asset-availability-evicted,
+.asset-availability-invalid {
+  color: #f1a0a0 !important;
+  background: #4a242b;
+}
+.asset-availability-none {
+  color: #aeb7c9 !important;
+  background: #303a56;
+}
+.asset-card button {
+  justify-self: start;
+  margin-top: auto;
+}
+@media (max-width: 32rem) {
+  .asset-library {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .asset-categories {
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid #303a56;
+  }
+  .asset-categories h2 {
+    margin: 0 0.4rem 0 0;
+  }
+  .asset-category-tab {
+    white-space: nowrap;
+  }
 }

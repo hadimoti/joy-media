@@ -90,20 +90,25 @@ async function route(
     url.pathname,
   );
   const workerFailMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/fail$/.exec(url.pathname);
+  const workerDerivativeUploadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/derivative$/.exec(
+    url.pathname,
+  );
   if (
     request.method === 'POST' &&
     (workerLeaseMatch !== null ||
       workerHelloMatch !== null ||
       workerHeartbeatMatch !== null ||
       workerCompleteMatch !== null ||
-      workerFailMatch !== null)
+      workerFailMatch !== null ||
+      workerDerivativeUploadMatch !== null)
   ) {
     const workerId =
       workerLeaseMatch?.[1] ??
       workerHelloMatch?.[1] ??
       workerHeartbeatMatch?.[1] ??
       workerCompleteMatch?.[1] ??
-      workerFailMatch?.[1];
+      workerFailMatch?.[1] ??
+      workerDerivativeUploadMatch?.[1];
     const sessionWorkerId = await options.controlPlane.authenticateWorker(
       workerSessionHash(request),
     );
@@ -151,6 +156,53 @@ async function route(
           requiredString(body, 'error'),
         ),
       });
+      return;
+    }
+    if (workerDerivativeUploadMatch !== null) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const bytes = await readBytes(request, 2 * 1024 * 1024);
+      const receipt = workerThumbnailHeaders(request);
+      if (bytes.byteLength !== receipt.bytes)
+        throw new ControlPlaneError(
+          'REQUEST_INVALID',
+          'derivative byte length does not match receipt',
+        );
+      const ref = `thumb-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}-${receipt.sha256.slice(0, 16)}`;
+      await store.put(
+        {
+          ref,
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          mimeType: receipt.descriptor.mimeType,
+        },
+        bytes,
+      );
+      try {
+        const derivative = await options.controlPlane.registerWorkerCloudDerivative(
+          decodeURIComponent(workerId),
+          decodeURIComponent(workerDerivativeUploadMatch[2]!),
+          {
+            id: `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}`,
+            assetId: receipt.assetId,
+            kind: 'thumbnail',
+            profile: 'jpeg-640',
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: receipt.descriptor,
+            availability: 'available-cloud',
+            locations: [{ kind: 'private-object', ref }],
+          },
+        );
+        respondJson(response, 201, { data: derivative });
+      } catch (error) {
+        await store.remove(ref).catch(() => undefined);
+        throw error;
+      }
       return;
     }
     respondJson(response, 200, {
@@ -389,6 +441,19 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   }
 }
 
+async function readBytes(request: IncomingMessage, maximumBytes: number): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.length;
+    if (length > maximumBytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload exceeds the limit');
+    chunks.push(bytes);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || value.length === 0)
@@ -481,6 +546,44 @@ function optionalWorkerResult(body: Record<string, unknown>):
       height: (descriptor as Record<string, unknown>).height as number,
     },
   };
+}
+
+function workerThumbnailHeaders(request: IncomingMessage): {
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: {
+    readonly mimeType: 'image/jpeg';
+    readonly width: number;
+    readonly height: number;
+  };
+} {
+  const assetId = requiredHeader(request, 'x-joy-asset-id');
+  const sha256 = requiredHeader(request, 'x-joy-sha256');
+  const bytes = Number(requiredHeader(request, 'x-joy-bytes'));
+  const width = Number(requiredHeader(request, 'x-joy-width'));
+  const height = Number(requiredHeader(request, 'x-joy-height'));
+  const mimeType = requiredHeader(request, 'content-type');
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId) ||
+    !/^[a-f0-9]{64}$/.test(sha256) ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    !Number.isSafeInteger(width) ||
+    width <= 0 ||
+    !Number.isSafeInteger(height) ||
+    height <= 0 ||
+    mimeType !== 'image/jpeg'
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
+  return { assetId, sha256, bytes, descriptor: { mimeType: 'image/jpeg', width, height } };
+}
+
+function requiredHeader(request: IncomingMessage, name: string): string {
+  const value = request.headers[name];
+  if (typeof value !== 'string' || value.length === 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${name} header is required`);
+  return value;
 }
 
 function isReceiptHashAndBytes(

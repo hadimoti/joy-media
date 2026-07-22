@@ -33,8 +33,14 @@ export class WorkerDaemon {
             cancelRequested ||= heartbeat.cancelRequested;
           },
         });
-        if (result.state === 'completed') await this.client.complete(job.id, result.result);
-        else await this.client.fail(job.id, 'canceled');
+        if (result.state === 'completed') {
+          await this.client.uploadDerivative(
+            job.id,
+            result.result,
+            this.runtime.readDerivative(result.result),
+          );
+          await this.client.complete(job.id, result.result);
+        } else await this.client.fail(job.id, 'canceled');
       } catch (error) {
         this.runtime.log.write(`control-plane ${error instanceof Error ? error.message : 'error'}`);
         await sleep(pollIntervalMs);

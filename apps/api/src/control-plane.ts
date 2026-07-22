@@ -73,9 +73,14 @@ export interface LocalDerivativeRegistration {
   readonly sha256: string;
   readonly bytes: number;
   readonly descriptor: MediaDescriptor;
+  /** Browser catalog HTTP permits only locally-owned cache state. */
   readonly availability: 'pending' | 'available-local';
   readonly locations: readonly AssetLocationRecord[];
 }
+/** Server-only promotion record; never accepted by the owner browser catalog route. */
+export type CloudDerivativeRegistration = Omit<LocalDerivativeRegistration, 'availability'> & {
+  readonly availability: 'available-cloud';
+};
 export interface WorkerRecord {
   readonly id: string;
   readonly ownerId: string;
@@ -179,6 +184,12 @@ export interface ControlPlane {
     actor: Actor,
     projectId: string,
     derivative: LocalDerivativeRegistration,
+    now?: number,
+  ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
+  registerWorkerCloudDerivative(
+    workerId: string,
+    jobId: string,
+    derivative: CloudDerivativeRegistration,
     now?: number,
   ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
   derivativesForAsset(
@@ -362,8 +373,38 @@ export class LocalControlPlane implements ControlPlane {
     if (this.#derivatives.has(derivative.id))
       throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
     const record: MediaDerivativeRecord = {
-      ...cloneLocalDerivativeRegistration(derivative),
+      ...cloneDerivativeRegistration(derivative),
       projectId,
+      verifiedAt: now,
+    };
+    this.#derivatives.set(record.id, record);
+    return cloneDerivative(record);
+  }
+  registerWorkerCloudDerivative(
+    workerId: string,
+    jobId: string,
+    derivative: CloudDerivativeRegistration,
+    now = Date.now(),
+  ): MediaDerivativeRecord {
+    validateCloudDerivativeRegistration(derivative);
+    const job = this.ownedLease(workerId, jobId, now);
+    const worker = this.#workers.get(workerId);
+    if (
+      worker === undefined ||
+      job.assetId !== derivative.assetId ||
+      derivative.availability !== 'available-cloud'
+    )
+      throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
+    const project = this.project({ id: worker.ownerId }, job.projectId);
+    if (!project.assetSyncEnabled) throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
+    const asset = this.#assets.get(derivative.assetId);
+    if (asset === undefined || asset.projectId !== job.projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
+    if (this.#derivatives.has(derivative.id))
+      throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+    const record: MediaDerivativeRecord = {
+      ...cloneDerivativeRegistration(derivative),
+      projectId: job.projectId,
       verifiedAt: now,
     };
     this.#derivatives.set(record.id, record);
@@ -766,15 +807,7 @@ export function validateAssetRegistration(value: AssetRegistration): void {
 }
 
 export function validateLocalDerivativeRegistration(value: LocalDerivativeRegistration): void {
-  validateOpaqueId(value.id, 'derivative id');
-  validateOpaqueId(value.assetId, 'asset id');
-  if (!['thumbnail', 'proxy'].includes(value.kind))
-    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
-  if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
-    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');
-  validateHashAndBytes(value.sha256, value.bytes, 'derivative');
-  validateDescriptor(value.descriptor);
-  validateLocations(value.locations);
+  validateDerivativeRegistration(value);
   if (value.availability !== 'pending' && value.availability !== 'available-local')
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative state is API-owned');
   if (value.availability === 'available-local') {
@@ -784,6 +817,28 @@ export function validateLocalDerivativeRegistration(value: LocalDerivativeRegist
         'local derivative requires an OPFS reference',
       );
   }
+}
+
+export function validateCloudDerivativeRegistration(value: CloudDerivativeRegistration): void {
+  validateDerivativeRegistration(value);
+  if (value.availability !== 'available-cloud')
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative state is invalid');
+  if (!value.locations.some((location) => location.kind === 'private-object'))
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative requires a private object');
+}
+
+function validateDerivativeRegistration(
+  value: LocalDerivativeRegistration | CloudDerivativeRegistration,
+): void {
+  validateOpaqueId(value.id, 'derivative id');
+  validateOpaqueId(value.assetId, 'asset id');
+  if (!['thumbnail', 'proxy'].includes(value.kind))
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
+  if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
+    throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');
+  validateHashAndBytes(value.sha256, value.bytes, 'derivative');
+  validateDescriptor(value.descriptor);
+  validateLocations(value.locations);
 }
 
 function validateOpaqueId(value: string, label: string): void {
@@ -833,9 +888,9 @@ function cloneAssetRegistration(value: AssetRegistration): AssetRegistration {
   };
 }
 
-function cloneLocalDerivativeRegistration(
-  value: LocalDerivativeRegistration,
-): LocalDerivativeRegistration {
+function cloneDerivativeRegistration(
+  value: LocalDerivativeRegistration | CloudDerivativeRegistration,
+): LocalDerivativeRegistration | CloudDerivativeRegistration {
   return {
     ...value,
     descriptor: { ...value.descriptor },

@@ -27,6 +27,14 @@ describe('WorkerDaemon', () => {
         calls.push(`progress:${progress}`);
         return { cancelRequested: false };
       },
+      uploadDerivative: async (
+        _jobId: string,
+        result: { readonly sha256: string; readonly bytes: number },
+        bytes: Uint8Array,
+      ) => {
+        expect(bytes.byteLength).toBe(result.bytes);
+        calls.push(`upload:${result.sha256.length}`);
+      },
       complete: async (_jobId: string, result: { readonly sha256: string }) => {
         calls.push(`complete:${result.sha256.length}`);
         stop = true;
@@ -60,6 +68,7 @@ describe('WorkerDaemon', () => {
         'progress:75',
         'progress:90',
         'progress:100',
+        'upload:64',
         'complete:64',
       ]);
     } finally {

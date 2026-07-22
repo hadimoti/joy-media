@@ -58,26 +58,36 @@ authorization to upload all original source media or to make sharing public.
       Focused real-FFmpeg fixture, cancellation/cleanup, real HTTP, and durable
       restart tests pass. **Not yet verified:** a production Worker registry,
       deployed migration/API, OPFS handoff, object-store sync, or browser playback.
-- [ ] **WP-14.4 — Authorized resolver transport (in progress).** The editor now
+- [ ] **WP-14.4 — Authorized resolver transport (locally verified; deployment open).** The editor now
       has an OPFS-first resolver whose only remote seam is an
       owner-authorized _binary_ transport—not a URL. It validates opaque IDs,
       SHA-256 and byte length before caching or creating a blob URL; removes
       tampered cache entries; makes object-URL cleanup explicit; distinguishes a
       revoked authority; and never gives the transport a raw local path or browser
       assertion. Focused coverage proves local-cache precedence, cache reuse,
-      tamper rejection, and revocation. **Still required to close this package:**
-      an API-brokered private-object-store adapter/end point that enforces project
-      owner + sync consent. The owner approved ParsPack's private
+      tamper rejection, and revocation. The API broker now has an rclone-backed
+      private-object adapter and owner/sync-consent-protected binary endpoint.
+      A Worker upload is bounded, integrity-checked, rollback-cleaned when
+      metadata registration is denied, and can register only its live leased
+      asset job; owner reads remain `private, no-store` and same-origin. Local
+      HTTP coverage proves sync-off cleanup and sync-on private bytes. The owner approved ParsPack's private
       S3-compatible `c212734` bucket and isolated `sweden-backups/joy-media/`
       prefix; existing VPS backups remain separate and a one-object
       write/read/delete probe passed. Its root-owned rclone credential is not
-      yet configured for the JOY Media API/Worker. No public URL,
-      implicit cross-origin access, or direct VPS-to-Worker connection is present.
-- [ ] **WP-14.5 — Editor asset UX and live gate.** Add an Asset Library and a
-      playable derivative affordance with missing/pending/verified/revoked states.
-      Browser/VPS proof must import or select a non-fixture asset, produce one real
-      derivative, play it through the selected boundary, reload/restart safely, and
-      remove/revoke the temporary authority.
+      yet configured for the JOY Media API/Worker. **Still required:** configure/deploy
+      the VPS API with its root-owned rclone credential and run the real media gate.
+      No public URL, implicit cross-origin access, or direct VPS-to-Worker connection is present.
+- [ ] **WP-14.5 — Editor asset UX and live gate (UX locally verified; gate open).**
+      The durable `media` Dockview panel now presents as **Assets**, retaining
+      saved-layout compatibility. It has left category tabs (all/video/audio/image),
+      a single responsive inline search + availability + sort + refresh toolbar,
+      safe metadata cards, explicit no-derivative/pending/local/cloud/evicted/
+      invalid states, and audio/video/image preview through the OPFS-first
+      authorized resolver. A local browser confirms visual layout and no console
+      warning/error; the unauthenticated local API path reports its actual failure.
+      Browser/VPS proof must still import or select a non-fixture asset, produce one
+      real derivative, play it through the selected boundary, reload/restart safely,
+      and remove/revoke the temporary authority.
 
 ## Exit criteria
 

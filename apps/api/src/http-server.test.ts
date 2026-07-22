@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
+import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
 const servers: Server[] = [];
 
@@ -221,12 +223,95 @@ describe('control-plane HTTP transport', () => {
       body: { error: { code: 'WORKER_SESSION_REQUIRED' } },
     });
   });
+
+  it('brokers a Worker thumbnail through private storage only with sync consent, then streams verified bytes to the owner', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
+    const source = {
+      id: 'asset-1',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: 123,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 640, height: 360 },
+      locations: [{ kind: 'opfs-cache', ref: 'source-1' }],
+    };
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/projects/p/assets', source);
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: ['asset.thumbnail'], assetIds: ['asset-1'] },
+      workerToken,
+    );
+    await request(origin, 'POST', '/v1/projects/p/jobs', {
+      id: 'j',
+      type: 'asset.thumbnail',
+      assetId: 'asset-1',
+    });
+    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+
+    const thumbnail = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const sha256 = createHash('sha256').update(thumbnail).digest('hex');
+    const upload = () =>
+      fetch(`${origin}/v1/workers/w/jobs/j/derivative`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${workerToken}`,
+          'content-type': 'image/jpeg',
+          'x-joy-asset-id': 'asset-1',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(thumbnail.byteLength),
+          'x-joy-width': '1',
+          'x-joy-height': '1',
+        },
+        body: thumbnail,
+      });
+
+    const denied = await upload();
+    expect(denied.status).toBe(409);
+    expect(store.removed).toEqual([`thumb-j-${sha256.slice(0, 16)}`]);
+    expect(store.objects).toHaveLength(0);
+
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+    const uploaded = await upload();
+    expect(uploaded.status).toBe(201);
+    expect(await uploaded.json()).toMatchObject({
+      data: { id: 'derivative-j', assetId: 'asset-1', availability: 'available-cloud' },
+    });
+    expect(store.objects).toHaveLength(1);
+
+    const content = await fetch(
+      `${origin}/v1/projects/p/assets/asset-1/derivatives/derivative-j/content`,
+    );
+    expect(content.status).toBe(200);
+    expect(content.headers.get('content-type')).toBe('image/jpeg');
+    expect(content.headers.get('cache-control')).toBe('private, no-store');
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(thumbnail);
+    expect(content.url).toContain('/content');
+    expect(content.url).not.toContain('parspack');
+  });
 });
 
-async function start(authentication: ApiAuthentication): Promise<string> {
+async function start(
+  authentication: ApiAuthentication,
+  privateObjectStore?: PrivateObjectStore,
+): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: new LocalControlPlane(),
     authentication,
+    ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -234,6 +319,28 @@ async function start(authentication: ApiAuthentication): Promise<string> {
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('test API did not bind TCP');
   return `http://127.0.0.1:${address.port}`;
+}
+
+class MemoryPrivateObjectStore implements PrivateObjectStore {
+  readonly objects: Array<{
+    readonly descriptor: PrivateObjectDescriptor;
+    readonly bytes: Uint8Array;
+  }> = [];
+  readonly removed: string[] = [];
+
+  async put(descriptor: PrivateObjectDescriptor, bytes: Uint8Array): Promise<void> {
+    this.objects.push({ descriptor, bytes });
+  }
+  async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
+    const object = this.objects.find((candidate) => candidate.descriptor.ref === descriptor.ref);
+    if (object === undefined) throw new Error('private object not found');
+    return object.bytes;
+  }
+  async remove(ref: string): Promise<void> {
+    this.removed.push(ref);
+    const index = this.objects.findIndex((candidate) => candidate.descriptor.ref === ref);
+    if (index >= 0) this.objects.splice(index, 1);
+  }
 }
 
 async function request(

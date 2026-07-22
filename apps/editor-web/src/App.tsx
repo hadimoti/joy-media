@@ -43,6 +43,7 @@ import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
+import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import {
   getOrCreateControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
@@ -62,7 +63,8 @@ function resolveReferenceMediaUrl(assetId: string): string {
 }
 
 const labels: Readonly<Record<string, string>> = {
-  media: 'Media',
+  // Keep the durable Dockview ID `media` for existing saved layouts.
+  media: 'Assets',
   monitor: 'Program Monitor',
   timeline: 'Timeline',
   captions: 'Captions',
@@ -771,6 +773,8 @@ function Panel({ api }: IDockviewPanelProps) {
         projectTitle={controlPlaneProject.title}
       />
     );
+  if (api.id === 'media')
+    return <AssetLibraryPanel projectId={controlPlaneProject.controlPlaneProjectId} />;
   if (api.id === 'history')
     return (
       <article>
@@ -796,11 +800,7 @@ function Panel({ api }: IDockviewPanelProps) {
   if (api.id === 'monitor') return <MonitorPanel />;
   return (
     <article>
-      <p>
-        {api.id === 'media'
-          ? 'Reference media proxies are ready.'
-          : `${labels[api.id] ?? api.id} panel`}
-      </p>
+      <p>{`${labels[api.id] ?? api.id} panel`}</p>
     </article>
   );
 }
