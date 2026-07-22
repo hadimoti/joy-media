@@ -1,18 +1,32 @@
+import { Pool } from 'pg';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
 import { JoyIdentityVerifier } from './joy-identity.js';
+import { PostgresControlPlane } from './postgres-control-plane.js';
 
-const api = new LocalControlPlane();
-const identity = createIdentityVerifier();
-createControlPlaneHttpServer({
-  controlPlane: api,
-  authentication: {
-    // The real shared-JOY identity adapter must be supplied before /v1 routes
-    // are activated in a deployed service. Health remains intentionally public.
-    authenticate: (request) => identity?.authenticate(request),
-  },
-}).listen(Number(process.env.JOY_MEDIA_API_PORT ?? 8790));
-console.log('JOY Media API listening');
+await start();
+
+async function start(): Promise<void> {
+  const databaseUrl = process.env.JOY_MEDIA_DATABASE_URL;
+  const identity = createIdentityVerifier();
+  const durableControlPlane =
+    databaseUrl === undefined
+      ? undefined
+      : new PostgresControlPlane(new Pool({ connectionString: databaseUrl }));
+  if (durableControlPlane !== undefined) await durableControlPlane.initialize();
+  createControlPlaneHttpServer({
+    controlPlane: durableControlPlane ?? new LocalControlPlane(),
+    authentication: {
+      // Public /v1 stays disabled unless both the JOY verifier and durable
+      // state are configured. Health remains intentionally public.
+      authenticate: (request) =>
+        identity === undefined || durableControlPlane === undefined
+          ? undefined
+          : identity.authenticate(request),
+    },
+  }).listen(Number(process.env.JOY_MEDIA_API_PORT ?? 8790));
+  console.log('JOY Media API listening');
+}
 
 function createIdentityVerifier(): JoyIdentityVerifier | undefined {
   const issuer = process.env.JOY_MEDIA_IDENTITY_ISSUER;

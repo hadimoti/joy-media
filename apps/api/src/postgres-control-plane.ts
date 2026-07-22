@@ -1,0 +1,291 @@
+import type { Pool, PoolClient } from 'pg';
+import {
+  ControlPlaneError,
+  type Actor,
+  type ControlPlane,
+  type Job,
+  type JobEvent,
+  type ProjectMetadata,
+  type WorkerRecord,
+} from './control-plane.js';
+import { POSTGRES_SCHEMA } from './postgres-schema.js';
+
+interface ProjectRow {
+  readonly id: string;
+  readonly owner_id: string;
+  readonly title: string;
+  readonly revision: number;
+}
+
+interface WorkerRow {
+  readonly id: string;
+  readonly owner_id: string;
+  readonly revoked_at: Date | null;
+}
+
+interface JobRow {
+  readonly id: string;
+  readonly project_id: string;
+  readonly type: string;
+  readonly state: Job['state'];
+  readonly lease_owner: string | null;
+  readonly lease_expires_at: Date | null;
+}
+
+interface EventRow {
+  readonly cursor: string | number;
+  readonly job_id: string;
+  readonly type: string;
+  readonly created_at: Date;
+}
+
+export interface PostgresControlPlaneOptions {
+  /** Test emulators may not implement PostgreSQL's queue-safe SKIP LOCKED. */
+  readonly skipLocked?: boolean;
+}
+
+/** Durable PostgreSQL implementation of the control-plane contract. */
+export class PostgresControlPlane implements ControlPlane {
+  readonly #skipLocked: boolean;
+
+  constructor(
+    private readonly pool: Pool,
+    options: PostgresControlPlaneOptions = {},
+  ) {
+    this.#skipLocked = options.skipLocked ?? true;
+  }
+
+  async initialize(): Promise<void> {
+    await this.pool.query(POSTGRES_SCHEMA);
+  }
+
+  async createProject(actor: Actor, id: string, title: string): Promise<ProjectMetadata> {
+    assertActor(actor);
+    try {
+      const result = await this.pool.query<ProjectRow>(
+        'INSERT INTO projects (id, owner_id, title, revision) VALUES ($1, $2, $3, 0) RETURNING *',
+        [id, actor.id, title],
+      );
+      return projectOf(requiredRow(result.rows[0], 'PROJECT_CREATE_FAILED'));
+    } catch (error) {
+      throw databaseError(error, 'PROJECT_EXISTS', id);
+    }
+  }
+
+  async updateProject(
+    actor: Actor,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): Promise<ProjectMetadata> {
+    assertActor(actor);
+    const result = await this.pool.query<ProjectRow>(
+      `UPDATE projects SET title = $3, revision = revision + 1
+       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+      [id, actor.id, title, baseRevision],
+    );
+    if (result.rows[0] !== undefined) return projectOf(result.rows[0]);
+    const current = await this.project(actor, id);
+    throw new ControlPlaneError(
+      'REVISION_CONFLICT',
+      `expected ${baseRevision}, found ${current.revision}`,
+    );
+  }
+
+  async pairWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
+    assertActor(actor);
+    const result = await this.pool.query<WorkerRow>(
+      `INSERT INTO workers (id, owner_id, revoked_at) VALUES ($1, $2, NULL)
+       ON CONFLICT (id) DO UPDATE SET revoked_at = NULL
+       WHERE workers.owner_id = EXCLUDED.owner_id
+       RETURNING *`,
+      [workerId, actor.id],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_NOT_FOUND', workerId);
+    return workerOf(result.rows[0]);
+  }
+
+  async revokeWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
+    assertActor(actor);
+    const result = await this.pool.query<WorkerRow>(
+      'UPDATE workers SET revoked_at = NOW() WHERE id = $1 AND owner_id = $2 RETURNING *',
+      [workerId, actor.id],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_NOT_FOUND', workerId);
+    return workerOf(result.rows[0]);
+  }
+
+  async enqueue(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    type: string,
+    now = Date.now(),
+  ): Promise<Job> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      try {
+        const result = await client.query<JobRow>(
+          `INSERT INTO jobs (id, project_id, type, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, $3, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, type],
+        );
+        const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
+        await this.event(client, id, 'queued', now);
+        return job;
+      } catch (error) {
+        throw databaseError(error, 'JOB_EXISTS', id);
+      }
+    });
+  }
+
+  async lease(workerId: string, now = Date.now(), durationMs = 30_000): Promise<Job | undefined> {
+    return this.transaction(async (client) => {
+      const worker = await client.query<WorkerRow>(
+        'SELECT * FROM workers WHERE id = $1 AND revoked_at IS NULL FOR UPDATE',
+        [workerId],
+      );
+      if (worker.rows[0] === undefined)
+        throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
+      const candidate = await client.query<JobRow>(
+        `SELECT * FROM jobs
+         WHERE state = 'queued' OR (state = 'leased' AND lease_expires_at <= $1)
+         ORDER BY id LIMIT 1 FOR UPDATE${this.#skipLocked ? ' SKIP LOCKED' : ''}`,
+        [new Date(now)],
+      );
+      const job = candidate.rows[0];
+      if (job === undefined) return undefined;
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3
+         WHERE id = $1 RETURNING *`,
+        [job.id, workerId, new Date(now + durationMs)],
+      );
+      await client.query(
+        'INSERT INTO job_attempts (job_id, worker_id, started_at) VALUES ($1, $2, $3)',
+        [job.id, workerId, new Date(now)],
+      );
+      await this.event(client, job.id, 'leased', now);
+      return jobOf(requiredRow(result.rows[0], 'JOB_LEASE_FAILED'));
+    });
+  }
+
+  async complete(workerId: string, jobId: string, now = Date.now()): Promise<Job> {
+    return this.transaction(async (client) => {
+      const result = await client.query<JobRow>(
+        `UPDATE jobs SET state = 'completed'
+         WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+         RETURNING *`,
+        [jobId, workerId, new Date(now)],
+      );
+      if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      await client.query(
+        `UPDATE job_attempts SET completed_at = $3
+         WHERE id = (SELECT id FROM job_attempts WHERE job_id = $1 AND worker_id = $2
+                     ORDER BY id DESC LIMIT 1)`,
+        [jobId, workerId, new Date(now)],
+      );
+      await this.event(client, jobId, 'completed', now);
+      return jobOf(result.rows[0]);
+    });
+  }
+
+  async eventsAfter(actor: Actor, projectId: string, cursor: number): Promise<readonly JobEvent[]> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<EventRow>(
+      `SELECT event.cursor, event.job_id, event.type, event.created_at
+       FROM job_events AS event JOIN jobs ON jobs.id = event.job_id
+       WHERE jobs.project_id = $1 AND event.cursor > $2 ORDER BY event.cursor`,
+      [projectId, cursor],
+    );
+    return result.rows.map((event) => ({
+      cursor: Number(event.cursor),
+      jobId: event.job_id,
+      type: event.type,
+      at: event.created_at.getTime(),
+    }));
+  }
+
+  private async project(
+    actor: Actor,
+    id: string,
+    client: Pool | PoolClient = this.pool,
+  ): Promise<ProjectMetadata> {
+    assertActor(actor);
+    const result = await client.query<ProjectRow>(
+      'SELECT * FROM projects WHERE id = $1 AND owner_id = $2',
+      [id, actor.id],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', id);
+    return projectOf(result.rows[0]);
+  }
+
+  private async event(client: PoolClient, jobId: string, type: string, at: number): Promise<void> {
+    await client.query('INSERT INTO job_events (job_id, type, created_at) VALUES ($1, $2, $3)', [
+      jobId,
+      type,
+      new Date(at),
+    ]);
+  }
+
+  private async transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await operation(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+function assertActor(actor: Actor): void {
+  if (actor.id.length === 0)
+    throw new ControlPlaneError('AUTH_REQUIRED', 'actor identity required');
+}
+
+function requiredRow<T>(row: T | undefined, code: string): T {
+  if (row === undefined) throw new ControlPlaneError(code, 'database did not return a row');
+  return row;
+}
+
+function projectOf(row: ProjectRow): ProjectMetadata {
+  return { id: row.id, ownerId: row.owner_id, title: row.title, revision: row.revision };
+}
+
+function workerOf(row: WorkerRow): WorkerRecord {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    paired: row.revoked_at === null,
+    revoked: row.revoked_at !== null,
+  };
+}
+
+function jobOf(row: JobRow): Job {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    type: row.type,
+    state: row.state,
+    ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
+    ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
+  };
+}
+
+function databaseError(error: unknown, duplicateCode: string, id: string): ControlPlaneError {
+  if (isPostgresError(error) && error.code === '23505')
+    return new ControlPlaneError(duplicateCode, id);
+  if (error instanceof ControlPlaneError) return error;
+  return new ControlPlaneError('DATABASE_ERROR', 'durable control-plane operation failed');
+}
+
+function isPostgresError(value: unknown): value is { readonly code: string } {
+  return (
+    value !== null && typeof value === 'object' && 'code' in value && typeof value.code === 'string'
+  );
+}

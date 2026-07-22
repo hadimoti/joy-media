@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { ControlPlaneError, type Actor, type LocalControlPlane } from './control-plane.js';
+import { ControlPlaneError, type Actor, type ControlPlane } from './control-plane.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
 }
 
 export interface ControlPlaneHttpServerOptions {
-  readonly controlPlane: LocalControlPlane;
+  readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
 }
 
@@ -46,7 +46,7 @@ async function route(
   if (request.method === 'POST' && url.pathname === '/v1/projects') {
     const body = await readJson(request);
     respondJson(response, 201, {
-      data: options.controlPlane.createProject(
+      data: await options.controlPlane.createProject(
         actor,
         requiredString(body, 'id'),
         requiredString(body, 'title'),
@@ -59,7 +59,7 @@ async function route(
   if (request.method === 'POST' && workerPairMatch !== null) {
     const [, workerId] = workerPairMatch;
     respondJson(response, 200, {
-      data: options.controlPlane.pairWorker(actor, decodeURIComponent(workerId!)),
+      data: await options.controlPlane.pairWorker(actor, decodeURIComponent(workerId!)),
     });
     return;
   }
@@ -68,7 +68,7 @@ async function route(
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
     respondJson(response, 201, {
-      data: options.controlPlane.enqueue(
+      data: await options.controlPlane.enqueue(
         actor,
         requiredString(body, 'id'),
         decodeURIComponent(jobMatch[1]!),
@@ -82,7 +82,7 @@ async function route(
   if (request.method === 'POST' && leaseMatch !== null) {
     const body = await readJson(request);
     const durationMs = optionalPositiveInteger(body, 'durationMs') ?? 30_000;
-    const job = options.controlPlane.lease(
+    const job = await options.controlPlane.lease(
       decodeURIComponent(leaseMatch[1]!),
       Date.now(),
       durationMs,
@@ -94,7 +94,7 @@ async function route(
   const completeMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/complete$/.exec(url.pathname);
   if (request.method === 'POST' && completeMatch !== null) {
     respondJson(response, 200, {
-      data: options.controlPlane.complete(
+      data: await options.controlPlane.complete(
         decodeURIComponent(completeMatch[1]!),
         decodeURIComponent(completeMatch[2]!),
       ),
@@ -106,7 +106,11 @@ async function route(
   if (request.method === 'GET' && eventsMatch !== null) {
     const cursor = optionalCursor(url.searchParams.get('cursor'));
     respondJson(response, 200, {
-      data: options.controlPlane.eventsAfter(actor, decodeURIComponent(eventsMatch[1]!), cursor),
+      data: await options.controlPlane.eventsAfter(
+        actor,
+        decodeURIComponent(eventsMatch[1]!),
+        cursor,
+      ),
     });
     return;
   }

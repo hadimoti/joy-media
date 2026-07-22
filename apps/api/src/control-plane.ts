@@ -27,6 +27,41 @@ export interface JobEvent {
   readonly type: string;
   readonly at: number;
 }
+
+/** The API transport can use the synchronous local spike or durable PostgreSQL. */
+export interface ControlPlane {
+  createProject(
+    actor: Actor,
+    id: string,
+    title: string,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  updateProject(
+    actor: Actor,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
+  revokeWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
+  enqueue(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    type: string,
+    now?: number,
+  ): Job | Promise<Job>;
+  lease(
+    workerId: string,
+    now?: number,
+    durationMs?: number,
+  ): Job | Promise<Job | undefined> | undefined;
+  complete(workerId: string, jobId: string, now?: number): Job | Promise<Job>;
+  eventsAfter(
+    actor: Actor,
+    projectId: string,
+    cursor: number,
+  ): readonly JobEvent[] | Promise<readonly JobEvent[]>;
+}
 export class ControlPlaneError extends Error {
   constructor(
     readonly code: string,
@@ -38,7 +73,7 @@ export class ControlPlaneError extends Error {
 }
 
 /** In-memory adapter with the same revision/lease semantics as the PostgreSQL implementation. */
-export class LocalControlPlane {
+export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
