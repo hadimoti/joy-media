@@ -68,7 +68,10 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
       kind: 'image',
       assetId: 'product-still',
       transform: {
-        x: 0,
+        // Offset from intro-title (kept at 0,0 — asserted by editor-session.test.ts)
+        // so the three seeded reference objects don't stack on identical
+        // placeholder-sized boxes and occlude one another in the Monitor preview.
+        x: 400,
         y: 0,
         scaleX: 1,
         scaleY: 1,
@@ -82,7 +85,7 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
       kind: 'shape',
       shape: 'rectangle',
       transform: {
-        x: 0,
+        x: 800,
         y: 0,
         scaleX: 1,
         scaleY: 1,
