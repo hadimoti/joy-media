@@ -7,12 +7,7 @@
  * are mapped to a frame node by these helpers. The editor renderer is then
  * responsible for painting the bitmap into the Monitor canvas.
  */
-import type {
-  RenderFrameIR,
-  RenderNode,
-  Transform2D,
-  VideoFrameNode,
-} from '@joy-media/render-ir';
+import type { RenderFrameIR, RenderNode, Transform2D, VideoFrameNode } from '@joy-media/render-ir';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 import type { MediaSource } from './decoder.js';
 import type { DecodedFrame } from './index.js';
@@ -78,10 +73,7 @@ export function videoFrameNodeFromDecoded(
 }
 
 /** Return a new `RenderFrameIR` with the supplied node appended. */
-export function withVideoFrameNode(
-  frame: RenderFrameIR,
-  node: VideoFrameNode,
-): RenderFrameIR {
+export function withVideoFrameNode(frame: RenderFrameIR, node: VideoFrameNode): RenderFrameIR {
   const nextNodes: readonly RenderNode[] = [...frame.nodes, node];
   const next: RenderFrameIR = { ...frame, nodes: nextNodes };
   validateRenderFrameIR(next);

@@ -19,13 +19,7 @@ export interface HtmlVideoElementLike {
 
 /** Minimal 2D canvas context boundary, mirroring `CanvasRenderingContext2D`. */
 export interface HtmlCanvas2DContextLike {
-  drawImage(
-    image: HtmlVideoElementLike,
-    dx: number,
-    dy: number,
-    dw: number,
-    dh: number,
-  ): void;
+  drawImage(image: HtmlVideoElementLike, dx: number, dy: number, dw: number, dh: number): void;
   getImageData(dx: number, dy: number, sw: number, sh: number): ImageDataLike;
   readonly canvas: { readonly width: number; readonly height: number };
 }

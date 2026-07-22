@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createHtmlVideoMediaClock,
-  PlaybackScheduler,
-  type MediaClock,
-} from './index.js';
+import { createHtmlVideoMediaClock, PlaybackScheduler, type MediaClock } from './index.js';
 
 /** Deterministic clock for sync-drift tests. */
 class FakeMediaClock implements MediaClock {
@@ -24,7 +20,7 @@ class FakeMediaClock implements MediaClock {
 
 describe('playback-engine sync clock (WP-11.3)', () => {
   it('createHtmlVideoMediaClock reads HTMLVideoElement.currentTime in microseconds', () => {
-    const video = { currentTime: 0 } as { currentTime: number };
+    const video = { currentTime: 0 } as unknown as HTMLVideoElement;
     const clock = createHtmlVideoMediaClock(video);
     video.currentTime = 1.5;
     expect(clock.timeUs).toBe(1_500_000);
@@ -33,7 +29,7 @@ describe('playback-engine sync clock (WP-11.3)', () => {
   });
 
   it('createHtmlVideoMediaClock accepts a readTimeUs override for tests', () => {
-    const video = { currentTime: 999 } as { currentTime: number };
+    const video = { currentTime: 999 } as unknown as HTMLVideoElement;
     const clock = createHtmlVideoMediaClock(video, () => 42_000);
     expect(clock.timeUs).toBe(42_000);
   });
@@ -165,16 +161,16 @@ describe('playback-engine sync clock (WP-11.3)', () => {
   });
 
   it('honours a custom drift tolerance', () => {
-      const scheduler = new PlaybackScheduler(48_000, { driftToleranceUs: 1_000 });
-      const clock = new FakeMediaClock(33_333); // clock at first frame time
-      scheduler.seek(0);
-      // First frame: clock and audio both at ~33,333 (drift ≈ 0)
-      expect(scheduler.driveTick(clock, true).onTime).toBe(true);
-      // Second frame: advance clock by 1 frame + 500µs (within 1ms tolerance)
-      clock.set(33_333 + 33_333 + 500); // = 67,166
-      expect(scheduler.driveTick(clock, true).onTime).toBe(true);
-      // Third frame: advance clock by 1 frame + 1,500µs (exceeds 1ms tolerance)
-      clock.set(33_333 * 3 + 1_500); // = 101,500
-      expect(scheduler.driveTick(clock, true).onTime).toBe(false);
-    });
+    const scheduler = new PlaybackScheduler(48_000, { driftToleranceUs: 1_000 });
+    const clock = new FakeMediaClock(33_333); // clock at first frame time
+    scheduler.seek(0);
+    // First frame: clock and audio both at ~33,333 (drift ≈ 0)
+    expect(scheduler.driveTick(clock, true).onTime).toBe(true);
+    // Second frame: advance clock by 1 frame + 500µs (within 1ms tolerance)
+    clock.set(33_333 + 33_333 + 500); // = 67,166
+    expect(scheduler.driveTick(clock, true).onTime).toBe(true);
+    // Third frame: advance clock by 1 frame + 1,500µs (exceeds 1ms tolerance)
+    clock.set(33_333 * 3 + 1_500); // = 101,500
+    expect(scheduler.driveTick(clock, true).onTime).toBe(false);
+  });
 });

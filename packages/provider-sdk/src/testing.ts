@@ -158,7 +158,11 @@ export function simulateProviderFailure(
 ): ProviderV2 {
   return {
     manifest: provider.manifest,
-    invoke: async (_capability: CapabilityId, _input: unknown, request?: CapabilityRequest): Promise<CapabilityResult> => {
+    invoke: async (
+      _capability: CapabilityId,
+      _input: unknown,
+      request?: CapabilityRequest,
+    ): Promise<CapabilityResult> => {
       switch (errorType) {
         case 'unavailable':
           throw new ProviderUnavailableError('Simulated provider unavailable');

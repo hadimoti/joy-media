@@ -22,12 +22,7 @@
  * that persist have their transform / opacity / zIndex updated in place.
  */
 
-import {
-  Application,
-  Container,
-  Graphics,
-  Text,
-} from 'pixi.js';
+import { Application, Container, Graphics, Text } from 'pixi.js';
 import type {
   Rgba,
   RenderFrameIR,
@@ -140,9 +135,7 @@ export async function createBrowserPixiRenderer(
       style: {
         fill: rgbaToHexString(node.color),
         fontSize: node.fontSizePx ?? 16,
-        ...(node.maxWidth !== undefined
-          ? { wordWrap: true, wordWrapWidth: node.maxWidth }
-          : {}),
+        ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
       },
     });
     text.label = `text:${node.id}`;
@@ -160,10 +153,7 @@ export async function createBrowserPixiRenderer(
     else text.anchor.set(0, 0);
   };
 
-  const updateLayerTransform = (
-    layer: LayerContainer,
-    node: VisualRenderNode,
-  ): void => {
+  const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
     layer.position.set(node.transform.translateX, node.transform.translateY);
     layer.scale.set(node.transform.scaleX, node.transform.scaleY);
     // `Transform2D` does not currently carry rotation; wired through so a
@@ -185,9 +175,7 @@ export async function createBrowserPixiRenderer(
     return container;
   };
 
-  const paint = (
-    frame: RenderFrameIR,
-  ): Omit<BrowserPixiRenderStats, 'width' | 'height'> => {
+  const paint = (frame: RenderFrameIR): Omit<BrowserPixiRenderStats, 'width' | 'height'> => {
     const drawNodes = flattenRenderNodes(frame.nodes)
       .map((node, index) => ({ node, index }))
       .sort((a, b) => a.node.zIndex - b.node.zIndex || a.index - b.index);
@@ -206,9 +194,7 @@ export async function createBrowserPixiRenderer(
       } else {
         if (existing.kind !== node.kind) {
           existing.visual.destroy();
-          const visual = node.kind === 'text'
-            ? paintTextVisual(node)
-            : paintRectVisual(node);
+          const visual = node.kind === 'text' ? paintTextVisual(node) : paintRectVisual(node);
           existing.addChild(visual);
           existing.visual = visual;
           existing.kind = node.kind;

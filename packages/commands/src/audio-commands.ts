@@ -233,12 +233,27 @@ function applyClipSetFade(
   const shouldRemoveFadeIn = !hasFadeInInPayload && payload.fadeInUsWasSet === true;
   const shouldRemoveFadeOut = !hasFadeOutInPayload && payload.fadeOutUsWasSet === true;
 
+  const nextFadeInUs = shouldRemoveFadeIn
+    ? undefined
+    : shouldSetFadeIn
+      ? payload.fadeInUs
+      : clip.fadeInUs;
+  const nextFadeOutUs = shouldRemoveFadeOut
+    ? undefined
+    : shouldSetFadeOut
+      ? payload.fadeOutUs
+      : clip.fadeOutUs;
+
+  const clipWithoutFades: Omit<AudioClipConfig, 'fadeInUs' | 'fadeOutUs'> = {
+    gain: clip.gain,
+    pan: clip.pan,
+    mute: clip.mute,
+    solo: clip.solo,
+  };
   const newConfig: AudioClipConfig = {
-    ...clip,
-    ...(shouldSetFadeIn && !shouldRemoveFadeIn ? { fadeInUs: payload.fadeInUs } : {}),
-    ...(shouldSetFadeOut && !shouldRemoveFadeOut ? { fadeOutUs: payload.fadeOutUs } : {}),
-    ...(shouldRemoveFadeIn ? { fadeInUs: undefined } : {}),
-    ...(shouldRemoveFadeOut ? { fadeOutUs: undefined } : {}),
+    ...clipWithoutFades,
+    ...(nextFadeInUs !== undefined ? { fadeInUs: nextFadeInUs } : {}),
+    ...(nextFadeOutUs !== undefined ? { fadeOutUs: nextFadeOutUs } : {}),
   };
 
   const newClips = { ...state.clips, [payload.clipId]: newConfig };

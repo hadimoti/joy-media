@@ -19,7 +19,9 @@
     "@joy-media/render-ir": "workspace:*"
   },
   "peerDependenciesMeta": {
-    "@joy-media/render-ir": { "optional": true }
+    "@joy-media/render-ir": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@joy-media/render-ir": "workspace:*"

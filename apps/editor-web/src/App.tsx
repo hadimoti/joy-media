@@ -18,9 +18,16 @@ import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/proj
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { buildRenderFrameIR, type ResolvedObject } from '@joy-media/visual-object-renderer';
-import { createBrowserPixiRenderer, type BrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
+import {
+  createBrowserPixiRenderer,
+  type BrowserPixiRenderer,
+} from '@joy-media/renderer-pixi/browser';
 import { renderHeadlessFrame } from '@joy-media/renderer-headless';
-import { downloadBrowserExport, type BrowserExportManifest, type BrowserExportResult } from '@joy-media/renderer-pixi/browser-export';
+import {
+  downloadBrowserExport,
+  type BrowserExportManifest,
+  type BrowserExportResult,
+} from '@joy-media/renderer-pixi/browser-export';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
@@ -76,10 +83,13 @@ interface EditorPanelContextValue {
   readonly redo: () => void;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
-const EditorRefsContext = createContext<{
-  readonly videoRef: React.MutableRefObject<HTMLVideoElement | null>;
-  readonly onMediaReady: (decoder: FrameDecoder, clock: MediaClock) => void;
-} | undefined>(undefined);
+const EditorRefsContext = createContext<
+  | {
+      readonly videoRef: React.MutableRefObject<HTMLVideoElement | null>;
+      readonly onMediaReady: (decoder: FrameDecoder, clock: MediaClock) => void;
+    }
+  | undefined
+>(undefined);
 
 export function App() {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
@@ -128,7 +138,10 @@ export function App() {
         : composition.tracks
             .flatMap((t) => t.clips)
             .find(
-              (c) => c.kind === 'video' && playheadUs >= c.startUs && playheadUs < c.startUs + c.durationUs,
+              (c) =>
+                c.kind === 'video' &&
+                playheadUs >= c.startUs &&
+                playheadUs < c.startUs + c.durationUs,
             );
     if (activeClip !== undefined && activeClip.kind === 'video' && composition !== undefined) {
       const clipSpec: VideoClipSpec = {
@@ -147,7 +160,8 @@ export function App() {
         .decode(source.originalToken, sourceTimeUs, scheduler.current.requestToken())
         .then((frame) => {
           const node = videoFrameNodeFromDecoded(clipSpec, frame);
-          const compositionV1 = session.visualProject.compositions[session.visualProject.rootCompositionId];
+          const compositionV1 =
+            session.visualProject.compositions[session.visualProject.rootCompositionId];
           const width = compositionV1?.width ?? 1920;
           const height = compositionV1?.height ?? 1080;
           withVideoFrameNode(
@@ -177,13 +191,10 @@ export function App() {
     const timer = window.setInterval(advancePlayback, 250);
     return () => window.clearInterval(timer);
   }, [advancePlayback, state.playing]);
-  const handleMediaReady = useCallback(
-    (decoder: FrameDecoder, clock: MediaClock) => {
-      decoderRef.current = decoder;
-      clockRef.current = clock;
-    },
-    [],
-  );
+  const handleMediaReady = useCallback((decoder: FrameDecoder, clock: MediaClock) => {
+    decoderRef.current = decoder;
+    clockRef.current = clock;
+  }, []);
   const togglePlayback = useCallback(() => {
     setState((current) => ({ ...current, playing: !current.playing }));
   }, []);
@@ -255,7 +266,8 @@ export function App() {
     setExporting(true);
     setExportStatus('Building render manifest…');
     try {
-      const compositionV1 = session.visualProject.compositions[session.visualProject.rootCompositionId];
+      const compositionV1 =
+        session.visualProject.compositions[session.visualProject.rootCompositionId];
       const width = compositionV1?.width ?? 1920;
       const height = compositionV1?.height ?? 1080;
       const compositionTimeline = session.timelineProject.compositions.root;
@@ -269,7 +281,9 @@ export function App() {
         durationUs,
       });
       const cameraId = compositionV1?.activeCameraId;
-      const objectsById = session.visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
+      const objectsById = session.visualProject.visualObjects as Readonly<
+        Record<string, VisualObjectV1>
+      >;
       const buildFrame = (timeUs: number) => {
         const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
           (object) => ({
@@ -318,9 +332,7 @@ export function App() {
         `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; ffprobe skipped — browser cannot probe raw RGBA containers).`,
       );
     } catch (error) {
-      setExportStatus(
-        `Export failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      setExportStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setExporting(false);
     }
@@ -533,18 +545,16 @@ function MonitorPanel() {
     if (composition === undefined) return;
     const cameraId = composition.activeCameraId;
     const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map(
-      (object) => ({
-        object,
-        transform: evaluateCameraExpressionTransform(
-          object.id,
-          cameraId,
-          objectsById,
-          state.playheadUs,
-          composition.height,
-        ).transform,
-      }),
-    );
+    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
+      object,
+      transform: evaluateCameraExpressionTransform(
+        object.id,
+        cameraId,
+        objectsById,
+        state.playheadUs,
+        composition.height,
+      ).transform,
+    }));
     const frame = buildRenderFrameIR(
       composition.id,
       state.playheadUs,
@@ -634,7 +644,7 @@ function fallbackSha256Hex(bytes: Uint8Array): string {
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ]);
   const l = bytes.length;
-  const padLen = (((l + 9 + 63) >> 6) << 6);
+  const padLen = ((l + 9 + 63) >> 6) << 6;
   const padded = new Uint8Array(padLen);
   padded.set(bytes);
   padded[l] = 0x80;
@@ -643,8 +653,11 @@ function fallbackSha256Hex(bytes: Uint8Array): string {
   const w = new Uint32Array(64);
   for (let chunk = 0; chunk < padLen; chunk += 64) {
     for (let i = 0; i < 16; i++)
-      w[i] = (padded[chunk + i * 4]! << 24) | (padded[chunk + i * 4 + 1]! << 16) |
-        (padded[chunk + i * 4 + 2]! << 8) | padded[chunk + i * 4 + 3]!;
+      w[i] =
+        (padded[chunk + i * 4]! << 24) |
+        (padded[chunk + i * 4 + 1]! << 16) |
+        (padded[chunk + i * 4 + 2]! << 8) |
+        padded[chunk + i * 4 + 3]!;
     for (let i = 16; i < 64; i++) {
       const s0 = rotr(w[i - 15]!, 7) ^ rotr(w[i - 15]!, 18) ^ (w[i - 15]! >>> 3);
       const s1 = rotr(w[i - 2]!, 17) ^ rotr(w[i - 2]!, 19) ^ (w[i - 2]! >>> 10);

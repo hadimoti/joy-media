@@ -32,7 +32,12 @@ export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
 export type { HtmlVideoElementLike } from './html-decoder.js';
 export { createHtmlMediaDecoder } from './html-decoder.js';
 export { sourceTimeAtPlayhead } from './source-time.js';
-export { importedClipToMediaSource, videoFrameNodeFromDecoded, withVideoFrameNode, type VideoClipSpec } from './video-frame-node.js';
+export {
+  importedClipToMediaSource,
+  videoFrameNodeFromDecoded,
+  withVideoFrameNode,
+  type VideoClipSpec,
+} from './video-frame-node.js';
 import type { ImageDataLike } from './image-data.js';
 export type { ImageDataLike } from './image-data.js';
 
@@ -79,7 +84,7 @@ export interface MediaClock {
  */
 export function createHtmlVideoMediaClock(
   video: HTMLVideoElement,
-  readTimeUs?: () => number
+  readTimeUs?: () => number,
 ): MediaClock {
   return {
     get timeUs(): number {
@@ -175,11 +180,7 @@ export class PlaybackScheduler {
    * @param decoded whether the decode call for this tick succeeded
    * @param intervalUs frame interval in µs (default = 33 333 µs = 1/30 s)
    */
-  driveTick(
-    clock: MediaClock,
-    decoded: boolean,
-    intervalUs = 33_333
-  ): PlaybackTick {
+  driveTick(clock: MediaClock, decoded: boolean, intervalUs = 33_333): PlaybackTick {
     this.#tickIndex++;
     this.audio.advance(intervalUs);
     const driftUs = this.driftFrom(clock);

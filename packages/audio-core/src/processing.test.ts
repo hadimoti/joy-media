@@ -68,7 +68,7 @@ describe('audio processing', () => {
       // fadeInSamples = 48, so gain = i/48 for i=0..47
       expect(output[0]).toBeCloseTo(0.0, 3);
       expect(output[24]).toBeCloseTo(0.5, 2); // 24/48 = 0.5
-      expect(output[47]).toBeCloseTo(47/48, 2); // 47/48 ≈ 0.979
+      expect(output[47]).toBeCloseTo(47 / 48, 2); // 47/48 ≈ 0.979
       expect(output[48]).toBeCloseTo(1.0, 3); // outside fade
     });
 
@@ -79,9 +79,9 @@ describe('audio processing', () => {
       // gain = 1 - i/48 for i=0..47
       expect(output[47]).toBeCloseTo(1.0, 3); // before fade
       expect(output[48]).toBeCloseTo(1.0, 2); // start of fade, i=0: 1-0/48 = 1
-      expect(output[71]).toBeCloseTo(1 - 23/48, 2); // i=23: 25/48 ≈ 0.521
-      expect(output[72]).toBeCloseTo(1 - 24/48, 2); // i=24: 24/48 = 0.5
-      expect(output[95]).toBeCloseTo(1 - 47/48, 2); // i=47: 1/48 ≈ 0.021
+      expect(output[71]).toBeCloseTo(1 - 23 / 48, 2); // i=23: 25/48 ≈ 0.521
+      expect(output[72]).toBeCloseTo(1 - 24 / 48, 2); // i=24: 24/48 = 0.5
+      expect(output[95]).toBeCloseTo(1 - 47 / 48, 2); // i=47: 1/48 ≈ 0.021
     });
 
     it('applies both fade-in and fade-out', () => {
@@ -91,11 +91,11 @@ describe('audio processing', () => {
       // fade-in: i=0..23, gain = i/24
       // fade-out: i=0..23 at idx 72..95, gain = 1 - i/24
       expect(output[0]).toBeCloseTo(0.0, 3);
-      expect(output[12]).toBeCloseTo(12/24, 2); // i=12: 0.5
-      expect(output[23]).toBeCloseTo(23/24, 2); // i=23: ~0.958
+      expect(output[12]).toBeCloseTo(12 / 24, 2); // i=12: 0.5
+      expect(output[23]).toBeCloseTo(23 / 24, 2); // i=23: ~0.958
       expect(output[72]).toBeCloseTo(1.0, 2); // start of fade-out
-      expect(output[84]).toBeCloseTo(1 - 12/24, 2); // i=12: 0.5
-      expect(output[95]).toBeCloseTo(1 - 23/24, 2); // i=23: ~0.042
+      expect(output[84]).toBeCloseTo(1 - 12 / 24, 2); // i=12: 0.5
+      expect(output[95]).toBeCloseTo(1 - 23 / 24, 2); // i=23: ~0.042
     });
   });
 

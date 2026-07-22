@@ -9,17 +9,17 @@
 
 ## Measured baseline (2026-07-19, `ssh sweden`)
 
-| Fact                       | Value                                                                                                                                                    |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CPU                        | QEMU Virtual CPU 2.5+ — `avx avx2 sse4_2 ssse3` **present** (plan §27.2 corrected in v1.1; model is provider-controlled, re-check after host migrations) |
-| RAM                        | 8 GB total, ~4.6 GB available (Synapse, joy-vps bot, admin, matrix, wg services share it)                                                                |
-| Disk                       | 99 GB, ~43 GB free                                                                                                                                       |
-| Node                       | v22.23.1                                                                                                                                                 |
+| Fact                       | Value                                                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CPU                        | QEMU Virtual CPU 2.5+ — `avx avx2 sse4_2 ssse3` **present** (plan §27.2 corrected in v1.1; model is provider-controlled, re-check after host migrations)         |
+| RAM                        | 8 GB total, ~4.6 GB available (Synapse, joy-vps bot, admin, matrix, wg services share it)                                                                        |
+| Disk                       | 99 GB, ~43 GB free                                                                                                                                               |
+| Node                       | v22.23.1                                                                                                                                                         |
 | PostgreSQL / Redis         | PostgreSQL 17.10 installed (Debian repo); no Redis. `joymedia` DB + role active, 5 tables applied (`projects`, `workers`, `jobs`, `job_attempts`, `job_events`). |
-| Docker                     | containerd present                                                                                                                                       |
-| Ports in use               | 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825                                                                        |
-| **Reserved for JOY Media** | **8790** API+WS · **8791** object gateway (optional). Re-verify free before first bind.                                                                  |
-| Skeleton                   | `/opt/joy-media/` created 2026-07-19 — contains this plan; nothing runs                                                                                  |
+| Docker                     | containerd present                                                                                                                                               |
+| Ports in use               | 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825                                                                                |
+| **Reserved for JOY Media** | **8790** API+WS · **8791** object gateway (optional). Re-verify free before first bind.                                                                          |
+| Skeleton                   | `/opt/joy-media/` created 2026-07-19 — contains this plan; nothing runs                                                                                          |
 
 Resource budget (DECIDED Q2, ADR-0001): **≤3 GB RAM, ≤2 CPU cores** — set as systemd `MemoryMax=3G` / `CPUQuota=200%` and kept adjustable; owner re-evaluates (VPS upgrade vs stay) after real usage. Disk working default ~10 GB. No GPU/model/render workloads ever (§2.11).
 

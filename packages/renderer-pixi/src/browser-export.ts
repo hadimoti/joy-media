@@ -92,7 +92,10 @@ export function packBrowserExport(source: BrowserExportFrameSource): {
   headerView.setUint32(12, height, true);
 
   const totalBytes = header.byteLength + frames.length * bytesPerFrame;
-  const blob = new Blob([header, ...frames], { type: 'application/octet-stream' });
+  // Frames are plain-array RGBA buffers, never SharedArrayBuffer-backed; BlobPart's
+  // stricter ArrayBuffer-only typing (TS 5.9 generic TypedArrays) doesn't affect
+  // runtime behavior here, so this narrowing cast is safe.
+  const blob = new Blob([header, ...frames] as BlobPart[], { type: 'application/octet-stream' });
   if (blob.size !== totalBytes) {
     throw new Error(
       `browser export produced ${blob.size} bytes, expected ${totalBytes}; this indicates a Blob implementation bug`,

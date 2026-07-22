@@ -118,7 +118,11 @@ export interface ProviderManifestV2 {
 
 export interface ProviderV2 {
   readonly manifest: ProviderManifestV2;
-  invoke(capability: CapabilityId, input: unknown): Promise<CapabilityResult>;
+  invoke(
+    capability: CapabilityId,
+    input: unknown,
+    request?: CapabilityRequest,
+  ): Promise<CapabilityResult>;
 }
 
 export type AnyProvider = Provider | ProviderV2;

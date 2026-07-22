@@ -45,7 +45,10 @@ class FakeContext implements HtmlCanvas2DContextLike {
 
 class FakeCanvas implements HtmlCanvasElementLike {
   readonly context: FakeContext;
-  constructor(public readonly width: number, public readonly height: number) {
+  constructor(
+    public readonly width: number,
+    public readonly height: number,
+  ) {
     this.context = new FakeContext({ width, height });
   }
   getContext(kind: '2d'): HtmlCanvas2DContextLike | null {
