@@ -42,6 +42,17 @@ import { DEFAULT_WORKSPACE } from './workspace.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 
+/**
+ * WP-11.2: resolves a timeline clip's assetId to a real, browser-fetchable
+ * URL for HTMLVideoElement decode. Only `asset-intro` has a real fixture
+ * committed (`public/media/reference/asset-intro.mp4`, generated via
+ * `ffmpeg -f lavfi -i testsrc`); other reference-project asset ids will 404,
+ * which the decoder already treats as a dropped frame, not a crash.
+ */
+function resolveReferenceMediaUrl(assetId: string): string {
+  return `/media/reference/${assetId}.mp4`;
+}
+
 const labels: Readonly<Record<string, string>> = {
   media: 'Media',
   monitor: 'Program Monitor',
@@ -146,7 +157,7 @@ export function App() {
     if (activeClip !== undefined && activeClip.kind === 'video' && composition !== undefined) {
       const clipSpec: VideoClipSpec = {
         id: activeClip.assetId,
-        originalToken: `media://reference/${activeClip.assetId}`,
+        originalToken: resolveReferenceMediaUrl(activeClip.assetId),
         startUs: activeClip.startUs,
         durationUs: activeClip.durationUs,
         sourceInUs: activeClip.sourceInUs,
@@ -159,7 +170,16 @@ export function App() {
       decoder
         .decode(source.originalToken, sourceTimeUs, scheduler.current.requestToken())
         .then((frame) => {
-          const node = videoFrameNodeFromDecoded(clipSpec, frame);
+          const activeVideo = videoRef.current;
+          const node = videoFrameNodeFromDecoded(clipSpec, frame, {
+            // WP-11.2: no capture canvas is wired yet (frame.bitmap is always
+            // undefined), so videoFrameNodeFromDecoded's own intrinsic-size
+            // fallback is what's actually used. Without this, it defaults to
+            // 0x0, which validateRenderFrameIR rejects — every decode was
+            // silently counted as a dropped frame despite succeeding.
+            width: activeVideo?.videoWidth ?? 0,
+            height: activeVideo?.videoHeight ?? 0,
+          });
           const compositionV1 =
             session.visualProject.compositions[session.visualProject.rootCompositionId];
           const width = compositionV1?.width ?? 1920;
@@ -600,7 +620,7 @@ function MonitorPanel() {
       .flatMap((t) => t.clips)
       .find((c) => c.kind === 'video');
     if (firstClip !== undefined && firstClip.kind === 'video') {
-      video.src = `media://reference/${firstClip.assetId}`;
+      video.src = resolveReferenceMediaUrl(firstClip.assetId);
     }
   }, [onMediaReady, timelineProject, videoRef]);
 
