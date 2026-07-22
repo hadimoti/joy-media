@@ -67,6 +67,19 @@ explicit cache recovery UX. A concrete provider, bucket, credentials, region,
 retention period, and cost/usage limits still require owner operational
 approval before any production object-storage deployment.
 
+### Approved initial provider
+
+The owner approved the existing ParsPack S3-compatible `c212734` bucket for
+the initial private replica, using only the isolated
+`sweden-backups/joy-media/` prefix. Existing VPS backup content under
+`sweden-backups/daily/` and `sweden-backups/configs/` is not JOY Media data and
+is outside its retention policy. The root-owned rclone credential remains on
+the VPS; it is never committed, copied into browser state, or returned by the
+API. On 2026-07-22, a one-object write → read/content-equality → deletion
+probe passed in the JOY Media prefix and left it empty. This approves the
+provider for API-broker implementation, but does not yet configure a JOY Media
+API/Worker credential or upload any media.
+
 ## Validation and rollback
 
 WP-14 must prove that a derivative is playable from OPFS, then from an

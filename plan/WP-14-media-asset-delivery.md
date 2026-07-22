@@ -67,8 +67,11 @@ authorization to upload all original source media or to make sharing public.
       assertion. Focused coverage proves local-cache precedence, cache reuse,
       tamper rejection, and revocation. **Still required to close this package:**
       an API-brokered private-object-store adapter/end point that enforces project
-      owner + sync consent and is backed by an owner-approved provider/bucket; no
-      such provider, credential, or deployment is configured. No public URL,
+      owner + sync consent. The owner approved ParsPack's private
+      S3-compatible `c212734` bucket and isolated `sweden-backups/joy-media/`
+      prefix; existing VPS backups remain separate and a one-object
+      write/read/delete probe passed. Its root-owned rclone credential is not
+      yet configured for the JOY Media API/Worker. No public URL,
       implicit cross-origin access, or direct VPS-to-Worker connection is present.
 - [ ] **WP-14.5 — Editor asset UX and live gate.** Add an Asset Library and a
       playable derivative affordance with missing/pending/verified/revoked states.
