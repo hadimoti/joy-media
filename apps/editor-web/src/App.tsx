@@ -15,6 +15,8 @@ import {
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { toggleSelection } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
+import type { EditorContext } from '@joy-media/agent-tools';
+import { buildEditorContext } from '@joy-media/agent-tools';
 import type {
   JoyProjectV1,
   SpikeProject,
@@ -44,6 +46,8 @@ import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { AgentPanel } from './AgentPanel.js';
+import { createAgentCommandBus } from './agent-command-bus.js';
 import {
   getOrCreateControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
@@ -74,6 +78,7 @@ const labels: Readonly<Record<string, string>> = {
   history: 'History',
   diagnostics: 'Diagnostics',
   jobs: 'Jobs',
+  agent: 'Agent',
 };
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
@@ -192,6 +197,7 @@ interface EditorPanelContextValue {
   readonly transcriptionError: string | undefined;
   readonly undo: () => void;
   readonly redo: () => void;
+  readonly agentContext: EditorContext;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
@@ -225,6 +231,17 @@ export function App() {
       window.localStorage,
       session.visualProject,
     ));
+  const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
+  if (agentCommandBusRef.current === null)
+    agentCommandBusRef.current = createAgentCommandBus(session, () =>
+      setRevision((revision) => revision + 1),
+    );
+  // WP-15.1/15.2: rebuilt each render so a dry-run/execute always sees the
+  // current real timeline, bound to the real command bus above — not a mock.
+  // `buildEditorContext`'s selection/audio fields are pre-existing, unwired
+  // summarizers (always empty); the Agent panel reads real selection/playhead
+  // state directly as props instead, documented in the WP-15 plan.
+  const agentContext = buildEditorContext(session.timelineProject, undefined, agentCommandBusRef.current);
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
@@ -688,6 +705,7 @@ export function App() {
           transcriptionError,
           undo,
           redo,
+          agentContext,
         }}
       >
         <DockviewReact
@@ -775,6 +793,16 @@ function Panel({ api }: IDockviewPanelProps) {
     );
   if (api.id === 'media')
     return <AssetLibraryPanel projectId={controlPlaneProject.controlPlaneProjectId} />;
+  if (api.id === 'agent')
+    return (
+      <AgentPanel
+        project={context.timelineProject}
+        selectedClipIds={state.selectedIds}
+        playheadUs={state.playheadUs}
+        agentContext={context.agentContext}
+        onUndo={context.undo}
+      />
+    );
   if (api.id === 'history')
     return (
       <article>

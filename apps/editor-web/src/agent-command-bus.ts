@@ -11,10 +11,17 @@ import type { EditorSession } from './editor-session.js';
  * log, never a parallel or flattened mutation path (P06 goal, master plan
  * §36 Phase 6).
  *
- * There is still no agent-facing UI panel wired to this bus (WP-15.2); this
- * file only proves the dispatch path itself is real.
+ * WP-15.2 wires this into the Agent panel. `onDispatched` lets the caller
+ * (App.tsx) trigger a React re-render after a real mutation — mirroring the
+ * existing `dispatchTimeline` callback's `setRevision` bump — since this bus
+ * calls `EditorSession` directly rather than through that callback (it needs
+ * to catch the real thrown `CommandError` and turn it into a `ToolResult`,
+ * which the plain callback does not do).
  */
-export function createAgentCommandBus(session: EditorSession): CommandDispatcher {
+export function createAgentCommandBus(
+  session: EditorSession,
+  onDispatched?: () => void,
+): CommandDispatcher {
   return {
     dispatchTimeline(commands, label): CommandDispatchResult {
       try {
@@ -25,6 +32,8 @@ export function createAgentCommandBus(session: EditorSession): CommandDispatcher
           return { success: false, error: `${error.code}: ${error.message}` };
         }
         throw error;
+      } finally {
+        onDispatched?.();
       }
     },
   };

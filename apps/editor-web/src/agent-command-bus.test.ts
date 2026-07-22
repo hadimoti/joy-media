@@ -85,6 +85,40 @@ describe('createAgentCommandBus (WP-15.1)', () => {
     expect(session.canUndo).toBe(false);
   });
 
+  it('calls onDispatched after both a successful and a rejected dispatch', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    let notifications = 0;
+    const bus = createAgentCommandBus(session, () => {
+      notifications += 1;
+    });
+
+    bus.dispatchTimeline(
+      [
+        {
+          type: 'timeline.removeClip',
+          payload: { compositionId: 'root', trackId: 'track-0', clipId: 'intro' },
+        },
+      ],
+      'Agent: remove intro',
+    );
+    expect(notifications).toBe(1);
+
+    bus.dispatchTimeline(
+      [
+        {
+          type: 'timeline.removeClip',
+          payload: { compositionId: 'root', trackId: 'track-0', clipId: 'does-not-exist' },
+        },
+      ],
+      'Agent: remove missing clip',
+    );
+    expect(notifications).toBe(2);
+  });
+
   it('persists an agent transaction across a session reload, exactly like a human edit', () => {
     const storage = memoryStorage();
     const session = new EditorSession(
