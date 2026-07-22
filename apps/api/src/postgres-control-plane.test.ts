@@ -28,7 +28,8 @@ describe('PostgresControlPlane', () => {
       first.claimWorkerSession('worker-1', 'pairing-hash', 'session-hash', 20_000, 101),
     ).resolves.toMatchObject({ workerId: 'worker-1' });
     await expect(first.authenticateWorker('session-hash', 102)).resolves.toBe('worker-1');
-    await first.enqueue(owner, 'job-1', 'project-1', 'fixture.thumbnail', 100);
+    await first.helloWorker('worker-1', ['asset.thumbnail'], ['asset-1'], 100);
+    await first.enqueueAssetThumbnail(owner, 'job-1', 'project-1', 'asset-1', 100);
     await expect(first.lease('worker-1', 101, 30_000)).resolves.toMatchObject({
       id: 'job-1',
       state: 'leased',
@@ -45,7 +46,7 @@ describe('PostgresControlPlane', () => {
       { id: 'derivative-1', availability: 'available-local', verifiedAt: 100 },
     ]);
     await expect(
-      restarted.complete('worker-1', 'job-1', 102, fixtureReceipt()),
+      restarted.complete('worker-1', 'job-1', 102, realThumbnailReceipt()),
     ).resolves.toMatchObject({
       id: 'job-1',
       state: 'completed',
@@ -53,6 +54,8 @@ describe('PostgresControlPlane', () => {
         jobId: 'job-1',
         workerRef: 'worker-1',
         resultRef: 'derivative:job-1',
+        assetId: 'asset-1',
+        localRef: 'thumb-job-1-aaaaaaaaaaaaaaaa',
         verifiedAt: 102,
       },
     });
@@ -70,16 +73,23 @@ describe('PostgresControlPlane', () => {
           jobId: 'job-1',
           resultRef: 'derivative:job-1',
           workerRef: 'worker-1',
+          assetId: 'asset-1',
+          descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
           verifiedAt: 102,
         },
       },
     ]);
     await afterCompletionRestart.retry(owner, 'project-1', 'job-1', 103);
     await expect(afterCompletionRestart.jobsForProject(owner, 'project-1')).resolves.toEqual([
-      expect.objectContaining({ id: 'job-1', state: 'queued', progress: 0 }),
+      expect.objectContaining({ id: 'job-1', assetId: 'asset-1', state: 'queued', progress: 0 }),
     ]);
     const retried = await afterCompletionRestart.jobsForProject(owner, 'project-1');
     expect(retried[0]?.derivative).toBeUndefined();
+    await expect(afterCompletionRestart.lease('worker-1', 104, 30_000)).resolves.toMatchObject({
+      id: 'job-1',
+      assetId: 'asset-1',
+      state: 'leased',
+    });
     await pool.end();
   });
 
@@ -93,7 +103,7 @@ describe('PostgresControlPlane', () => {
     await controlPlane.createProject(owner, 'project-1', 'Reference');
     await controlPlane.pairWorker(owner, 'worker-old');
     await controlPlane.pairWorker(owner, 'worker-new');
-    await controlPlane.enqueue(owner, 'job-1', 'project-1', 'asset.thumbnail', 100);
+    await controlPlane.enqueue(owner, 'job-1', 'project-1', 'fixture.thumbnail', 100);
     await controlPlane.lease('worker-old', 101, 5);
     await controlPlane.lease('worker-new', 106, 5);
 
@@ -104,11 +114,14 @@ describe('PostgresControlPlane', () => {
   });
 });
 
-function fixtureReceipt() {
+function realThumbnailReceipt() {
   return {
-    kind: 'fixture.thumbnail' as const,
-    sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
-    bytes: 14,
+    kind: 'asset.thumbnail' as const,
+    assetId: 'asset-1',
+    sha256: 'a'.repeat(64),
+    bytes: 1024,
+    localRef: 'thumb-job-1-aaaaaaaaaaaaaaaa',
+    descriptor: { mimeType: 'image/jpeg' as const, width: 640, height: 360 },
   };
 }
 

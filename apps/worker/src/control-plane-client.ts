@@ -11,11 +11,19 @@ export interface LeasedJob {
   readonly id: string;
   readonly projectId: string;
   readonly type: string;
+  readonly assetId?: string;
 }
 export interface WorkerJobResult {
-  readonly kind: 'fixture.thumbnail';
+  readonly kind: 'asset.thumbnail';
+  readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: 'image/jpeg';
+    readonly width: number;
+    readonly height: number;
+  };
 }
 
 export interface WorkerControlPlaneClientOptions {
@@ -66,17 +74,20 @@ export class WorkerControlPlaneClient {
       { durationMs },
     );
     if (result === null) return undefined;
+    const assetId =
+      isRecord(result) && typeof result.assetId === 'string' ? result.assetId : undefined;
     return {
       id: requiredString(result, 'id'),
       projectId: requiredString(result, 'projectId'),
       type: requiredString(result, 'type'),
+      ...(assetId === undefined ? {} : { assetId }),
     };
   }
 
-  async hello(capabilities: readonly string[]): Promise<void> {
+  async hello(capabilities: readonly string[], assetIds: readonly string[]): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/hello`,
-      { capabilities },
+      { capabilities, assetIds },
     );
   }
 

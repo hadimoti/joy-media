@@ -53,7 +53,7 @@ describe('WorkerControlPlaneClient', () => {
       projectId: 'project-1',
       type: 'asset.thumbnail',
     });
-    await client.complete('job-1', fixtureReceipt());
+    await client.complete('job-1', realThumbnailReceipt());
 
     expect(requests).toEqual([
       { pathname: '/v1/worker-pair/offers' },
@@ -136,15 +136,30 @@ describe('WorkerControlPlaneClient', () => {
         await post(apiUrl, '/v1/workers/worker-1/pair', { pairingCode }, 'joy-assertion'),
       ).toMatchObject({ status: 200 });
       expect(await client.claimPairing(pairingCode)).toBe(true);
+      await client.hello(['asset.thumbnail'], ['asset-1']);
       await post(apiUrl, '/v1/projects', { id: 'project-1', title: 'Reference' }, 'joy-assertion');
       await post(
         apiUrl,
+        '/v1/projects/project-1/assets',
+        {
+          id: 'asset-1',
+          kind: 'video',
+          displayName: 'clip.mp4',
+          sha256: 'a'.repeat(64),
+          bytes: 1024,
+          descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 320, height: 180 },
+          locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
+        },
+        'joy-assertion',
+      );
+      await post(
+        apiUrl,
         '/v1/projects/project-1/jobs',
-        { id: 'job-1', type: 'asset.thumbnail' },
+        { id: 'job-1', type: 'asset.thumbnail', assetId: 'asset-1' },
         'joy-assertion',
       );
       await expect(client.lease()).resolves.toMatchObject({ id: 'job-1' });
-      await expect(client.complete('job-1', fixtureReceipt())).resolves.toBeUndefined();
+      await expect(client.complete('job-1', realThumbnailReceipt())).resolves.toBeUndefined();
     } finally {
       await close(server);
     }
@@ -158,8 +173,15 @@ function response(status: number, value: unknown): Response {
   });
 }
 
-function fixtureReceipt() {
-  return { kind: 'fixture.thumbnail' as const, sha256: 'a'.repeat(64), bytes: 14 };
+function realThumbnailReceipt() {
+  return {
+    kind: 'asset.thumbnail' as const,
+    assetId: 'asset-1',
+    sha256: 'a'.repeat(64),
+    bytes: 1024,
+    localRef: 'thumb-job-1-aaaaaaaaaaaaaaaa',
+    descriptor: { mimeType: 'image/jpeg' as const, width: 320, height: 180 },
+  };
 }
 
 async function post(

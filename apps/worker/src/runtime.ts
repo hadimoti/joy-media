@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  rmSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -8,7 +9,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
@@ -119,6 +120,27 @@ export interface ToolAvailability {
   readonly ffmpeg: boolean;
   readonly ffprobe: boolean;
 }
+
+/** Private mapping held only by the Worker; it is never serialized to the API. */
+export interface LocalAssetSourceRegistry {
+  assetIds(): readonly string[];
+  resolve(assetId: string): string | undefined;
+}
+
+export class StaticLocalAssetSourceRegistry implements LocalAssetSourceRegistry {
+  readonly #paths = new Map<string, string>();
+
+  constructor(entries: Readonly<Record<string, string>>) {
+    for (const [assetId, sourcePath] of Object.entries(entries))
+      this.#paths.set(assetId, sourcePath);
+  }
+  assetIds(): readonly string[] {
+    return [...this.#paths.keys()].sort();
+  }
+  resolve(assetId: string): string | undefined {
+    return this.#paths.get(assetId);
+  }
+}
 export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolAvailability {
   return { ffmpeg: run('ffmpeg'), ffprobe: run('ffprobe') };
 }
@@ -151,6 +173,10 @@ export class WorkerRuntime {
   constructor(
     readonly identity: DeviceIdentity,
     readonly tools: ToolAvailability,
+    private readonly options: {
+      readonly sources?: LocalAssetSourceRegistry;
+      readonly derivativeDirectory?: string;
+    } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] =
@@ -162,53 +188,168 @@ export class WorkerRuntime {
       platform,
       architecture,
       capabilities,
-      localAssetIds: [],
+      localAssetIds: this.localAssetIds(),
       maxConcurrentJobs: 1,
     };
   }
   async run(
-    jobId: string,
+    job: { readonly id: string; readonly type: string; readonly assetId?: string },
     options: {
       readonly cancelled: () => boolean;
       readonly progress: (progress: number) => Promise<void>;
     },
   ): Promise<
     | {
-        readonly tempDir: string;
         readonly state: 'completed';
-        readonly result: FixtureThumbnailReceipt;
+        readonly result: RealThumbnailReceipt;
       }
-    | { readonly tempDir: string; readonly state: 'canceled' }
+    | { readonly state: 'canceled' }
   > {
-    const tempDir = mkdtempSync(join(tmpdir(), `joy-media-${jobId}-`));
-    this.log.write(`job ${jobId} temp ${tempDir}`);
-    for (const progress of [5, 50, 90]) {
-      if (options.cancelled()) {
-        this.log.write(`job ${jobId} canceled`);
-        return { tempDir, state: 'canceled' };
+    if (job.type !== 'asset.thumbnail' || job.assetId === undefined)
+      throw new Error(`unsupported Worker job ${job.type}`);
+    if (!this.tools.ffmpeg || !this.tools.ffprobe)
+      throw new Error('FFmpeg and FFprobe are required');
+    if (options.cancelled()) return { state: 'canceled' };
+    const sourcePath = this.options.sources?.resolve(job.assetId);
+    if (sourcePath === undefined)
+      throw new Error(`asset ${job.assetId} is not available on this Worker`);
+    const tempDir = mkdtempSync(join(tmpdir(), `joy-media-${job.id}-`));
+    const temporaryOutput = join(tempDir, 'thumbnail.jpg');
+    this.log.write(`job ${job.id} started`);
+    try {
+      if (options.cancelled()) return { state: 'canceled' };
+      await options.progress(5);
+      await options.progress(25);
+      const transcoded = await runBounded(
+        'ffmpeg',
+        [
+          '-y',
+          '-nostdin',
+          '-v',
+          'error',
+          '-ss',
+          '0',
+          '-i',
+          sourcePath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=640:-2:force_original_aspect_ratio=decrease',
+          '-q:v',
+          '3',
+          temporaryOutput,
+        ],
+        options.cancelled,
+      );
+      if (!transcoded || options.cancelled()) {
+        this.log.write(`job ${job.id} canceled`);
+        return { state: 'canceled' };
       }
-      await options.progress(progress);
-      await sleep(20);
+      await options.progress(75);
+      const descriptor = probeThumbnail(temporaryOutput);
+      await options.progress(90);
+      const bytes = readFileSync(temporaryOutput);
+      if (bytes.length < 1) throw new Error('thumbnail output is empty');
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const localRef = `thumb-${job.id}-${sha256.slice(0, 16)}`;
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      mkdirSync(derivativeDirectory, { recursive: true });
+      const finalOutput = join(derivativeDirectory, `${localRef}.jpg`);
+      rmSync(finalOutput, { force: true });
+      renameSync(temporaryOutput, finalOutput);
+      await options.progress(100);
+      this.log.write(`job ${job.id} completed`);
+      return {
+        state: 'completed',
+        result: {
+          kind: 'asset.thumbnail',
+          assetId: job.assetId,
+          sha256,
+          bytes: bytes.length,
+          localRef,
+          descriptor,
+        },
+      };
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
     }
-    if (options.cancelled()) {
-      this.log.write(`job ${jobId} canceled`);
-      return { tempDir, state: 'canceled' };
-    }
-    const bytes = Buffer.from('P6\n1 1\n255\n\x20\x80\xe0', 'binary');
-    writeFileSync(join(tempDir, 'fixture-thumbnail.ppm'), bytes, { mode: 0o600 });
-    const result = {
-      kind: 'fixture.thumbnail' as const,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-      bytes: bytes.length,
-    };
-    await options.progress(100);
-    this.log.write(`job ${jobId} completed`);
-    return { tempDir, state: 'completed', result };
+  }
+
+  localAssetIds(): readonly string[] {
+    return this.options.sources?.assetIds() ?? [];
   }
 }
 
-export interface FixtureThumbnailReceipt {
-  readonly kind: 'fixture.thumbnail';
+export interface RealThumbnailReceipt {
+  readonly kind: 'asset.thumbnail';
+  readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: 'image/jpeg';
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+async function runBounded(
+  command: string,
+  args: readonly string[],
+  cancelled: () => boolean,
+): Promise<boolean> {
+  const child = spawn(command, args, { shell: false, stdio: 'ignore' });
+  const completed = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  while (child.exitCode === null) {
+    if (cancelled()) {
+      child.kill();
+      await completed.catch(() => undefined);
+      return false;
+    }
+    await sleep(20);
+  }
+  return (await completed) === 0;
+}
+
+function probeThumbnail(path: string): RealThumbnailReceipt['descriptor'] {
+  const probe = spawnSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=codec_name,width,height',
+      '-of',
+      'json',
+      path,
+    ],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (probe.status !== 0) throw new Error('FFprobe could not inspect thumbnail output');
+  const value: unknown = JSON.parse(probe.stdout);
+  const stream =
+    value !== null &&
+    typeof value === 'object' &&
+    Array.isArray((value as { streams?: unknown }).streams)
+      ? (value as { streams: readonly unknown[] }).streams[0]
+      : undefined;
+  if (stream === null || typeof stream !== 'object' || Array.isArray(stream))
+    throw new Error('FFprobe thumbnail stream is missing');
+  const fields = stream as Record<string, unknown>;
+  if (
+    fields.codec_name !== 'mjpeg' ||
+    !Number.isSafeInteger(fields.width) ||
+    !Number.isSafeInteger(fields.height) ||
+    (fields.width as number) < 1 ||
+    (fields.height as number) < 1
+  ) {
+    throw new Error('FFprobe thumbnail descriptor is invalid');
+  }
+  return { mimeType: 'image/jpeg', width: fields.width as number, height: fields.height as number };
 }

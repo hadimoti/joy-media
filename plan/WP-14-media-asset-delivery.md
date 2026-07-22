@@ -1,6 +1,6 @@
 # M-MAD — Media Asset Delivery and Playable Derivatives
 
-**Status:** in progress (WP-14.1 accepted; durable metadata next) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
+**Status:** in progress (WP-14.3 locally verified; authorized resolver next) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
 
 **Goal:** turn the WP-13 verified derivative receipt into a real, safely
 resolvable media asset that can be played in the editor without ever exposing a
@@ -48,10 +48,16 @@ authorization to upload all original source media or to make sharing public.
       The catalog persists only metadata appropriate to the selected boundary;
       never copies the entire creative project or physical location.
 
-- [ ] **WP-14.3 — Real Worker derivative.** Replace the fixture-only output
-      with a bounded actual thumbnail/proxy job, ffprobe-normalized descriptor, and
-      independently verified output hash/byte count. Handle cancel, retry, Worker
-      loss, cleanup, and explicit sync handoff without leaking temporary paths.
+- [x] **WP-14.3 — Real Worker derivative.** Added `asset.thumbnail`: a
+      Worker-local opaque asset registry resolves the source only inside the
+      Worker; FFmpeg creates one bounded JPEG thumbnail; FFprobe normalizes its
+      descriptor; and the Worker re-reads the output for SHA-256/byte count before
+      atomically retaining it under an opaque local reference. The API leases the
+      job only to a Worker advertising that opaque asset ID, persists the safe
+      receipt across PostgreSQL restart, and preserves the binding through retry.
+      Focused real-FFmpeg fixture, cancellation/cleanup, real HTTP, and durable
+      restart tests pass. **Not yet verified:** a production Worker registry,
+      deployed migration/API, OPFS handoff, object-store sync, or browser playback.
 - [ ] **WP-14.4 — Authorized resolver transport.** Implement the selected
       OPFS-first/private-object-store resolver and test origin/owner/revocation/
       integrity boundaries. No public URL, implicit cross-origin access, or direct

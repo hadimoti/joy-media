@@ -14,7 +14,10 @@ export class WorkerDaemon {
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
-    await this.client.hello(this.runtime.hello(process.platform, process.arch).capabilities);
+    await this.client.hello(
+      this.runtime.hello(process.platform, process.arch).capabilities,
+      this.runtime.localAssetIds(),
+    );
     while (!options.stopped()) {
       try {
         const job = await this.client.lease();
@@ -23,7 +26,7 @@ export class WorkerDaemon {
           continue;
         }
         let cancelRequested = false;
-        const result = await this.runtime.run(job.id, {
+        const result = await this.runtime.run(job, {
           cancelled: () => options.stopped() || cancelRequested,
           progress: async (progress) => {
             const heartbeat = await this.client.heartbeat(job.id, progress);

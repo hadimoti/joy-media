@@ -3,6 +3,7 @@ import {
   ControlPlaneError,
   type AssetRegistration,
   type Actor,
+  type AssetThumbnailReceipt,
   type ControlPlane,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
@@ -37,6 +38,7 @@ interface WorkerRow {
   readonly session_token_hash: string | null;
   readonly session_expires_at: Date | null;
   readonly capabilities: readonly string[];
+  readonly local_asset_ids: readonly string[];
   readonly last_seen_at: Date | null;
 }
 
@@ -51,6 +53,7 @@ interface JobRow {
   readonly id: string;
   readonly project_id: string;
   readonly type: string;
+  readonly asset_id: string | null;
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
@@ -62,6 +65,11 @@ interface JobRow {
   readonly result_ref: string | null;
   readonly result_worker_ref: string | null;
   readonly result_verified_at: Date | null;
+  readonly result_asset_id: string | null;
+  readonly result_local_ref: string | null;
+  readonly result_mime_type: string | null;
+  readonly result_width: number | null;
+  readonly result_height: number | null;
   readonly error: string | null;
 }
 
@@ -298,7 +306,14 @@ export class PostgresControlPlane implements ControlPlane {
       [workerId, actor.id, pairingCodeHash, new Date(now)],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PAIRING_CODE_INVALID', workerId);
-    return { id: workerId, ownerId: actor.id, paired: false, revoked: false, capabilities: [] };
+    return {
+      id: workerId,
+      ownerId: actor.id,
+      paired: false,
+      revoked: false,
+      capabilities: [],
+      localAssetIds: [],
+    };
   }
 
   async claimWorkerSession(
@@ -343,12 +358,19 @@ export class PostgresControlPlane implements ControlPlane {
   async helloWorker(
     workerId: string,
     capabilities: readonly string[],
+    localAssetIds: readonly string[] = [],
     now = Date.now(),
   ): Promise<WorkerRecord> {
+    const assets = normalizeOpaqueAssetIds(localAssetIds);
     const result = await this.pool.query<WorkerRow>(
-      `UPDATE workers SET capabilities = $2::jsonb, last_seen_at = $3
+      `UPDATE workers SET capabilities = $2::jsonb, local_asset_ids = $3::jsonb, last_seen_at = $4
        WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
-      [workerId, JSON.stringify([...new Set(capabilities)].sort()), new Date(now)],
+      [
+        workerId,
+        JSON.stringify([...new Set(capabilities)].sort()),
+        JSON.stringify(assets),
+        new Date(now),
+      ],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
     return workerOf(result.rows[0]);
@@ -371,6 +393,11 @@ export class PostgresControlPlane implements ControlPlane {
     type: string,
     now = Date.now(),
   ): Promise<Job> {
+    if (type === 'asset.thumbnail')
+      throw new ControlPlaneError(
+        'ASSET_JOB_INVALID',
+        'asset thumbnail requires an opaque asset ID',
+      );
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
       try {
@@ -378,6 +405,30 @@ export class PostgresControlPlane implements ControlPlane {
           `INSERT INTO jobs (id, project_id, type, state, lease_owner, lease_expires_at)
            VALUES ($1, $2, $3, 'queued', NULL, NULL) RETURNING *`,
           [id, projectId, type],
+        );
+        const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
+        await this.event(client, id, 'queued', now);
+        return job;
+      } catch (error) {
+        throw databaseError(error, 'JOB_EXISTS', id);
+      }
+    });
+  }
+
+  async enqueueAssetThumbnail(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    assetId: string,
+    now = Date.now(),
+  ): Promise<Job> {
+    return this.transaction(async (client) => {
+      await this.asset(actor, projectId, assetId, client);
+      try {
+        const result = await client.query<JobRow>(
+          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, 'asset.thumbnail', $3, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, assetId],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -396,13 +447,21 @@ export class PostgresControlPlane implements ControlPlane {
       );
       if (worker.rows[0] === undefined)
         throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
+      const workerRecord = workerOf(worker.rows[0]);
       const candidate = await client.query<JobRow>(
         `SELECT * FROM jobs
-         WHERE state = 'queued' OR (state = 'leased' AND lease_expires_at <= $1)
-         ORDER BY id LIMIT 1 FOR UPDATE${this.#skipLocked ? ' SKIP LOCKED' : ''}`,
+         WHERE (state = 'queued' OR (state = 'leased' AND lease_expires_at <= $1))
+         ORDER BY id LIMIT 64 FOR UPDATE${this.#skipLocked ? ' SKIP LOCKED' : ''}`,
         [new Date(now)],
       );
-      const job = candidate.rows[0];
+      // Keep opaque-locality matching in the Worker/control-plane domain; this
+      // also keeps the durable contract executable in pg-mem without changing
+      // PostgreSQL's queue lock semantics.
+      const job = candidate.rows.find(
+        (item) =>
+          item.type !== 'asset.thumbnail' ||
+          (item.asset_id !== null && workerRecord.localAssetIds.includes(item.asset_id)),
+      );
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
@@ -454,15 +513,18 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
     receipt?: WorkerResultReceipt,
   ): Promise<Job> {
-    if (receipt !== undefined && !isFixtureReceipt(receipt))
+    if (receipt !== undefined && !isWorkerReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
              result_kind = $4, result_sha256 = $5, result_bytes = $6,
-             result_ref = $7, result_worker_ref = $8, result_verified_at = $9
+             result_ref = $7, result_worker_ref = $8, result_verified_at = $9,
+             result_asset_id = $10, result_local_ref = $11, result_mime_type = $12,
+             result_width = $13, result_height = $14
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
+           AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
          RETURNING *`,
         [
           jobId,
@@ -474,6 +536,11 @@ export class PostgresControlPlane implements ControlPlane {
           receipt === undefined ? null : `derivative:${jobId}`,
           receipt === undefined ? null : workerId,
           receipt === undefined ? null : new Date(now),
+          receipt?.kind === 'asset.thumbnail' ? receipt.assetId : null,
+          receipt?.kind === 'asset.thumbnail' ? receipt.localRef : null,
+          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.mimeType : null,
+          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.width : null,
+          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.height : null,
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -526,7 +593,9 @@ export class PostgresControlPlane implements ControlPlane {
         `UPDATE jobs SET state = 'queued', progress = 0, cancel_requested = false,
              lease_owner = NULL, lease_expires_at = NULL, result_kind = NULL,
              result_sha256 = NULL, result_bytes = NULL, result_ref = NULL,
-             result_worker_ref = NULL, result_verified_at = NULL, error = NULL
+             result_worker_ref = NULL, result_verified_at = NULL, result_asset_id = NULL,
+             result_local_ref = NULL, result_mime_type = NULL, result_width = NULL,
+             result_height = NULL, error = NULL
          WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
@@ -650,6 +719,7 @@ function workerOf(row: WorkerRow): WorkerRecord {
     paired: row.revoked_at === null,
     revoked: row.revoked_at !== null,
     capabilities: row.capabilities,
+    localAssetIds: row.local_asset_ids,
     ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at.getTime() }),
   };
 }
@@ -659,6 +729,7 @@ function jobOf(row: JobRow): Job {
     id: row.id,
     projectId: row.project_id,
     type: row.type,
+    ...(row.asset_id === null ? {} : { assetId: row.asset_id }),
     state: row.state,
     progress: row.progress,
     cancelRequested: row.cancel_requested,
@@ -672,18 +743,39 @@ function jobOf(row: JobRow): Job {
     row.result_verified_at === null
       ? {}
       : {
-          derivative: {
-            jobId: row.id,
-            kind: row.result_kind as WorkerResultReceipt['kind'],
-            sha256: row.result_sha256,
-            bytes: row.result_bytes,
-            resultRef: row.result_ref,
-            workerRef: row.result_worker_ref,
-            verifiedAt: row.result_verified_at.getTime(),
-          },
+          derivative: derivativeOfRow(row),
         }),
     ...(row.error === null ? {} : { error: row.error }),
   };
+}
+
+function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
+  const base = {
+    jobId: row.id,
+    sha256: row.result_sha256!,
+    bytes: row.result_bytes!,
+    resultRef: row.result_ref!,
+    workerRef: row.result_worker_ref!,
+    verifiedAt: row.result_verified_at!.getTime(),
+  };
+  if (row.result_kind === 'fixture.thumbnail') return { ...base, kind: row.result_kind };
+  if (
+    row.result_kind === 'asset.thumbnail' &&
+    row.result_asset_id !== null &&
+    row.result_local_ref !== null &&
+    row.result_mime_type === 'image/jpeg' &&
+    row.result_width !== null &&
+    row.result_height !== null
+  ) {
+    return {
+      ...base,
+      kind: row.result_kind,
+      assetId: row.result_asset_id,
+      localRef: row.result_local_ref,
+      descriptor: { mimeType: 'image/jpeg', width: row.result_width, height: row.result_height },
+    };
+  }
+  throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
 }
 
 function mediaAssetOf(row: MediaAssetRow): MediaAssetRecord {
@@ -735,12 +827,44 @@ function jsonArray(value: unknown): readonly unknown[] {
   return value;
 }
 
-function isFixtureReceipt(value: WorkerResultReceipt): boolean {
+function isFixtureReceipt(
+  value: WorkerResultReceipt,
+): value is WorkerResultReceipt & { readonly kind: 'fixture.thumbnail' } {
   return (
     value.kind === 'fixture.thumbnail' &&
     value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
     value.bytes === FIXTURE_THUMBNAIL_BYTES
   );
+}
+
+function isWorkerReceipt(value: WorkerResultReceipt): boolean {
+  return isFixtureReceipt(value) || isAssetThumbnailReceipt(value);
+}
+
+function isAssetThumbnailReceipt(value: WorkerResultReceipt): value is AssetThumbnailReceipt {
+  return (
+    value.kind === 'asset.thumbnail' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 100 &&
+    /^thumb-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    value.descriptor.mimeType === 'image/jpeg' &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    value.descriptor.width > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    value.descriptor.height > 0
+  );
+}
+
+function normalizeOpaqueAssetIds(values: readonly string[]): readonly string[] {
+  if (
+    values.length > 1_000 ||
+    values.some((value) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value))
+  ) {
+    throw new ControlPlaneError('WORKER_ASSETS_INVALID', 'Worker asset IDs must be opaque');
+  }
+  return [...new Set(values)].sort();
 }
 
 function databaseError(error: unknown, duplicateCode: string, id: string): ControlPlaneError {

@@ -124,6 +124,7 @@ async function route(
         data: await options.controlPlane.helloWorker(
           decodeURIComponent(workerId),
           requiredStringArray(body, 'capabilities'),
+          optionalStringArray(body, 'assetIds') ?? [],
         ),
       });
       return;
@@ -155,7 +156,7 @@ async function route(
         decodeURIComponent(workerId),
         decodeURIComponent(workerCompleteMatch![2]!),
         undefined,
-        optionalFixtureReceipt(await readJson(request)),
+        optionalWorkerResult(await readJson(request)),
       ),
     });
     return;
@@ -277,13 +278,22 @@ async function route(
   }
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
+    const type = requiredString(body, 'type');
     respondJson(response, 201, {
-      data: await options.controlPlane.enqueue(
-        actor,
-        requiredString(body, 'id'),
-        decodeURIComponent(jobMatch[1]!),
-        requiredString(body, 'type'),
-      ),
+      data:
+        type === 'asset.thumbnail'
+          ? await options.controlPlane.enqueueAssetThumbnail(
+              actor,
+              requiredString(body, 'id'),
+              decodeURIComponent(jobMatch[1]!),
+              requiredString(body, 'assetId'),
+            )
+          : await options.controlPlane.enqueue(
+              actor,
+              requiredString(body, 'id'),
+              decodeURIComponent(jobMatch[1]!),
+              type,
+            ),
     });
     return;
   }
@@ -376,26 +386,76 @@ function requiredStringArray(body: Record<string, unknown>, field: string): read
   return value;
 }
 
-function optionalFixtureReceipt(
+function optionalStringArray(
   body: Record<string, unknown>,
-):
+  field: string,
+): readonly string[] | undefined {
+  if (body[field] === undefined) return undefined;
+  return requiredStringArray(body, field);
+}
+
+function optionalWorkerResult(body: Record<string, unknown>):
   | { readonly kind: 'fixture.thumbnail'; readonly sha256: string; readonly bytes: number }
+  | {
+      readonly kind: 'asset.thumbnail';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: 'image/jpeg';
+        readonly width: number;
+        readonly height: number;
+      };
+    }
   | undefined {
   const value = body.result;
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new ControlPlaneError('REQUEST_INVALID', 'result must be an object');
   const result = value as Record<string, unknown>;
+  if (result.kind === 'fixture.thumbnail' && isReceiptHashAndBytes(result)) {
+    return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
+  }
+  const descriptor = result.descriptor;
   if (
-    result.kind !== 'fixture.thumbnail' ||
-    typeof result.sha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(result.sha256) ||
-    typeof result.bytes !== 'number' ||
-    !Number.isSafeInteger(result.bytes) ||
-    result.bytes <= 0
-  )
+    result.kind !== 'asset.thumbnail' ||
+    typeof result.assetId !== 'string' ||
+    typeof result.localRef !== 'string' ||
+    !isReceiptHashAndBytes(result) ||
+    descriptor === null ||
+    typeof descriptor !== 'object' ||
+    Array.isArray(descriptor) ||
+    (descriptor as Record<string, unknown>).mimeType !== 'image/jpeg' ||
+    !Number.isSafeInteger((descriptor as Record<string, unknown>).width) ||
+    !Number.isSafeInteger((descriptor as Record<string, unknown>).height)
+  ) {
     throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
-  return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
+  }
+  return {
+    kind: result.kind,
+    assetId: result.assetId,
+    sha256: result.sha256,
+    bytes: result.bytes,
+    localRef: result.localRef,
+    descriptor: {
+      mimeType: 'image/jpeg',
+      width: (descriptor as Record<string, unknown>).width as number,
+      height: (descriptor as Record<string, unknown>).height as number,
+    },
+  };
+}
+
+function isReceiptHashAndBytes(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & { readonly sha256: string; readonly bytes: number } {
+  return (
+    typeof value.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    typeof value.bytes === 'number' &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0
+  );
 }
 
 function optionalCursor(value: string | null): number {

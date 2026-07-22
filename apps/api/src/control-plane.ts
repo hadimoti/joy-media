@@ -82,6 +82,8 @@ export interface WorkerRecord {
   readonly paired: boolean;
   readonly revoked: boolean;
   readonly capabilities: readonly string[];
+  /** Opaque asset IDs present on the Worker; never local paths. */
+  readonly localAssetIds: readonly string[];
   readonly lastSeenAt?: number;
 }
 export interface WorkerPairingOffer {
@@ -96,6 +98,7 @@ export interface Job {
   readonly id: string;
   readonly projectId: string;
   readonly type: string;
+  readonly assetId?: string;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly leaseOwner?: string;
   readonly leaseExpiresAt?: number;
@@ -105,22 +108,36 @@ export interface Job {
   readonly derivative?: DerivativeRecord;
   readonly error?: string;
 }
-export interface WorkerResultReceipt {
+export interface FixtureThumbnailReceipt {
   /** A receipt only: local paths and media bytes never leave the Worker. */
   readonly kind: 'fixture.thumbnail';
   readonly sha256: string;
   readonly bytes: number;
 }
+export interface AssetThumbnailReceipt {
+  /** A verified local thumbnail result; `localRef` is opaque and Worker-local. */
+  readonly kind: 'asset.thumbnail';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: 'image/jpeg';
+    readonly width: number;
+    readonly height: number;
+  };
+}
+export type WorkerResultReceipt = FixtureThumbnailReceipt | AssetThumbnailReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
  */
-export interface DerivativeRecord extends WorkerResultReceipt {
+export type DerivativeRecord = WorkerResultReceipt & {
   readonly jobId: string;
   readonly workerRef: string;
   readonly resultRef: string;
   readonly verifiedAt: number;
-}
+};
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
 export interface JobEvent {
@@ -195,6 +212,7 @@ export interface ControlPlane {
   helloWorker(
     workerId: string,
     capabilities: readonly string[],
+    localAssetIds?: readonly string[],
     now?: number,
   ): WorkerRecord | Promise<WorkerRecord>;
   revokeWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
@@ -203,6 +221,13 @@ export interface ControlPlane {
     id: string,
     projectId: string,
     type: string,
+    now?: number,
+  ): Job | Promise<Job>;
+  enqueueAssetThumbnail(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    assetId: string,
     now?: number,
   ): Job | Promise<Job>;
   lease(
@@ -359,6 +384,7 @@ export class LocalControlPlane implements ControlPlane {
       paired: true,
       revoked: false,
       capabilities: [],
+      localAssetIds: [],
     };
     this.#workers.set(workerId, worker);
     return worker;
@@ -384,7 +410,14 @@ export class LocalControlPlane implements ControlPlane {
     if (offer === undefined || offer.expiresAt <= now || offer.pairingCodeHash !== pairingCodeHash)
       throw new ControlPlaneError('PAIRING_CODE_INVALID', workerId);
     this.#pairingOffers.set(workerId, { ...offer, ownerId: actor.id });
-    return { id: workerId, ownerId: actor.id, paired: false, revoked: false, capabilities: [] };
+    return {
+      id: workerId,
+      ownerId: actor.id,
+      paired: false,
+      revoked: false,
+      capabilities: [],
+      localAssetIds: [],
+    };
   }
   claimWorkerSession(
     workerId: string,
@@ -408,6 +441,7 @@ export class LocalControlPlane implements ControlPlane {
       paired: true,
       revoked: false,
       capabilities: [],
+      localAssetIds: [],
     });
     this.#workerSessions.set(sessionTokenHash, { workerId, expiresAt });
     return { workerId, expiresAt };
@@ -418,11 +452,21 @@ export class LocalControlPlane implements ControlPlane {
     const worker = this.#workers.get(session.workerId);
     return worker === undefined || worker.revoked ? undefined : worker.id;
   }
-  helloWorker(workerId: string, capabilities: readonly string[], now = Date.now()): WorkerRecord {
+  helloWorker(
+    workerId: string,
+    capabilities: readonly string[],
+    localAssetIds: readonly string[] = [],
+    now = Date.now(),
+  ): WorkerRecord {
     const worker = this.#workers.get(workerId);
     if (worker === undefined || worker.revoked)
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
-    const next = { ...worker, capabilities: [...new Set(capabilities)].sort(), lastSeenAt: now };
+    const next = {
+      ...worker,
+      capabilities: [...new Set(capabilities)].sort(),
+      localAssetIds: validatedOpaqueIds(localAssetIds),
+      lastSeenAt: now,
+    };
     this.#workers.set(workerId, next);
     return next;
   }
@@ -436,7 +480,36 @@ export class LocalControlPlane implements ControlPlane {
   }
   enqueue(actor: Actor, id: string, projectId: string, type: string, now = Date.now()): Job {
     this.project(actor, projectId);
+    if (type === 'asset.thumbnail')
+      throw new ControlPlaneError(
+        'ASSET_JOB_INVALID',
+        'asset thumbnail requires an opaque asset ID',
+      );
     const job: Job = { id, projectId, type, state: 'queued', progress: 0, cancelRequested: false };
+    this.#jobs.set(id, job);
+    this.event(id, 'queued', now);
+    return job;
+  }
+  enqueueAssetThumbnail(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    assetId: string,
+    now = Date.now(),
+  ): Job {
+    this.project(actor, projectId);
+    const asset = this.#assets.get(assetId);
+    if (asset === undefined || asset.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const job: Job = {
+      id,
+      projectId,
+      type: 'asset.thumbnail',
+      assetId,
+      state: 'queued',
+      progress: 0,
+      cancelRequested: false,
+    };
     this.#jobs.set(id, job);
     this.event(id, 'queued', now);
     return job;
@@ -447,10 +520,11 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
     const job = [...this.#jobs.values()].find(
       (item) =>
-        item.state === 'queued' ||
-        (item.state === 'leased' &&
-          item.leaseExpiresAt !== undefined &&
-          item.leaseExpiresAt <= now),
+        isWorkerCompatible(worker, item) &&
+        (item.state === 'queued' ||
+          (item.state === 'leased' &&
+            item.leaseExpiresAt !== undefined &&
+            item.leaseExpiresAt <= now)),
     );
     if (job === undefined) return undefined;
     const leased: Job = {
@@ -483,6 +557,11 @@ export class LocalControlPlane implements ControlPlane {
   complete(workerId: string, jobId: string, now = Date.now(), receipt?: WorkerResultReceipt): Job {
     const job = this.ownedLease(workerId, jobId, now);
     if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (
+      job.type === 'asset.thumbnail' &&
+      (!isAssetThumbnailReceipt(receipt) || receipt.assetId !== job.assetId)
+    )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
@@ -538,6 +617,7 @@ export class LocalControlPlane implements ControlPlane {
       id: job.id,
       projectId: job.projectId,
       type: job.type,
+      ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -589,12 +669,51 @@ export class LocalControlPlane implements ControlPlane {
   }
 }
 
-function isFixtureReceipt(value: WorkerResultReceipt | undefined): value is WorkerResultReceipt {
+function isFixtureReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is FixtureThumbnailReceipt {
   return (
     value?.kind === 'fixture.thumbnail' &&
     value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
     value.bytes === FIXTURE_THUMBNAIL_BYTES
   );
+}
+
+function isAssetThumbnailReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is AssetThumbnailReceipt {
+  return (
+    value?.kind === 'asset.thumbnail' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 100 &&
+    /^thumb-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    value.descriptor.mimeType === 'image/jpeg' &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    value.descriptor.width > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    value.descriptor.height > 0
+  );
+}
+
+function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
+  return (
+    job.type !== 'asset.thumbnail' ||
+    (job.assetId !== undefined &&
+      worker.capabilities.includes('asset.thumbnail') &&
+      worker.localAssetIds.includes(job.assetId))
+  );
+}
+
+function validatedOpaqueIds(values: readonly string[]): readonly string[] {
+  if (
+    values.length > 1_000 ||
+    values.some((value) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value))
+  ) {
+    throw new ControlPlaneError('WORKER_ASSETS_INVALID', 'Worker asset IDs must be opaque');
+  }
+  return [...new Set(values)].sort();
 }
 
 function derivativeOf(

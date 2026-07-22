@@ -1,10 +1,11 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   BoundedLog,
   JsonFileWorkerStore,
+  StaticLocalAssetSourceRegistry,
   WorkerRuntime,
   detectMediaTools,
   getDeviceIdentity,
@@ -37,8 +38,100 @@ describe('Worker runtime', () => {
       { ffmpeg: true, ffprobe: true },
     );
     expect(
-      (await runtime.run('j', { cancelled: () => true, progress: async () => undefined })).state,
+      (
+        await runtime.run(
+          { id: 'j', type: 'asset.thumbnail', assetId: 'asset-1' },
+          { cancelled: () => true, progress: async () => undefined },
+        )
+      ).state,
     ).toBe('canceled');
+  });
+  it('creates a real bounded JPEG thumbnail and retains only an opaque local reference', async () => {
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-derivatives-'));
+    const source = join(
+      process.cwd(),
+      'apps',
+      'editor-web',
+      'public',
+      'media',
+      'reference',
+      'asset-intro.mp4',
+    );
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true },
+      {
+        sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
+        derivativeDirectory,
+      },
+    );
+    try {
+      const updates: number[] = [];
+      const result = await runtime.run(
+        { id: 'job-real', type: 'asset.thumbnail', assetId: 'asset-intro' },
+        {
+          cancelled: () => false,
+          progress: async (progress) => {
+            updates.push(progress);
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        state: 'completed',
+        result: {
+          kind: 'asset.thumbnail',
+          assetId: 'asset-intro',
+          descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
+        },
+      });
+      if (result.state !== 'completed') throw new Error('real thumbnail was unexpectedly canceled');
+      expect(result.result.bytes).toBeGreaterThan(100);
+      expect(result.result.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.result.localRef).toMatch(/^thumb-job-real-[a-f0-9]{16}$/);
+      expect(existsSync(join(derivativeDirectory, `${result.result.localRef}.jpg`))).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(source);
+      expect(updates).toEqual([5, 25, 75, 90, 100]);
+    } finally {
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+    }
+  });
+  it('cancels an in-flight real thumbnail and leaves no derivative behind', async () => {
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-canceled-'));
+    const source = join(
+      process.cwd(),
+      'apps',
+      'editor-web',
+      'public',
+      'media',
+      'reference',
+      'asset-intro.mp4',
+    );
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true },
+      {
+        sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
+        derivativeDirectory,
+      },
+    );
+    let canceled = false;
+    try {
+      await expect(
+        runtime.run(
+          { id: 'job-canceled', type: 'asset.thumbnail', assetId: 'asset-intro' },
+          {
+            cancelled: () => canceled,
+            progress: async (progress) => {
+              if (progress === 25) canceled = true;
+            },
+          },
+        ),
+      ).resolves.toEqual({ state: 'canceled' });
+      expect(existsSync(derivativeDirectory)).toBe(true);
+      expect(readdirSync(derivativeDirectory)).toEqual([]);
+    } finally {
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+    }
   });
   it('persists identity, Worker session, and a pending pairing separately from project data', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');
