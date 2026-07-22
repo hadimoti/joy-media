@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
 
 function memoryStorage() {
@@ -7,6 +8,13 @@ function memoryStorage() {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
   };
+}
+
+function json(status: number, value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 describe('control-plane project binding', () => {
@@ -60,5 +68,43 @@ describe('control-plane project binding', () => {
         () => 'recovered-project',
       ),
     ).toMatchObject({ controlPlaneProjectId: 'project-recovered-project' });
+  });
+
+  it('reopens the same owner-scoped job history through the persisted binding', async () => {
+    const storage = memoryStorage();
+    const requests: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === 'https://joyteam.ir/identity')
+        return json(200, { access_token: 'assertion', expires_in: 300 });
+      return json(200, { data: [{ id: 'job-1', state: 'queued' }] });
+    };
+    const first = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-edit-1', title: 'Campaign cut' },
+      () => 'opaque-project-1',
+    );
+    const reopened = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-edit-1', title: 'Campaign cut' },
+      () => 'must-not-be-used',
+    );
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        'https://joyteam.ir/identity',
+      );
+      await expect(client.jobs(reopened.controlPlaneProjectId)).resolves.toMatchObject([
+        { id: 'job-1', state: 'queued' },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(reopened.controlPlaneProjectId).toBe(first.controlPlaneProjectId);
+    expect(requests).toContain(
+      `https://media.joyteam.ir/api/v1/projects/${first.controlPlaneProjectId}/jobs`,
+    );
   });
 });

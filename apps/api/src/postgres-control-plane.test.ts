@@ -48,6 +48,25 @@ describe('PostgresControlPlane', () => {
       { type: 'leased' },
       { type: 'completed' },
     ]);
+    const afterCompletionRestart = new PostgresControlPlane(pool, { skipLocked: false });
+    await expect(afterCompletionRestart.jobsForProject(owner, 'project-1')).resolves.toMatchObject([
+      {
+        id: 'job-1',
+        state: 'completed',
+        derivative: {
+          jobId: 'job-1',
+          resultRef: 'derivative:job-1',
+          workerRef: 'worker-1',
+          verifiedAt: 102,
+        },
+      },
+    ]);
+    await afterCompletionRestart.retry(owner, 'project-1', 'job-1', 103);
+    await expect(afterCompletionRestart.jobsForProject(owner, 'project-1')).resolves.toEqual([
+      expect.objectContaining({ id: 'job-1', state: 'queued', progress: 0 }),
+    ]);
+    const retried = await afterCompletionRestart.jobsForProject(owner, 'project-1');
+    expect(retried[0]?.derivative).toBeUndefined();
     await pool.end();
   });
 

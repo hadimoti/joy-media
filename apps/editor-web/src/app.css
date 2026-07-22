@@ -181,6 +181,33 @@ label {
   padding: 0.35rem 0;
   border-top: 1px solid #303a56;
 }
+.jobs-list li.job-queued {
+  border-left: 3px solid #9fb0c8;
+}
+.jobs-list li.job-leased {
+  border-left: 3px solid #e9b949;
+}
+.jobs-list li.job-completed {
+  border-left: 3px solid #64c48c;
+}
+.jobs-list li.job-canceled,
+.jobs-list li.job-failed,
+.jobs-workers li.worker-revoked,
+.jobs-workers li.worker-disconnected {
+  border-left: 3px solid #d37a7a;
+}
+.jobs-workers li.worker-connected {
+  border-left: 3px solid #64c48c;
+}
+.jobs-list li,
+.jobs-workers li {
+  padding-left: 0.45rem;
+}
+.job-derivative {
+  color: #64c48c;
+  font-size: 0.8rem;
+  margin-top: 0.2rem;
+}
 .jobs-status {
   color: #9fb0c8;
   margin: 0;

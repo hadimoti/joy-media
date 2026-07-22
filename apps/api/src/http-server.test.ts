@@ -165,6 +165,10 @@ describe('control-plane HTTP transport', () => {
       status: 200,
       body: { data: { id: 'w', revoked: true } },
     });
+    expect(await request(origin, 'GET', '/v1/workers')).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'w', revoked: true }] },
+    });
     expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
       status: 401,
       body: { error: { code: 'WORKER_SESSION_REQUIRED' } },

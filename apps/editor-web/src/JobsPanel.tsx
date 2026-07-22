@@ -4,6 +4,7 @@ import {
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
+import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
 
 export function JobsPanel({
   projectId,
@@ -17,6 +18,7 @@ export function JobsPanel({
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
   const [workerId, setWorkerId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
+  const [projectInitialized, setProjectInitialized] = useState(false);
   const [status, setStatus] = useState('Checking JOY Media connection…');
   const refresh = useCallback(async () => {
     try {
@@ -33,15 +35,8 @@ export function JobsPanel({
       }
       setWorkers(nextWorkers);
       setJobs(nextJobs);
-      setStatus(
-        projectMissing
-          ? nextWorkers.some(isConnected)
-            ? 'Connected Worker available — queue a fixture to initialize this project.'
-            : 'No connected Worker — queue a fixture to initialize this project.'
-          : nextWorkers.some(isConnected)
-            ? 'Connected Worker available'
-            : 'No connected Worker',
-      );
+      setProjectInitialized(!projectMissing);
+      setStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
       setStatus(`Offline or not signed in: ${message(error)}`);
     }
@@ -61,15 +56,30 @@ export function JobsPanel({
       setStatus(`Pairing failed: ${message(error)}`);
     }
   };
-  const submit = async () => {
+  const initialize = async () => {
     try {
       try {
         await client.createProject(projectId, projectTitle);
       } catch (error) {
         if (!message(error).includes('PROJECT_EXISTS')) throw error;
       }
+      setProjectInitialized(true);
+      setStatus(
+        'Project initialized. You can queue a thumbnail derivative when a Worker is available.',
+      );
+      await refresh();
+    } catch (error) {
+      setStatus(`Could not initialize project: ${message(error)}`);
+    }
+  };
+  const submit = async () => {
+    if (!projectInitialized) {
+      setStatus('Initialize this project before queueing a derivative job.');
+      return;
+    }
+    try {
       await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
-      setStatus('Fixture thumbnail queued for a paired local Worker.');
+      setStatus('Thumbnail derivative queued for a paired local Worker.');
       await refresh();
     } catch (error) {
       setStatus(`Could not queue job: ${message(error)}`);
@@ -82,10 +92,28 @@ export function JobsPanel({
         {status}
       </p>
       <section className="jobs-pairing">
-        <strong>Pair local Worker</strong>
+        <h3>Project actions</h3>
+        <button type="button" onClick={() => void initialize()} disabled={projectInitialized}>
+          {projectInitialized ? 'Project initialized' : 'Initialize project'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!projectInitialized}
+          aria-label="Queue thumbnail derivative for this project"
+        >
+          Queue thumbnail derivative
+        </button>
+      </section>
+      <section className="jobs-pairing">
+        <h3>Pair local Worker</h3>
         <label>
           Worker ID
-          <input value={workerId} onChange={(event) => setWorkerId(event.target.value)} />
+          <input
+            value={workerId}
+            onChange={(event) => setWorkerId(event.target.value)}
+            aria-label="Worker ID"
+          />
         </label>
         <label>
           One-time pairing code
@@ -93,63 +121,79 @@ export function JobsPanel({
             value={pairingCode}
             onChange={(event) => setPairingCode(event.target.value)}
             autoComplete="off"
+            aria-label="One-time pairing code"
           />
         </label>
-        <button disabled={!workerId.trim() || !pairingCode.trim()} onClick={() => void pair()}>
+        <button
+          type="button"
+          disabled={!workerId.trim() || !pairingCode.trim()}
+          onClick={() => void pair()}
+        >
           Approve pairing
         </button>
       </section>
       <section>
-        <button onClick={() => void submit()}>Queue fixture thumbnail</button>
+        <h3>Paired Workers</h3>
+        <ul className="jobs-workers" aria-label="Paired Workers">
+          {workers.map((worker) => (
+            <li key={worker.id} className={`worker-${workerPresence(worker)}`}>
+              <strong>{worker.id}</strong> · {workerPresence(worker)}
+              {worker.capabilities.length > 0 && ` · ${worker.capabilities.join(', ')}`}
+              {!worker.revoked && (
+                <button
+                  type="button"
+                  onClick={() => void client.revokeWorker(worker.id).then(refresh).catch(report)}
+                >
+                  Revoke
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       </section>
-      <ul className="jobs-workers" aria-label="Paired Workers">
-        {workers.map((worker) => (
-          <li key={worker.id}>
-            <strong>{worker.id}</strong> ·{' '}
-            {worker.revoked ? 'revoked' : isConnected(worker) ? 'connected' : 'disconnected'}
-            {worker.capabilities.length > 0 && ` · ${worker.capabilities.join(', ')}`}
-            {!worker.revoked && (
-              <button
-                type="button"
-                onClick={() => void client.revokeWorker(worker.id).then(refresh).catch(report)}
-              >
-                Revoke
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-      <ul className="jobs-list" aria-label="Project jobs">
-        {jobs.map((job) => (
-          <li key={job.id}>
-            <div>
-              <strong>{job.type}</strong> · {job.state} · {job.progress}%
-              {job.cancelRequested && ' · cancel requested'}
-              {job.derivative !== undefined &&
-                ` · verified ${job.derivative.bytes} B derivative receipt`}
-              {job.error !== undefined && ` · ${job.error}`}
-            </div>
-            <div>
-              {(job.state === 'queued' || job.state === 'leased') && (
-                <button
-                  onClick={() => void client.cancel(projectId, job.id).then(refresh).catch(report)}
-                >
-                  Cancel
-                </button>
-              )}
-              {(job.state === 'canceled' ||
-                job.state === 'failed' ||
-                job.state === 'completed') && (
-                <button
-                  onClick={() => void client.retry(projectId, job.id).then(refresh).catch(report)}
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <section>
+        <h3>Project derivative jobs</h3>
+        <ul className="jobs-list" aria-label="Project derivative jobs">
+          {jobs.map((job) => (
+            <li key={job.id} className={`job-${job.state}`}>
+              <div>
+                <strong>Thumbnail derivative</strong> · <span>{jobStateLabel(job)}</span> ·{' '}
+                {job.progress}%
+                {job.derivative !== undefined && (
+                  <div className="job-derivative" aria-label="Verified derivative receipt">
+                    Verified receipt · {job.derivative.bytes} B · SHA-256{' '}
+                    {job.derivative.sha256.slice(0, 12)}… ·{' '}
+                    {new Date(job.derivative.verifiedAt).toLocaleString()}
+                  </div>
+                )}
+                {job.error !== undefined && ` · ${job.error}`}
+              </div>
+              <div>
+                {(job.state === 'queued' || job.state === 'leased') && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void client.cancel(projectId, job.id).then(refresh).catch(report)
+                    }
+                  >
+                    Cancel
+                  </button>
+                )}
+                {(job.state === 'canceled' ||
+                  job.state === 'failed' ||
+                  job.state === 'completed') && (
+                  <button
+                    type="button"
+                    onClick={() => void client.retry(projectId, job.id).then(refresh).catch(report)}
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
     </article>
   );
 
@@ -158,9 +202,6 @@ export function JobsPanel({
   }
 }
 
-function isConnected(worker: BrowserWorker): boolean {
-  return worker.lastSeenAt !== undefined && worker.lastSeenAt > Date.now() - 35_000;
-}
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
