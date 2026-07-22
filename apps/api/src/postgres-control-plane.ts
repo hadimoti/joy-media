@@ -6,7 +6,9 @@ import {
   type Job,
   type JobEvent,
   type ProjectMetadata,
+  type WorkerPairingOffer,
   type WorkerRecord,
+  type WorkerSession,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
@@ -21,6 +23,15 @@ interface WorkerRow {
   readonly id: string;
   readonly owner_id: string;
   readonly revoked_at: Date | null;
+  readonly session_token_hash: string | null;
+  readonly session_expires_at: Date | null;
+}
+
+interface PairingOfferRow {
+  readonly worker_id: string;
+  readonly pairing_code_hash: string;
+  readonly owner_id: string | null;
+  readonly expires_at: Date;
 }
 
 interface JobRow {
@@ -103,6 +114,79 @@ export class PostgresControlPlane implements ControlPlane {
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_NOT_FOUND', workerId);
     return workerOf(result.rows[0]);
+  }
+
+  async createPairingOffer(
+    workerId: string,
+    pairingCodeHash: string,
+    expiresAt: number,
+  ): Promise<WorkerPairingOffer> {
+    if (workerId.length === 0 || pairingCodeHash.length === 0 || expiresAt <= 0)
+      throw new ControlPlaneError('PAIRING_OFFER_INVALID', 'worker pairing offer is invalid');
+    await this.pool.query(
+      `INSERT INTO worker_pairing_offers (worker_id, pairing_code_hash, owner_id, expires_at)
+       VALUES ($1, $2, NULL, $3)
+       ON CONFLICT (worker_id) DO UPDATE
+       SET pairing_code_hash = EXCLUDED.pairing_code_hash, owner_id = NULL, expires_at = EXCLUDED.expires_at`,
+      [workerId, pairingCodeHash, new Date(expiresAt)],
+    );
+    return { workerId, expiresAt };
+  }
+
+  async approvePairing(
+    actor: Actor,
+    workerId: string,
+    pairingCodeHash: string,
+    now = Date.now(),
+  ): Promise<WorkerRecord> {
+    assertActor(actor);
+    const result = await this.pool.query<PairingOfferRow>(
+      `UPDATE worker_pairing_offers SET owner_id = $2
+       WHERE worker_id = $1 AND pairing_code_hash = $3 AND expires_at > $4
+       RETURNING *`,
+      [workerId, actor.id, pairingCodeHash, new Date(now)],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('PAIRING_CODE_INVALID', workerId);
+    return { id: workerId, ownerId: actor.id, paired: false, revoked: false };
+  }
+
+  async claimWorkerSession(
+    workerId: string,
+    pairingCodeHash: string,
+    sessionTokenHash: string,
+    expiresAt: number,
+    now = Date.now(),
+  ): Promise<WorkerSession | undefined> {
+    return this.transaction(async (client) => {
+      const offer = await client.query<PairingOfferRow>(
+        `DELETE FROM worker_pairing_offers
+         WHERE worker_id = $1 AND pairing_code_hash = $2 AND owner_id IS NOT NULL AND expires_at > $3
+         RETURNING *`,
+        [workerId, pairingCodeHash, new Date(now)],
+      );
+      const row = offer.rows[0];
+      if (row === undefined || row.owner_id === null) return undefined;
+      await client.query(
+        `INSERT INTO workers (id, owner_id, revoked_at, session_token_hash, session_expires_at)
+         VALUES ($1, $2, NULL, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET owner_id = EXCLUDED.owner_id, revoked_at = NULL,
+             session_token_hash = EXCLUDED.session_token_hash, session_expires_at = EXCLUDED.session_expires_at`,
+        [workerId, row.owner_id, sessionTokenHash, new Date(expiresAt)],
+      );
+      return { workerId, expiresAt };
+    });
+  }
+
+  async authenticateWorker(
+    sessionTokenHash: string,
+    now = Date.now(),
+  ): Promise<string | undefined> {
+    const result = await this.pool.query<WorkerRow>(
+      `SELECT * FROM workers
+       WHERE session_token_hash = $1 AND session_expires_at > $2 AND revoked_at IS NULL`,
+      [sessionTokenHash, new Date(now)],
+    );
+    return result.rows[0]?.id;
   }
 
   async revokeWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {

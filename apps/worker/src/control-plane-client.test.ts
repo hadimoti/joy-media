@@ -1,0 +1,179 @@
+import type { Server } from 'node:http';
+import { once } from 'node:events';
+import { describe, expect, it } from 'vitest';
+import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/api';
+import { WorkerControlPlaneClient } from './control-plane-client.js';
+
+describe('WorkerControlPlaneClient', () => {
+  it('uses a Worker-only session after the owner approves a pairing offer', async () => {
+    const requests: Array<{ readonly pathname: string; readonly authorization?: string }> = [];
+    let session: string | undefined;
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir/',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => session,
+        saveWorkerSession: (value) => {
+          session = value;
+        },
+        clearWorkerSession: () => {
+          session = undefined;
+        },
+      },
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        const authorization = new Headers(init?.headers).get('authorization') ?? undefined;
+        requests.push({
+          pathname: url.pathname,
+          ...(authorization === undefined ? {} : { authorization }),
+        });
+        if (url.pathname === '/v1/worker-pair/offers')
+          return response(201, { data: { workerId: 'worker-1', expiresAt: 1_700_000_300_000 } });
+        if (url.pathname === '/v1/worker-pair/claim')
+          return response(201, {
+            data: {
+              workerId: 'worker-1',
+              expiresAt: 1_700_000_300_000,
+              sessionToken: 'worker-session',
+            },
+          });
+        if (url.pathname.endsWith('/leases'))
+          return response(200, {
+            data: { id: 'job-1', projectId: 'project-1', type: 'asset.thumbnail' },
+          });
+        if (url.pathname.endsWith('/complete')) return response(200, { data: { id: 'job-1' } });
+        return response(404, { error: {} });
+      },
+    });
+
+    await expect(client.publishPairingOffer('pairing-code')).resolves.toBe(1_700_000_300_000);
+    await expect(client.claimPairing('pairing-code')).resolves.toBe(true);
+    await expect(client.lease()).resolves.toEqual({
+      id: 'job-1',
+      projectId: 'project-1',
+      type: 'asset.thumbnail',
+    });
+    await client.complete('job-1');
+
+    expect(requests).toEqual([
+      { pathname: '/v1/worker-pair/offers' },
+      { pathname: '/v1/worker-pair/claim' },
+      { pathname: '/v1/workers/worker-1/leases', authorization: 'Bearer worker-session' },
+      {
+        pathname: '/v1/workers/worker-1/jobs/job-1/complete',
+        authorization: 'Bearer worker-session',
+      },
+    ]);
+  });
+
+  it('does not save a session until the pairing offer is approved', async () => {
+    let saved = false;
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => undefined,
+        saveWorkerSession: () => {
+          saved = true;
+        },
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async () => response(403, { error: { code: 'PAIRING_CLAIM_DENIED' } }),
+    });
+
+    await expect(client.claimPairing('pairing-code')).resolves.toBe(false);
+    expect(saved).toBe(false);
+  });
+
+  it('clears a revoked Worker session after a 401 response', async () => {
+    let session: string | undefined = 'revoked-session';
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => session,
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => {
+          session = undefined;
+        },
+      },
+      fetch: async () => response(401, { error: { code: 'WORKER_SESSION_REQUIRED' } }),
+    });
+
+    await expect(client.lease()).rejects.toThrow('Worker session expired or was revoked');
+    expect(session).toBeUndefined();
+  });
+
+  it('pairs and completes a job over the real versioned HTTP transport', async () => {
+    const server = createControlPlaneHttpServer({
+      controlPlane: new LocalControlPlane(),
+      authentication: { authenticate: () => ({ id: 'joy-user-1' }) },
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('test API did not bind TCP');
+      const apiUrl = `http://127.0.0.1:${address.port}`;
+      let session: string | undefined;
+      const client = new WorkerControlPlaneClient({
+        apiUrl,
+        identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+        sessionStore: {
+          loadWorkerSession: () => session,
+          saveWorkerSession: (value) => {
+            session = value;
+          },
+          clearWorkerSession: () => {
+            session = undefined;
+          },
+        },
+      });
+      const pairingCode = 'pairing-code';
+      await client.publishPairingOffer(pairingCode);
+      expect(
+        await post(apiUrl, '/v1/workers/worker-1/pair', { pairingCode }, 'joy-assertion'),
+      ).toMatchObject({ status: 200 });
+      expect(await client.claimPairing(pairingCode)).toBe(true);
+      await post(apiUrl, '/v1/projects', { id: 'project-1', title: 'Reference' }, 'joy-assertion');
+      await post(
+        apiUrl,
+        '/v1/projects/project-1/jobs',
+        { id: 'job-1', type: 'asset.thumbnail' },
+        'joy-assertion',
+      );
+      await expect(client.lease()).resolves.toMatchObject({ id: 'job-1' });
+      await expect(client.complete('job-1')).resolves.toBeUndefined();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+function response(status: number, value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+async function post(
+  apiUrl: string,
+  pathname: string,
+  body: Record<string, unknown>,
+  bearerToken: string,
+): Promise<{ readonly status: number; readonly body: unknown }> {
+  const response = await fetch(`${apiUrl}${pathname}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${bearerToken}` },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+async function close(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error === undefined ? resolve() : reject(error))),
+  );
+}

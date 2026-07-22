@@ -44,21 +44,34 @@ describe('control-plane HTTP transport', () => {
       status: 201,
       body: { data: { id: 'p', revision: 0 } },
     });
-    expect(await request(origin, 'POST', '/v1/workers/w/pair')).toMatchObject({
-      status: 200,
-      body: { data: { id: 'w', paired: true, revoked: false } },
+    expect(
+      await request(origin, 'POST', '/v1/worker-pair/offers', {
+        workerId: 'w',
+        pairingCode: 'pairing-code',
+      }),
+    ).toMatchObject({ status: 201, body: { data: { workerId: 'w' } } });
+    expect(
+      await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' }),
+    ).toMatchObject({ status: 200, body: { data: { id: 'w', paired: false, revoked: false } } });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
     });
+    expect(claim).toMatchObject({ status: 201, body: { data: { workerId: 'w' } } });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
     expect(
       await request(origin, 'POST', '/v1/projects/p/jobs', { id: 'j', type: 'asset.thumbnail' }),
     ).toMatchObject({
       status: 201,
       body: { data: { id: 'j', state: 'queued' } },
     });
-    expect(await request(origin, 'POST', '/v1/workers/w/leases')).toMatchObject({
+    expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
       status: 200,
       body: { data: { id: 'j', state: 'leased', leaseOwner: 'w' } },
     });
-    expect(await request(origin, 'POST', '/v1/workers/w/jobs/j/complete')).toMatchObject({
+    expect(
+      await request(origin, 'POST', '/v1/workers/w/jobs/j/complete', {}, workerToken),
+    ).toMatchObject({
       status: 200,
       body: { data: { id: 'j', state: 'completed' } },
     });
@@ -89,12 +102,14 @@ async function request(
   method: string,
   pathname: string,
   body?: Record<string, unknown>,
+  bearerToken?: string,
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (bearerToken !== undefined) headers.authorization = `Bearer ${bearerToken}`;
   const response = await fetch(
     `${origin}${pathname}`,
-    body === undefined
-      ? { method }
-      : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    body === undefined ? { method } : { method, headers, body: JSON.stringify(body) },
   );
   return { status: response.status, body: await response.json() };
 }

@@ -13,6 +13,14 @@ export interface WorkerRecord {
   readonly paired: boolean;
   readonly revoked: boolean;
 }
+export interface WorkerPairingOffer {
+  readonly workerId: string;
+  readonly expiresAt: number;
+}
+export interface WorkerSession {
+  readonly workerId: string;
+  readonly expiresAt: number;
+}
 export interface Job {
   readonly id: string;
   readonly projectId: string;
@@ -42,6 +50,28 @@ export interface ControlPlane {
     baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
   pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
+  createPairingOffer(
+    workerId: string,
+    pairingCodeHash: string,
+    expiresAt: number,
+  ): WorkerPairingOffer | Promise<WorkerPairingOffer>;
+  approvePairing(
+    actor: Actor,
+    workerId: string,
+    pairingCodeHash: string,
+    now?: number,
+  ): WorkerRecord | Promise<WorkerRecord>;
+  claimWorkerSession(
+    workerId: string,
+    pairingCodeHash: string,
+    sessionTokenHash: string,
+    expiresAt: number,
+    now?: number,
+  ): WorkerSession | Promise<WorkerSession | undefined> | undefined;
+  authenticateWorker(
+    sessionTokenHash: string,
+    now?: number,
+  ): string | Promise<string | undefined> | undefined;
   revokeWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   enqueue(
     actor: Actor,
@@ -78,6 +108,14 @@ export class LocalControlPlane implements ControlPlane {
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
   readonly #events: JobEvent[] = [];
+  readonly #pairingOffers = new Map<
+    string,
+    { readonly pairingCodeHash: string; readonly expiresAt: number; ownerId?: string }
+  >();
+  readonly #workerSessions = new Map<
+    string,
+    { readonly workerId: string; readonly expiresAt: number }
+  >();
   createProject(actor: Actor, id: string, title: string): ProjectMetadata {
     this.auth(actor);
     if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
@@ -101,6 +139,60 @@ export class LocalControlPlane implements ControlPlane {
     const worker = { id: workerId, ownerId: actor.id, paired: true, revoked: false };
     this.#workers.set(workerId, worker);
     return worker;
+  }
+  createPairingOffer(
+    workerId: string,
+    pairingCodeHash: string,
+    expiresAt: number,
+  ): WorkerPairingOffer {
+    if (workerId.length === 0 || pairingCodeHash.length === 0 || expiresAt <= 0)
+      throw new ControlPlaneError('PAIRING_OFFER_INVALID', 'worker pairing offer is invalid');
+    this.#pairingOffers.set(workerId, { pairingCodeHash, expiresAt });
+    return { workerId, expiresAt };
+  }
+  approvePairing(
+    actor: Actor,
+    workerId: string,
+    pairingCodeHash: string,
+    now = Date.now(),
+  ): WorkerRecord {
+    this.auth(actor);
+    const offer = this.#pairingOffers.get(workerId);
+    if (offer === undefined || offer.expiresAt <= now || offer.pairingCodeHash !== pairingCodeHash)
+      throw new ControlPlaneError('PAIRING_CODE_INVALID', workerId);
+    this.#pairingOffers.set(workerId, { ...offer, ownerId: actor.id });
+    return { id: workerId, ownerId: actor.id, paired: false, revoked: false };
+  }
+  claimWorkerSession(
+    workerId: string,
+    pairingCodeHash: string,
+    sessionTokenHash: string,
+    expiresAt: number,
+    now = Date.now(),
+  ): WorkerSession | undefined {
+    const offer = this.#pairingOffers.get(workerId);
+    if (
+      offer === undefined ||
+      offer.ownerId === undefined ||
+      offer.expiresAt <= now ||
+      offer.pairingCodeHash !== pairingCodeHash
+    )
+      return undefined;
+    this.#pairingOffers.delete(workerId);
+    this.#workers.set(workerId, {
+      id: workerId,
+      ownerId: offer.ownerId,
+      paired: true,
+      revoked: false,
+    });
+    this.#workerSessions.set(sessionTokenHash, { workerId, expiresAt });
+    return { workerId, expiresAt };
+  }
+  authenticateWorker(sessionTokenHash: string, now = Date.now()): string | undefined {
+    const session = this.#workerSessions.get(sessionTokenHash);
+    if (session === undefined || session.expiresAt <= now) return undefined;
+    const worker = this.#workers.get(session.workerId);
+    return worker === undefined || worker.revoked ? undefined : worker.id;
   }
   revokeWorker(actor: Actor, workerId: string): WorkerRecord {
     const worker = this.#workers.get(workerId);

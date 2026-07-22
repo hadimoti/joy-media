@@ -1,0 +1,139 @@
+import { randomBytes } from 'node:crypto';
+import type { DeviceIdentity } from './runtime.js';
+
+export interface WorkerSessionStore {
+  loadWorkerSession(): string | undefined;
+  saveWorkerSession(sessionToken: string): void;
+  clearWorkerSession(): void;
+}
+
+export interface LeasedJob {
+  readonly id: string;
+  readonly projectId: string;
+  readonly type: string;
+}
+
+export interface WorkerControlPlaneClientOptions {
+  readonly apiUrl: string;
+  readonly identity: DeviceIdentity;
+  readonly sessionStore: WorkerSessionStore;
+  readonly fetch?: typeof fetch;
+}
+
+/** Outbound-only Worker client. It never holds a JOY user session or password. */
+export class WorkerControlPlaneClient {
+  readonly #fetch: typeof fetch;
+
+  constructor(private readonly options: WorkerControlPlaneClientOptions) {
+    this.#fetch = options.fetch ?? fetch;
+  }
+
+  static createPairingCode(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  async publishPairingOffer(pairingCode: string): Promise<number> {
+    const result = await this.request('/v1/worker-pair/offers', {
+      workerId: this.options.identity.workerId,
+      pairingCode,
+    });
+    return requiredNumber(result, 'expiresAt');
+  }
+
+  /** Returns undefined until the signed-in JOY user approves the pairing code. */
+  async claimPairing(pairingCode: string): Promise<boolean> {
+    const response = await this.request(
+      '/v1/worker-pair/claim',
+      {
+        workerId: this.options.identity.workerId,
+        pairingCode,
+      },
+      false,
+    );
+    if (response === undefined) return false;
+    this.options.sessionStore.saveWorkerSession(requiredString(response, 'sessionToken'));
+    return true;
+  }
+
+  async lease(durationMs = 30_000): Promise<LeasedJob | undefined> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/leases`,
+      { durationMs },
+    );
+    if (result === null) return undefined;
+    return {
+      id: requiredString(result, 'id'),
+      projectId: requiredString(result, 'projectId'),
+      type: requiredString(result, 'type'),
+    };
+  }
+
+  async complete(jobId: string): Promise<void> {
+    await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/complete`,
+      {},
+    );
+  }
+
+  private async authenticatedRequest(
+    pathname: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    const sessionToken = this.options.sessionStore.loadWorkerSession();
+    if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const response = await this.fetchJson(pathname, body, sessionToken);
+    if (response.status === 401) {
+      this.options.sessionStore.clearWorkerSession();
+      throw new Error('Worker session expired or was revoked');
+    }
+    if (!response.ok) throw new Error(`Worker control-plane request failed (${response.status})`);
+    return response.body;
+  }
+
+  private async request(
+    pathname: string,
+    body: Record<string, unknown>,
+    throwOnFailure = true,
+  ): Promise<unknown | undefined> {
+    const response = await this.fetchJson(pathname, body);
+    if (!response.ok) {
+      if (!throwOnFailure && response.status === 403) return undefined;
+      throw new Error(`Worker control-plane request failed (${response.status})`);
+    }
+    return response.body;
+  }
+
+  private async fetchJson(
+    pathname: string,
+    body: Record<string, unknown>,
+    sessionToken?: string,
+  ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
+    const response = await this.#fetch(`${this.options.apiUrl.replace(/\/$/, '')}${pathname}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(sessionToken === undefined ? {} : { authorization: `Bearer ${sessionToken}` }),
+      },
+      body: JSON.stringify(body),
+    });
+    const envelope: unknown = await response.json();
+    const bodyValue = isRecord(envelope) && 'data' in envelope ? envelope.data : envelope;
+    return { ok: response.ok, status: response.status, body: bodyValue };
+  }
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (!isRecord(value) || typeof value[field] !== 'string')
+    throw new Error(`Invalid Worker response: ${field}`);
+  return value[field];
+}
+
+function requiredNumber(value: unknown, field: string): number {
+  if (!isRecord(value) || typeof value[field] !== 'number')
+    throw new Error(`Invalid Worker response: ${field}`);
+  return value[field];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}

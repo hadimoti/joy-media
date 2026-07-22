@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import { ControlPlaneError, type Actor, type ControlPlane } from './control-plane.js';
 
 export interface ApiAuthentication {
@@ -40,6 +41,69 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/worker-pair/offers') {
+    const body = await readJson(request);
+    const workerId = requiredString(body, 'workerId');
+    const pairingCode = requiredString(body, 'pairingCode');
+    const expiresAt = Date.now() + 5 * 60_000;
+    respondJson(response, 201, {
+      data: await options.controlPlane.createPairingOffer(
+        workerId,
+        secretHash(pairingCode),
+        expiresAt,
+      ),
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/worker-pair/claim') {
+    const body = await readJson(request);
+    const workerId = requiredString(body, 'workerId');
+    const pairingCode = requiredString(body, 'pairingCode');
+    const sessionToken = randomBytes(32).toString('base64url');
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60_000;
+    const session = await options.controlPlane.claimWorkerSession(
+      workerId,
+      secretHash(pairingCode),
+      secretHash(sessionToken),
+      expiresAt,
+    );
+    if (session === undefined) throw new ControlPlaneError('PAIRING_CLAIM_DENIED', workerId);
+    respondJson(response, 201, { data: { ...session, sessionToken } });
+    return;
+  }
+
+  const workerLeaseMatch = /^\/v1\/workers\/([^/]+)\/leases$/.exec(url.pathname);
+  const workerCompleteMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/complete$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'POST' && (workerLeaseMatch !== null || workerCompleteMatch !== null)) {
+    const workerId = workerLeaseMatch?.[1] ?? workerCompleteMatch?.[1];
+    const sessionWorkerId = await options.controlPlane.authenticateWorker(
+      workerSessionHash(request),
+    );
+    if (workerId === undefined || sessionWorkerId !== workerId)
+      throw new ControlPlaneError('WORKER_SESSION_REQUIRED', 'worker session required');
+    if (workerLeaseMatch !== null) {
+      const body = await readJson(request);
+      const durationMs = optionalPositiveInteger(body, 'durationMs') ?? 30_000;
+      const job = await options.controlPlane.lease(
+        decodeURIComponent(workerId),
+        Date.now(),
+        durationMs,
+      );
+      respondJson(response, 200, { data: job ?? null });
+      return;
+    }
+    respondJson(response, 200, {
+      data: await options.controlPlane.complete(
+        decodeURIComponent(workerId),
+        decodeURIComponent(workerCompleteMatch![2]!),
+      ),
+    });
+    return;
+  }
+
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
 
@@ -58,8 +122,13 @@ async function route(
   const workerPairMatch = /^\/v1\/workers\/([^/]+)\/pair$/.exec(url.pathname);
   if (request.method === 'POST' && workerPairMatch !== null) {
     const [, workerId] = workerPairMatch;
+    const body = await readJson(request);
     respondJson(response, 200, {
-      data: await options.controlPlane.pairWorker(actor, decodeURIComponent(workerId!)),
+      data: await options.controlPlane.approvePairing(
+        actor,
+        decodeURIComponent(workerId!),
+        secretHash(requiredString(body, 'pairingCode')),
+      ),
     });
     return;
   }
@@ -73,30 +142,6 @@ async function route(
         requiredString(body, 'id'),
         decodeURIComponent(jobMatch[1]!),
         requiredString(body, 'type'),
-      ),
-    });
-    return;
-  }
-
-  const leaseMatch = /^\/v1\/workers\/([^/]+)\/leases$/.exec(url.pathname);
-  if (request.method === 'POST' && leaseMatch !== null) {
-    const body = await readJson(request);
-    const durationMs = optionalPositiveInteger(body, 'durationMs') ?? 30_000;
-    const job = await options.controlPlane.lease(
-      decodeURIComponent(leaseMatch[1]!),
-      Date.now(),
-      durationMs,
-    );
-    respondJson(response, 200, { data: job ?? null });
-    return;
-  }
-
-  const completeMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/complete$/.exec(url.pathname);
-  if (request.method === 'POST' && completeMatch !== null) {
-    respondJson(response, 200, {
-      data: await options.controlPlane.complete(
-        decodeURIComponent(completeMatch[1]!),
-        decodeURIComponent(completeMatch[2]!),
       ),
     });
     return;
@@ -164,9 +209,29 @@ function respondJson(response: ServerResponse, status: number, payload: unknown)
 function respondError(response: ServerResponse, error: unknown): void {
   if (error instanceof ControlPlaneError) {
     const status =
-      error.code === 'AUTH_REQUIRED' ? 401 : error.code === 'REQUEST_INVALID' ? 400 : 409;
+      error.code === 'AUTH_REQUIRED' || error.code === 'WORKER_SESSION_REQUIRED'
+        ? 401
+        : error.code === 'REQUEST_INVALID'
+          ? 400
+          : error.code.startsWith('PAIRING_')
+            ? 403
+            : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }
   respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
+}
+
+function bearerToken(request: IncomingMessage): string | undefined {
+  const value = request.headers.authorization;
+  return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice(7) : undefined;
+}
+
+function workerSessionHash(request: IncomingMessage): string {
+  const token = bearerToken(request);
+  return token === undefined ? '' : secretHash(token);
+}
+
+function secretHash(value: string): string {
+  return createHash('sha256').update(value).digest('base64url');
 }

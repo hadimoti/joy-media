@@ -1,5 +1,14 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BoundedLog, WorkerRuntime, detectMediaTools, getDeviceIdentity } from './runtime.js';
+import {
+  BoundedLog,
+  JsonFileWorkerStore,
+  WorkerRuntime,
+  detectMediaTools,
+  getDeviceIdentity,
+} from './runtime.js';
 describe('Worker runtime', () => {
   it('persists device identity and advertises only detected capabilities', () => {
     let saved: ReturnType<typeof getDeviceIdentity> | undefined;
@@ -28,5 +37,18 @@ describe('Worker runtime', () => {
       { ffmpeg: true, ffprobe: true },
     );
     expect(runtime.run('j', () => true).state).toBe('canceled');
+  });
+  it('persists identity and Worker session separately from the project data', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');
+    const store = new JsonFileWorkerStore(path);
+    const identity = getDeviceIdentity(store, new Date('2026-07-22T00:00:00.000Z'));
+    store.saveWorkerSession('worker-session');
+
+    const restarted = new JsonFileWorkerStore(path);
+    expect(restarted.load()).toEqual(identity);
+    expect(restarted.loadWorkerSession()).toBe('worker-session');
+    restarted.clearWorkerSession();
+    expect(restarted.load()).toEqual(identity);
+    expect(restarted.loadWorkerSession()).toBeUndefined();
   });
 });

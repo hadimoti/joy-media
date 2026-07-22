@@ -13,7 +13,16 @@ describe('PostgresControlPlane', () => {
     const owner = { id: 'joy-user-1' };
 
     await first.createProject(owner, 'project-1', 'Reference');
-    await first.pairWorker(owner, 'worker-1');
+    await first.createPairingOffer('worker-1', 'pairing-hash', 10_000);
+    await expect(
+      first.approvePairing(owner, 'worker-1', 'pairing-hash', 100),
+    ).resolves.toMatchObject({
+      paired: false,
+    });
+    await expect(
+      first.claimWorkerSession('worker-1', 'pairing-hash', 'session-hash', 20_000, 101),
+    ).resolves.toMatchObject({ workerId: 'worker-1' });
+    await expect(first.authenticateWorker('session-hash', 102)).resolves.toBe('worker-1');
     await first.enqueue(owner, 'job-1', 'project-1', 'asset.thumbnail', 100);
     await expect(first.lease('worker-1', 101, 30_000)).resolves.toMatchObject({
       id: 'job-1',
