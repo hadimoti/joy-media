@@ -73,9 +73,11 @@ authorization to upload all original source media or to make sharing public.
       HTTP coverage proves sync-off cleanup and sync-on private bytes. The owner approved ParsPack's private
       S3-compatible `c212734` bucket and isolated `sweden-backups/joy-media/`
       prefix; existing VPS backups remain separate and a one-object
-      write/read/delete probe passed. Its root-owned rclone credential is not
-      yet configured for the JOY Media API/Worker. **Still required:** configure/deploy
-      the VPS API with its root-owned rclone credential and run the real media gate.
+      write/read/delete probe passed. Release `4896fd7` configures the VPS API
+      service with a `0600` service-account rclone config copied on-host from the
+      approved root-owned credential and the isolated prefix; the service account
+      can list it. **Still required:** a real application byte transfer and the
+      browser media gate.
       No public URL, implicit cross-origin access, or direct VPS-to-Worker connection is present.
 - [ ] **WP-14.5 — Editor asset UX and live gate (UX locally verified; gate open).**
       The durable `media` Dockview panel now presents as **Assets**, retaining
@@ -83,11 +85,16 @@ authorization to upload all original source media or to make sharing public.
       a single responsive inline search + availability + sort + refresh toolbar,
       safe metadata cards, explicit no-derivative/pending/local/cloud/evicted/
       invalid states, and audio/video/image preview through the OPFS-first
-      authorized resolver. A local browser confirms visual layout and no console
-      warning/error; the unauthenticated local API path reports its actual failure.
-      Browser/VPS proof must still import or select a non-fixture asset, produce one
-      real derivative, play it through the selected boundary, reload/restart safely,
-      and remove/revoke the temporary authority.
+      authorized resolver. The signed-in production browser reloaded release
+      `4896fd7`, rendered the library and its honest empty-project state, and had
+      no console warning/error. **Gate review blocker:** the current Worker entry
+      point does not configure `LocalAssetSourceRegistry`, so it advertises no
+      opaque real asset IDs; no non-fixture catalog asset, leased Worker job,
+      ParsPack upload, API byte read, OPFS playback, reload, or revocation has
+      occurred. Browser/VPS proof must configure that local-only source mapping,
+      register a real owner asset, produce one derivative, play it through the
+      selected boundary, reload/restart safely, and remove/revoke the temporary
+      authority.
 
 ## Exit criteria
 
