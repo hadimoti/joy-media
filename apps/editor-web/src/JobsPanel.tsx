@@ -92,6 +92,14 @@ export function JobsPanel({
             <strong>{worker.id}</strong> ·{' '}
             {worker.revoked ? 'revoked' : isConnected(worker) ? 'connected' : 'disconnected'}
             {worker.capabilities.length > 0 && ` · ${worker.capabilities.join(', ')}`}
+            {!worker.revoked && (
+              <button
+                type="button"
+                onClick={() => void client.revokeWorker(worker.id).then(refresh).catch(report)}
+              >
+                Revoke
+              </button>
+            )}
           </li>
         ))}
       </ul>

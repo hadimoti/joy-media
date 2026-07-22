@@ -189,6 +189,17 @@ async function route(
     return;
   }
 
+  const workerRevokeMatch = /^\/v1\/workers\/([^/]+)\/revoke$/.exec(url.pathname);
+  if (request.method === 'POST' && workerRevokeMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.revokeWorker(
+        actor,
+        decodeURIComponent(workerRevokeMatch[1]!),
+      ),
+    });
+    return;
+  }
+
   const jobMatch = /^\/v1\/projects\/([^/]+)\/jobs$/.exec(url.pathname);
   if (request.method === 'GET' && jobMatch !== null) {
     respondJson(response, 200, {

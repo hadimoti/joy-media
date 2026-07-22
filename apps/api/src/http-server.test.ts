@@ -147,6 +147,14 @@ describe('control-plane HTTP transport', () => {
     expect(
       (events.body as { data: readonly { type: string }[] }).data.map((event) => event.type),
     ).toEqual(expect.arrayContaining(['queued', 'cancel-requested', 'retried', 'completed']));
+    expect(await request(origin, 'POST', '/v1/workers/w/revoke', {})).toMatchObject({
+      status: 200,
+      body: { data: { id: 'w', revoked: true } },
+    });
+    expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
+      status: 401,
+      body: { error: { code: 'WORKER_SESSION_REQUIRED' } },
+    });
   });
 });
 

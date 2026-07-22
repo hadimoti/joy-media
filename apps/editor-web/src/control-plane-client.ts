@@ -44,6 +44,9 @@ export class BrowserControlPlaneClient {
   async pairWorker(workerId: string, pairingCode: string): Promise<void> {
     await this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
   }
+  async revokeWorker(workerId: string): Promise<BrowserWorker> {
+    return this.post(`/v1/workers/${encodeURIComponent(workerId)}/revoke`, {});
+  }
   async cancel(projectId: string, jobId: string): Promise<BrowserJob> {
     return this.post(
       `/v1/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/cancel`,

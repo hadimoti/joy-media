@@ -16,3 +16,12 @@ the built API/static editor; install the systemd/nginx manifests; validate
 configuration; restart services; verify public health/JWKS and the signed
 assertion path. Preserve the prior `/opt/joy-media/app` and each immutable
 release for rollback.
+
+On the VPS, use the lockfile to reconstruct the deployment dependency layout
+before building: `CI=true npm_config_confirm_modules_purge=false pnpm install
+--frozen-lockfile`. Build the API and static editor, then create the immutable
+API release with `CI=true npm_config_confirm_modules_purge=false pnpm deploy
+--legacy --prod`. Point the `current-api` and `web` symlinks at the new
+release only after the checks pass. Rollback is a symlink change to the prior
+immutable release followed by `systemctl restart joy-media@api`; keep the
+database backup until the deployment gate is accepted.
