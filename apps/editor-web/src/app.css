@@ -48,6 +48,9 @@ h2 {
   display: flex;
   flex-direction: column;
 }
+.playback-media {
+  display: none;
+}
 .monitor-error {
   color: #ff8080;
 }

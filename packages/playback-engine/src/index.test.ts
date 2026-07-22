@@ -12,7 +12,12 @@ describe('playback scheduler', () => {
     scheduler.acceptFrame(active, false);
     expect(scheduler.droppedFrames).toBe(3);
     expect(scheduler.quality()).toBe('proxy');
-    expect(scheduler.metrics).toEqual({ decodedFrames: 3, droppedFrames: 3, quality: 'proxy' });
+    expect(scheduler.metrics).toEqual({
+      decodedFrames: 3,
+      droppedFrames: 3,
+      quality: 'proxy',
+      maxDriftUs: 0,
+    });
   });
   it('bounds decoded frames with LRU promotion', () => {
     const cache = new FrameCache(2);

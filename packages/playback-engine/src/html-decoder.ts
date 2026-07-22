@@ -2,6 +2,12 @@ import type { DecodedFrame } from './index.js';
 import type { FrameDecoder } from './decoder.js';
 import type { ImageDataLike } from './image-data.js';
 
+/** Browser decoder with a no-seek path for video-frame-driven playback. */
+export interface HtmlMediaDecoder extends FrameDecoder {
+  /** Capture the frame already presented by the live HTML media clock. */
+  captureCurrentFrame(requestToken: number): DecodedFrame;
+}
+
 /** Minimal DOM boundary, enabling a proxy-backed HTML media decode tier in the editor. */
 export interface HtmlVideoElementLike {
   readonly videoWidth: number;
@@ -45,16 +51,27 @@ export interface HtmlCanvasElementLike {
 export function createHtmlMediaDecoder(
   video: HtmlVideoElementLike,
   canvas?: HtmlCanvasElementLike | HTMLCanvasElement,
-): FrameDecoder {
+): HtmlMediaDecoder {
+  let currentSourceToken = '';
   return {
     async decode(sourceToken, sourceTimeUs, requestToken): Promise<DecodedFrame> {
       if (video.src !== sourceToken) video.src = sourceToken;
+      currentSourceToken = sourceToken;
       video.currentTime = sourceTimeUs / 1_000_000;
       if (video.readyState < 2) await waitForSeek(video);
       const bitmap = captureBitmap(video, canvas);
       return {
         assetId: sourceToken,
         sourceTimeUs,
+        token: `html-media:${requestToken}`,
+        ...(bitmap !== undefined ? { bitmap } : {}),
+      };
+    },
+    captureCurrentFrame(requestToken): DecodedFrame {
+      const bitmap = captureBitmap(video, canvas);
+      return {
+        assetId: currentSourceToken || video.src,
+        sourceTimeUs: Math.floor(video.currentTime * 1_000_000),
         token: `html-media:${requestToken}`,
         ...(bitmap !== undefined ? { bitmap } : {}),
       };

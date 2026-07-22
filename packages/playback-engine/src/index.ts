@@ -29,7 +29,7 @@ class AudioPreviewClock {
 
 export type { FrameDecoder, MediaSource } from './decoder.js';
 export { requestDecodedFrame, selectDecodeSource } from './decoder.js';
-export type { HtmlVideoElementLike } from './html-decoder.js';
+export type { HtmlMediaDecoder, HtmlVideoElementLike } from './html-decoder.js';
 export { createHtmlMediaDecoder } from './html-decoder.js';
 export { sourceTimeAtPlayhead } from './source-time.js';
 export {
@@ -120,6 +120,7 @@ export class PlaybackScheduler {
   #generation = 0;
   #droppedFrames = 0;
   #decodedFrames = 0;
+  #maxDriftUs = 0;
   #tickIndex = 0;
 
   constructor(sampleRate = 48_000, options: PlaybackSchedulerOptions = {}) {
@@ -184,6 +185,7 @@ export class PlaybackScheduler {
     this.#tickIndex++;
     this.audio.advance(intervalUs);
     const driftUs = this.driftFrom(clock);
+    this.#maxDriftUs = Math.max(this.#maxDriftUs, Math.abs(driftUs));
     const onTime = Math.abs(driftUs) <= this.driftToleranceUs;
     const dropped = !onTime || !decoded;
     if (decoded) this.#decodedFrames++;
@@ -213,11 +215,14 @@ export class PlaybackScheduler {
   get metrics(): {
     readonly decodedFrames: number;
     readonly droppedFrames: number;
+    /** Largest observed absolute media/audio drift since construction. */
+    readonly maxDriftUs: number;
     readonly quality: 'full' | 'proxy';
   } {
     return {
       decodedFrames: this.#decodedFrames,
       droppedFrames: this.#droppedFrames,
+      maxDriftUs: this.#maxDriftUs,
       quality: this.quality(),
     };
   }

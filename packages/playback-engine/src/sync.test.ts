@@ -111,6 +111,7 @@ describe('playback-engine sync clock (WP-11.3)', () => {
       if (!tick.onTime) break; // bail early on first failure
     }
     expect(maxDrift).toBeLessThanOrEqual(scheduler.driftToleranceUs);
+    expect(scheduler.metrics.maxDriftUs).toBe(maxDrift);
     expect(scheduler.metrics.droppedFrames).toBe(0);
     expect(scheduler.metrics.decodedFrames).toBe(totalFrames);
     expect(scheduler.metrics.quality).toBe('full');

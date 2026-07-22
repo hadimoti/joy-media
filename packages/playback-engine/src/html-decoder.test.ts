@@ -93,6 +93,20 @@ describe('HTML media decoder tier', () => {
     expect(decoded.bitmap?.height).toBe(360);
   });
 
+  it('captures the already-presented media frame without seeking it again', () => {
+    const video = new FakeVideo();
+    video.src = 'already-playing.mp4';
+    video.currentTime = 3.25;
+    video.videoWidth = 320;
+    video.videoHeight = 180;
+    const decoded = createHtmlMediaDecoder(video, new FakeCanvas(320, 180)).captureCurrentFrame(8);
+    expect(decoded.assetId).toBe('already-playing.mp4');
+    expect(decoded.sourceTimeUs).toBe(3_250_000);
+    expect(decoded.token).toBe('html-media:8');
+    expect(decoded.bitmap?.width).toBe(320);
+    expect(video.currentTime).toBe(3.25);
+  });
+
   it('omits the bitmap when the video has no decoded frame yet', async () => {
     const video = new FakeVideo();
     const canvas = new FakeCanvas(64, 64);

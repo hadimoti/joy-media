@@ -4,11 +4,10 @@ import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import {
   createHtmlMediaDecoder,
   createHtmlVideoMediaClock,
-  importedClipToMediaSource,
   PlaybackScheduler,
   videoFrameNodeFromDecoded,
   withVideoFrameNode,
-  type FrameDecoder,
+  type HtmlMediaDecoder,
   type ImageDataLike,
   type MediaClock,
   type VideoClipSpec,
@@ -26,7 +25,7 @@ import {
 } from '@joy-media/renderer-pixi/browser';
 import { renderHeadlessFrame } from '@joy-media/renderer-headless';
 import {
-  downloadBrowserExport,
+  downloadBrowserMp4,
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
@@ -67,6 +66,28 @@ const labels: Readonly<Record<string, string>> = {
   diagnostics: 'Diagnostics',
 };
 
+function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
+  const composition = project.compositions.root;
+  return composition?.tracks
+    .flatMap((track) => track.clips)
+    .find(
+      (clip) =>
+        clip.kind === 'video' &&
+        playheadUs >= clip.startUs &&
+        playheadUs < clip.startUs + clip.durationUs,
+    );
+}
+
+/** Resolve the currently playing timeline clip from the live media URL. */
+function activeVideoClipForSource(project: SpikeProject, sourceUrl: string) {
+  const composition = project.compositions.root;
+  return composition?.tracks
+    .flatMap((track) => track.clips)
+    .find(
+      (clip) => clip.kind === 'video' && sourceUrl.endsWith(`/media/reference/${clip.assetId}.mp4`),
+    );
+}
+
 interface EditorRuntimeState {
   readonly selectedIds: readonly string[];
   readonly playheadUs: number;
@@ -103,13 +124,6 @@ interface EditorPanelContextValue {
   readonly redo: () => void;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
-const EditorRefsContext = createContext<
-  | {
-      readonly videoRef: React.MutableRefObject<HTMLVideoElement | null>;
-      readonly onMediaReady: (decoder: FrameDecoder, clock: MediaClock) => void;
-    }
-  | undefined
->(undefined);
 
 export function App() {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
@@ -125,7 +139,7 @@ export function App() {
   const sessionRef = useRef<EditorSession | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const decoderRef = useRef<FrameDecoder | null>(null);
+  const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
   if (sessionRef.current === null)
     sessionRef.current = new EditorSession(
@@ -134,87 +148,171 @@ export function App() {
       INITIAL_EDITOR_PROJECT,
     );
   const session = sessionRef.current;
-  const seek = useCallback((timeUs: number) => {
-    scheduler.current.seek(timeUs);
-    setState((current) => ({ ...current, playheadUs: timeUs }));
-  }, []);
-  const advancePlayback = useCallback(() => {
-    const clock = clockRef.current;
-    const decoder = decoderRef.current;
-    const composition = session.timelineProject.compositions.root;
-    const durationUs = composition?.durationUs ?? 0;
-    if (clock === null || decoder === null) {
-      setState((current) => {
-        const nextPlayhead = Math.min(durationUs, current.playheadUs + 250_000);
-        scheduler.current.seek(nextPlayhead);
-        const token = scheduler.current.requestToken();
-        scheduler.current.acceptFrame(token, true);
-        return { ...current, playheadUs: nextPlayhead, playing: nextPlayhead < durationUs };
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
+  const playbackFrameRef = useRef<number | undefined>(undefined);
+
+  const syncMediaToPlayhead = useCallback(
+    async (playheadUs: number, play: boolean): Promise<boolean> => {
+      const video = videoRef.current;
+      const clock = clockRef.current;
+      const composition = session.timelineProject.compositions.root;
+      const clip = activeVideoClipAt(session.timelineProject, playheadUs);
+      if (
+        video === null ||
+        clock === null ||
+        composition === undefined ||
+        clip === undefined ||
+        clip.kind !== 'video'
+      )
+        return false;
+      const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href).href;
+      if (video.src !== sourceUrl) {
+        video.src = sourceUrl;
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            video.removeEventListener('loadeddata', onLoaded);
+            video.removeEventListener('error', onError);
+          };
+          const onLoaded = () => {
+            cleanup();
+            resolve();
+          };
+          const onError = () => {
+            cleanup();
+            reject(new Error(`Unable to load ${clip.assetId} for live playback`));
+          };
+          video.addEventListener('loadeddata', onLoaded, { once: true });
+          video.addEventListener('error', onError, { once: true });
+        });
+      }
+      const sourceTimeUs = playheadUs - clip.startUs + clip.sourceInUs;
+      video.currentTime = sourceTimeUs / 1_000_000;
+      scheduler.current.seek(sourceTimeUs);
+      lastMediaTimeUsRef.current = undefined;
+      if (play) await video.play();
+      return true;
+    },
+    [session],
+  );
+
+  const seek = useCallback(
+    (timeUs: number) => {
+      scheduler.current.seek(timeUs);
+      lastMediaTimeUsRef.current = undefined;
+      setState((current) => ({ ...current, playheadUs: timeUs }));
+      void syncMediaToPlayhead(timeUs, stateRef.current.playing).catch(() => {
+        setState((current) => ({ ...current, playing: false }));
       });
-      setRevision((revision) => revision + 1);
-      return;
-    }
-    const playheadUs = clock.timeUs;
-    const activeClip =
-      composition === undefined
-        ? undefined
-        : composition.tracks
-            .flatMap((t) => t.clips)
-            .find(
-              (c) =>
-                c.kind === 'video' &&
-                playheadUs >= c.startUs &&
-                playheadUs < c.startUs + c.durationUs,
-            );
-    if (activeClip !== undefined && activeClip.kind === 'video' && composition !== undefined) {
+    },
+    [syncMediaToPlayhead],
+  );
+  useEffect(() => {
+    if (!state.playing) return;
+    const video = videoRef.current;
+    const decoder = decoderRef.current;
+    const clock = clockRef.current;
+    if (video === null || decoder === null || clock === null) return;
+    let cancelled = false;
+    const capture = (): void => {
+      if (cancelled || !stateRef.current.playing) return;
+      const clip =
+        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
+        activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      if (clip === undefined || clip.kind !== 'video') return;
+      const sourceTimeUs = clock.timeUs;
+      const compositionTimeUs = clip.startUs + sourceTimeUs - clip.sourceInUs;
+      if (compositionTimeUs >= clip.startUs + clip.durationUs) {
+        const nextPlayheadUs = clip.startUs + clip.durationUs;
+        const durationUs = session.timelineProject.compositions.root?.durationUs ?? nextPlayheadUs;
+        if (nextPlayheadUs >= durationUs) {
+          video.pause();
+          setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));
+          setRevision((revision) => revision + 1);
+          return;
+        }
+        void syncMediaToPlayhead(nextPlayheadUs, true).then((ready) => {
+          if (ready && !cancelled) requestFrame();
+        });
+        return;
+      }
+      const token = scheduler.current.requestToken();
+      const frame = decoder.captureCurrentFrame(token);
       const clipSpec: VideoClipSpec = {
-        id: activeClip.assetId,
-        originalToken: resolveReferenceMediaUrl(activeClip.assetId),
-        startUs: activeClip.startUs,
-        durationUs: activeClip.durationUs,
-        sourceInUs: activeClip.sourceInUs,
+        id: clip.assetId,
+        originalToken: resolveReferenceMediaUrl(clip.assetId),
+        startUs: clip.startUs,
+        durationUs: clip.durationUs,
+        sourceInUs: clip.sourceInUs,
         transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
         opacity: 1,
         zIndex: 0,
       };
-      const source = importedClipToMediaSource(clipSpec);
-      const sourceTimeUs = playheadUs - activeClip.startUs + activeClip.sourceInUs;
-      decoder
-        .decode(source.originalToken, sourceTimeUs, scheduler.current.requestToken())
-        .then((frame) => {
-          const activeVideo = videoRef.current;
-          const node = videoFrameNodeFromDecoded(clipSpec, frame, {
-            // The bitmap supplies these dimensions in the normal display path.
-            // Keep the live-video fallback as a guard during first metadata load.
-            width: activeVideo?.videoWidth ?? 0,
-            height: activeVideo?.videoHeight ?? 0,
-          });
-          if (frame.bitmap === undefined)
-            throw new Error('HTML media decode returned metadata without a drawable bitmap');
-          setPreviewVideoFrame({ node, bitmap: frame.bitmap });
-          scheduler.current.driveTick(clock, true);
-        })
-        .catch(() => {
-          scheduler.current.driveTick(clock, false);
-        });
-    } else {
-      scheduler.current.driveTick(clock, false);
-    }
-    setState((current) => ({ ...current, playheadUs, playing: playheadUs < durationUs }));
-    setRevision((revision) => revision + 1);
-  }, [session]);
-  useEffect(() => {
-    if (!state.playing) return;
-    const timer = window.setInterval(advancePlayback, 250);
-    return () => window.clearInterval(timer);
-  }, [advancePlayback, state.playing]);
-  const handleMediaReady = useCallback((decoder: FrameDecoder, clock: MediaClock) => {
+      const node = videoFrameNodeFromDecoded(clipSpec, frame, {
+        width: video.videoWidth,
+        height: video.videoHeight,
+      });
+      if (frame.bitmap === undefined) scheduler.current.recordDecodedFrame(token, false, false);
+      else {
+        setPreviewVideoFrame({ node, bitmap: frame.bitmap });
+        const previous = lastMediaTimeUsRef.current;
+        if (previous === undefined) scheduler.current.recordDecodedFrame(token, true, true);
+        else scheduler.current.driveTick(clock, true, Math.max(1, sourceTimeUs - previous));
+      }
+      lastMediaTimeUsRef.current = sourceTimeUs;
+      setState((active) => ({ ...active, playheadUs: compositionTimeUs }));
+      setRevision((revision) => revision + 1);
+      requestFrame();
+    };
+    const requestFrame = (): void => {
+      // Real decoded-video callback when available; unlike a UI animation
+      // ticker it follows the browser's media presentation cadence and stays
+      // meaningful when editor panels are switched or the UI is quiet.
+      if (typeof video.requestVideoFrameCallback === 'function')
+        playbackFrameRef.current = video.requestVideoFrameCallback(() => capture());
+      else playbackFrameRef.current = window.requestAnimationFrame(capture);
+    };
+    requestFrame();
+    return () => {
+      cancelled = true;
+      if (playbackFrameRef.current !== undefined) {
+        if (typeof video.cancelVideoFrameCallback === 'function')
+          video.cancelVideoFrameCallback(playbackFrameRef.current);
+        else window.cancelAnimationFrame(playbackFrameRef.current);
+      }
+    };
+  }, [session, state.playing, syncMediaToPlayhead]);
+  const handleMediaReady = useCallback((decoder: HtmlMediaDecoder, clock: MediaClock) => {
     decoderRef.current = decoder;
     clockRef.current = clock;
   }, []);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video === null) return;
+    const captureCanvas = document.createElement('canvas');
+    // A zero-sized canvas asks the decoder to size it to the decoded media on
+    // first use; this avoids treating the DOM default 300×150 as a proxy size.
+    captureCanvas.width = 0;
+    captureCanvas.height = 0;
+    const decoder = createHtmlMediaDecoder(video, captureCanvas);
+    handleMediaReady(decoder, createHtmlVideoMediaClock(video));
+    const firstClip = activeVideoClipAt(session.timelineProject, 0);
+    if (firstClip !== undefined && firstClip.kind === 'video')
+      video.src = resolveReferenceMediaUrl(firstClip.assetId);
+    return () => video.pause();
+  }, [handleMediaReady, session]);
   const togglePlayback = useCallback(() => {
-    setState((current) => ({ ...current, playing: !current.playing }));
-  }, []);
+    const current = stateRef.current;
+    if (current.playing) {
+      videoRef.current?.pause();
+      setState((active) => ({ ...active, playing: false }));
+      return;
+    }
+    void syncMediaToPlayhead(current.playheadUs, true)
+      .then((ready) => setState((active) => ({ ...active, playing: ready })))
+      .catch(() => setState((active) => ({ ...active, playing: false })));
+  }, [syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       session.dispatchTimeline(transaction);
@@ -316,37 +414,53 @@ export function App() {
         );
         return buildRenderFrameIR(compositionV1?.id ?? 'root', timeUs, width, height, resolved);
       };
-      setExportStatus(`Rendering ${totalFrames} frames…`);
-      const exportFrames: Uint8Array[] = [];
-      const exportDigests: string[] = [];
-      for (let index = 0; index < totalFrames; index++) {
-        const timeUs = Math.floor((index * 1_000_000) / frameRate);
-        const headless = renderHeadlessFrame(buildFrame(timeUs));
-        exportFrames.push(headless.pixels);
-        exportDigests.push(await sha256Hex(headless.pixels));
-      }
-      setExportStatus('Comparing preview↔export digests…');
       let mismatched = 0;
-      for (let index = 0; index < totalFrames; index++) {
-        const timeUs = Math.floor((index * 1_000_000) / frameRate);
-        const previewDigest = await sha256Hex(renderHeadlessFrame(buildFrame(timeUs)).pixels);
-        if (previewDigest !== exportDigests[index]) mismatched++;
-      }
-      if (mismatched > 0)
-        throw new Error(`preview↔export digest mismatch on ${mismatched}/${totalFrames} frames`);
-      setExportStatus('Packaging browser export…');
-      const exportResult: BrowserExportResult = downloadBrowserExport({
+      // The seeded reference composition has no time-varying visual-object
+      // properties. Detect that from the evaluated IR (excluding its time
+      // stamp) so its 900 identical frames are streamed without retaining a
+      // multi-gigabyte RGBA array or making the media clock run at render speed.
+      const frameSignature = (timeUs: number) => {
+        const frame = buildFrame(timeUs);
+        return JSON.stringify({
+          viewport: frame.viewport,
+          background: frame.background,
+          nodes: frame.nodes,
+        });
+      };
+      const staticReferenceFrame =
+        frameSignature(0) === frameSignature(Math.floor(durationUs / 2)) &&
+        frameSignature(0) === frameSignature(Math.max(0, durationUs - 1));
+      const firstExportFrame = renderHeadlessFrame(buildFrame(0)).pixels;
+      const firstPreviewDigest = await sha256Hex(renderHeadlessFrame(buildFrame(0)).pixels);
+      const firstExportDigest = await sha256Hex(firstExportFrame);
+      if (staticReferenceFrame && firstPreviewDigest !== firstExportDigest) mismatched++;
+      setExportStatus(`Encoding ${totalFrames} H.264/AAC frames…`);
+      const exportResult: BrowserExportResult = await downloadBrowserMp4({
         manifest: {
           width: manifest.width,
           height: manifest.height,
           frameRate: manifest.frameRate,
           durationUs: manifest.durationUs,
         },
-        frames: exportFrames,
-        filename: `joy-media-export-${Date.now()}.rgba`,
+        frameCount: totalFrames,
+        renderFrame: async (index) => {
+          if (staticReferenceFrame) return firstExportFrame;
+          const timeUs = Math.floor((index * 1_000_000) / frameRate);
+          const exportFrame = renderHeadlessFrame(buildFrame(timeUs)).pixels;
+          const previewDigest = await sha256Hex(renderHeadlessFrame(buildFrame(timeUs)).pixels);
+          if (previewDigest !== (await sha256Hex(exportFrame))) mismatched++;
+          return exportFrame;
+        },
+        onProgress: (completed, total) => {
+          if (completed === total || completed % frameRate === 0)
+            setExportStatus(`Encoding H.264/AAC… ${completed}/${total} frames`);
+        },
+        filename: `joy-media-export-${Date.now()}.mp4`,
       });
+      if (mismatched > 0)
+        throw new Error(`preview↔export digest mismatch on ${mismatched}/${totalFrames} frames`);
       setExportStatus(
-        `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; ffprobe skipped — browser cannot probe raw RGBA containers).`,
+        `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; H.264/AAC MP4).`,
       );
     } catch (error) {
       setExportStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -408,6 +522,7 @@ export function App() {
           ))}
         </section>
       )}
+      <video ref={videoRef} className="playback-media" playsInline />
       <EditorPanelContext.Provider
         value={{
           state,
@@ -433,13 +548,11 @@ export function App() {
           redo,
         }}
       >
-        <EditorRefsContext.Provider value={{ videoRef, onMediaReady: handleMediaReady }}>
-          <DockviewReact
-            className="workspace"
-            components={{ 'editor-panel': Panel }}
-            onReady={onReady}
-          />
-        </EditorRefsContext.Provider>
+        <DockviewReact
+          className="workspace"
+          components={{ 'editor-panel': Panel }}
+          onReady={onReady}
+        />
       </EditorPanelContext.Provider>
     </main>
   );
@@ -530,6 +643,7 @@ function Panel({ api }: IDockviewPanelProps) {
         <p>
           {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
         </p>
+        <p>Maximum media drift: {context.playback.maxDriftUs} µs</p>
       </article>
     );
   if (api.id === 'monitor') return <MonitorPanel />;
@@ -546,11 +660,8 @@ function Panel({ api }: IDockviewPanelProps) {
 
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
-  const refs = useContext(EditorRefsContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  if (refs === undefined) throw new Error('editor refs context is unavailable');
-  const { state, previewVideoFrame, visualProject, timelineProject } = context;
-  const { videoRef, onMediaReady } = refs;
+  const { state, previewVideoFrame, visualProject } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
@@ -617,32 +728,12 @@ function MonitorPanel() {
   }, []);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (video === null) return;
-    const captureCanvas = document.createElement('canvas');
-    // A zero-sized canvas asks the decoder to size it to the decoded media on
-    // first use; this avoids treating the DOM default 300×150 as a proxy size.
-    captureCanvas.width = 0;
-    captureCanvas.height = 0;
-    const decoder = createHtmlMediaDecoder(video, captureCanvas);
-    const clock = createHtmlVideoMediaClock(video);
-    onMediaReady(decoder, clock);
-    const firstClip = timelineProject.compositions.root?.tracks
-      .flatMap((t) => t.clips)
-      .find((c) => c.kind === 'video');
-    if (firstClip !== undefined && firstClip.kind === 'video') {
-      video.src = resolveReferenceMediaUrl(firstClip.assetId);
-    }
-  }, [onMediaReady, timelineProject, videoRef]);
-
-  useEffect(() => {
     paintRef.current();
   }, [previewVideoFrame, state.playheadUs, visualProject]);
 
   return (
     <article className="monitor-panel">
       {error !== undefined && <p className="monitor-error">{error}</p>}
-      <video ref={videoRef} muted playsInline style={{ display: 'none' }} />
       <div ref={containerRef} className="monitor-canvas" />
     </article>
   );
