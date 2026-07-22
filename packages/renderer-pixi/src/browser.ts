@@ -97,8 +97,17 @@ export async function createBrowserPixiRenderer(
     autoStart: options.autoStart ?? false,
     backgroundAlpha: options.backgroundAlpha ?? 0,
     preference: options.preference ?? 'webgl',
+    // Without this, the WebGL drawing buffer clears itself after compositing
+    // (visible on screen fine, but any programmatic read-back — toDataURL,
+    // getImageData, a future thumbnail/screenshot feature — sees blank).
+    preserveDrawingBuffer: true,
   });
   if (options.parent !== undefined) options.parent.appendChild(app.canvas);
+
+  const background = new Graphics();
+  background.label = 'renderer-pixi:background';
+  background.zIndex = -1;
+  app.stage.addChild(background);
 
   const layers = new Container();
   layers.label = 'renderer-pixi:layers';
@@ -229,8 +238,12 @@ export async function createBrowserPixiRenderer(
       const { width, height, dpr } = frame.viewport;
       const resolution = options.resolution ?? dpr;
       resize(width, height, resolution);
-      if (options.autoStart !== true) app.renderer.render(app.stage);
+      background
+        .clear()
+        .rect(0, 0, width, height)
+        .fill({ color: rgbaToHex(frame.background), alpha: frame.background.a / 255 });
       const { drawCalls, created, reused } = paint(frame);
+      if (options.autoStart !== true) app.renderer.render(app.stage);
       return { width: frameWidth, height: frameHeight, drawCalls, created, reused };
     },
     destroy(): void {
