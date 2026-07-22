@@ -12,6 +12,15 @@ export class EditorCommandController {
   get undoLabel(): string | undefined {
     return this.#history.undoLabel;
   }
+  get redoLabel(): string | undefined {
+    return this.#history.redoLabel;
+  }
+  get undoRecords(): readonly import('@joy-media/commands').TransactionRecord[] {
+    return this.#history.undoRecords;
+  }
+  get redoRecords(): readonly import('@joy-media/commands').TransactionRecord[] {
+    return this.#history.redoRecords;
+  }
   get canUndo(): boolean {
     return this.#history.canUndo;
   }

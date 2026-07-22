@@ -19,6 +19,8 @@ import {
   PlanExecutor,
 } from '@joy-media/agent-tools';
 import { AGENT_INTENTS, type AgentIntent } from './agent-panel-intents.js';
+import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
+import { extractPendingChanges } from './agent-plan-visualizer.js';
 
 type PolicyName = 'default' | 'permissive';
 
@@ -142,6 +144,11 @@ export function AgentPanel({
 
   const entries: readonly AuditEntry[] = [...auditRef.current.getAllEntries()].reverse();
 
+  const pendingChanges = useMemo(() => {
+    if (pending === undefined) return [];
+    return extractPendingChanges(pending.plan, project);
+  }, [pending, project]);
+
   return (
     <article className="agent-panel">
       <p>
@@ -175,6 +182,14 @@ export function AgentPanel({
         <section className="agent-pending-plan" aria-live="polite">
           <h3>{pending.intent.label}</h3>
           <p>Dry-run: {pending.dryRun.aggregateDiff.summary}</p>
+          <AgentTimelineCanvas
+            project={project}
+            playheadUs={playheadUs}
+            highlightedClipIds={selectedClipIds}
+            pendingChanges={pendingChanges}
+            width={400}
+            height={120}
+          />
           {pending.dryRun.errors.length > 0 && (
             <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
           )}

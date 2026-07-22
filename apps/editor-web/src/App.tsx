@@ -17,6 +17,7 @@ import { toggleSelection } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
+import type { HistoryEntry } from './editor-session.js';
 import type {
   JoyProjectV1,
   SpikeProject,
@@ -47,6 +48,7 @@ import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { AgentPanel } from './AgentPanel.js';
+import { HistoryPanel } from './HistoryPanel.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import {
   getOrCreateControlPlaneProjectBinding,
@@ -183,6 +185,7 @@ interface EditorPanelContextValue {
   readonly playback: PlaybackScheduler['metrics'];
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  readonly historyEntries: readonly HistoryEntry[];
   readonly togglePlayback: () => void;
   readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
@@ -691,6 +694,7 @@ export function App() {
           playback: scheduler.current.metrics,
           canUndo: session.canUndo,
           canRedo: session.canRedo,
+          historyEntries: session.historyEntries,
           togglePlayback,
           seek,
           toggleSelection: (id) =>
@@ -805,15 +809,13 @@ function Panel({ api }: IDockviewPanelProps) {
     );
   if (api.id === 'history')
     return (
-      <article>
-        <p>Durable local command history</p>
-        <button disabled={!context.canUndo} onClick={context.undo}>
-          Undo
-        </button>
-        <button disabled={!context.canRedo} onClick={context.redo}>
-          Redo
-        </button>
-      </article>
+      <HistoryPanel
+        entries={context.historyEntries}
+        canUndo={context.canUndo}
+        canRedo={context.canRedo}
+        onUndo={context.undo}
+        onRedo={context.redo}
+      />
     );
   if (api.id === 'diagnostics')
     return (

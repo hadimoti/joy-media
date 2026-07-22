@@ -15,7 +15,23 @@ import { validateJoyProjectV1, validateSpikeProject } from '@joy-media/project-s
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { EditorCommandController } from './command-controller.js';
 
+export interface HistoryEntry {
+  readonly id: string;
+  readonly source: 'timeline' | 'visual-object';
+  readonly label: string;
+  readonly direction: 'undo' | 'redo';
+  readonly commandCount: number;
+  readonly sequence: number;
+}
+
 type EditorOperation = 'timeline' | 'visual-object';
+
+interface HistoryStackEntry {
+  readonly operation: EditorOperation;
+  readonly label: string;
+  readonly commandCount: number;
+  readonly sequence: number;
+}
 
 const timelineAdapter: PersistenceAdapter<SpikeProject, CommandTransaction> = {
   projectId: (project) => project.id,
@@ -41,8 +57,9 @@ export class EditorSession {
   readonly #visualObjectPersistence: LocalProjectPersistence<JoyProjectV1, VisualObjectTransaction>;
   readonly #timeline: EditorCommandController;
   readonly #visualObjects: VisualObjectProjectHistory;
-  readonly #undo: EditorOperation[] = [];
-  readonly #redo: EditorOperation[] = [];
+  readonly #undo: HistoryStackEntry[] = [];
+  readonly #redo: HistoryStackEntry[] = [];
+  #sequence = 0;
 
   constructor(
     storage: BrowserKeyValueStore,
@@ -79,11 +96,18 @@ export class EditorSession {
     return this.#redo.length > 0;
   }
 
+  get historyEntries(): readonly HistoryEntry[] {
+    return [
+      ...this.#undo.map((e) => this.#toEntry(e, 'undo')),
+      ...this.#redo.map((e) => this.#toEntry(e, 'redo')),
+    ];
+  }
+
   dispatchTimeline(transaction: CommandTransaction): SpikeProject {
     const before = this.#timeline.project;
     const project = this.#timeline.dispatch(transaction);
     this.#timelinePersistence.saveTransaction(before, transaction, false);
-    this.record('timeline');
+    this.#record('timeline', transaction.label, transaction.commands.length);
     return project;
   }
 
@@ -91,14 +115,14 @@ export class EditorSession {
     const before = this.#visualObjects.present;
     const project = this.#visualObjects.apply(transaction);
     this.#visualObjectPersistence.saveTransaction(before, transaction, false);
-    this.record('visual-object');
+    this.#record('visual-object', transaction.label, transaction.commands.length);
     return project;
   }
 
   undo(): void {
-    const operation = this.#undo.pop();
-    if (operation === undefined) return;
-    if (operation === 'timeline') {
+    const entry = this.#undo.pop();
+    if (entry === undefined) return;
+    if (entry.operation === 'timeline') {
       const before = this.#timeline.project;
       const mutation = this.#timeline.undoWithRecord();
       this.#timelinePersistence.saveTransaction(
@@ -111,13 +135,13 @@ export class EditorSession {
       const mutation = this.#visualObjects.undo();
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
     }
-    this.#redo.push(operation);
+    this.#redo.push(entry);
   }
 
   redo(): void {
-    const operation = this.#redo.pop();
-    if (operation === undefined) return;
-    if (operation === 'timeline') {
+    const entry = this.#redo.pop();
+    if (entry === undefined) return;
+    if (entry.operation === 'timeline') {
       const before = this.#timeline.project;
       const mutation = this.#timeline.redoWithRecord();
       this.#timelinePersistence.saveTransaction(
@@ -130,11 +154,22 @@ export class EditorSession {
       const mutation = this.#visualObjects.redo();
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
     }
-    this.#undo.push(operation);
+    this.#undo.push(entry);
   }
 
-  private record(operation: EditorOperation): void {
-    this.#undo.push(operation);
+  #toEntry(entry: HistoryStackEntry, direction: 'undo' | 'redo'): HistoryEntry {
+    return {
+      id: `history-${entry.sequence}`,
+      source: entry.operation,
+      label: entry.label,
+      direction,
+      commandCount: entry.commandCount,
+      sequence: entry.sequence,
+    };
+  }
+
+  #record(operation: EditorOperation, label: string, commandCount: number): void {
+    this.#undo.push({ operation, label, commandCount, sequence: ++this.#sequence });
     this.#redo.length = 0;
   }
 }

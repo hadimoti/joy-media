@@ -319,6 +319,26 @@ export class VisualObjectProjectHistory {
     return this.#redo.length > 0;
   }
 
+  /** Label of the transaction that undo would revert. */
+  get undoLabel(): string | undefined {
+    return this.#undo[this.#undo.length - 1]?.transaction.label;
+  }
+
+  /** Label of the transaction that redo would re-apply. */
+  get redoLabel(): string | undefined {
+    return this.#redo[this.#redo.length - 1]?.transaction.label;
+  }
+
+  /** Returns a copy of the undo stack (newest first, most recent at index 0). */
+  get undoRecords(): readonly VisualObjectTransactionRecord[] {
+    return [...this.#undo].reverse();
+  }
+
+  /** Returns a copy of the redo stack (newest first, most recent at index 0). */
+  get redoRecords(): readonly VisualObjectTransactionRecord[] {
+    return [...this.#redo].reverse();
+  }
+
   apply(transaction: VisualObjectTransaction): JoyProjectV1 {
     const result = applyVisualObjectProjectTransactionWithRecord(this.#present, transaction);
     this.#present = result.project;

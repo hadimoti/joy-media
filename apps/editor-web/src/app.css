@@ -671,3 +671,74 @@ label {
     white-space: nowrap;
   }
 }
+.agent-timeline-canvas {
+  border: 1px solid #303a56;
+  border-radius: 0.25rem;
+  background: #05070f;
+}
+.agent-pending-plan canvas,
+.agent-last-run canvas {
+  display: block;
+}
+.history-panel {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+}
+.history-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+.history-section h3 {
+  margin: 0.5rem 0 0.3rem;
+  font-size: 0.8rem;
+  color: #9fb0c8;
+}
+.history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.2rem;
+}
+.history-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #303a56;
+  border-radius: 0.2rem;
+  background: #1b2233;
+}
+.history-entry-redo {
+  opacity: 0.6;
+}
+.history-entry-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.history-entry-badge {
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.15rem;
+  font-size: 0.65rem;
+}
+.history-entry-badge-timeline {
+  background: #174b56;
+  color: #9fd6f4;
+}
+.history-entry-badge-visual-object {
+  background: #3e345d;
+  color: #d4c4f4;
+}
+.history-entry-count {
+  color: #8a93ad;
+  font-size: 0.7rem;
+}
+.history-empty {
+  color: #8a93ad;
+  font-size: 0.85rem;
+  margin: 0.3rem 0;
+}

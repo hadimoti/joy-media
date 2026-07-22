@@ -89,6 +89,21 @@ export class ProjectHistory {
     return this.#undo[this.#undo.length - 1]?.label;
   }
 
+  /** Label of the transaction that redo would re-apply. */
+  get redoLabel(): string | undefined {
+    return this.#redo[this.#redo.length - 1]?.label;
+  }
+
+  /** Returns a copy of the undo stack (newest first, most recent at index 0). */
+  get undoRecords(): readonly TransactionRecord[] {
+    return [...this.#undo].reverse();
+  }
+
+  /** Returns a copy of the redo stack (newest first, most recent at index 0). */
+  get redoRecords(): readonly TransactionRecord[] {
+    return [...this.#redo].reverse();
+  }
+
   apply(transaction: CommandTransaction): SpikeProject {
     const result = applyTransaction(this.#present, transaction);
     this.#present = result.project;
