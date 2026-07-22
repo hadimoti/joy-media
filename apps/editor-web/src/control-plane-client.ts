@@ -14,7 +14,15 @@ export interface BrowserJob {
   readonly progress: number;
   readonly cancelRequested: boolean;
   readonly error?: string;
-  readonly result?: { readonly kind: string; readonly sha256: string; readonly bytes: number };
+  readonly derivative?: {
+    readonly jobId: string;
+    readonly kind: string;
+    readonly sha256: string;
+    readonly bytes: number;
+    readonly workerRef: string;
+    readonly resultRef: string;
+    readonly verifiedAt: number;
+  };
 }
 
 export class BrowserControlPlaneClient {

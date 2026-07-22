@@ -12,6 +12,9 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFA
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_kind text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_sha256 text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_bytes integer;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_ref text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_worker_ref text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_verified_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error text;
 CREATE TABLE IF NOT EXISTS job_attempts (id bigserial primary key, job_id text not null, worker_id text not null, started_at timestamptz not null, completed_at timestamptz);
 CREATE TABLE IF NOT EXISTS job_events (cursor bigserial primary key, job_id text not null, type text not null, created_at timestamptz not null);

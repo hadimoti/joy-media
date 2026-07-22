@@ -125,7 +125,8 @@ export function JobsPanel({
             <div>
               <strong>{job.type}</strong> · {job.state} · {job.progress}%
               {job.cancelRequested && ' · cancel requested'}
-              {job.result !== undefined && ` · verified ${job.result.bytes} B receipt`}
+              {job.derivative !== undefined &&
+                ` · verified ${job.derivative.bytes} B derivative receipt`}
               {job.error !== undefined && ` · ${job.error}`}
             </div>
             <div>

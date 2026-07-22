@@ -32,14 +32,25 @@ export interface Job {
   readonly leaseExpiresAt?: number;
   readonly progress: number;
   readonly cancelRequested: boolean;
-  readonly result?: JobResult;
+  /** Safe, server-verified derivative metadata; never a local file or media payload. */
+  readonly derivative?: DerivativeRecord;
   readonly error?: string;
 }
-export interface JobResult {
+export interface WorkerResultReceipt {
   /** A receipt only: local paths and media bytes never leave the Worker. */
   readonly kind: 'fixture.thumbnail';
   readonly sha256: string;
   readonly bytes: number;
+}
+/**
+ * Owner-visible derivative projection. All references are control-plane IDs;
+ * it deliberately has no Worker path, bytes, pairing secret, or session token.
+ */
+export interface DerivativeRecord extends WorkerResultReceipt {
+  readonly jobId: string;
+  readonly workerRef: string;
+  readonly resultRef: string;
+  readonly verifiedAt: number;
 }
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -116,7 +127,12 @@ export interface ControlPlane {
         readonly job: Job;
         readonly cancelRequested: boolean;
       }>;
-  complete(workerId: string, jobId: string, now?: number, result?: JobResult): Job | Promise<Job>;
+  complete(
+    workerId: string,
+    jobId: string,
+    now?: number,
+    receipt?: WorkerResultReceipt,
+  ): Job | Promise<Job>;
   fail(workerId: string, jobId: string, error: string, now?: number): Job | Promise<Job>;
   cancel(actor: Actor, projectId: string, jobId: string, now?: number): Job | Promise<Job>;
   retry(actor: Actor, projectId: string, jobId: string, now?: number): Job | Promise<Job>;
@@ -302,16 +318,18 @@ export class LocalControlPlane implements ControlPlane {
     this.event(jobId, `progress:${progress}`, now);
     return { job: updated, cancelRequested: updated.cancelRequested };
   }
-  complete(workerId: string, jobId: string, now = Date.now(), result?: JobResult): Job {
+  complete(workerId: string, jobId: string, now = Date.now(), receipt?: WorkerResultReceipt): Job {
     const job = this.ownedLease(workerId, jobId, now);
-    if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(result))
+    if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    const derivative =
+      receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
     const done: Job = {
       ...job,
       state: 'completed',
       progress: 100,
       cancelRequested: false,
-      ...(result === undefined ? {} : { result }),
+      ...(derivative === undefined ? {} : { derivative }),
     };
     this.#jobs.set(jobId, done);
     this.event(jobId, 'completed', now);
@@ -409,10 +427,25 @@ export class LocalControlPlane implements ControlPlane {
   }
 }
 
-function isFixtureReceipt(value: JobResult | undefined): value is JobResult {
+function isFixtureReceipt(value: WorkerResultReceipt | undefined): value is WorkerResultReceipt {
   return (
     value?.kind === 'fixture.thumbnail' &&
     value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
     value.bytes === FIXTURE_THUMBNAIL_BYTES
   );
+}
+
+function derivativeOf(
+  jobId: string,
+  workerRef: string,
+  receipt: WorkerResultReceipt,
+  verifiedAt: number,
+): DerivativeRecord {
+  return {
+    jobId,
+    workerRef,
+    resultRef: `derivative:${jobId}`,
+    verifiedAt,
+    ...receipt,
+  };
 }

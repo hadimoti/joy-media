@@ -20,10 +20,12 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                   |
 | WP-11 live preview canvas        | done*       | 5/5      | 2026-07-22   | Gate re-reviewed: Pixi/video/audio MP4 export and scrub pixels verified; *lint/golden baseline exceptions remain |
 | WP-12 control plane + Worker E2E | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence               |
-| WP-13 project/Worker integration | in-progress | 1/5      | 2026-07-22   | WP-13.1 locally binds persisted editor IDs to opaque control-plane IDs; next: safe result projection             |
+| WP-13 project/Worker integration | in-progress | 2/5      | 2026-07-22   | Local durable derivative projection is safe/typed; next: project-scoped editor job UX                            |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                  |
 
 ## Session log (newest first)
+
+| 2026-07-22 | WP-13 | **WP-13.2 locally implemented; no live claim.** Worker completion still submits only the existing fixture receipt; the API now turns it into a durable typed derivative record containing job ID, kind, SHA-256, byte count, server verification time, and opaque Worker/result references. PostgreSQL persists those fields, retry clears them, and the browser Jobs type renders the verified derivative receipt. Focused local/HTTP/PostgreSQL tests pass and include a response-boundary regression against paths, pairing codes, sessions, and browser tokens. **Not verified:** a live Worker producing this new record, project-scoped UX, or the WP-13 browser/VPS gate. |
 
 | 2026-07-22 | WP-13 | **WP-13.1 started and locally implemented; no live claim.** `editor-web` now stores one opaque control-plane project ID per persisted local editor-project ID and passes that ID—not the old fixed `local-editor-project`—to the Jobs panel. The local creative document remains in browser persistence; only its ID/title are used to initialize the owner-scoped control-plane record on first submission. Focused tests prove idempotent reopen, distinct local-project IDs, and malformed binding recovery; editor build and root typecheck pass. The existing ready-to-initialize UI still handles a not-yet-created remote record without calling it offline. **Not verified:** a live alternate project/reopen against the VPS, any Worker-result projection, or the WP-13 browser/VPS gate. |
 

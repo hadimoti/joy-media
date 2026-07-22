@@ -120,24 +120,38 @@ describe('control-plane HTTP transport', () => {
       body: { data: { state: 'queued', progress: 0 } },
     });
     await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
-    expect(
-      await request(
-        origin,
-        'POST',
-        '/v1/workers/w/jobs/j/complete',
-        {
-          result: {
+    const completion = await request(
+      origin,
+      'POST',
+      '/v1/workers/w/jobs/j/complete',
+      {
+        result: {
+          kind: 'fixture.thumbnail',
+          sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+          bytes: 14,
+        },
+      },
+      workerToken,
+    );
+    expect(completion).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          id: 'j',
+          state: 'completed',
+          progress: 100,
+          derivative: {
+            jobId: 'j',
             kind: 'fixture.thumbnail',
-            sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
             bytes: 14,
+            workerRef: 'w',
+            resultRef: 'derivative:j',
           },
         },
-        workerToken,
-      ),
-    ).toMatchObject({
-      status: 200,
-      body: { data: { id: 'j', state: 'completed', progress: 100, result: { bytes: 14 } } },
+      },
     });
+    const serializedCompletion = JSON.stringify(completion.body);
+    expect(serializedCompletion).not.toMatch(/path|pairing|session|access_token|\\bbytesData\\b/i);
     expect(await request(origin, 'GET', '/v1/projects/p/jobs')).toMatchObject({
       status: 200,
       body: { data: [{ id: 'j', state: 'completed' }] },

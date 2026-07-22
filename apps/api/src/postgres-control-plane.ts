@@ -5,7 +5,7 @@ import {
   type ControlPlane,
   type Job,
   type JobEvent,
-  type JobResult,
+  type WorkerResultReceipt,
   type ProjectMetadata,
   type WorkerPairingOffer,
   type WorkerRecord,
@@ -52,6 +52,9 @@ interface JobRow {
   readonly result_kind: string | null;
   readonly result_sha256: string | null;
   readonly result_bytes: number | null;
+  readonly result_ref: string | null;
+  readonly result_worker_ref: string | null;
+  readonly result_verified_at: Date | null;
   readonly error: string | null;
 }
 
@@ -313,14 +316,15 @@ export class PostgresControlPlane implements ControlPlane {
     workerId: string,
     jobId: string,
     now = Date.now(),
-    receipt?: JobResult,
+    receipt?: WorkerResultReceipt,
   ): Promise<Job> {
     if (receipt !== undefined && !isFixtureReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
-             result_kind = $4, result_sha256 = $5, result_bytes = $6
+             result_kind = $4, result_sha256 = $5, result_bytes = $6,
+             result_ref = $7, result_worker_ref = $8, result_verified_at = $9
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
          RETURNING *`,
@@ -331,6 +335,9 @@ export class PostgresControlPlane implements ControlPlane {
           receipt?.kind ?? null,
           receipt?.sha256 ?? null,
           receipt?.bytes ?? null,
+          receipt === undefined ? null : `derivative:${jobId}`,
+          receipt === undefined ? null : workerId,
+          receipt === undefined ? null : new Date(now),
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -382,7 +389,8 @@ export class PostgresControlPlane implements ControlPlane {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'queued', progress = 0, cancel_requested = false,
              lease_owner = NULL, lease_expires_at = NULL, result_kind = NULL,
-             result_sha256 = NULL, result_bytes = NULL, error = NULL
+             result_sha256 = NULL, result_bytes = NULL, result_ref = NULL,
+             result_worker_ref = NULL, result_verified_at = NULL, error = NULL
          WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
@@ -500,20 +508,29 @@ function jobOf(row: JobRow): Job {
     cancelRequested: row.cancel_requested,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
-    ...(row.result_kind === null || row.result_sha256 === null || row.result_bytes === null
+    ...(row.result_kind === null ||
+    row.result_sha256 === null ||
+    row.result_bytes === null ||
+    row.result_ref === null ||
+    row.result_worker_ref === null ||
+    row.result_verified_at === null
       ? {}
       : {
-          result: {
-            kind: row.result_kind as JobResult['kind'],
+          derivative: {
+            jobId: row.id,
+            kind: row.result_kind as WorkerResultReceipt['kind'],
             sha256: row.result_sha256,
             bytes: row.result_bytes,
+            resultRef: row.result_ref,
+            workerRef: row.result_worker_ref,
+            verifiedAt: row.result_verified_at.getTime(),
           },
         }),
     ...(row.error === null ? {} : { error: row.error }),
   };
 }
 
-function isFixtureReceipt(value: JobResult): boolean {
+function isFixtureReceipt(value: WorkerResultReceipt): boolean {
   return (
     value.kind === 'fixture.thumbnail' &&
     value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&

@@ -23,7 +23,7 @@ describe('PostgresControlPlane', () => {
       first.claimWorkerSession('worker-1', 'pairing-hash', 'session-hash', 20_000, 101),
     ).resolves.toMatchObject({ workerId: 'worker-1' });
     await expect(first.authenticateWorker('session-hash', 102)).resolves.toBe('worker-1');
-    await first.enqueue(owner, 'job-1', 'project-1', 'asset.thumbnail', 100);
+    await first.enqueue(owner, 'job-1', 'project-1', 'fixture.thumbnail', 100);
     await expect(first.lease('worker-1', 101, 30_000)).resolves.toMatchObject({
       id: 'job-1',
       state: 'leased',
@@ -31,9 +31,17 @@ describe('PostgresControlPlane', () => {
     });
 
     const restarted = new PostgresControlPlane(pool, { skipLocked: false });
-    await expect(restarted.complete('worker-1', 'job-1', 102)).resolves.toMatchObject({
+    await expect(
+      restarted.complete('worker-1', 'job-1', 102, fixtureReceipt()),
+    ).resolves.toMatchObject({
       id: 'job-1',
       state: 'completed',
+      derivative: {
+        jobId: 'job-1',
+        workerRef: 'worker-1',
+        resultRef: 'derivative:job-1',
+        verifiedAt: 102,
+      },
     });
     await expect(restarted.eventsAfter(owner, 'project-1', 0)).resolves.toMatchObject([
       { type: 'queued' },
@@ -63,3 +71,11 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 });
+
+function fixtureReceipt() {
+  return {
+    kind: 'fixture.thumbnail' as const,
+    sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+    bytes: 14,
+  };
+}
