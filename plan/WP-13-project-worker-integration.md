@@ -15,9 +15,9 @@ rendering.
 
 The WP-12 gate review also found one small UX distinction to preserve: an
 editor project that has not yet created its control-plane record is *ready to
-initialize*, not unauthenticated or offline. The scoped correction is staged
-with this preparation and must ship in WP-13.1's first immutable static
-release.
+initialize*, not unauthenticated or offline. That scoped correction shipped in
+the WP-12 closeout static release (`7bb3e93`); WP-13.1 adds its durable
+project-binding test coverage.
 
 ## Work packages
 
