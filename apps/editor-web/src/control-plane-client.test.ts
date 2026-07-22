@@ -37,6 +37,20 @@ describe('BrowserControlPlaneClient', () => {
       },
     ]);
   });
+
+  it('reports a plain-text identity denial without a JSON parsing failure', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        'https://joyteam.ir/identity',
+      );
+      await expect(client.workers()).rejects.toThrow('unauthorized');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
 
 function json(status: number, value: unknown): Response {

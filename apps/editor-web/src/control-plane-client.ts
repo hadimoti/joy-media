@@ -73,7 +73,7 @@ export class BrowserControlPlaneClient {
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${token}` },
     });
-    const body: unknown = await response.json();
+    const body = await responseBody(response);
     if (!response.ok) throw new Error(errorMessage(body, response.status));
     if (!isRecord(body) || !('data' in body))
       throw new Error('JOY Media API returned an invalid response');
@@ -82,7 +82,7 @@ export class BrowserControlPlaneClient {
   private async assertion(): Promise<string> {
     if (this.#token !== undefined && Date.now() < this.#tokenExpiresAt) return this.#token;
     const response = await fetch(this.identityUrl, { method: 'POST', credentials: 'include' });
-    const body: unknown = await response.json();
+    const body = await responseBody(response);
     if (!response.ok || !isRecord(body) || typeof body.access_token !== 'string')
       throw new Error(errorMessage(body, response.status));
     this.#token = body.access_token;
@@ -99,6 +99,15 @@ function errorMessage(body: unknown, status: number): string {
   }
   if (isRecord(body) && typeof body.error === 'string') return body.error;
   return `JOY Media request failed (${status})`;
+}
+async function responseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (text.length === 0) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return { error: text };
+  }
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
