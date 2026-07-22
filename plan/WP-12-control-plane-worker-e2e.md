@@ -37,7 +37,7 @@ pairing, submission, cancellation, retry, and recovery UI actions.
 - [ ] Cancellation, retry, and stale-lease recovery are demonstrated in the running editor and recorded in cursorable events. **Recorded through the live API/Worker; signed-in editor operation remains open.**
 - [x] API/Worker restart does not erase project metadata, job state, or auditable events.
 - [ ] Live deployment identifies an immutable source revision/artifact and preserves X01 isolation, health, backup, and rollback guarantees. **Source/artifact/health/backup are evidenced; an actual rollback drill is open.**
-- [ ] Root typecheck, formatting, and relevant unit/integration/browser checks pass; documented repository-baseline exceptions remain explicit. **Run recorded in the final gate review.**
+- [ ] Root typecheck, formatting, and relevant unit/integration/browser checks pass; documented repository-baseline exceptions remain explicit. **Final 2026-07-22 run:** typecheck and formatting pass; 1,117/1,118 tests pass, with only the documented cross-Chromium golden mismatch; lint has exactly the eight accepted plugin-sdk/bin findings duplicated by the foreign worktree. The command is therefore not literally green, but no new gate regression remains.
 
 ## Scope boundaries
 
