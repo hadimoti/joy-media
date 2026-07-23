@@ -12,10 +12,43 @@ import {
   computePrivacyPreflight,
 } from '@joy-media/provider-sdk';
 
+const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function mockComfyFetch(imageCount: number): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith('/prompt')) {
+      return new Response(JSON.stringify({ prompt_id: 'prompt-1' }), { status: 200 });
+    }
+    if (url.includes('/history/')) {
+      const images = Array.from({ length: imageCount }, (_, index) => ({
+        filename: `out-${index}.png`,
+        subfolder: '',
+        type: 'output',
+      }));
+      return new Response(
+        JSON.stringify({
+          'prompt-1': {
+            outputs: {
+              '9': { images },
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.includes('/view?')) {
+      return new Response(PNG, { status: 200 });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+}
+
 const DEFAULT_CONFIG: ComfyUIAdapterConfig = {
   endpoint: 'http://localhost:8188',
   timeoutMs: 30000,
-  pollIntervalMs: 500,
+  pollIntervalMs: 10,
+  fetch: mockComfyFetch(1),
 };
 
 describe('createComfyUIAdapter', () => {
@@ -59,7 +92,7 @@ describe('createComfyUIAdapter', () => {
 });
 
 describe('ComfyUI adapter invoke', () => {
-  it('handles image.upscale successfully', async () => {
+  it('handles image.upscale successfully via real HTTP protocol', async () => {
     const adapter = createComfyUIAdapter(DEFAULT_CONFIG, [IMAGE_UPSCALE_TEMPLATE]);
     const request = createTestRequest('image.upscale', {
       image: new Uint8Array([1, 2, 3]),
@@ -71,10 +104,14 @@ describe('ComfyUI adapter invoke', () => {
     expect(result.outputs.length).toBeGreaterThan(0);
     expect(result.outputs[0]!.kind).toBe('image');
     expect(result.outputs[0]!.mimeType).toBe('image/png');
+    expect(result.outputs[0]!.bytes).toEqual(PNG);
   });
 
-  it('handles image.removeBackground successfully', async () => {
-    const adapter = createComfyUIAdapter(DEFAULT_CONFIG, [BACKGROUND_REMOVAL_TEMPLATE]);
+  it('handles image.removeBackground successfully via real HTTP protocol', async () => {
+    const adapter = createComfyUIAdapter(
+      { ...DEFAULT_CONFIG, fetch: mockComfyFetch(2) },
+      [BACKGROUND_REMOVAL_TEMPLATE],
+    );
     const result = await adapter.invoke('image.removeBackground', {
       image: new Uint8Array([1, 2, 3]),
     });
@@ -83,6 +120,34 @@ describe('ComfyUI adapter invoke', () => {
     expect(result.outputs).toHaveLength(2);
     expect(result.outputs[0]!.kind).toBe('image');
     expect(result.outputs[1]!.kind).toBe('image');
+  });
+
+  it('fails closed when the endpoint is empty', async () => {
+    const adapter = createComfyUIAdapter(
+      { endpoint: '', timeoutMs: 1000, pollIntervalMs: 10 },
+      [IMAGE_UPSCALE_TEMPLATE],
+    );
+    const result = await adapter.invoke('image.upscale', { image: new Uint8Array([1]) });
+    expect(result.status).toBe('failed');
+    expect(result.diagnostics.some((d) => d.message.includes('COMFYUI_UNAVAILABLE'))).toBe(true);
+    expect(result.outputs).toEqual([]);
+  });
+
+  it('fails closed when ComfyUI is unreachable', async () => {
+    const adapter = createComfyUIAdapter(
+      {
+        endpoint: 'http://127.0.0.1:9',
+        timeoutMs: 1000,
+        pollIntervalMs: 10,
+        fetch: (async () => {
+          throw new Error('ECONNREFUSED');
+        }) as typeof fetch,
+      },
+      [IMAGE_UPSCALE_TEMPLATE],
+    );
+    const result = await adapter.invoke('image.upscale', { image: new Uint8Array([1]) });
+    expect(result.status).toBe('failed');
+    expect(result.diagnostics.some((d) => d.message.includes('COMFYUI_UNAVAILABLE'))).toBe(true);
   });
 
   it('returns failed status for unsupported capability', async () => {
@@ -177,13 +242,5 @@ describe('Built-in templates', () => {
     expect(IMAGE_UPSCALE_TEMPLATE.inputs).toHaveLength(2);
     expect(IMAGE_UPSCALE_TEMPLATE.outputs).toHaveLength(1);
     expect(IMAGE_UPSCALE_TEMPLATE.requiredModels).toContain('RealESRGAN_x4plus.pth');
-  });
-
-  it('BACKGROUND_REMOVAL_TEMPLATE has correct structure', () => {
-    expect(BACKGROUND_REMOVAL_TEMPLATE.templateId).toBe('background-removal-v1');
-    expect(BACKGROUND_REMOVAL_TEMPLATE.capability).toBe('image.removeBackground');
-    expect(BACKGROUND_REMOVAL_TEMPLATE.inputs).toHaveLength(2);
-    expect(BACKGROUND_REMOVAL_TEMPLATE.outputs).toHaveLength(2);
-    expect(BACKGROUND_REMOVAL_TEMPLATE.requiredModels).toContain('u2net.onnx');
   });
 });

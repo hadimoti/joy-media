@@ -34,6 +34,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 ## Session log (newest first)
 
 
+| 2026-07-23 | WP-23 | **ComfyUI fail-closed HTTP.** `adapter-comfyui` now queues `/prompt`, polls `/history`, fetches `/view`; empty endpoint or connection errors return `COMFYUI_UNAVAILABLE` — no mock PNG success. |
+
 | 2026-07-23 | WP-23 | **edge-tts synthesize API.** `POST /v1/providers/speech/synthesize` runs real Microsoft Edge TTS (FA/EN voices); adapter-tts gains `edge-tts` engine with data-leaves-device disclosure; workflow speech port drops `__stub` and defers bytes to the API. |
 
 | 2026-07-23 | WP-23 | **Live Whisper API.** `POST /v1/providers/speech/transcribe` runs `faster-whisper` (tiny) via `apps/api/scripts/whisper_transcribe.py`; Captions tries authenticated API then falls back to FA/EN fixtures. editor-web 77/77; api whisper smoke green. |
