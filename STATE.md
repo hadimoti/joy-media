@@ -15,7 +15,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P05 audio + providers            | in-progress | 5/5      | 2026-07-22   | Original 33 failures fixed; one cross-Chromium golden remains, and providers remain stubs                         |
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
 | P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
-| P08 plugin SDK + templates       | in-progress | 5/5      | 2026-07-21   | SDK contracts/fixtures unit-only; no host wiring in editor                                                        |
+| P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
 | WP-11 live preview canvas        | done*       | 5/5      | 2026-07-22   | Gate re-reviewed: Pixi/video/audio MP4 export and scrub pixels verified; *lint/golden baseline exceptions remain  |
@@ -25,10 +25,13 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 || WP-15 agent editor integration   | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean |
 | WP-16 workflow recorder + UX     | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul        |
 | WP-17 first-party ports          | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                  |
+| WP-18 plugin host wiring         | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                             |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
 ## Session log (newest first)
 
+
+| 2026-07-23 | WP-18 | **Plugin host wired into editor.** Split browser-safe `@joy-media/plugin-sdk/browser` (`FirstPartyPluginHost` + policy, no Node crypto). Plugins panel lists first-party demo (install disabled → enable); safe mode default-on blocks enable/mount; project data survives disable. editor-web 71/71; plugin-sdk 19/19; vite build ok. |
 
 | 2026-07-23 | WP-17 | **Gate accepted; P07 done.** Owner directed full next-slice work. Chromium live evidence (release `e1f9307`) stands: System workflows ×3, draft-reels Run→choose-candidates→approve-render→Finished. Residuals remain explicit: stub ports (P05), no version-bump toast. |
 

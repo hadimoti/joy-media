@@ -1,8 +1,9 @@
 /** Non-destructive plugin lifecycle and project degradation contract (§24.7). */
 
 import { diffPluginPermissions, verifyPluginPackage } from './security.js';
-import type { PluginExecutionPolicy, PluginPackageV1, PluginTrustStore } from './security.js';
-import { decidePluginExecution } from './security.js';
+import type { PluginPackageV1, PluginTrustStore } from './security.js';
+import { decidePluginExecution } from './policy.js';
+import type { PluginExecutionPolicy } from './policy.js';
 import type { PluginEntrypoint, PluginManifestV1 } from './manifest.js';
 
 export type InstalledPluginState = 'disabled' | 'enabled';
@@ -79,6 +80,23 @@ export class PluginLifecycle {
       state: 'disabled',
     };
     this.#installed.set(plugin.manifest.id, plugin);
+    return { state: 'updated', plugin };
+  }
+
+  /**
+   * Registers a first-party bundled plugin without package signature verification.
+   * Host trust replaces Ed25519 for shipped JOY contributions (browser-safe path).
+   */
+  registerFirstParty(manifest: PluginManifestV1, packageSha256 = 'first-party'): PluginUpdateResult {
+    if (this.#installed.has(manifest.id)) {
+      return { state: 'rejected', issues: ['plugin/already-installed'] };
+    }
+    const plugin: InstalledPlugin = {
+      manifest,
+      packageSha256,
+      state: 'disabled',
+    };
+    this.#installed.set(manifest.id, plugin);
     return { state: 'updated', plugin };
   }
 

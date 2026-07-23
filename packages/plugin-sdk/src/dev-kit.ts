@@ -1,14 +1,10 @@
 /** Developer-kit primitives: scaffold, local capability simulation, fixtures, snapshots (§24.8). */
 
 import { createHash } from 'node:crypto';
-import { decidePluginExecution } from './security.js';
+import { decidePluginExecution } from './policy.js';
+import type { PluginExecutionPolicy } from './policy.js';
 import { validatePluginManifest } from './manifest.js';
-import type {
-  PluginEntrypoint,
-  PluginExecutionPolicy,
-  PluginManifestV1,
-  PluginPermission,
-} from './index.js';
+import type { PluginEntrypoint, PluginManifestV1, PluginPermission } from './manifest.js';
 
 export interface PluginScaffoldOptions {
   readonly id: string;

@@ -43,16 +43,16 @@ export type {
   PluginTrustStore,
   PluginVerificationResult,
   PluginPermissionDiff,
-  PluginExecutionPolicy,
-  PluginExecutionDecision,
 } from './security.js';
 export {
-  decidePluginExecution,
   diffPluginPermissions,
   hashPluginPackage,
   signPluginPackage,
   verifyPluginPackage,
 } from './security.js';
+
+export type { PluginExecutionPolicy, PluginExecutionDecision } from './policy.js';
+export { decidePluginExecution } from './policy.js';
 
 export type {
   InstalledPluginState,
@@ -64,6 +64,13 @@ export type {
   PluginUpdateResult,
 } from './lifecycle.js';
 export { PluginLifecycle } from './lifecycle.js';
+
+export type {
+  FirstPartyInstalledPlugin,
+  FirstPartyPluginState,
+  FirstPartyUpdateResult,
+} from './first-party-host.js';
+export { FirstPartyPluginHost } from './first-party-host.js';
 
 export type {
   PluginScaffoldOptions,

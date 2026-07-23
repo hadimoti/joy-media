@@ -1,13 +1,10 @@
 /** Verification, update approval, tier gate, and safe-mode policy (§24.5, §29.7). */
 
 import { createHash, sign, verify } from 'node:crypto';
-import { executionTierFor, validatePluginManifest } from './manifest.js';
-import type {
-  PluginEntrypoint,
-  PluginExecutionTier,
-  PluginManifestV1,
-  PluginPermission,
-} from './manifest.js';
+import { validatePluginManifest } from './manifest.js';
+import type { PluginManifestV1, PluginPermission } from './manifest.js';
+export type { PluginExecutionDecision, PluginExecutionPolicy } from './policy.js';
+export { decidePluginExecution } from './policy.js';
 
 export interface PluginPackageSignatureV1 {
   readonly algorithm: 'ed25519';
@@ -39,20 +36,6 @@ export interface PluginPermissionDiff {
   readonly removed: readonly PluginPermission[];
   /** Any added permission requires an explicit update approval. */
   readonly requiresApproval: boolean;
-}
-
-export interface PluginExecutionPolicy {
-  readonly safeMode: boolean;
-  /** Server plugins are never enabled by default. */
-  readonly allowServerPlugins?: boolean;
-  readonly approvedPermissions: ReadonlySet<PluginPermission>;
-}
-
-export interface PluginExecutionDecision {
-  readonly allowed: boolean;
-  readonly tier: PluginExecutionTier;
-  readonly reason?:
-    'safe-mode' | 'server-plugin-disabled' | 'permission-unapproved' | 'entrypoint-missing';
 }
 
 /** Canonical content hash: sorted package paths, delimiters, and original bytes. */
@@ -151,26 +134,6 @@ export function diffPluginPermissions(
   const added = [...next].filter((permission) => !previous.has(permission)).sort();
   const removed = [...previous].filter((permission) => !next.has(permission)).sort();
   return { added, removed, requiresApproval: added.length > 0 };
-}
-
-/** Blocks all third-party code in safe mode and enforces tier permissions. */
-export function decidePluginExecution(
-  manifest: PluginManifestV1,
-  entrypoint: PluginEntrypoint,
-  policy: PluginExecutionPolicy,
-): PluginExecutionDecision {
-  const tier = executionTierFor(manifest);
-  if (manifest.entrypoints?.[entrypoint] === undefined)
-    return { allowed: false, tier, reason: 'entrypoint-missing' };
-  if (policy.safeMode) return { allowed: false, tier, reason: 'safe-mode' };
-  if (tier === 'server-plugin' && policy.allowServerPlugins !== true) {
-    return { allowed: false, tier, reason: 'server-plugin-disabled' };
-  }
-  const missing = manifest.permissions.some(
-    (permission) => !policy.approvedPermissions.has(permission),
-  );
-  if (missing) return { allowed: false, tier, reason: 'permission-unapproved' };
-  return { allowed: true, tier };
 }
 
 function isPackageFilePath(value: string): boolean {

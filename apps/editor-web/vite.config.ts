@@ -6,6 +6,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@joy-media/workflow-engine': '/opt/joy-media/repo/packages/workflow-engine/dist/index.js',
+      '@joy-media/plugin-sdk/browser': '/opt/joy-media/repo/packages/plugin-sdk/dist/browser.js',
+      '@joy-media/plugin-sdk': '/opt/joy-media/repo/packages/plugin-sdk/dist/index.js',
     },
   },
 });

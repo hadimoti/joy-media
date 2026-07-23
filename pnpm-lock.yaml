@@ -72,6 +72,9 @@ importers:
       '@joy-media/playback-engine':
         specifier: workspace:*
         version: link:../../packages/playback-engine
+      '@joy-media/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@joy-media/project-persistence':
         specifier: workspace:*
         version: link:../../packages/project-persistence

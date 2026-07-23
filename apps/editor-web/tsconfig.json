@@ -55,6 +55,12 @@
     },
     {
       "path": "../../packages/export-core"
+    },
+    {
+      "path": "../../packages/workflow-engine"
+    },
+    {
+      "path": "../../packages/plugin-sdk"
     }
   ]
 }

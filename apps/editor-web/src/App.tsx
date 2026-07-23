@@ -50,6 +50,8 @@ import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { AgentPanel } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
+import { PluginsPanel } from './PluginsPanel.js';
+import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import {
@@ -107,6 +109,7 @@ const labels: Readonly<Record<string, string>> = {
   jobs: 'Jobs',
   agent: 'Agent',
   workflows: 'Workflows',
+  plugins: 'Plugins',
 };
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
@@ -255,6 +258,8 @@ export function App() {
     undefined,
   );
   const [, setRevision] = useState(0);
+  const [pluginHost] = useState(() => createEditorPluginHost());
+  const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
@@ -985,6 +990,14 @@ export function App() {
               };
             }
           }}
+        />
+      );
+    }
+    if (api.id === 'plugins') {
+      return (
+        <PluginsPanel
+          pluginHost={pluginHost}
+          onChange={() => setPluginRevision((revision) => revision + 1)}
         />
       );
     }
