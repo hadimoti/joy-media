@@ -34,6 +34,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 ## Session log (newest first)
 
 
+| 2026-07-23 | fix | **Captions toolbar wrap.** Slot header and caption rows wrap so FA/EN/SRT actions stay inside the utility column instead of clipping past the panel edge. |
+
 | 2026-07-23 | fix | **Dockview v3 seed.** v2 repeatedly used `direction: right`, which created 12×120px columns. Utilities now stack with `within` under one right-hand group; migrate key `joy-media.dockview.v3` and drop v1/v2. |
 
 | 2026-07-23 | fix | **Dockview layout + Captions a11y.** Fresh workspace uses Adobe-like 3-zone seed (media | monitor/timeline | utilities) under `joy-media.dockview.v2`; missing panels add `inactive` so they no longer steal focus; Captions SRT/VTT/FA/EN gained aria-labels. |

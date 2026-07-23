@@ -409,9 +409,13 @@ label {
 }
 .captions-slot-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 0.4rem;
+}
+.captions-slot-header > strong {
+  flex: 1 1 8rem;
+  min-width: 0;
 }
 .captions-list {
   display: grid;
@@ -422,6 +426,7 @@ label {
 }
 .caption-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
 }
