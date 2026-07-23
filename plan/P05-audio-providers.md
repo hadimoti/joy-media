@@ -37,6 +37,6 @@ Package-level P05 was marked done earlier; **editor/API live seams** landed late
 ## Open residuals (do not claim done)
 
 - GPU ComfyUI Worker + `JOY_MEDIA_COMFYUI_URL`.
-- Local TTS engines (kokoro/fish-speech/…) instead of edge-tts.
+- Local TTS: **Piper** is live (`engine: 'piper'` / `JOY_MEDIA_TTS_ENGINE=piper`); default remains edge-tts.
 - ML denoise (DeepFilterNet / RNNoise).
 - Signed-in live gate proving Whisper/TTS provenance (needs `joymedia_allowed` on identity owner).

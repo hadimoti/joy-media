@@ -26,14 +26,30 @@ describe('project Jobs panel state', () => {
     expect(jobStateLabel({ state: 'failed', cancelRequested: false })).toBe('Failed');
     expect(jobStateLabel({ state: 'completed', cancelRequested: false })).toBe('Completed');
   });
+  it('mentions local GPU Worker when Comfy/ML capabilities are absent or present', () => {
+    const noGpu = projectJobStatus(false, [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })], NOW);
+    expect(noGpu).toContain('local GPU Worker');
+    const withGpu = projectJobStatus(
+      false,
+      [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail', 'image.comfy'] })],
+      NOW,
+    );
+    expect(withGpu).toContain('Local GPU Worker capabilities are available');
+  });
 });
 
-function worker(input: Partial<{ readonly revoked: boolean; readonly lastSeenAt: number }>) {
+function worker(
+  input: Partial<{
+    readonly revoked: boolean;
+    readonly lastSeenAt: number;
+    readonly capabilities: readonly string[];
+  }>,
+) {
   return {
     id: 'worker-1',
     paired: true,
     revoked: false,
-    capabilities: [],
+    capabilities: [] as readonly string[],
     ...input,
   };
 }

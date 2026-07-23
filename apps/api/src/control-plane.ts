@@ -132,7 +132,23 @@ export interface AssetThumbnailReceipt {
     readonly height: number;
   };
 }
-export type WorkerResultReceipt = FixtureThumbnailReceipt | AssetThumbnailReceipt;
+/** Local GPU Worker derivative (Comfy / ML denoise) — ADR-0018. */
+export interface LocalGpuWorkerReceipt {
+  readonly kind: 'image.comfy' | 'audio.ml-denoise';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
+  };
+}
+export type WorkerResultReceipt =
+  | FixtureThumbnailReceipt
+  | AssetThumbnailReceipt
+  | LocalGpuWorkerReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
@@ -628,6 +644,11 @@ export class LocalControlPlane implements ControlPlane {
       (!isAssetThumbnailReceipt(receipt) || receipt.assetId !== job.assetId)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (
+      (job.type === 'image.comfy' || job.type === 'audio.ml-denoise') &&
+      (!isLocalGpuReceipt(receipt) || receipt.kind !== job.type)
+    )
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
     const done: Job = {
@@ -762,13 +783,33 @@ function isAssetThumbnailReceipt(
   );
 }
 
-function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
+function isLocalGpuReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is LocalGpuWorkerReceipt {
   return (
-    job.type !== 'asset.thumbnail' ||
-    (job.assetId !== undefined &&
-      worker.capabilities.includes('asset.thumbnail') &&
-      worker.localAssetIds.includes(job.assetId))
+    (value?.kind === 'image.comfy' || value?.kind === 'audio.ml-denoise') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^gpu-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0
   );
+}
+
+function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
+  if (job.type === 'asset.thumbnail') {
+    return (
+      job.assetId !== undefined &&
+      worker.capabilities.includes('asset.thumbnail') &&
+      worker.localAssetIds.includes(job.assetId)
+    );
+  }
+  if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
+  if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
+  // Fixture / unknown types: any connected Worker may lease (existing behavior).
+  return true;
 }
 
 function validatedOpaqueIds(values: readonly string[]): readonly string[] {

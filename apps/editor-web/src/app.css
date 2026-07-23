@@ -334,9 +334,34 @@ label {
   gap: 0.25rem;
   margin: 0.5rem 0;
 }
-.timeline-panel {
+.html-scenes-section {
   display: grid;
   gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.html-scene-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.html-scene-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.html-scene-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #3d3d40;
+  border-radius: 0.25rem;
+  background: #2a2a2c;
+  color: #dcdcde;
+  font-size: 0.75rem;
 }
 .timeline-toolbar,
 .timeline-track {
@@ -349,7 +374,15 @@ label {
   border-top: 1px solid #3d3d40;
 }
 .timeline-track strong {
-  width: 2rem;
+  flex: 0 0 5.5rem;
+  width: 5.5rem;
+  overflow: hidden;
+  color: #9d9da1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
 }
 .timeline-tracks {
   display: grid;
@@ -1148,6 +1181,32 @@ label {
   --dv-drag-over-background-color: rgb(233 185 73 / 18%);
   --dv-drag-over-border-color: #e9b949;
   --dv-paneview-active-outline-color: #e9b949;
+}
+
+/* Icon-only panel tabs (DESIGN.md §3). Own classes — not `.dv-*` internals. */
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0 0.35rem;
+  box-sizing: border-box;
+}
+.panel-tab-icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+.panel-tab-fallback {
+  font-size: 0.78rem;
 }
 
 /* === Workflows Panel - WP-17 additions === */

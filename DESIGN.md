@@ -1,6 +1,6 @@
 # JOY Media — Editor Design System
 
-Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); source of truth for icons is [icons.tsx](apps/editor-web/src/icons.tsx). If a change is needed, change it here and in those two files together.
+Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); source of truth for toolbar/action icons is [icons.tsx](apps/editor-web/src/icons.tsx); source of truth for dockview panel-tab glyphs is [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
 
 ## 1. Color tokens
 
@@ -46,8 +46,9 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 3. Layout & panels
 
-- Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label in App's `labels` map — a panel that isn't registered does not exist.
-- Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly.
+- Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label + tab icon in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) — a panel that isn't registered does not exist.
+- **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` (and in App's `labels` / panel `title` for overflow menus). Never put the panel name as visible tab text. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
+- Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly — tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes.
 - Panel root: `<article className="<name>-panel">`, `display: grid; gap: 0.4–0.5rem; align-content: start`. Section headings are `<h3>` (0.8rem, `text-muted`).
 - Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
 
@@ -74,8 +75,9 @@ Icon-only buttons always have `aria-label` + `title`. Toggles always have `aria-
 
 ## 6. Adding a new panel — checklist
 
-1. Register id in `workspace.ts` (`PANEL_IDS` + `DEFAULT_WORKSPACE`) and App `labels`.
-2. Root `<article className="…-panel">`, tokens from §1 only — no new hex values without adding them to this file.
-3. Common actions as `icon-button`s (§2); new icons into `icons.tsx`.
-4. Shortcuts through the resolver (§4).
-5. Verify in the browser (light smoke: mount, console clean, tab reachable) before claiming done.
+1. Register id in `workspace.ts` (`PANEL_IDS` + `DEFAULT_WORKSPACE`) and `PANEL_LABELS` / `PANEL_TAB_ICONS` in `panel-tab-icons.ts`.
+2. Add a black-on-transparent panel-tab PNG under `public/assets/icons/` and map it in `panel-tab-icons.ts` (§3).
+3. Root `<article className="…-panel">`, tokens from §1 only — no new hex values without adding them to this file.
+4. Common actions as `icon-button`s (§2); new toolbar icons into `icons.tsx`.
+5. Shortcuts through the resolver (§4).
+6. Verify in the browser (light smoke: mount, console clean, icon tab reachable via tooltip label) before claiming done.

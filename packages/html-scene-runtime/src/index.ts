@@ -48,8 +48,10 @@ export type {
   ScenePreviewEvent,
   ScenePreviewUpdate,
   ScenePreviewLifecycle,
+  ScenePreviewCapture,
   ScenePreviewReady,
   ScenePreviewFailure,
+  ScenePreviewSurface,
   ScenePreviewEndpoint,
   SandboxedIframeDescriptor,
 } from './preview-protocol.js';

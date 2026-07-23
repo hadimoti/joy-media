@@ -36,7 +36,7 @@ describe('Worker runtime', () => {
     expect(log.lines()).toEqual(['b', 'c']);
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
-      { ffmpeg: true, ffprobe: true },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
     );
     expect(
       (
@@ -60,7 +60,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -109,7 +109,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -165,5 +165,47 @@ describe('Worker runtime', () => {
     expect(() => localAssetSourcesFromEnvironment('{"asset-a":"x"}', () => false)).toThrow(
       'asset-a',
     );
+  });
+
+  it('runs audio.ml-denoise via ffmpeg arnndn when locally enabled', async () => {
+    const previous = process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+    const previousModel = process.env.JOY_MEDIA_RNNOISE_MODEL;
+    process.env.JOY_MEDIA_LOCAL_ML_DENOISE = '1';
+    process.env.JOY_MEDIA_RNNOISE_MODEL = '/opt/joy-media/data/rnnoise/cb.rnnn';
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-ml-'));
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-ml', createdAt: '2026-07-24T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true },
+      { derivativeDirectory },
+    );
+    try {
+      const result = await runtime.run(
+        { id: 'job-ml', type: 'audio.ml-denoise' },
+        { cancelled: () => false, progress: async () => undefined },
+      );
+      expect(result.state).toBe('completed');
+      if (result.state !== 'completed') return;
+      expect(result.result.kind).toBe('audio.ml-denoise');
+      expect(result.result.bytes).toBeGreaterThan(100);
+      expect(runtime.readDerivative(result.result).byteLength).toBe(result.result.bytes);
+    } finally {
+      rmSync(derivativeDirectory, { recursive: true, force: true });
+      if (previous === undefined) delete process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+      else process.env.JOY_MEDIA_LOCAL_ML_DENOISE = previous;
+      if (previousModel === undefined) delete process.env.JOY_MEDIA_RNNOISE_MODEL;
+      else process.env.JOY_MEDIA_RNNOISE_MODEL = previousModel;
+    }
+  });
+
+  it('advertises GPU capabilities only when local env is set', () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'w', createdAt: 'now' },
+      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true },
+    );
+    expect(runtime.hello('linux', 'x64').capabilities).toEqual([
+      'asset.thumbnail',
+      'image.comfy',
+      'audio.ml-denoise',
+    ]);
   });
 });

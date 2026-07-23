@@ -89,6 +89,15 @@ export type VisualObjectCommand =
       readonly type: 'camera.setFieldOfView';
       readonly payload: { readonly objectId: string; readonly fieldOfViewDeg: number };
     }
+  | {
+      /** Adds a `kind: 'html-scene'` object referencing a scene package (P04). */
+      readonly type: 'htmlScene.create';
+      readonly payload: { readonly object: VisualObjectV1 };
+    }
+  | {
+      readonly type: 'htmlScene.remove';
+      readonly payload: { readonly objectId: string };
+    }
   | CaptionCommand
   | MotionCommand;
 export interface VisualObjectApplyResult {
@@ -230,6 +239,39 @@ export function applyVisualObjectProjectCommand(
         type: 'camera.setFieldOfView',
         payload: { objectId, fieldOfViewDeg: previousFov },
       },
+    };
+  }
+  if (command.type === 'htmlScene.create') {
+    const { object } = command.payload;
+    if (object.kind !== 'html-scene')
+      throw new RangeError('htmlScene.create requires an html-scene-kind object');
+    if (typeof object.scenePackageId !== 'string' || object.scenePackageId.length === 0)
+      throw new RangeError('htmlScene.create requires scenePackageId');
+    if (project.visualObjects[object.id] !== undefined)
+      throw new RangeError(`visual object "${object.id}" already exists`);
+    return {
+      project: {
+        ...project,
+        visualObjects: { ...project.visualObjects, [object.id]: object },
+      },
+      inverse: { type: 'htmlScene.remove', payload: { objectId: object.id } },
+    };
+  }
+  if (command.type === 'htmlScene.remove') {
+    const { objectId } = command.payload;
+    const scene = project.visualObjects[objectId];
+    if (scene === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
+    if (scene.kind !== 'html-scene') throw new RangeError(`object "${objectId}" is not an html-scene`);
+    const parentOf = Object.values(project.visualObjects).find(
+      (candidate) => candidate.parentId === objectId,
+    );
+    if (parentOf !== undefined)
+      throw new RangeError(`html-scene "${objectId}" is still the parent of "${parentOf.id}"`);
+    const remaining = { ...project.visualObjects };
+    delete remaining[objectId];
+    return {
+      project: { ...project, visualObjects: remaining },
+      inverse: { type: 'htmlScene.create', payload: { object: scene } },
     };
   }
   const object = project.visualObjects[command.payload.objectId];

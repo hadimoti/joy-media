@@ -333,7 +333,11 @@ export interface TransformPorts {
     readonly aspect: string;
     readonly subjectHints?: unknown;
   }) => unknown;
-  readonly denoise?: (args: { readonly source: unknown; readonly strength?: number }) => unknown;
+  readonly denoise?: (args: {
+    readonly source: unknown;
+    readonly strength?: number;
+    readonly method?: 'noise-gate' | 'spectral' | 'ml';
+  }) => unknown;
   readonly normalizeAudio?: (args: {
     readonly source: unknown;
     readonly targetLufs?: number;
@@ -815,14 +819,29 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
       if (strength !== undefined && (typeof strength !== 'number' || !Number.isFinite(strength))) {
         issues.push(paramIssue('strength', 'must be a finite number'));
       }
+      const method = params['method'];
+      if (
+        method !== undefined &&
+        method !== 'noise-gate' &&
+        method !== 'spectral' &&
+        method !== 'ml'
+      ) {
+        issues.push(paramIssue('method', 'must be noise-gate, spectral, or ml'));
+      }
       return issues;
     },
     portBacked(ports.transform?.denoise, 'transform.denoise', (port, ctx) => {
       const strength = optionalNumberParam(ctx, 'strength');
+      const methodRaw = ctx.node.params['method'];
+      const method =
+        methodRaw === 'noise-gate' || methodRaw === 'spectral' || methodRaw === 'ml'
+          ? methodRaw
+          : undefined;
       return okResult(
         port({
           source: resolveSource(ctx, 'source'),
           ...(strength !== undefined ? { strength } : {}),
+          ...(method !== undefined ? { method } : {}),
         }),
       );
     }),

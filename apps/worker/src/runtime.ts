@@ -14,6 +14,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
+import {
+  readGpuDerivative,
+  runAudioMlDenoiseJob,
+  runImageComfyJob,
+  type LocalGpuReceipt,
+} from './local-gpu.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -119,6 +125,10 @@ export class BoundedLog {
 export interface ToolAvailability {
   readonly ffmpeg: boolean;
   readonly ffprobe: boolean;
+  /** Local ComfyUI (or JOY_MEDIA_LOCAL_COMFY_URL) on the Worker PC — ADR-0018. */
+  readonly comfy: boolean;
+  /** Local ML denoise tool/env on the Worker PC — ADR-0018. */
+  readonly mlDenoise: boolean;
 }
 
 /** Private mapping held only by the Worker; it is never serialized to the API. */
@@ -175,7 +185,15 @@ export function localAssetSourcesFromEnvironment(
   return new StaticLocalAssetSourceRegistry(sources);
 }
 export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolAvailability {
-  return { ffmpeg: run('ffmpeg'), ffprobe: run('ffprobe') };
+  const comfyUrl = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim();
+  return {
+    ffmpeg: run('ffmpeg'),
+    ffprobe: run('ffprobe'),
+    // Opt-in: owner PC has ComfyUI listening locally (never the VPS).
+    comfy: comfyUrl.length > 0,
+    // Opt-in: owner PC has ML denoise tooling installed.
+    mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
+  };
 }
 function canRun(tool: string): boolean {
   const result = spawnSync(tool, ['-version'], { shell: false, stdio: 'ignore' });
@@ -212,8 +230,10 @@ export class WorkerRuntime {
     } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
-    const capabilities: WorkerCapability[] =
-      this.tools.ffmpeg && this.tools.ffprobe ? ['asset.thumbnail'] : [];
+    const capabilities: WorkerCapability[] = [];
+    if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
+    if (this.tools.comfy) capabilities.push('image.comfy');
+    if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
       workerId: this.identity.workerId,
@@ -234,10 +254,64 @@ export class WorkerRuntime {
   ): Promise<
     | {
         readonly state: 'completed';
-        readonly result: RealThumbnailReceipt;
+        readonly result: WorkerDerivativeReceipt;
       }
     | { readonly state: 'canceled' }
   > {
+    if (job.type === 'image.comfy') {
+      if (!this.tools.comfy) throw new Error('ComfyUI is not enabled on this Worker');
+      if (options.cancelled()) return { state: 'canceled' };
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write(`job ${job.id} started (image.comfy)`);
+      try {
+        const sourcePath =
+          job.assetId === undefined ? undefined : this.options.sources?.resolve(job.assetId);
+        const result = await runImageComfyJob({
+          jobId: job.id,
+          ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+          ...(sourcePath === undefined ? {} : { sourcePath }),
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
+    if (job.type === 'audio.ml-denoise') {
+      if (!this.tools.mlDenoise) throw new Error('ML denoise is not enabled on this Worker');
+      if (options.cancelled()) return { state: 'canceled' };
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write(`job ${job.id} started (audio.ml-denoise)`);
+      try {
+        const sourcePath =
+          job.assetId === undefined ? undefined : this.options.sources?.resolve(job.assetId);
+        const result = await runAudioMlDenoiseJob({
+          jobId: job.id,
+          ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+          ...(sourcePath === undefined ? {} : { sourcePath }),
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
     if (job.type !== 'asset.thumbnail' || job.assetId === undefined)
       throw new Error(`unsupported Worker job ${job.type}`);
     if (!this.tools.ffmpeg || !this.tools.ffprobe)
@@ -314,7 +388,12 @@ export class WorkerRuntime {
   }
 
   /** Reads a retained derivative only after re-checking its receipt integrity. */
-  readDerivative(result: RealThumbnailReceipt): Uint8Array {
+  readDerivative(result: WorkerDerivativeReceipt): Uint8Array {
+    if (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') {
+      const directory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      return readGpuDerivative(directory, result);
+    }
     if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef))
       throw new Error('derivative local reference is invalid');
     const directory =
@@ -328,6 +407,8 @@ export class WorkerRuntime {
     return bytes;
   }
 }
+
+export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt;
 
 export interface RealThumbnailReceipt {
   readonly kind: 'asset.thumbnail';

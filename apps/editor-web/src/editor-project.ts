@@ -107,6 +107,34 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     },
+    'scene-title': {
+      id: 'scene-title',
+      kind: 'html-scene',
+      scenePackageId: 'joy.firstparty.title',
+      transform: {
+        x: 0,
+        y: 200,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    },
+    'scene-lower-third': {
+      id: 'scene-lower-third',
+      kind: 'html-scene',
+      scenePackageId: 'joy.firstparty.lower-third',
+      transform: {
+        x: 0,
+        y: 320,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    },
   },
   captionDocuments: {
     'captions-fa': {
@@ -137,7 +165,7 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
 };
 
 export const TIMELINE_OBJECT_IDS: Readonly<Record<string, readonly string[]>> = {
-  intro: ['intro-title'],
-  product: ['product-image'],
+  intro: ['intro-title', 'scene-title'],
+  product: ['product-image', 'scene-lower-third'],
   outro: ['outro-shape'],
 };

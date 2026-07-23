@@ -10,3 +10,5 @@
 **Must not:** Changing core invariants without an ADR.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+Accepted through **ADR-0018** (local GPU Worker for Comfy / ML denoise on owner PC).

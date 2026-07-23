@@ -137,11 +137,22 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         denoise: (args: {
           readonly source: unknown;
           readonly strength?: number;
-          readonly method?: 'noise-gate' | 'spectral';
+          readonly method?: 'noise-gate' | 'spectral' | 'ml';
         }) => {
           const sampleRate = 48_000;
           const samples = generateNoisyFixturePcm(sampleRate);
           const strength = Math.min(1, Math.max(0, args.strength ?? 0.5));
+          if (args.method === 'ml') {
+            // ADR-0018: ML denoise runs on a local GPU Worker, not the VPS.
+            return {
+              source: args.source,
+              method: 'ml-denoise',
+              strength,
+              deferredJobType: 'audio.ml-denoise',
+              requiredWorkerCapability: 'audio.ml-denoise',
+              note: 'ML denoise requires a paired local GPU Worker advertising audio.ml-denoise (DeepFilterNet via JOY_MEDIA_ML_DENOISE_CMD, else ffmpeg arnndn/RNNoise).',
+            };
+          }
           const preferSpectral = args.method === 'spectral' || strength >= 0.75;
           if (preferSpectral) {
             // Browser ports cannot shell ffmpeg; spectral runs on the API/Worker adapter.
@@ -210,14 +221,27 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           readonly text: string;
           readonly voiceId: string;
           readonly language?: string;
+          readonly engine?: 'edge-tts' | 'piper';
         }) => {
-          // Browser workflow ports are sync; real MP3 bytes come from
-          // POST /v1/providers/speech/synthesize (edge-tts, data leaves device).
           const language = args.language ?? 'en';
+          const engine = args.engine === 'piper' ? 'piper' : 'edge-tts';
           const stockVoice = language.toLowerCase().startsWith('fa')
             ? 'fa-IR-DilaraNeural'
             : 'en-US-EmmaMultilingualNeural';
           const isCloned = args.voiceId.length > 0 && !args.voiceId.startsWith('stock:');
+          if (engine === 'piper') {
+            return {
+              voiceOver: args.text,
+              voiceId: args.voiceId || stockVoice,
+              method: 'piper',
+              dataLeavesDevice: false,
+              retentionDisclosure:
+                'Text is synthesized locally with Piper ONNX; it does not leave this host',
+              deferredEndpoint: '/v1/providers/speech/synthesize',
+              deferredBody: { engine: 'piper' },
+              requiresConsent: isCloned,
+            };
+          }
           return {
             voiceOver: args.text,
             voiceId: isCloned ? args.voiceId : stockVoice,
@@ -225,6 +249,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             dataLeavesDevice: true,
             retentionDisclosure: 'Text is sent to Microsoft Edge online TTS for synthesis',
             deferredEndpoint: '/v1/providers/speech/synthesize',
+            deferredBody: { engine: 'edge-tts' },
             requiresConsent: isCloned,
           };
         },

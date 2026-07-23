@@ -16,7 +16,8 @@ import {
   parentChain,
   sampleCurve,
 } from '@joy-media/motion-core';
-import { CheckIcon } from './icons.js';
+import { FIRST_PARTY_SCENES, type FirstPartySceneId } from '@joy-media/html-scene-runtime/first-party';
+import { CheckIcon, CloseIcon, PlusIcon } from './icons.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -31,10 +32,99 @@ const LANE_WIDTH = 280;
 const GRAPH_HEIGHT = 90;
 const PRESET_DURATION_US = 1_000_000;
 
+const IDENTITY_TRANSFORM = {
+  x: 0,
+  y: 120,
+  scaleX: 1,
+  scaleY: 1,
+  rotationDeg: 0,
+  opacity: 1,
+  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+} as const;
+
 function animatedChannels(object: VisualObjectV1): readonly AnimatablePropertyV1[] {
   const animations = object.animations;
   if (animations === undefined) return [];
   return ANIMATABLE_PROPERTIES.filter((key) => animations[key] !== undefined);
+}
+
+function HtmlScenesSection({
+  allObjects,
+  onDispatch,
+}: {
+  readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+}) {
+  const existing = Object.values(allObjects).filter((item) => item.kind === 'html-scene');
+  const addScene = (sceneId: FirstPartySceneId) => {
+    const id = `scene-${sceneId.split('.').pop()}-${Date.now().toString(36)}`;
+    onDispatch({
+      label: `Add HTML scene ${sceneId}`,
+      commands: [
+        {
+          type: 'htmlScene.create',
+          payload: {
+            object: {
+              id,
+              kind: 'html-scene',
+              scenePackageId: sceneId,
+              transform: {
+                ...IDENTITY_TRANSFORM,
+                x: existing.length * 80,
+              },
+            },
+          },
+        },
+      ],
+    });
+  };
+  return (
+    <section className="html-scenes-section">
+      <h3>HTML scenes</h3>
+      <p className="empty-hint">
+        First-party P04 packages. Instances preview as labeled layers in Monitor/export until iframe
+        capture is wired.
+      </p>
+      <div className="html-scene-actions">
+        {FIRST_PARTY_SCENES.map((scene) => (
+          <button
+            key={scene.id}
+            type="button"
+            className="icon-button icon-button-labeled"
+            title={`Add ${scene.name}`}
+            aria-label={`Add HTML scene ${scene.name}`}
+            onClick={() => addScene(scene.id)}
+          >
+            <PlusIcon />
+            <span>{scene.name}</span>
+          </button>
+        ))}
+      </div>
+      {existing.length > 0 && (
+        <ul className="html-scene-list">
+          {existing.map((scene) => (
+            <li key={scene.id} dir="ltr">
+              <span>{scene.scenePackageId}</span>
+              <button
+                type="button"
+                className="icon-button"
+                title={`Remove ${scene.id}`}
+                aria-label={`Remove HTML scene ${scene.id}`}
+                onClick={() =>
+                  onDispatch({
+                    label: `Remove HTML scene ${scene.id}`,
+                    commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
+                  })
+                }
+              >
+                <CloseIcon />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 export function MotionPanel({
@@ -48,8 +138,14 @@ export function MotionPanel({
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
 
-  if (object === undefined) return <p>Select a visual clip to edit its motion.</p>;
-
+  if (object === undefined) {
+    return (
+      <article className="motion-panel">
+        <HtmlScenesSection allObjects={allObjects} onDispatch={onDispatch} />
+        <p className="empty-hint">Select a visual clip to edit its motion.</p>
+      </article>
+    );
+  }
   const duration = Math.max(1, compositionDurationUs);
   const timeToX = (timeUs: number) =>
     (Math.min(duration, Math.max(0, timeUs)) / duration) * LANE_WIDTH;

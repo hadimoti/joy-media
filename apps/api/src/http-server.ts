@@ -324,14 +324,16 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/synthesize') {
-    const { runEdgeSpeechSynthesis } = await import('./speech-synthesize.js');
+    const { runSpeechSynthesis, resolveSpeechEngine } = await import('./speech-synthesize.js');
     const body = await readJson(request);
     const text = requiredString(body, 'text');
     const language = typeof body.language === 'string' ? body.language : undefined;
     const voiceId = typeof body.voiceId === 'string' ? body.voiceId : undefined;
     const speed = typeof body.speed === 'number' ? body.speed : undefined;
-    const synthesized = runEdgeSpeechSynthesis({
+    const engine = resolveSpeechEngine(body.engine);
+    const synthesized = runSpeechSynthesis({
       text,
+      engine,
       ...(language !== undefined ? { language } : {}),
       ...(voiceId !== undefined ? { voiceId } : {}),
       ...(speed !== undefined ? { speed } : {}),
@@ -596,6 +598,18 @@ function optionalWorkerResult(body: Record<string, unknown>):
         readonly height: number;
       };
     }
+  | {
+      readonly kind: 'image.comfy' | 'audio.ml-denoise';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+    }
   | undefined {
   const value = body.result;
   if (value === undefined) return undefined;
@@ -606,6 +620,32 @@ function optionalWorkerResult(body: Record<string, unknown>):
     return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
   }
   const descriptor = result.descriptor;
+  if (
+    (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') &&
+    typeof result.assetId === 'string' &&
+    typeof result.localRef === 'string' &&
+    isReceiptHashAndBytes(result) &&
+    descriptor !== null &&
+    typeof descriptor === 'object' &&
+    !Array.isArray(descriptor) &&
+    typeof (descriptor as Record<string, unknown>).mimeType === 'string'
+  ) {
+    const mimeType = (descriptor as Record<string, unknown>).mimeType as string;
+    const width = (descriptor as Record<string, unknown>).width;
+    const height = (descriptor as Record<string, unknown>).height;
+    return {
+      kind: result.kind,
+      assetId: result.assetId,
+      sha256: result.sha256,
+      bytes: result.bytes,
+      localRef: result.localRef,
+      descriptor: {
+        mimeType,
+        ...(typeof width === 'number' && Number.isSafeInteger(width) ? { width } : {}),
+        ...(typeof height === 'number' && Number.isSafeInteger(height) ? { height } : {}),
+      },
+    };
+  }
   if (
     result.kind !== 'asset.thumbnail' ||
     typeof result.assetId !== 'string' ||

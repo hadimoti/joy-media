@@ -291,7 +291,9 @@ export function TimelinePanel({
           if (source === undefined) return null;
           return (
             <div className="timeline-track" key={track.id}>
-              <strong>{track.id}</strong>
+              <strong dir="ltr" title={track.id}>
+                {track.id}
+              </strong>
               <button
                 className="icon-button"
                 aria-pressed={track.locked}

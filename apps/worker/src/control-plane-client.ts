@@ -14,15 +14,15 @@ export interface LeasedJob {
   readonly assetId?: string;
 }
 export interface WorkerJobResult {
-  readonly kind: 'asset.thumbnail';
+  readonly kind: 'asset.thumbnail' | 'image.comfy' | 'audio.ml-denoise';
   readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
   readonly localRef: string;
   readonly descriptor: {
-    readonly mimeType: 'image/jpeg';
-    readonly width: number;
-    readonly height: number;
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
   };
 }
 
@@ -111,19 +111,22 @@ export class WorkerControlPlaneClient {
   async uploadDerivative(jobId: string, result: WorkerJobResult, bytes: Uint8Array): Promise<void> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${sessionToken}`,
+      'content-type': result.descriptor.mimeType,
+      'x-joy-asset-id': result.assetId,
+      'x-joy-sha256': result.sha256,
+      'x-joy-bytes': String(result.bytes),
+    };
+    if (result.descriptor.width !== undefined)
+      headers['x-joy-width'] = String(result.descriptor.width);
+    if (result.descriptor.height !== undefined)
+      headers['x-joy-height'] = String(result.descriptor.height);
     const response = await this.#fetch(
       `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,
       {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': result.descriptor.mimeType,
-          'x-joy-asset-id': result.assetId,
-          'x-joy-sha256': result.sha256,
-          'x-joy-bytes': String(result.bytes),
-          'x-joy-width': String(result.descriptor.width),
-          'x-joy-height': String(result.descriptor.height),
-        },
+        headers,
         body: bytes,
       },
     );

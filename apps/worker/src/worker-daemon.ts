@@ -34,11 +34,15 @@ export class WorkerDaemon {
           },
         });
         if (result.state === 'completed') {
-          await this.client.uploadDerivative(
-            job.id,
-            result.result,
-            this.runtime.readDerivative(result.result),
-          );
+          // Cloud derivative upload remains thumbnail-only (requires job.assetId).
+          // GPU receipts complete with a verified localRef; no VPS private-object upload.
+          if (result.result.kind === 'asset.thumbnail') {
+            await this.client.uploadDerivative(
+              job.id,
+              result.result,
+              this.runtime.readDerivative(result.result),
+            );
+          }
           await this.client.complete(job.id, result.result);
         } else await this.client.fail(job.id, 'canceled');
       } catch (error) {

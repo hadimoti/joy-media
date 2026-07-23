@@ -5,6 +5,7 @@
     "outDir": "dist"
   },
   "include": ["src"],
+  "exclude": ["src/browser-preview.ts"],
   "references": [
     {
       "path": "../project-schema"

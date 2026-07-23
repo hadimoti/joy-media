@@ -15,6 +15,12 @@ export default defineConfig({
       '@joy-media/renderer-pixi': pkg('./packages/renderer-pixi/src/index.ts'),
       '@joy-media/renderer-headless': pkg('./packages/renderer-headless/src/index.ts'),
       '@joy-media/html-scene-runtime': pkg('./packages/html-scene-runtime/src/index.ts'),
+      '@joy-media/html-scene-runtime/first-party': pkg(
+        './packages/html-scene-runtime/src/first-party.ts',
+      ),
+      '@joy-media/html-scene-runtime/browser': pkg(
+        './packages/html-scene-runtime/src/browser-preview.ts',
+      ),
       '@joy-media/media-core': pkg('./packages/media-core/src/index.ts'),
       '@joy-media/audio-core': pkg('./packages/audio-core/src/index.ts'),
       '@joy-media/audio-core/normalize': pkg('./packages/audio-core/src/normalization.ts'),

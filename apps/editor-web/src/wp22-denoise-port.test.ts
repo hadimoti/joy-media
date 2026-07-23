@@ -42,7 +42,7 @@ describe('transform.denoise port', () => {
     expect(Number.isFinite(output.outputPeakDb)).toBe(true);
   });
 
-  it('defers high-strength / spectral denoise to ffmpeg-afftdn', () => {
+  it('defers ML denoise to a local GPU Worker capability', () => {
     const library = createStubFirstPartyLibrary();
     const handler = library.handlers['transform.denoise'];
     expect(handler).toBeDefined();
@@ -53,7 +53,7 @@ describe('transform.denoise port', () => {
         id: 'denoise',
         category: 'transform',
         type: 'transform.denoise',
-        params: { strength: 0.9 },
+        params: { strength: 0.5, method: 'ml' },
         deterministic: true,
       },
       upstream: { src: { assetId: 'a1' } },
@@ -67,7 +67,8 @@ describe('transform.denoise port', () => {
     expect(result).toMatchObject({ ok: true });
     if (!('ok' in result) || !result.ok) return;
     const output = result.output as Record<string, unknown>;
-    expect(output.method).toBe('ffmpeg-afftdn');
-    expect(output.deferredEndpoint).toBe('/v1/providers/audio/denoise');
+    expect(output.method).toBe('ml-denoise');
+    expect(output.deferredJobType).toBe('audio.ml-denoise');
+    expect(output.requiredWorkerCapability).toBe('audio.ml-denoise');
   });
 });

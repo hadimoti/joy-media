@@ -62,5 +62,6 @@ These four decisions unblock WP-16 (agent → workflow recorder). Each is **DEFA
 | D-W23-3 | ComfyUI without a live endpoint? | DEFAULT | **Fail closed** — real HTTP client, never mock PNG/`mock text output`. |
 | D-W23-4 | What counts as “denoise” without ML models? | DEFAULT | **Noise-gate** in-browser + **ffmpeg `afftdn`** spectral on API/adapter. Do not label either as ML denoise. |
 | D-W23-5 | How to treat identity 401 in headless/unsigned? | DEFAULT | **Expected → `signed-out`.** No Media bypass/test token (ADR-0016). Entitlement stays on the JOY identity owner (`joymedia_allowed`). |
+| D-W24-1 | Where do Comfy / ML denoise GPU jobs run? | DEFAULT | **Owner PC local Worker** advertising `image.comfy` / `audio.ml-denoise` (ADR-0018). No VPS GPU / no `JOY_MEDIA_COMFYUI_URL` on the API host. Spectral `afftdn` + Whisper + edge-tts remain on VPS CPU. |
 
 See [`WP-23-live-provider-residuals.md`](WP-23-live-provider-residuals.md).

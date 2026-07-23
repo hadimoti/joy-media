@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
+import { PanelTab } from './PanelTab.js';
 import {
   createHtmlMediaDecoder,
   createHtmlVideoMediaClock,
@@ -36,6 +37,7 @@ import {
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
+import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
@@ -60,6 +62,7 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
+import { panelLabel } from './panel-tab-icons.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
   CommandIcon,
@@ -94,23 +97,6 @@ import 'dockview/dist/styles/dockview.css';
 function resolveReferenceMediaUrl(assetId: string): string {
   return `/media/reference/${assetId}.mp4`;
 }
-
-const labels: Readonly<Record<string, string>> = {
-  // Keep the durable Dockview ID `media` for existing saved layouts.
-  media: 'Assets',
-  monitor: 'Program Monitor',
-  timeline: 'Timeline',
-  captions: 'Captions',
-  inspector: 'Inspector',
-  motion: 'Motion',
-  camera: 'Camera',
-  history: 'History',
-  diagnostics: 'Diagnostics',
-  jobs: 'Jobs',
-  agent: 'Agent',
-  workflows: 'Workflows',
-  plugins: 'Plugins',
-};
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
   const composition = project.compositions.root;
@@ -721,6 +707,25 @@ export function App() {
       if (exportAudioTrack === undefined)
         throw new Error('Export audio mix did not produce a track');
       const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
+      const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
+        (object) => object.kind === 'html-scene',
+      );
+      const sceneFrames = new Map<number, Map<string, { width: number; height: number; data: Uint8ClampedArray }>>();
+      if (hasHtmlScenes) {
+        setExportStatus('Capturing HTML scene frames…');
+        const sceneCache = new HtmlSceneSurfaceCache();
+        try {
+          for (let index = 0; index < totalFrames; index++) {
+            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+            await sceneCache.sync(session.visualProject.visualObjects, timeUs);
+            sceneFrames.set(index, new Map(sceneCache.bitmaps()));
+            if (index % frameRate === 0)
+              setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
+          }
+        } finally {
+          sceneCache.destroy();
+        }
+      }
       const startTimers: number[] = [];
       const audioSources: AudioBufferSourceNode[] = [];
       try {
@@ -764,10 +769,12 @@ export function App() {
               width: media.video.videoWidth,
               height: media.video.videoHeight,
             });
-            renderer.render(
-              withVideoFrameNode(buildFrame(timeUs), node),
-              new Map([[node.id, decoded.bitmap]]),
-            );
+            const bitmaps = new Map([[node.id, decoded.bitmap]]);
+            const scenes = sceneFrames.get(index);
+            if (scenes !== undefined) {
+              for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
+            }
+            renderer.render(withVideoFrameNode(buildFrame(timeUs), node), bitmaps);
           },
           onProgress: (completed, total) => {
             setExportProgress(0.05 + 0.93 * (completed / total));
@@ -859,7 +866,7 @@ export function App() {
       event.api.addPanel({
         id,
         component: 'editor-panel',
-        title: labels[id] ?? id,
+        title: panelLabel(id),
         inactive: options.inactive ?? true,
         ...(options.position !== undefined ? { position: options.position } : {}),
       });
@@ -1060,7 +1067,7 @@ export function App() {
     }
     return (
       <article>
-        <p>{`${labels[api.id] ?? api.id} panel`}</p>
+        <p>{`${panelLabel(api.id)} panel`}</p>
       </article>
     );
   }
@@ -1293,6 +1300,7 @@ export function App() {
         <DockviewReact
           className="workspace"
           components={{ 'editor-panel': Panel }}
+          defaultTabComponent={PanelTab}
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
@@ -1307,6 +1315,8 @@ function MonitorPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
+  const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
+  const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
 
   paintRef.current = (): void => {
@@ -1337,10 +1347,14 @@ function MonitorPanel() {
       previewVideoFrame === undefined
         ? visualFrame
         : withVideoFrameNode(visualFrame, previewVideoFrame.node);
-    const videoBitmaps =
+    const videoBitmaps = new Map(
       previewVideoFrame === undefined
-        ? undefined
-        : new Map([[previewVideoFrame.node.id, previewVideoFrame.bitmap]]);
+        ? []
+        : [[previewVideoFrame.node.id, previewVideoFrame.bitmap] as const],
+    );
+    for (const [id, bitmap] of sceneCacheRef.current.bitmaps()) {
+      videoBitmaps.set(id, bitmap);
+    }
     renderer.render(frame, videoBitmaps);
   };
 
@@ -1370,8 +1384,21 @@ function MonitorPanel() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void sceneCacheRef.current.sync(visualProject.visualObjects, state.playheadUs).then(() => {
+      if (cancelled) return;
+      setSceneTick((value) => value + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.playheadUs, visualProject]);
+
+  useEffect(() => () => sceneCacheRef.current.destroy(), []);
+
+  useEffect(() => {
     paintRef.current();
-  }, [previewVideoFrame, state.playheadUs, visualProject]);
+  }, [previewVideoFrame, state.playheadUs, visualProject, sceneTick]);
 
   return (
     <article className="monitor-panel">

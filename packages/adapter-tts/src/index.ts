@@ -22,7 +22,8 @@ export type TTSEngine =
   | 'kokoro'
   | 'chatterbox'
   | 'elevenlabs'
-  | 'edge-tts';
+  | 'edge-tts'
+  | 'piper';
 
 export interface TTSConfig {
   readonly execution: 'worker-local' | 'remote-api';
@@ -32,6 +33,10 @@ export interface TTSConfig {
   readonly apiKey?: string;
   /** Override path to the edge-tts binary (default: edge-tts on PATH). */
   readonly edgeTtsCommand?: string;
+  /** Override path to the Piper binary (default: JOY_MEDIA_PIPER / stock path). */
+  readonly piperCommand?: string;
+  /** Override directory containing Piper `.onnx` voice models. */
+  readonly piperVoicesDir?: string;
 }
 
 export interface TTSInput {
@@ -77,9 +82,11 @@ const VALID_ENGINES: readonly TTSEngine[] = [
   'chatterbox',
   'elevenlabs',
   'edge-tts',
+  'piper',
 ];
 
 const REMOTE_ENGINES: readonly TTSEngine[] = ['elevenlabs', 'edge-tts'];
+const LOCAL_ONLY_ENGINES: readonly TTSEngine[] = ['piper'];
 
 function validateConfig(config: TTSConfig): void {
   if (!VALID_ENGINES.includes(config.engine)) {
@@ -88,6 +95,10 @@ function validateConfig(config: TTSConfig): void {
 
   if (REMOTE_ENGINES.includes(config.engine) && config.execution === 'worker-local') {
     throw new Error(`Engine '${config.engine}' requires remote-api execution`);
+  }
+
+  if (LOCAL_ONLY_ENGINES.includes(config.engine) && config.execution !== 'worker-local') {
+    throw new Error(`Engine '${config.engine}' requires worker-local execution`);
   }
 
   if (config.apiKey !== undefined && typeof config.apiKey !== 'string') {
@@ -210,6 +221,59 @@ function synthesizeWithEdgeTts(
   }
 }
 
+function resolvePiperModel(
+  config: TTSConfig,
+  language: string | undefined,
+  voiceId: string | undefined,
+): string {
+  if (voiceId !== undefined && voiceId.length > 0 && voiceId.endsWith('.onnx') && existsSync(voiceId)) {
+    return voiceId;
+  }
+  const voicesDir =
+    config.piperVoicesDir ??
+    process.env.JOY_MEDIA_PIPER_VOICES_DIR?.trim() ??
+    '/opt/joy-media/data/piper/voices';
+  const lang = (language ?? 'en').toLowerCase();
+  const preferred = lang.startsWith('fa')
+    ? join(voicesDir, 'fa_IR-gyro-medium.onnx')
+    : join(voicesDir, 'en_US-lessac-medium.onnx');
+  if (existsSync(preferred)) return preferred;
+  const fallback = join(voicesDir, 'en_US-lessac-medium.onnx');
+  if (existsSync(fallback)) return fallback;
+  throw new Error(`Piper voice model missing under ${voicesDir}`);
+}
+
+function synthesizeWithPiper(
+  config: TTSConfig,
+  input: TTSInput,
+): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
+  const command =
+    config.piperCommand ??
+    process.env.JOY_MEDIA_PIPER?.trim() ??
+    '/opt/joy-media/data/piper/piper/piper';
+  const model = resolvePiperModel(config, input.language, input.voiceId ?? config.voiceId);
+  const speed = input.speed ?? 1.0;
+  const dir = mkdtempSync(join(tmpdir(), 'joy-piper-tts-'));
+  const mediaPath = join(dir, 'speech.wav');
+  try {
+    const result = spawnSync(command, ['--model', model, '--output_file', mediaPath], {
+      encoding: 'utf8',
+      input: input.text,
+      timeout: Number(process.env.JOY_MEDIA_TTS_TIMEOUT_MS ?? 60_000),
+    });
+    if (result.status !== 0 || !existsSync(mediaPath)) {
+      throw new Error(
+        `piper failed: ${(result.stderr || result.stdout || 'no output').slice(0, 400)}`,
+      );
+    }
+    const audioData = new Uint8Array(readFileSync(mediaPath));
+    const timings = generateWordTimings(input.text, speed);
+    return { audioData, timings, mimeType: 'audio/wav', sampleRate: 22_050 };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function synthesizeSineFixture(
   input: TTSInput,
 ): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
@@ -237,6 +301,9 @@ function synthesizeSpeech(
 ): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
   if (config.engine === 'edge-tts') {
     return synthesizeWithEdgeTts(config, input);
+  }
+  if (config.engine === 'piper') {
+    return synthesizeWithPiper(config, input);
   }
   // Other engines remain fixture sine until a local binary is wired.
   return synthesizeSineFixture(input);

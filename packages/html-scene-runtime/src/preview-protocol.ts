@@ -21,7 +21,19 @@ export interface ScenePreviewLifecycle {
   readonly instanceId: string;
 }
 
-export type ScenePreviewMessage = ScenePreviewUpdate | ScenePreviewLifecycle;
+/** Host → scene: request an RGBA surface of the current painted frame. */
+export interface ScenePreviewCapture {
+  readonly type: 'joy.scene.capture.v1';
+  readonly instanceId: string;
+  readonly requestId: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type ScenePreviewMessage =
+  | ScenePreviewUpdate
+  | ScenePreviewLifecycle
+  | ScenePreviewCapture;
 
 export interface ScenePreviewReady {
   readonly type: 'joy.scene.ready.v1';
@@ -34,7 +46,20 @@ export interface ScenePreviewFailure {
   readonly diagnostic: SceneDiagnostic;
 }
 
-export type ScenePreviewEvent = ScenePreviewReady | ScenePreviewFailure;
+/** Scene → host: transferable RGBA bytes for Pixi `video-frame` bitmaps. */
+export interface ScenePreviewSurface {
+  readonly type: 'joy.scene.surface.v1';
+  readonly instanceId: string;
+  readonly requestId: string;
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: ArrayBuffer;
+}
+
+export type ScenePreviewEvent =
+  | ScenePreviewReady
+  | ScenePreviewFailure
+  | ScenePreviewSurface;
 
 export interface SandboxedIframeDescriptor {
   readonly sandbox: 'allow-scripts';
@@ -60,6 +85,91 @@ const PREVIEW_BOOTSTRAP = `(function () {
       return typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean';
     });
   }
+  function captureSurface(requestId, width, height) {
+    var root = document.getElementById('joy-scene-root');
+    if (!root) {
+      window.parent.postMessage({
+        type: 'joy.scene.failure.v1',
+        instanceId: instanceId || '',
+        diagnostic: { code: 'SCENE_CAPTURE', message: 'joy-scene-root missing', path: 'root' }
+      }, '*');
+      return;
+    }
+    var canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      window.parent.postMessage({
+        type: 'joy.scene.failure.v1',
+        instanceId: instanceId || '',
+        diagnostic: { code: 'SCENE_CAPTURE', message: '2d context unavailable', path: 'canvas' }
+      }, '*');
+      return;
+    }
+    var html = new XMLSerializer().serializeToString(root);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' +
+      width +
+      '" height="' +
+      height +
+      '">' +
+      '<foreignObject width="100%" height="100%" requiredExtensions="http://www.w3.org/1999/xhtml">' +
+      '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' +
+      width +
+      'px;height:' +
+      height +
+      'px;margin:0;padding:0;overflow:hidden;background:transparent;">' +
+      html +
+      '</div></foreignObject></svg>';
+    var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var img = new Image();
+    img.onload = function () {
+      try {
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        var imageData = ctx.getImageData(0, 0, width, height);
+        var buffer = imageData.data.buffer.slice(
+          imageData.data.byteOffset,
+          imageData.data.byteOffset + imageData.data.byteLength
+        );
+        window.parent.postMessage(
+          {
+            type: 'joy.scene.surface.v1',
+            instanceId: instanceId || '',
+            requestId: requestId,
+            width: width,
+            height: height,
+            rgba: buffer
+          },
+          '*',
+          [buffer]
+        );
+      } catch (error) {
+        window.parent.postMessage({
+          type: 'joy.scene.failure.v1',
+          instanceId: instanceId || '',
+          diagnostic: {
+            code: 'SCENE_CAPTURE',
+            message: error && error.message ? String(error.message) : 'capture failed',
+            path: 'surface'
+          }
+        }, '*');
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      window.parent.postMessage({
+        type: 'joy.scene.failure.v1',
+        instanceId: instanceId || '',
+        diagnostic: { code: 'SCENE_CAPTURE', message: 'svg rasterize failed', path: 'image' }
+      }, '*');
+    };
+    img.src = url;
+  }
   function receive(event) {
     if (event.source !== window.parent) return;
     var message = event.data;
@@ -69,6 +179,13 @@ const PREVIEW_BOOTSTRAP = `(function () {
     instanceId = message.instanceId;
     if (message.type === 'joy.scene.suspend.v1') { suspended = true; return; }
     if (message.type === 'joy.scene.resume.v1') { suspended = false; return; }
+    if (message.type === 'joy.scene.capture.v1') {
+      if (typeof message.requestId !== 'string' ||
+          !Number.isSafeInteger(message.width) || message.width < 1 ||
+          !Number.isSafeInteger(message.height) || message.height < 1) return;
+      captureSurface(message.requestId, message.width, message.height);
+      return;
+    }
     if (message.type !== 'joy.scene.update.v1' || suspended ||
         !Number.isSafeInteger(message.timeUs) || message.timeUs < 0 ||
         !validVariables(message.variables)) return;
@@ -143,6 +260,24 @@ export class ScenePreviewSession {
     return true;
   }
 
+  capture(requestId: string, width: number, height: number): boolean {
+    if (requestId.length === 0) throw new RangeError('scene capture requestId must be non-empty');
+    if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1)
+      throw new RangeError('scene capture size must be positive safe integers');
+    if (this.#suspended) return false;
+    this.endpoint.postMessage(
+      {
+        type: 'joy.scene.capture.v1',
+        instanceId: this.instanceId,
+        requestId,
+        width,
+        height,
+      },
+      '*',
+    );
+    return true;
+  }
+
   suspend(): void {
     if (this.#suspended) return;
     this.#suspended = true;
@@ -161,6 +296,24 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
     return undefined;
   if (value.type === 'joy.scene.suspend.v1' || value.type === 'joy.scene.resume.v1')
     return { type: value.type, instanceId: value.instanceId };
+  if (
+    value.type === 'joy.scene.capture.v1' &&
+    typeof value.requestId === 'string' &&
+    value.requestId.length > 0 &&
+    typeof value.width === 'number' &&
+    Number.isSafeInteger(value.width) &&
+    value.width > 0 &&
+    typeof value.height === 'number' &&
+    Number.isSafeInteger(value.height) &&
+    value.height > 0
+  )
+    return {
+      type: value.type,
+      instanceId: value.instanceId,
+      requestId: value.requestId,
+      width: value.width,
+      height: value.height,
+    };
   if (
     value.type === 'joy.scene.update.v1' &&
     typeof value.timeUs === 'number' &&
@@ -184,6 +337,25 @@ export function validateScenePreviewEvent(value: unknown): ScenePreviewEvent | u
     return { type: value.type, instanceId: value.instanceId };
   if (value.type === 'joy.scene.failure.v1' && isDiagnostic(value.diagnostic))
     return { type: value.type, instanceId: value.instanceId, diagnostic: value.diagnostic };
+  if (
+    value.type === 'joy.scene.surface.v1' &&
+    typeof value.requestId === 'string' &&
+    typeof value.width === 'number' &&
+    Number.isSafeInteger(value.width) &&
+    value.width > 0 &&
+    typeof value.height === 'number' &&
+    Number.isSafeInteger(value.height) &&
+    value.height > 0 &&
+    value.rgba instanceof ArrayBuffer
+  )
+    return {
+      type: value.type,
+      instanceId: value.instanceId,
+      requestId: value.requestId,
+      width: value.width,
+      height: value.height,
+      rgba: value.rgba,
+    };
   return undefined;
 }
 

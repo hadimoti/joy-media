@@ -48,6 +48,28 @@ describe('sandboxed scene preview protocol', () => {
     expect(validateScenePreviewEvent({ type: 'joy.scene.ready.v1' })).toBeUndefined();
   });
 
+  it('accepts capture messages and surface events', () => {
+    expect(
+      validateScenePreviewMessage({
+        type: 'joy.scene.capture.v1',
+        instanceId: 'scene-1',
+        requestId: 'r1',
+        width: 64,
+        height: 64,
+      }),
+    ).toMatchObject({ type: 'joy.scene.capture.v1', requestId: 'r1' });
+    expect(
+      validateScenePreviewEvent({
+        type: 'joy.scene.surface.v1',
+        instanceId: 'scene-1',
+        requestId: 'r1',
+        width: 2,
+        height: 2,
+        rgba: new ArrayBuffer(16),
+      }),
+    ).toMatchObject({ type: 'joy.scene.surface.v1', width: 2 });
+  });
+
   it('suspends offscreen instances and suppresses time updates until resumed', () => {
     const sent: ScenePreviewMessage[] = [];
     const session = new ScenePreviewSession('scene-1', {
@@ -69,5 +91,16 @@ describe('sandboxed scene preview protocol', () => {
     expect(() => new ScenePreviewSession('', { postMessage: () => undefined })).toThrow(
       'non-empty',
     );
+    const captureSent: ScenePreviewMessage[] = [];
+    const captureSession = new ScenePreviewSession('scene-1', {
+      postMessage: (message) => captureSent.push(message),
+    });
+    expect(captureSession.capture('req-1', 32, 48)).toBe(true);
+    expect(captureSent[0]).toMatchObject({
+      type: 'joy.scene.capture.v1',
+      requestId: 'req-1',
+      width: 32,
+      height: 48,
+    });
   });
 });

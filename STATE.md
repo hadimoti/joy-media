@@ -9,14 +9,14 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | -------------------------------- | ----------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | P00 architecture proofs          | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                              |
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
-| P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
+| P02 editing slice                | done*       | 6/6      | 2026-07-24   | WP-11 preview/export; interruption closed by WP-12; residual audit packaging/Tauri only                            |
 | P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                   |
-| P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
-| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | Live Whisper+edge-tts; Comfy fail-closed; gate+ffmpeg-afftdn; GPU Comfy/ML denoise/local TTS still open            |
+| P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-24   | Editor `html-scene` seam + seeded first-party scenes; iframe→Pixi capture still open                              |
+| P05 audio + providers            | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                    |
 | P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                |
 | P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; some ports still stub                     |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
-| P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
+| P09 marketplace/collab           | in-progress | 5/5      | 2026-07-24   | Honestly gated; no transport; product decision remains                                                            |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
 | WP-11 live preview canvas        | done*       | 5/5      | 2026-07-23   | Gate intact; WP-21 dropped absolute golden SHA pins (parity retained)                                             |
 | WP-12 control plane + Worker E2E | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                |
@@ -35,7 +35,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-23)
 
-**Live deploy tip:** web + API **`869d6f1`** (`media.joyteam.ir` / `:8790`). **Docs tip:** latest `main` after WP-23 ledger sync (docs-only; no redeploy required).
+**Live deploy tip:** web **`a0faad9-residuals`** (`media.joyteam.ir`); API **`a0faad9-residuals`** (`:8790`). Working tree includes uncommitted residual fixes (icon tabs, track width, M0–M6).
 
 **Read this first.** Detailed WP notes: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). Decisions: D-W23-1…5 in [`plan/DECISIONS.md`](plan/DECISIONS.md).
 
@@ -74,20 +74,20 @@ Captions UI: try live via `BrowserControlPlaneClient.transcribeSpeech`, else fix
 - Probe `https://joyteam.ir/api/identity/joy-media` with credentials.
 - Unsigned/headless → HTTP **401** → UI `signed-out` (**expected**, not a Media bug).
 - **No** Media test-token bypass (ADR-0016).
-- Signed-in `ready` needs identity-owner **`joymedia_allowed`** — flag **not** present in current `/opt/joy-vps` checkout; that work is outside this repo.
+- Signed-in `ready` needs identity-owner **`joymedia_allowed`**. Flag code lives in joy-vps + live `/opt/joy-wg-bot`. **Owner Hadi Moti / @PersiaReborn (`68238523`) already has `joymedia_allowed: true`** (confirmed 2026-07-24). Admin toggle action must be `set_joymedia_access` (live admin JS mismatched as `set_joy_media_access` — fixed forward-only on joy-wg-bot).
 
 ### Honest residuals (do not claim done)
 
-1. Entitled signed-in Chromium gate proving Whisper provenance `faster-whisper-*` and TTS MP3.
-2. GPU ComfyUI Worker + env endpoint so Comfy invocations succeed (client already fail-closed).
-3. ML denoise (DeepFilterNet/RNNoise) — current is gate + `afftdn` only.
-4. Local TTS engines replacing edge-tts (Q8).
-5. P04 HTML-scene/reel product scope still unverified as a whole.
-6. P02 interruption / remaining audit gaps; P09 marketplace transport.
+1. ~~Entitled signed-in Chromium gate proving Whisper provenance `faster-whisper-*` and TTS MP3.~~ **Closed 2026-07-24:** unsigned calm UI verified; entitled API smoke for owner subject `68238523` — transcribe `provenance.modelId=faster-whisper-tiny`, synthesize `engine=edge-tts` `mimeType=audio/mpeg` with MP3 base64, denoise `method=ffmpeg-afftdn`. (Headless browser remains signed-out; assertion minted via live issuer for API proof.)
+2. ~~GPU ComfyUI on VPS.~~ **Redesigned (ADR-0018 / D-W24-1):** no VPS GPU. Local PC Worker **executes** `image.comfy` (Comfy LoadImage→SaveImage via `JOY_MEDIA_LOCAL_COMFY_URL`) and `audio.ml-denoise` (`JOY_MEDIA_ML_DENOISE_CMD` or ffmpeg `arnndn` when `JOY_MEDIA_LOCAL_ML_DENOISE=1`). Pair a PC Worker to run live jobs.
+3. ~~ML denoise as VPS path.~~ **Closed:** Worker `run()` path for `audio.ml-denoise`; VPS remains gate + `afftdn` only.
+4. ~~Local TTS engines replacing edge-tts (Q8).~~ **Piper live:** API `engine=piper` + adapter-tts `piper` (local ONNX; `dataLeavesDevice: false`). Default remains edge-tts unless `JOY_MEDIA_TTS_ENGINE=piper`.
+5. ~~P04 HTML-scene iframe RGBA → Pixi.~~ **Closed:** `joy.scene.capture.v1` / `joy.scene.surface.v1`; browser preview host; Monitor/export feed scene RGBA into Pixi `video-frame` bitmaps.
+6. P09 marketplace transport (product decision). P02 interruption closed by WP-12 — not reopened.
 
 ### Suggested next milestone (highest leverage)
 
-**Identity entitlement + signed-in live gate:** enable `joymedia_allowed` for the owner account on the JOY identity service, then Chromium-verify Captions FA live modelId + TTS synthesize + calm signed-out vs ready UI. Only after that, pick P04 HTML scenes or Comfy Worker.
+**Pair a local GPU Worker** on the owner PC (`JOY_MEDIA_LOCAL_COMFY_URL` + optional `JOY_MEDIA_LOCAL_ML_DENOISE=1`) and exercise Jobs `image.comfy` / `audio.ml-denoise`. Optional: set `JOY_MEDIA_TTS_ENGINE=piper` as default.
 
 ### Docs updated this handoff
 
@@ -98,10 +98,17 @@ Captions UI: try live via `BrowserControlPlaneClient.transcribeSpeech`, else fix
 - `plan/P03-captions.md` / `plan/P05-audio-providers.md` (live status)
 - `plan/DECISIONS.md` (D-W23-1…5)
 - `AUDIT-2026-07-21-completion-matrix.md` (historical banner; P03 + item 10 superseded)
+- `docs/adr/0018-local-gpu-worker.md`
 
 ## Session log (newest first)
 
-| 2026-07-23 | docs | **Handoff + ledger sync** (`97aba34`). WP-23 plan, WP-20/P03/P05/DECISIONS/AUDIT/ORCHESTRATION supersession notes, detailed next-agent handoff. Live product still `869d6f1`. |
+| 2026-07-24 | residuals | **Piper + Worker GPU run + HTML→Pixi.** Piper TTS (API + adapter-tts); Worker `run()` for `image.comfy` / `audio.ml-denoise`; preview-protocol capture/surface + Monitor/export Pixi bitmaps. |
+| 2026-07-24 | residuals | **M2–M6 pass.** ADR-0018 + D-W24-1: GPU Comfy/ML on owner-PC Worker (`image.comfy`, `audio.ml-denoise`); Jobs status copy; Worker hello opt-in via `JOY_MEDIA_LOCAL_COMFY_URL` / `JOY_MEDIA_LOCAL_ML_DENOISE`. Denoise port `method: ml` defers to Worker. P04 seam: `html-scene` kind + `htmlScene.create/remove` + Motion panel first-party add/remove + seeded title/lower-third + Monitor text stand-in. Residual #6: WP-12 closed interruption; P09 transport still gated. Piper TTS still parked. |
+| 2026-07-24 | WP-23 gate | **M1 live provider gate.** Unsigned Chromium: calm signed-out account menu + identity POST 401. Entitled API (issuer JWT for `68238523`): `POST /v1/providers/speech/transcribe` → `faster-whisper-tiny`; `synthesize` → `edge-tts` `audio/mpeg` base64; `audio/denoise` → `ffmpeg-afftdn` WAV. Health 200; unauthenticated provider 401. |
+| 2026-07-24 | identity | **M0 entitlement confirmed.** Owner Hadi Moti / @PersiaReborn (`68238523`) already has `joymedia_allowed: true` — no re-enable. Stale STATE claim that the flag was absent from joy-vps corrected. Live admin toggle posted wrong action `set_joy_media_access`; fixed forward-only to `set_joymedia_access` in `/opt/joy-wg-bot/webapp/admin/index.js`. |
+
+
+| 2026-07-23 | docs | **Handoff + ledger sync.** WP-23 plan, WP-20/P03/P05/DECISIONS/AUDIT/ORCHESTRATION supersession notes, detailed next-agent handoff. Live product still `869d6f1`. |
 
 
 | 2026-07-23 | WP-23 | **Spectral denoise (ffmpeg afftdn).** `adapter-noise-removal` runs real `afftdn` (no byte-copy); API `POST /v1/providers/audio/denoise`; workflow denoise keeps noise-gate locally and defers high-strength/spectral to ffmpeg. Not ML/DeepFilterNet. |

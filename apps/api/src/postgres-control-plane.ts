@@ -11,6 +11,7 @@ import {
   type MediaDerivativeRecord,
   type Job,
   type JobEvent,
+  type LocalGpuWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
   type WorkerPairingOffer,
@@ -520,11 +521,19 @@ export class PostgresControlPlane implements ControlPlane {
       // Keep opaque-locality matching in the Worker/control-plane domain; this
       // also keeps the durable contract executable in pg-mem without changing
       // PostgreSQL's queue lock semantics.
-      const job = candidate.rows.find(
-        (item) =>
-          item.type !== 'asset.thumbnail' ||
-          (item.asset_id !== null && workerRecord.localAssetIds.includes(item.asset_id)),
-      );
+      const job = candidate.rows.find((item) => {
+        const caps = workerRecord.capabilities;
+        if (item.type === 'asset.thumbnail') {
+          return (
+            item.asset_id !== null &&
+            caps.includes('asset.thumbnail') &&
+            workerRecord.localAssetIds.includes(item.asset_id)
+          );
+        }
+        if (item.type === 'image.comfy') return caps.includes('image.comfy');
+        if (item.type === 'audio.ml-denoise') return caps.includes('audio.ml-denoise');
+        return true;
+      });
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
@@ -578,6 +587,9 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<Job> {
     if (receipt !== undefined && !isWorkerReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    const isThumb = receipt?.kind === 'asset.thumbnail';
+    const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
+    const storesAsset = isThumb || isGpu;
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
@@ -588,6 +600,8 @@ export class PostgresControlPlane implements ControlPlane {
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
+           AND (type <> 'image.comfy' OR $4 = 'image.comfy')
+           AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
          RETURNING *`,
         [
           jobId,
@@ -599,11 +613,19 @@ export class PostgresControlPlane implements ControlPlane {
           receipt === undefined ? null : `derivative:${jobId}`,
           receipt === undefined ? null : workerId,
           receipt === undefined ? null : new Date(now),
-          receipt?.kind === 'asset.thumbnail' ? receipt.assetId : null,
-          receipt?.kind === 'asset.thumbnail' ? receipt.localRef : null,
-          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.mimeType : null,
-          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.width : null,
-          receipt?.kind === 'asset.thumbnail' ? receipt.descriptor.height : null,
+          storesAsset && receipt !== undefined ? receipt.assetId : null,
+          storesAsset && receipt !== undefined ? receipt.localRef : null,
+          storesAsset && receipt !== undefined ? receipt.descriptor.mimeType : null,
+          isThumb && receipt?.kind === 'asset.thumbnail'
+            ? receipt.descriptor.width
+            : isGpu && receipt !== undefined
+              ? (receipt.descriptor.width ?? null)
+              : null,
+          isThumb && receipt?.kind === 'asset.thumbnail'
+            ? receipt.descriptor.height
+            : isGpu && receipt !== undefined
+              ? (receipt.descriptor.height ?? null)
+              : null,
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -838,6 +860,24 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
       descriptor: { mimeType: 'image/jpeg', width: row.result_width, height: row.result_height },
     };
   }
+  if (
+    (row.result_kind === 'image.comfy' || row.result_kind === 'audio.ml-denoise') &&
+    row.result_asset_id !== null &&
+    row.result_local_ref !== null &&
+    row.result_mime_type !== null
+  ) {
+    return {
+      ...base,
+      kind: row.result_kind,
+      assetId: row.result_asset_id,
+      localRef: row.result_local_ref,
+      descriptor: {
+        mimeType: row.result_mime_type,
+        ...(row.result_width === null ? {} : { width: row.result_width }),
+        ...(row.result_height === null ? {} : { height: row.result_height }),
+      },
+    };
+  }
   throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
 }
 
@@ -901,7 +941,9 @@ function isFixtureReceipt(
 }
 
 function isWorkerReceipt(value: WorkerResultReceipt): boolean {
-  return isFixtureReceipt(value) || isAssetThumbnailReceipt(value);
+  return (
+    isFixtureReceipt(value) || isAssetThumbnailReceipt(value) || isLocalGpuReceipt(value)
+  );
 }
 
 function isAssetThumbnailReceipt(value: WorkerResultReceipt): value is AssetThumbnailReceipt {
@@ -917,6 +959,19 @@ function isAssetThumbnailReceipt(value: WorkerResultReceipt): value is AssetThum
     value.descriptor.width > 0 &&
     Number.isSafeInteger(value.descriptor.height) &&
     value.descriptor.height > 0
+  );
+}
+
+function isLocalGpuReceipt(value: WorkerResultReceipt): value is LocalGpuWorkerReceipt {
+  return (
+    (value.kind === 'image.comfy' || value.kind === 'audio.ml-denoise') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^gpu-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0
   );
 }
 

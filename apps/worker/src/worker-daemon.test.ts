@@ -53,7 +53,7 @@ describe('WorkerDaemon', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,

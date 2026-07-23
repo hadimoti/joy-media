@@ -2,7 +2,20 @@
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 
-export type WorkerCapability = 'asset.thumbnail';
+export type WorkerCapability =
+  | 'asset.thumbnail'
+  /** Local PC ComfyUI (or equivalent); never assumed on the VPS (ADR-0018). */
+  | 'image.comfy'
+  /** Local PC ML denoise (e.g. DeepFilterNet); VPS keeps gate + afftdn only. */
+  | 'audio.ml-denoise';
+
+/** GPU-backed Worker job types leased only to capable local Workers (ADR-0018). */
+export type LocalGpuWorkerJobType = 'image.comfy' | 'audio.ml-denoise';
+
+export const LOCAL_GPU_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
+  'image.comfy',
+  'audio.ml-denoise',
+] as const;
 export type ThumbnailJobState =
   'queued' | 'assigned' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'canceled';
 

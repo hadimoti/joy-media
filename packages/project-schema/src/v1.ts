@@ -112,13 +112,14 @@ export interface CameraParamsV1 {
  * nothing but contributes a transform that its children inherit (§20.3
  * parenting). `kind: 'camera'` is a depth-only 2.5D camera controller (ADR-0015):
  * it renders nothing but its resolved transform + `camera` params drive
- * perspective projection for a composition's `activeCameraId`. `parentId` links
- * an object to its parent for transform inheritance; the graph must stay
- * acyclic.
+ * perspective projection for a composition's `activeCameraId`. `kind: 'html-scene'`
+ * references a first-party or packaged HTML scene (`scenePackageId`) for
+ * Monitor/export (P04). `parentId` links an object to its parent for transform
+ * inheritance; the graph must stay acyclic.
  */
 export interface VisualObjectV1 {
   readonly id: string;
-  readonly kind: 'image' | 'text' | 'shape' | 'null' | 'camera';
+  readonly kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene';
   readonly transform: VisualObjectTransformV1;
   /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
   readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
@@ -141,6 +142,8 @@ export interface VisualObjectV1 {
   readonly shape?: 'rectangle' | 'ellipse';
   /** Present iff `kind === 'camera'` (ADR-0015). */
   readonly camera?: CameraParamsV1;
+  /** Present iff `kind === 'html-scene'` — first-party or package scene id (P04). */
+  readonly scenePackageId?: string;
 }
 
 export interface CompositionV1 {
@@ -537,7 +540,8 @@ function validateVisualObject(
     value.kind !== 'text' &&
     value.kind !== 'shape' &&
     value.kind !== 'null' &&
-    value.kind !== 'camera'
+    value.kind !== 'camera' &&
+    value.kind !== 'html-scene'
   )
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object kind is invalid', path));
   if (value.kind === 'camera') {
@@ -558,6 +562,24 @@ function validateVisualObject(
   } else if (value.camera !== undefined) {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_CAMERA', 'only camera objects may carry camera params', path),
+    );
+  }
+  if (value.kind === 'html-scene') {
+    if (!isNonEmptyString(value.scenePackageId))
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_HTML_SCENE',
+          'html-scene objects require a non-empty scenePackageId',
+          path,
+        ),
+      );
+  } else if (value.scenePackageId !== undefined) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_HTML_SCENE',
+        'only html-scene objects may carry scenePackageId',
+        path,
+      ),
     );
   }
   if (value.parentId !== undefined && !isNonEmptyString(value.parentId))
