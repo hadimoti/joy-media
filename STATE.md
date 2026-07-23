@@ -34,6 +34,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 ## Session log (newest first)
 
 
+| 2026-07-23 | fix | **Dockview v3 seed.** v2 repeatedly used `direction: right`, which created 12×120px columns. Utilities now stack with `within` under one right-hand group; migrate key `joy-media.dockview.v3` and drop v1/v2. |
+
 | 2026-07-23 | fix | **Dockview layout + Captions a11y.** Fresh workspace uses Adobe-like 3-zone seed (media | monitor/timeline | utilities) under `joy-media.dockview.v2`; missing panels add `inactive` so they no longer steal focus; Captions SRT/VTT/FA/EN gained aria-labels. |
 
 | 2026-07-23 | WP-19/20/21 | **Normalize port, caption fixtures, baseline hygiene.** `transform.normalizeAudio` now runs `audio-core.normalizeDialogue` (no `__stub`); Captions FA/EN load fixture transcripts (`fixture-whisper-*-v1`); golden test keeps preview↔export parity and drops cross-Chromium SHA pins; eslint Node globals for bins. editor-web 73/73; typecheck clean; golden 2/2. |

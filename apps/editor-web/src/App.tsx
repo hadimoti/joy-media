@@ -828,9 +828,11 @@ export function App() {
     }
   }, [exporting, recordExportEntry, session]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    const layoutKey = 'joy-media.dockview.v2';
-    // Drop the pre-WP-18 single-strip v1 layouts (13 overflow tabs, newest steals focus).
+    // v3: utilities stack as tabs in one group (`within`). v2 wrongly split each
+    // utility into its own column via repeated `direction: 'right'`.
+    const layoutKey = 'joy-media.dockview.v3';
     window.localStorage.removeItem('joy-media.dockview.v1');
+    window.localStorage.removeItem('joy-media.dockview.v2');
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -845,7 +847,13 @@ export function App() {
     const previouslyActive = event.api.activePanel?.id;
     const addPanel = (
       id: string,
-      options: { readonly inactive?: boolean; readonly position?: { readonly referencePanel: string; readonly direction: 'left' | 'right' | 'above' | 'below' } } = {},
+      options: {
+        readonly inactive?: boolean;
+        readonly position?: {
+          readonly referencePanel: string;
+          readonly direction: 'left' | 'right' | 'above' | 'below' | 'within';
+        };
+      } = {},
     ) => {
       if (event.api.getPanel(id) !== undefined) return;
       event.api.addPanel({
@@ -858,12 +866,12 @@ export function App() {
     };
 
     if (!restored) {
-      // Adobe-like seed: media | monitor/timeline | utility stack (never one 13-tab strip).
+      // Adobe-like seed: media | monitor/timeline | one utility tab group.
       addPanel('monitor', { inactive: false });
       addPanel('timeline', { position: { referencePanel: 'monitor', direction: 'below' } });
       addPanel('media', { position: { referencePanel: 'monitor', direction: 'left' } });
-      const utilityIds = [
-        'captions',
+      addPanel('captions', { position: { referencePanel: 'monitor', direction: 'right' } });
+      const stackedUtilities = [
         'inspector',
         'motion',
         'camera',
@@ -874,8 +882,8 @@ export function App() {
         'workflows',
         'plugins',
       ] as const;
-      for (const id of utilityIds) {
-        addPanel(id, { position: { referencePanel: 'monitor', direction: 'right' } });
+      for (const id of stackedUtilities) {
+        addPanel(id, { position: { referencePanel: 'captions', direction: 'within' } });
       }
       event.api.getPanel('monitor')?.api.setActive();
     } else {
