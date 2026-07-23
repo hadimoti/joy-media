@@ -12,7 +12,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
 | P03 captions                     | done*       | 5/5      | 2026-07-23   | WP-20 fixture Whisper seam (FA/EN); live Whisper binary still optional                                            |
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
-| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | WP-19 normalize + WP-22 detectSilence real DSP; TTS/denoise/Comfy still mock
+| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | WP-19/22 normalize+silence+loudness real DSP; TTS/denoise/Comfy still mock
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
 | P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
@@ -33,6 +33,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Session log (newest first)
 
+
+| 2026-07-23 | WP-22+ | **Loudness port real DSP.** `analysis.loudness` now runs `audio-core.measureLoudness` (same browser `./analysis` export); no `__stub`. editor-web 75/75. |
 
 | 2026-07-23 | WP-22 | **Silence port real DSP.** `analysis.silence` / `detectSilence` now runs `audio-core.detectSilence` (browser `./analysis` export); no `__stub`. Fixture PCM with mid-gap proves ~0.4s range. editor-web 74/74; typecheck clean. |
 

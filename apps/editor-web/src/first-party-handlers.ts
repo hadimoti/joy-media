@@ -1,6 +1,6 @@
 // apps/editor-web/src/first-party-handlers.ts
 
-import { detectSilence } from '@joy-media/audio-core/analysis';
+import { detectSilence, measureLoudness } from '@joy-media/audio-core/analysis';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
@@ -8,7 +8,7 @@ import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
  * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22).
  *
  * Most ports remain deterministic stubs tagged `__stub: true`.
- * Real DSP: `transform.normalizeAudio`, `analysis.detectSilence`.
+ * Real DSP: `transform.normalizeAudio`, `analysis.detectSilence`, `analysis.measureLoudness`.
  */
 
 function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
@@ -79,6 +79,18 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             thresholdDb,
             minSilenceMs,
             silent: detection.silent,
+          };
+        },
+        measureLoudness: (args: { readonly source: unknown }) => {
+          // Real audio-core DSP — not a stub (paired with WP-22 silence).
+          const sampleRate = 48_000;
+          const samples = generateFixtureDialoguePcm(sampleRate);
+          const loudness = measureLoudness(samples, sampleRate);
+          return {
+            source: args.source,
+            integratedLufs: loudness.integrated,
+            shortTermLufs: loudness.shortTerm,
+            loudnessRange: loudness.range,
           };
         },
         detectHighlights: (args: { readonly source: unknown }) =>
