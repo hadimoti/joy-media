@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { makeVideoClip, SECOND_US } from '@joy-media/test-fixtures';
 import { createPlan, type AgentPlanStep } from '@joy-media/agent-tools';
-import { convertPlanToWorkflow, deleteWorkflow, loadWorkflow, listWorkflows, saveWorkflow } from './workflow-recorder.js';
+import {
+  convertPlanToWorkflow,
+  deleteWorkflow,
+  loadWorkflow,
+  listWorkflows,
+  resolveParameterizedValue,
+  saveWorkflow,
+} from './workflow-recorder.js';
 
 describe('workflow-recorder', () => {
   it('converts a single-step plan to a JoyWorkflow', () => {
@@ -61,5 +68,73 @@ describe('workflow-recorder', () => {
 
     deleteWorkflow(null, recorded.workflow.id);
     expect(loadWorkflow(null, recorded.workflow.id)).toBeUndefined();
+  });
+
+  it('parameterizes timing and structural identifiers while baking assetId and compositionId', () => {
+    const step: AgentPlanStep = {
+      id: 'step-1',
+      description: 'Insert a clip',
+      mode: 'command',
+      tool: 'insertClip',
+      arguments: {
+        compositionId: 'root',
+        trackId: 'track-0',
+        clip: { ...makeVideoClip('agent-clip-1', 30 * SECOND_US, 5 * SECOND_US) },
+      },
+      dependsOn: [],
+      expectedChange: 'Insert agent-clip-1',
+      preconditions: [],
+      requiresConfirmation: false,
+    };
+    const plan = createPlan('Parameterization test', [step]);
+    const workflow = convertPlanToWorkflow(plan);
+    const node = workflow.nodes[0];
+    expect(node).toBeDefined();
+
+    const commands = (node!.params.commands as Readonly<{ readonly tool: string; readonly arguments: Record<string, unknown> }[]> | undefined);
+    expect(commands).toHaveLength(1);
+    const args = commands![0]!.arguments;
+
+    expect(args.compositionId).toBe('root');
+    expect(args.trackId).toEqual({ __parameter: true, name: 'trackId' });
+    expect(args.clip).toBeDefined();
+    const clipArgs = args.clip as Record<string, unknown>;
+    expect(clipArgs.kind).toBe('video');
+    expect(clipArgs.assetId).toBe('asset-agent-clip-1');
+    expect(clipArgs.id).toEqual({ __parameter: true, name: 'clipId' });
+    expect(clipArgs.startUs).toEqual({ __parameter: true, name: 'clipStartUs' });
+    expect(clipArgs.durationUs).toEqual({ __parameter: true, name: 'clipDurationUs' });
+    expect(clipArgs.sourceInUs).toEqual({ __parameter: true, name: 'clipSourceInUs' });
+
+    const inputsProps = workflow.inputs.properties as Record<string, unknown>;
+    expect(inputsProps.trackId).toBeDefined();
+    expect(inputsProps.clipId).toBeDefined();
+    expect(inputsProps.clipStartUs).toBeDefined();
+    expect(inputsProps.clipDurationUs).toBeDefined();
+    expect(inputsProps.clipSourceInUs).toBeDefined();
+    expect(inputsProps.compositionId).toBeUndefined();
+    expect(inputsProps.assetId).toBeUndefined();
+  });
+
+  it('resolveParameterizedValue substitutes parameters and leaves constants alone', () => {
+    const marker = { __parameter: true, name: 'trackId' } as const;
+    const value = {
+      compositionId: 'root',
+      trackId: marker,
+      clip: {
+        id: marker,
+        startUs: { __parameter: true, name: 'clipStartUs' } as const,
+        durationUs: 5_000_000,
+      },
+    };
+    const inputs = { trackId: 'track-1', clipStartUs: 10_000_000 };
+    const resolved = resolveParameterizedValue(value, inputs);
+    expect((resolved as Record<string, unknown>).compositionId).toBe('root');
+    expect((resolved as Record<string, unknown>).trackId).toBe('track-1');
+    expect((resolved as Record<string, unknown>).clip).toBeDefined();
+    const clip = (resolved as Record<string, unknown>).clip as Record<string, unknown>;
+    expect(clip.id).toBe('track-1');
+    expect(clip.startUs).toBe(10_000_000);
+    expect(clip.durationUs).toBe(5_000_000);
   });
 });

@@ -17,6 +17,7 @@ describe('WP-16 live gate: record → save → run → undo', () => {
       buildReferenceSpikeProject(),
       INITIAL_EDITOR_PROJECT,
     );
+    const baseClip = makeVideoClip('agent-clip-1', 30 * SECOND_US, 5 * SECOND_US);
     const step: AgentPlanStep = {
       id: 'step-1',
       description: 'Insert a clip at the end of track-0',
@@ -25,7 +26,7 @@ describe('WP-16 live gate: record → save → run → undo', () => {
       arguments: {
         compositionId: 'root',
         trackId: 'track-0',
-        clip: { ...makeVideoClip('agent-clip-1', 30 * SECOND_US, 5 * SECOND_US) },
+        clip: { ...baseClip },
       },
       dependsOn: [],
       expectedChange: 'Insert agent-clip-1',
@@ -42,7 +43,13 @@ describe('WP-16 live gate: record → save → run → undo', () => {
       .find((t) => t.id === 'track-0')
       ?.clips.map((c) => c.id) ?? [];
 
-    await runWorkflow(session, recorded.workflow.id);
+    await runWorkflow(session, recorded.workflow.id, {
+      trackId: 'track-0',
+      clipId: baseClip.id,
+      clipStartUs: baseClip.startUs,
+      clipDurationUs: baseClip.durationUs,
+      clipSourceInUs: baseClip.sourceInUs,
+    });
 
     const afterClips = session.timelineProject.compositions.root?.tracks
       .find((t) => t.id === 'track-0')

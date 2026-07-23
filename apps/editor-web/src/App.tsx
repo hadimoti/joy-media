@@ -953,9 +953,11 @@ export function App() {
       return (
         <WorkflowsPanel
           session={session}
-          onRun={async (workflowId) => {
+          selectedClipIds={state.selectedIds}
+          playheadUs={state.playheadUs}
+          onRun={async (workflowId, inputs) => {
             try {
-              await runWorkflow(session, workflowId);
+              await runWorkflow(session, workflowId, inputs);
               setRevision((revision) => revision + 1);
             } catch (error) {
               console.error('Failed to run workflow:', error);

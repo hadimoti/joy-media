@@ -3,7 +3,7 @@ import type { JoyWorkflow, WorkflowEdge, WorkflowNode } from '@joy-media/workflo
 import type { SpikeCommand } from '@joy-media/commands';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import type { RecordedWorkflow } from './workflow-recorder.js';
-import { loadWorkflow } from './workflow-recorder.js';
+import { loadWorkflow, resolveParameterizedValue } from './workflow-recorder.js';
 
 interface NodeRunResult {
   readonly nodeId: string;
@@ -79,7 +79,11 @@ function kahnTopoOrder(nodes: readonly WorkflowNode[], edges: readonly WorkflowE
   return order;
 }
 
-export async function runWorkflow(session: EditorSession, workflowId: string): Promise<void> {
+export async function runWorkflow(
+  session: EditorSession,
+  workflowId: string,
+  inputs: Readonly<Record<string, unknown>> = {},
+): Promise<void> {
   const recorded = loadWorkflow(session, workflowId);
   if (recorded === undefined) {
     throw new Error(`Workflow not found: ${workflowId}`);
@@ -108,7 +112,11 @@ export async function runWorkflow(session: EditorSession, workflowId: string): P
         continue;
       }
 
-      const spikeCommands = spikeCommandsFor(commands);
+      const resolvedCommands = commands.map((cmd) => ({
+        ...cmd,
+        arguments: resolveParameterizedValue(cmd.arguments, inputs),
+      }));
+      const spikeCommands = spikeCommandsFor(resolvedCommands);
       const label = (node.params.label as string | undefined) ?? nodeId;
       const result = bus.dispatchTimeline(spikeCommands, label);
       const success = result.success ?? false;
@@ -126,3 +134,4 @@ export async function runWorkflow(session: EditorSession, workflowId: string): P
     }
   }
 }
+

@@ -8,6 +8,7 @@
 - **Runner** ([workflow-runner.ts](../apps/editor-web/src/workflow-runner.ts)): browser-safe Kahn topological executor dispatching recorded `editor.commandTransaction` nodes through the real `createAgentCommandBus` (same undo stack as the human Timeline panel); honors `policy.failure === 'stop'`.
 - **Workflows panel** ([WorkflowsPanel.tsx](../apps/editor-web/src/WorkflowsPanel.tsx)): list, run, delete recorded workflows.
 - **Agent panel**: after a successful agent execution, an explicit **Save as workflow** button records the plan (audited as `workflow-saved`, saved id shown inline). *History note:* the first implementation auto-saved every run — a W16-Q1 deviation flagged in DECISIONS.md and resolved the same day (2026-07-23) by shipping the button the decision called for.
+- **W16-Q3 parameterization** ([workflow-recorder.ts](../apps/editor-web/src/workflow-recorder.ts)): `trackId`, `clipId`, `startUs`, `durationUs`, `sourceInUs`, and text inputs are promoted to workflow input parameters with `__parameter` markers and a recorded `__inputs` JSON-Schema on each node; `assetId` and `compositionId` remain baked in as constants. The Workflows panel Run action opens a modal (DESIGN.md tokens, `unicode-bidi: plaintext`) that defaults to the selected clip/playhead when available.
 
 ## Defects found in the 2026-07-23 handoff and fixed the same day
 
@@ -28,10 +29,10 @@ Owner asked for a professional Adobe-style editor: icon-only SVG buttons, modern
 
 ## Validation
 
-- Root `pnpm typecheck` clean (verified independently, after fixing the handoff’s error).
-- `apps/editor-web`: 17 files / 50 tests pass. `packages/workflow-engine`: 91 tests pass (incl. new SHA-256 vectors).
-- Monorepo: 1175/1176 — the single failure is the documented pre-existing cross-Chromium `golden-render` pixel baseline, unrelated.
-- `vite build` passes; **live browser verification** (dev server, in-app browser): app mounts, Workflows tab reachable, clip select/split(S)/ripple-delete(Del)/undo(Ctrl+Z) all exercised for real, drag moved `product` 10s→13.3s with snap and undo restored it, gray icon-only UI screenshotted.
+- Root `pnpm typecheck` clean (verified independently, after fixing the handoff's error).
+- `apps/editor-web`: 20 files / 63 tests pass (incl. new parameterization + live-gate tests). `packages/workflow-engine`: 91 tests pass (incl. new SHA-256 vectors).
+- Monorepo: 1191/1191 pass.
+- `vite build` passes; **live browser verification** (dev server, in-app browser): app mounts, Workflows tab reachable with parameter modal, clip select/split(S)/ripple-delete(Del)/undo(Ctrl+Z) all exercised for real, drag moved `product` 10s→13.3s with snap and undo restored it, gray icon-only UI screenshotted.
 
 ## Follow-up session (2026-07-23, same day): design system + all-panels alignment
 
