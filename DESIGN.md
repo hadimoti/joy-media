@@ -1,0 +1,71 @@
+# JOY Media — Editor Design System
+
+Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); source of truth for icons is [icons.tsx](apps/editor-web/src/icons.tsx). If a change is needed, change it here and in those two files together.
+
+## 1. Color tokens
+
+Neutral grays only. **No blue anywhere.** Amber is the single accent. Semantic green/red are reserved for status.
+
+| Token          | Hex       | Use                                                            |
+| -------------- | --------- | -------------------------------------------------------------- |
+| `bg-app`       | `#1e1e1e` | Root/page background                                            |
+| `bg-panel`     | `#232324` | Panel/article surfaces, dockview group background               |
+| `bg-chrome`    | `#2b2b2d` | Header, tab strips                                              |
+| `bg-raised`    | `#2a2a2c` | Cards, list rows (history entries, workflow rows, asset cards)  |
+| `bg-inset`     | `#202022` | Sunken sections (register form, category rail)                  |
+| `bg-control`   | `#333335` | Buttons, lanes, interactive fills                               |
+| `bg-hover`     | `#3f3f42` | Hovered controls                                                |
+| `bg-input`     | `#1a1a1b` | Text inputs, selects                                            |
+| `bg-deep`      | `#101011` | Canvases, code/expression fields, preview wells                 |
+| `border`       | `#3d3d40` | Default borders/dividers                                        |
+| `border-strong`| `#4d4d51` | Control borders                                                 |
+| `border-hover` | `#6b6b72` | Hovered control borders, clip borders                           |
+| `gap`          | `#141414` | Dockview separators, workspace gaps                             |
+| `text`         | `#e4e4e6` | Primary text                                                    |
+| `text-soft`    | `#dcdcde` | Icon/button glyphs                                              |
+| `text-muted`   | `#9d9da1` | Secondary text, inactive tabs                                   |
+| `text-faint`   | `#8c8c90` | Hints, timestamps, metadata                                     |
+| `accent`       | `#e9b949` | Selection outlines, playhead, active keyframe, warnings, drag-over |
+| `accent-soft`  | `#d4b06a` | Secondary accent (expression/fx active states)                  |
+| `ok`           | `#64c48c` | Success/connected status only                                   |
+| `danger`       | `#d37a7a` / `#ff8080` | Failure/revoked status and error text only          |
+
+Timeline clips: `#4b4b50` fill, `#58585e` hover, `border-hover` border, `accent` outline when selected.
+
+## 2. Buttons & iconography
+
+**Rule: buttons show SVG icons, not text.** Every repeated, toolbar, or per-item action is an `icon-button` with an icon from [icons.tsx](apps/editor-web/src/icons.tsx) and **both** `aria-label` and `title` (tooltip must state the shortcut when one exists, e.g. `"Undo (Ctrl+Z)"`).
+
+- `className="icon-button"` — square icon-only button. The default.
+- `className="icon-button icon-button-labeled"` — icon **plus a short label**, allowed only where the icon alone is ambiguous between siblings (e.g. `SRT`/`VTT` export formats, `FA`/`EN` transcription languages) or for one-time setup/submit actions (Initialize project, Register media, Pair worker). Never a full sentence.
+- Toggle buttons (lock/mute/solo, category tabs) carry `aria-pressed`; the pressed state is styled by CSS, never by swapping label text.
+- Icons: 16×16 viewBox, `stroke="currentColor"`, `strokeWidth 1.5`, `aria-hidden` — add new icons to `icons.tsx` only; never inline one-off SVGs in a panel, never emoji as icons.
+- Destructive per-item actions (delete/revoke) use `TrashIcon`/`CloseIcon` — still icon-only, tooltip says what is destroyed.
+
+Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), trim, trash, export, command (⌘), save, lock, mute, solo, check (approve), close (dismiss/cancel), plus (add), download, upload, mic (transcribe), image (thumbnail), refresh, cloud (backup).
+
+## 3. Layout & panels
+
+- Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label in App's `labels` map — a panel that isn't registered does not exist.
+- Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly.
+- Panel root: `<article className="<name>-panel">`, `display: grid; gap: 0.4–0.5rem; align-content: start`. Section headings are `<h3>` (0.8rem, `text-muted`).
+- Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
+
+## 4. Interaction standards
+
+- **Keyboard**: all global shortcuts live in [keyboard-shortcuts.ts](apps/editor-web/src/keyboard-shortcuts.ts) (pure resolver + tests). Space play/pause · S split · Del/Backspace ripple delete · Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+K palette · Esc close · ←/→ seek 1s (Shift = 100 ms) · Home/End. New shortcuts are added to the resolver (with a test) — never as ad-hoc listeners in panels. Shortcuts never fire while typing (`isEditableTarget`).
+- **Drag**: pointer events (`setPointerCapture`), 4 px click-vs-drag threshold, 100 ms snap grid, invalid drops snap back silently. `touch-action: none` on draggables.
+- **Selection**: amber 2px outline (`aria-pressed='true'`), single accent everywhere.
+- Async/busy buttons set `aria-busy` and a disabled state; status text goes in an adjacent `aria-live="polite"` element, not inside the button.
+
+## 5. Accessibility non-negotiables
+
+Icon-only buttons always have `aria-label` + `title`. Toggles always have `aria-pressed`. Live status regions use `aria-live="polite"`. Interactive targets ≥ 1.9rem square. Text contrast: `text` on `bg-control` and lighter surfaces must stay ≥ 4.5:1.
+
+## 6. Adding a new panel — checklist
+
+1. Register id in `workspace.ts` (`PANEL_IDS` + `DEFAULT_WORKSPACE`) and App `labels`.
+2. Root `<article className="…-panel">`, tokens from §1 only — no new hex values without adding them to this file.
+3. Common actions as `icon-button`s (§2); new icons into `icons.tsx`.
+4. Shortcuts through the resolver (§4).
+5. Verify in the browser (light smoke: mount, console clean, tab reachable) before claiming done.

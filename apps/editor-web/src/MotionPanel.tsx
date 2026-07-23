@@ -16,6 +16,7 @@ import {
   parentChain,
   sampleCurve,
 } from '@joy-media/motion-core';
+import { CheckIcon } from './icons.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -116,8 +117,14 @@ export function MotionPanel({
             ))}
           </select>
         </label>
-        <button type="button" onClick={applyPreset}>
-          Apply at playhead
+        <button
+          type="button"
+          className="icon-button icon-button-labeled"
+          title="Apply the selected preset at the playhead"
+          onClick={applyPreset}
+        >
+          <CheckIcon />
+          Apply
         </button>
       </div>
 

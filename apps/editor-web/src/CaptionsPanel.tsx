@@ -21,6 +21,7 @@ import {
 import type { CaptionSlot } from '@joy-media/captions-core';
 import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { DownloadIcon, MicIcon, PlusIcon, TrashIcon, UndoIcon, UploadIcon } from './icons.js';
 
 /**
  * Transcript-first caption editing (WP-03.2/03.3). Every durable change goes
@@ -252,13 +253,30 @@ function CaptionSlotEditor({
             </option>
           ))}
         </select>
-        <button onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}>
-          Export SRT
+        <button
+          className="icon-button icon-button-labeled"
+          title="Export captions as SRT"
+          onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
+        >
+          <DownloadIcon />
+          SRT
         </button>
-        <button onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}>
-          Export VTT
+        <button
+          className="icon-button icon-button-labeled"
+          title="Export captions as WebVTT"
+          onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
+        >
+          <DownloadIcon />
+          VTT
         </button>
-        <button onClick={() => fileInput.current?.click()}>Import…</button>
+        <button
+          className="icon-button"
+          aria-label="Import captions"
+          title="Import SRT/VTT file"
+          onClick={() => fileInput.current?.click()}
+        >
+          <UploadIcon />
+        </button>
         <input
           ref={fileInput}
           type="file"
@@ -270,9 +288,30 @@ function CaptionSlotEditor({
             if (file !== undefined) void importFile(file);
           }}
         />
-        <button onClick={addSegment}>Add caption</button>
-        <button onClick={() => void onTranscribe(document.id, 'fa-IR')}>Transcribe Persian</button>
-        <button onClick={() => void onTranscribe(document.id, 'en-US')}>Transcribe English</button>
+        <button
+          className="icon-button"
+          aria-label="Add caption"
+          title="Add caption at playhead"
+          onClick={addSegment}
+        >
+          <PlusIcon />
+        </button>
+        <button
+          className="icon-button icon-button-labeled"
+          title="Transcribe Persian (fa-IR)"
+          onClick={() => void onTranscribe(document.id, 'fa-IR')}
+        >
+          <MicIcon />
+          FA
+        </button>
+        <button
+          className="icon-button icon-button-labeled"
+          title="Transcribe English (en-US)"
+          onClick={() => void onTranscribe(document.id, 'en-US')}
+        >
+          <MicIcon />
+          EN
+        </button>
       </header>
       {importIssues > 0 && (
         <p className="caption-warning">
@@ -360,6 +399,8 @@ function CaptionSlotEditor({
               )}
               {segment.textOverride !== undefined && (
                 <button
+                  className="icon-button"
+                  aria-label={`Revert caption ${segment.id} to source text`}
                   title={`Revert to source: ${source}`}
                   onClick={() =>
                     onDispatch({
@@ -377,11 +418,13 @@ function CaptionSlotEditor({
                     })
                   }
                 >
-                  Revert
+                  <UndoIcon />
                 </button>
               )}
               <button
+                className="icon-button"
                 aria-label={`Delete caption ${segment.id}`}
+                title="Delete caption"
                 onClick={() =>
                   onDispatch({
                     label: 'Delete caption',
@@ -394,7 +437,7 @@ function CaptionSlotEditor({
                   })
                 }
               >
-                Delete
+                <TrashIcon />
               </button>
             </li>
           );

@@ -157,3 +157,81 @@ export function SaveIcon() {
     </Svg>
   );
 }
+
+export function CheckIcon() {
+  return (
+    <Svg>
+      <path d="m2.5 8.5 3.5 3.5 7.5-8" />
+    </Svg>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <Svg>
+      <path d="m3.5 3.5 9 9M12.5 3.5l-9 9" />
+    </Svg>
+  );
+}
+
+export function PlusIcon() {
+  return (
+    <Svg>
+      <path d="M8 2.5v11M2.5 8h11" />
+    </Svg>
+  );
+}
+
+export function DownloadIcon() {
+  return (
+    <Svg>
+      <path d="M8 2.5V10M5 7l3 3 3-3" />
+      <path d="M2.5 11.5v2h11v-2" />
+    </Svg>
+  );
+}
+
+export function UploadIcon() {
+  return (
+    <Svg>
+      <path d="M8 10.5V3M5 6l3-3 3 3" />
+      <path d="M2.5 11.5v2h11v-2" />
+    </Svg>
+  );
+}
+
+export function MicIcon() {
+  return (
+    <Svg>
+      <rect x="6" y="2" width="4" height="7" rx="2" />
+      <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2" />
+    </Svg>
+  );
+}
+
+export function ImageIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="3" width="11" height="10" rx="1" />
+      <circle cx="5.7" cy="6.2" r="1.1" />
+      <path d="m2.5 11 3.3-3 2.7 2.5L11 8l2.5 3" />
+    </Svg>
+  );
+}
+
+export function RefreshIcon() {
+  return (
+    <Svg>
+      <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+      <path d="M13 2.5V5h-2.5" />
+    </Svg>
+  );
+}
+
+export function CloudIcon() {
+  return (
+    <Svg>
+      <path d="M4.5 12.5a3 3 0 0 1-.4-6A4 4 0 0 1 12 7.6a2.5 2.5 0 0 1-.5 4.9Z" />
+    </Svg>
+  );
+}

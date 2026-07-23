@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { EditorSession } from './editor-session.js';
 import { listWorkflows, deleteWorkflow } from './workflow-recorder.js';
-import { PlayIcon, TrashIcon } from './icons.js';
+import { PlayIcon, RefreshIcon, TrashIcon } from './icons.js';
 
 export function WorkflowsPanel({
   session,
@@ -19,7 +19,17 @@ export function WorkflowsPanel({
 
   return (
     <article className="workflows-panel">
-      <h3>Workflows</h3>
+      <div className="workflows-header">
+        <h3>Workflows</h3>
+        <button
+          className="icon-button"
+          aria-label="Refresh workflow list"
+          title="Refresh workflow list"
+          onClick={() => setWorkflows(listWorkflows(session))}
+        >
+          <RefreshIcon />
+        </button>
+      </div>
       {workflows.length === 0 ? (
         <p>No saved workflows yet. Run an agent action and save it as a workflow.</p>
       ) : (

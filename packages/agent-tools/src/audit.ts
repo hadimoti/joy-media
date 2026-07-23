@@ -35,7 +35,8 @@ export type AuditAction =
   | 'branch-rejected'
   | 'revert-started'
   | 'revert-completed'
-  | 'revert-failed';
+  | 'revert-failed'
+  | 'workflow-saved';
 
 export class AuditTrail {
   private entries: AuditEntry[] = [];

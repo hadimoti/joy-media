@@ -23,6 +23,7 @@ import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
+import { CheckIcon, CloseIcon, PlayIcon, SaveIcon, UndoIcon } from './icons.js';
 
 type PolicyName = 'default' | 'permissive';
 
@@ -35,8 +36,10 @@ interface PendingPlan {
 
 interface LastRun {
   readonly intent: AgentIntent;
+  readonly plan: AgentEditPlan;
   readonly executionResult: ExecutionResult;
   readonly reverted: boolean;
+  readonly savedWorkflowId?: string;
 }
 
 /**
@@ -131,11 +134,20 @@ export function AgentPanel({
       metadata: { transactionLabel: executionResult.transactionLabel },
     });
     setPending(undefined);
-    setLastRun({ intent, executionResult, reverted: false });
+    // W16-Q1: saving as a workflow is an explicit user action, not automatic.
+    setLastRun({ intent, plan: agentPlan, executionResult, reverted: false });
+  };
 
-    if (executionResult.success) {
-      saveWorkflow(session, agentPlan);
-    }
+  const saveLastRunAsWorkflow = () => {
+    if (lastRun === undefined || !lastRun.executionResult.success) return;
+    const recorded = saveWorkflow(session, lastRun.plan);
+    auditRef.current.record({
+      planId: lastRun.plan.planId,
+      action: 'workflow-saved',
+      userId: 'local-owner',
+      metadata: { workflowId: recorded.workflow.id },
+    });
+    setLastRun({ ...lastRun, savedWorkflowId: recorded.workflow.id });
   };
 
   const undoLastRun = () => {
@@ -205,16 +217,44 @@ export function AgentPanel({
             Approval: <strong>{pending.approval.decision}</strong> — {pending.approval.reason}
           </p>
           {pending.approval.decision === 'blocked' && (
-            <button onClick={reject}>Dismiss</button>
+            <button
+              className="icon-button"
+              aria-label="Dismiss blocked plan"
+              title="Dismiss"
+              onClick={reject}
+            >
+              <CloseIcon />
+            </button>
           )}
           {pending.approval.decision === 'requires-manual' && (
             <>
-              <button onClick={() => void executePending()}>Approve &amp; Execute</button>
-              <button onClick={reject}>Reject</button>
+              <button
+                className="icon-button icon-button-labeled"
+                title="Approve this plan and execute it"
+                onClick={() => void executePending()}
+              >
+                <CheckIcon />
+                Approve
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Reject plan"
+                title="Reject plan"
+                onClick={reject}
+              >
+                <CloseIcon />
+              </button>
             </>
           )}
           {pending.approval.decision === 'auto-approved' && (
-            <button onClick={() => void executePending()}>Execute</button>
+            <button
+              className="icon-button icon-button-labeled"
+              title="Execute this plan"
+              onClick={() => void executePending()}
+            >
+              <PlayIcon />
+              Execute
+            </button>
           )}
         </section>
       )}
@@ -229,7 +269,27 @@ export function AgentPanel({
             <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
           )}
           {lastRun.executionResult.success && !lastRun.reverted && (
-            <button onClick={undoLastRun}>Undo this</button>
+            <button
+              className="icon-button"
+              aria-label="Undo this run"
+              title="Undo this run"
+              onClick={undoLastRun}
+            >
+              <UndoIcon />
+            </button>
+          )}
+          {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
+            <button
+              className="icon-button"
+              aria-label="Save as reusable workflow"
+              title="Save as reusable workflow"
+              onClick={saveLastRunAsWorkflow}
+            >
+              <SaveIcon />
+            </button>
+          )}
+          {lastRun.savedWorkflowId !== undefined && (
+            <p className="agent-workflow-saved">Saved as {lastRun.savedWorkflowId}</p>
           )}
           {lastRun.reverted && <p>Reverted.</p>}
         </section>

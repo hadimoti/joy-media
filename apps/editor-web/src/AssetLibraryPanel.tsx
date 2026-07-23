@@ -16,6 +16,7 @@ import {
 } from './asset-library-state.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import { CloseIcon, CloudIcon, ImageIcon, PlayIcon, RefreshIcon } from './icons.js';
 
 const categories: readonly { readonly id: AssetCategory; readonly label: string }[] = [
   { id: 'all', label: 'All assets' },
@@ -276,19 +277,26 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
           </label>
           <button
             type="button"
-            className="asset-refresh"
+            className="icon-button asset-refresh"
             onClick={() => void refresh()}
             aria-label="Refresh assets"
+            title="Refresh assets"
           >
-            Refresh
+            <RefreshIcon />
           </button>
           <button
             type="button"
-            className="asset-sync"
+            className="icon-button icon-button-labeled asset-sync"
             disabled={syncEnabled}
+            title={
+              syncEnabled
+                ? 'Private backup is enabled for this project'
+                : 'Enable private cloud backup for this project'
+            }
             onClick={() => void enableSync()}
           >
-            {syncEnabled ? 'Private backup enabled' : 'Enable private backup'}
+            <CloudIcon />
+            {syncEnabled ? 'Backup on' : 'Backup'}
           </button>
         </div>
         <details className="asset-register">
@@ -334,8 +342,14 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
               <strong>{preview.displayName}</strong>
               <span>Verified private derivative</span>
             </div>
-            <button type="button" onClick={clearPreview}>
-              Close preview
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close preview"
+              title="Close preview"
+              onClick={clearPreview}
+            >
+              <CloseIcon />
             </button>
             {preview.mimeType.startsWith('video/') ? (
               <video key={preview.derivativeId} src={preview.url} controls autoPlay />
@@ -371,13 +385,25 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
                     {availabilityLabel(status)}
                   </p>
                   {derivatives.length === 0 && (
-                    <button type="button" onClick={() => void queueThumbnail(asset)}>
-                      Generate thumbnail
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Generate thumbnail for ${asset.displayName}`}
+                      title="Generate thumbnail"
+                      onClick={() => void queueThumbnail(asset)}
+                    >
+                      <ImageIcon />
                     </button>
                   )}
                   {derivative !== undefined && (
-                    <button type="button" onClick={() => void openPreview(asset, derivative)}>
-                      Preview verified {derivative.kind}
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Preview verified ${derivative.kind} for ${asset.displayName}`}
+                      title={`Preview verified ${derivative.kind}`}
+                      onClick={() => void openPreview(asset, derivative)}
+                    >
+                      <PlayIcon />
                     </button>
                   )}
                 </li>

@@ -840,6 +840,20 @@ label {
   color: #8c8c90;
   font-size: 0.75rem;
 }
+.workflows-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.workflows-header h3 {
+  margin: 0;
+}
+.agent-workflow-saved {
+  color: #64c48c;
+  font-size: 0.8rem;
+  margin: 0;
+}
 /* Dockview chrome follows the neutral-gray theme via its CSS variables.
    dockview.css loads after this file, so the selector needs #root to win. */
 #root .workspace {

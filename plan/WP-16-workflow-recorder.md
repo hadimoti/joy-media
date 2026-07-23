@@ -7,7 +7,7 @@
 - **Recorder** ([workflow-recorder.ts](../apps/editor-web/src/workflow-recorder.ts)): converts a successful `AgentEditPlan` into a first-class `JoyWorkflow` (formatVersion 1, `user.workflows.<slug>` id per W16-Q4), persists to `window.localStorage` under `joy-media.workflow.v1:*` with an in-memory fallback for Node tests. Save/load/list/delete covered by tests.
 - **Runner** ([workflow-runner.ts](../apps/editor-web/src/workflow-runner.ts)): browser-safe Kahn topological executor dispatching recorded `editor.commandTransaction` nodes through the real `createAgentCommandBus` (same undo stack as the human Timeline panel); honors `policy.failure === 'stop'`.
 - **Workflows panel** ([WorkflowsPanel.tsx](../apps/editor-web/src/WorkflowsPanel.tsx)): list, run, delete recorded workflows.
-- **Agent panel**: a successful agent execution is recorded automatically as a workflow. **Deviation from W16-Q1 (DEFAULT):** the decision text called for a “Save as workflow” button; the implementation auto-saves after every successful run. Flagged for the owner — either supersede W16-Q1 with an ADR accepting auto-save, or add the explicit button.
+- **Agent panel**: after a successful agent execution, an explicit **Save as workflow** button records the plan (audited as `workflow-saved`, saved id shown inline). *History note:* the first implementation auto-saved every run — a W16-Q1 deviation flagged in DECISIONS.md and resolved the same day (2026-07-23) by shipping the button the decision called for.
 
 ## Defects found in the 2026-07-23 handoff and fixed the same day
 
@@ -32,6 +32,13 @@ Owner asked for a professional Adobe-style editor: icon-only SVG buttons, modern
 - `apps/editor-web`: 17 files / 50 tests pass. `packages/workflow-engine`: 91 tests pass (incl. new SHA-256 vectors).
 - Monorepo: 1175/1176 — the single failure is the documented pre-existing cross-Chromium `golden-render` pixel baseline, unrelated.
 - `vite build` passes; **live browser verification** (dev server, in-app browser): app mounts, Workflows tab reachable, clip select/split(S)/ripple-delete(Del)/undo(Ctrl+Z) all exercised for real, drag moved `product` 10s→13.3s with snap and undo restored it, gray icon-only UI screenshotted.
+
+## Follow-up session (2026-07-23, same day): design system + all-panels alignment
+
+- Repo-root **[DESIGN.md](../DESIGN.md)** codifies the D-UI-GRAY system: color tokens, icon-button rules (icon-only default; short label only where sibling icons would be ambiguous, e.g. SRT/VTT, FA/EN), dockview theming contract, interaction standards, a11y non-negotiables, and a new-panel checklist. All future UI work follows that file.
+- **Every panel aligned:** Captions (export/import/add/transcribe toolbar + per-row revert/delete), Assets (refresh/backup/close-preview/thumbnail/preview), Jobs (revoke/cancel/retry), Camera (create), Motion (apply preset), Agent (approve/reject/execute/dismiss/undo), Workflows (+ refresh button so saves from the Agent panel appear without remount). Icon set grew by check/close/plus/download/upload/mic/image/refresh/cloud.
+- **W16-Q1 resolved:** explicit Save-as-workflow button replaces auto-save; `workflow-saved` added to the agent-tools `AuditAction` union (additive).
+- Verified in-browser on a fresh load: all 9 tabs mount with zero console errors.
 
 ## Cleanup
 

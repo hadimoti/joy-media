@@ -5,6 +5,7 @@ import {
   type BrowserWorker,
 } from './control-plane-client.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import { CloseIcon, RefreshIcon } from './icons.js';
 
 export function JobsPanel({
   projectId,
@@ -142,9 +143,12 @@ export function JobsPanel({
               {!worker.revoked && (
                 <button
                   type="button"
+                  className="icon-button"
+                  aria-label={`Revoke Worker ${worker.id}`}
+                  title={`Revoke Worker ${worker.id}`}
                   onClick={() => void client.revokeWorker(worker.id).then(refresh).catch(report)}
                 >
-                  Revoke
+                  <CloseIcon />
                 </button>
               )}
             </li>
@@ -172,11 +176,14 @@ export function JobsPanel({
                 {(job.state === 'queued' || job.state === 'leased') && (
                   <button
                     type="button"
+                    className="icon-button"
+                    aria-label={`Cancel job ${job.id}`}
+                    title="Cancel job"
                     onClick={() =>
                       void client.cancel(projectId, job.id).then(refresh).catch(report)
                     }
                   >
-                    Cancel
+                    <CloseIcon />
                   </button>
                 )}
                 {(job.state === 'canceled' ||
@@ -184,9 +191,12 @@ export function JobsPanel({
                   job.state === 'completed') && (
                   <button
                     type="button"
+                    className="icon-button"
+                    aria-label={`Retry job ${job.id}`}
+                    title="Retry job"
                     onClick={() => void client.retry(projectId, job.id).then(refresh).catch(report)}
                   >
-                    Retry
+                    <RefreshIcon />
                   </button>
                 )}
               </div>
