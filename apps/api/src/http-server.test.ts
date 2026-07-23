@@ -35,6 +35,15 @@ describe('control-plane HTTP transport', () => {
       status: 401,
       body: { error: { code: 'AUTH_REQUIRED' } },
     });
+    expect(
+      await request(origin, 'POST', '/v1/providers/speech/transcribe', {
+        language: 'en',
+        referenceAssetId: 'asset-intro',
+      }),
+    ).toMatchObject({
+      status: 401,
+      body: { error: { code: 'AUTH_REQUIRED' } },
+    });
   });
 
   it('preserves project, Worker lease, completion, and cursor event semantics over v1', async () => {

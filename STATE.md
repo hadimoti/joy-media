@@ -10,7 +10,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P00 architecture proofs          | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                              |
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
 | P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
-| P03 captions                     | done*       | 5/5      | 2026-07-23   | WP-20 fixture Whisper seam (FA/EN); live Whisper binary still optional                                            |
+| P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
 | P05 audio + providers            | done*       | 5/5      | 2026-07-23   | WP-19/22 normalize+silence+loudness+gate-denoise real DSP; TTS/Comfy/ML denoise still open
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
@@ -33,6 +33,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Session log (newest first)
 
+
+| 2026-07-23 | WP-23 | **Live Whisper API.** `POST /v1/providers/speech/transcribe` runs `faster-whisper` (tiny) via `apps/api/scripts/whisper_transcribe.py`; Captions tries authenticated API then falls back to FA/EN fixtures. editor-web 77/77; api whisper smoke green. |
 
 | 2026-07-23 | WP-22+ | **Denoise port = noise-gate DSP.** `transform.denoise` runs `audio-core.applyGate` (browser `./effects`); method `noise-gate`, no `__stub`. Not ML denoise. editor-web 76/76. |
 

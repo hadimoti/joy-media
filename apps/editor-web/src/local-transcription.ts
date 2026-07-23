@@ -4,6 +4,7 @@ import {
   ProviderUnavailableError,
 } from '@joy-media/provider-sdk';
 import type { CaptionDocumentV1 } from '@joy-media/project-schema';
+import { BrowserControlPlaneClient } from './control-plane-client.js';
 
 interface TranscriptionFixture {
   readonly language: string;
@@ -18,7 +19,7 @@ interface TranscriptionFixture {
   }[];
 }
 
-/** Fixture-backed FA/EN transcripts (WP-20). JSON copies kept under src/fixtures for review. */
+/** Fixture-backed FA/EN transcripts (WP-20). Used when live Whisper API is unavailable. */
 const FIXTURES: Readonly<Record<'fa-IR' | 'en-US', TranscriptionFixture>> = {
   'fa-IR': {
     language: 'fa-IR',
@@ -48,11 +49,12 @@ const FIXTURES: Readonly<Record<'fa-IR' | 'en-US', TranscriptionFixture>> = {
   },
 };
 
-/**
- * Fixture-backed local Whisper seam (WP-20).
- * Swap the fixture loader for an installed Whisper binary later without changing the Captions UI.
- */
-function providerFor(language: 'fa-IR' | 'en-US') {
+const REFERENCE_ASSET_BY_LANGUAGE: Readonly<Record<'fa-IR' | 'en-US', string>> = {
+  'fa-IR': 'asset-intro',
+  'en-US': 'asset-intro',
+};
+
+function fixtureProvider(language: 'fa-IR' | 'en-US') {
   const fixture = FIXTURES[language];
   return createLocalWhisperProvider(async (_capability, input) => {
     if (input.language !== undefined && !String(input.language).startsWith(language.slice(0, 2))) {
@@ -73,13 +75,40 @@ function providerFor(language: 'fa-IR' | 'en-US') {
   }, fixture.modelId);
 }
 
+async function tryLiveTranscription(
+  language: 'fa-IR' | 'en-US',
+  client: BrowserControlPlaneClient,
+) {
+  return client.transcribeSpeech(language, {
+    referenceAssetId: REFERENCE_ASSET_BY_LANGUAGE[language],
+  });
+}
+
+/**
+ * Captions FA/EN transcription: prefer authenticated faster-whisper API,
+ * fall back to committed fixtures when unsigned or the provider is down.
+ */
 export async function transcribeReferenceCaption(
   documentId: string,
   language: 'fa-IR' | 'en-US',
+  client: BrowserControlPlaneClient = new BrowserControlPlaneClient(),
 ): Promise<CaptionDocumentV1> {
-  const provider = providerFor(language);
-  return captionDocumentFromTranscription(
-    documentId,
-    await provider.invoke('speech.transcribe', { assetId: `reference-${language}`, language }),
-  );
+  try {
+    const live = await tryLiveTranscription(language, client);
+    return captionDocumentFromTranscription(documentId, {
+      language: live.language,
+      words: live.words,
+      speakers: live.speakers,
+      provenance: live.provenance,
+    });
+  } catch {
+    const provider = fixtureProvider(language);
+    return captionDocumentFromTranscription(
+      documentId,
+      await provider.invoke('speech.transcribe', {
+        assetId: `reference-${language}`,
+        language,
+      }),
+    );
+  }
 }

@@ -148,6 +148,73 @@ export class BrowserControlPlaneClient {
     return response.blob();
   }
 
+  /** Live faster-whisper transcription (authenticated). Falls back is caller's job. */
+  async transcribeSpeech(
+    language: string,
+    options: {
+      readonly referenceAssetId?: string;
+      readonly media?: Blob;
+      readonly mediaType?: string;
+    } = {},
+  ): Promise<{
+    readonly language: string;
+    readonly words: readonly {
+      readonly text: string;
+      readonly startUs: number;
+      readonly endUs: number;
+      readonly confidence?: number;
+      readonly speakerId?: string;
+    }[];
+    readonly speakers: readonly { readonly id: string; readonly name: string }[];
+    readonly provenance: {
+      readonly providerId: string;
+      readonly modelId: string;
+      readonly createdAt: string;
+    };
+  }> {
+    if (options.referenceAssetId !== undefined) {
+      return this.post('/v1/providers/speech/transcribe', {
+        language,
+        referenceAssetId: options.referenceAssetId,
+      });
+    }
+    if (options.media === undefined) {
+      throw new Error('transcribeSpeech requires referenceAssetId or media');
+    }
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/providers/speech/transcribe?language=${encodeURIComponent(language)}`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': options.mediaType ?? (options.media.type || 'application/octet-stream'),
+        },
+        body: options.media,
+      },
+    );
+    const body = await responseBody(response);
+    if (!response.ok) throw new Error(errorMessage(body, response.status));
+    if (!isRecord(body) || !('data' in body))
+      throw new Error('JOY Media API returned an invalid response');
+    return body.data as {
+      readonly language: string;
+      readonly words: readonly {
+        readonly text: string;
+        readonly startUs: number;
+        readonly endUs: number;
+        readonly confidence?: number;
+        readonly speakerId?: string;
+      }[];
+      readonly speakers: readonly { readonly id: string; readonly name: string }[];
+      readonly provenance: {
+        readonly providerId: string;
+        readonly modelId: string;
+        readonly createdAt: string;
+      };
+    };
+  }
+
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }

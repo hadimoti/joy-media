@@ -271,6 +271,58 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/providers/speech/transcribe') {
+    const { runWhisperOnReferenceAsset, runWhisperTranscription } = await import(
+      './whisper-transcribe.js'
+    );
+    const contentType = request.headers['content-type'] ?? '';
+    let transcript;
+    if (contentType.includes('application/json')) {
+      const body = await readJson(request);
+      const language = requiredString(body, 'language');
+      const referenceAssetId =
+        typeof body.referenceAssetId === 'string' ? body.referenceAssetId : undefined;
+      if (referenceAssetId !== undefined) {
+        transcript = runWhisperOnReferenceAsset(referenceAssetId, language);
+      } else {
+        throw new ControlPlaneError(
+          'REQUEST_INVALID',
+          'JSON body requires referenceAssetId (or send raw media bytes)',
+        );
+      }
+    } else {
+      const language = url.searchParams.get('language');
+      if (language === null || language.length === 0) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'language query parameter is required');
+      }
+      const media = await readBytes(request, 64 * 1024 * 1024);
+      if (media.byteLength === 0) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'media body is required');
+      }
+      const extension = contentType.includes('wav')
+        ? 'wav'
+        : contentType.includes('mpeg') || contentType.includes('mp3')
+          ? 'mp3'
+          : contentType.includes('mp4') || contentType.includes('video')
+            ? 'mp4'
+            : 'bin';
+      transcript = runWhisperTranscription(media, language, { mediaExtension: extension });
+    }
+    respondJson(response, 200, {
+      data: {
+        language: transcript.language,
+        words: transcript.words,
+        speakers: transcript.speakers,
+        provenance: {
+          providerId: 'joy.faster-whisper',
+          modelId: transcript.modelId,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    });
+    return;
+  }
+
   const assetSyncMatch = /^\/v1\/projects\/([^/]+)\/asset-sync$/.exec(url.pathname);
   if (request.method === 'POST' && assetSyncMatch !== null) {
     const body = await readJson(request);
@@ -714,9 +766,11 @@ function respondError(response: ServerResponse, error: unknown): void {
         ? 401
         : error.code === 'REQUEST_INVALID'
           ? 400
-          : error.code.startsWith('PAIRING_')
-            ? 403
-            : 409;
+          : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
+            ? 503
+            : error.code.startsWith('PAIRING_')
+              ? 403
+              : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }
