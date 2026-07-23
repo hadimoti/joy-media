@@ -215,6 +215,25 @@ export class BrowserControlPlaneClient {
     };
   }
 
+  async synthesizeSpeech(input: {
+    readonly text: string;
+    readonly language?: string;
+    readonly voiceId?: string;
+    readonly speed?: number;
+  }): Promise<{
+    readonly assetId: string;
+    readonly mimeType: string;
+    readonly bytesBase64: string;
+    readonly voiceId: string;
+    readonly engine: string;
+    readonly modelId: string;
+    readonly dataLeavesDevice: true;
+    readonly retentionDisclosure: string;
+    readonly durationUs: number;
+  }> {
+    return this.post('/v1/providers/speech/synthesize', input);
+  }
+
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }

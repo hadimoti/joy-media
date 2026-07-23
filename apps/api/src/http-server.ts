@@ -323,6 +323,23 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/providers/speech/synthesize') {
+    const { runEdgeSpeechSynthesis } = await import('./speech-synthesize.js');
+    const body = await readJson(request);
+    const text = requiredString(body, 'text');
+    const language = typeof body.language === 'string' ? body.language : undefined;
+    const voiceId = typeof body.voiceId === 'string' ? body.voiceId : undefined;
+    const speed = typeof body.speed === 'number' ? body.speed : undefined;
+    const synthesized = runEdgeSpeechSynthesis({
+      text,
+      ...(language !== undefined ? { language } : {}),
+      ...(voiceId !== undefined ? { voiceId } : {}),
+      ...(speed !== undefined ? { speed } : {}),
+    });
+    respondJson(response, 200, { data: synthesized });
+    return;
+  }
+
   const assetSyncMatch = /^\/v1\/projects\/([^/]+)\/asset-sync$/.exec(url.pathname);
   if (request.method === 'POST' && assetSyncMatch !== null) {
     const body = await readJson(request);

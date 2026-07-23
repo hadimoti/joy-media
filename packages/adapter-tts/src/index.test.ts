@@ -87,6 +87,16 @@ describe('createTTSAdapter', () => {
     expect(() => createTTSAdapter({ execution: 'worker-local', engine: 'elevenlabs' })).toThrow(
       /requires remote-api execution/,
     );
+    expect(() => createTTSAdapter({ execution: 'worker-local', engine: 'edge-tts' })).toThrow(
+      /requires remote-api execution/,
+    );
+  });
+
+  it('declares edge-tts as remote with data-leaves-device disclosure', () => {
+    const adapter = createTTSAdapter({ execution: 'remote-api', engine: 'edge-tts' });
+    expect(adapter.manifest.execution).toBe('remote-api');
+    expect(adapter.manifest.privacy.dataLeavesDevice).toBe(true);
+    expect(adapter.manifest.privacy.retentionDisclosure).toMatch(/Microsoft Edge/i);
   });
 
   it('uses engine name as modelId when modelId not provided', () => {

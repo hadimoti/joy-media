@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import type {
   CapabilityDeclaration,
   CapabilityId,
@@ -12,7 +16,13 @@ import type {
 export type { TTSRequestWithConsent } from './consent-tts.js';
 export { synthesizeWithConsent, VoiceConsentError } from './consent-tts.js';
 
-export type TTSEngine = 'fish-speech' | 'f5-tts' | 'kokoro' | 'chatterbox' | 'elevenlabs';
+export type TTSEngine =
+  | 'fish-speech'
+  | 'f5-tts'
+  | 'kokoro'
+  | 'chatterbox'
+  | 'elevenlabs'
+  | 'edge-tts';
 
 export interface TTSConfig {
   readonly execution: 'worker-local' | 'remote-api';
@@ -20,6 +30,8 @@ export interface TTSConfig {
   readonly modelId?: string;
   readonly voiceId?: string;
   readonly apiKey?: string;
+  /** Override path to the edge-tts binary (default: edge-tts on PATH). */
+  readonly edgeTtsCommand?: string;
 }
 
 export interface TTSInput {
@@ -64,15 +76,17 @@ const VALID_ENGINES: readonly TTSEngine[] = [
   'kokoro',
   'chatterbox',
   'elevenlabs',
+  'edge-tts',
 ];
+
+const REMOTE_ENGINES: readonly TTSEngine[] = ['elevenlabs', 'edge-tts'];
 
 function validateConfig(config: TTSConfig): void {
   if (!VALID_ENGINES.includes(config.engine)) {
     throw new RangeError(`engine must be one of: ${VALID_ENGINES.join(', ')}`);
   }
 
-  const remoteEngines: readonly TTSEngine[] = ['elevenlabs'];
-  if (remoteEngines.includes(config.engine) && config.execution === 'worker-local') {
+  if (REMOTE_ENGINES.includes(config.engine) && config.execution === 'worker-local') {
     throw new Error(`Engine '${config.engine}' requires remote-api execution`);
   }
 
@@ -146,10 +160,59 @@ function generateWordTimings(text: string, speed: number): WordTiming[] {
   return timings;
 }
 
-function synthesizeSpeech(
-  _config: TTSConfig,
+/** Map BCP-47 / short language codes to Edge neural voices. */
+export function resolveEdgeVoice(language: string | undefined, voiceId: string | undefined): string {
+  if (voiceId !== undefined && voiceId.length > 0 && !voiceId.startsWith('stock:')) {
+    return voiceId;
+  }
+  const lang = (language ?? 'en').toLowerCase();
+  if (lang.startsWith('fa')) return 'fa-IR-DilaraNeural';
+  if (lang.startsWith('en')) return 'en-US-EmmaMultilingualNeural';
+  return 'en-US-EmmaMultilingualNeural';
+}
+
+function synthesizeWithEdgeTts(
+  config: TTSConfig,
   input: TTSInput,
-): { audioData: Uint8Array; timings: WordTiming[] } {
+): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
+  const command = config.edgeTtsCommand ?? process.env.JOY_MEDIA_EDGE_TTS ?? 'edge-tts';
+  const voice = resolveEdgeVoice(input.language, input.voiceId ?? config.voiceId);
+  const speed = input.speed ?? 1.0;
+  const ratePercent = Math.round((speed - 1) * 100);
+  const rate = `${ratePercent >= 0 ? '+' : ''}${ratePercent}%`;
+  const dir = mkdtempSync(join(tmpdir(), 'joy-edge-tts-'));
+  const mediaPath = join(dir, 'speech.mp3');
+  try {
+    const args = [
+      '-t',
+      input.text,
+      '-v',
+      voice,
+      '--rate',
+      rate,
+      '--write-media',
+      mediaPath,
+    ];
+    const result = spawnSync(command, args, {
+      encoding: 'utf8',
+      timeout: Number(process.env.JOY_MEDIA_TTS_TIMEOUT_MS ?? 60_000),
+    });
+    if (result.status !== 0 || !existsSync(mediaPath)) {
+      throw new Error(
+        `edge-tts failed: ${(result.stderr || result.stdout || 'no output').slice(0, 400)}`,
+      );
+    }
+    const audioData = new Uint8Array(readFileSync(mediaPath));
+    const timings = generateWordTimings(input.text, speed);
+    return { audioData, timings, mimeType: 'audio/mpeg', sampleRate: 24_000 };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function synthesizeSineFixture(
+  input: TTSInput,
+): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
   const speed = input.speed ?? 1.0;
   const timings = generateWordTimings(input.text, speed);
   const totalDurationUs = timings.length > 0 ? timings[timings.length - 1]!.endUs : 1_000_000;
@@ -165,7 +228,18 @@ function synthesizeSpeech(
     audioData[i * 2 + 1] = (intSample >> 8) & 0xff;
   }
 
-  return { audioData, timings };
+  return { audioData, timings, mimeType: 'audio/wav', sampleRate };
+}
+
+function synthesizeSpeech(
+  config: TTSConfig,
+  input: TTSInput,
+): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
+  if (config.engine === 'edge-tts') {
+    return synthesizeWithEdgeTts(config, input);
+  }
+  // Other engines remain fixture sine until a local binary is wired.
+  return synthesizeSineFixture(input);
 }
 
 export function createTTSAdapter(config: TTSConfig): ProviderV2 {
@@ -249,7 +323,14 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
     secretFields,
     privacy: {
       dataLeavesDevice: !isLocal,
-      retentionDisclosure: isLocal ? undefined : 'Text sent to remote TTS service for synthesis',
+      ...(isLocal
+        ? {}
+        : {
+            retentionDisclosure:
+              config.engine === 'edge-tts'
+                ? 'Text is sent to Microsoft Edge online TTS for synthesis'
+                : 'Text sent to remote TTS service for synthesis',
+          }),
     },
   };
 
@@ -307,23 +388,24 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
       const ttsInput = input as TTSInput;
 
       try {
-        const { audioData, timings } = synthesizeSpeech(config, ttsInput);
+        const { audioData, timings, mimeType, sampleRate } = synthesizeSpeech(config, ttsInput);
         const assetId = generateAssetId();
 
         const output: GeneratedOutput = {
           kind: 'audio',
           assetId,
-          mimeType: 'audio/wav',
+          mimeType,
           bytes: audioData,
           metadata: {
             engine: config.engine,
             modelId,
             language: ttsInput.language ?? 'en',
-            voiceId: ttsInput.voiceId ?? config.voiceId ?? 'default',
+            voiceId:
+              ttsInput.voiceId ?? config.voiceId ?? resolveEdgeVoice(ttsInput.language, undefined),
             speed: ttsInput.speed ?? 1.0,
             pitch: ttsInput.pitch ?? 0,
             wordTimings: timings,
-            sampleRate: 24000,
+            sampleRate,
             durationUs: timings.length > 0 ? timings[timings.length - 1]!.endUs : 0,
           },
         };

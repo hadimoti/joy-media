@@ -191,8 +191,28 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         }) => stubResult({ sceneInstance: args.templateId, variables: args.variables }),
       },
       generation: {
-        synthesizeSpeech: (args: { readonly text: string; readonly voiceId: string }) =>
-          stubResult({ voiceOver: args.text, voiceId: args.voiceId }),
+        synthesizeSpeech: (args: {
+          readonly text: string;
+          readonly voiceId: string;
+          readonly language?: string;
+        }) => {
+          // Browser workflow ports are sync; real MP3 bytes come from
+          // POST /v1/providers/speech/synthesize (edge-tts, data leaves device).
+          const language = args.language ?? 'en';
+          const stockVoice = language.toLowerCase().startsWith('fa')
+            ? 'fa-IR-DilaraNeural'
+            : 'en-US-EmmaMultilingualNeural';
+          const isCloned = args.voiceId.length > 0 && !args.voiceId.startsWith('stock:');
+          return {
+            voiceOver: args.text,
+            voiceId: isCloned ? args.voiceId : stockVoice,
+            method: 'edge-tts',
+            dataLeavesDevice: true,
+            retentionDisclosure: 'Text is sent to Microsoft Edge online TTS for synthesis',
+            deferredEndpoint: '/v1/providers/speech/synthesize',
+            requiresConsent: isCloned,
+          };
+        },
         translate: (args: { readonly text: string; readonly targetLanguage: string }) =>
           stubResult({
             text: `[${args.targetLanguage}] ${args.text}`,
