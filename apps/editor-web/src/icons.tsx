@@ -228,6 +228,33 @@ export function RefreshIcon() {
   );
 }
 
+export function UserIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="5" r="2.8" />
+      <path d="M2.8 13.5a5.2 5.2 0 0 1 10.4 0" />
+    </Svg>
+  );
+}
+
+export function LogoutIcon() {
+  return (
+    <Svg>
+      <path d="M6.5 2.5H3v11h3.5" />
+      <path d="M10 5l3 3-3 3M13 8H6" />
+    </Svg>
+  );
+}
+
+export function ListIcon() {
+  return (
+    <Svg>
+      <path d="M5.5 4h8M5.5 8h8M5.5 12h8" />
+      <path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01" strokeWidth="2" />
+    </Svg>
+  );
+}
+
 export function CloudIcon() {
   return (
     <Svg>

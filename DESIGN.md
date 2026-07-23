@@ -58,6 +58,16 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 - **Selection**: amber 2px outline (`aria-pressed='true'`), single accent everywhere.
 - Async/busy buttons set `aria-busy` and a disabled state; status text goes in an adjacent `aria-live="polite"` element, not inside the button.
 
+## 4b. Header chrome
+
+- The header owns global state surfaces: undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)).
+- Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`; status text lives in the ellipsized `.export-status` span, never inside a button.
+- Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.
+
+## 4c. Bidirectional text (Persian-first)
+
+Text fields that hold user content (`input[type=text]`, untyped inputs, search, textarea) carry `unicode-bidi: plaintext` so each field follows its own content direction — Persian is right-aligned, Latin filenames stay left-aligned, no global LTR forcing. Filenames/ids rendered in UI chrome get an explicit `dir="ltr"`. Explainers and empty states use `.empty-hint` (centered, muted, line-height 1.5); never leave a bare left-aligned paragraph floating in a panel.
+
 ## 5. Accessibility non-negotiables
 
 Icon-only buttons always have `aria-label` + `title`. Toggles always have `aria-pressed`. Live status regions use `aria-live="polite"`. Interactive targets ≥ 1.9rem square. Text contrast: `text` on `bg-control` and lighter surfaces must stay ≥ 4.5:1.

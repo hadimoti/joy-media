@@ -35,6 +35,12 @@ export interface BrowserExportResult {
   /** The filename that was used (or suggested) for the download. */
   readonly filename: string;
   /**
+   * The encoded payload, when the caller wants to re-offer the download
+   * (e.g. an export-history panel). Omitted by producers that cannot or
+   * should not retain the bytes.
+   */
+  readonly blob?: Blob;
+  /**
    * `true` when a real encoded container (e.g. MP4) was emitted; `false` for
    * the explicit raw-RGBA interchange fallback.
    */
@@ -186,6 +192,7 @@ export async function downloadBrowserMp4(
     totalBytes: blob.size,
     mimeType: blob.type,
     filename,
+    blob,
     encoded: true,
   };
 }

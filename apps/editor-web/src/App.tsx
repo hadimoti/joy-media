@@ -59,7 +59,28 @@ import {
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
-import { CommandIcon, ExportIcon, RedoIcon, UndoIcon } from './icons.js';
+import {
+  CommandIcon,
+  DownloadIcon,
+  ExportIcon,
+  ListIcon,
+  LogoutIcon,
+  RedoIcon,
+  UndoIcon,
+  UserIcon,
+} from './icons.js';
+import {
+  JOY_LOGIN_URL,
+  logoutJoySession,
+  probeJoySession,
+  type JoySessionState,
+} from './identity.js';
+import {
+  loadExportHistory,
+  saveExportHistory,
+  upsertEntry,
+  type ExportProcessEntry,
+} from './export-history.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 
@@ -216,6 +237,14 @@ export function App() {
   const [transcriptionError, setTranscriptionError] = useState<string>();
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
+  const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
+  const [exportHistory, setExportHistory] = useState<readonly ExportProcessEntry[]>(() =>
+    loadExportHistory(window.localStorage),
+  );
+  const [processesOpen, setProcessesOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
@@ -478,6 +507,23 @@ export function App() {
     },
     [redo, undo],
   );
+  const refreshJoySession = useCallback(() => {
+    void probeJoySession().then(setJoySession);
+  }, []);
+  useEffect(() => {
+    refreshJoySession();
+  }, [refreshJoySession]);
+  const signOut = useCallback(async () => {
+    await logoutJoySession();
+    refreshJoySession();
+  }, [refreshJoySession]);
+  const recordExportEntry = useCallback((entry: ExportProcessEntry) => {
+    setExportHistory((entries) => {
+      const next = upsertEntry(entries, entry);
+      saveExportHistory(window.localStorage, next);
+      return next;
+    });
+  }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const action = resolveShortcut(event);
@@ -505,6 +551,8 @@ export function App() {
           break;
         case 'palette.close':
           setPaletteOpen(false);
+          setProcessesOpen(false);
+          setAccountOpen(false);
           break;
         case 'playhead.back':
           seek(Math.max(0, current.playheadUs - 1_000_000));
@@ -575,6 +623,11 @@ export function App() {
     if (exporting) return;
     setExporting(true);
     setExportStatus('Building render manifest…');
+    setExportProgress(0.02);
+    const entryId = `export-${Date.now()}`;
+    const startedAt = new Date().toISOString();
+    const exportFilename = `joy-media-export-${Date.now()}.mp4`;
+    recordExportEntry({ id: entryId, filename: exportFilename, status: 'running', startedAt });
     try {
       const compositionV1 =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
@@ -628,6 +681,7 @@ export function App() {
         throw new Error('No playable video clips are available for export');
 
       setExportStatus('Preloading preview-equivalent video and audio…');
+      setExportProgress(0.05);
       const audioContext = new AudioContext();
       const audioDestination = audioContext.createMediaStreamDestination();
       const exportMedia = await Promise.all(
@@ -704,16 +758,33 @@ export function App() {
             );
           },
           onProgress: (completed, total) => {
+            setExportProgress(0.05 + 0.93 * (completed / total));
             if (completed === total || completed % frameRate === 0)
               setExportStatus(
                 `Encoding preview-equivalent H.264/AAC… ${completed}/${total} frames`,
               );
           },
-          filename: `joy-media-export-${Date.now()}.mp4`,
+          filename: exportFilename,
         });
         setExportStatus(
           `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; preview-equivalent H.264/AAC MP4).`,
         );
+        setExportProgress(1);
+        // Retain only the newest export's bytes for re-download.
+        if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
+        lastExportRef.current =
+          exportResult.blob !== undefined
+            ? { entryId, url: URL.createObjectURL(exportResult.blob) }
+            : null;
+        recordExportEntry({
+          id: entryId,
+          filename: exportResult.filename,
+          status: 'completed',
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          totalBytes: exportResult.totalBytes,
+          frameCount: exportResult.frameCount,
+        });
       } finally {
         for (const timer of startTimers) window.clearTimeout(timer);
         for (const source of audioSources) source.stop();
@@ -722,11 +793,21 @@ export function App() {
         await audioContext.close();
       }
     } catch (error) {
-      setExportStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      setExportStatus(`Export failed: ${message}`);
+      recordExportEntry({
+        id: entryId,
+        filename: exportFilename,
+        status: 'failed',
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        error: message,
+      });
     } finally {
       setExporting(false);
+      setExportProgress(undefined);
     }
-  }, [exporting, session]);
+  }, [exporting, recordExportEntry, session]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const saved = window.localStorage.getItem('joy-media.dockview.v1');
     if (saved !== null) {
@@ -879,8 +960,22 @@ export function App() {
   return (
     <main>
       <header>
+        {exportProgress !== undefined && (
+          <div
+            className="export-progress"
+            role="progressbar"
+            aria-label="Export encoding progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(exportProgress * 100)}
+          >
+            <span style={{ width: `${Math.min(100, exportProgress * 100).toFixed(1)}%` }} />
+          </div>
+        )}
         <strong>JOY Media</strong>
-        <span>Saved locally · {scheduler.current.metrics.quality} preview</span>
+        <span className="header-status">
+          Saved locally · {scheduler.current.metrics.quality} preview
+        </span>
         <button
           className="icon-button"
           disabled={!session.canUndo}
@@ -922,6 +1017,123 @@ export function App() {
             {exportStatus}
           </span>
         )}
+        <div className="header-menu">
+          <button
+            className="icon-button"
+            aria-label="Recent processes"
+            aria-expanded={processesOpen}
+            title="Recent processes"
+            onClick={() => {
+              setProcessesOpen((open) => !open);
+              setAccountOpen(false);
+            }}
+          >
+            <ListIcon />
+          </button>
+          {processesOpen && (
+            <section className="header-dropdown" aria-label="Recent processes">
+              <h3>Recent processes</h3>
+              {exportHistory.length === 0 ? (
+                <p className="empty-hint">No exports yet. Use Export to encode an MP4.</p>
+              ) : (
+                <ul className="process-list">
+                  {exportHistory.map((entry) => (
+                    <li key={entry.id} className={`process-row process-${entry.status}`}>
+                      <span className="process-dot" aria-hidden="true" />
+                      <span className="process-name" dir="ltr">
+                        {entry.filename}
+                      </span>
+                      <span className="process-meta">
+                        {entry.status === 'completed' && entry.totalBytes !== undefined
+                          ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
+                          : entry.status === 'failed'
+                            ? (entry.error ?? 'failed')
+                            : 'encoding…'}
+                      </span>
+                      {lastExportRef.current?.entryId === entry.id && (
+                        <a
+                          className="icon-button"
+                          href={lastExportRef.current.url}
+                          download={entry.filename}
+                          aria-label={`Download ${entry.filename} again`}
+                          title="Download again"
+                        >
+                          <DownloadIcon />
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </div>
+        <div className="header-menu">
+          <button
+            className="icon-button"
+            aria-label="JOY account"
+            aria-expanded={accountOpen}
+            title={
+              joySession.kind === 'ready'
+                ? `Signed in · JOY account ${joySession.subject ?? ''}`
+                : joySession.kind === 'no-access'
+                  ? 'Signed in, JOY Media access not enabled'
+                  : joySession.kind === 'signed-out'
+                    ? 'Signed out'
+                    : 'JOY account'
+            }
+            onClick={() => {
+              setAccountOpen((open) => !open);
+              setProcessesOpen(false);
+              refreshJoySession();
+            }}
+          >
+            <UserIcon />
+            <span
+              className={`session-dot session-${joySession.kind}`}
+              aria-hidden="true"
+            />
+          </button>
+          {accountOpen && (
+            <section className="header-dropdown" aria-label="JOY account">
+              <h3>JOY account</h3>
+              {joySession.kind === 'ready' && (
+                <>
+                  <p>Signed in{joySession.subject !== undefined && ` · account ${joySession.subject}`}</p>
+                  <button
+                    className="icon-button icon-button-labeled"
+                    title="Sign out of the shared JOY session"
+                    onClick={() => void signOut()}
+                  >
+                    <LogoutIcon />
+                    Sign out
+                  </button>
+                </>
+              )}
+              {joySession.kind === 'no-access' && (
+                <p className="empty-hint">{joySession.message}</p>
+              )}
+              {joySession.kind === 'signed-out' && (
+                <>
+                  <p className="empty-hint">
+                    Sign in with your JOY account; this editor uses the shared JOY session.
+                  </p>
+                  <a
+                    className="icon-button icon-button-labeled"
+                    href={JOY_LOGIN_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Opens joyteam.ir sign-in in a new tab; reopen this menu afterwards"
+                  >
+                    <UserIcon />
+                    Sign in at joyteam.ir
+                  </a>
+                </>
+              )}
+              {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
+            </section>
+          )}
+        </div>
       </header>
       {paletteOpen && (
         <section className="palette" aria-label="Command palette">
