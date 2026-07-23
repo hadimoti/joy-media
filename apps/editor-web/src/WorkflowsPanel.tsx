@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { EditorSession } from './editor-session.js';
 import { extractWorkflowInputs, loadWorkflow, listWorkflows, deleteWorkflow } from './workflow-recorder.js';
-import { PlayIcon, RefreshIcon, TrashIcon } from './icons.js';
+import { loadFirstPartyWorkflows, getFirstPartyWorkflowVersion } from './first-party-workflows.js';
+import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
 
 export interface WorkflowInputParameter {
   readonly name: string;
@@ -24,6 +25,7 @@ export function WorkflowsPanel({
   const [workflows, setWorkflows] = useState(() => listWorkflows(session));
   const [runModal, setRunModal] = useState<{ workflowId: string; parameters: WorkflowInputParameter[] } | undefined>(undefined);
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [showSystemWorkflows, setShowSystemWorkflows] = useState(false);
 
   const handleDelete = (workflowId: string) => {
     deleteWorkflow(session, workflowId);
@@ -41,10 +43,21 @@ export function WorkflowsPanel({
     return undefined;
   })();
 
+  // Load system (first-party) workflows
+  const systemWorkflows = loadFirstPartyWorkflows();
+  const systemWorkflowVersion = getFirstPartyWorkflowVersion();
+
   function openRunModal(workflowId: string) {
     const recorded = loadWorkflow(session, workflowId);
-    if (recorded === undefined) return;
-    const inputsSchema = extractWorkflowInputs(recorded.workflow.nodes);
+    let workflow;
+    if (recorded !== undefined) {
+      workflow = recorded.workflow;
+    } else {
+      const systemWf = systemWorkflows.find((w) => w.workflow.id === workflowId);
+      if (!systemWf) return;
+      workflow = systemWf.workflow;
+    }
+    const inputsSchema = extractWorkflowInputs(workflow.nodes);
     const properties = (inputsSchema.properties as Record<string, unknown> | undefined) ?? {};
     const required = (inputsSchema.required as string[]) ?? [];
     const parameters = required.map((name) => {
@@ -96,6 +109,45 @@ export function WorkflowsPanel({
     setRunInputs({});
   }
 
+  // Render a workflow row with "Derived from" badge for system workflows
+  function renderWorkflowRow(wf: { workflow: { id: string; name: string; version: string; inputs: { properties: Record<string, unknown> } } }, isSystem = false) {
+    const hasInputs = Object.keys((wf.workflow.inputs.properties as Record<string, unknown>) ?? {}).length > 0;
+    return (
+      <li key={wf.workflow.id} className="workflow-row">
+        <div className="workflow-row-main">
+          <strong>{wf.workflow.name}</strong>
+          <span>v{wf.workflow.version}</span>
+          {isSystem && (
+            <span className="derived-badge" title={`Derived from first-party workflow v${systemWorkflowVersion}`}>
+              <BadgeIcon size={10} />
+              Derived
+            </span>
+          )}
+        </div>
+        <div className="workflow-row-actions">
+          <button
+            className="icon-button"
+            onClick={() => (hasInputs ? openRunModal(wf.workflow.id) : onRun(wf.workflow.id, {}))}
+            aria-label={`Run ${wf.workflow.name}`}
+            title={`Run ${wf.workflow.name}`}
+          >
+            <PlayIcon />
+          </button>
+          {!isSystem && (
+            <button
+              className="icon-button"
+              onClick={() => handleDelete(wf.workflow.id)}
+              aria-label={`Delete ${wf.workflow.name}`}
+              title={`Delete ${wf.workflow.name}`}
+            >
+              <TrashIcon />
+            </button>
+          )}
+        </div>
+      </li>
+    );
+  }
+
   return (
     <article className="workflows-panel">
       <div className="workflows-header">
@@ -109,6 +161,7 @@ export function WorkflowsPanel({
           <RefreshIcon />
         </button>
       </div>
+
       {runModal !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
           <h4>Run: {runModal.workflowId}</h4>
@@ -136,36 +189,36 @@ export function WorkflowsPanel({
           </div>
         </div>
       )}
-      {workflows.length === 0 ? (
+
+      {workflows.length === 0 && systemWorkflows.length === 0 ? (
         <p className="empty-hint">No saved workflows yet. Run an agent action and save it as a workflow.</p>
       ) : (
-        <ul>
-          {workflows.map((wf) => {
-            const hasInputs = Object.keys((wf.workflow.inputs.properties as Record<string, unknown>) ?? {}).length > 0;
-            return (
-              <li key={wf.workflow.id} className="workflow-row">
-                <strong>{wf.workflow.name}</strong>
-                <span>v{wf.workflow.version}</span>
-                <button
-                  className="icon-button"
-                  onClick={() => (hasInputs ? openRunModal(wf.workflow.id) : onRun(wf.workflow.id, {}))}
-                  aria-label={`Run ${wf.workflow.name}`}
-                  title={`Run ${wf.workflow.name}`}
-                >
-                  <PlayIcon />
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={() => handleDelete(wf.workflow.id)}
-                  aria-label={`Delete ${wf.workflow.name}`}
-                  title={`Delete ${wf.workflow.name}`}
-                >
-                  <TrashIcon />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {/* User workflows section */}
+          {workflows.length > 0 && (
+            <>
+              <div className="workflow-section-header">
+                <h4>My Workflows</h4>
+              </div>
+              <ul className="workflow-list">
+                {workflows.map((wf) => renderWorkflowRow(wf, false))}
+              </ul>
+            </>
+          )}
+
+          {/* System workflows section */}
+          {systemWorkflows.length > 0 && (
+            <>
+              <div className="workflow-section-header">
+                <h4>System Workflows</h4>
+                <span className="system-version-badge">v{systemWorkflowVersion}</span>
+              </div>
+              <ul className="workflow-list">
+                {systemWorkflows.map((wf) => renderWorkflowRow(wf, true))}
+              </ul>
+            </>
+          )}
+        </>
       )}
     </article>
   );

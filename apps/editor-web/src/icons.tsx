@@ -262,3 +262,12 @@ export function CloudIcon() {
     </Svg>
   );
 }
+
+export function BadgeIcon() {
+  return (
+    <Svg>
+      <path d="M13.5 2.5H2.5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Z" />
+      <path d="M5.5 5h5M5.5 8h5M5.5 11h5" />
+    </Svg>
+  );
+}
