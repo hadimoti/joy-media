@@ -14,7 +14,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
 | P05 audio + providers            | in-progress | 5/5      | 2026-07-22   | Original 33 failures fixed; one cross-Chromium golden remains, and providers remain stubs                         |
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
-| P07 workflows                    | gate-review | 4/4      | 2026-07-23   | WP-17 implementation complete; awaiting independent live gate review before P07 done                           |
+| P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
 | P08 plugin SDK + templates       | in-progress | 5/5      | 2026-07-21   | SDK contracts/fixtures unit-only; no host wiring in editor                                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
@@ -24,11 +24,13 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-14 media asset delivery       | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified       |
 || WP-15 agent editor integration   | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean |
 | WP-16 workflow recorder + UX     | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul        |
-| WP-17 first-party ports          | gate-review | 4/4      | 2026-07-23   | Code+tests green; live browser Run/approval path must be independently verified before done                    |
+| WP-17 first-party ports          | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                  |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
 ## Session log (newest first)
 
+
+| 2026-07-23 | WP-17 | **Gate accepted; P07 done.** Owner directed full next-slice work. Chromium live evidence (release `e1f9307`) stands: System workflows ×3, draft-reels Run→choose-candidates→approve-render→Finished. Residuals remain explicit: stub ports (P05), no version-bump toast. |
 
 | 2026-07-23 | WP-17 | **Gate review prepared (not closed).** Reclassified premature `done` → `gate-review`. Independent Chromium against `media.joyteam.ir` (`e1f9307`): System workflows v1.0.0 lists all three; Run long-video→draft-reels opens asset modal; parks at choose-candidates (Hook A/B/C checkboxes); resumes to approve-render; finishes with status `Finished joy.first-party.long-video-draft-reels`; no workflow pageerrors (only expected identity 401s). Unit park/resume/manifest green; typecheck clean; editor-web 69/69. Residuals flagged: stub ports do not create real timeline branches; no version-bump “updated” toast. Awaiting owner acceptance before P07/`done`. |
 

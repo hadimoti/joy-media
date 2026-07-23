@@ -1,6 +1,6 @@
 # WP-17 — First-Party Workflow Ports (P07 closure)
 
-**Status:** gate-review 2026-07-23 · **Parts:** P07 (workflows) closure · **Master plan:** §23.4, §36 Phase 7
+**Status:** done 2026-07-23 (owner-accepted) · **Parts:** P07 (workflows) closure · **Master plan:** §23.4, §36 Phase 7
 **Prerequisite:** WP-16 done (recorder/parameterization shipped, `af9449f` deployed)
 
 ## Why
@@ -39,7 +39,7 @@ shipped workflow.
 - Amber badge on **recorded** rows only via `detectDerivedFrom()` (goal/name /
   first-step text matching a first-party id). System rows are not labeled Derived.
 
-### WP-17.4 — P07 gate closure evidence — in gate-review
+### WP-17.4 — P07 gate closure evidence — done
 
 - Decisions D-W17-1 / D-W17-2 recorded as DEFAULT in DECISIONS.md.
 - STATE/plan stay `gate-review` until live browser evidence is attached.
@@ -66,7 +66,7 @@ shipped workflow.
       deterministic test.
 - [x] Live-gate path: Workflows panel Run modal works for the first-party
       system entry on media.joyteam.ir (assetId → park → checkbox approval).
-- [ ] P07 row in STATE.md is `done`; plan status is `done` (only after gate review).
+- [x] P07 row in STATE.md is `done`; plan status is `done` (owner-accepted after live evidence).
 
 ## Decisions used
 
@@ -103,4 +103,4 @@ Independent Chromium headless against `https://media.joyteam.ir/` (release `e1f9
 - Derived-from badge requires a recorded workflow whose goal/name matches; empty user
   list correctly shows no badge.
 
-**Gate status:** ready for owner acceptance. Do not flip P07/`done` until accepted.
+**Gate status:** accepted by owner 2026-07-23. P07/`done` closed.
