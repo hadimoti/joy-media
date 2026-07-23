@@ -1,6 +1,6 @@
 /** P07 WP-07.1 — canonical serialization and deterministic run keys (§23.5). */
 
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './sha256.js';
 
 export class CanonicalJsonError extends Error {
   readonly code = 'workflow/non-canonical-value';
@@ -80,5 +80,5 @@ export function computeRunKey(input: RunKeyInput): string {
     providerVersion: input.providerVersion ?? null,
     settings: input.settings ?? null,
   });
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return sha256Hex(canonical);
 }

@@ -13,7 +13,7 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
-import { toggleSelection } from '@joy-media/timeline-engine';
+import { rippleDelete, toggleSelection } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
@@ -49,13 +49,17 @@ import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { AgentPanel } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
+import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
+import { runWorkflow } from './workflow-runner.js';
 import {
   getOrCreateControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
+import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import { CommandIcon, ExportIcon, RedoIcon, UndoIcon } from './icons.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 
@@ -81,6 +85,7 @@ const labels: Readonly<Record<string, string>> = {
   diagnostics: 'Diagnostics',
   jobs: 'Jobs',
   agent: 'Agent',
+  workflows: 'Workflows',
 };
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
@@ -473,6 +478,99 @@ export function App() {
     },
     [redo, undo],
   );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = resolveShortcut(event);
+      if (action === undefined) return;
+      // Escape must close the palette even while its search input has focus.
+      if (action !== 'palette.close' && isEditableTarget(event.target)) return;
+      const current = stateRef.current;
+      const composition = session.timelineProject.compositions.root;
+      const durationUs = composition?.durationUs ?? 0;
+      const selection = composition?.tracks
+        .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
+        .find((item) => current.selectedIds.includes(item.clip.id));
+      switch (action) {
+        case 'playback.toggle':
+          togglePlayback();
+          break;
+        case 'history.undo':
+          undo();
+          break;
+        case 'history.redo':
+          redo();
+          break;
+        case 'palette.toggle':
+          setPaletteOpen((open) => !open);
+          break;
+        case 'palette.close':
+          setPaletteOpen(false);
+          break;
+        case 'playhead.back':
+          seek(Math.max(0, current.playheadUs - 1_000_000));
+          break;
+        case 'playhead.forward':
+          seek(Math.min(durationUs, current.playheadUs + 1_000_000));
+          break;
+        case 'playhead.backFine':
+          seek(Math.max(0, current.playheadUs - 100_000));
+          break;
+        case 'playhead.forwardFine':
+          seek(Math.min(durationUs, current.playheadUs + 100_000));
+          break;
+        case 'playhead.start':
+          seek(0);
+          break;
+        case 'playhead.end':
+          seek(durationUs);
+          break;
+        case 'clip.split': {
+          if (composition === undefined || selection === undefined) return;
+          const endUs = selection.clip.startUs + selection.clip.durationUs;
+          if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
+          dispatchTimeline({
+            label: `Split ${selection.clip.id}`,
+            commands: [
+              {
+                type: 'timeline.splitClip',
+                payload: {
+                  compositionId: composition.id,
+                  trackId: selection.track.id,
+                  clipId: selection.clip.id,
+                  atUs: current.playheadUs,
+                  newClipId: `${selection.clip.id}-split-${current.playheadUs}`,
+                },
+              },
+            ],
+          });
+          break;
+        }
+        case 'clip.delete': {
+          if (composition === undefined || selection === undefined) return;
+          dispatchTimeline(
+            rippleDelete(
+              composition.id,
+              selection.track.id,
+              selection.track.clips.map((clip) => ({
+                id: clip.id,
+                startUs: clip.startUs,
+                durationUs: clip.durationUs,
+              })),
+              selection.clip.id,
+            ),
+          );
+          setState((active) => ({
+            ...active,
+            selectedIds: active.selectedIds.filter((id) => id !== selection.clip.id),
+          }));
+          break;
+        }
+      }
+      event.preventDefault();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dispatchTimeline, redo, seek, session, togglePlayback, undo]);
   const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
@@ -646,20 +744,178 @@ export function App() {
       if (event.api.getPanel(panel) === undefined)
         event.api.addPanel({ id: panel, component: 'editor-panel', title: labels[panel] ?? panel });
   }, []);
+
+  function Panel({ api }: IDockviewPanelProps) {
+    const context = useContext(EditorPanelContext);
+    if (context === undefined) throw new Error('editor panel context is unavailable');
+    const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    if (api.id === 'inspector') {
+      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      return (
+        <InspectorPanel
+          object={object}
+          allObjects={visualProject.visualObjects}
+          playheadUs={state.playheadUs}
+          onSetStatic={updateVisualProperty}
+          onDispatch={context.dispatchProject}
+        />
+      );
+    }
+    if (api.id === 'motion') {
+      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      return (
+        <MotionPanel
+          object={object}
+          allObjects={visualProject.visualObjects}
+          compositionDurationUs={context.timelineProject.compositions.root?.durationUs ?? 30_000_000}
+          playheadUs={state.playheadUs}
+          onSeek={context.seek}
+          onDispatch={context.dispatchProject}
+        />
+      );
+    }
+    if (api.id === 'camera') {
+      const composition = visualProject.compositions[visualProject.rootCompositionId];
+      if (composition === undefined) return <p>No root composition.</p>;
+      return (
+        <CameraPanel
+          allObjects={visualProject.visualObjects}
+          composition={composition}
+          onDispatch={context.dispatchProject}
+        />
+      );
+    }
+    if (api.id === 'captions')
+      return (
+        <CaptionsPanel
+          project={visualProject}
+          playheadUs={state.playheadUs}
+          onSeek={context.seek}
+          onDispatch={context.dispatchProject}
+          onTranscribe={context.transcribe}
+          transcriptionError={context.transcriptionError}
+        />
+      );
+    if (api.id === 'timeline')
+      return (
+        <TimelinePanel
+          project={context.timelineProject}
+          playheadUs={state.playheadUs}
+          playing={state.playing}
+          selectedIds={state.selectedIds}
+          onTogglePlayback={context.togglePlayback}
+          onSeek={context.seek}
+          onToggleSelection={context.toggleSelection}
+          onDispatch={context.dispatchTimeline}
+        />
+      );
+    if (api.id === 'jobs')
+      return (
+        <JobsPanel
+          projectId={controlPlaneProject.controlPlaneProjectId}
+          projectTitle={controlPlaneProject.title}
+        />
+      );
+    if (api.id === 'media')
+      return <AssetLibraryPanel projectId={controlPlaneProject.controlPlaneProjectId} />;
+    if (api.id === 'agent') {
+      return (
+        <AgentPanel
+          project={context.timelineProject}
+          selectedClipIds={state.selectedIds}
+          playheadUs={state.playheadUs}
+          agentContext={context.agentContext}
+          onUndo={context.undo}
+          session={session}
+        />
+      );
+    }
+    if (api.id === 'history') {
+      return (
+        <HistoryPanel
+          entries={context.historyEntries}
+          canUndo={context.canUndo}
+          canRedo={context.canRedo}
+          onUndo={context.undo}
+          onRedo={context.redo}
+        />
+      );
+    }
+    if (api.id === 'diagnostics')
+      return (
+        <article>
+          <p>{context.playback.quality} proxy preview</p>
+          <p>
+            {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
+          </p>
+          <p>Maximum media drift: {context.playback.maxDriftUs} µs</p>
+        </article>
+      );
+    if (api.id === 'monitor') return <MonitorPanel />;
+    if (api.id === 'workflows') {
+      return (
+        <WorkflowsPanel
+          session={session}
+          onRun={async (workflowId) => {
+            try {
+              await runWorkflow(session, workflowId);
+              setRevision((revision) => revision + 1);
+            } catch (error) {
+              console.error('Failed to run workflow:', error);
+            }
+          }}
+        />
+      );
+    }
+    return (
+      <article>
+        <p>{`${labels[api.id] ?? api.id} panel`}</p>
+      </article>
+    );
+  }
+
   return (
     <main>
       <header>
         <strong>JOY Media</strong>
         <span>Saved locally · {scheduler.current.metrics.quality} preview</span>
-        <button disabled={!session.canUndo} onClick={undo}>
-          Undo
+        <button
+          className="icon-button"
+          disabled={!session.canUndo}
+          onClick={undo}
+          aria-label="Undo"
+          title="Undo (Ctrl+Z)"
+        >
+          <UndoIcon />
         </button>
-        <button disabled={!session.canRedo} onClick={redo}>
-          Redo
+        <button
+          className="icon-button"
+          disabled={!session.canRedo}
+          onClick={redo}
+          aria-label="Redo"
+          title="Redo (Ctrl+Y)"
+        >
+          <RedoIcon />
         </button>
-        <button onClick={() => setPaletteOpen(true)}>Commands ⌘K</button>
-        <button onClick={handleExport} disabled={exporting}>
-          {exporting ? 'Exporting…' : 'Export'}
+        <button
+          className="icon-button"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Command palette"
+          title="Command palette (Ctrl+K)"
+        >
+          <CommandIcon />
+        </button>
+        <button
+          className="icon-button"
+          onClick={handleExport}
+          disabled={exporting}
+          aria-label="Export MP4"
+          title={exporting ? 'Exporting…' : 'Export MP4'}
+          aria-busy={exporting}
+        >
+          <ExportIcon />
         </button>
         {exportStatus !== undefined && (
           <span className="export-status" aria-live="polite">
@@ -719,119 +975,6 @@ export function App() {
         />
       </EditorPanelContext.Provider>
     </main>
-  );
-}
-
-function Panel({ api }: IDockviewPanelProps) {
-  const context = useContext(EditorPanelContext);
-  if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
-  if (api.id === 'inspector') {
-    const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
-    const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
-    return (
-      <InspectorPanel
-        object={object}
-        allObjects={visualProject.visualObjects}
-        playheadUs={state.playheadUs}
-        onSetStatic={updateVisualProperty}
-        onDispatch={context.dispatchProject}
-      />
-    );
-  }
-  if (api.id === 'motion') {
-    const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
-    const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
-    return (
-      <MotionPanel
-        object={object}
-        allObjects={visualProject.visualObjects}
-        compositionDurationUs={context.timelineProject.compositions.root?.durationUs ?? 30_000_000}
-        playheadUs={state.playheadUs}
-        onSeek={context.seek}
-        onDispatch={context.dispatchProject}
-      />
-    );
-  }
-  if (api.id === 'camera') {
-    const composition = visualProject.compositions[visualProject.rootCompositionId];
-    if (composition === undefined) return <p>No root composition.</p>;
-    return (
-      <CameraPanel
-        allObjects={visualProject.visualObjects}
-        composition={composition}
-        onDispatch={context.dispatchProject}
-      />
-    );
-  }
-  if (api.id === 'captions')
-    return (
-      <CaptionsPanel
-        project={visualProject}
-        playheadUs={state.playheadUs}
-        onSeek={context.seek}
-        onDispatch={context.dispatchProject}
-        onTranscribe={context.transcribe}
-        transcriptionError={context.transcriptionError}
-      />
-    );
-  if (api.id === 'timeline')
-    return (
-      <TimelinePanel
-        project={context.timelineProject}
-        playheadUs={state.playheadUs}
-        playing={state.playing}
-        selectedIds={state.selectedIds}
-        onTogglePlayback={context.togglePlayback}
-        onSeek={context.seek}
-        onToggleSelection={context.toggleSelection}
-        onDispatch={context.dispatchTimeline}
-      />
-    );
-  if (api.id === 'jobs')
-    return (
-      <JobsPanel
-        projectId={controlPlaneProject.controlPlaneProjectId}
-        projectTitle={controlPlaneProject.title}
-      />
-    );
-  if (api.id === 'media')
-    return <AssetLibraryPanel projectId={controlPlaneProject.controlPlaneProjectId} />;
-  if (api.id === 'agent')
-    return (
-      <AgentPanel
-        project={context.timelineProject}
-        selectedClipIds={state.selectedIds}
-        playheadUs={state.playheadUs}
-        agentContext={context.agentContext}
-        onUndo={context.undo}
-      />
-    );
-  if (api.id === 'history')
-    return (
-      <HistoryPanel
-        entries={context.historyEntries}
-        canUndo={context.canUndo}
-        canRedo={context.canRedo}
-        onUndo={context.undo}
-        onRedo={context.redo}
-      />
-    );
-  if (api.id === 'diagnostics')
-    return (
-      <article>
-        <p>{context.playback.quality} proxy preview</p>
-        <p>
-          {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
-        </p>
-        <p>Maximum media drift: {context.playback.maxDriftUs} µs</p>
-      </article>
-    );
-  if (api.id === 'monitor') return <MonitorPanel />;
-  return (
-    <article>
-      <p>{`${labels[api.id] ?? api.id} panel`}</p>
-    </article>
   );
 }
 

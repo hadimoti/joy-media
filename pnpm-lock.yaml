@@ -102,6 +102,9 @@ importers:
       '@joy-media/visual-object-renderer':
         specifier: workspace:*
         version: link:../../packages/visual-object-renderer
+      '@joy-media/workflow-engine':
+        specifier: workspace:*
+        version: link:../../packages/workflow-engine
       dockview:
         specifier: ^4.10.0
         version: 4.13.1(react@19.2.7)

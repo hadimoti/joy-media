@@ -32,3 +32,16 @@ Open product questions from master plan §48, plus orchestration-added ones. Sta
 - **D-HERMES — Hermes is the companion agent.** The existing Hermes agent (from the JOY ecosystem) is expected to operate alongside JOY Media for authoring/automation (first concrete duty: HTML scene templates, Q11). Integration boundary to be designed in P06; until then nothing in core may hard-depend on Hermes internals.
 
 **Rule:** changing a DECIDED entry requires a superseding ADR. DEFAULT entries may be used but must be flagged in session reports.
+
+## WP-16 workflow-recorder decisions (2026-07-23)
+
+These four decisions unblock WP-16 (agent → workflow recorder). Each is **DEFAULT** — usable now, but flag in the WP-16 session report so the owner can supersede with an ADR if the long-term direction changes.
+
+| #   | Question                                      | Status  | Decision |
+| --- | --------------------------------------------- | ------- | -------- |
+| W16-Q1 | Where does the recorder UI live?           | DEFAULT | **Extend the Agent panel** (WP-15.2 surface). Add a "Save as workflow" button after each successful agent run. Do **not** build a standalone workflow designer yet — the Agent panel already has the execution context, and a full designer can be added later without refactoring if the recorder writes to a stable storage format. |
+| W16-Q2 | What serialization format do recorded workflows use? | DEFAULT | **Reuse `workflow-engine`'s JSON DAG format directly.** Map each `AgentEditPlan` step to a workflow node; map `dependsOn` to edges. No wrapper/adapter layer — recorded workflows must be first-class citizens in the existing workflow catalog so they can be executed by `workflow-engine` and edited by a future designer. |
+| W16-Q3 | What gets parameterized when recording?    | DEFAULT | **Promote structural identifiers and timing/content as workflow inputs; bake in project-specific references.** Specifically: `trackId`, `clipId`, `startUs`, `durationUs`, and text inputs become parameters (marked with a `parameter:` flag in the workflow node). `assetId` and `compositionId` are baked in as constants — the workflow assumes the same project structure. This makes workflows reusable across clips/tracks but not across projects (which is the right boundary for the MVP). |
+| W16-Q4 | How are recorded workflows named and versioned? | DEFAULT | **Namespace `user.workflows.<slug>`; slug derived from the plan title (kebab-case, alphanumeric + hyphens); semantic versioning starting at 1.0.0.** Example: `user.workflows.split-clip-at-playhead`. The `user.workflows.` prefix distinguishes recorded workflows from system/first-party workflows. Bump major on breaking changes, minor on new parameters, patch on bug fixes. Users can rename later via a future UI; the ID stays stable. |
+
+**WP-16 outcome flags (2026-07-23, see [WP-16-workflow-recorder.md](WP-16-workflow-recorder.md)):** W16-Q2/Q3/Q4 used as decided. **W16-Q1 deviation:** the shipped recorder auto-saves every successful agent run instead of offering a “Save as workflow” button — owner must either supersede W16-Q1 by ADR or request the explicit button. **New DEFAULT (D-UI-GRAY):** owner directed a professional Adobe-style editor UI — icon-only SVG buttons with tooltips and a neutral-gray theme (amber accent, no blue) — applied editor-wide 2026-07-23.

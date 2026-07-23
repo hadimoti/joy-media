@@ -1,4 +1,5 @@
 import type { HistoryEntry } from './editor-session.js';
+import { RedoIcon, UndoIcon } from './icons.js';
 
 interface HistoryPanelProps {
   readonly entries: readonly HistoryEntry[];
@@ -19,11 +20,23 @@ export function HistoryPanel({ entries, canUndo, canRedo, onUndo, onRedo }: Hist
   return (
     <article className="history-panel">
       <div className="history-controls">
-        <button disabled={!canUndo} onClick={onUndo}>
-          Undo
+        <button
+          className="icon-button"
+          disabled={!canUndo}
+          onClick={onUndo}
+          aria-label="Undo"
+          title="Undo (Ctrl+Z)"
+        >
+          <UndoIcon />
         </button>
-        <button disabled={!canRedo} onClick={onRedo}>
-          Redo
+        <button
+          className="icon-button"
+          disabled={!canRedo}
+          onClick={onRedo}
+          aria-label="Redo"
+          title="Redo (Ctrl+Y)"
+        >
+          <RedoIcon />
         </button>
       </div>
 

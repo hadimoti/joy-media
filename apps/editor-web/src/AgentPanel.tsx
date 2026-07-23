@@ -21,6 +21,8 @@ import {
 import { AGENT_INTENTS, type AgentIntent } from './agent-panel-intents.js';
 import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
+import { saveWorkflow } from './workflow-recorder.js';
+import type { EditorSession } from './editor-session.js';
 
 type PolicyName = 'default' | 'permissive';
 
@@ -52,12 +54,14 @@ export function AgentPanel({
   playheadUs,
   agentContext,
   onUndo,
+  session,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
   readonly playheadUs: number;
   readonly agentContext: EditorContext;
   readonly onUndo: () => void;
+  readonly session: EditorSession;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -128,6 +132,10 @@ export function AgentPanel({
     });
     setPending(undefined);
     setLastRun({ intent, executionResult, reverted: false });
+
+    if (executionResult.success) {
+      saveWorkflow(session, agentPlan);
+    }
   };
 
   const undoLastRun = () => {

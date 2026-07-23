@@ -1,6 +1,6 @@
 :root {
-  color: #eef2ff;
-  background: #10131d;
+  color: #e4e4e6;
+  background: #1e1e1e;
   font-family: Inter, system-ui, sans-serif;
 }
 body {
@@ -14,15 +14,45 @@ header {
   gap: 1rem;
   align-items: center;
   padding: 0.75rem 1rem;
-  background: #181d2d;
+  background: #2b2b2d;
 }
 header span {
-  color: #9fb0c8;
+  color: #9d9da1;
   flex: 1;
 }
 button,
 input {
   font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0.3rem;
+  border: 1px solid #4d4d51;
+  border-radius: 0.3rem;
+  background: #333335;
+  color: #dcdcde;
+}
+.icon-button-labeled {
+  padding: 0.3rem 0.6rem;
+}
+.icon-button:hover:not(:disabled) {
+  background: #3f3f42;
+  border-color: #6b6b72;
+}
+.icon-button svg {
+  flex: none;
 }
 .sr-only {
   position: absolute;
@@ -41,16 +71,16 @@ input {
   grid-template-columns: 1fr 2fr 1fr;
   grid-template-rows: 1fr 1fr;
   gap: 1px;
-  background: #2b3247;
+  background: #141414;
 }
 article {
-  background: #151a28;
+  background: #232324;
   padding: 0.75rem;
 }
 h2 {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
-  color: #9fb0c8;
+  color: #9d9da1;
 }
 .timeline {
   grid-column: 1 / 3;
@@ -88,7 +118,7 @@ h2 {
   transform: translateX(-50%);
   width: 28rem;
   padding: 0.75rem;
-  background: #272f46;
+  background: #2f2f31;
   box-shadow: 0 1rem 3rem #0008;
 }
 .palette input,
@@ -119,19 +149,61 @@ label {
 }
 .timeline-track {
   min-height: 2rem;
-  border-top: 1px solid #303a56;
+  border-top: 1px solid #3d3d40;
 }
 .timeline-track strong {
   width: 2rem;
 }
+.timeline-tracks {
+  display: grid;
+  gap: 0.1rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
 .timeline-lane {
+  position: relative;
   flex: 1;
-  min-height: 1.2rem;
-  background: #273452;
+  min-height: 1.7rem;
+  background: #333335;
   border-radius: 0.15rem;
+  cursor: crosshair;
+}
+.timeline-clip {
+  position: absolute;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  overflow: hidden;
+  padding: 0 0.35rem;
+  border: 1px solid #6b6b72;
+  border-radius: 0.2rem;
+  background: #4b4b50;
+  color: #e4e4e6;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: grab;
+  touch-action: none;
+}
+.timeline-clip:hover {
+  background: #58585e;
+}
+.timeline-clip.dragging {
+  z-index: 2;
+  opacity: 0.85;
+  cursor: grabbing;
+  box-shadow: 0 0.2rem 0.8rem #0008;
 }
 .timeline-clip[aria-pressed='true'] {
   outline: 2px solid #e9b949;
+}
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #e9b949;
+  pointer-events: none;
 }
 .captions-panel {
   display: grid;
@@ -190,10 +262,10 @@ label {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.35rem 0;
-  border-top: 1px solid #303a56;
+  border-top: 1px solid #3d3d40;
 }
 .jobs-list li.job-queued {
-  border-left: 3px solid #9fb0c8;
+  border-left: 3px solid #9d9da1;
 }
 .jobs-list li.job-leased {
   border-left: 3px solid #e9b949;
@@ -220,19 +292,19 @@ label {
   margin-top: 0.2rem;
 }
 .jobs-status {
-  color: #9fb0c8;
+  color: #9d9da1;
   margin: 0;
 }
 .caption-preview {
   position: relative;
   overflow: hidden;
-  background: #05070f;
-  border: 1px solid #303a56;
+  background: #101011;
+  border: 1px solid #3d3d40;
   border-radius: 0.25rem;
   align-self: center;
 }
 .inspector-time {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.8rem;
   margin: 0 0 0.4rem;
 }
@@ -256,17 +328,17 @@ label {
   height: 1.4rem;
   padding: 0;
   line-height: 1;
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.2rem;
   background: transparent;
-  color: #8a93ad;
+  color: #8c8c90;
   cursor: pointer;
 }
 .inspector-row .kf-on {
   color: #e9b949;
 }
 .inspector-row .kf-active {
-  color: #0a0d16;
+  color: #1a1a1b;
   background: #e9b949;
   border-color: #e9b949;
 }
@@ -284,15 +356,15 @@ label {
   line-height: 1;
   font-size: 0.7rem;
   font-style: italic;
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.2rem;
   background: transparent;
-  color: #8a93ad;
+  color: #8c8c90;
   cursor: pointer;
 }
 .inspector-row .fx-on {
-  color: #7cc4ff;
-  border-color: #7cc4ff;
+  color: #d4b06a;
+  border-color: #d4b06a;
 }
 .inspector-channel {
   margin-bottom: 0.2rem;
@@ -304,10 +376,10 @@ label {
   width: calc(100% - 2rem);
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
-  background: #05070f;
-  border: 1px solid #7cc4ff;
+  background: #101011;
+  border: 1px solid #d4b06a;
   border-radius: 0.2rem;
-  color: #e5e9f5;
+  color: #e4e4e6;
   padding: 0.15rem 0.3rem;
 }
 .inspector-expression-error {
@@ -331,13 +403,13 @@ label {
   flex-direction: column;
   gap: 0.2rem;
   font-size: 0.8rem;
-  color: #8a93ad;
+  color: #8c8c90;
 }
 .motion-field select {
   min-width: 8rem;
 }
 .motion-empty {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.85rem;
 }
 .motion-lanes {
@@ -355,7 +427,7 @@ label {
   text-align: right;
   background: transparent;
   border: none;
-  color: #8a93ad;
+  color: #8c8c90;
   cursor: pointer;
   font-size: 0.8rem;
   padding: 0;
@@ -364,8 +436,8 @@ label {
   color: #e9b949;
 }
 .motion-lane-track {
-  background: #05070f;
-  border: 1px solid #303a56;
+  background: #101011;
+  border: 1px solid #3d3d40;
   border-radius: 0.15rem;
 }
 .motion-graph {
@@ -374,8 +446,8 @@ label {
   margin-top: 0.3rem;
 }
 .motion-graph svg {
-  background: #05070f;
-  border: 1px solid #303a56;
+  background: #101011;
+  border: 1px solid #3d3d40;
   border-radius: 0.2rem;
 }
 .motion-graph-scale {
@@ -383,7 +455,7 @@ label {
   flex-direction: column;
   justify-content: space-between;
   font-size: 0.7rem;
-  color: #8a93ad;
+  color: #8c8c90;
 }
 .camera-panel {
   display: flex;
@@ -401,18 +473,18 @@ label {
   flex-direction: column;
   gap: 0.2rem;
   font-size: 0.8rem;
-  color: #8a93ad;
+  color: #8c8c90;
 }
 .camera-field select,
 .camera-field input {
   min-width: 8rem;
 }
 .camera-empty {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.85rem;
 }
 .camera-hint {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.75rem;
   line-height: 1.4;
 }
@@ -420,15 +492,15 @@ label {
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
   min-height: 100%;
-  background: #151a28;
+  background: #232324;
 }
 .asset-categories {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.75rem 0.5rem;
-  border-right: 1px solid #303a56;
-  background: #111622;
+  border-right: 1px solid #3d3d40;
+  background: #202022;
 }
 .asset-categories h2 {
   padding: 0 0.25rem;
@@ -442,21 +514,21 @@ label {
   border: 1px solid transparent;
   border-radius: 0.25rem;
   background: transparent;
-  color: #b9c4db;
+  color: #bcbcc0;
   text-align: left;
   cursor: pointer;
 }
 .asset-category-tab:hover,
 .asset-category-tab.active {
-  background: #273452;
-  border-color: #435171;
-  color: #eef2ff;
+  background: #333335;
+  border-color: #4d4d51;
+  color: #e4e4e6;
 }
 .asset-category-tab.active {
-  box-shadow: inset 2px 0 #7cc4ff;
+  box-shadow: inset 2px 0 #d4b06a;
 }
 .asset-category-tab small {
-  color: #8a93ad;
+  color: #8c8c90;
 }
 .asset-library-content {
   display: grid;
@@ -482,22 +554,22 @@ label {
   width: 100%;
   min-width: 0;
   padding: 0.4rem 0.5rem;
-  border: 1px solid #435171;
+  border: 1px solid #4d4d51;
   border-radius: 0.25rem;
-  background: #0c101b;
-  color: #eef2ff;
+  background: #1a1a1b;
+  color: #e4e4e6;
 }
 .asset-filter {
   min-width: 7.4rem;
-  color: #9fb0c8;
+  color: #9d9da1;
   font-size: 0.72rem;
 }
 .asset-filter select {
   min-height: 2.1rem;
-  border: 1px solid #435171;
+  border: 1px solid #4d4d51;
   border-radius: 0.25rem;
-  background: #0c101b;
-  color: #eef2ff;
+  background: #1a1a1b;
+  color: #e4e4e6;
 }
 .asset-refresh {
   min-height: 2.1rem;
@@ -507,18 +579,18 @@ label {
 }
 .asset-register {
   padding: 0.55rem 0.65rem;
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.3rem;
-  background: #111622;
+  background: #202022;
 }
 .asset-register summary {
-  color: #dce6ff;
+  color: #dcdcde;
   cursor: pointer;
 }
 .asset-register p {
   max-width: 54rem;
   margin: 0.45rem 0;
-  color: #9fb0c8;
+  color: #9d9da1;
   font-size: 0.78rem;
   line-height: 1.35;
 }
@@ -530,7 +602,7 @@ label {
 }
 .asset-register-fields label {
   margin: 0;
-  color: #9fb0c8;
+  color: #9d9da1;
   font-size: 0.75rem;
 }
 .asset-register-fields input:not([type='file']) {
@@ -538,13 +610,13 @@ label {
 }
 .asset-register-fields input[type='file'] {
   max-width: 16rem;
-  color: #c5d1e8;
+  color: #c4c4c8;
   font-size: 0.75rem;
 }
 .asset-library-status,
 .asset-library-empty {
   margin: 0;
-  color: #9fb0c8;
+  color: #9d9da1;
   font-size: 0.82rem;
 }
 .asset-preview {
@@ -588,9 +660,9 @@ label {
   gap: 0.45rem;
   min-height: 8.3rem;
   padding: 0.6rem;
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.3rem;
-  background: #1b2233;
+  background: #2a2a2c;
 }
 .asset-card-heading {
   display: flex;
@@ -605,7 +677,7 @@ label {
 }
 .asset-card p {
   margin: 0;
-  color: #9fb0c8;
+  color: #9d9da1;
   font-size: 0.78rem;
 }
 .asset-kind,
@@ -616,25 +688,25 @@ label {
   font-size: 0.7rem;
 }
 .asset-kind {
-  background: #303a56;
-  color: #dce6ff;
+  background: #3d3d40;
+  color: #dcdcde;
 }
 .asset-kind-video {
-  background: #3e345d;
+  background: #46424e;
 }
 .asset-kind-audio {
-  background: #174b56;
+  background: #3a3f40;
 }
 .asset-kind-image {
-  background: #514124;
+  background: #4a4234;
 }
 .asset-availability-available-cloud {
   color: #9fd8b3 !important;
   background: #173d2e;
 }
 .asset-availability-available-local {
-  color: #9fd6f4 !important;
-  background: #14394a;
+  color: #cfcfd3 !important;
+  background: #3a3a3e;
 }
 .asset-availability-pending {
   color: #f2ce79 !important;
@@ -646,8 +718,8 @@ label {
   background: #4a242b;
 }
 .asset-availability-none {
-  color: #aeb7c9 !important;
-  background: #303a56;
+  color: #b0b0b4 !important;
+  background: #3d3d40;
 }
 .asset-card button {
   justify-self: start;
@@ -662,7 +734,7 @@ label {
     align-items: center;
     overflow-x: auto;
     border-right: 0;
-    border-bottom: 1px solid #303a56;
+    border-bottom: 1px solid #3d3d40;
   }
   .asset-categories h2 {
     margin: 0 0.4rem 0 0;
@@ -672,9 +744,9 @@ label {
   }
 }
 .agent-timeline-canvas {
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.25rem;
-  background: #05070f;
+  background: #101011;
 }
 .agent-pending-plan canvas,
 .agent-last-run canvas {
@@ -692,7 +764,7 @@ label {
 .history-section h3 {
   margin: 0.5rem 0 0.3rem;
   font-size: 0.8rem;
-  color: #9fb0c8;
+  color: #9d9da1;
 }
 .history-list {
   margin: 0;
@@ -706,9 +778,9 @@ label {
   align-items: center;
   gap: 0.4rem;
   padding: 0.3rem 0.4rem;
-  border: 1px solid #303a56;
+  border: 1px solid #3d3d40;
   border-radius: 0.2rem;
-  background: #1b2233;
+  background: #2a2a2c;
 }
 .history-entry-redo {
   opacity: 0.6;
@@ -726,19 +798,65 @@ label {
   font-size: 0.65rem;
 }
 .history-entry-badge-timeline {
-  background: #174b56;
-  color: #9fd6f4;
+  background: #3a3f40;
+  color: #cfcfd3;
 }
 .history-entry-badge-visual-object {
-  background: #3e345d;
-  color: #d4c4f4;
+  background: #46424e;
+  color: #d5d0dd;
 }
 .history-entry-count {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.7rem;
 }
 .history-empty {
-  color: #8a93ad;
+  color: #8c8c90;
   font-size: 0.85rem;
   margin: 0.3rem 0;
+}
+.workflows-panel ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workflow-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #3d3d40;
+  border-radius: 0.25rem;
+  background: #2a2a2c;
+}
+.workflow-row strong {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-row span {
+  color: #8c8c90;
+  font-size: 0.75rem;
+}
+/* Dockview chrome follows the neutral-gray theme via its CSS variables.
+   dockview.css loads after this file, so the selector needs #root to win. */
+#root .workspace {
+  --dv-group-view-background-color: #232324;
+  --dv-tabs-and-actions-container-background-color: #2b2b2d;
+  --dv-tabs-and-actions-container-font-size: 0.78rem;
+  --dv-activegroup-visiblepanel-tab-background-color: #3a3a3d;
+  --dv-activegroup-hiddenpanel-tab-background-color: #2b2b2d;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #333335;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #2b2b2d;
+  --dv-activegroup-visiblepanel-tab-color: #e4e4e6;
+  --dv-activegroup-hiddenpanel-tab-color: #9d9da1;
+  --dv-inactivegroup-visiblepanel-tab-color: #c0c0c4;
+  --dv-inactivegroup-hiddenpanel-tab-color: #8c8c90;
+  --dv-separator-border: #141414;
+  --dv-tab-divider-color: #141414;
+  --dv-drag-over-background-color: rgb(233 185 73 / 18%);
+  --dv-drag-over-border-color: #e9b949;
+  --dv-paneview-active-outline-color: #e9b949;
 }
