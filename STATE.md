@@ -33,7 +33,9 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                       |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
-## Handoff for next agent (2026-07-23, tip `869d6f1`)
+## Handoff for next agent (2026-07-23)
+
+**Live deploy tip:** web + API **`869d6f1`** (`media.joyteam.ir` / `:8790`). **Docs tip:** `741f81d` (this handoff; no redeploy required for docs-only).
 
 **Read this first.** Detailed WP notes: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). Decisions: D-W23-1…5 in [`plan/DECISIONS.md`](plan/DECISIONS.md).
 
