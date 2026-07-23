@@ -255,6 +255,7 @@ function CaptionSlotEditor({
         </select>
         <button
           className="icon-button icon-button-labeled"
+          aria-label="Export captions as SRT"
           title="Export captions as SRT"
           onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
         >
@@ -263,6 +264,7 @@ function CaptionSlotEditor({
         </button>
         <button
           className="icon-button icon-button-labeled"
+          aria-label="Export captions as WebVTT"
           title="Export captions as WebVTT"
           onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
@@ -298,6 +300,7 @@ function CaptionSlotEditor({
         </button>
         <button
           className="icon-button icon-button-labeled"
+          aria-label="Transcribe Persian"
           title="Transcribe Persian (fa-IR)"
           onClick={() => void onTranscribe(document.id, 'fa-IR')}
         >
@@ -306,6 +309,7 @@ function CaptionSlotEditor({
         </button>
         <button
           className="icon-button icon-button-labeled"
+          aria-label="Transcribe English"
           title="Transcribe English (en-US)"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >

@@ -828,21 +828,70 @@ export function App() {
     }
   }, [exporting, recordExportEntry, session]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    const saved = window.localStorage.getItem('joy-media.dockview.v1');
+    const layoutKey = 'joy-media.dockview.v2';
+    // Drop the pre-WP-18 single-strip v1 layouts (13 overflow tabs, newest steals focus).
+    window.localStorage.removeItem('joy-media.dockview.v1');
+    const saved = window.localStorage.getItem(layoutKey);
+    let restored = false;
     if (saved !== null) {
       try {
         event.api.fromJSON(JSON.parse(saved), { reuseExistingPanels: false });
+        restored = true;
       } catch {
-        window.localStorage.removeItem('joy-media.dockview.v1');
+        window.localStorage.removeItem(layoutKey);
       }
     }
+
+    const previouslyActive = event.api.activePanel?.id;
+    const addPanel = (
+      id: string,
+      options: { readonly inactive?: boolean; readonly position?: { readonly referencePanel: string; readonly direction: 'left' | 'right' | 'above' | 'below' } } = {},
+    ) => {
+      if (event.api.getPanel(id) !== undefined) return;
+      event.api.addPanel({
+        id,
+        component: 'editor-panel',
+        title: labels[id] ?? id,
+        inactive: options.inactive ?? true,
+        ...(options.position !== undefined ? { position: options.position } : {}),
+      });
+    };
+
+    if (!restored) {
+      // Adobe-like seed: media | monitor/timeline | utility stack (never one 13-tab strip).
+      addPanel('monitor', { inactive: false });
+      addPanel('timeline', { position: { referencePanel: 'monitor', direction: 'below' } });
+      addPanel('media', { position: { referencePanel: 'monitor', direction: 'left' } });
+      const utilityIds = [
+        'captions',
+        'inspector',
+        'motion',
+        'camera',
+        'history',
+        'diagnostics',
+        'jobs',
+        'agent',
+        'workflows',
+        'plugins',
+      ] as const;
+      for (const id of utilityIds) {
+        addPanel(id, { position: { referencePanel: 'monitor', direction: 'right' } });
+      }
+      event.api.getPanel('monitor')?.api.setActive();
+    } else {
+      for (const panel of DEFAULT_WORKSPACE.panels) {
+        addPanel(panel, { inactive: true });
+      }
+      const restoreId =
+        previouslyActive !== undefined && event.api.getPanel(previouslyActive) !== undefined
+          ? previouslyActive
+          : 'monitor';
+      event.api.getPanel(restoreId)?.api.setActive();
+    }
+
     event.api.onDidLayoutChange(() => {
-      window.localStorage.setItem('joy-media.dockview.v1', JSON.stringify(event.api.toJSON()));
+      window.localStorage.setItem(layoutKey, JSON.stringify(event.api.toJSON()));
     });
-    // Add any default panel a saved layout predates (e.g. Captions from P03).
-    for (const panel of DEFAULT_WORKSPACE.panels)
-      if (event.api.getPanel(panel) === undefined)
-        event.api.addPanel({ id: panel, component: 'editor-panel', title: labels[panel] ?? panel });
   }, []);
 
   function Panel({ api }: IDockviewPanelProps) {
