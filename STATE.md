@@ -35,7 +35,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-23)
 
-**Live deploy tip:** web + API **`869d6f1`** (`media.joyteam.ir` / `:8790`). **Docs tip:** `741f81d` (this handoff; no redeploy required for docs-only).
+**Live deploy tip:** web + API **`869d6f1`** (`media.joyteam.ir` / `:8790`). **Docs tip:** `97aba34` (this handoff; no redeploy required for docs-only).
 
 **Read this first.** Detailed WP notes: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). Decisions: D-W23-1…5 in [`plan/DECISIONS.md`](plan/DECISIONS.md).
 
@@ -101,7 +101,7 @@ Captions UI: try live via `BrowserControlPlaneClient.transcribeSpeech`, else fix
 
 ## Session log (newest first)
 
-| 2026-07-23 | docs | **Handoff + ledger sync.** Added WP-23 plan, updated WP-20/P05/DECISIONS/AUDIT supersession notes, and this detailed next-agent handoff. Tip remains `869d6f1`. |
+| 2026-07-23 | docs | **Handoff + ledger sync** (`741f81d`). WP-23 plan, WP-20/P03/P05/DECISIONS/AUDIT/ORCHESTRATION supersession notes, detailed next-agent handoff. Live product still `869d6f1`. |
 
 
 | 2026-07-23 | WP-23 | **Spectral denoise (ffmpeg afftdn).** `adapter-noise-removal` runs real `afftdn` (no byte-copy); API `POST /v1/providers/audio/denoise`; workflow denoise keeps noise-gate locally and defers high-strength/spectral to ffmpeg. Not ML/DeepFilterNet. |
