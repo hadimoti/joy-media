@@ -1,6 +1,6 @@
 // apps/editor-web/src/first-party-handlers.ts
 
-import { normalizeDialogue } from '@joy-media/audio-core';
+import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
