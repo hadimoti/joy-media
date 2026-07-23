@@ -61,7 +61,7 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 ## 4b. Header chrome
 
 - The header owns global state surfaces: undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)).
-- Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`; status text lives in the ellipsized `.export-status` span, never inside a button.
+- Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`. Status text lives in a centered `.export-toast` pinned under that bar (absolute, not in the icon row); the toast clears as soon as the file has downloaded (errors linger briefly). Durable history stays in the processes menu.
 - Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.
 
 ## 4c. Bidirectional text (Persian-first)

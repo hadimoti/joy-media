@@ -245,6 +245,12 @@ export function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
+  const exportToastTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(exportToastTimerRef.current);
+    };
+  }, []);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
@@ -622,6 +628,7 @@ export function App() {
   const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
+    window.clearTimeout(exportToastTimerRef.current);
     setExportStatus('Building render manifest…');
     setExportProgress(0.02);
     const entryId = `export-${Date.now()}`;
@@ -766,9 +773,6 @@ export function App() {
           },
           filename: exportFilename,
         });
-        setExportStatus(
-          `Exported ${exportResult.filename} (${width}×${height}, ${exportResult.frameCount} frames, ${exportResult.totalBytes} bytes; preview-equivalent H.264/AAC MP4).`,
-        );
         setExportProgress(1);
         // Retain only the newest export's bytes for re-download.
         if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
@@ -785,6 +789,13 @@ export function App() {
           totalBytes: exportResult.totalBytes,
           frameCount: exportResult.frameCount,
         });
+        // File has already downloaded via the browser save prompt — drop the
+        // toast immediately and clear the full bar after a short settle so the
+        // processes menu (not the icon row) remains the durable record.
+        setExportStatus(undefined);
+        exportToastTimerRef.current = window.setTimeout(() => {
+          setExportProgress(undefined);
+        }, 450);
       } finally {
         for (const timer of startTimers) window.clearTimeout(timer);
         for (const source of audioSources) source.stop();
@@ -803,9 +814,12 @@ export function App() {
         finishedAt: new Date().toISOString(),
         error: message,
       });
+      setExportProgress(undefined);
+      exportToastTimerRef.current = window.setTimeout(() => {
+        setExportStatus(undefined);
+      }, 8_000);
     } finally {
       setExporting(false);
-      setExportProgress(undefined);
     }
   }, [exporting, recordExportEntry, session]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
@@ -972,6 +986,11 @@ export function App() {
             <span style={{ width: `${Math.min(100, exportProgress * 100).toFixed(1)}%` }} />
           </div>
         )}
+        {exportStatus !== undefined && (
+          <div className="export-toast" role="status" aria-live="polite" dir="ltr">
+            {exportStatus}
+          </div>
+        )}
         <strong>JOY Media</strong>
         <span className="header-status">
           Saved locally · {scheduler.current.metrics.quality} preview
@@ -1012,11 +1031,6 @@ export function App() {
         >
           <ExportIcon />
         </button>
-        {exportStatus !== undefined && (
-          <span className="export-status" aria-live="polite">
-            {exportStatus}
-          </span>
-        )}
         <div className="header-menu">
           <button
             className="icon-button"

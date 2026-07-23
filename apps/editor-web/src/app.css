@@ -30,20 +30,35 @@ header strong {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.export-status {
-  max-width: 22rem;
+/* Pinned under the 3px export progress bar; never participates in the icon row. */
+.export-toast {
+  position: absolute;
+  z-index: 4;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(80%, 34rem);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0.28rem 0.8rem;
+  border: 1px solid #3d3d40;
+  border-top: none;
+  border-radius: 0 0 0.4rem 0.4rem;
+  background: #202022;
   color: #9d9da1;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
+  box-shadow: 0 0.4rem 1.2rem #0008;
+  pointer-events: none;
 }
 .export-progress {
   position: absolute;
+  z-index: 5;
   inset: 0 0 auto 0;
   height: 3px;
   background: #141414;
   overflow: hidden;
+  pointer-events: none;
 }
 .export-progress span {
   display: block;
