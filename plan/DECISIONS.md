@@ -52,3 +52,15 @@ These four decisions unblock WP-16 (agent → workflow recorder). Each is **DEFA
 | --- | --- | --- | --- |
 | D-W17-1 | Where do system-workflow JSON artifacts live at runtime? | DEFAULT | **(a) Bundle via `@joy-media/workflow-engine`** — editor loads `buildFirstPartyWorkflows()` / pinned `workflows/*.json` through the workspace package (same artifacts the CLI and first-party tests pin). No separate `/api/first-party` fetch until the API owns catalog distribution. |
 | D-W17-2 | What does the approval modal look like for non-clip inputs? | DEFAULT | **Reuse the Workflows run-modal surface.** Text/number fields for start inputs (e.g. `assetId`); checkbox-list variant for `choose-candidates` / continue affordance for `approve-render` and other approval kinds. |
+
+## WP-23 provider residuals decisions (2026-07-23)
+
+| # | Question | Status | Decision |
+| --- | --- | --- | --- |
+| D-W23-1 | Where do live Whisper/TTS run before a GPU Worker exists? | DEFAULT | **VPS API** using already-installed `faster-whisper` + `edge-tts`. Authenticated routes only; Captions fixtures remain the unsigned/offline fallback. |
+| D-W23-2 | Is edge-tts acceptable despite remote egress? | DEFAULT | **Yes for stock voices**, with `dataLeavesDevice: true` and retention disclosure. Cloned voices still require consent (`synthesizeWithConsent`). Prefer local engines later under Q8. |
+| D-W23-3 | ComfyUI without a live endpoint? | DEFAULT | **Fail closed** — real HTTP client, never mock PNG/`mock text output`. |
+| D-W23-4 | What counts as “denoise” without ML models? | DEFAULT | **Noise-gate** in-browser + **ffmpeg `afftdn`** spectral on API/adapter. Do not label either as ML denoise. |
+| D-W23-5 | How to treat identity 401 in headless/unsigned? | DEFAULT | **Expected → `signed-out`.** No Media bypass/test token (ADR-0016). Entitlement stays on the JOY identity owner (`joymedia_allowed`). |
+
+See [`WP-23-live-provider-residuals.md`](WP-23-live-provider-residuals.md).

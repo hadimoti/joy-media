@@ -26,6 +26,9 @@ Phase parts (dependency-ordered, from master plan §36) and cross-cutting parts 
 | **WP-13** | [plan/WP-13-project-worker-integration.md](plan/WP-13-project-worker-integration.md) | Bind persisted editor projects to safe Worker-result records instead of a fixture-only panel | WP-12 gate |
 | **WP-14** | [plan/WP-14-media-asset-delivery.md](plan/WP-14-media-asset-delivery.md)         | Media Asset Delivery: real playable derivatives via OPFS + private object storage  | WP-13 gate |
 | **WP-15** | [plan/WP-15-agent-editor-integration.md](plan/WP-15-agent-editor-integration.md) | Agent Wired Into the Real Editor: real command-bus dispatch, live UI, live gate     | P06 (unit-level) + WP-11 live editor |
+| **WP-16…18** | (see STATE + plan/WP-16…18) | Workflows UX, first-party ports, plugin host — **done 2026-07-23** | WP-15 / P07 / P08 |
+| **WP-19…22** | (see STATE + plan/WP-19…22) | Real audio-core ports + caption fixtures + baseline hygiene — **done** | WP-17 |
+| **WP-23** | [plan/WP-23-live-provider-residuals.md](plan/WP-23-live-provider-residuals.md) | Live Whisper + edge-tts + Comfy fail-closed + afftdn — **done**; residuals in STATE handoff | WP-19…22 |
 | **X01**   | [plan/X01-vps-control-plane.md](plan/X01-vps-control-plane.md)                   | Live-VPS deployment plan: isolation, ports, Postgres, health checks                 | activates with P01                       |
 
 ```mermaid
@@ -57,7 +60,7 @@ Each part file contains **work packages (WPs)** — checkbox units sized for rou
 
 Every implementation session follows this loop:
 
-1. **Orient.** Read this file, [`STATE.md`](STATE.md), and the one part file you will work in. Read the master plan sections that the part references — not the whole plan. Read any ADRs the part lists.
+1. **Orient.** Read this file, then the **Handoff** section at the top of [`STATE.md`](STATE.md) (paths, deploy, residuals, tip SHA). Then open the one part/WP file you will work in. Read the master plan sections that part references — not the whole plan. Read any ADRs the part lists.
 2. **Check the gate.** A part may only move to `in-progress` when every dependency's exit criteria are checked off in its part file. Phase gates are exit-criteria-driven, never calendar-driven (§36).
 3. **Pick ONE work package.** Do not span parts. If the WP turns out to need a core-invariant change, stop and record the question in `plan/DECISIONS.md` (stop conditions: master plan §46.3).
 4. **Implement** following §45 (engineering standards) and §46.1 (required agent behavior). Tests and fixtures ship in the same change (§45.1). Respect §44 anti-patterns as review-blockers.
@@ -90,6 +93,7 @@ Recorded here so no session re-litigates them:
 
 - **VPS:** `ssh sweden` → `46.249.103.142`, root, key `C:\Users\HadiMoti\.ssh\joy-vps.pem` (same as joy-vps project) · QEMU Virtual CPU 2.5+ with avx/avx2/sse4_2 · 8 GB RAM · 99 GB disk (43 free) · Node v22.23.1 · PostgreSQL 17 installed · Docker/containerd present.
 - **Ports in use on VPS:** 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825. **Reserved for JOY Media: 8790 (API/WS), 8791 (object gateway, optional).** Recorded in X01; re-verify before first bind.
-- **VPS skeleton:** `/opt/joy-media/` exists with a copy of the X01 plan; nothing runs there yet.
+- **VPS skeleton:** `/opt/joy-media/` — live web + API at tip in STATE handoff (`media.joyteam.ir`, API `:8790`). Deploy via immutable `web-releases/<sha>` and `releases/<shortsha>` (see STATE).
+- **Current tip (2026-07-23):** `869d6f1` — WP-23 live providers shipped; next residual = identity `joymedia_allowed` + signed-in gate (outside Media repo for entitlement flag).
 - **VPS budget (DECIDED Q2):** ≤3 GB RAM, ≤2 CPU cores for JOY Media, flexible; owner re-evaluates after real usage.
 - **Owner decision round 1 (2026-07-19):** all §48 questions answered — see `plan/DECISIONS.md` and ADR-0001. Highlights: both surfaces together (desktop-only launch acceptable), Chrome-first, shared JOY login with per-user admin activation, English-only UI with excellent Persian speech/captions, OpenRouter + Windows-local models, Hermes authors scene templates, everything trends agentic (D-AGENT).

@@ -3,18 +3,18 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md). Its original findings remain historical evidence, but its claims that no pixels render and no real UI media is decoded/encoded were superseded by the independently browser-verified WP-11 work on 2026-07-22. The unrelated plugin-sdk lint baseline and cross-Chromium golden are still not green and are never silently treated as such.
+> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-23-tip-869d6f1)** below. Tip deployed: web + API `869d6f1`.
 
 | Part                             | Status      | WPs done | Last session | Next action                                                                                                       |
 | -------------------------------- | ----------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | P00 architecture proofs          | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                              |
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
 | P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
-| P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline
+| P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                   |
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
-| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | Live Whisper+edge-tts; Comfy fail-closed; gate+ffmpeg-afftdn denoise; TTS/Comfy ML still residual
-|| P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
-| P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
+| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | Live Whisper+edge-tts; Comfy fail-closed; gate+ffmpeg-afftdn; GPU Comfy/ML denoise/local TTS still open            |
+| P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                |
+| P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; some ports still stub                     |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
@@ -22,16 +22,84 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-12 control plane + Worker E2E | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                |
 | WP-13 project/Worker integration | done        | 5/5      | 2026-07-22   | Gate passed: opaque project, safe receipt, API restart/reload, and revoked temporary Worker are live              |
 | WP-14 media asset delivery       | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified       |
-|| WP-15 agent editor integration   | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean |
-| WP-16 workflow recorder + UX     | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul        |
-| WP-17 first-party ports          | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                  |
-| WP-18 plugin host wiring         | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                             |
-| WP-19 normalizeAudio port         | done        | —        | 2026-07-23   | Real audio-core DSP for first-party normalize; other ports stay __stub                                            |
-| WP-20 caption transcription fixtures | done     | —        | 2026-07-23   | FA/EN fixture Whisper seam; modelId not pending                                                                   |
-| WP-21 baseline hygiene            | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                          |
+| WP-15 agent editor integration   | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean                                                                    |
+| WP-16 workflow recorder + UX     | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul         |
+| WP-17 first-party ports          | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                     |
+| WP-18 plugin host wiring         | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                              |
+| WP-19 normalizeAudio port        | done        | —        | 2026-07-23   | Real audio-core DSP for first-party normalize                                                                     |
+| WP-20 caption transcription      | done*       | —        | 2026-07-23   | Fixtures remain fallback; live Whisper is WP-23                                                                   |
+| WP-21 baseline hygiene           | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                          |
+| WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                               |
+| WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                       |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
+## Handoff for next agent (2026-07-23, tip `869d6f1`)
+
+**Read this first.** Detailed WP notes: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). Decisions: D-W23-1…5 in [`plan/DECISIONS.md`](plan/DECISIONS.md).
+
+### Where things live
+
+| Path | Role |
+| --- | --- |
+| `/opt/joy-media/repo` | Working git checkout (`main` = `origin/main`) |
+| `/opt/joy-media.git` | Bare remote `origin` |
+| `/opt/joy-media/web` → `web-releases/<sha>` | Static editor (immutable releases) |
+| `/opt/joy-media/releases/current-api` → `releases/<short-sha>` | Node API (`dist/server.js`, user `joy-media`, port **8790**) |
+| `/etc/joy-media/api.env` | DB + identity JWKS + object-store (mode 0600; never commit) |
+| `/opt/joy-media/data/whisper-models` | `faster-whisper` model cache |
+| `apps/api/scripts/whisper_transcribe.py` | Whisper CLI helper (must ship beside `dist/` in API release) |
+
+### Deploy pattern (push after every step)
+
+1. `pnpm typecheck` + focused tests + `pnpm --filter @joy-media/api build` + editor `build`.
+2. Commit → `git push origin HEAD` (needs unrestricted FS for bare remote).
+3. API: copy `apps/api/dist` + `scripts` + `package.json` + `node_modules` into `/opt/joy-media/releases/<shortsha>`, `ln -sfn` → `current-api`, restart the node process (systemd `joy-media@api` may not be available in some agent shells — kill PID on `:8790` and relaunch as `joy-media` with `api.env`).
+4. Web: copy `apps/editor-web/dist` (+ ensure `public/media/reference` present) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
+5. Smoke: `GET :8790/health`; provider routes return **401** without Bearer (expected).
+
+### Live provider API (all require JOY Media assertion)
+
+| Method | Path | Backend |
+| --- | --- | --- |
+| POST | `/v1/providers/speech/transcribe` | faster-whisper (`referenceAssetId` or raw media) |
+| POST | `/v1/providers/speech/synthesize` | edge-tts → MP3 base64 (data leaves device) |
+| POST | `/v1/providers/audio/denoise` | ffmpeg `afftdn` |
+
+Captions UI: try live via `BrowserControlPlaneClient.transcribeSpeech`, else fixtures (`fixture-whisper-*-v1`).
+
+### Identity
+
+- Probe `https://joyteam.ir/api/identity/joy-media` with credentials.
+- Unsigned/headless → HTTP **401** → UI `signed-out` (**expected**, not a Media bug).
+- **No** Media test-token bypass (ADR-0016).
+- Signed-in `ready` needs identity-owner **`joymedia_allowed`** — flag **not** present in current `/opt/joy-vps` checkout; that work is outside this repo.
+
+### Honest residuals (do not claim done)
+
+1. Entitled signed-in Chromium gate proving Whisper provenance `faster-whisper-*` and TTS MP3.
+2. GPU ComfyUI Worker + env endpoint so Comfy invocations succeed (client already fail-closed).
+3. ML denoise (DeepFilterNet/RNNoise) — current is gate + `afftdn` only.
+4. Local TTS engines replacing edge-tts (Q8).
+5. P04 HTML-scene/reel product scope still unverified as a whole.
+6. P02 interruption / remaining audit gaps; P09 marketplace transport.
+
+### Suggested next milestone (highest leverage)
+
+**Identity entitlement + signed-in live gate:** enable `joymedia_allowed` for the owner account on the JOY identity service, then Chromium-verify Captions FA live modelId + TTS synthesize + calm signed-out vs ready UI. Only after that, pick P04 HTML scenes or Comfy Worker.
+
+### Docs updated this handoff
+
+- `STATE.md` (this file — detailed handoff)
+- `ORCHESTRATION.md` (WP-16…23 map + orient → handoff; standing facts tip)
+- `plan/WP-23-live-provider-residuals.md` (new)
+- `plan/WP-20-caption-fixtures.md` (supersession note)
+- `plan/P03-captions.md` / `plan/P05-audio-providers.md` (live status)
+- `plan/DECISIONS.md` (D-W23-1…5)
+- `AUDIT-2026-07-21-completion-matrix.md` (historical banner; P03 + item 10 superseded)
+
 ## Session log (newest first)
+
+| 2026-07-23 | docs | **Handoff + ledger sync.** Added WP-23 plan, updated WP-20/P05/DECISIONS/AUDIT supersession notes, and this detailed next-agent handoff. Tip remains `869d6f1`. |
 
 
 | 2026-07-23 | WP-23 | **Spectral denoise (ffmpeg afftdn).** `adapter-noise-removal` runs real `afftdn` (no byte-copy); API `POST /v1/providers/audio/denoise`; workflow denoise keeps noise-gate locally and defers high-strength/spectral to ffmpeg. Not ML/DeepFilterNet. |

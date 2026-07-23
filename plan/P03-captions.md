@@ -1,6 +1,6 @@
 # P03 — Captions and Transcript-First Editing
 
-**Status:** done · **Gate to enter:** owner authorized early start; P02 completion remains tracked · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
+**Status:** done* (2026-07-23) · Manual captions + live Whisper API with fixture fallback · See [WP-20](WP-20-caption-fixtures.md) / [WP-23](WP-23-live-provider-residuals.md) · **Gate to enter:** owner authorized early start · **Master plan:** §36 Phase 3, §39 items 51–61, §20.5, §2.7, §33.4
 **Goal:** captions become a first-class reason to use JOY — structured language data, Persian/RTL first-class, transcription as a replaceable adapter.
 
 **Decisions needed:** Q7 (Persian quality benchmarks), Q12 (brand kit draft).
