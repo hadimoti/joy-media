@@ -340,6 +340,23 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/providers/audio/denoise') {
+    const { runSpectralDenoise } = await import('./spectral-denoise.js');
+    const body = await readJson(request);
+    const assetId = requiredString(body, 'assetId');
+    const mediaBase64 = requiredString(body, 'mediaBase64');
+    const sampleRate = typeof body.sampleRate === 'number' ? body.sampleRate : undefined;
+    const strength = typeof body.strength === 'number' ? body.strength : undefined;
+    const denoised = runSpectralDenoise({
+      assetId,
+      mediaBase64,
+      ...(sampleRate !== undefined ? { sampleRate } : {}),
+      ...(strength !== undefined ? { strength } : {}),
+    });
+    respondJson(response, 200, { data: denoised });
+    return;
+  }
+
   const assetSyncMatch = /^\/v1\/projects\/([^/]+)\/asset-sync$/.exec(url.pathname);
   if (request.method === 'POST' && assetSyncMatch !== null) {
     const body = await readJson(request);

@@ -134,11 +134,26 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             reframed: args.aspect,
             subjectHints: args.subjectHints ?? null,
           }),
-        denoise: (args: { readonly source: unknown; readonly strength?: number }) => {
-          // Local noise-gate DSP (not ML denoise). Strength maps to gate threshold.
+        denoise: (args: {
+          readonly source: unknown;
+          readonly strength?: number;
+          readonly method?: 'noise-gate' | 'spectral';
+        }) => {
           const sampleRate = 48_000;
           const samples = generateNoisyFixturePcm(sampleRate);
           const strength = Math.min(1, Math.max(0, args.strength ?? 0.5));
+          const preferSpectral = args.method === 'spectral' || strength >= 0.75;
+          if (preferSpectral) {
+            // Browser ports cannot shell ffmpeg; spectral runs on the API/Worker adapter.
+            return {
+              source: args.source,
+              method: 'ffmpeg-afftdn',
+              strength,
+              deferredEndpoint: '/v1/providers/audio/denoise',
+              note: 'Spectral afftdn requires ffmpeg on the API/Worker; not ML denoise.',
+            };
+          }
+          // Local noise-gate DSP (not ML denoise). Strength maps to gate threshold.
           const thresholdDb = -55 + strength * 25;
           const gated = applyGate(
             samples,

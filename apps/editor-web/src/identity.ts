@@ -5,6 +5,11 @@
  * issuer mints a five-minute JOY Media assertion for an entitled session.
  * This module only *probes* that state for display — API calls keep using
  * `BrowserControlPlaneClient`'s own assertion flow.
+ *
+ * Unsigned / headless browsers receive HTTP 401 from the identity issuer —
+ * that is expected and maps to `signed-out`. There is no Media-side bypass
+ * (ADR-0016). Entitlement (`joymedia_allowed`) is owned by the JOY identity
+ * service, not this repository.
  */
 
 export const JOY_IDENTITY_URL = 'https://joyteam.ir/api/identity/joy-media';

@@ -12,7 +12,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
 | P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
-| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | Live Whisper+edge-tts APIs; Comfy fail-closed next; spectral denoise next
+| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | Live Whisper+edge-tts; Comfy fail-closed; gate+ffmpeg-afftdn denoise; TTS/Comfy ML still residual
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
 | P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
@@ -32,6 +32,10 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
 ## Session log (newest first)
+
+
+| 2026-07-23 | WP-23 | **Spectral denoise (ffmpeg afftdn).** `adapter-noise-removal` runs real `afftdn` (no byte-copy); API `POST /v1/providers/audio/denoise`; workflow denoise keeps noise-gate locally and defers high-strength/spectral to ffmpeg. Not ML/DeepFilterNet. |
+| 2026-07-23 | identity | **Expected unsigned 401.** Probe still fail-closed (ADR-0016); UI copy states unsigned/headless 401 → signed-out is expected; no Media bypass. Entitlement (`joymedia_allowed`) remains identity-owner work (absent from current joy-vps checkout). |
 
 
 | 2026-07-23 | WP-23 | **ComfyUI fail-closed HTTP.** `adapter-comfyui` now queues `/prompt`, polls `/history`, fetches `/view`; empty endpoint or connection errors return `COMFYUI_UNAVAILABLE` — no mock PNG success. |

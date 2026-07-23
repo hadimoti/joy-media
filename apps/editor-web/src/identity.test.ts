@@ -42,6 +42,14 @@ describe('probeJoySession', () => {
     expect(state).toEqual({ kind: 'signed-out' });
   });
 
+  it('treats unsigned identity 401 as an expected signed-out probe (no bypass)', async () => {
+    // Headless Chromium without a .joyteam.ir web_token cookie always sees 401.
+    // Live gates must assert signed-out here — never invent a Media test token.
+    const state = await probeJoySession(async () => new Response('unauthorized', { status: 401 }));
+    expect(state.kind).toBe('signed-out');
+    expect(state).not.toMatchObject({ kind: 'ready' });
+  });
+
   it('reports unknown on network failure instead of guessing', async () => {
     const state = await probeJoySession(async () => {
       throw new TypeError('network down');

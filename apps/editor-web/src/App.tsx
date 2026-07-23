@@ -1224,7 +1224,9 @@ export function App() {
               {joySession.kind === 'signed-out' && (
                 <>
                   <p className="empty-hint">
-                    Sign in with your JOY account; this editor uses the shared JOY session.
+                    Not signed in (expected without a JOY session cookie). Sign in with your JOY
+                    account; this editor uses the shared JOY session. Live Whisper/TTS APIs require
+                    an entitled signed-in session.
                   </p>
                   <a
                     className="icon-button icon-button-labeled"

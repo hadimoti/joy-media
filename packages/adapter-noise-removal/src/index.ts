@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import type {
   CapabilityDeclaration,
   CapabilityId,
@@ -82,15 +86,58 @@ function validateInput(input: unknown): { valid: boolean; diagnostics: Diagnosti
   return { valid: diagnostics.length === 0, diagnostics };
 }
 
-function processNoiseRemoval(_config: NoiseRemovalConfig, input: NoiseRemovalInput): Uint8Array {
-  const inputData = input.data ?? new Uint8Array(1024);
-  const output = new Uint8Array(inputData.length);
+/** Map 0..1 strength to ffmpeg afftdn noise floor (dB). */
+export function strengthToAfftdnNf(strength: number): number {
+  return -25 - Math.min(1, Math.max(0, strength)) * 50;
+}
 
-  for (let i = 0; i < inputData.length; i++) {
-    output[i] = inputData[i]!;
+/**
+ * Spectral denoise via ffmpeg `afftdn` (not ML / DeepFilterNet).
+ * Requires input media bytes — never silently byte-copies.
+ */
+function processNoiseRemoval(config: NoiseRemovalConfig, input: NoiseRemovalInput): Uint8Array {
+  if (input.data === undefined || input.data.byteLength === 0) {
+    throw new Error('DENOISE_UNAVAILABLE: audio data is required for spectral denoise');
+  }
+  const ffmpeg = process.env.JOY_MEDIA_FFMPEG ?? 'ffmpeg';
+  const which = spawnSync(ffmpeg, ['-version'], { encoding: 'utf8' });
+  if (which.status !== 0) {
+    throw new Error('DENOISE_UNAVAILABLE: ffmpeg is not available');
   }
 
-  return output;
+  const dir = mkdtempSync(join(tmpdir(), 'joy-denoise-'));
+  const inputPath = join(dir, 'input.bin');
+  const outputPath = join(dir, 'denoised.wav');
+  try {
+    writeFileSync(inputPath, input.data);
+    const nf = strengthToAfftdnNf(config.strength);
+    const result = spawnSync(
+      ffmpeg,
+      [
+        '-y',
+        '-i',
+        inputPath,
+        '-af',
+        `afftdn=nf=${nf.toFixed(1)}`,
+        '-ac',
+        '1',
+        '-ar',
+        String(input.sampleRate ?? 48_000),
+        '-f',
+        'wav',
+        outputPath,
+      ],
+      { encoding: 'utf8', timeout: 60_000 },
+    );
+    if (result.status !== 0 || !existsSync(outputPath)) {
+      throw new Error(
+        `DENOISE_FAILED: ${(result.stderr || result.stdout || 'ffmpeg afftdn failed').slice(0, 400)}`,
+      );
+    }
+    return new Uint8Array(readFileSync(outputPath));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export function createNoiseRemovalAdapter(config: NoiseRemovalConfig): ProviderV2 {
@@ -130,9 +177,9 @@ export function createNoiseRemovalAdapter(config: NoiseRemovalConfig): ProviderV
         },
       },
     },
-    models: config.modelPath
-      ? [{ id: config.modelPath, displayName: 'Noise Removal Model' }]
-      : undefined,
+    ...(config.modelPath !== undefined
+      ? { models: [{ id: config.modelPath, displayName: 'Noise Removal Model' }] }
+      : {}),
     estimatedResources: {
       estimatedDurationMs: 2000,
       estimatedMemoryMb: isLocal ? 256 : 0,
@@ -166,7 +213,9 @@ export function createNoiseRemovalAdapter(config: NoiseRemovalConfig): ProviderV
     secretFields: [],
     privacy: {
       dataLeavesDevice: !isLocal,
-      retentionDisclosure: isLocal ? undefined : 'Audio sent to remote API for processing',
+      ...(!isLocal
+        ? { retentionDisclosure: 'Audio sent to remote API for processing' }
+        : {}),
     },
   };
 
@@ -235,6 +284,7 @@ export function createNoiseRemovalAdapter(config: NoiseRemovalConfig): ProviderV
           metadata: {
             sourceAssetId: noiseInput.assetId,
             strength: config.strength,
+            method: 'ffmpeg-afftdn',
             execution: config.execution,
             sampleRate: noiseInput.sampleRate ?? 48000,
           },
