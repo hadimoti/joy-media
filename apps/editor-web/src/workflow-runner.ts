@@ -1,9 +1,19 @@
+// apps/editor-web/src/workflow-runner.ts
+
 import type { EditorSession } from './editor-session.js';
-import type { JoyWorkflow, WorkflowEdge, WorkflowNode } from '@joy-media/workflow-engine';
+import {
+  executeWorkflow,
+  type HumanInputRequest,
+  type JoyWorkflow,
+  type RunCheckpoint,
+  type WorkflowEdge,
+  type WorkflowNode,
+} from '@joy-media/workflow-engine';
 import type { SpikeCommand } from '@joy-media/commands';
 import { createAgentCommandBus } from './agent-command-bus.js';
-import type { RecordedWorkflow } from './workflow-recorder.js';
 import { loadWorkflow, resolveParameterizedValue } from './workflow-recorder.js';
+import { getFirstPartyWorkflow } from './first-party-workflows.js';
+import { createStubFirstPartyLibrary } from './first-party-handlers.js';
 
 interface NodeRunResult {
   readonly nodeId: string;
@@ -12,6 +22,55 @@ interface NodeRunResult {
 }
 
 type CommandLike = { readonly tool: string; readonly arguments: unknown };
+
+export interface ParkedWorkflowRun {
+  readonly runId: string;
+  readonly workflowId: string;
+  readonly workflow: JoyWorkflow;
+  readonly workflowInputs: unknown;
+  readonly checkpoint: RunCheckpoint;
+  readonly nodeId: string;
+  readonly request: HumanInputRequest;
+}
+
+export type WorkflowRunOutcome =
+  | {
+      readonly status: 'succeeded';
+      readonly workflowId: string;
+      readonly runId: string;
+      readonly outputs?: unknown;
+    }
+  | {
+      readonly status: 'waiting_for_input';
+      readonly workflowId: string;
+      readonly runId: string;
+      readonly nodeId: string;
+      readonly request: HumanInputRequest;
+      readonly checkpoint: RunCheckpoint;
+    }
+  | {
+      readonly status: 'failed';
+      readonly workflowId: string;
+      readonly runId: string;
+      readonly error: string;
+    };
+
+const parkedRuns = new Map<string, ParkedWorkflowRun>();
+let stubLibrary = createStubFirstPartyLibrary();
+
+/** Test seam: replace the stub library (e.g. to assert call counts). */
+export function setFirstPartyLibraryForTests(library: ReturnType<typeof createStubFirstPartyLibrary>): void {
+  stubLibrary = library;
+}
+
+export function resetFirstPartyLibraryForTests(): void {
+  stubLibrary = createStubFirstPartyLibrary();
+  parkedRuns.clear();
+}
+
+export function getParkedWorkflowRun(runId: string): ParkedWorkflowRun | undefined {
+  return parkedRuns.get(runId);
+}
 
 function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
   const mapped: SpikeCommand[] = [];
@@ -79,19 +138,62 @@ function kahnTopoOrder(nodes: readonly WorkflowNode[], edges: readonly WorkflowE
   return order;
 }
 
-export async function runWorkflow(
-  session: EditorSession,
-  workflowId: string,
-  inputs: Readonly<Record<string, unknown>> = {},
-): Promise<void> {
+function resolveWorkflow(session: EditorSession, workflowId: string): JoyWorkflow {
   const recorded = loadWorkflow(session, workflowId);
-  if (recorded === undefined) {
-    throw new Error(`Workflow not found: ${workflowId}`);
+  if (recorded !== undefined) {
+    return recorded.workflow;
   }
+  const system = getFirstPartyWorkflow(workflowId);
+  if (system !== undefined) {
+    return system.workflow;
+  }
+  throw new Error(`Workflow not found: ${workflowId}`);
+}
 
-  const workflow = recorded.workflow;
+/** Normalize editor modal inputs into the first-party workflow input shape. */
+export function normalizeFirstPartyInputs(
+  workflow: JoyWorkflow,
+  inputs: Readonly<Record<string, unknown>>,
+): unknown {
+  const required = (workflow.inputs.required as string[] | undefined) ?? [];
+  if (required.includes('asset') && inputs.asset === undefined && typeof inputs.assetId === 'string') {
+    return { ...inputs, asset: { assetId: inputs.assetId, __stub: true } };
+  }
+  if (typeof inputs.asset === 'string') {
+    return { ...inputs, asset: { assetId: inputs.asset, __stub: true } };
+  }
+  return inputs;
+}
+
+function findPendingApproval(checkpoint: RunCheckpoint): {
+  readonly nodeId: string;
+  readonly request: HumanInputRequest;
+} | undefined {
+  for (const [nodeId, record] of Object.entries(checkpoint.nodes)) {
+    if (record.state === 'waiting_for_input' && record.pendingRequest !== undefined) {
+      return { nodeId, request: record.pendingRequest };
+    }
+  }
+  return undefined;
+}
+
+function newRunId(workflowId: string): string {
+  return `editor-${workflowId.replaceAll('.', '-')}-${String(Date.now())}`;
+}
+
+async function runRecordedWorkflow(
+  session: EditorSession,
+  workflow: JoyWorkflow,
+  inputs: Readonly<Record<string, unknown>>,
+): Promise<WorkflowRunOutcome> {
+  const runId = newRunId(workflow.id);
   if (workflow.formatVersion !== 1) {
-    throw new Error(`Unsupported workflow format version: ${String(workflow.formatVersion)}`);
+    return {
+      status: 'failed',
+      workflowId: workflow.id,
+      runId,
+      error: `Unsupported workflow format version: ${String(workflow.formatVersion)}`,
+    };
   }
 
   const bus = createAgentCommandBus(session);
@@ -123,15 +225,144 @@ export async function runWorkflow(
       const nodeResult: NodeRunResult = { ...(!success ? { error: result.error } : {}), nodeId, success };
       results.set(nodeId, nodeResult);
       if (!success && workflow.policy.failure === 'stop') {
-        throw new Error(`Workflow stopped at ${nodeId}: ${String(result.error ?? 'unknown error')}`);
+        return {
+          status: 'failed',
+          workflowId: workflow.id,
+          runId,
+          error: `Workflow stopped at ${nodeId}: ${String(result.error ?? 'unknown error')}`,
+        };
       }
     } else {
       const nodeResult: NodeRunResult = { nodeId, success: false, error: `unsupported node type ${node.type}` };
       results.set(nodeId, nodeResult);
       if (workflow.policy.failure === 'stop') {
-        throw new Error(`Workflow stopped at ${nodeId}: unsupported node type ${node.type}`);
+        return {
+          status: 'failed',
+          workflowId: workflow.id,
+          runId,
+          error: `Workflow stopped at ${nodeId}: unsupported node type ${node.type}`,
+        };
       }
     }
   }
+
+  return { status: 'succeeded', workflowId: workflow.id, runId };
 }
 
+function runFirstPartyWorkflow(
+  workflow: JoyWorkflow,
+  inputs: Readonly<Record<string, unknown>>,
+  options: {
+    readonly runId?: string;
+    readonly resumeFrom?: RunCheckpoint;
+    readonly humanInputs?: Readonly<Record<string, unknown>>;
+  } = {},
+): WorkflowRunOutcome {
+  const runId = options.runId ?? newRunId(workflow.id);
+  const workflowInputs = normalizeFirstPartyInputs(workflow, inputs);
+  const result = executeWorkflow({
+    workflow,
+    runId,
+    projectRevision: 'editor-local',
+    workflowInputs,
+    handlers: stubLibrary.handlers,
+    ...(options.resumeFrom !== undefined ? { resumeFrom: options.resumeFrom } : {}),
+    ...(options.humanInputs !== undefined ? { humanInputs: options.humanInputs } : {}),
+  });
+
+  const checkpoint = result.checkpoint;
+  if (checkpoint.state === 'waiting_for_input') {
+    const pending = findPendingApproval(checkpoint);
+    if (pending === undefined) {
+      return {
+        status: 'failed',
+        workflowId: workflow.id,
+        runId,
+        error: 'Workflow parked without a pending approval request',
+      };
+    }
+    parkedRuns.set(runId, {
+      runId,
+      workflowId: workflow.id,
+      workflow,
+      workflowInputs,
+      checkpoint,
+      nodeId: pending.nodeId,
+      request: pending.request,
+    });
+    return {
+      status: 'waiting_for_input',
+      workflowId: workflow.id,
+      runId,
+      nodeId: pending.nodeId,
+      request: pending.request,
+      checkpoint,
+    };
+  }
+
+  parkedRuns.delete(runId);
+
+  if (checkpoint.state === 'failed' || checkpoint.state === 'waiting_for_manual_intervention') {
+    const failedNode = Object.entries(checkpoint.nodes).find(([, node]) => node.state === 'failed');
+    return {
+      status: 'failed',
+      workflowId: workflow.id,
+      runId,
+      error: failedNode?.[1].failureCode ?? `Workflow ended in state ${checkpoint.state}`,
+    };
+  }
+
+  const outputsNode = checkpoint.nodes['manifest'] ?? checkpoint.nodes['write-manifest'];
+  return {
+    status: 'succeeded',
+    workflowId: workflow.id,
+    runId,
+    ...(outputsNode?.output !== undefined ? { outputs: outputsNode.output } : {}),
+  };
+}
+
+export async function runWorkflow(
+  session: EditorSession,
+  workflowId: string,
+  inputs: Readonly<Record<string, unknown>> = {},
+): Promise<WorkflowRunOutcome> {
+  const recorded = loadWorkflow(session, workflowId);
+  if (recorded !== undefined) {
+    return runRecordedWorkflow(session, recorded.workflow, inputs);
+  }
+
+  const system = getFirstPartyWorkflow(workflowId);
+  if (system === undefined) {
+    throw new Error(`Workflow not found: ${workflowId}`);
+  }
+  return runFirstPartyWorkflow(system.workflow, inputs);
+}
+
+export async function resumeWorkflow(
+  _session: EditorSession,
+  runId: string,
+  humanInputs: Readonly<Record<string, unknown>>,
+): Promise<WorkflowRunOutcome> {
+  const parked = parkedRuns.get(runId);
+  if (parked === undefined) {
+    return {
+      status: 'failed',
+      workflowId: 'unknown',
+      runId,
+      error: `No parked workflow run: ${runId}`,
+    };
+  }
+
+  const inputs =
+    typeof parked.workflowInputs === 'object' && parked.workflowInputs !== null
+      ? (parked.workflowInputs as Record<string, unknown>)
+      : {};
+
+  return runFirstPartyWorkflow(parked.workflow, inputs, {
+    runId: parked.runId,
+    resumeFrom: parked.checkpoint,
+    humanInputs,
+  });
+}
+
+export { resolveWorkflow };

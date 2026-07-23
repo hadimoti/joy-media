@@ -1,143 +1,108 @@
 // apps/editor-web/src/first-party-handlers.ts
 
-import type { NodeHandler, NodeExecutionContext, NodeResult, HumanInputRequest } from '@joy-media/workflow-engine';
+import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
- * Stub handlers for first-party workflow node types.
- * These are minimal implementations that allow the workflow to run and
- * demonstrate the approval/parking mechanism without real providers.
- * Real implementations will replace these in future work packages.
+ * Browser-side stub ports for first-party workflows (WP-17.2).
+ *
+ * Every port return value carries `__stub: true` so the audit trail never
+ * pretends these are real providers. Later WPs replace individual ports
+ * without changing the runner contract.
  */
 
-// Human input request handler - parks the workflow waiting for user input
-export interface HumanInputResponse {
-  readonly kind: string;
-  readonly payload: Record<string, unknown>;
+function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
+  return { ...value, __stub: true as const };
 }
 
-// Store for pending human input requests (in-memory, per workflow run)
-const pendingHumanInputs = new Map<string, { resolve: (response: HumanInputResponse) => void }>();
+/** Build a NodeLibrary whose ports are deterministic stubs suitable for editor runs. */
+export function createStubFirstPartyLibrary(): NodeLibrary {
+  let branchSeq = 0;
 
-function createHumanInputHandler(): NodeHandler {
-  return (context: NodeExecutionContext): NodeResult => {
-    const { kind, prompt, payloadFrom } = context.node.params as {
-      kind: string;
-      prompt: string;
-      payloadFrom: unknown;
-    };
-
-    // Create a request ID for this human input
-    const requestId = `human-input-${context.runId}-${context.nodeId}-${Date.now()}`;
-
-    // Return a waiting result that signals the runtime to park
-    return {
-      waiting: true,
-      request: {
-        kind,
-        prompt,
-        payload: payloadFrom,
+  return buildNodeLibrary({
+    ports: {
+      analysis: {
+        transcribe: () =>
+          stubResult({
+            language: 'fa',
+            segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
+          }),
+        detectSilence: () =>
+          stubResult({
+            ranges: [
+              { startUs: 10_000_000, endUs: 12_500_000 },
+              { startUs: 40_000_000, endUs: 43_000_000 },
+            ],
+          }),
+        detectHighlights: (args: { readonly source: unknown }) =>
+          stubResult({
+            candidates: [
+              { title: 'Hook A', source: args.source, subjectHints: { focus: 'speaker' } },
+              { title: 'Hook B', source: args.source, subjectHints: { focus: 'product' } },
+              { title: 'Hook C', source: args.source, subjectHints: { focus: 'wide' } },
+            ],
+          }),
+        detectSpeakers: () => stubResult({ speakers: [{ id: 'spk-1' }, { id: 'spk-2' }] }),
+        generateChapters: (args: { readonly source: unknown }) =>
+          stubResult({
+            chapters: [
+              { title: 'Intro', startUs: 0, endUs: 60_000_000, source: args.source },
+              { title: 'Main topic', startUs: 60_000_000, endUs: 300_000_000, source: args.source },
+            ],
+          }),
       },
-    };
-  };
-}
-
-/**
- * Resume a workflow that was parked waiting for human input.
- * Called from the UI when the user submits their response.
- */
-export function resumeHumanInput(requestId: string, response: HumanInputResponse): boolean {
-  const pending = pendingHumanInputs.get(requestId);
-  if (!pending) return false;
-
-  pending.resolve(response);
-  pendingHumanInputs.delete(requestId);
-  return true;
-}
-
-// Create a simple stub handler
-function createStubHandler(output: unknown): NodeHandler {
-  return (): NodeResult => ({ ok: true, output });
-}
-
-// Stub handlers for various node types
-export const firstPartyHandlers: Readonly<Record<string, NodeHandler>> = {
-  // Input/ingest nodes
-  'input.item': createStubHandler({ item: 'input-item', __stub: true }),
-
-  // Analysis nodes
-  'analysis.transcribe': createStubHandler({ transcript: 'Stub transcript', __stub: true }),
-
-  'analysis.hooks': createStubHandler({
-    candidates: [
-      { id: 'hook-1', subjectHints: 'Hook 1', startUs: 0, durationUs: 15_000_000 },
-      { id: 'hook-2', subjectHints: 'Hook 2', startUs: 30_000_000, durationUs: 15_000_000 },
-      { id: 'hook-3', subjectHints: 'Hook 3', startUs: 60_000_000, durationUs: 15_000_000 },
-    ],
-    __stub: true,
-  }),
-
-  'analysis.speakers': createStubHandler({ speakers: ['Speaker 1', 'Speaker 2'], __stub: true }),
-
-  'analysis.silence': createStubHandler({ ranges: [{ startUs: 10_000_000, endUs: 12_000_000 }], __stub: true }),
-
-  'analysis.chapters': createStubHandler({ chapters: [{ title: 'Chapter 1', startUs: 0 }, { title: 'Chapter 2', startUs: 300_000_000 }], __stub: true }),
-
-  // Decision/approval nodes
-  'decision.approval': createHumanInputHandler(),
-
-  // Transform nodes
-  'transform.reframe': createStubHandler({ asset: 'reframed-asset', aspect: '9:16', __stub: true }),
-
-  'transform.caption': createStubHandler({ asset: 'captioned-asset', templateId: 'default', __stub: true }),
-
-  'transform.normalizeAudio': createStubHandler({ asset: 'normalized-audio', targetLufs: -14, duckMusic: true, __stub: true }),
-
-  'transform.denoise': createStubHandler({ asset: 'denoised-asset', __stub: true }),
-
-  'transform.trim': createStubHandler({ asset: 'trimmed-asset', rangesFrom: 'analysis.silence', __stub: true }),
-
-  'transform.compose': createStubHandler({ composed: {}, __stub: true }),
-
-  'transform.sceneTemplate': createStubHandler({ scene: 'template-scene', variablesFrom: {}, __stub: true }),
-
-  // Generation nodes
-  'generation.translate': createStubHandler({ text: 'Translated text', language: 'en', __stub: true }),
-
-  'generation.speech': createStubHandler({ audio: 'speech-asset', voiceId: 'default', __stub: true }),
-
-  // Render nodes
-  'render.preview': createStubHandler({ previewUrl: 'blob:preview', profile: 'preview', __stub: true }),
-
-  'render.final': createStubHandler({ asset: 'rendered-asset', profile: 'final', __stub: true }),
-
-  // Output nodes
-  'output.folder': createStubHandler({ folderId: 'default', fileName: 'output', saved: true, __stub: true }),
-
-  'output.metadata': createStubHandler({ manifest: { fileName: 'output', folderId: 'default', data: {}, __stub: true } }),
-
-  // Control nodes
-  'control.map': createStubHandler({ items: [], mapped: true, __stub: true }),
-
-  // Editor nodes
-  'editor.createBranch': createStubHandler({ branchId: 'branch-1', name: 'new-branch', source: 'main', __stub: true }),
-};
-
-/**
- * Creates a handler registry that includes all first-party handlers
- * plus any additional custom handlers.
- */
-export function createFirstPartyHandlerRegistry(
-  additionalHandlers: Readonly<Record<string, NodeHandler>> = {}
-): Readonly<Record<string, NodeHandler>> {
-  return {
-    ...firstPartyHandlers,
-    ...additionalHandlers,
-  };
-}
-
-/**
- * Type guard to check if a result contains a human input request.
- */
-export function isHumanInputRequest(result: NodeResult): result is { waiting: true; request: HumanInputRequest } {
-  return 'waiting' in result && result.waiting === true;
+      transform: {
+        trim: (args: { readonly source: unknown; readonly ranges: unknown }) =>
+          stubResult({ trimmed: true, ranges: args.ranges }),
+        applyCaptionTemplate: (args: { readonly templateId: string }) =>
+          stubResult({ captioned: true, templateId: args.templateId }),
+        reframe: (args: { readonly aspect: string; readonly subjectHints?: unknown }) =>
+          stubResult({
+            reframed: args.aspect,
+            subjectHints: args.subjectHints ?? null,
+          }),
+        denoise: () => stubResult({ denoised: true }),
+        normalizeAudio: (args: { readonly targetLufs?: number; readonly duckMusic?: boolean }) =>
+          stubResult({
+            normalized: args.targetLufs ?? null,
+            duckMusic: args.duckMusic === true,
+          }),
+        instantiateSceneTemplate: (args: {
+          readonly templateId: string;
+          readonly variables: unknown;
+        }) => stubResult({ sceneInstance: args.templateId, variables: args.variables }),
+      },
+      generation: {
+        synthesizeSpeech: (args: { readonly text: string; readonly voiceId: string }) =>
+          stubResult({ voiceOver: args.text, voiceId: args.voiceId }),
+        translate: (args: { readonly text: string; readonly targetLanguage: string }) =>
+          stubResult({
+            text: `[${args.targetLanguage}] ${args.text}`,
+            targetLanguage: args.targetLanguage,
+          }),
+      },
+      editor: {
+        createBranch: (args: { readonly name: string; readonly source: unknown }) => {
+          branchSeq += 1;
+          return stubResult({
+            branchId: `branch-${String(branchSeq)}`,
+            name: args.name,
+            source: args.source,
+          });
+        },
+      },
+      render: {
+        render: (args: { readonly mode: 'preview' | 'final'; readonly profile?: string }) =>
+          stubResult({
+            rendered: args.mode,
+            profile: args.profile ?? null,
+          }),
+      },
+      output: {
+        writeToFolder: (args: { readonly folderId: string }) =>
+          stubResult({ written: true, folderId: args.folderId }),
+        writeMetadataFile: (args: { readonly fileName: string }) =>
+          stubResult({ written: true, fileName: args.fileName }),
+      },
+    },
+  });
 }

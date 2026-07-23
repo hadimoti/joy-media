@@ -45,3 +45,10 @@ These four decisions unblock WP-16 (agent → workflow recorder). Each is **DEFA
 | W16-Q4 | How are recorded workflows named and versioned? | DEFAULT | **Namespace `user.workflows.<slug>`; slug derived from the plan title (kebab-case, alphanumeric + hyphens); semantic versioning starting at 1.0.0.** Example: `user.workflows.split-clip-at-playhead`. The `user.workflows.` prefix distinguishes recorded workflows from system/first-party workflows. Bump major on breaking changes, minor on new parameters, patch on bug fixes. Users can rename later via a future UI; the ID stays stable. |
 
 **WP-16 outcome flags (2026-07-23, see [WP-16-workflow-recorder.md](WP-16-workflow-recorder.md)):** W16-Q2/Q3/Q4 used as decided. **W16-Q1 deviation — RESOLVED same day:** the first implementation auto-saved every successful agent run; the explicit “Save as workflow” button W16-Q1 called for now ships in the Agent panel (save is a deliberate user action, audited as `workflow-saved`, with the saved id shown). **New DEFAULT (D-UI-GRAY):** owner directed a professional Adobe-style editor UI — icon-only SVG buttons with tooltips and a neutral-gray theme (amber accent, no blue) — applied editor-wide 2026-07-23 and codified in the repo-root [DESIGN.md](../DESIGN.md), which all panels must follow.
+
+## WP-17 first-party ports decisions (2026-07-23)
+
+| # | Question | Status | Decision |
+| --- | --- | --- | --- |
+| D-W17-1 | Where do system-workflow JSON artifacts live at runtime? | DEFAULT | **(a) Bundle via `@joy-media/workflow-engine`** — editor loads `buildFirstPartyWorkflows()` / pinned `workflows/*.json` through the workspace package (same artifacts the CLI and first-party tests pin). No separate `/api/first-party` fetch until the API owns catalog distribution. |
+| D-W17-2 | What does the approval modal look like for non-clip inputs? | DEFAULT | **Reuse the Workflows run-modal surface.** Text/number fields for start inputs (e.g. `assetId`); checkbox-list variant for `choose-candidates` / continue affordance for `approve-render` and other approval kinds. |

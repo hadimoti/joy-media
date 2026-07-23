@@ -51,7 +51,7 @@ import { AgentPanel } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
-import { runWorkflow } from './workflow-runner.js';
+import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import {
   getOrCreateControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
@@ -957,10 +957,32 @@ export function App() {
           playheadUs={state.playheadUs}
           onRun={async (workflowId, inputs) => {
             try {
-              await runWorkflow(session, workflowId, inputs);
+              const outcome = await runWorkflow(session, workflowId, inputs);
               setRevision((revision) => revision + 1);
+              return outcome;
             } catch (error) {
               console.error('Failed to run workflow:', error);
+              return {
+                status: 'failed' as const,
+                workflowId,
+                runId: 'error',
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          }}
+          onResume={async (runId, humanInputs) => {
+            try {
+              const outcome = await resumeWorkflow(session, runId, humanInputs);
+              setRevision((revision) => revision + 1);
+              return outcome;
+            } catch (error) {
+              console.error('Failed to resume workflow:', error);
+              return {
+                status: 'failed' as const,
+                workflowId: 'unknown',
+                runId,
+                error: error instanceof Error ? error.message : String(error),
+              };
             }
           }}
         />

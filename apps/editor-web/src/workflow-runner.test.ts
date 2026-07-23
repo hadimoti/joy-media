@@ -91,13 +91,14 @@ describe('workflow-runner', () => {
       .find((t) => t.id === 'track-0')
       ?.clips.map((c) => c.id) ?? [];
 
-    await runWorkflow(session, recorded.workflow.id, {
+    const first = await runWorkflow(session, recorded.workflow.id, {
       trackId: 'track-0',
       clipId: clipA.id,
       clipStartUs: clipA.startUs,
       clipDurationUs: clipA.durationUs,
       clipSourceInUs: clipA.sourceInUs,
     });
+    expect(first.status).toBe('succeeded');
 
     const afterClipA = session.timelineProject.compositions.root?.tracks
       .find((t) => t.id === 'track-0')
@@ -112,13 +113,14 @@ describe('workflow-runner', () => {
     ).toEqual(beforeClips);
 
     const clipB = makeVideoClip('clip-b', 0, 5 * SECOND_US);
-    await runWorkflow(session, recorded.workflow.id, {
+    const second = await runWorkflow(session, recorded.workflow.id, {
       trackId: 'track-0',
       clipId: clipB.id,
       clipStartUs: clipB.startUs,
       clipDurationUs: clipB.durationUs,
       clipSourceInUs: clipB.sourceInUs,
     });
+    expect(second.status).toBe('succeeded');
 
     const afterClipB = session.timelineProject.compositions.root?.tracks
       .find((t) => t.id === 'track-0')

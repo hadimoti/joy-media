@@ -1210,8 +1210,27 @@ label {
   gap: 0.2rem;
   font-size: 0.65rem;
   padding: 0.1rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #6b5a2a;
   border-radius: 0.2rem;
-  background: #202022;
+  background: #2a2418;
+  color: #e9b949;
+}
+.workflow-status-hint {
+  margin: 0.35rem 0;
+  font-size: 0.75rem;
   color: #9d9da1;
+}
+.workflow-candidate-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workflow-candidate-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #e4e4e6;
+  font-size: 0.8rem;
 }

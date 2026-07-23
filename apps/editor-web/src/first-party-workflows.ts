@@ -6,11 +6,12 @@ import {
   FIRST_PARTY_WORKFLOWS_VERSION,
   FIRST_PARTY_WORKFLOW_IDS,
 } from '@joy-media/workflow-engine';
-import type { JoyWorkflow, FirstPartyDefinitionFile, FirstPartyWorkflow as WorkflowEngineFirstPartyWorkflow } from '@joy-media/workflow-engine';
+import type { JoyWorkflow } from '@joy-media/workflow-engine';
+import type { RecordedWorkflow } from './workflow-recorder.js';
 
 /**
- * First-party workflows loaded from the workflow-engine package.
- * These are built-in workflows that ship with JOY Media.
+ * First-party workflows loaded from `@joy-media/workflow-engine` (D-W17-1a:
+ * bundled via the workspace package — same artifact the CLI/tests pin).
  */
 
 export interface FirstPartyWorkflow {
@@ -23,7 +24,6 @@ let cachedWorkflows: readonly FirstPartyWorkflow[] | undefined;
 export function loadFirstPartyWorkflows(): readonly FirstPartyWorkflow[] {
   if (cachedWorkflows !== undefined) return cachedWorkflows;
 
-  // Use the builder functions from workflow-engine to get the workflows
   const builtWorkflows = buildFirstPartyWorkflows();
   const definitionFiles = firstPartyDefinitionFiles();
 
@@ -36,11 +36,37 @@ export function loadFirstPartyWorkflows(): readonly FirstPartyWorkflow[] {
 }
 
 export function getFirstPartyWorkflow(workflowId: string): FirstPartyWorkflow | undefined {
-  return loadFirstPartyWorkflows().find((w) => w.workflow.id === workflowId);
+  return loadFirstPartyWorkflows().find((entry) => entry.workflow.id === workflowId);
 }
 
 export function getFirstPartyWorkflowVersion(): string {
   return FIRST_PARTY_WORKFLOWS_VERSION;
+}
+
+/**
+ * WP-17.3 — surface lineage when a recorded workflow's goal/name references a
+ * first-party system workflow. Exact recording-from-system lineage lands later;
+ * this makes teachable reuse visible without inventing false provenance.
+ */
+export function detectDerivedFrom(recorded: RecordedWorkflow): string | undefined {
+  const haystack = `${recorded.workflow.name} ${recorded.originalPlan.goal}`.toLowerCase();
+  for (const id of FIRST_PARTY_WORKFLOW_IDS) {
+    const short = id.replace('joy.first-party.', '').replaceAll('-', ' ');
+    if (haystack.includes(id.toLowerCase()) || haystack.includes(short)) {
+      return id;
+    }
+  }
+  const firstStep = recorded.originalPlan.steps[0];
+  if (firstStep !== undefined) {
+    const stepHaystack = `${firstStep.tool} ${firstStep.description}`.toLowerCase();
+    for (const id of FIRST_PARTY_WORKFLOW_IDS) {
+      const short = id.replace('joy.first-party.', '').replaceAll('-', ' ');
+      if (stepHaystack.includes(short)) {
+        return id;
+      }
+    }
+  }
+  return undefined;
 }
 
 export { FIRST_PARTY_WORKFLOW_IDS };
