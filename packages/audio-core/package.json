@@ -14,6 +14,10 @@
     "./normalize": {
       "types": "./dist/normalization.d.ts",
       "default": "./dist/normalization.js"
+    },
+    "./analysis": {
+      "types": "./dist/analysis.d.ts",
+      "default": "./dist/analysis.js"
     }
   },
   "scripts": {

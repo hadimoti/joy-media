@@ -1,13 +1,14 @@
 // apps/editor-web/src/first-party-handlers.ts
 
+import { detectSilence } from '@joy-media/audio-core/analysis';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
- * Browser-side ports for first-party workflows (WP-17.2 / WP-19).
+ * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22).
  *
  * Most ports remain deterministic stubs tagged `__stub: true`.
- * `transform.normalizeAudio` uses real `audio-core.normalizeDialogue` DSP.
+ * Real DSP: `transform.normalizeAudio`, `analysis.detectSilence`.
  */
 
 function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
@@ -19,6 +20,25 @@ function generateFixtureDialoguePcm(sampleRate: number, durationSec = 1): Float3
   const samples = new Float32Array(sampleRate * durationSec);
   for (let i = 0; i < samples.length; i++) {
     samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.2;
+  }
+  return samples;
+}
+
+/**
+ * Fixture with a mid-clip silent gap so `detectSilence` returns a measurable range
+ * (tone → silence → tone). Sample indices convert to timeline µs for workflow ports.
+ */
+function generateFixturePcmWithSilence(sampleRate: number): Float32Array {
+  const toneA = Math.floor(sampleRate * 0.5);
+  const silence = Math.floor(sampleRate * 0.4);
+  const toneB = Math.floor(sampleRate * 0.5);
+  const samples = new Float32Array(toneA + silence + toneB);
+  for (let i = 0; i < toneA; i++) {
+    samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.25;
+  }
+  // silence region stays 0
+  for (let i = 0; i < toneB; i++) {
+    samples[toneA + silence + i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.25;
   }
   return samples;
 }
@@ -35,13 +55,32 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             language: 'fa',
             segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
           }),
-        detectSilence: () =>
-          stubResult({
-            ranges: [
-              { startUs: 10_000_000, endUs: 12_500_000 },
-              { startUs: 40_000_000, endUs: 43_000_000 },
-            ],
-          }),
+        detectSilence: (args: {
+          readonly source: unknown;
+          readonly thresholdDb?: number;
+          readonly minSilenceMs?: number;
+        }) => {
+          // WP-22: real audio-core DSP — not a stub.
+          const sampleRate = 48_000;
+          const samples = generateFixturePcmWithSilence(sampleRate);
+          const thresholdDb = args.thresholdDb ?? -40;
+          const minSilenceMs = args.minSilenceMs ?? 100;
+          const minSamples = Math.floor((minSilenceMs / 1000) * sampleRate);
+          const detection = detectSilence(samples, thresholdDb);
+          const ranges = detection.silentRegions
+            .filter((region) => region.end - region.start >= minSamples)
+            .map((region) => ({
+              startUs: Math.round((region.start / sampleRate) * 1_000_000),
+              endUs: Math.round((region.end / sampleRate) * 1_000_000),
+            }));
+          return {
+            source: args.source,
+            ranges,
+            thresholdDb,
+            minSilenceMs,
+            silent: detection.silent,
+          };
+        },
         detectHighlights: (args: { readonly source: unknown }) =>
           stubResult({
             candidates: [
