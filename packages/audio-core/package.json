@@ -18,6 +18,10 @@
     "./analysis": {
       "types": "./dist/analysis.d.ts",
       "default": "./dist/analysis.js"
+    },
+    "./effects": {
+      "types": "./dist/effects.d.ts",
+      "default": "./dist/effects.js"
     }
   },
   "scripts": {

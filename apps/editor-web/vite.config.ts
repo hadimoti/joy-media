@@ -10,6 +10,7 @@ export default defineConfig({
       '@joy-media/plugin-sdk': '/opt/joy-media/repo/packages/plugin-sdk/dist/index.js',
       '@joy-media/audio-core/normalize': '/opt/joy-media/repo/packages/audio-core/dist/normalization.js',
       '@joy-media/audio-core/analysis': '/opt/joy-media/repo/packages/audio-core/dist/analysis.js',
+      '@joy-media/audio-core/effects': '/opt/joy-media/repo/packages/audio-core/dist/effects.js',
     },
   },
 });

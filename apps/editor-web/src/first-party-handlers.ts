@@ -1,6 +1,7 @@
 // apps/editor-web/src/first-party-handlers.ts
 
-import { detectSilence, measureLoudness } from '@joy-media/audio-core/analysis';
+import { detectSilence, measureLoudness, measurePeak } from '@joy-media/audio-core/analysis';
+import { applyGate } from '@joy-media/audio-core/effects';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
@@ -8,7 +9,7 @@ import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
  * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22).
  *
  * Most ports remain deterministic stubs tagged `__stub: true`.
- * Real DSP: `transform.normalizeAudio`, `analysis.detectSilence`, `analysis.measureLoudness`.
+ * Real DSP: normalizeAudio, detectSilence, measureLoudness, denoise (noise-gate).
  */
 
 function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
@@ -39,6 +40,19 @@ function generateFixturePcmWithSilence(sampleRate: number): Float32Array {
   // silence region stays 0
   for (let i = 0; i < toneB; i++) {
     samples[toneA + silence + i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.25;
+  }
+  return samples;
+}
+
+/** Tone plus low-level floor noise so a noise gate has measurable work to do. */
+function generateNoisyFixturePcm(sampleRate: number, durationSec = 1): Float32Array {
+  const samples = new Float32Array(sampleRate * durationSec);
+  for (let i = 0; i < samples.length; i++) {
+    const tone = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.25;
+    // Alternate quiet windows of floor noise only.
+    const inQuiet = Math.floor(i / (sampleRate * 0.1)) % 2 === 1;
+    const floor = (((i * 1103515245 + 12345) >>> 16) / 32768 - 0.5) * 0.02;
+    samples[i] = inQuiet ? floor : tone + floor * 0.25;
   }
   return samples;
 }
@@ -120,7 +134,33 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             reframed: args.aspect,
             subjectHints: args.subjectHints ?? null,
           }),
-        denoise: () => stubResult({ denoised: true }),
+        denoise: (args: { readonly source: unknown; readonly strength?: number }) => {
+          // Local noise-gate DSP (not ML denoise). Strength maps to gate threshold.
+          const sampleRate = 48_000;
+          const samples = generateNoisyFixturePcm(sampleRate);
+          const strength = Math.min(1, Math.max(0, args.strength ?? 0.5));
+          const thresholdDb = -55 + strength * 25;
+          const gated = applyGate(
+            samples,
+            {
+              threshold: thresholdDb,
+              attackUs: 5_000,
+              releaseUs: 80_000,
+              holdUs: 20_000,
+            },
+            sampleRate,
+          );
+          const input = measurePeak(samples);
+          const output = measurePeak(gated);
+          return {
+            source: args.source,
+            method: 'noise-gate',
+            strength,
+            thresholdDb,
+            inputPeakDb: input.peakDb,
+            outputPeakDb: output.peakDb,
+          };
+        },
         normalizeAudio: (args: {
           readonly source: unknown;
           readonly targetLufs?: number;
