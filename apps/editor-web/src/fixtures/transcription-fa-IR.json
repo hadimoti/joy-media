@@ -1,0 +1,13 @@
+{
+  "language": "fa-IR",
+  "modelId": "fixture-whisper-fa-v1",
+  "speakers": [{ "id": "speaker-1", "name": "گوینده محلی" }],
+  "words": [
+    { "text": "سلام", "startUs": 0, "endUs": 400000, "confidence": 0.97, "speakerId": "speaker-1" },
+    { "text": "به", "startUs": 400000, "endUs": 650000, "confidence": 0.94, "speakerId": "speaker-1" },
+    { "text": "استودیوی", "startUs": 650000, "endUs": 1200000, "confidence": 0.96, "speakerId": "speaker-1" },
+    { "text": "جوی", "startUs": 1200000, "endUs": 1550000, "confidence": 0.98, "speakerId": "speaker-1" },
+    { "text": "خوش", "startUs": 1550000, "endUs": 1850000, "confidence": 0.95, "speakerId": "speaker-1" },
+    { "text": "آمدید", "startUs": 1850000, "endUs": 2400000, "confidence": 0.96, "speakerId": "speaker-1" }
+  ]
+}

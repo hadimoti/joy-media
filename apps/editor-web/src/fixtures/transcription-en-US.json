@@ -1,0 +1,13 @@
+{
+  "language": "en-US",
+  "modelId": "fixture-whisper-en-v1",
+  "speakers": [{ "id": "speaker-1", "name": "Local speaker" }],
+  "words": [
+    { "text": "Welcome", "startUs": 0, "endUs": 450000, "confidence": 0.97, "speakerId": "speaker-1" },
+    { "text": "to", "startUs": 450000, "endUs": 650000, "confidence": 0.95, "speakerId": "speaker-1" },
+    { "text": "the", "startUs": 650000, "endUs": 800000, "confidence": 0.94, "speakerId": "speaker-1" },
+    { "text": "JOY", "startUs": 800000, "endUs": 1100000, "confidence": 0.99, "speakerId": "speaker-1" },
+    { "text": "Media", "startUs": 1100000, "endUs": 1500000, "confidence": 0.98, "speakerId": "speaker-1" },
+    { "text": "studio", "startUs": 1500000, "endUs": 2100000, "confidence": 0.96, "speakerId": "speaker-1" }
+  ]
+}

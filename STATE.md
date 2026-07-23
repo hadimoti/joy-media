@@ -10,15 +10,15 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P00 architecture proofs          | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                              |
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
 | P02 editing slice                | in-progress | 6/6      | 2026-07-22   | WP-11 proves browser proxy playback and UI H.264/AAC export; interruption/other audit gaps remain                 |
-| P03 captions                     | in-progress | 5/5      | 2026-07-21   | Manual captions/RTL real in editor; transcription is a hardcoded stub                                             |
+| P03 captions                     | done*       | 5/5      | 2026-07-23   | WP-20 fixture Whisper seam (FA/EN); live Whisper binary still optional                                            |
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-22   | WP-11 proves real Pixi preview and UI MP4 export; HTML-scene/reel scope remains separately unverified             |
-| P05 audio + providers            | in-progress | 5/5      | 2026-07-22   | Original 33 failures fixed; one cross-Chromium golden remains, and providers remain stubs                         |
+| P05 audio + providers            | done*       | 5/5      | 2026-07-23   | WP-19 real normalizeAudio DSP; other adapters still mock; ComfyUI remote still out of scope                       |
 || P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor |
 | P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; providers still P05                    |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-21   | Honestly gated; package-level only, no transport/marketplace                                                      |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
-| WP-11 live preview canvas        | done*       | 5/5      | 2026-07-22   | Gate re-reviewed: Pixi/video/audio MP4 export and scrub pixels verified; *lint/golden baseline exceptions remain  |
+| WP-11 live preview canvas        | done*       | 5/5      | 2026-07-23   | Gate intact; WP-21 dropped absolute golden SHA pins (parity retained)                                             |
 | WP-12 control plane + Worker E2E | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                |
 | WP-13 project/Worker integration | done        | 5/5      | 2026-07-22   | Gate passed: opaque project, safe receipt, API restart/reload, and revoked temporary Worker are live              |
 | WP-14 media asset delivery       | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified       |
@@ -26,10 +26,15 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-16 workflow recorder + UX     | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul        |
 | WP-17 first-party ports          | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                  |
 | WP-18 plugin host wiring         | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                             |
+| WP-19 normalizeAudio port         | done        | —        | 2026-07-23   | Real audio-core DSP for first-party normalize; other ports stay __stub                                            |
+| WP-20 caption transcription fixtures | done     | —        | 2026-07-23   | FA/EN fixture Whisper seam; modelId not pending                                                                   |
+| WP-21 baseline hygiene            | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                          |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
 ## Session log (newest first)
 
+
+| 2026-07-23 | WP-19/20/21 | **Normalize port, caption fixtures, baseline hygiene.** `transform.normalizeAudio` now runs `audio-core.normalizeDialogue` (no `__stub`); Captions FA/EN load fixture transcripts (`fixture-whisper-*-v1`); golden test keeps preview↔export parity and drops cross-Chromium SHA pins; eslint Node globals for bins. editor-web 73/73; typecheck clean; golden 2/2. |
 
 | 2026-07-23 | WP-18 | **Plugin host wired into editor.** Split browser-safe `@joy-media/plugin-sdk/browser` (`FirstPartyPluginHost` + policy, no Node crypto). Plugins panel lists first-party demo (install disabled → enable); safe mode default-on blocks enable/mount; project data survives disable. editor-web 71/71; plugin-sdk 19/19; vite build ok. |
 

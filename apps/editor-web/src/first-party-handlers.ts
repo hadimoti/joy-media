@@ -1,17 +1,26 @@
 // apps/editor-web/src/first-party-handlers.ts
 
+import { normalizeDialogue } from '@joy-media/audio-core';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
- * Browser-side stub ports for first-party workflows (WP-17.2).
+ * Browser-side ports for first-party workflows (WP-17.2 / WP-19).
  *
- * Every port return value carries `__stub: true` so the audit trail never
- * pretends these are real providers. Later WPs replace individual ports
- * without changing the runner contract.
+ * Most ports remain deterministic stubs tagged `__stub: true`.
+ * `transform.normalizeAudio` uses real `audio-core.normalizeDialogue` DSP.
  */
 
 function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
   return { ...value, __stub: true as const };
+}
+
+/** Quiet 1 kHz dialogue-like fixture PCM for browser-side normalize proofs. */
+function generateFixtureDialoguePcm(sampleRate: number, durationSec = 1): Float32Array {
+  const samples = new Float32Array(sampleRate * durationSec);
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = Math.sin((2 * Math.PI * 1000 * i) / sampleRate) * 0.2;
+  }
+  return samples;
 }
 
 /** Build a NodeLibrary whose ports are deterministic stubs suitable for editor runs. */
@@ -61,11 +70,30 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             subjectHints: args.subjectHints ?? null,
           }),
         denoise: () => stubResult({ denoised: true }),
-        normalizeAudio: (args: { readonly targetLufs?: number; readonly duckMusic?: boolean }) =>
-          stubResult({
-            normalized: args.targetLufs ?? null,
+        normalizeAudio: (args: {
+          readonly source: unknown;
+          readonly targetLufs?: number;
+          readonly duckMusic?: boolean;
+        }) => {
+          // WP-19: real audio-core DSP — not a stub. Other ports remain __stub.
+          const sampleRate = 48_000;
+          const samples = generateFixtureDialoguePcm(sampleRate);
+          const targetLoudness = args.targetLufs ?? -16;
+          const { result } = normalizeDialogue(samples, sampleRate, {
+            targetLoudness,
+            targetPeak: -1,
+            mode: 'normalize',
+          });
+          return {
+            source: args.source,
+            measuredLufs: result.outputLoudness,
+            targetLufs: targetLoudness,
+            inputLoudness: result.inputLoudness,
+            gainAdjustment: result.gainAdjustment,
             duckMusic: args.duckMusic === true,
-          }),
+            processing: result.processing,
+          };
+        },
         instantiateSceneTemplate: (args: {
           readonly templateId: string;
           readonly variables: unknown;

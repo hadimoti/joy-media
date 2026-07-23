@@ -1,30 +1,83 @@
 import {
   captionDocumentFromTranscription,
   createLocalWhisperProvider,
+  ProviderUnavailableError,
 } from '@joy-media/provider-sdk';
 import type { CaptionDocumentV1 } from '@joy-media/project-schema';
 
-/** Deterministic local-adapter smoke data; swap its executor for installed Whisper runtime wiring. */
-const provider = createLocalWhisperProvider(async (_capability, input) => {
-  const persian = input.language?.startsWith('fa') === true;
-  const tokens = persian ? ['سلام', 'JOY', 'دنیا'] : ['Hello', 'JOY', 'world'];
-  return {
-    language: persian ? 'fa-IR' : 'en-US',
-    words: tokens.map((text, index) => ({
-      text,
-      startUs: index * 500_000,
-      endUs: (index + 1) * 500_000,
-      confidence: 0.95,
-      speakerId: 'speaker-1',
-    })),
+interface TranscriptionFixture {
+  readonly language: string;
+  readonly modelId: string;
+  readonly speakers: readonly { readonly id: string; readonly name: string }[];
+  readonly words: readonly {
+    readonly text: string;
+    readonly startUs: number;
+    readonly endUs: number;
+    readonly confidence: number;
+    readonly speakerId: string;
+  }[];
+}
+
+/** Fixture-backed FA/EN transcripts (WP-20). JSON copies kept under src/fixtures for review. */
+const FIXTURES: Readonly<Record<'fa-IR' | 'en-US', TranscriptionFixture>> = {
+  'fa-IR': {
+    language: 'fa-IR',
+    modelId: 'fixture-whisper-fa-v1',
+    speakers: [{ id: 'speaker-1', name: 'گوینده محلی' }],
+    words: [
+      { text: 'سلام', startUs: 0, endUs: 400_000, confidence: 0.97, speakerId: 'speaker-1' },
+      { text: 'به', startUs: 400_000, endUs: 650_000, confidence: 0.94, speakerId: 'speaker-1' },
+      { text: 'استودیوی', startUs: 650_000, endUs: 1_200_000, confidence: 0.96, speakerId: 'speaker-1' },
+      { text: 'جوی', startUs: 1_200_000, endUs: 1_550_000, confidence: 0.98, speakerId: 'speaker-1' },
+      { text: 'خوش', startUs: 1_550_000, endUs: 1_850_000, confidence: 0.95, speakerId: 'speaker-1' },
+      { text: 'آمدید', startUs: 1_850_000, endUs: 2_400_000, confidence: 0.96, speakerId: 'speaker-1' },
+    ],
+  },
+  'en-US': {
+    language: 'en-US',
+    modelId: 'fixture-whisper-en-v1',
     speakers: [{ id: 'speaker-1', name: 'Local speaker' }],
-    provenance: { providerId: 'local', modelId: 'pending', createdAt: '2026-07-19T00:00:00.000Z' },
-  };
-}, 'local-whisper-reference');
+    words: [
+      { text: 'Welcome', startUs: 0, endUs: 450_000, confidence: 0.97, speakerId: 'speaker-1' },
+      { text: 'to', startUs: 450_000, endUs: 650_000, confidence: 0.95, speakerId: 'speaker-1' },
+      { text: 'the', startUs: 650_000, endUs: 800_000, confidence: 0.94, speakerId: 'speaker-1' },
+      { text: 'JOY', startUs: 800_000, endUs: 1_100_000, confidence: 0.99, speakerId: 'speaker-1' },
+      { text: 'Media', startUs: 1_100_000, endUs: 1_500_000, confidence: 0.98, speakerId: 'speaker-1' },
+      { text: 'studio', startUs: 1_500_000, endUs: 2_100_000, confidence: 0.96, speakerId: 'speaker-1' },
+    ],
+  },
+};
+
+/**
+ * Fixture-backed local Whisper seam (WP-20).
+ * Swap the fixture loader for an installed Whisper binary later without changing the Captions UI.
+ */
+function providerFor(language: 'fa-IR' | 'en-US') {
+  const fixture = FIXTURES[language];
+  return createLocalWhisperProvider(async (_capability, input) => {
+    if (input.language !== undefined && !String(input.language).startsWith(language.slice(0, 2))) {
+      throw new ProviderUnavailableError(
+        `No transcription fixture for language ${String(input.language)}`,
+      );
+    }
+    return {
+      language: fixture.language,
+      words: fixture.words.map((word) => ({ ...word })),
+      speakers: fixture.speakers.map((speaker) => ({ ...speaker })),
+      provenance: {
+        providerId: 'local',
+        modelId: fixture.modelId,
+        createdAt: '2026-07-23T00:00:00.000Z',
+      },
+    };
+  }, fixture.modelId);
+}
+
 export async function transcribeReferenceCaption(
   documentId: string,
   language: 'fa-IR' | 'en-US',
 ): Promise<CaptionDocumentV1> {
+  const provider = providerFor(language);
   return captionDocumentFromTranscription(
     documentId,
     await provider.invoke('speech.transcribe', { assetId: `reference-${language}`, language }),

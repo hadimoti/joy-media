@@ -57,6 +57,9 @@ importers:
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
+      '@joy-media/audio-core':
+        specifier: workspace:*
+        version: link:../../packages/audio-core
       '@joy-media/captions-core':
         specifier: workspace:*
         version: link:../../packages/captions-core

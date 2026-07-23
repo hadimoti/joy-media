@@ -19,6 +19,7 @@
     "@joy-media/timeline-engine": "workspace:*",
     "@joy-media/workflow-engine": "workspace:*",
     "@joy-media/plugin-sdk": "workspace:*",
+    "@joy-media/audio-core": "workspace:*",
     "dockview": "^4.10.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
