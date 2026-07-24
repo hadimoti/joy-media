@@ -86,7 +86,19 @@ export interface GroupNode extends RenderNodeBase {
   readonly children: readonly RenderNode[];
 }
 
-export type RenderNode = SpriteNode | VideoFrameNode | TextNode | GroupNode;
+/** A transition between two clips (dissolve, wipe, slide). */
+export interface TransitionNode extends RenderNodeBase {
+  readonly kind: 'transition';
+  readonly width: number;
+  readonly height: number;
+  readonly color: Rgba;
+  readonly transitionType: 'dissolve' | 'wipe' | 'slide';
+  readonly progress: number; // 0 to 1
+  readonly leftClipId: string;
+  readonly rightClipId: string;
+}
+
+export type RenderNode = SpriteNode | VideoFrameNode | TextNode | GroupNode | TransitionNode;
 export type VisualRenderNode = Exclude<RenderNode, GroupNode>;
 
 export interface RenderFrameIR {
@@ -198,7 +210,7 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
     }
     if (node.kind === 'group') {
       validateNodes(node.children, ids);
-    } else {
+    } else if (node.kind !== 'transition') {
       assertRgba(node.color, `node "${node.id}" color`);
     }
   }

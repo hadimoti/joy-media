@@ -32,6 +32,7 @@ import type {
   RenderFrameIR,
   SpriteNode,
   TextNode,
+  TransitionNode,
   VideoFrameNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
@@ -81,6 +82,8 @@ interface LayerContainer extends Container {
   /** Persistent CPU canvas and GPU texture for a decoded video node. */
   videoCanvas?: HTMLCanvasElement | undefined;
   videoTexture?: Texture | undefined;
+  /** Persistent GPU texture for a transition node. */
+  transitionTexture?: Texture | undefined;
 }
 
 /**
@@ -129,6 +132,10 @@ export async function createBrowserPixiRenderer(
   const layers = new Container();
   layers.label = 'renderer-pixi:layers';
   app.stage.addChild(layers);
+
+  const transitionLayer = new Container();
+  transitionLayer.label = 'renderer-pixi:transitions';
+  app.stage.addChild(transitionLayer);
   app.stage.sortableChildren = true;
 
   const spriteMap = new Map<string, LayerContainer>();
@@ -146,7 +153,7 @@ export async function createBrowserPixiRenderer(
     app.renderer.resize(width, height, resolution);
   };
 
-  const paintRectVisual = (node: SpriteNode | VideoFrameNode): Graphics => {
+  const paintRectVisual = (node: Exclude<VisualRenderNode, { kind: 'text' }>): Graphics => {
     const graphic = new Graphics();
     graphic
       .rect(0, 0, node.width, node.height)
@@ -268,7 +275,12 @@ export async function createBrowserPixiRenderer(
     let drawCalls = 0;
     let created = 0;
     let reused = 0;
-    for (const { node } of drawNodes) {
+    const transitionNodes: Array<{ node: TransitionNode; index: number }> = [];
+    for (const { node, index } of drawNodes) {
+      if (node.kind === 'transition') {
+        transitionNodes.push({ node, index });
+        continue;
+      }
       seen.add(node.id);
       const existing = spriteMap.get(node.id);
       const videoBitmap = node.kind === 'video-frame' ? videoBitmaps.get(node.id) : undefined;
@@ -310,6 +322,25 @@ export async function createBrowserPixiRenderer(
         spriteMap.delete(id);
       }
     }
+    // Paint transitions in their own layer
+    const seenTransitionIds = new Set<string>();
+    for (const { node } of transitionNodes) {
+      seenTransitionIds.add(node.id);
+      const existing = transitionLayer.getChildByName(`transition:${node.id}`) as Container | undefined;
+      if (existing === undefined) {
+        const container = createTransitionLayer(node);
+        transitionLayer.addChild(container);
+      } else {
+        updateTransitionLayer(existing, node);
+      }
+      drawCalls += 1;
+    }
+    for (const child of transitionLayer.children) {
+      const name = child.name;
+      if (name.startsWith('transition:') && !seenTransitionIds.has(name.slice('transition:'.length))) {
+        child.destroy({ children: true });
+      }
+    }
     return { drawCalls, created, reused };
   };
 
@@ -347,6 +378,54 @@ export async function createBrowserPixiRenderer(
       app.destroy(true, { children: true, texture: true });
     },
   };
+}
+
+function createTransitionLayer(node: TransitionNode): Container {
+  const container = new Container();
+  container.name = `transition:${node.id}`;
+  container.zIndex = node.zIndex;
+
+  const graphic = new Graphics();
+  graphic.label = `transition:${node.id}:visual`;
+  container.addChild(graphic);
+  paintTransitionVisual(graphic, node);
+
+  return container;
+}
+
+function updateTransitionLayer(container: Container, node: TransitionNode): void {
+  const graphic = container.getChildByName(`transition:${node.id}:visual`) as Graphics | undefined;
+  if (graphic === undefined) return;
+  graphic.clear();
+  paintTransitionVisual(graphic, node);
+}
+
+function paintTransitionVisual(graphic: Graphics, node: TransitionNode): void {
+  graphic.clear();
+  switch (node.transitionType) {
+    case 'dissolve': {
+      const alpha = node.progress;
+      graphic
+        .rect(0, 0, node.width, node.height)
+        .fill({ color: rgbaToHex(node.color), alpha });
+      break;
+    }
+    case 'wipe': {
+      graphic
+        .rect(0, 0, node.width, node.height)
+        .fill({ color: rgbaToHex({ ...node.color, a: Math.round(node.color.a * node.progress) }) });
+      graphic
+        .rect(node.width * node.progress, 0, node.width * (1 - node.progress), node.height)
+        .fill({ color: rgbaToHex(node.color), alpha: node.progress });
+      break;
+    }
+    case 'slide': {
+      graphic
+        .rect(node.width * (1 - node.progress), 0, node.width * node.progress, node.height)
+        .fill({ color: rgbaToHex(node.color), alpha: node.progress });
+      break;
+    }
+  }
 }
 
 function rgbaToHex(color: Rgba): number {

@@ -14,6 +14,7 @@ export type {
   TextNode,
   TextSpan,
   GroupNode,
+  TransitionNode,
   RenderNode,
   VisualRenderNode,
   RenderFrameIR,

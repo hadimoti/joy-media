@@ -1772,7 +1772,8 @@ label {
 }
 .audio-panel,
 .effects-panel,
-.color-panel {
+.color-panel,
+.transitions-panel {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -1780,7 +1781,8 @@ label {
   overflow: auto;
 }
 .audio-strip,
-.effects-stack > li {
+.effects-stack > li,
+.transition-item {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -1788,6 +1790,78 @@ label {
   border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
   background: #2a2a2c;
+}
+.transitions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.transitions-section h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #9d9da1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.transition-type-picker {
+  display: flex;
+  gap: 0.35rem;
+}
+.transition-type-btn {
+  padding: 0.35rem;
+  border: 1px solid #3a3a3e;
+  border-radius: 0.25rem;
+  background: #2a2a2c;
+  color: #e4e4e6;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.transition-type-btn:hover {
+  border-color: #e9b949;
+  background: #2f2f32;
+}
+.transition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.transition-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.transition-type-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.2rem;
+  background: #3a3a3e;
+  color: #e9b949;
+  text-transform: uppercase;
+}
+.transition-clips {
+  font-size: 0.7rem;
+  color: #9d9da1;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.transition-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.25rem;
+}
+.transition-controls .control-row {
+  flex-wrap: wrap;
+}
+.duration-value {
+  font-size: 0.7rem;
+  color: #e9b949;
+  font-variant-numeric: tabular-nums;
 }
 .audio-clip-id {
   flex: 1;

@@ -8,6 +8,7 @@ export const PANEL_IDS = [
   'camera',
   'audio',
   'effects',
+  'transitions',
   'color',
   'history',
   'diagnostics',

@@ -62,6 +62,7 @@ import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
+import { TransitionsPanel } from './TransitionsPanel.js';
 import {
   ensureClipAudio,
   loadAudioState,
@@ -902,7 +903,14 @@ function EditorWorkspace({
             ).transform,
           }),
         );
-        return buildRenderFrameIR(compositionV1?.id ?? 'root', timeUs, width, height, resolved);
+        return buildRenderFrameIR(
+          compositionV1?.id ?? 'root',
+          timeUs,
+          width,
+          height,
+          resolved,
+          session.visualProject.transitions,
+        );
       };
       const transitionTimes = Array.from(
         new Set(
@@ -1181,6 +1189,7 @@ function EditorWorkspace({
         'agent',
         'workflows',
         'plugins',
+        'transitions',
       ] as const;
       for (const id of stackedUtilities) {
         addPanel(id, { position: { referencePanel: 'captions', direction: 'within' } });
@@ -1264,6 +1273,34 @@ function EditorWorkspace({
           project={visualProject}
           objectId={objectId}
           onChange={context.replaceVisualProject}
+        />
+      );
+    }
+    if (api.id === 'transitions') {
+      return (
+        <TransitionsPanel
+          project={visualProject}
+          selectedClipIds={state.selectedIds}
+          onAddTransition={(t) =>
+            context.replaceVisualProject({
+              ...visualProject,
+              transitions: [...(visualProject.transitions ?? []), { ...t, id: `transition-${Date.now()}` }],
+            })
+          }
+          onRemoveTransition={(transitionId) =>
+            context.replaceVisualProject({
+              ...visualProject,
+              transitions: (visualProject.transitions ?? []).filter((t) => t.id !== transitionId),
+            })
+          }
+          onUpdateTransition={(transitionId, updates) =>
+            context.replaceVisualProject({
+              ...visualProject,
+              transitions: (visualProject.transitions ?? []).map((t) =>
+                t.id === transitionId ? { ...t, ...updates } : t,
+              ),
+            })
+          }
         />
       );
     }
@@ -1701,29 +1738,30 @@ function MonitorPanel() {
   const [error, setError] = useState<string | undefined>(undefined);
 
   paintRef.current = (): void => {
-    const renderer = rendererRef.current;
-    if (renderer === null) return;
-    const composition = visualProject.compositions[visualProject.rootCompositionId];
-    if (composition === undefined) return;
-    const cameraId = composition.activeCameraId;
-    const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
-      object,
-      transform: evaluateCameraExpressionTransform(
-        object.id,
-        cameraId,
-        objectsById,
+      const renderer = rendererRef.current;
+      if (renderer === null) return;
+      const composition = visualProject.compositions[visualProject.rootCompositionId];
+      if (composition === undefined) return;
+      const cameraId = composition.activeCameraId;
+      const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
+      const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
+        object,
+        transform: evaluateCameraExpressionTransform(
+          object.id,
+          cameraId,
+          objectsById,
+          state.playheadUs,
+          composition.height,
+        ).transform,
+      }));
+      const visualFrame = buildRenderFrameIR(
+        composition.id,
         state.playheadUs,
+        composition.width,
         composition.height,
-      ).transform,
-    }));
-    const visualFrame = buildRenderFrameIR(
-      composition.id,
-      state.playheadUs,
-      composition.width,
-      composition.height,
-      resolved,
-    );
+        resolved,
+        visualProject.transitions,
+      );
     const frame =
       previewVideoFrame === undefined
         ? visualFrame

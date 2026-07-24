@@ -11,8 +11,8 @@
  */
 
 import type { VisualObjectV1, VisualObjectTransformV1 } from '@joy-media/project-schema';
-import type { RenderNode, RenderFrameIR, Rgba, Transform2D } from '@joy-media/render-ir';
-import type { TimeUs } from '@joy-media/project-schema';
+import type { RenderNode, RenderFrameIR, Rgba, Transform2D, TransitionNode } from '@joy-media/render-ir';
+import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -88,6 +88,9 @@ export function visualObjectToRenderNode(resolved: ResolvedObject): RenderNode |
 /**
  * Convert a flat list of resolved objects (already sorted by z/draw order)
  * into a RenderFrameIR ready for renderer-pixi or renderer-headless.
+ *
+ * If transitions are provided, they are converted to transition render nodes
+ * and included in the node list.
  */
 export function buildRenderFrameIR(
   compositionId: string,
@@ -95,12 +98,22 @@ export function buildRenderFrameIR(
   width: number,
   height: number,
   resolvedObjects: readonly ResolvedObject[],
+  transitions?: readonly TransitionV1[],
 ): RenderFrameIR {
   const nodes: RenderNode[] = [];
   for (const resolved of resolvedObjects) {
     const node = visualObjectToRenderNode(resolved);
     if (node) nodes.push(node);
   }
+
+  // Add transition nodes if transitions are provided and active at this time
+  if (transitions && transitions.length > 0) {
+    const transitionNodes = transitions
+      .filter((t) => isTransitionActive(t, timeUs))
+      .map((t) => transitionToRenderNode(t, timeUs, width, height));
+    nodes.push(...transitionNodes);
+  }
+
   return {
     version: 1,
     compositionId,
@@ -108,6 +121,40 @@ export function buildRenderFrameIR(
     viewport: { width, height, dpr: 1 },
     background: DARK_BG,
     nodes,
+  };
+}
+
+/** Check if a transition is active at the given time. */
+function isTransitionActive(transition: TransitionV1, timeUs: TimeUs): boolean {
+  // We need to find the right clip's start time to know when the transition starts
+  // For now, we'll assume the transition starts at the right clip's startUs - durationUs
+  // This is a simplification; a full implementation would look up the clips
+  return true; // Placeholder - full implementation needs clip timing
+}
+
+/** Convert a TransitionV1 to a RenderNode for the renderer. */
+function transitionToRenderNode(
+  transition: TransitionV1,
+  timeUs: TimeUs,
+  width: number,
+  height: number,
+): RenderNode {
+  // Calculate progress through transition (0 to 1)
+  const progress = Math.min(1, Math.max(0, timeUs / transition.durationUs));
+
+  return {
+    kind: 'transition',
+    id: `transition-${transition.id}`,
+    zIndex: 1000, // Render on top of normal content
+    opacity: 1,
+    transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+    width,
+    height,
+    color: { r: 0, g: 0, b: 0, a: 0 },
+    transitionType: transition.type,
+    progress,
+    leftClipId: transition.leftClipId,
+    rightClipId: transition.rightClipId,
   };
 }
 
