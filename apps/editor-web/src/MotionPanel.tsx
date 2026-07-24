@@ -18,6 +18,7 @@ import {
 } from '@joy-media/motion-core';
 import { FIRST_PARTY_SCENES, type FirstPartySceneId } from '@joy-media/html-scene-runtime/first-party';
 import { CheckIcon, CloseIcon, PlusIcon } from './icons.js';
+import { GraphEditor } from './GraphEditor.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -29,7 +30,6 @@ interface MotionPanelProps {
 }
 
 const LANE_WIDTH = 280;
-const GRAPH_HEIGHT = 90;
 const PRESET_DURATION_US = 1_000_000;
 
 const IDENTITY_TRANSFORM = {
@@ -284,73 +284,69 @@ export function MotionPanel({
       )}
 
       {activeGraph !== undefined && (
-        <MotionGraph
+        <GraphEditor
           object={object}
           channel={activeGraph}
           duration={duration}
           playheadUs={playheadUs}
+          onSeek={onSeek}
+          onDispatch={onDispatch}
         />
+      )}
+
+      {object !== undefined && (
+        <SpatialPathPreview object={object} duration={duration} playheadUs={playheadUs} />
       )}
     </article>
   );
 }
 
-interface MotionGraphProps {
+function SpatialPathPreview({
+  object,
+  duration,
+  playheadUs,
+}: {
   readonly object: VisualObjectV1;
-  readonly channel: AnimatablePropertyV1;
   readonly duration: number;
   readonly playheadUs: number;
-}
-
-function MotionGraph({ object, channel, duration, playheadUs }: MotionGraphProps) {
-  const curve = object.animations?.[channel];
-  if (curve === undefined) return null;
-  const samples = 80;
-  const points: { readonly t: number; readonly v: number }[] = [];
+}) {
+  const xCurve = object.animations?.x;
+  const yCurve = object.animations?.y;
+  if (xCurve === undefined || yCurve === undefined) {
+    return (
+      <section className="motion-spatial">
+        <h3>Spatial path</h3>
+        <p className="empty-hint">Animate both X and Y to preview the 2D motion path.</p>
+      </section>
+    );
+  }
+  const samples = 48;
+  const points: { x: number; y: number }[] = [];
   for (let i = 0; i <= samples; i += 1) {
     const t = (duration * i) / samples;
-    points.push({ t, v: sampleCurve(curve, t) });
+    points.push({ x: sampleCurve(xCurve, t), y: sampleCurve(yCurve, t) });
   }
-  const values = points.map((point) => point.v);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const x = (t: number) => (t / duration) * LANE_WIDTH;
-  const y = (v: number) => GRAPH_HEIGHT - 8 - ((v - min) / span) * (GRAPH_HEIGHT - 16);
-  const path = points.map((point) => `${x(point.t).toFixed(1)},${y(point.v).toFixed(1)}`).join(' ');
-
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const w = 280;
+  const h = 100;
+  const px = (v: number) => ((v - minX) / spanX) * (w - 16) + 8;
+  const py = (v: number) => h - 8 - ((v - minY) / spanY) * (h - 16);
+  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(' ');
+  const now = { x: sampleCurve(xCurve, playheadUs), y: sampleCurve(yCurve, playheadUs) };
   return (
-    <div className="motion-graph">
-      <div className="motion-graph-scale">
-        <span>{max.toFixed(2)}</span>
-        <span>{min.toFixed(2)}</span>
-      </div>
-      <svg
-        viewBox={`0 0 ${LANE_WIDTH} ${GRAPH_HEIGHT}`}
-        width={LANE_WIDTH}
-        height={GRAPH_HEIGHT}
-        role="img"
-        aria-label={`${channel} value graph`}
-      >
-        <polyline points={path} fill="none" stroke="#7cc4ff" strokeWidth={1.5} />
-        <line
-          x1={x(playheadUs)}
-          y1={0}
-          x2={x(playheadUs)}
-          y2={GRAPH_HEIGHT}
-          stroke="#e9b949"
-          strokeWidth={1}
-        />
-        {curve.keyframes.map((keyframe) => (
-          <circle
-            key={keyframe.timeUs}
-            cx={x(keyframe.timeUs)}
-            cy={y(keyframe.value)}
-            r={3}
-            fill="#e9b949"
-          />
-        ))}
+    <section className="motion-spatial">
+      <h3>Spatial path</h3>
+      <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} role="img" aria-label="XY motion path">
+        <path d={d} fill="none" stroke="#7cc4ff" strokeWidth={1.5} />
+        <circle cx={px(now.x)} cy={py(now.y)} r={4} fill="#e9b949" />
       </svg>
-    </div>
+    </section>
   );
 }

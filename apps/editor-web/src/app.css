@@ -466,6 +466,25 @@ label {
   cursor: grab;
   touch-action: none;
 }
+.timeline-clip-trim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0.45rem;
+  z-index: 3;
+  cursor: ew-resize;
+  background: transparent;
+}
+.timeline-clip-trim:hover,
+.timeline-clip-trim:active {
+  background: #e9b949aa;
+}
+.timeline-clip-trim-start {
+  left: 0;
+}
+.timeline-clip-trim-end {
+  right: 0;
+}
 .timeline-clip-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1656,3 +1675,106 @@ label {
   opacity: 1;
 }
 
+
+.timeline-clip-waveform {
+  position: absolute;
+  inset: auto 0.45rem 0.1rem;
+  height: 0.35rem;
+  opacity: 0.45;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    #9ad0ff 0 2px,
+    transparent 2px 5px
+  );
+}
+.timeline-marker-rail {
+  position: relative;
+  height: 0.9rem;
+  margin-left: 7.5rem;
+}
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #e9b949;
+  cursor: pointer;
+  font-size: 0.65rem;
+  line-height: 1;
+}
+.graph-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+.audio-panel,
+.effects-panel,
+.color-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.5rem;
+  overflow: auto;
+}
+.audio-strip,
+.effects-stack > li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid #3a3a3e;
+  border-radius: 0.25rem;
+  background: #2a2a2c;
+}
+.audio-strip-flags {
+  display: flex;
+  gap: 0.25rem;
+}
+.audio-meter {
+  height: 0.35rem;
+  background: #1a1a1c;
+  border-radius: 0.15rem;
+  overflow: hidden;
+}
+.audio-meter > span {
+  display: block;
+  height: 100%;
+  background: #7cc4ff;
+}
+.effects-catalog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.color-scopes {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  height: 5rem;
+  padding: 0.35rem;
+  background: #1a1a1c;
+  border-radius: 0.25rem;
+}
+.scope-bar {
+  flex: 1;
+  border-radius: 0.1rem 0.1rem 0 0;
+}
+.scope-r { background: #e06666; }
+.scope-g { background: #6aa84f; }
+.scope-b { background: #6fa8dc; }
+.export-preset-select {
+  max-width: 9rem;
+  height: 1.7rem;
+  border: 1px solid #4a4a4e;
+  border-radius: 0.2rem;
+  background: #2a2a2c;
+  color: #e4e4e6;
+  font-size: 0.72rem;
+}
+.motion-spatial {
+  margin-top: 0.75rem;
+}

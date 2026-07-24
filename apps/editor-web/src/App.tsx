@@ -59,6 +59,17 @@ import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { AudioPanel } from './AudioPanel.js';
+import { EffectsPanel } from './EffectsPanel.js';
+import { ColorPanel } from './ColorPanel.js';
+import {
+  ensureClipAudio,
+  loadAudioState,
+  saveAudioState,
+  withProjectAudio,
+} from './audio-session.js';
+import type { AudioState } from '@joy-media/commands';
+import type { ExportPresetId } from '@joy-media/project-schema';
 import { AgentPanel } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
@@ -236,6 +247,9 @@ interface EditorPanelContextValue {
     value: number,
   ) => void;
   readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
+  readonly replaceVisualProject: (next: JoyProjectV1) => void;
+  readonly audioState: AudioState;
+  readonly setAudioState: (next: AudioState, label?: string) => void;
   readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
   readonly transcriptionError: string | undefined;
   readonly undo: () => void;
@@ -328,6 +342,8 @@ function EditorWorkspace({
   const [exportHistory, setExportHistory] = useState<readonly ExportProcessEntry[]>(() =>
     loadExportHistory(window.localStorage),
   );
+  const [exportPreset, setExportPreset] = useState<ExportPresetId>('social-h264-aac');
+  const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
   const [processesOpen, setProcessesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
@@ -373,7 +389,12 @@ function EditorWorkspace({
   // `buildEditorContext`'s selection/audio fields are pre-existing, unwired
   // summarizers (always empty); the Agent panel reads real selection/playhead
   // state directly as props instead, documented in the WP-15 plan.
-  const agentContext = buildEditorContext(session.timelineProject, undefined, agentCommandBusRef.current);
+  const agentContext = buildEditorContext(
+    session.timelineProject,
+    undefined,
+    agentCommandBusRef.current,
+    { liveAudio: audioState },
+  );
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
@@ -421,6 +442,7 @@ function EditorWorkspace({
       scheduler.current.seek(sourceTimeUs);
       lastMediaTimeUsRef.current = undefined;
       if (play) {
+        video.muted = false;
         if (rate === 0) {
           video.pause();
           freezeWallStartRef.current = {
@@ -598,6 +620,33 @@ function EditorWorkspace({
     },
     [session],
   );
+
+  const replaceVisualProject = useCallback(
+    (next: JoyProjectV1) => {
+      session.replaceVisualProject(next);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
+
+  const setAudioState = useCallback(
+    (next: AudioState) => {
+      setAudioStateRaw(next);
+      saveAudioState(projectId, next);
+      session.replaceVisualProject(withProjectAudio(session.visualProject, next));
+      setRevision((revision) => revision + 1);
+    },
+    [projectId, session],
+  );
+
+  const timelineClipIds =
+    session.timelineProject.compositions.root?.tracks.flatMap((track) =>
+      track.clips.map((clip) => clip.id),
+    ) ?? [];
+  useEffect(() => {
+    setAudioStateRaw((current) => ensureClipAudio(current, timelineClipIds));
+  }, [timelineClipIds.join('|')]);
+
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
       try {
@@ -777,8 +826,21 @@ function EditorWorkspace({
     try {
       const compositionV1 =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
-      const width = compositionV1?.width ?? 1920;
-      const height = compositionV1?.height ?? 1080;
+      const baseWidth = compositionV1?.width ?? 1920;
+      const baseHeight = compositionV1?.height ?? 1080;
+      const { width, height } = (() => {
+        switch (exportPreset) {
+          case 'reels-1080':
+          case 'shorts-1080':
+            return { width: 1080, height: 1920 };
+          case 'youtube-1080':
+            return { width: 1920, height: 1080 };
+          case 'high-bitrate':
+            return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
+          default:
+            return { width: baseWidth, height: baseHeight };
+        }
+      })();
       const compositionTimeline = session.timelineProject.compositions.root;
       const durationUs = compositionTimeline?.durationUs ?? 30_000_000;
       const frameRate = 30;
@@ -788,6 +850,11 @@ function EditorWorkspace({
         height,
         frameRate,
         durationUs,
+      });
+      session.replaceVisualProject({
+        ...session.visualProject,
+        exportPreset,
+        updatedAt: new Date().toISOString(),
       });
       const cameraId = compositionV1?.activeCameraId;
       const objectsById = session.visualProject.visualObjects as Readonly<
@@ -981,13 +1048,14 @@ function EditorWorkspace({
     } finally {
       setExporting(false);
     }
-  }, [exporting, recordExportEntry, session]);
+  }, [exportPreset, exporting, recordExportEntry, session]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
     // v3: utilities stack as tabs in one group (`within`). v2 wrongly split each
     // utility into its own column via repeated `direction: 'right'`.
-    const layoutKey = 'joy-media.dockview.v3';
+    const layoutKey = 'joy-media.dockview.v4';
     window.localStorage.removeItem('joy-media.dockview.v1');
     window.localStorage.removeItem('joy-media.dockview.v2');
+    window.localStorage.removeItem('joy-media.dockview.v3');
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -1030,6 +1098,9 @@ function EditorWorkspace({
         'inspector',
         'motion',
         'camera',
+        'audio',
+        'effects',
+        'color',
         'history',
         'diagnostics',
         'jobs',
@@ -1099,6 +1170,31 @@ function EditorWorkspace({
         />
       );
     }
+    if (api.id === 'audio') {
+      const clipIds =
+        context.timelineProject.compositions.root?.tracks.flatMap((track) =>
+          track.clips.map((clip) => clip.id),
+        ) ?? [];
+      return (
+        <AudioPanel
+          clipIds={clipIds}
+          audioState={context.audioState}
+          onAudioChange={(next) => context.setAudioState(next)}
+        />
+      );
+    }
+    if (api.id === 'effects') {
+      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      return (
+        <EffectsPanel
+          project={visualProject}
+          objectId={objectId}
+          onChange={context.replaceVisualProject}
+        />
+      );
+    }
+    if (api.id === 'color')
+      return <ColorPanel project={visualProject} onChange={context.replaceVisualProject} />;
     if (api.id === 'captions')
       return (
         <CaptionsPanel
@@ -1117,10 +1213,36 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedIds={state.selectedIds}
+          markers={visualProject.markers}
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
           onDispatch={context.dispatchTimeline}
+          onAddMarker={(timeUs, label) =>
+            context.dispatchProject({
+              label: `Add ${label}`,
+              commands: [
+                {
+                  type: 'marker.add',
+                  payload: {
+                    marker: {
+                      id: `marker-${timeUs}`,
+                      timeUs,
+                      label,
+                      kind: 'marker',
+                      color: '#e9b949',
+                    },
+                  },
+                },
+              ],
+            })
+          }
+          onRemoveMarker={(id) =>
+            context.dispatchProject({
+              label: `Remove marker ${id}`,
+              commands: [{ type: 'marker.remove', payload: { markerId: id } }],
+            })
+          }
         />
       );
     if (api.id === 'jobs')
@@ -1278,6 +1400,20 @@ function EditorWorkspace({
         >
           <CommandIcon />
         </button>
+        <select
+          aria-label="Export preset"
+          className="export-preset-select"
+          value={exportPreset}
+          disabled={exporting}
+          onChange={(event) => setExportPreset(event.currentTarget.value as ExportPresetId)}
+          title="Export preset"
+        >
+          <option value="social-h264-aac">Social H.264</option>
+          <option value="reels-1080">Reels 1080×1920</option>
+          <option value="shorts-1080">Shorts 1080×1920</option>
+          <option value="youtube-1080">YouTube 1920×1080</option>
+          <option value="high-bitrate">High bitrate</option>
+        </select>
         <button
           className="icon-button"
           onClick={handleExport}
@@ -1424,7 +1560,7 @@ function EditorWorkspace({
           ))}
         </section>
       )}
-      <video ref={videoRef} className="playback-media" playsInline />
+      <video ref={videoRef} className="playback-media" playsInline muted={false} />
       <EditorPanelContext.Provider
         value={{
           state,
@@ -1446,6 +1582,9 @@ function EditorWorkspace({
           dispatchTimeline,
           updateVisualProperty,
           dispatchProject,
+          replaceVisualProject,
+          audioState,
+          setAudioState,
           transcribe,
           transcriptionError,
           undo,

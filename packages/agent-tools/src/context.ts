@@ -26,6 +26,8 @@ export interface EditorContext {
   readonly timeline: TimelineContext;
   readonly captions?: CaptionContext;
   readonly audio: AudioContext;
+  /** Live mixer graph when the editor binds one (Phase 3). */
+  readonly liveAudio?: import('@joy-media/commands').AudioState;
   readonly providers: ProviderContext;
   readonly availableTools: readonly string[];
   readonly recentHistory: readonly string[];
@@ -114,6 +116,7 @@ export function buildEditorContext(
   projectState: unknown,
   options?: ContextOptions,
   dispatch?: CommandDispatcher,
+  extras?: { readonly liveAudio?: import('@joy-media/commands').AudioState },
 ): EditorContext {
   const opts = {
     maxTimelineSummaryItems: 10,
@@ -136,6 +139,7 @@ export function buildEditorContext(
     timeline,
     ...(captions && { captions }),
     audio,
+    ...(extras?.liveAudio !== undefined ? { liveAudio: extras.liveAudio } : {}),
     providers,
     availableTools: [],
     recentHistory: [],

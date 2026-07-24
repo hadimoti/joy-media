@@ -11,6 +11,7 @@ import {
   rippleDelete,
   timeToPixel,
   toggleTrackFlag,
+  trimCommand,
   virtualTracks,
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
@@ -32,6 +33,7 @@ import {
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  PlusIcon,
 } from './icons.js';
 import {
   TimelineContextMenu,
@@ -48,20 +50,28 @@ function TimelineClip({
   selected,
   maxStartUs,
   viewport,
+  locked,
   onToggleSelection,
   onMove,
+  onTrim,
   onContextMenu,
 }: {
   readonly clip: Clip;
   readonly selected: boolean;
   readonly maxStartUs: number;
   readonly viewport: TimelineViewport;
+  readonly locked: boolean;
   readonly onToggleSelection: (id: string) => void;
   readonly onMove: (clipId: string, newStartUs: number) => boolean;
+  readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   readonly onContextMenu: (clipId: string, clientX: number, clientY: number) => void;
 }) {
   const [dragPx, setDragPx] = useState<number | undefined>(undefined);
+  const [trimPreview, setTrimPreview] = useState<
+    { edge: 'start' | 'end'; timeUs: number } | undefined
+  >(undefined);
   const dragRef = useRef<{ originX: number; moved: boolean } | null>(null);
+  const trimRef = useRef<{ edge: 'start' | 'end'; originX: number } | null>(null);
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
 
@@ -71,20 +81,44 @@ function TimelineClip({
     return Math.min(maxStartUs, Math.max(0, snapped));
   };
 
+  const trimTimeUs = (edge: 'start' | 'end', clientX: number, originX: number): number => {
+    const deltaUs = (clientX - originX) / pxPerUs;
+    if (edge === 'start') {
+      const raw = clip.startUs + deltaUs;
+      const snapped = Math.round(raw / SNAP_US) * SNAP_US;
+      const maxStart = clip.startUs + clip.durationUs - SNAP_US;
+      return Math.min(maxStart, Math.max(0, snapped));
+    }
+    const raw = clip.startUs + clip.durationUs + deltaUs;
+    const snapped = Math.round(raw / SNAP_US) * SNAP_US;
+    const minEnd = clip.startUs + SNAP_US;
+    return Math.max(minEnd, snapped);
+  };
+
   const displayStartUs =
-    dragPx !== undefined ? dropTimeUs(dragPx) : clip.startUs;
+    trimPreview?.edge === 'start'
+      ? trimPreview.timeUs
+      : dragPx !== undefined
+        ? dropTimeUs(dragPx)
+        : clip.startUs;
+  const displayDurationUs =
+    trimPreview === undefined
+      ? clip.durationUs
+      : trimPreview.edge === 'start'
+        ? clip.startUs + clip.durationUs - trimPreview.timeUs
+        : trimPreview.timeUs - clip.startUs;
 
   return (
     <button
-      className={`timeline-clip${dragPx !== undefined ? ' dragging' : ''}`}
+      className={`timeline-clip${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}`}
       aria-pressed={selected}
       title={`${clip.id} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
         left: `${timeToPixel(displayStartUs, viewport)}px`,
-        width: `${Math.max(8, clip.durationUs * pxPerUs)}px`,
+        width: `${Math.max(8, displayDurationUs * pxPerUs)}px`,
       }}
       onClick={() => {
-        if (dragRef.current?.moved !== true) onToggleSelection(clip.id);
+        if (dragRef.current?.moved !== true && trimRef.current === null) onToggleSelection(clip.id);
         dragRef.current = null;
       }}
       onContextMenu={(event) => {
@@ -93,11 +127,17 @@ function TimelineClip({
         onContextMenu(clip.id, event.clientX, event.clientY);
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || locked) return;
+        if ((event.target as HTMLElement).dataset.trimEdge) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         dragRef.current = { originX: event.clientX, moved: false };
       }}
       onPointerMove={(event) => {
+        const trim = trimRef.current;
+        if (trim !== null) {
+          setTrimPreview({ edge: trim.edge, timeUs: trimTimeUs(trim.edge, event.clientX, trim.originX) });
+          return;
+        }
         const drag = dragRef.current;
         if (drag === null) return;
         const deltaPx = event.clientX - drag.originX;
@@ -105,6 +145,14 @@ function TimelineClip({
         if (drag.moved) setDragPx(deltaPx);
       }}
       onPointerUp={(event) => {
+        const trim = trimRef.current;
+        if (trim !== null) {
+          const timeUs = trimTimeUs(trim.edge, event.clientX, trim.originX);
+          trimRef.current = null;
+          setTrimPreview(undefined);
+          onTrim(clip.id, trim.edge, timeUs);
+          return;
+        }
         const drag = dragRef.current;
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
@@ -113,33 +161,70 @@ function TimelineClip({
       }}
       onPointerCancel={() => {
         setDragPx(undefined);
+        setTrimPreview(undefined);
         dragRef.current = null;
+        trimRef.current = null;
       }}
     >
+      {!locked && (
+        <>
+          <span
+            className="timeline-clip-trim timeline-clip-trim-start"
+            data-trim-edge="start"
+            aria-label={`Trim start of ${clip.id}`}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              (event.currentTarget.parentElement as HTMLElement).setPointerCapture(event.pointerId);
+              trimRef.current = { edge: 'start', originX: event.clientX };
+            }}
+          />
+          <span
+            className="timeline-clip-trim timeline-clip-trim-end"
+            data-trim-edge="end"
+            aria-label={`Trim end of ${clip.id}`}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              (event.currentTarget.parentElement as HTMLElement).setPointerCapture(event.pointerId);
+              trimRef.current = { edge: 'end', originX: event.clientX };
+            }}
+          />
+        </>
+      )}
       <span className="timeline-clip-label">{clip.id}</span>
       {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
+      <span className="timeline-clip-waveform" aria-hidden="true" />
     </button>
   );
 }
+
+export const JOY_MEDIA_ASSET_DND = 'application/x-joy-media-asset';
 
 export function TimelinePanel({
   project,
   playheadUs,
   playing,
   selectedIds,
+  markers = [],
   onTogglePlayback,
   onSeek,
   onToggleSelection,
   onDispatch,
+  onAddMarker,
+  onRemoveMarker,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
   readonly playing: boolean;
   readonly selectedIds: readonly string[];
+  readonly markers?: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
   readonly onTogglePlayback: () => void;
   readonly onSeek: (timeUs: number) => void;
   readonly onToggleSelection: (id: string) => void;
   readonly onDispatch: (transaction: CommandTransaction) => void;
+  readonly onAddMarker?: (timeUs: number, label: string) => void;
+  readonly onRemoveMarker?: (id: string) => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [viewport, setViewport] = useState<TimelineViewport>({
@@ -252,6 +337,57 @@ export function TimelinePanel({
     } catch {
       return false;
     }
+  };
+
+  const trimClip =
+    (trackId: string) =>
+    (clipId: string, edge: 'start' | 'end', timeUs: number): boolean => {
+      try {
+        onDispatch({
+          label: `Trim ${edge} ${clipId}`,
+          commands: [trimCommand(composition.id, trackId, clipId, edge, timeUs)],
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+  const insertAssetOnTrack = (
+    trackId: string,
+    asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+    dropUs: number,
+  ) => {
+    const source = composition.tracks.find((t) => t.id === trackId);
+    if (source === undefined) return;
+    const durationUs = 5_000_000;
+    const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
+    let startUs = Math.max(0, snapped);
+    const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+    for (const existing of sorted) {
+      const end = existing.startUs + existing.durationUs;
+      if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
+    }
+    onDispatch({
+      label: `Insert ${asset.displayName ?? asset.assetId}`,
+      commands: [
+        {
+          type: 'timeline.insertClip',
+          payload: {
+            compositionId: composition.id,
+            trackId,
+            clip: {
+              id: `clip-${asset.assetId}-${Date.now()}`,
+              kind: 'video',
+              assetId: asset.assetId,
+              startUs,
+              durationUs,
+              sourceInUs: 0,
+            },
+          },
+        },
+      ],
+    });
   };
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -438,6 +574,44 @@ export function TimelinePanel({
         >
           <SkipForwardIcon />
         </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Add video track"
+          title="Add track"
+          onClick={() => {
+            const order = composition.tracks.length;
+            onDispatch({
+              label: 'Add track',
+              commands: [
+                {
+                  type: 'timeline.addTrack',
+                  payload: {
+                    compositionId: composition.id,
+                    track: {
+                      id: `V${order + 1}`,
+                      kind: 'video',
+                      order,
+                      enabled: true,
+                      clips: [],
+                    },
+                  },
+                },
+              ],
+            });
+          }}
+        >
+          <PlusIcon />
+        </button>
+        {onAddMarker !== undefined && (
+          <button
+            type="button"
+            className="icon-button icon-button-labeled"
+            onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+          >
+            Marker
+          </button>
+        )}
         <input
           aria-label="Playhead"
           className="timeline-playhead-slider"
@@ -498,6 +672,28 @@ export function TimelinePanel({
         }}
       >
         <div className="timeline-tracks-inner" ref={laneMeasureRef}>
+          {markers.length > 0 && (
+            <div className="timeline-marker-rail" style={{ minWidth: `${laneWidthPx}px` }}>
+              {markers.map((marker) => (
+                <button
+                  key={marker.id}
+                  type="button"
+                  className="timeline-marker"
+                  style={{
+                    left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                  }}
+                  title={marker.label}
+                  onClick={() => onSeek(marker.timeUs)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onRemoveMarker?.(marker.id);
+                  }}
+                >
+                  ▼
+                </button>
+              ))}
+            </div>
+          )}
           {visible.map((track) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
@@ -521,7 +717,22 @@ export function TimelinePanel({
                     aria-pressed={track.muted}
                     aria-label={`Mute ${track.id}`}
                     title={track.muted ? 'Unmute track' : 'Mute track'}
-                    onClick={() => toggle(track.id, 'muted')}
+                    onClick={() => {
+                      toggle(track.id, 'muted');
+                      onDispatch({
+                        label: track.muted ? `Enable ${track.id}` : `Mute ${track.id}`,
+                        commands: [
+                          {
+                            type: 'property.setTrackEnabled',
+                            payload: {
+                              compositionId: composition.id,
+                              trackId: track.id,
+                              enabled: track.muted,
+                            },
+                          },
+                        ],
+                      });
+                    }}
                   >
                     <MuteIcon />
                   </button>
@@ -534,12 +745,62 @@ export function TimelinePanel({
                   >
                     <SoloIcon />
                   </button>
+                  {source.clips.length === 0 && composition.tracks.length > 1 && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove track ${track.id}`}
+                      title="Remove empty track"
+                      onClick={() =>
+                        onDispatch({
+                          label: `Remove ${track.id}`,
+                          commands: [
+                            {
+                              type: 'timeline.removeTrack',
+                              payload: {
+                                compositionId: composition.id,
+                                trackId: track.id,
+                              },
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
                 </div>
                 <span
                   className="timeline-lane"
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onPointerDown={(event) => {
                     if (event.target === event.currentTarget) seekFromLane(event);
+                  }}
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (track.locked) return;
+                    const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+                    if (!raw) return;
+                    try {
+                      const asset = JSON.parse(raw) as {
+                        assetId: string;
+                        kind: string;
+                        displayName?: string;
+                      };
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const dropUs = pixelToTime(event.clientX - rect.left, {
+                        originUs: 0,
+                        pixelsPerSecond: viewport.pixelsPerSecond,
+                      });
+                      insertAssetOnTrack(track.id, asset, dropUs);
+                    } catch {
+                      /* ignore malformed payload */
+                    }
                   }}
                 >
                   {source.clips.map((clip) => (
@@ -549,8 +810,10 @@ export function TimelinePanel({
                       selected={selectedIds.includes(clip.id)}
                       maxStartUs={composition.durationUs - clip.durationUs}
                       viewport={{ ...viewport, originUs: 0 }}
+                      locked={track.locked}
                       onToggleSelection={onToggleSelection}
                       onMove={track.locked ? () => false : moveClip(track.id)}
+                      onTrim={track.locked ? () => false : trimClip(track.id)}
                       onContextMenu={(clipId, x, y) => {
                         const target = source.clips.find((c) => c.id === clipId);
                         if (target === undefined) return;

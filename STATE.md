@@ -3,7 +3,7 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-24)** below. Committed tip: `9fd9301`. Live web symlink: `residuals-piper-gpu-pixi`. Working tree (2026-07-24) has **uncommitted** CapCut-style project library gate + timeline NLE polish.
+> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-24)** below. Pro-tools roadmap Phases 0–6 landed 2026-07-24 (library/timeline ship, trim/DnD/audio preview, GraphEditor, Audio/Effects/Color panels, markers/tracks, export presets, honest agent audio).
 
 | Part                             | Status      | WPs done | Last session | Next action                                                                                                       |
 | -------------------------------- | ----------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |

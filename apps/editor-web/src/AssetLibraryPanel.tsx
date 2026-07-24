@@ -17,6 +17,7 @@ import {
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { CloseIcon, CloudIcon, ImageIcon, PlayIcon, RefreshIcon } from './icons.js';
+import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
 const categories: readonly { readonly id: AssetCategory; readonly label: string }[] = [
   { id: 'all', label: 'All assets' },
@@ -373,7 +374,23 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
                 derivative?.availability ??
                 (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
               return (
-                <li key={asset.id} className="asset-card">
+                <li
+                  key={asset.id}
+                  className="asset-card"
+                  draggable
+                  title="Drag onto a timeline track"
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(
+                      JOY_MEDIA_ASSET_DND,
+                      JSON.stringify({
+                        assetId: asset.id,
+                        kind: asset.kind,
+                        displayName: asset.displayName,
+                      }),
+                    );
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
+                >
                   <div className="asset-card-heading">
                     <strong title={asset.id}>{asset.displayName}</strong>
                     <span className={`asset-kind asset-kind-${asset.kind}`}>{asset.kind}</span>

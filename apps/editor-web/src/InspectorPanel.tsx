@@ -19,7 +19,9 @@ import {
   resolveObjectTransformWithExpressions,
   sampleCurve,
   setKeyframe,
+  EASED_HANDLES,
 } from '@joy-media/motion-core';
+import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
 
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -55,6 +57,7 @@ export function InspectorPanel({
   );
   const [draftSource, setDraftSource] = useState('');
   const [commitError, setCommitError] = useState<string | undefined>(undefined);
+  const [interpolation, setInterpolation] = useState<KeyframeInterpolationV1>('linear');
 
   if (object === undefined) return <p>Select a visual clip to edit.</p>;
   const timeUs = Math.max(0, Math.round(playheadUs));
@@ -82,13 +85,26 @@ export function InspectorPanel({
     });
   };
 
+  const keyframePayload = (value: number) => {
+    if (interpolation === 'bezier')
+      return {
+        timeUs,
+        value,
+        interpolation,
+        bezier: { x1: 0.42, y1: 0, x2: 0.58, y2: 1 },
+      } as const;
+    if (interpolation === 'eased')
+      return { timeUs, value, interpolation, bezier: EASED_HANDLES } as const;
+    return { timeUs, value, interpolation } as const;
+  };
+
   const toggleKeyframe = (property: AnimatablePropertyV1, value: number) => {
     const curve = object.animations?.[property];
     if (curve !== undefined && hasKeyframeAt(curve, timeUs)) {
       replaceChannel(property, removeKeyframe(curve, timeUs));
       return;
     }
-    replaceChannel(property, setKeyframe(curve, { timeUs, value, interpolation: 'linear' }));
+    replaceChannel(property, setKeyframe(curve, keyframePayload(value)));
   };
 
   const commitExpression = (property: AnimatablePropertyV1, source: string) => {
@@ -125,6 +141,21 @@ export function InspectorPanel({
     <article>
       <p>Editing {object.id}</p>
       <p className="inspector-time">Playhead {(timeUs / 1_000_000).toFixed(2)}s</p>
+      <label className="inspector-row">
+        <span className="inspector-label">Interp</span>
+        <select
+          aria-label="Default keyframe interpolation"
+          value={interpolation}
+          onChange={(event) =>
+            setInterpolation(event.currentTarget.value as KeyframeInterpolationV1)
+          }
+        >
+          <option value="hold">Hold</option>
+          <option value="linear">Linear</option>
+          <option value="eased">Eased</option>
+          <option value="bezier">Bezier</option>
+        </select>
+      </label>
       {NUMERIC_PROPERTIES.map((property) => {
         const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
         const curve = object.animations?.[key];
@@ -173,10 +204,7 @@ export function InspectorPanel({
                   const next = event.currentTarget.valueAsNumber;
                   if (!Number.isFinite(next)) return;
                   if (animated)
-                    replaceChannel(
-                      key,
-                      setKeyframe(curve, { timeUs, value: next, interpolation: 'linear' }),
-                    );
+                    replaceChannel(key, setKeyframe(curve, keyframePayload(next)));
                   else onSetStatic(object.id, key, next);
                 }}
               />

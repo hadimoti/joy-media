@@ -99,6 +99,14 @@ export interface FreezeFramePayload extends TrackTarget {
 export interface RestoreTrackClipsPayload extends TrackTarget {
   readonly clips: readonly Clip[];
 }
+export interface AddTrackPayload {
+  readonly compositionId: CompositionId;
+  readonly track: Track;
+}
+export interface RemoveTrackPayload {
+  readonly compositionId: CompositionId;
+  readonly trackId: TrackId;
+}
 
 export type SpikeCommand =
   | { readonly type: 'timeline.insertClip'; readonly payload: InsertClipPayload }
@@ -112,6 +120,8 @@ export type SpikeCommand =
   | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
   | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
   | { readonly type: 'timeline.restoreTrackClips'; readonly payload: RestoreTrackClipsPayload }
+  | { readonly type: 'timeline.addTrack'; readonly payload: AddTrackPayload }
+  | { readonly type: 'timeline.removeTrack'; readonly payload: RemoveTrackPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
 
 export type SpikeCommandType = SpikeCommand['type'];
@@ -131,6 +141,8 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.setClipRate': { description: 'Set clip playback rate (0.1–8×); rescale duration by default.' },
   'timeline.freezeFrame': { description: 'Insert a freeze/hold segment at a time inside a video clip.' },
   'timeline.restoreTrackClips': { description: 'Replace a track clip list (undo for compound edits).' },
+  'timeline.addTrack': { description: 'Add a track to a composition.' },
+  'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
 };
 
@@ -177,6 +189,10 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyFreezeFrame(project, command.payload);
     case 'timeline.restoreTrackClips':
       return applyRestoreTrackClips(project, command.payload);
+    case 'timeline.addTrack':
+      return applyAddTrack(project, command.payload);
+    case 'timeline.removeTrack':
+      return applyRemoveTrack(project, command.payload);
     case 'property.setTrackEnabled':
       return applySetTrackEnabled(project, command.payload);
     default: {
@@ -731,6 +747,68 @@ function applySetTrackEnabled(project: SpikeProject, payload: SetTrackEnabledPay
     inverse: {
       type: 'property.setTrackEnabled',
       payload: { ...payload, enabled: track.enabled },
+    },
+  };
+}
+
+function applyAddTrack(project: SpikeProject, payload: AddTrackPayload): ApplyResult {
+  const comp = project.compositions[payload.compositionId];
+  if (comp === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+  if (comp.tracks.some((track) => track.id === payload.track.id)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_DUPLICATE_ID',
+      `track id "${payload.track.id}" already exists`,
+    );
+  }
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: { ...comp, tracks: [...comp.tracks, payload.track] },
+      },
+    },
+    inverse: {
+      type: 'timeline.removeTrack',
+      payload: { compositionId: payload.compositionId, trackId: payload.track.id },
+    },
+  };
+}
+
+function applyRemoveTrack(project: SpikeProject, payload: RemoveTrackPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  if (track.clips.length > 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `removeTrack: track "${payload.trackId}" still has clips`,
+    );
+  }
+  const comp = project.compositions[payload.compositionId]!;
+  if (comp.tracks.length <= 1) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      'removeTrack: cannot remove the last track',
+    );
+  }
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: {
+          ...comp,
+          tracks: comp.tracks.filter((item) => item.id !== payload.trackId),
+        },
+      },
+    },
+    inverse: {
+      type: 'timeline.addTrack',
+      payload: { compositionId: payload.compositionId, track },
     },
   };
 }

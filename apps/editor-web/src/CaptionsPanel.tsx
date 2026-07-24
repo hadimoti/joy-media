@@ -300,6 +300,15 @@ function CaptionSlotEditor({
         </button>
         <button
           className="icon-button icon-button-labeled"
+          aria-label="Auto caption"
+          title="Auto caption (Whisper / fixture)"
+          onClick={() => void onTranscribe(document.id, 'en-US')}
+        >
+          <MicIcon />
+          Auto
+        </button>
+        <button
+          className="icon-button icon-button-labeled"
           aria-label="Transcribe Persian"
           title="Transcribe Persian (fa-IR)"
           onClick={() => void onTranscribe(document.id, 'fa-IR')}

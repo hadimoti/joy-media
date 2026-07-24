@@ -1,4 +1,5 @@
 import type { SpikeCommand } from '@joy-media/commands';
+import { applyAudioCommand } from '@joy-media/commands';
 import type { Clip } from '@joy-media/project-schema';
 import type { EditorContext } from './context.js';
 import type { JsonValue, Precondition, ToolDefinition, ToolDiff, ToolResult } from './types.js';
@@ -862,10 +863,8 @@ function checkJoinClipsPreconditions(
   return preconditions;
 }
 
-// The five audio tools below (setGain/setPan/setMute/setFade/addEffect) still
-// return a preview-shaped result unconditionally: editor-web has no live
-// AudioState/ProjectHistory-equivalent to dispatch into yet (a pre-existing
-// P05/editor-web gap, not introduced or silently fixed here — see WP-15 plan).
+// Audio tools require `context.liveAudio` (editor mixer graph). Without it they
+// fail honestly instead of fabricating success diffs.
 
 export function createSetGainTool(): EditTool {
   const definition: ToolDefinition = {
@@ -914,16 +913,35 @@ export function createSetGainTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
-      return {
-        success: true,
-        stableIds: [input.clipId],
-        diff: {
-          created: [],
-          modified: [input.clipId],
-          deleted: [],
-          summary: `Set gain for clip ${input.clipId}`,
-        },
-      };
+      if (context.liveAudio === undefined) {
+        return {
+          success: false,
+          error: 'No live audio graph bound — open the Audio panel in the editor',
+        };
+      }
+
+      try {
+        const gain = typeof input.gain === 'number' ? input.gain : Number(input.gain);
+        const { state } = applyAudioCommand(context.liveAudio, {
+          type: 'audioClip.setGain',
+          payload: { clipId: input.clipId, gain },
+        });
+        return {
+          success: true,
+          stableIds: [input.clipId],
+          diff: {
+            created: [],
+            modified: [input.clipId],
+            deleted: [],
+            summary: `Set gain for clip ${input.clipId} → ${gain} (graph clips=${Object.keys(state.clips).length})`,
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     },
     dryRun: (context, input) => {
       if (!isRecord(input) || typeof input.clipId !== 'string') {
@@ -937,6 +955,14 @@ export function createSetGainTool(): EditTool {
       };
     },
     checkPreconditions: (context, input) => checkSetGainPreconditions(context, input),
+  };
+}
+
+function requireLiveAudio(context: EditorContext): ToolResult | undefined {
+  if (context.liveAudio !== undefined) return undefined;
+  return {
+    success: false,
+    error: 'No live audio graph bound — open the Audio panel in the editor',
   };
 }
 
@@ -1018,16 +1044,27 @@ export function createSetPanTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
-      return {
-        success: true,
-        stableIds: [input.clipId],
-        diff: {
-          created: [],
-          modified: [input.clipId],
-          deleted: [],
-          summary: `Set pan for clip ${input.clipId}`,
-        },
-      };
+      const missing = requireLiveAudio(context);
+      if (missing) return missing;
+      try {
+        const pan = typeof input.pan === 'number' ? input.pan : Number(input.pan);
+        applyAudioCommand(context.liveAudio!, {
+          type: 'audioClip.setPan',
+          payload: { clipId: input.clipId, pan },
+        });
+        return {
+          success: true,
+          stableIds: [input.clipId],
+          diff: {
+            created: [],
+            modified: [input.clipId],
+            deleted: [],
+            summary: `Set pan for clip ${input.clipId} → ${pan}`,
+          },
+        };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     },
     dryRun: (context, input) => {
       if (!isRecord(input) || typeof input.clipId !== 'string') {
@@ -1122,16 +1159,27 @@ export function createSetMuteTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
-      return {
-        success: true,
-        stableIds: [input.clipId],
-        diff: {
-          created: [],
-          modified: [input.clipId],
-          deleted: [],
-          summary: `Set mute for clip ${input.clipId}`,
-        },
-      };
+      const missing = requireLiveAudio(context);
+      if (missing) return missing;
+      try {
+        const mute = Boolean(input.mute);
+        applyAudioCommand(context.liveAudio!, {
+          type: 'audioClip.setMute',
+          payload: { clipId: input.clipId, mute },
+        });
+        return {
+          success: true,
+          stableIds: [input.clipId],
+          diff: {
+            created: [],
+            modified: [input.clipId],
+            deleted: [],
+            summary: `Set mute for clip ${input.clipId} → ${mute}`,
+          },
+        };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     },
     dryRun: (context, input) => {
       if (!isRecord(input) || typeof input.clipId !== 'string') {
@@ -1227,16 +1275,40 @@ export function createSetFadeTool(): EditTool {
         return { success: false, error: 'invalid input' };
       }
 
-      return {
-        success: true,
-        stableIds: [input.clipId],
-        diff: {
-          created: [],
-          modified: [input.clipId],
-          deleted: [],
-          summary: `Set fade for clip ${input.clipId}`,
-        },
-      };
+      const missing = requireLiveAudio(context);
+      if (missing) return missing;
+      try {
+        const payload: {
+          readonly clipId: string;
+          readonly fadeInUs?: number;
+          readonly fadeOutUs?: number;
+          readonly fadeInUsWasSet?: boolean;
+          readonly fadeOutUsWasSet?: boolean;
+        } = { clipId: input.clipId };
+        const next = { ...payload };
+        if (typeof input.fadeInUs === 'number') {
+          Object.assign(next, { fadeInUs: input.fadeInUs, fadeInUsWasSet: true });
+        }
+        if (typeof input.fadeOutUs === 'number') {
+          Object.assign(next, { fadeOutUs: input.fadeOutUs, fadeOutUsWasSet: true });
+        }
+        applyAudioCommand(context.liveAudio!, {
+          type: 'audioClip.setFade',
+          payload: next,
+        });
+        return {
+          success: true,
+          stableIds: [input.clipId],
+          diff: {
+            created: [],
+            modified: [input.clipId],
+            deleted: [],
+            summary: `Set fade for clip ${input.clipId}`,
+          },
+        };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     },
     dryRun: (context, input) => {
       if (!isRecord(input) || typeof input.clipId !== 'string') {
@@ -1345,20 +1417,39 @@ export function createAddEffectTool(): EditTool {
         };
       }
 
-      if (!isRecord(input) || typeof input.id !== 'string') {
+      if (
+        !isRecord(input) ||
+        typeof input.id !== 'string' ||
+        typeof input.targetId !== 'string' ||
+        !isRecord(input.effect)
+      ) {
         return { success: false, error: 'invalid input' };
       }
 
-      return {
-        success: true,
-        stableIds: [input.id],
-        diff: {
-          created: [input.id],
-          modified: [],
-          deleted: [],
-          summary: `Added effect ${input.id}`,
-        },
-      };
+      const missing = requireLiveAudio(context);
+      if (missing) return missing;
+      try {
+        applyAudioCommand(context.liveAudio!, {
+          type: 'audioEffect.add',
+          payload: {
+            id: input.id,
+            targetId: input.targetId,
+            effect: input.effect as never,
+          },
+        });
+        return {
+          success: true,
+          stableIds: [input.id],
+          diff: {
+            created: [input.id],
+            modified: [],
+            deleted: [],
+            summary: `Added effect ${input.id}`,
+          },
+        };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     },
     dryRun: (context, input) => {
       if (!isRecord(input) || typeof input.id !== 'string') {

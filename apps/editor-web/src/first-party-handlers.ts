@@ -125,8 +125,42 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           }),
       },
       transform: {
-        trim: (args: { readonly source: unknown; readonly ranges: unknown }) =>
-          stubResult({ trimmed: true, ranges: args.ranges }),
+        trim: (args: {
+          readonly source: unknown;
+          readonly ranges: unknown;
+          readonly compositionId?: string;
+          readonly trackId?: string;
+          readonly clipId?: string;
+          readonly edge?: 'start' | 'end';
+          readonly timeUs?: number;
+        }) => {
+          if (
+            typeof args.compositionId === 'string' &&
+            typeof args.trackId === 'string' &&
+            typeof args.clipId === 'string' &&
+            (args.edge === 'start' || args.edge === 'end') &&
+            typeof args.timeUs === 'number'
+          ) {
+            return {
+              trimmed: true,
+              deferredToEditor: true,
+              command:
+                args.edge === 'start' ? 'timeline.trimClipStart' : 'timeline.trimClipEnd',
+              compositionId: args.compositionId,
+              trackId: args.trackId,
+              clipId: args.clipId,
+              timeUs: args.timeUs,
+              ranges: args.ranges,
+            };
+          }
+          return {
+            trimmed: false,
+            deferred: true,
+            reason:
+              'Pass compositionId/trackId/clipId/edge/timeUs; apply via timeline trim commands in the editor',
+            ranges: args.ranges,
+          };
+        },
         applyCaptionTemplate: (args: { readonly templateId: string }) =>
           stubResult({ captioned: true, templateId: args.templateId }),
         reframe: (args: { readonly aspect: string; readonly subjectHints?: unknown }) =>
@@ -270,11 +304,13 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         },
       },
       render: {
-        render: (args: { readonly mode: 'preview' | 'final'; readonly profile?: string }) =>
-          stubResult({
-            rendered: args.mode,
-            profile: args.profile ?? null,
-          }),
+        render: (args: { readonly mode: 'preview' | 'final'; readonly profile?: string }) => ({
+          rendered: false,
+          deferred: true,
+          mode: args.mode,
+          profile: args.profile ?? 'social-h264-aac',
+          reason: 'Use editor Export with a delivery preset; Worker encode is not wired yet',
+        }),
       },
       output: {
         writeToFolder: (args: { readonly folderId: string }) =>

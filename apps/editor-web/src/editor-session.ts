@@ -119,6 +119,18 @@ export class EditorSession {
     return project;
   }
 
+  replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
+    const before = this.#visualObjects.present;
+    const project = this.#visualObjects.replacePresent(next);
+    this.#visualObjectPersistence.saveTransaction(
+      before,
+      { label: 'Replace project document', commands: [] },
+      false,
+    );
+    this.#record('visual-object', 'Replace project document', 0);
+    return project;
+  }
+
   undo(): void {
     const entry = this.#undo.pop();
     if (entry === undefined) return;

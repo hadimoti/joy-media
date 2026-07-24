@@ -389,6 +389,12 @@ export class VisualObjectProjectHistory {
     return this.#present;
   }
 
+  /** Direct document replace for pro-tool panels (audio/color/effects) — not undoable. */
+  replacePresent(next: JoyProjectV1): JoyProjectV1 {
+    this.#present = next;
+    return this.#present;
+  }
+
   undo(): { readonly project: JoyProjectV1; readonly transaction: VisualObjectTransaction } {
     const record = this.#undo.pop();
     if (record === undefined) throw new RangeError('nothing to undo');

@@ -23,6 +23,14 @@ export interface JoyProjectV1 {
   readonly captionDocuments: Readonly<Record<string, CaptionDocumentV1>>;
   /** Namespaced JSON only; plugin runtime objects never enter the project. */
   readonly pluginData: Readonly<Record<string, JsonValue>>;
+  /** Optional durable audio graph (mixer / buses / FX). */
+  readonly audio?: ProjectAudioV1;
+  /** Optional master color grade (DaVinci-lite). */
+  readonly colorGrade?: ColorGradeV1;
+  /** Optional clip-junction transitions. */
+  readonly transitions?: readonly TransitionV1[];
+  /** Last chosen export preset id. */
+  readonly exportPreset?: ExportPresetId;
 }
 
 export interface VisualObjectTransformV1 {
@@ -266,7 +274,64 @@ export interface MarkerV1 {
   readonly id: string;
   readonly timeUs: TimeUs;
   readonly label: string;
+  readonly color?: string;
+  readonly kind?: 'marker' | 'chapter';
 }
+
+export interface ProjectAudioClipV1 {
+  readonly gain: number;
+  readonly pan: number;
+  readonly mute: boolean;
+  readonly solo: boolean;
+  readonly fadeInUs?: number;
+  readonly fadeOutUs?: number;
+}
+
+export interface ProjectAudioBusV1 {
+  readonly id: string;
+  readonly name: string;
+  readonly gain: number;
+  readonly pan: number;
+  readonly mute: boolean;
+  readonly solo: boolean;
+  readonly inputs: readonly string[];
+}
+
+export interface ProjectAudioEffectV1 {
+  readonly id: string;
+  readonly targetId: string;
+  readonly effect: JsonValue;
+}
+
+export interface ProjectAudioV1 {
+  readonly clips: Readonly<Record<string, ProjectAudioClipV1>>;
+  readonly buses: readonly ProjectAudioBusV1[];
+  readonly effects: readonly ProjectAudioEffectV1[];
+}
+
+export interface ColorGradeV1 {
+  readonly lift: number;
+  readonly gamma: number;
+  readonly gain: number;
+  readonly saturation: number;
+  readonly lutId?: 'none' | 'rec709' | 'contrast';
+}
+
+export interface TransitionV1 {
+  readonly id: string;
+  readonly trackId: string;
+  readonly leftClipId: string;
+  readonly rightClipId: string;
+  readonly type: 'dissolve' | 'wipe' | 'slide';
+  readonly durationUs: TimeUs;
+}
+
+export type ExportPresetId =
+  | 'social-h264-aac'
+  | 'reels-1080'
+  | 'shorts-1080'
+  | 'youtube-1080'
+  | 'high-bitrate';
 
 export type JsonValue =
   null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
