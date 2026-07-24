@@ -69,6 +69,7 @@ import {
   withProjectAudio,
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
+import { buildMixerBuffer } from './mixer-buffer.js';
 import type { ExportPresetId } from '@joy-media/project-schema';
 import { AgentPanel } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
@@ -369,6 +370,30 @@ function EditorWorkspace({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const previewGainNodeRef = useRef<GainNode | null>(null);
+  const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
+  const previewMixerSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const previewMixerBufferRef = useRef<Float32Array | null>(null);
+
+  const ensurePreviewAudioGraph = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (audioContextRef.current === null) {
+      audioContextRef.current = new AudioContext();
+    }
+    const audioContext = audioContextRef.current;
+    if (previewAudioSourceRef.current === null) {
+      previewAudioSourceRef.current = audioContext.createMediaElementSource(video);
+      previewGainNodeRef.current = audioContext.createGain();
+      previewPanNodeRef.current = audioContext.createStereoPanner();
+      previewAudioSourceRef.current
+        .connect(previewGainNodeRef.current)
+        .connect(previewPanNodeRef.current)
+        .connect(audioContext.destination);
+    }
+  }, []);
   if (sessionRef.current === null) {
     const entry = getCatalogProject(window.localStorage, projectId);
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
@@ -590,6 +615,7 @@ function EditorWorkspace({
       setState((active) => ({ ...active, playing: false }));
       return;
     }
+    ensurePreviewAudioGraph();
     void syncMediaToPlayhead(current.playheadUs, true)
       .then((ready) => setState((active) => ({ ...active, playing: ready })))
       .catch(() => setState((active) => ({ ...active, playing: false })));
@@ -947,6 +973,19 @@ function EditorWorkspace({
         }),
       );
       const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
+      const mixedAudio = buildMixerBuffer(
+        exportMedia.map((media) => ({ clipId: media.clip.id, samples: media.audio.samples })),
+        audioState.clips,
+        audioState.buses,
+        durationUs,
+        exportMedia[0]?.audio.sampleRate ?? 48000,
+      );
+      const mixedAudioBuffer = audioContext.createBuffer(1, mixedAudio.length, exportMedia[0]?.audio.sampleRate ?? 48000);
+      const mixedChannel = mixedAudioBuffer.getChannelData(0);
+      for (let i = 0; i < mixedAudio.length; i++) mixedChannel[i] = mixedAudio[i]!;
+      const mixedAudioSource = audioContext.createBufferSource();
+      mixedAudioSource.buffer = mixedAudioBuffer;
+      mixedAudioSource.connect(audioDestination);
       const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
       if (exportAudioTrack === undefined)
         throw new Error('Export audio mix did not produce a track');
