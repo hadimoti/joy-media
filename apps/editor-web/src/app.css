@@ -1,6 +1,23 @@
 :root {
-  color: #e4e4e6;
-  background: #1e1e1e;
+  /* DESIGN.md §1 — darker gray theme */
+  --joy-bg-app: #121212;
+  --joy-bg-panel: #18181a;
+  --joy-bg-chrome: #1c1c1e;
+  --joy-bg-raised: #1f1f21;
+  --joy-bg-inset: #161618;
+  --joy-bg-control: #252528;
+  --joy-bg-hover: #323236;
+  --joy-bg-input: #0e0e10;
+  --joy-bg-deep: #0a0a0b;
+  --joy-border: #2e2e32;
+  --joy-border-strong: #3a3a3e;
+  --joy-border-hover: #55555c;
+  --joy-gap: #0a0a0a;
+  --joy-text: #e4e4e6;
+  --joy-text-muted: #9d9da1;
+  --joy-accent: #e9b949;
+  color: var(--joy-text);
+  background: var(--joy-bg-app);
   font-family: Inter, system-ui, sans-serif;
 }
 body {
@@ -15,8 +32,26 @@ header {
   gap: 0.5rem;
   align-items: center;
   padding: 0.75rem 1rem;
-  background: #2b2b2d;
-  border-bottom: 1px solid #141414;
+  background: #1c1c1e;
+  border-bottom: 1px solid #0a0a0a;
+}
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-inline-end: 0.5rem;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.app-brand-logo {
+  width: 1.375rem;
+  height: 1.375rem;
+  object-fit: contain;
+  display: block;
+}
+.app-brand strong {
+  margin: 0;
+  font-weight: 650;
 }
 header strong {
   margin-inline-end: 0.5rem;
@@ -42,10 +77,10 @@ header strong {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0.28rem 0.8rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-top: none;
   border-radius: 0 0 0.4rem 0.4rem;
-  background: #202022;
+  background: #161618;
   color: #9d9da1;
   font-size: 0.75rem;
   box-shadow: 0 0.4rem 1.2rem #0008;
@@ -56,7 +91,7 @@ header strong {
   z-index: 5;
   inset: 0 0 auto 0;
   height: 3px;
-  background: #141414;
+  background: #0a0a0a;
   overflow: hidden;
   pointer-events: none;
 }
@@ -77,9 +112,9 @@ header strong {
   min-width: 19rem;
   max-width: 26rem;
   padding: 0.75rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.4rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   box-shadow: 0 0.8rem 2.2rem #000a;
 }
 .header-dropdown h3 {
@@ -121,9 +156,9 @@ header strong {
   align-items: center;
   gap: 0.45rem;
   padding: 0.35rem 0.45rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #202022;
+  background: #161618;
   font-size: 0.78rem;
 }
 .process-dot {
@@ -174,9 +209,9 @@ input:not([type='range']):not([type='file']):not([type='checkbox']),
 select,
 textarea {
   padding: 0.3rem 0.45rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.3rem;
-  background: #1a1a1b;
+  background: #0e0e10;
   color: #e4e4e6;
 }
 input::placeholder,
@@ -196,14 +231,14 @@ textarea {
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: #4d4d51 transparent;
+  scrollbar-color: #3a3a3e transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #4d4d51;
+  background: #3a3a3e;
   border-radius: 4px;
 }
 *::-webkit-scrollbar-track {
@@ -211,9 +246,9 @@ textarea {
 }
 kbd {
   padding: 0.05rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #202022;
+  background: #161618;
   color: #9d9da1;
   font-size: 0.72rem;
 }
@@ -237,17 +272,17 @@ a.icon-button {
   min-width: 1.9rem;
   min-height: 1.9rem;
   padding: 0.3rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.3rem;
-  background: #333335;
+  background: #252528;
   color: #dcdcde;
 }
 .icon-button-labeled {
   padding: 0.3rem 0.6rem;
 }
 .icon-button:hover:not(:disabled) {
-  background: #3f3f42;
-  border-color: #6b6b72;
+  background: #323236;
+  border-color: #55555c;
 }
 .icon-button[aria-pressed='true'] {
   border-color: #e9b949;
@@ -305,7 +340,7 @@ a.icon-button {
 .icon-tool:hover,
 .icon-tool[aria-pressed='true'] {
   border-color: #5a5a60;
-  background: #333335;
+  background: #252528;
   color: #e9b949;
 }
 .control-row {
@@ -343,10 +378,10 @@ a.icon-button {
   grid-template-columns: 1fr 2fr 1fr;
   grid-template-rows: 1fr 1fr;
   gap: 1px;
-  background: #141414;
+  background: #0a0a0a;
 }
 article {
-  background: #232324;
+  background: #18181a;
   padding: 0.75rem;
 }
 h2 {
@@ -432,9 +467,9 @@ label {
   justify-content: space-between;
   gap: 0.4rem;
   padding: 0.3rem 0.4rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: #dcdcde;
   font-size: 0.75rem;
 }
@@ -463,7 +498,7 @@ label {
   width: 1px;
   align-self: stretch;
   margin: 0.15rem 0.15rem;
-  background: #4d4d51;
+  background: #3a3a3e;
 }
 .timeline-timecode {
   min-width: 3.6rem;
@@ -477,7 +512,7 @@ label {
 }
 .timeline-track {
   min-height: 2rem;
-  border-top: 1px solid #3d3d40;
+  border-top: 1px solid #2e2e32;
 }
 .timeline-track-header {
   display: flex;
@@ -514,7 +549,7 @@ label {
   position: relative;
   flex: 1;
   min-height: 1.7rem;
-  background: #333335;
+  background: #252528;
   border-radius: 0.15rem;
   cursor: crosshair;
 }
@@ -527,7 +562,7 @@ label {
   gap: 0.25rem;
   overflow: hidden;
   padding: 0 0.35rem;
-  border: 1px solid #6b6b72;
+  border: 1px solid #55555c;
   border-radius: 0.2rem;
   background: #4b4b50;
   color: #e4e4e6;
@@ -565,7 +600,7 @@ label {
   margin-left: auto;
   padding: 0.05rem 0.28rem;
   border-radius: 0.15rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: #e9b949;
   font-size: 0.65rem;
   font-weight: 600;
@@ -599,7 +634,7 @@ label {
   gap: 0.35rem;
   margin-top: 0.3rem;
   padding-top: 0.25rem;
-  border-top: 1px solid #3d3d40;
+  border-top: 1px solid #2e2e32;
 }
 .timeline-zoom-slider {
   flex: 1 1 auto;
@@ -622,9 +657,9 @@ label {
   display: grid;
   min-width: 11.5rem;
   padding: 0.3rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.35rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   box-shadow: 0 0.4rem 1.2rem #000a;
 }
 .timeline-context-item {
@@ -645,7 +680,7 @@ label {
 }
 .timeline-context-item:hover:not(:disabled),
 .timeline-context-preset:hover:not(:disabled) {
-  background: #3f3f42;
+  background: #323236;
 }
 .timeline-context-item:disabled,
 .timeline-context-preset:disabled {
@@ -659,7 +694,7 @@ label {
 .timeline-context-sep {
   height: 1px;
   margin: 0.25rem 0.2rem;
-  background: #3d3d40;
+  background: #2e2e32;
 }
 .timeline-context-section {
   display: grid;
@@ -685,9 +720,9 @@ label {
   min-width: 2.2rem;
   margin: 0;
   padding: 0.25rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #333335;
+  background: #252528;
   color: #dcdcde;
   font: inherit;
   font-size: 0.72rem;
@@ -766,7 +801,7 @@ label {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.35rem 0;
-  border-top: 1px solid #3d3d40;
+  border-top: 1px solid #2e2e32;
 }
 .jobs-list li.job-queued {
   border-left: 3px solid #9d9da1;
@@ -802,8 +837,8 @@ label {
 .caption-preview {
   position: relative;
   overflow: hidden;
-  background: #101011;
-  border: 1px solid #3d3d40;
+  background: #0a0a0b;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
   align-self: center;
 }
@@ -832,7 +867,7 @@ label {
   height: 1.4rem;
   padding: 0;
   line-height: 1;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.2rem;
   background: transparent;
   color: #8c8c90;
@@ -842,7 +877,7 @@ label {
   color: #e9b949;
 }
 .inspector-row .kf-active {
-  color: #1a1a1b;
+  color: #0e0e10;
   background: #e9b949;
   border-color: #e9b949;
 }
@@ -860,7 +895,7 @@ label {
   line-height: 1;
   font-size: 0.7rem;
   font-style: italic;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.2rem;
   background: transparent;
   color: #8c8c90;
@@ -880,7 +915,7 @@ label {
   width: calc(100% - 2rem);
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
-  background: #101011;
+  background: #0a0a0b;
   border: 1px solid #d4b06a;
   border-radius: 0.2rem;
   color: #e4e4e6;
@@ -942,8 +977,8 @@ label {
   color: #e9b949;
 }
 .motion-lane-track {
-  background: #101011;
-  border: 1px solid #3d3d40;
+  background: #0a0a0b;
+  border: 1px solid #2e2e32;
   border-radius: 0.15rem;
 }
 .motion-graph {
@@ -952,8 +987,8 @@ label {
   margin-top: 0.3rem;
 }
 .motion-graph svg {
-  background: #101011;
-  border: 1px solid #3d3d40;
+  background: #0a0a0b;
+  border: 1px solid #2e2e32;
   border-radius: 0.2rem;
 }
 .motion-graph-scale {
@@ -1000,15 +1035,15 @@ label {
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
   min-height: 100%;
-  background: #232324;
+  background: #18181a;
 }
 .asset-categories {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.75rem 0.5rem;
-  border-right: 1px solid #3d3d40;
-  background: #202022;
+  border-right: 1px solid #2e2e32;
+  background: #161618;
 }
 .asset-categories h2 {
   padding: 0 0.25rem;
@@ -1028,8 +1063,8 @@ label {
 }
 .asset-category-tab:hover,
 .asset-category-tab.active {
-  background: #333335;
-  border-color: #4d4d51;
+  background: #252528;
+  border-color: #3a3a3e;
   color: #e4e4e6;
 }
 .asset-category-tab.active {
@@ -1062,9 +1097,9 @@ label {
   width: 100%;
   min-width: 0;
   padding: 0.4rem 0.5rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #1a1a1b;
+  background: #0e0e10;
   color: #e4e4e6;
 }
 .asset-filter {
@@ -1074,9 +1109,9 @@ label {
 }
 .asset-filter select {
   min-height: 2.1rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #1a1a1b;
+  background: #0e0e10;
   color: #e4e4e6;
 }
 .asset-refresh {
@@ -1087,9 +1122,9 @@ label {
 }
 .asset-register {
   padding: 0.55rem 0.65rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.3rem;
-  background: #202022;
+  background: #161618;
 }
 .asset-register summary {
   color: #dcdcde;
@@ -1168,9 +1203,9 @@ label {
   gap: 0.45rem;
   min-height: 8.3rem;
   padding: 0.6rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.3rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .asset-card-heading {
   display: flex;
@@ -1196,7 +1231,7 @@ label {
   font-size: 0.7rem;
 }
 .asset-kind {
-  background: #3d3d40;
+  background: #2e2e32;
   color: #dcdcde;
 }
 .asset-kind-video {
@@ -1227,7 +1262,7 @@ label {
 }
 .asset-availability-none {
   color: #b0b0b4 !important;
-  background: #3d3d40;
+  background: #2e2e32;
 }
 .asset-card button {
   justify-self: start;
@@ -1242,7 +1277,7 @@ label {
     align-items: center;
     overflow-x: auto;
     border-right: 0;
-    border-bottom: 1px solid #3d3d40;
+    border-bottom: 1px solid #2e2e32;
   }
   .asset-categories h2 {
     margin: 0 0.4rem 0 0;
@@ -1252,9 +1287,9 @@ label {
   }
 }
 .agent-timeline-canvas {
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #101011;
+  background: #0a0a0b;
 }
 .agent-pending-plan canvas,
 .agent-last-run canvas {
@@ -1286,9 +1321,9 @@ label {
   align-items: center;
   gap: 0.4rem;
   padding: 0.3rem 0.4rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.2rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .history-entry-redo {
   opacity: 0.6;
@@ -1338,7 +1373,7 @@ label {
   padding: 1.2rem 0.8rem !important;
 }
 .palette {
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.45rem;
 }
 .palette input {
@@ -1352,8 +1387,8 @@ label {
   color: #e4e4e6;
 }
 .palette button:hover {
-  background: #333335;
-  border-color: #4d4d51;
+  background: #252528;
+  border-color: #3a3a3e;
 }
 .workflows-panel ul {
   display: grid;
@@ -1367,9 +1402,9 @@ label {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.45rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .workflow-row strong {
   flex: 1;
@@ -1399,8 +1434,8 @@ label {
   display: grid;
   gap: 0.4rem;
   padding: 0.6rem;
-  background: #232324;
-  border: 1px solid #3d3d40;
+  background: #18181a;
+  border: 1px solid #2e2e32;
   border-radius: 0.4rem;
   margin-block: 0.4rem;
 }
@@ -1418,8 +1453,8 @@ label {
 .workflow-run-modal input {
   width: 100%;
   padding: 0.35rem 0.5rem;
-  background: #1a1a1b;
-  border: 1px solid #3d3d40;
+  background: #0e0e10;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
   color: #e4e4e6;
   font-size: 0.85rem;
@@ -1434,19 +1469,19 @@ label {
 /* Dockview chrome follows the neutral-gray theme via its CSS variables.
    dockview.css loads after this file, so the selector needs #root to win. */
 #root .workspace {
-  --dv-group-view-background-color: #232324;
-  --dv-tabs-and-actions-container-background-color: #2b2b2d;
+  --dv-group-view-background-color: #18181a;
+  --dv-tabs-and-actions-container-background-color: #1c1c1e;
   --dv-tabs-and-actions-container-font-size: 0.78rem;
-  --dv-activegroup-visiblepanel-tab-background-color: #3a3a3d;
-  --dv-activegroup-hiddenpanel-tab-background-color: #2b2b2d;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #333335;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #2b2b2d;
+  --dv-activegroup-visiblepanel-tab-background-color: #242426;
+  --dv-activegroup-hiddenpanel-tab-background-color: #1c1c1e;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #252528;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #1c1c1e;
   --dv-activegroup-visiblepanel-tab-color: #e4e4e6;
   --dv-activegroup-hiddenpanel-tab-color: #9d9da1;
   --dv-inactivegroup-visiblepanel-tab-color: #c0c0c4;
   --dv-inactivegroup-hiddenpanel-tab-color: #8c8c90;
-  --dv-separator-border: #141414;
-  --dv-tab-divider-color: #141414;
+  --dv-separator-border: #0a0a0a;
+  --dv-tab-divider-color: #0a0a0a;
   --dv-drag-over-background-color: rgb(233 185 73 / 18%);
   --dv-drag-over-border-color: #e9b949;
   --dv-paneview-active-outline-color: #e9b949;
@@ -1491,7 +1526,7 @@ label {
   gap: 0.4rem;
   margin: 0.5rem 0 0.3rem;
   padding-bottom: 0.3rem;
-  border-bottom: 1px solid #3d3d40;
+  border-bottom: 1px solid #2e2e32;
 }
 .workflow-section-header h4 {
   margin: 0;
@@ -1501,17 +1536,17 @@ label {
 .workflow-version-badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.2rem;
-  background: #202022;
+  background: #161618;
   color: #9d9da1;
 }
 .system-version-badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.2rem;
-  background: #202022;
+  background: #161618;
   color: #9d9da1;
 }
 .workflow-list {
@@ -1526,9 +1561,9 @@ label {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.45rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .workflow-row-main {
   display: flex;
@@ -1602,9 +1637,9 @@ label {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.45rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .plugin-row-main {
   display: flex;
@@ -1621,9 +1656,9 @@ label {
 .plugin-state-badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.35rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.2rem;
-  background: #202022;
+  background: #161618;
   color: #9d9da1;
 }
 .plugin-contribution h4 {
@@ -1635,9 +1670,9 @@ label {
   display: grid;
   gap: 0.35rem;
   padding: 0.5rem;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.25rem;
-  background: #202022;
+  background: #161618;
   color: #e4e4e6;
   font-size: 0.8rem;
 }
@@ -1645,7 +1680,7 @@ label {
 /* —— Project library gate —— */
 .project-library {
   min-height: 100vh;
-  background: #1a1a1b;
+  background: #0e0e10;
   color: #e4e4e6;
 }
 .project-library-header {
@@ -1654,13 +1689,13 @@ label {
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid #2f2f32;
-  background: #222224;
+  border-bottom: 1px solid #2e2e32;
+  background: #1c1c1e;
 }
 .project-library-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.45rem;
   letter-spacing: 0.02em;
 }
 .project-library-main {
@@ -1688,9 +1723,9 @@ label {
 .project-library-create input {
   min-width: min(100%, 18rem);
   padding: 0.45rem 0.65rem;
-  border: 1px solid #4d4d51;
+  border: 1px solid #3a3a3e;
   border-radius: 0.3rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: #e4e4e6;
   font: inherit;
 }
@@ -1710,9 +1745,9 @@ label {
   width: 100%;
   margin: 0;
   padding: 0;
-  border: 1px solid #3d3d40;
+  border: 1px solid #2e2e32;
   border-radius: 0.4rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: inherit;
   text-align: start;
   cursor: pointer;
@@ -1724,8 +1759,8 @@ label {
 .project-library-card-thumb {
   display: block;
   height: 7.5rem;
-  background: #333335;
-  border-bottom: 1px solid #3d3d40;
+  background: #252528;
+  border-bottom: 1px solid #2e2e32;
 }
 .project-library-card-body {
   display: grid;
@@ -1808,7 +1843,7 @@ label {
   padding: 0.5rem;
   border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
 }
 .transitions-section {
   display: flex;
@@ -1831,7 +1866,7 @@ label {
   padding: 0.35rem;
   border: 1px solid #3a3a3e;
   border-radius: 0.25rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: #e4e4e6;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -1932,7 +1967,7 @@ label {
   height: 1.7rem;
   border: 1px solid #4a4a4e;
   border-radius: 0.2rem;
-  background: #2a2a2c;
+  background: #1f1f21;
   color: #e4e4e6;
   font-size: 0.72rem;
 }

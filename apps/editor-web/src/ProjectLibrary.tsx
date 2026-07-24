@@ -5,7 +5,7 @@ import {
   removeCatalogProject,
   type ProjectCatalogEntry,
 } from './project-catalog.js';
-import { CheckIcon, CloseIcon, PlusIcon, ProjectsIcon, TrashIcon } from './icons.js';
+import { CheckIcon, CloseIcon, PlusIcon, TrashIcon } from './icons.js';
 
 export function ProjectLibrary({
   storage,
@@ -31,8 +31,15 @@ export function ProjectLibrary({
   return (
     <div className="project-library">
       <header className="project-library-header">
-        <div className="project-library-brand">
-          <ProjectsIcon />
+        <div className="project-library-brand app-brand">
+          <img
+            className="app-brand-logo"
+            src="/assets/logo.png"
+            alt=""
+            width={22}
+            height={22}
+            decoding="async"
+          />
           <strong>JOY Media</strong>
         </div>
         <button

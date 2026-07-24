@@ -4,23 +4,23 @@ Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23): a professional, Adobe-
 
 ## 1. Color tokens
 
-Neutral grays only. **No blue anywhere.** Amber is the single accent. Semantic green/red are reserved for status.
+Neutral grays only. **No blue anywhere.** Amber is the single accent. Semantic green/red are reserved for status. Gray ramp is intentionally dark (deeper than early editor drafts) so panels read as Adobe-class chrome, not washed mid-gray.
 
 | Token          | Hex       | Use                                                            |
 | -------------- | --------- | -------------------------------------------------------------- |
-| `bg-app`       | `#1e1e1e` | Root/page background                                            |
-| `bg-panel`     | `#232324` | Panel/article surfaces, dockview group background               |
-| `bg-chrome`    | `#2b2b2d` | Header, tab strips                                              |
-| `bg-raised`    | `#2a2a2c` | Cards, list rows (history entries, workflow rows, asset cards)  |
-| `bg-inset`     | `#202022` | Sunken sections (register form, category rail)                  |
-| `bg-control`   | `#333335` | Buttons, lanes, interactive fills                               |
-| `bg-hover`     | `#3f3f42` | Hovered controls                                                |
-| `bg-input`     | `#1a1a1b` | Text inputs, selects                                            |
-| `bg-deep`      | `#101011` | Canvases, code/expression fields, preview wells                 |
-| `border`       | `#3d3d40` | Default borders/dividers                                        |
-| `border-strong`| `#4d4d51` | Control borders                                                 |
-| `border-hover` | `#6b6b72` | Hovered control borders, clip borders                           |
-| `gap`          | `#141414` | Dockview separators, workspace gaps                             |
+| `bg-app`       | `#121212` | Root/page background                                            |
+| `bg-panel`     | `#18181a` | Panel/article surfaces, dockview group background               |
+| `bg-chrome`    | `#1c1c1e` | Header, tab strips                                              |
+| `bg-raised`    | `#1f1f21` | Cards, list rows (history entries, workflow rows, asset cards)  |
+| `bg-inset`     | `#161618` | Sunken sections (register form, category rail)                  |
+| `bg-control`   | `#252528` | Buttons, lanes, interactive fills                               |
+| `bg-hover`     | `#323236` | Hovered controls                                                |
+| `bg-input`     | `#0e0e10` | Text inputs, selects                                            |
+| `bg-deep`      | `#0a0a0b` | Canvases, code/expression fields, preview wells                 |
+| `border`       | `#2e2e32` | Default borders/dividers                                        |
+| `border-strong`| `#3a3a3e` | Control borders                                                 |
+| `border-hover` | `#55555c` | Hovered control borders, clip borders                           |
+| `gap`          | `#0a0a0a` | Dockview separators, workspace gaps                             |
 | `text`         | `#e4e4e6` | Primary text                                                    |
 | `text-soft`    | `#dcdcde` | Icon/button glyphs                                              |
 | `text-muted`   | `#9d9da1` | Secondary text, inactive tabs                                   |
@@ -73,6 +73,7 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 4c. Header chrome
 
+- Brand lockup: small JOY mark (`public/assets/logo.png`, same asset as the main webapp / joy-agent header logo) + **JOY Media** wordmark in `.app-brand` (editor header and project library). Logo is decorative (`alt=""`); the strong text carries the product name. Size ~22×22 (`1.375rem`), never a large hero mark in chrome.
 - The header owns global state surfaces: **Projects** (back to library), undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)). Status line shows the active project title.
 - Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`. Status text lives in a centered `.export-toast` pinned under that bar (absolute, not in the icon row); the toast clears as soon as the file has downloaded (errors linger briefly). Durable history stays in the processes menu.
 - Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.

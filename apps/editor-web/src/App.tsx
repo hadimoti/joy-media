@@ -1513,7 +1513,17 @@ function EditorWorkspace({
             {exportStatus}
           </div>
         )}
-        <strong>JOY Media</strong>
+        <span className="app-brand">
+          <img
+            className="app-brand-logo"
+            src="/assets/logo.png"
+            alt=""
+            width={22}
+            height={22}
+            decoding="async"
+          />
+          <strong>JOY Media</strong>
+        </span>
         <span className="header-status">
           {session.visualProject.title} · Saved locally · {scheduler.current.metrics.quality} preview
         </span>
