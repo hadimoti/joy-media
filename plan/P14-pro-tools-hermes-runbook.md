@@ -52,7 +52,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8790/health
 - [ ] **P14.1** Preview/export honor mixer mute/solo/gain (deploy)
 - [x] **P14.2** Durable spatial path schema + UI persistence
 - [ ] **P14.3** Mixer graph drives audible preview/export end-to-end (deploy)
-- [ ] **P14.4** Transitions icon browser + Pixi/export apply (deploy)
+- [x] **P14.4** Transitions icon browser + Pixi/export apply (deploy)
 - [ ] **P14.5** Effects + color grade apply in Pixi/export; scopes honesty (deploy)
 - [ ] **P14.6** Agent/workflow stub retirement + caption burn-in icon (deploy)
 - [ ] **P14.7** STATE + Hermes skill sync (+ GBrain staging if asked)
