@@ -183,7 +183,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Hold"
-          title="Hold interpolation"
           aria-label="Hold interpolation"
           disabled={selected.length === 0}
           onClick={() => setInterp('hold')}
@@ -194,7 +193,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Linear"
-          title="Linear interpolation"
           aria-label="Linear interpolation"
           disabled={selected.length === 0}
           onClick={() => setInterp('linear')}
@@ -205,7 +203,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Eased"
-          title="Eased interpolation"
           aria-label="Eased interpolation"
           disabled={selected.length === 0}
           onClick={() => setInterp('eased')}
@@ -216,7 +213,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Bezier"
-          title="Bezier interpolation"
           aria-label="Bezier interpolation"
           disabled={selected.length === 0}
           onClick={() => setInterp('bezier')}
@@ -227,7 +223,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Copy keys"
-          title="Copy selected keys"
           aria-label="Copy selected keys"
           onClick={copySelected}
         >
@@ -237,7 +232,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Paste keys"
-          title="Paste keys at playhead"
           aria-label="Paste keys at playhead"
           onClick={pasteAtPlayhead}
           disabled={graphClipboard === undefined}
@@ -248,7 +242,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Previous key"
-          title="Jump to previous key"
           aria-label="Jump to previous key"
           onClick={() => {
             const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
@@ -262,7 +255,6 @@ export function GraphEditor({
           type="button"
           className="icon-button"
           data-guide="Next key"
-          title="Jump to next key"
           aria-label="Jump to next key"
           onClick={() => {
             const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);

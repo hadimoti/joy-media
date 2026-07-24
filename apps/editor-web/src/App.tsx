@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { DockviewReact } from 'dockview';
-import type { DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
+import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import { AppMenuBar } from './AppMenuBar.js';
+import { panelIdFromMenuAction, type AppMenuActionId } from './app-menu.js';
 import {
   createHtmlMediaDecoder,
   createHtmlVideoMediaClock,
@@ -101,25 +103,24 @@ import { DEFAULT_WORKSPACE } from './workspace.js';
 import { panelLabel } from './panel-tab-icons.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
+  CloseIcon,
   CommandIcon,
-  CutIcon,
   DownloadIcon,
-  DuplicateIcon,
   ExportIcon,
+  FullscreenIcon,
   HighBitrateIcon,
   ListIcon,
   LogoutIcon,
   PauseIcon,
   PlayIcon,
-  ProjectsIcon,
   RedoIcon,
   ReelsIcon,
-  ScissorsIcon,
   SkipBackIcon,
   SkipForwardIcon,
   UndoIcon,
   UserIcon,
   YoutubeIcon,
+  ZoomInIcon,
 } from './icons.js';
 import {
   JOY_LOGIN_URL,
@@ -318,6 +319,7 @@ interface EditorPanelContextValue {
   readonly transcriptionError: string | undefined;
   readonly undo: () => void;
   readonly redo: () => void;
+  readonly jumpToHistory: (sequence: number) => void;
   readonly agentContext: EditorContext;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
@@ -406,7 +408,7 @@ function EditorWorkspace({
   const [exportHistory, setExportHistory] = useState<readonly ExportProcessEntry[]>(() =>
     loadExportHistory(window.localStorage),
   );
-  const [exportPreset, setExportPreset] = useState<ExportPresetId>('social-h264-aac');
+  const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
   const [processesOpen, setProcessesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -427,6 +429,7 @@ function EditorWorkspace({
   const [pluginHost] = useState(() => createEditorPluginHost());
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
+  const dockviewApiRef = useRef<DockviewApi | null>(null);
   const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -870,6 +873,13 @@ function EditorWorkspace({
     session.redo();
     setRevision((revision) => revision + 1);
   }, [session]);
+  const jumpToHistory = useCallback(
+    (sequence: number) => {
+      session.jumpToHistory(sequence);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
   const executeAction = useCallback(
     (id: string) => {
       if (id === 'history.undo') undo();
@@ -878,6 +888,9 @@ function EditorWorkspace({
     },
     [redo, undo],
   );
+  const activatePanel = useCallback((panelId: string) => {
+    dockviewApiRef.current?.getPanel(panelId)?.api.setActive();
+  }, []);
   const refreshJoySession = useCallback(() => {
     void probeJoySession().then(setJoySession);
   }, []);
@@ -1079,9 +1092,6 @@ function EditorWorkspace({
     [dispatchTimeline, session],
   );
 
-  const projectTitle =
-    getCatalogProject(window.localStorage, projectId)?.title ?? session.visualProject.title;
-
   const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
@@ -1096,8 +1106,8 @@ function EditorWorkspace({
       await syncStickerBitmaps();
       const compositionV1 =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
-      const baseWidth = compositionV1?.width ?? 1920;
-      const baseHeight = compositionV1?.height ?? 1080;
+      const baseWidth = compositionV1?.width ?? 1080;
+      const baseHeight = compositionV1?.height ?? 1920;
       const { width, height } = (() => {
         switch (exportPreset) {
           case 'reels-1080':
@@ -1377,14 +1387,67 @@ function EditorWorkspace({
       setExporting(false);
     }
   }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
+  const runMenuAction = useCallback(
+    (id: AppMenuActionId) => {
+      const panelId = panelIdFromMenuAction(id);
+      if (panelId !== undefined) {
+        activatePanel(panelId);
+        return;
+      }
+      switch (id) {
+        case 'file.projects':
+          onBackToLibrary();
+          break;
+        case 'file.export':
+          void handleExport();
+          break;
+        case 'file.signOut':
+          void signOut();
+          break;
+        case 'edit.undo':
+          undo();
+          break;
+        case 'edit.redo':
+          redo();
+          break;
+        case 'edit.delete':
+          runSelectedClipAction('delete');
+          break;
+        case 'edit.duplicate':
+          runSelectedClipAction('duplicate');
+          break;
+        case 'edit.commandPalette':
+        case 'view.commandPalette':
+          setPaletteOpen(true);
+          break;
+        case 'clip.split':
+          runSelectedClipAction('split');
+          break;
+        default:
+          break;
+      }
+    },
+    [
+      activatePanel,
+      handleExport,
+      onBackToLibrary,
+      redo,
+      runSelectedClipAction,
+      signOut,
+      undo,
+    ],
+  );
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    // v6: Premiere-like hierarchy — Assets | LARGE Preview | Inspector; Timeline full-width bottom.
-    const layoutKey = 'joy-media.dockview.v6';
+    dockviewApiRef.current = event.api;
+    // v7: Assets | Inspector (center) | Monitor (right); Timeline full-width bottom.
+    // Clears v6 layouts that left the preview unconstrained in the center column.
+    const layoutKey = 'joy-media.dockview.v7';
     window.localStorage.removeItem('joy-media.dockview.v1');
     window.localStorage.removeItem('joy-media.dockview.v2');
     window.localStorage.removeItem('joy-media.dockview.v3');
     window.localStorage.removeItem('joy-media.dockview.v4');
     window.localStorage.removeItem('joy-media.dockview.v5');
+    window.localStorage.removeItem('joy-media.dockview.v6');
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -1418,14 +1481,16 @@ function EditorWorkspace({
     };
 
     if (!restored) {
-      // Timeline first so it owns the bottom row full width; preview stack above.
       addPanel('timeline', { inactive: false });
-      addPanel('monitor', {
+      addPanel('inspector', {
         inactive: false,
         position: { referencePanel: 'timeline', direction: 'above' },
       });
-      addPanel('media', { position: { referencePanel: 'monitor', direction: 'left' } });
-      addPanel('inspector', { position: { referencePanel: 'monitor', direction: 'right' } });
+      addPanel('media', { position: { referencePanel: 'inspector', direction: 'left' } });
+      addPanel('monitor', {
+        inactive: false,
+        position: { referencePanel: 'inspector', direction: 'right' },
+      });
       const inspectorTabs = [
         'motion',
         'effects',
@@ -1640,16 +1705,13 @@ function EditorWorkspace({
       return (
         <HistoryPanel
           entries={context.historyEntries}
-          canUndo={context.canUndo}
-          canRedo={context.canRedo}
-          onUndo={context.undo}
-          onRedo={context.redo}
+          onJumpTo={context.jumpToHistory}
         />
       );
     }
     if (api.id === 'diagnostics')
       return (
-        <article>
+        <article className="diagnostics-panel">
           <p>{context.playback.quality} proxy preview</p>
           <p>
             {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
@@ -1738,28 +1800,15 @@ function EditorWorkspace({
               className="app-brand-logo"
               src="/assets/logo.png"
               alt=""
-              width={22}
-              height={22}
+              width={16}
+              height={16}
               decoding="async"
             />
             <strong>JOY Media</strong>
           </span>
-          <div className="header-project">
-            <span className="header-project-name" title={projectTitle}>
-              {projectTitle}
-            </span>
-            <span className="header-save-status">Saved locally</span>
-          </div>
-          <button
-            className="icon-button"
-            onClick={onBackToLibrary}
-            aria-label="Back to projects"
-            title="Projects library"
-          >
-            <ProjectsIcon />
-          </button>
         </div>
-        <div className="header-group header-center" role="group" aria-label="Edit">
+        <div className="header-spacer" aria-hidden="true" />
+        <div className="header-group" role="group" aria-label="Edit">
           <button
             className="icon-button"
             disabled={!session.canUndo}
@@ -1780,33 +1829,6 @@ function EditorWorkspace({
           </button>
           <button
             className="icon-button"
-            disabled={state.selectedIds.length === 0}
-            onClick={() => runSelectedClipAction('delete')}
-            aria-label="Cut / delete clip"
-            title="Ripple delete (Del)"
-          >
-            <CutIcon />
-          </button>
-          <button
-            className="icon-button"
-            disabled={state.selectedIds.length === 0}
-            onClick={() => runSelectedClipAction('split')}
-            aria-label="Split clip"
-            title="Split at playhead (S)"
-          >
-            <ScissorsIcon />
-          </button>
-          <button
-            className="icon-button"
-            disabled={state.selectedIds.length === 0}
-            onClick={() => runSelectedClipAction('duplicate')}
-            aria-label="Duplicate clip"
-            title="Duplicate (Ctrl+D)"
-          >
-            <DuplicateIcon />
-          </button>
-          <button
-            className="icon-button"
             onClick={() => setPaletteOpen(true)}
             aria-label="Command palette"
             title="Command palette (Ctrl+K)"
@@ -1822,7 +1844,6 @@ function EditorWorkspace({
               disabled={exporting}
               aria-label="Export preset"
               aria-expanded={exportPresetOpen}
-              title={`Export preset: ${exportPreset}`}
               data-guide="Export preset"
               onClick={() => {
                 setExportPresetOpen((open) => !open);
@@ -1860,7 +1881,6 @@ function EditorWorkspace({
                         disabled={exporting}
                         aria-pressed={exportPreset === id}
                         aria-label={label}
-                        title={label}
                         data-guide={label}
                         onClick={() => {
                           setExportPreset(id);
@@ -1881,12 +1901,11 @@ function EditorWorkspace({
             className="header-export-btn"
             onClick={handleExport}
             disabled={exporting}
-            aria-label="Export MP4"
-            title={exporting ? 'Exporting…' : 'Export MP4'}
+            aria-label={exporting ? 'Exporting…' : 'Export MP4'}
             data-guide={exporting ? 'Exporting…' : 'Export MP4'}
             aria-busy={exporting}
           >
-            {exporting ? 'Exporting…' : 'Export'}
+            <ExportIcon />
           </button>
           <div className="header-menu">
             <button
@@ -2010,6 +2029,14 @@ function EditorWorkspace({
           </div>
         </div>
       </header>
+      <AppMenuBar
+        canUndo={session.canUndo}
+        canRedo={session.canRedo}
+        hasSelection={state.selectedIds.length > 0}
+        exporting={exporting}
+        signedIn={joySession.kind === 'ready'}
+        onAction={runMenuAction}
+      />
 
       {paletteOpen && (
         <section className="palette" aria-label="Command palette">
@@ -2058,6 +2085,7 @@ function EditorWorkspace({
           transcriptionError,
           undo,
           redo,
+          jumpToHistory,
           agentContext,
         }}
       >
@@ -2096,7 +2124,27 @@ function MonitorPanel() {
   const [error, setError] = useState<string | undefined>(undefined);
   const [viewerZoom, setViewerZoom] = useState<'fit' | '50' | '100' | '200'>('fit');
   const [fullscreen, setFullscreen] = useState(false);
+  const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
+  const transportRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!zoomDrawerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = transportRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setZoomDrawerOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setZoomDrawerOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [zoomDrawerOpen]);
 
   useEffect(() => {
     const mattes = readImageMatteMap(visualProject);
@@ -2203,11 +2251,13 @@ function MonitorPanel() {
   }, [previewVideoFrame, state.playheadUs, visualProject, sceneTick, viewerZoom]);
 
   const composition = visualProject.compositions[visualProject.rootCompositionId];
-  const width = composition?.width ?? 1920;
-  const height = composition?.height ?? 1080;
+  const width = composition?.width ?? 1080;
+  const height = composition?.height ?? 1920;
   const durationUs = composition?.durationUs ?? 30_000_000;
   const zoomScale =
     viewerZoom === 'fit' ? 1 : viewerZoom === '50' ? 0.5 : viewerZoom === '200' ? 2 : 1;
+  const zoomLabel =
+    viewerZoom === 'fit' ? 'Fit' : viewerZoom === '50' ? '50%' : viewerZoom === '200' ? '200%' : '100%';
 
   const toggleFullscreen = () => {
     const el = panelRef.current;
@@ -2222,90 +2272,124 @@ function MonitorPanel() {
 
   return (
     <article className="monitor-panel" ref={panelRef}>
-      <div className="monitor-toolbar">
-        <span className="monitor-meta" dir="ltr">
-          {width} × {height} · {formatTimecode(state.playheadUs)}
-        </span>
-        <div className="monitor-zoom-group" role="group" aria-label="Preview zoom">
-          {(
-            [
-              ['fit', 'Fit'],
-              ['50', '50%'],
-              ['100', '100%'],
-              ['200', '200%'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className="icon-button icon-button-labeled"
-              style={{
-                width: 'auto',
-                height: 'var(--control-sm)',
-                minHeight: 'var(--control-sm)',
-                fontSize: '0.72rem',
-              }}
-              aria-pressed={viewerZoom === id}
-              aria-label={`Zoom ${label}`}
-              title={`Zoom ${label}`}
-              onClick={() => setViewerZoom(id)}
-            >
-              {label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="icon-button icon-button-labeled"
-            style={{ width: 'auto', height: 'var(--control-sm)', minHeight: 'var(--control-sm)' }}
-            aria-pressed={fullscreen}
-            aria-label="Fullscreen preview"
-            title="Fullscreen preview"
-            onClick={toggleFullscreen}
-          >
-            Full
-          </button>
-        </div>
-      </div>
       {error !== undefined && <p className="monitor-error">{error}</p>}
       <div className="monitor-canvas-wrap">
         <div
           ref={containerRef}
           className="monitor-canvas"
           style={
-            viewerZoom === 'fit'
-              ? undefined
-              : { transform: `scale(${zoomScale})`, maxWidth: 'none', maxHeight: 'none' }
+            viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }
           }
         />
       </div>
-      <div className="monitor-transport">
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Seek back 1s"
-          title="Seek back 1s (←)"
-          onClick={() => seek(Math.max(0, state.playheadUs - 1_000_000))}
-        >
-          <SkipBackIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={state.playing ? 'Pause' : 'Play'}
-          title={state.playing ? 'Pause (Space)' : 'Play (Space)'}
-          onClick={togglePlayback}
-        >
-          {state.playing ? <PauseIcon /> : <PlayIcon />}
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Seek forward 1s"
-          title="Seek forward 1s (→)"
-          onClick={() => seek(Math.min(durationUs, state.playheadUs + 1_000_000))}
-        >
-          <SkipForwardIcon />
-        </button>
+      <div className="monitor-transport" ref={transportRef}>
+        {zoomDrawerOpen && (
+          <div
+            className="monitor-zoom-drawer"
+            id="monitor-zoom-drawer"
+            role="dialog"
+            aria-label="Preview scale"
+          >
+            <div className="monitor-zoom-drawer-head">
+              <strong>Preview scale</strong>
+              <button
+                type="button"
+                className="monitor-transport-btn"
+                aria-label="Close scale options"
+                title="Close"
+                onClick={() => setZoomDrawerOpen(false)}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="monitor-zoom-group" role="group" aria-label="Preview zoom">
+              {(
+                [
+                  ['fit', 'Fit'],
+                  ['50', '50%'],
+                  ['100', '100%'],
+                  ['200', '200%'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="monitor-zoom-chip"
+                  aria-pressed={viewerZoom === id}
+                  aria-label={`Zoom ${label}`}
+                  title={`Zoom ${label}`}
+                  onClick={() => {
+                    setViewerZoom(id);
+                    setZoomDrawerOpen(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="monitor-transport-btn"
+                aria-pressed={fullscreen}
+                aria-label="Fullscreen preview"
+                data-guide="Full"
+                onClick={() => {
+                  toggleFullscreen();
+                  setZoomDrawerOpen(false);
+                }}
+              >
+                <FullscreenIcon />
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="monitor-transport-start">
+          <span className="monitor-meta" dir="ltr">
+            {width} × {height} · {formatTimecode(state.playheadUs)}
+          </span>
+        </div>
+        <div className="monitor-transport-controls">
+          <button
+            type="button"
+            className="monitor-transport-btn"
+            aria-label="Seek back 1s"
+            title="Seek back 1s (←)"
+            onClick={() => seek(Math.max(0, state.playheadUs - 1_000_000))}
+          >
+            <SkipBackIcon />
+          </button>
+          <button
+            type="button"
+            className="monitor-transport-btn"
+            aria-label={state.playing ? 'Pause' : 'Play'}
+            title={state.playing ? 'Pause (Space)' : 'Play (Space)'}
+            onClick={togglePlayback}
+          >
+            {state.playing ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button
+            type="button"
+            className="monitor-transport-btn"
+            aria-label="Seek forward 1s"
+            title="Seek forward 1s (→)"
+            onClick={() => seek(Math.min(durationUs, state.playheadUs + 1_000_000))}
+          >
+            <SkipForwardIcon />
+          </button>
+        </div>
+        <div className="monitor-transport-end">
+          <button
+            type="button"
+            className="monitor-transport-btn"
+            aria-label={`Preview scale (${zoomLabel})`}
+            aria-expanded={zoomDrawerOpen}
+            aria-controls="monitor-zoom-drawer"
+            aria-pressed={zoomDrawerOpen}
+            data-guide="Scale"
+            onClick={() => setZoomDrawerOpen((open) => !open)}
+          >
+            <ZoomInIcon />
+          </button>
+        </div>
       </div>
     </article>
   );

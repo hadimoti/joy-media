@@ -12,7 +12,7 @@ import { useState } from 'react';
 import type { CompositionV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { parentChain } from '@joy-media/motion-core';
-import { PlusIcon } from './icons.js';
+import { CameraUiIcon } from './icons.js';
 
 interface CameraPanelProps {
   readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
@@ -154,12 +154,12 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
         </label>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
-          title="Create a new 2.5D camera"
+          className="icon-button"
+          aria-label="Create camera"
+          data-guide="Create camera"
           onClick={createCamera}
         >
-          <PlusIcon />
-          Camera
+          <CameraUiIcon />
         </button>
       </div>
 

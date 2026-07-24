@@ -79,7 +79,6 @@ export function EffectsPanel({ project, objectId, onChange }: EffectsPanelProps)
             type="button"
             className="icon-button"
             data-guide={item.label}
-            title={item.label}
             aria-label={`Add ${item.label}`}
             onClick={() => {
               const effect: EffectInstance = {
@@ -106,7 +105,7 @@ export function EffectsPanel({ project, objectId, onChange }: EffectsPanelProps)
             return (
               <li key={effect.id}>
                 <div className="audio-strip-flags">
-                  <span className="icon-tool" data-guide={meta?.label ?? effect.kind} title={meta?.label}>
+                  <span className="icon-tool" data-guide={meta?.label ?? effect.kind}>
                     <Icon />
                   </span>
                   <label className="icon-tool" data-guide={effect.enabled ? 'Enabled' : 'Bypassed'}>
@@ -127,7 +126,6 @@ export function EffectsPanel({ project, objectId, onChange }: EffectsPanelProps)
                     type="button"
                     className="icon-button"
                     aria-label={`Remove ${effect.kind}`}
-                    title="Remove effect"
                     data-guide="Remove"
                     onClick={() => {
                       const effects = (stack?.effects ?? []).filter((_, i) => i !== index);
@@ -147,7 +145,6 @@ export function EffectsPanel({ project, objectId, onChange }: EffectsPanelProps)
                       step={0.01}
                       value={value}
                       aria-label={`${effect.kind} ${key}`}
-                      title={`${key}`}
                       data-guide={key}
                       onChange={(event) => {
                         const effects = (stack?.effects ?? []).map((item, i) =>

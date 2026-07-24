@@ -233,7 +233,6 @@ export function InspectorPanel({
                   style={{ width: 'var(--control-sm)', height: 'var(--control-sm)', minWidth: 'var(--control-sm)', minHeight: 'var(--control-sm)' }}
                   aria-pressed={interpolation === id}
                   aria-label={label}
-                  title={label}
                   data-guide={label}
                   onClick={() => setInterpolation(id)}
                 >

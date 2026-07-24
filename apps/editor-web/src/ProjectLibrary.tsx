@@ -46,7 +46,6 @@ export function ProjectLibrary({
           type="button"
           className="icon-button"
           aria-label="New project"
-          title="New project"
           data-guide="New project"
           onClick={() => setCreating(true)}
         >
@@ -81,7 +80,6 @@ export function ProjectLibrary({
               type="submit"
               className="icon-button"
               aria-label="Create project"
-              title="Create project"
               data-guide="Create"
             >
               <CheckIcon />
@@ -90,7 +88,6 @@ export function ProjectLibrary({
               type="button"
               className="icon-button"
               aria-label="Cancel"
-              title="Cancel"
               data-guide="Cancel"
               onClick={() => {
                 setCreating(false);

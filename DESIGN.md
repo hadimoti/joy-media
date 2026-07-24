@@ -9,7 +9,7 @@ Neutral grays only. **No blue anywhere.** Amber is the single accent. Semantic g
 | Token          | Hex       | Use                                                            |
 | -------------- | --------- | -------------------------------------------------------------- |
 | `bg-app`       | `#121212` | Root/page background                                            |
-| `bg-panel`     | `#18181a` | Panel/article surfaces, dockview group background               |
+| `bg-panel`     | `#141416` | Panel/article surfaces, dockview group + content background     |
 | `bg-chrome`    | `#1c1c1e` | Header, tab strips                                              |
 | `bg-raised`    | `#1f1f21` | Cards, list rows (history entries, workflow rows, asset cards)  |
 | `bg-inset`     | `#161618` | Sunken sections (register form, category rail)                  |
@@ -49,8 +49,9 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 - Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label + tab icon in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) — a panel that isn't registered does not exist.
 - **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` (and in App's `labels` / panel `title` for overflow menus). Never put the panel name as visible tab text. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
 - Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly — tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes.
-- Panel root: `<article className="<name>-panel">`, `display: grid; gap: 0.4–0.5rem; align-content: start`. Section headings are `<h3>` (0.8rem, `text-muted`).
+- Panel root: `<article className="<name>-panel">`, `display: grid; gap: 0.4–0.5rem; align-content: start`. Section headings are centered `<h3>` (0.8rem, `text-muted`).
 - Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
+- **History panel** is Photoshop-style: one linear list of restore points (Document → edits). Click a row to jump; future states after the cursor are dimmed. Undo/redo buttons live in the header/menubar only — not inside the History panel.
 
 ## 4. Interaction standards
 
@@ -61,7 +62,7 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 4a. Project library gate (CapCut-like entry)
 
-- **First paint is the projects library**, not the Dockview editor. [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) lists catalog entries; **Open** / **New project** set the active id and mount [`EditorWorkspace`](apps/editor-web/src/App.tsx). Header **Projects** (`ProjectsIcon`) clears active id and returns to the library.
+- **First paint is the projects library**, not the Dockview editor. [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) lists catalog entries; **Open** / **New project** set the active id and mount [`EditorWorkspace`](apps/editor-web/src/App.tsx). **File → Projects Library…** on the Adobe-style menubar under the header clears the active id and returns to the library.
 - Catalog keys: `joy-media.project-catalog.v1` (titles + paired timeline/visual ids), `joy-media.active-project.v1`. Creative docs remain in timeline/visual persistence logs; blank projects use one shared id for both slices ([`project-factory.ts`](apps/editor-web/src/project-factory.ts)).
 - Library chrome uses the same neutral-gray tokens as the editor (no purple themes, no emoji decoration). Cards are interactive surfaces (open on click); delete is an icon-only hover control.
 
@@ -73,16 +74,16 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 4c. Header chrome
 
-- Brand lockup + **project name** + save status on the left; **Projects** returns to the library.
-- Center edit cluster: Undo · Redo · Cut · Split · Duplicate · command palette (icon-only + shortcuts in tooltips).
+- Brand lockup on the left (no Projects icon). Center edit cluster: Undo · Redo · Cut · Split · Duplicate · command palette (icon-only + shortcuts in tooltips).
 - Right deliver cluster: export-preset menu · primary **Export** text button (accent) · processes · account.
+- **Menubar** row under the header ([`AppMenuBar.tsx`](apps/editor-web/src/AppMenuBar.tsx) + [`app-menu.ts`](apps/editor-web/src/app-menu.ts)): **File · Edit · Clip · View · Window** — plain-text items with shortcuts. File → Projects Library… returns to the library; View lists every Dockview panel by name.
 - Groups use `.header-group` separators. Accent is reserved for Export / selection / playhead — not every border.
 
 ## 3. Layout & panels (seed)
 
-Default dock seed key `joy-media.dockview.v6`: **Timeline** full-width bottom; above it **Assets | LARGE Monitor | Inspector**. Creative/utility tools stack as tabs on the inspector side. Clear older `v1`–`v5` layout keys on load.
+Default dock seed key `joy-media.dockview.v7`: **Timeline** full-width bottom; above it **Assets | Inspector | Monitor (right)**. Creative/utility tools stack as tabs on the inspector side. Clear older `v1`–`v6` layout keys on load. Default composition / blank project: **1080×1920**.
 
-Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transport under the canvas.
+Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transport under the canvas. Preview canvas is absolutely contained so intrinsic frame size cannot inflate the dock.
 
 ## 4e. Stickers / overlays (P15)
 

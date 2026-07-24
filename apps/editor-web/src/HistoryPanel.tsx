@@ -1,88 +1,78 @@
+/**
+ * Photoshop-style history: one linear list of restore points. Click a row to
+ * jump there. Undo/redo chrome stays in the app header / menubar — not here.
+ */
+
 import type { HistoryEntry } from './editor-session.js';
-import { RedoIcon, UndoIcon } from './icons.js';
 
 interface HistoryPanelProps {
   readonly entries: readonly HistoryEntry[];
-  readonly canUndo: boolean;
-  readonly canRedo: boolean;
-  readonly onUndo: () => void;
-  readonly onRedo: () => void;
+  readonly onJumpTo: (sequence: number) => void;
 }
 
-export function HistoryPanel({ entries, canUndo, canRedo, onUndo, onRedo }: HistoryPanelProps) {
-  const undoEntries = entries
-    .filter((e) => e.direction === 'undo')
-    .sort((a, b) => b.sequence - a.sequence);
-  const redoEntries = entries
-    .filter((e) => e.direction === 'redo')
-    .sort((a, b) => b.sequence - a.sequence);
-
+export function HistoryPanel({ entries, onJumpTo }: HistoryPanelProps) {
   return (
     <article className="history-panel">
-      <div className="history-controls">
-        <button
-          className="icon-button"
-          disabled={!canUndo}
-          onClick={onUndo}
-          aria-label="Undo"
-          title="Undo (Ctrl+Z)"
-        >
-          <UndoIcon />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!canRedo}
-          onClick={onRedo}
-          aria-label="Redo"
-          title="Redo (Ctrl+Y)"
-        >
-          <RedoIcon />
-        </button>
-      </div>
-
-      <section className="history-section">
-        <h3>Undo stack</h3>
-        {undoEntries.length === 0 ? (
-          <p className="history-empty">No history yet</p>
-        ) : (
-          <ul className="history-list">
-            {undoEntries.map((entry) => (
-              <HistoryEntryRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="history-section">
-        <h3>Redo stack</h3>
-        {redoEntries.length === 0 ? (
-          <p className="history-empty">No history yet</p>
-        ) : (
-          <ul className="history-list">
-            {redoEntries.map((entry) => (
-              <HistoryEntryRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        )}
-      </section>
+      <h3>History</h3>
+      {entries.length <= 1 && entries[0]?.sequence === 0 && entries[0]?.direction === 'current' ? (
+        <p className="history-empty">No edits yet — restore points appear here</p>
+      ) : (
+        <ol className="history-list" aria-label="History restore points">
+          {entries.map((entry) => (
+            <HistoryEntryRow key={entry.id} entry={entry} onJumpTo={onJumpTo} />
+          ))}
+        </ol>
+      )}
     </article>
   );
 }
 
-function HistoryEntryRow({ entry }: { readonly entry: HistoryEntry }) {
+function HistoryEntryRow({
+  entry,
+  onJumpTo,
+}: {
+  readonly entry: HistoryEntry;
+  readonly onJumpTo: (sequence: number) => void;
+}) {
+  const isCurrent = entry.direction === 'current';
+  const isFuture = entry.direction === 'redo';
   const badgeClass =
     entry.source === 'timeline'
       ? 'history-entry-badge history-entry-badge-timeline'
-      : 'history-entry-badge history-entry-badge-visual-object';
+      : entry.source === 'visual-object'
+        ? 'history-entry-badge history-entry-badge-visual-object'
+        : 'history-entry-badge history-entry-badge-document';
 
-  const rowClass =
-    entry.direction === 'redo' ? 'history-entry history-entry-redo' : 'history-entry';
+  const rowClass = [
+    'history-entry',
+    isCurrent ? 'history-entry-current' : '',
+    isFuture ? 'history-entry-future' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <li className={rowClass}>
-      <span className="history-entry-label">{entry.label}</span>
-      <span className={badgeClass}>{entry.source}</span>
-      <span className="history-entry-count">{entry.commandCount} cmd</span>
+    <li>
+      <button
+        type="button"
+        className={rowClass}
+        aria-current={isCurrent ? 'step' : undefined}
+        aria-label={
+          isCurrent
+            ? `Current state: ${entry.label}`
+            : `Restore to: ${entry.label}`
+        }
+        title={isCurrent ? 'Current state' : `Restore to “${entry.label}”`}
+        onClick={() => {
+          if (!isCurrent) onJumpTo(entry.sequence);
+        }}
+      >
+        <span className="history-entry-marker" aria-hidden="true" />
+        <span className="history-entry-label">{entry.label}</span>
+        {entry.source !== 'document' && (
+          <span className={badgeClass}>{entry.source === 'timeline' ? 'timeline' : 'visual'}</span>
+        )}
+      </button>
     </li>
   );
 }

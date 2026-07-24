@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildRulerTicks,
   clampPixelsPerSecond,
   clipRateLabel,
   commitMove,
   fitPixelsPerSecond,
+  formatRulerLabel,
   placeDuplicateAfter,
   pixelToTime,
   previewMove,
@@ -100,5 +102,33 @@ describe('timeline coordinates', () => {
         playbackRate: 0,
       }),
     ).toBe('❄');
+  });
+});
+
+describe('ruler ticks', () => {
+  it('uses denser majors when zoomed in and sparser when zoomed out', () => {
+    const durationUs = 60_000_000;
+    const dense = buildRulerTicks({ durationUs, pixelsPerSecond: 200, minMajorPx: 80 });
+    const sparse = buildRulerTicks({ durationUs, pixelsPerSecond: 5, minMajorPx: 80 });
+    const denseMajors = dense.filter((t) => t.major);
+    const sparseMajors = sparse.filter((t) => t.major);
+    expect(denseMajors.length).toBeGreaterThan(sparseMajors.length);
+    // At 200 px/s, 0.5s major = 100px ≥ 80 → majors every 0.5s
+    expect(denseMajors[1]!.timeUs - denseMajors[0]!.timeUs).toBe(500_000);
+    // At 5 px/s, 30s major = 150px → majors every 30s
+    expect(sparseMajors[1]!.timeUs - sparseMajors[0]!.timeUs).toBe(30_000_000);
+  });
+
+  it('clamps ticks to duration and formats compact labels', () => {
+    const ticks = buildRulerTicks({
+      durationUs: 2_500_000,
+      pixelsPerSecond: 100,
+      minMajorPx: 80,
+    });
+    expect(ticks.every((t) => t.timeUs <= 2_500_000)).toBe(true);
+    expect(ticks.some((t) => t.timeUs === 0)).toBe(true);
+    expect(formatRulerLabel(0)).toBe('0:00');
+    expect(formatRulerLabel(65_000_000)).toBe('1:05');
+    expect(formatRulerLabel(3_661_000_000)).toBe('1:01:01');
   });
 });

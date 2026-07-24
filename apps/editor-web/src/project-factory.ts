@@ -4,7 +4,7 @@ import {
   emptySpikeProject,
   REFERENCE_PROJECT,
 } from '@joy-media/test-fixtures';
-import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
+import { INITIAL_EDITOR_PROJECT, DEFAULT_COMPOSITION_SIZE } from './editor-project.js';
 import type { ProjectCatalogEntry } from './project-catalog.js';
 
 /** Blank creative documents for a brand-new library project (same id on both slices). */
@@ -31,8 +31,8 @@ export function createBlankProjectDocuments(
       root: {
         id: 'root',
         name: 'Root composition',
-        width: 1920,
-        height: 1080,
+        width: DEFAULT_COMPOSITION_SIZE.width,
+        height: DEFAULT_COMPOSITION_SIZE.height,
         pixelAspectRatio: { num: 1, den: 1 },
         frameRate: { num: 30, den: 1 },
         durationUs: 60_000_000,

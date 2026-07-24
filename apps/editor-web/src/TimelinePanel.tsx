@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  buildRulerTicks,
   clampPixelsPerSecond,
   clipRateLabel,
   duplicateClipCommand,
@@ -42,11 +43,43 @@ import {
   TimelineContextMenu,
   type TimelineContextMenuState,
 } from './TimelineContextMenu.js';
-
+import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 const DEFAULT_PPS = 20;
+
+function clipDisplayName(id: string): string {
+  return id
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b([a-z])/g, (ch) => ch.toUpperCase())
+    .trim();
+}
+
+function hashUnit(seed: string, salt: number): number {
+  let h = (salt + 1) * 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) % 1000 / 1000;
+}
+
+function filmstripCellCount(widthPx: number): number {
+  return Math.max(2, Math.min(24, Math.floor(widthPx / 28)));
+}
+
+/** Voice/audio clips: denser bars as zoom (pps) increases for beat-accurate cuts. */
+function waveformBarCount(widthPx: number, pixelsPerSecond: number): number {
+  const barPitchPx = Math.max(1.25, Math.min(8, 140 / Math.max(5, pixelsPerSecond)));
+  return Math.max(8, Math.min(512, Math.round(widthPx / barPitchPx)));
+}
+
+function isVoiceClip(clip: Clip): boolean {
+  if (clip.kind !== 'video') return false;
+  const id = `${clip.id}\0${clip.assetId}`;
+  return /(?:^|[-_])(voice|audio|vo|sfx|music|aiff|wav|mp3|m4a)(?:$|[-_])/i.test(id);
+}
 
 function TimelineClip({
   clip,
@@ -54,6 +87,7 @@ function TimelineClip({
   maxStartUs,
   viewport,
   locked,
+  laneIndex,
   onToggleSelection,
   onMove,
   onTrim,
@@ -64,6 +98,7 @@ function TimelineClip({
   readonly maxStartUs: number;
   readonly viewport: TimelineViewport;
   readonly locked: boolean;
+  readonly laneIndex: number;
   readonly onToggleSelection: (id: string) => void;
   readonly onMove: (clipId: string, newStartUs: number) => boolean;
   readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
@@ -77,6 +112,7 @@ function TimelineClip({
   const trimRef = useRef<{ edge: 'start' | 'end'; originX: number } | null>(null);
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
+  const voice = isVoiceClip(clip);
 
   const dropTimeUs = (deltaPx: number): number => {
     const rawUs = clip.startUs + deltaPx / pxPerUs;
@@ -111,14 +147,31 @@ function TimelineClip({
         ? clip.startUs + clip.durationUs - trimPreview.timeUs
         : trimPreview.timeUs - clip.startUs;
 
+  const widthPx = Math.max(8, displayDurationUs * pxPerUs);
+  const gapPx = 1;
+  const layoutWidthPx = Math.max(6, widthPx - gapPx * 2);
+  const cellCount = filmstripCellCount(layoutWidthPx);
+  const waveCount = waveformBarCount(layoutWidthPx, viewport.pixelsPerSecond);
+  const label = clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
+  const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
+  const showChrome = layoutWidthPx >= 48;
+  const showDuration = layoutWidthPx >= 100;
+  const kindClass =
+    clip.kind === 'composition'
+      ? 'timeline-clip--comp'
+      : voice
+        ? 'timeline-clip--voice'
+        : 'timeline-clip--video';
+  const laneClass = `timeline-clip--lane-${Math.min(laneIndex, 3)}`;
+
   return (
     <button
-      className={`timeline-clip${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}`}
+      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}`}
       aria-pressed={selected}
-      title={`${clip.id} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
+      title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
-        left: `${timeToPixel(displayStartUs, viewport)}px`,
-        width: `${Math.max(8, displayDurationUs * pxPerUs)}px`,
+        left: `${timeToPixel(displayStartUs, viewport) + gapPx}px`,
+        width: `${layoutWidthPx}px`,
       }}
       onClick={() => {
         if (dragRef.current?.moved !== true && trimRef.current === null) onToggleSelection(clip.id);
@@ -195,9 +248,44 @@ function TimelineClip({
           />
         </>
       )}
-      <span className="timeline-clip-label">{clip.id}</span>
-      {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
-      <span className="timeline-clip-waveform" aria-hidden="true" />
+      {voice ? (
+        <span className="timeline-clip-waveform" aria-hidden="true">
+          {Array.from({ length: waveCount }, (_, index) => {
+            const amp = hashUnit(clip.id, index);
+            const beat = index % 8 === 0 ? 0.22 : index % 4 === 0 ? 0.1 : 0;
+            const level = Math.min(1, 0.28 + amp * 0.62 + beat);
+            const tone = level > 0.78 ? 'is-peak' : level > 0.48 ? '' : 'is-mid';
+            return (
+              <span
+                key={index}
+                className={`timeline-clip-wave-bar ${tone}`.trim()}
+                style={{ height: `${Math.round(level * 100)}%` }}
+              />
+            );
+          })}
+        </span>
+      ) : (
+        <span className="timeline-clip-filmstrip" aria-hidden="true">
+          {Array.from({ length: cellCount }, (_, index) => {
+            const t = hashUnit(clip.id, index);
+            const light = 14 + Math.round(t * 18);
+            return (
+              <span
+                key={index}
+                className="timeline-clip-cell"
+                style={{ backgroundColor: `hsl(42 42% ${light}%)` }}
+              />
+            );
+          })}
+        </span>
+      )}
+      {showChrome && (
+        <span className="timeline-clip-chrome">
+          <span className="timeline-clip-label">{label}</span>
+          {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
+          {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
+        </span>
+      )}
     </button>
   );
 }
@@ -248,7 +336,7 @@ export function TimelinePanel({
     return (
       saved ?? {
         id: track.id,
-        heightPx: 36,
+        heightPx: 44,
         locked: false,
         muted: !track.enabled,
         solo: false,
@@ -371,6 +459,7 @@ export function TimelinePanel({
       const end = existing.startUs + existing.durationUs;
       if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
     }
+    const isAudio = asset.kind === 'audio';
     onDispatch({
       label: `Insert ${asset.displayName ?? asset.assetId}`,
       commands: [
@@ -380,7 +469,7 @@ export function TimelinePanel({
             compositionId: composition.id,
             trackId,
             clip: {
-              id: `clip-${asset.assetId}-${Date.now()}`,
+              id: `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`,
               kind: 'video',
               assetId: asset.assetId,
               startUs,
@@ -492,6 +581,16 @@ export function TimelinePanel({
     timeToPixel(composition.durationUs, { ...viewport, originUs: 0 }),
   );
 
+  const rulerTicks = useMemo(
+    () =>
+      buildRulerTicks({
+        durationUs: composition.durationUs,
+        pixelsPerSecond: viewport.pixelsPerSecond,
+        originUs: 0,
+      }),
+    [composition.durationUs, viewport.pixelsPerSecond],
+  );
+
   const seekFromLane = (event: React.PointerEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - rect.left;
@@ -568,7 +667,6 @@ export function TimelinePanel({
         >
           <SkipBackIcon />
         </button>
-        <output className="timeline-timecode">{(playheadUs / 1_000_000).toFixed(2)} s</output>
         <button
           className="icon-button"
           onClick={() => onSeek(Math.min(composition.durationUs, playheadUs + 1_000_000))}
@@ -581,7 +679,6 @@ export function TimelinePanel({
           type="button"
           className="icon-button"
           aria-label="Add video track"
-          title="Add track"
           data-guide="Add track"
           onClick={() => {
             const order = composition.tracks.length;
@@ -612,23 +709,12 @@ export function TimelinePanel({
             type="button"
             className="icon-button"
             aria-label="Add marker at playhead"
-            title="Add marker"
             data-guide="Add marker"
             onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
           >
             <MarkerIcon />
           </button>
         )}
-        <input
-          aria-label="Playhead"
-          className="timeline-playhead-slider"
-          type="range"
-          min={0}
-          max={composition.durationUs}
-          step={100_000}
-          value={playheadUs}
-          onChange={(event) => onSeek(event.currentTarget.valueAsNumber)}
-        />
         <span className="timeline-toolbar-sep" aria-hidden="true" />
         <button
           className="icon-button"
@@ -678,7 +764,40 @@ export function TimelinePanel({
           applyZoom(viewport.pixelsPerSecond * factor, event.clientX);
         }}
       >
+        <div
+          className="timeline-scrub-row"
+          style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}
+        >
+          <div className="timeline-scrub-gutter">
+            <output className="timeline-timecode" aria-live="polite">
+              {(playheadUs / 1_000_000).toFixed(2)} s
+            </output>
+          </div>
+          <TimelineRuler
+            durationUs={composition.durationUs}
+            playheadUs={playheadUs}
+            viewport={{ ...viewport, originUs: 0 }}
+            widthPx={laneWidthPx}
+            ticks={rulerTicks}
+            onSeek={onSeek}
+          />
+          <span
+            className="timeline-playhead timeline-playhead--scrub"
+            style={{
+              left: `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`,
+            }}
+            aria-hidden="true"
+          />
+        </div>
         <div className="timeline-tracks-inner" ref={laneMeasureRef}>
+          <TimelineTracksGrid ticks={rulerTicks} widthPx={laneWidthPx} />
+          <span
+            className="timeline-playhead"
+            style={{
+              left: `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`,
+            }}
+            aria-hidden="true"
+          />
           {markers.length > 0 && (
             <div className="timeline-marker-rail" style={{ minWidth: `${laneWidthPx}px` }}>
               {markers.map((marker) => (
@@ -704,15 +823,31 @@ export function TimelinePanel({
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
+            const voiceDominant =
+              source.clips.length > 0 && source.clips.every((c) => isVoiceClip(c));
+            const audioIndex = visible
+              .slice(0, index + 1)
+              .filter((t) => {
+                const s = composition.tracks.find((item) => item.id === t.id);
+                return s !== undefined && s.clips.length > 0 && s.clips.every((c) => isVoiceClip(c));
+              }).length;
             return (
               <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
                 <div className="timeline-track-header">
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
-                      {`V${index + 1}`}
+                      {voiceDominant ? `A${audioIndex}` : `V${index + 1}`}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {index === 0 ? 'Main Video' : index === 1 ? 'B-roll' : `Video ${index + 1}`}
+                      {voiceDominant
+                        ? audioIndex === 1
+                          ? 'Voice'
+                          : `Audio ${audioIndex}`
+                        : index === 0
+                          ? 'Main Video'
+                          : index === 1
+                            ? 'B-roll'
+                            : `Video ${index + 1}`}
                     </span>
                   </div>
                   <button
@@ -823,6 +958,7 @@ export function TimelinePanel({
                       maxStartUs={composition.durationUs - clip.durationUs}
                       viewport={{ ...viewport, originUs: 0 }}
                       locked={track.locked}
+                      laneIndex={index}
                       onToggleSelection={onToggleSelection}
                       onMove={track.locked ? () => false : moveClip(track.id)}
                       onTrim={track.locked ? () => false : trimClip(track.id)}
@@ -833,13 +969,6 @@ export function TimelinePanel({
                       }}
                     />
                   ))}
-                  <span
-                    className="timeline-playhead"
-                    style={{
-                      left: `${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px`,
-                    }}
-                    aria-hidden="true"
-                  />
                 </span>
               </div>
             );
@@ -849,7 +978,8 @@ export function TimelinePanel({
 
       <div className="timeline-zoombar">
         <button
-          className="icon-button"
+          type="button"
+          className="timeline-zoom-btn"
           aria-label="Zoom out"
           title="Zoom out"
           onClick={() => applyZoom(viewport.pixelsPerSecond / 1.25)}
@@ -867,7 +997,8 @@ export function TimelinePanel({
           onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
         />
         <button
-          className="icon-button"
+          type="button"
+          className="timeline-zoom-btn"
           aria-label="Zoom in"
           title="Zoom in"
           onClick={() => applyZoom(viewport.pixelsPerSecond * 1.25)}
@@ -875,7 +1006,8 @@ export function TimelinePanel({
           <ZoomInIcon />
         </button>
         <button
-          className="icon-button"
+          type="button"
+          className="timeline-zoom-btn"
           aria-label="Fit timeline to width"
           title="Fit to width"
           aria-pressed={autoFit}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
@@ -16,14 +16,33 @@ import {
 } from './asset-library-state.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
-import { CloseIcon, CloudIcon, ImageIcon, PlayIcon, PlusIcon, RefreshIcon, AiEffectIcon } from './icons.js';
+import {
+  CloseIcon,
+  CloudIcon,
+  ImageIcon,
+  PlayIcon,
+  PlusIcon,
+  RefreshIcon,
+  AiEffectIcon,
+  SearchIcon,
+  FilterIcon,
+  UploadIcon,
+  CheckIcon,
+  GridUiIcon,
+  VideoIcon,
+  AudioIcon,
+} from './icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
-const categories: readonly { readonly id: AssetCategory; readonly label: string }[] = [
-  { id: 'all', label: 'All assets' },
-  { id: 'video', label: 'Video' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'image', label: 'Images' },
+const categories: readonly {
+  readonly id: AssetCategory;
+  readonly label: string;
+  readonly Icon: ComponentType;
+}[] = [
+  { id: 'all', label: 'All assets', Icon: GridUiIcon },
+  { id: 'video', label: 'Video', Icon: VideoIcon },
+  { id: 'audio', label: 'Audio', Icon: AudioIcon },
+  { id: 'image', label: 'Images', Icon: ImageIcon },
 ];
 
 interface Preview {
@@ -74,6 +93,14 @@ export function AssetLibraryPanel({
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [comfyReady, setComfyReady] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const filterActive = availability !== 'all' || sort !== 'recent';
+  const canImport = selectedFile !== undefined && assetId.trim().length > 0;
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -97,6 +124,7 @@ export function AssetLibraryPanel({
           ? 'No media has been registered for this project yet.'
           : 'Catalog ready.',
       );
+      if (assets.length === 0) setImportOpen(true);
     } catch (error) {
       const detail = message(error);
       if (detail.includes('PROJECT_NOT_FOUND')) {
@@ -110,6 +138,37 @@ export function AssetLibraryPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!filterOpen && !searchOpen && !importOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = toolbarRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setFilterOpen(false);
+      if (query.trim().length === 0) setSearchOpen(false);
+      if (selectedFile === undefined && assetId.trim().length === 0) setImportOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setFilterOpen(false);
+      setImportOpen(false);
+      if (query.trim().length === 0) {
+        setSearchOpen(false);
+        searchInputRef.current?.blur();
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [filterOpen, searchOpen, importOpen, query, selectedFile, assetId]);
 
   useEffect(() => {
     void client
@@ -251,6 +310,8 @@ export function AssetLibraryPanel({
       await client.registerAsset(projectId, registration);
       setSelectedFile(undefined);
       setAssetId('');
+      if (fileInputRef.current !== null) fileInputRef.current.value = '';
+      setImportOpen(false);
       setStatus(
         `Registered ${selectedFile.name}. Configure the same opaque ID on a local Worker before queuing a derivative.`,
       );
@@ -286,131 +347,249 @@ export function AssetLibraryPanel({
   return (
     <section className="asset-library" aria-label="Asset library">
       <nav className="asset-categories" aria-label="Asset categories">
-        <h2>Assets</h2>
         {categories.map((entry) => {
           const count =
             entry.id === 'all'
               ? items.length
               : items.filter(({ asset }) => asset.kind === entry.id).length;
+          const Icon = entry.Icon;
           return (
             <button
               key={entry.id}
               type="button"
               className={category === entry.id ? 'asset-category-tab active' : 'asset-category-tab'}
               aria-pressed={category === entry.id}
+              aria-label={`${entry.label} (${count})`}
+              title={`${entry.label} (${count})`}
               onClick={() => setCategory(entry.id)}
             >
-              <span>{entry.label}</span>
+              <Icon />
               <small>{count}</small>
             </button>
           );
         })}
       </nav>
       <div className="asset-library-content">
-        <div className="asset-library-toolbar" role="search">
-          <label className="asset-search">
-            <span className="sr-only">Search assets</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search assets"
-              aria-label="Search assets"
-            />
-          </label>
-          <label className="asset-filter">
-            <span>Availability</span>
-            <select
-              value={availability}
-              onChange={(event) => setAvailability(event.target.value as AssetAvailability)}
-              aria-label="Filter by availability"
-            >
-              <option value="all">Any status</option>
-              <option value="available-cloud">Ready in cloud</option>
-              <option value="available-local">Cached locally</option>
-              <option value="pending">Processing</option>
-              <option value="evicted">Cache evicted</option>
-              <option value="invalid">Needs repair</option>
-              <option value="none">No derivative</option>
-            </select>
-          </label>
-          <label className="asset-filter">
-            <span>Sort</span>
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as AssetSort)}
-              aria-label="Sort assets"
-            >
-              <option value="recent">Newest</option>
-              <option value="name">Name</option>
-              <option value="size">Largest file</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="icon-button asset-refresh"
-            onClick={() => void refresh()}
-            aria-label="Refresh assets"
-            title="Refresh assets"
-          >
-            <RefreshIcon />
-          </button>
-          <button
-            type="button"
-            className="icon-button asset-sync"
-            disabled={syncEnabled}
-            aria-pressed={syncEnabled}
-            aria-label={
-              syncEnabled
-                ? 'Private backup is enabled for this project'
-                : 'Enable private cloud backup for this project'
-            }
-            title={
-              syncEnabled
-                ? 'Private backup on'
-                : 'Enable private cloud backup'
-            }
-            data-guide={syncEnabled ? 'Backup on' : 'Enable backup'}
-            onClick={() => void enableSync()}
-          >
-            <CloudIcon />
-          </button>
-        </div>
-        <details className="asset-register" open={items.length === 0}>
-          <summary>Import media</summary>
-          <p>
-            Files are hashed and cached in this browser only. Use an opaque Asset ID that matches a
-            Worker source mapping — paths are never uploaded.
-          </p>
-          <div className="asset-register-fields">
-            <label>
-              Asset ID
-              <input
-                value={assetId}
-                onChange={(event) => setAssetId(event.target.value)}
-                placeholder="asset-campaign-intro"
-                aria-label="Asset ID"
-              />
-            </label>
-            <label>
-              Media file
-              <input
-                type="file"
-                accept="video/*,audio/*,image/*"
-                onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
-                aria-label="Media file"
-              />
-            </label>
+        <div className="asset-library-toolbar" ref={toolbarRef}>
+          <div className="asset-toolbar-icons" role="toolbar" aria-label="Asset tools">
+            {searchOpen ? (
+              <label className="asset-search asset-search-expanded">
+                <span className="sr-only">Search assets</span>
+                <SearchIcon />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onBlur={() => {
+                    if (query.trim().length === 0) setSearchOpen(false);
+                  }}
+                  placeholder="Search assets"
+                  aria-label="Search assets"
+                />
+                <button
+                  type="button"
+                  className="icon-button asset-search-close"
+                  aria-label="Close search"
+                  title="Close search"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setQuery('');
+                    setSearchOpen(false);
+                  }}
+                >
+                  <CloseIcon />
+                </button>
+              </label>
+            ) : (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Search assets"
+                title="Search assets"
+                aria-expanded={false}
+                onClick={() => {
+                  setFilterOpen(false);
+                  setImportOpen(false);
+                  setSearchOpen(true);
+                }}
+              >
+                <SearchIcon />
+              </button>
+            )}
             <button
               type="button"
-              className="asset-import-btn"
-              disabled={selectedFile === undefined || assetId.trim().length === 0}
-              onClick={() => void registerSelectedAsset()}
+              className="icon-button"
+              aria-label="Import media"
+              title="Import media"
+              aria-expanded={importOpen}
+              aria-pressed={importOpen}
+              data-active={importOpen ? 'true' : undefined}
+              onClick={() => {
+                setFilterOpen(false);
+                setSearchOpen(false);
+                setImportOpen((open) => !open);
+              }}
             >
-              Import media
+              <UploadIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Filter and sort"
+              title="Filter and sort"
+              aria-expanded={filterOpen}
+              aria-pressed={filterActive || filterOpen}
+              data-active={filterActive || filterOpen ? 'true' : undefined}
+              onClick={() => {
+                setImportOpen(false);
+                setFilterOpen((open) => !open);
+              }}
+            >
+              <FilterIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button asset-refresh"
+              onClick={() => void refresh()}
+              aria-label="Refresh assets"
+              title="Refresh assets"
+            >
+              <RefreshIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button asset-sync"
+              disabled={syncEnabled}
+              aria-pressed={syncEnabled}
+              aria-label={
+                syncEnabled
+                  ? 'Private backup is enabled for this project'
+                  : 'Enable private cloud backup for this project'
+              }
+              data-guide={syncEnabled ? 'Backup on' : 'Enable backup'}
+              onClick={() => void enableSync()}
+            >
+              <CloudIcon />
             </button>
           </div>
-        </details>
+          {importOpen && (
+            <div className="asset-import-drawer" role="dialog" aria-label="Import media">
+              <div className="asset-filter-drawer-head">
+                <strong>Import media</strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close import"
+                  title="Close import"
+                  onClick={() => setImportOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <p className="asset-import-hint">
+                Hashed and cached in this browser. Use an opaque Asset ID that matches a Worker —
+                paths stay local.
+              </p>
+              <div className="asset-import-row">
+                <input
+                  ref={fileInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept="video/*,audio/*,image/*"
+                  onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
+                  aria-label="Media file"
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Choose media file"
+                  title="Choose media file"
+                  data-active={selectedFile !== undefined ? 'true' : undefined}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <PlusIcon />
+                </button>
+                <span className="asset-import-file" title={selectedFile?.name}>
+                  {selectedFile?.name ?? 'Choose file'}
+                </span>
+                <input
+                  className="asset-import-id"
+                  value={assetId}
+                  onChange={(event) => setAssetId(event.target.value)}
+                  placeholder="Asset ID"
+                  aria-label="Asset ID"
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  disabled={!canImport}
+                  aria-label="Confirm import"
+                  title="Import media"
+                  onClick={() => void registerSelectedAsset()}
+                >
+                  <CheckIcon />
+                </button>
+              </div>
+            </div>
+          )}
+          {filterOpen && (
+            <div className="asset-filter-drawer" role="dialog" aria-label="Asset filters">
+              <div className="asset-filter-drawer-head">
+                <strong>Filters</strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close filters"
+                  title="Close filters"
+                  onClick={() => setFilterOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <label className="asset-filter-field">
+                <span>Availability</span>
+                <select
+                  value={availability}
+                  onChange={(event) => setAvailability(event.target.value as AssetAvailability)}
+                  aria-label="Filter by availability"
+                >
+                  <option value="all">Any status</option>
+                  <option value="available-cloud">Ready in cloud</option>
+                  <option value="available-local">Cached locally</option>
+                  <option value="pending">Processing</option>
+                  <option value="evicted">Cache evicted</option>
+                  <option value="invalid">Needs repair</option>
+                  <option value="none">No derivative</option>
+                </select>
+              </label>
+              <label className="asset-filter-field">
+                <span>Sort</span>
+                <select
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as AssetSort)}
+                  aria-label="Sort assets"
+                >
+                  <option value="recent">Newest</option>
+                  <option value="name">Name</option>
+                  <option value="size">Largest file</option>
+                </select>
+              </label>
+              {filterActive && (
+                <button
+                  type="button"
+                  className="asset-filter-reset"
+                  onClick={() => {
+                    setAvailability('all');
+                    setSort('recent');
+                  }}
+                >
+                  Reset filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <p className="asset-library-status" aria-live="polite">
           {status}
         </p>
@@ -450,8 +629,17 @@ export function AssetLibraryPanel({
               </>
             ) : (
               <>
-                <p>Drop media here or import files.</p>
                 <p>No assets match the current filters.</p>
+                <button
+                  type="button"
+                  className="icon-button icon-button-labeled"
+                  onClick={() => setImportOpen(true)}
+                  aria-label="Import media"
+                  title="Import media"
+                >
+                  <UploadIcon />
+                  Import
+                </button>
               </>
             )}
           </div>
@@ -518,7 +706,6 @@ export function AssetLibraryPanel({
                         type="button"
                         className="icon-button"
                         aria-label={`Add ${asset.displayName} as sticker`}
-                        title="Add as sticker"
                         data-guide="Add as sticker"
                         onClick={() => void addAsSticker(asset)}
                       >
@@ -528,11 +715,6 @@ export function AssetLibraryPanel({
                         type="button"
                         className="icon-button"
                         aria-label={`Remove background from ${asset.displayName}`}
-                        title={
-                          comfyReady
-                            ? 'Remove background (GPU Worker RemBG)'
-                            : 'Needs paired GPU Worker with image.comfy'
-                        }
                         data-guide="Remove background"
                         disabled={!comfyReady}
                         onClick={() => void removeBackground(asset)}

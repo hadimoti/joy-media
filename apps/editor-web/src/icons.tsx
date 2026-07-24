@@ -148,11 +148,22 @@ export function LockIcon() {
 }
 
 export function MuteIcon() {
-  return <PngMaskIcon src={UI_ICONS.mute} />;
+  return (
+    <Svg>
+      <path d="M2.5 6.2h2.2L8.2 3.5v9L4.7 9.8H2.5Z" />
+      <path d="m10.2 6.2 4.1 4.1M14.3 6.2l-4.1 4.1" />
+    </Svg>
+  );
 }
 
 export function SpeakerOnIcon() {
-  return <PngMaskIcon src={UI_ICONS.speakerOn} />;
+  return (
+    <Svg>
+      <path d="M2.5 6.2h2.2L8.2 3.5v9L4.7 9.8H2.5Z" />
+      <path d="M10.5 6.2a2.6 2.6 0 0 1 0 3.6" />
+      <path d="M12.2 4.6a4.8 4.8 0 0 1 0 6.8" />
+    </Svg>
+  );
 }
 
 export function SoloIcon() {
@@ -191,11 +202,7 @@ export function CloseIcon() {
 }
 
 export function PlusIcon() {
-  return (
-    <Svg>
-      <path d="M8 2.5v11M2.5 8h11" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.add} />;
 }
 
 export function DownloadIcon() {
@@ -221,7 +228,7 @@ export function MicIcon() {
 }
 
 export function VoiceIcon() {
-  return <PngMaskIcon src={UI_ICONS.voice} />;
+  return <SpeakerOnIcon />;
 }
 
 export function EffectsUiIcon() {
@@ -233,11 +240,15 @@ export function TransitionUiIcon() {
 }
 
 export function AiEffectIcon() {
-  return <PngMaskIcon src={UI_ICONS.aiEffect} />;
+  return <PngMaskIcon src={UI_ICONS.agentAi} />;
 }
 
 export function SettingsGearIcon() {
   return <PngMaskIcon src={UI_ICONS.settings} />;
+}
+
+export function CameraUiIcon() {
+  return <PngMaskIcon src={UI_ICONS.camera} />;
 }
 
 export function GridUiIcon() {
@@ -254,11 +265,47 @@ export function ImageIcon() {
   );
 }
 
+export function VideoIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="3.5" width="8" height="9" rx="1" />
+      <path d="M10.5 6.5 13.5 4.5v7L10.5 9.5Z" />
+    </Svg>
+  );
+}
+
+export function AudioIcon() {
+  return (
+    <Svg>
+      <path d="M4 6.5v3a4 4 0 0 0 8 0v-3" />
+      <path d="M8 2.5v4" />
+      <circle cx="8" cy="11.5" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon() {
   return (
     <Svg>
       <path d="M13 8a5 5 0 1 1-1.5-3.6" />
       <path d="M13 2.5V5h-2.5" />
+    </Svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <Svg>
+      <circle cx="7" cy="7" r="4.25" />
+      <path d="m10.2 10.2 3.3 3.3" />
+    </Svg>
+  );
+}
+
+export function FilterIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 3.5h11l-4 4.5V12.5l-3 1.5V8Z" />
     </Svg>
   );
 }
@@ -374,7 +421,7 @@ export function CutIcon() {
 }
 
 export function ProjectsIcon() {
-  return <PngMaskIcon src={UI_ICONS.capcut} />;
+  return <PngMaskIcon src={UI_ICONS.assets} />;
 }
 
 export function MarkerIcon() {
@@ -463,11 +510,43 @@ export function InterpBezierIcon() {
 }
 
 export function GainIcon() {
-  return (
-    <Svg>
-      <path d="M3 12.5V8M6.5 12.5V5.5M10 12.5V7M13.5 12.5V3.5" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.gain} />;
+}
+
+export function LiftIcon() {
+  return <PngMaskIcon src={UI_ICONS.lift} />;
+}
+
+export function GammaIcon() {
+  return <PngMaskIcon src={UI_ICONS.gamma} />;
+}
+
+export function BrightnessIcon() {
+  return <PngMaskIcon src={UI_ICONS.brightness} />;
+}
+
+export function SaturationIcon() {
+  return <PngMaskIcon src={UI_ICONS.saturation} />;
+}
+
+export function ContrastIcon() {
+  return <PngMaskIcon src={UI_ICONS.contrast} />;
+}
+
+export function InvertColorIcon() {
+  return <PngMaskIcon src={UI_ICONS.invertColor} />;
+}
+
+export function BlendIcon() {
+  return <PngMaskIcon src={UI_ICONS.blend} />;
+}
+
+export function CropIcon() {
+  return <PngMaskIcon src={UI_ICONS.crop} />;
+}
+
+export function FullscreenIcon() {
+  return <PngMaskIcon src={UI_ICONS.fullscreen} />;
 }
 
 export function PanIcon() {
@@ -497,12 +576,7 @@ export function FadeOutIcon() {
 }
 
 export function BlurIcon() {
-  return (
-    <Svg>
-      <circle cx="8" cy="8" r="4.5" opacity="0.45" />
-      <circle cx="8" cy="8" r="2.5" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.blur} />;
 }
 
 export function GlowIcon() {
@@ -550,12 +624,7 @@ export function GrainIcon() {
 }
 
 export function ColorWheelIcon() {
-  return (
-    <Svg>
-      <circle cx="8" cy="8" r="5.5" />
-      <path d="M8 2.5v11M2.5 8h11M4.2 4.2l7.6 7.6M11.8 4.2 4.2 11.8" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.colors} />;
 }
 
 export function TrackAddIcon() {

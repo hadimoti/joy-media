@@ -14,12 +14,14 @@ import type { BrowserKeyValueStore, PersistenceAdapter } from '@joy-media/projec
 import { validateJoyProjectV1, validateSpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { EditorCommandController } from './command-controller.js';
+import { withDefaultPortraitComposition } from './editor-project.js';
 
 export interface HistoryEntry {
   readonly id: string;
-  readonly source: 'timeline' | 'visual-object';
+  readonly source: 'timeline' | 'visual-object' | 'document';
   readonly label: string;
-  readonly direction: 'undo' | 'redo';
+  /** Present when this entry is past (`undo`) or future (`redo`) relative to the cursor. */
+  readonly direction: 'undo' | 'redo' | 'current';
   readonly commandCount: number;
   readonly sequence: number;
 }
@@ -75,7 +77,10 @@ export class EditorSession {
       visualObjectAdapter,
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
-    const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
+    // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
+    const visualObjects = withDefaultPortraitComposition(
+      recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject),
+    );
     this.#timeline = new EditorCommandController(timeline);
     this.#visualObjects = new VisualObjectProjectHistory(visualObjects);
   }
@@ -97,10 +102,68 @@ export class EditorSession {
   }
 
   get historyEntries(): readonly HistoryEntry[] {
-    return [
-      ...this.#undo.map((e) => this.#toEntry(e, 'undo')),
-      ...this.#redo.map((e) => this.#toEntry(e, 'redo')),
-    ];
+    const cursorSequence = this.historyCursorSequence;
+    // Photoshop-style linear strip: Document → past → current tip → future redo states.
+    const document: HistoryEntry = {
+      id: 'history-document',
+      source: 'document',
+      label: 'Document',
+      direction: cursorSequence === 0 ? 'current' : 'undo',
+      commandCount: 0,
+      sequence: 0,
+    };
+    const pastRows: HistoryEntry[] = this.#undo.map((e, index) => {
+      const isTip = index === this.#undo.length - 1;
+      return this.#toEntry(e, isTip ? 'current' : 'undo');
+    });
+    const futureRows = [...this.#redo]
+      .reverse()
+      .map((e) => this.#toEntry(e, 'redo'));
+    if (cursorSequence === 0) {
+      return [document, ...futureRows];
+    }
+    return [document, ...pastRows, ...futureRows];
+  }
+
+  /** Sequence of the present state (0 = empty document / no commits). */
+  get historyCursorSequence(): number {
+    const tip = this.#undo[this.#undo.length - 1];
+    return tip?.sequence ?? 0;
+  }
+
+  /**
+   * Jump to a history restore point (Photoshop-style). Undoes or redoes until
+   * `historyCursorSequence === sequence`.
+   */
+  jumpToHistory(sequence: number): void {
+    if (!Number.isFinite(sequence) || sequence < 0) return;
+    const known =
+      sequence === 0 ||
+      this.#undo.some((e) => e.sequence === sequence) ||
+      this.#redo.some((e) => e.sequence === sequence);
+    if (!known) return;
+    let guard = this.#undo.length + this.#redo.length + 2;
+    while (this.historyCursorSequence > sequence && this.canUndo && guard-- > 0) {
+      this.undo();
+    }
+    guard = this.#undo.length + this.#redo.length + 2;
+    while (this.historyCursorSequence < sequence && this.canRedo && guard-- > 0) {
+      this.redo();
+    }
+  }
+
+  #toEntry(
+    entry: HistoryStackEntry,
+    direction: 'undo' | 'redo' | 'current',
+  ): HistoryEntry {
+    return {
+      id: `history-${entry.sequence}`,
+      source: entry.operation,
+      label: entry.label,
+      direction,
+      commandCount: entry.commandCount,
+      sequence: entry.sequence,
+    };
   }
 
   dispatchTimeline(transaction: CommandTransaction): SpikeProject {
@@ -167,17 +230,6 @@ export class EditorSession {
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
     }
     this.#undo.push(entry);
-  }
-
-  #toEntry(entry: HistoryStackEntry, direction: 'undo' | 'redo'): HistoryEntry {
-    return {
-      id: `history-${entry.sequence}`,
-      source: entry.operation,
-      label: entry.label,
-      direction,
-      commandCount: entry.commandCount,
-      sequence: entry.sequence,
-    };
   }
 
   #record(operation: EditorOperation, label: string, commandCount: number): void {

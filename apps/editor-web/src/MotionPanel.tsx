@@ -92,7 +92,6 @@ function HtmlScenesSection({
             key={scene.id}
             type="button"
             className="icon-button"
-            title={`Add ${scene.name}`}
             data-guide={scene.name}
             aria-label={`Add HTML scene ${scene.name}`}
             onClick={() => addScene(scene.id)}
@@ -235,7 +234,6 @@ export function MotionPanel({
         <button
           type="button"
           className="icon-button"
-          title="Apply preset at playhead"
           data-guide="Apply preset"
           aria-label="Apply motion preset"
           onClick={applyPreset}
@@ -245,7 +243,6 @@ export function MotionPanel({
         <button
           type="button"
           className="icon-button"
-          title="Save current XY motion as durable spatial path"
           data-guide="Save spatial path"
           aria-label="Save spatial path"
           onClick={saveSpatialPath}

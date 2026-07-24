@@ -89,7 +89,6 @@ export function CaptionsPanel({
           className="icon-button"
           aria-pressed={burnIn}
           aria-label={burnIn ? 'Disable caption burn-in' : 'Enable caption burn-in'}
-          title={burnIn ? 'Burn-in on (Monitor + Export)' : 'Burn-in off (sidecar only)'}
           data-guide={burnIn ? 'Burn-in on' : 'Burn-in off'}
           onClick={() => onProjectChange(withCaptionBurnIn(project, !burnIn))}
         >
@@ -292,7 +291,6 @@ function CaptionSlotEditor({
                 className="icon-button"
                 aria-pressed={active}
                 aria-label={meta?.label ?? template.name}
-                title={template.description}
                 data-guide={meta?.label ?? template.name}
                 onClick={() => applyTemplate(template.id)}
               >
@@ -304,7 +302,6 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Export captions as SRT"
-          title="Export captions as SRT"
           data-guide="Export SRT"
           onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
         >
@@ -313,7 +310,6 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Export captions as WebVTT"
-          title="Export captions as WebVTT"
           data-guide="Export VTT"
           onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
@@ -349,7 +345,6 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Auto caption"
-          title="Auto caption"
           data-guide="Auto caption"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >
@@ -358,7 +353,6 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Transcribe Persian"
-          title="Transcribe Persian (fa-IR)"
           data-guide="Persian (fa)"
           onClick={() => void onTranscribe(document.id, 'fa-IR')}
         >
@@ -367,7 +361,6 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Transcribe English"
-          title="Transcribe English (en-US)"
           data-guide="English (en)"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >

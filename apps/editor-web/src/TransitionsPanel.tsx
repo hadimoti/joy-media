@@ -117,7 +117,6 @@ export function TransitionsPanel({
                       className="icon-button transition-type-btn"
                       onClick={() => handleAddTransition()}
                       aria-label={label}
-                      title={label}
                       data-guide={label}
                     >
                       <Icon />

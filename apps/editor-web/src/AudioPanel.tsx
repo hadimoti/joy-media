@@ -38,7 +38,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
       {master !== undefined && (
         <div className="audio-strip">
           <div className="control-row">
-            <span className="icon-tool" data-guide="Master bus" title="Master bus" aria-hidden="true">
+            <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
               <MasterBusIcon />
             </span>
             <input
@@ -82,7 +82,6 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 className="icon-button"
                 aria-pressed={clip.mute}
                 aria-label={`Mute ${clipId}`}
-                title="Mute"
                 data-guide="Mute"
                 onClick={() =>
                   dispatch(
@@ -98,7 +97,6 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 className="icon-button"
                 aria-pressed={clip.solo}
                 aria-label={`Solo ${clipId}`}
-                title="Solo"
                 data-guide="Solo"
                 onClick={() =>
                   dispatch(
@@ -111,7 +109,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               </button>
             </div>
             <div className="control-row">
-              <span className="icon-tool" data-guide="Gain" title="Gain" aria-hidden="true">
+              <span className="icon-tool" data-guide="Gain" aria-hidden="true">
                 <GainIcon />
               </span>
               <input
@@ -135,7 +133,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               <span className="value">{clip.gain.toFixed(2)}</span>
             </div>
             <div className="control-row">
-              <span className="icon-tool" data-guide="Pan" title="Pan" aria-hidden="true">
+              <span className="icon-tool" data-guide="Pan" aria-hidden="true">
                 <PanIcon />
               </span>
               <input
@@ -159,7 +157,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               <span className="value">{clip.pan.toFixed(2)}</span>
             </div>
             <div className="control-row">
-              <span className="icon-tool" data-guide="Fade in" title="Fade in" aria-hidden="true">
+              <span className="icon-tool" data-guide="Fade in" aria-hidden="true">
                 <FadeInIcon />
               </span>
               <input
@@ -186,7 +184,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               <span className="value">ms</span>
             </div>
             <div className="control-row">
-              <span className="icon-tool" data-guide="Fade out" title="Fade out" aria-hidden="true">
+              <span className="icon-tool" data-guide="Fade out" aria-hidden="true">
                 <FadeOutIcon />
               </span>
               <input

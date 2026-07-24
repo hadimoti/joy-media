@@ -3,7 +3,15 @@
  */
 
 import type { ColorGradeV1, JoyProjectV1 } from '@joy-media/project-schema';
-import { ColorWheelIcon, GainIcon, HighBitrateIcon } from './icons.js';
+import {
+  BlendIcon,
+  ContrastIcon,
+  GainIcon,
+  GammaIcon,
+  InvertColorIcon,
+  LiftIcon,
+  SaturationIcon,
+} from './icons.js';
 
 export const DEFAULT_GRADE: ColorGradeV1 = {
   lift: 0,
@@ -24,6 +32,12 @@ interface ColorPanelProps {
   readonly onChange: (next: JoyProjectV1) => void;
 }
 
+const LUT_ICONS = {
+  none: InvertColorIcon,
+  rec709: BlendIcon,
+  contrast: ContrastIcon,
+} as const;
+
 export function ColorPanel({ project, onChange }: ColorPanelProps) {
   const grade = readColorGrade(project);
   const set = (patch: Partial<ColorGradeV1>) => {
@@ -40,8 +54,8 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
   return (
     <article className="color-panel">
       <div className="control-row">
-        <span className="icon-tool" data-guide="Lift" title="Lift" aria-hidden="true">
-          <ColorWheelIcon />
+        <span className="icon-tool" data-guide="Lift" aria-hidden="true">
+          <LiftIcon />
         </span>
         <input
           type="range"
@@ -56,8 +70,8 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
         <span className="value">{grade.lift.toFixed(2)}</span>
       </div>
       <div className="control-row">
-        <span className="icon-tool" data-guide="Gamma" title="Gamma" aria-hidden="true">
-          <HighBitrateIcon />
+        <span className="icon-tool" data-guide="Gamma" aria-hidden="true">
+          <GammaIcon />
         </span>
         <input
           type="range"
@@ -72,7 +86,7 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
         <span className="value">{grade.gamma.toFixed(2)}</span>
       </div>
       <div className="control-row">
-        <span className="icon-tool" data-guide="Gain" title="Gain" aria-hidden="true">
+        <span className="icon-tool" data-guide="Gain" aria-hidden="true">
           <GainIcon />
         </span>
         <input
@@ -88,8 +102,8 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
         <span className="value">{grade.gain.toFixed(2)}</span>
       </div>
       <div className="control-row">
-        <span className="icon-tool" data-guide="Saturation" title="Saturation" aria-hidden="true">
-          <ColorWheelIcon />
+        <span className="icon-tool" data-guide="Saturation" aria-hidden="true">
+          <SaturationIcon />
         </span>
         <input
           type="range"
@@ -110,20 +124,22 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
             ['rec709', 'Rec.709'],
             ['contrast', 'Contrast'],
           ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className="icon-button"
-            aria-pressed={(grade.lutId ?? 'none') === id}
-            aria-label={label}
-            title={label}
-            data-guide={label}
-            onClick={() => set({ lutId: id })}
-          >
-            <ColorWheelIcon />
-          </button>
-        ))}
+        ).map(([id, label]) => {
+          const Icon = LUT_ICONS[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              className="icon-button"
+              aria-pressed={(grade.lutId ?? 'none') === id}
+              aria-label={label}
+              data-guide={label}
+              onClick={() => set({ lutId: id })}
+            >
+              <Icon />
+            </button>
+          );
+        })}
       </div>
       <div className="color-scopes" aria-label="Parade scope">
         <div className="scope-bar scope-r" style={{ height: scopeHeight(grade.gain, 1) }} />

@@ -36,6 +36,104 @@ export function clampPixelsPerSecond(value: number): number {
   return Math.min(MAX_PIXELS_PER_SECOND, Math.max(MIN_PIXELS_PER_SECOND, value));
 }
 
+/** Nice major step candidates in microseconds (expanding with zoom-out). */
+const RULER_MAJOR_US = [
+  100_000, // 0.1s
+  200_000,
+  500_000,
+  1_000_000, // 1s
+  2_000_000,
+  5_000_000,
+  10_000_000,
+  15_000_000,
+  30_000_000,
+  60_000_000, // 1m
+  120_000_000,
+  300_000_000, // 5m
+  600_000_000,
+  1_800_000_000, // 30m
+  3_600_000_000, // 1h
+] as const;
+
+export interface RulerTick {
+  readonly timeUs: TimeUs;
+  readonly xPx: number;
+  readonly major: boolean;
+}
+
+export interface BuildRulerTicksInput {
+  readonly durationUs: TimeUs;
+  readonly pixelsPerSecond: number;
+  readonly originUs?: TimeUs;
+  /** Minimum pixel gap between major ticks (default 80). */
+  readonly minMajorPx?: number;
+}
+
+function pickMajorUs(pixelsPerSecond: number, minMajorPx: number): number {
+  const pps = Math.max(1e-6, pixelsPerSecond);
+  for (const majorUs of RULER_MAJOR_US) {
+    const px = (majorUs / 1_000_000) * pps;
+    if (px >= minMajorPx) return majorUs;
+  }
+  return RULER_MAJOR_US[RULER_MAJOR_US.length - 1]!;
+}
+
+function minorDivisor(majorUs: number): number {
+  // Prefer /5; use /4 when major is a multiple of 2s but not 5/10/15…
+  if (majorUs % 5_000_000 === 0) return 5;
+  if (majorUs === 2_000_000 || majorUs === 200_000) return 4;
+  return 5;
+}
+
+/** Build major/minor ruler ticks for the visible timeline span. */
+export function buildRulerTicks(input: BuildRulerTicksInput): readonly RulerTick[] {
+  const durationUs = Math.max(0, input.durationUs);
+  const originUs = input.originUs ?? 0;
+  const minMajorPx = input.minMajorPx ?? 80;
+  const pps = clampPixelsPerSecond(input.pixelsPerSecond);
+  const viewport: TimelineViewport = { originUs, pixelsPerSecond: pps };
+  const majorUs = pickMajorUs(pps, minMajorPx);
+  const minorUs = Math.max(1, Math.round(majorUs / minorDivisor(majorUs)));
+
+  const endUs = originUs + durationUs;
+  const firstIndex = Math.ceil(originUs / minorUs);
+  const lastIndex = Math.floor(endUs / minorUs);
+  const ticks: RulerTick[] = [];
+
+  for (let i = firstIndex; i <= lastIndex; i++) {
+    const t = i * minorUs;
+    if (t < originUs || t > endUs) continue;
+    ticks.push({
+      timeUs: t as TimeUs,
+      xPx: timeToPixel(t as TimeUs, viewport),
+      major: t % majorUs === 0,
+    });
+  }
+
+  // Ensure origin is present when missing (e.g. not on the minor grid).
+  if (ticks.length === 0 || ticks[0]!.timeUs !== originUs) {
+    ticks.unshift({
+      timeUs: originUs as TimeUs,
+      xPx: timeToPixel(originUs as TimeUs, viewport),
+      major: originUs % majorUs === 0,
+    });
+  }
+
+  return ticks;
+}
+
+/** Compact ruler label: `M:SS` or `H:MM:SS` when ≥ 1 hour. */
+export function formatRulerLabel(timeUs: TimeUs): string {
+  const totalSec = Math.max(0, Math.floor(timeUs / 1_000_000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export interface TimedClip {
   readonly id: string;
   readonly startUs: TimeUs;
