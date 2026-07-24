@@ -16,6 +16,9 @@ export type {
   BezierHandlesV1,
   KeyframeInterpolationV1,
   KeyframeV1,
+  SpatialKeyframe,
+  SpatialPathV1,
+  Vec2,
 } from '@joy-media/project-schema';
 export { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
 
@@ -37,7 +40,6 @@ export {
   setKeyframe,
 } from './curve.js';
 
-export type { SpatialKeyframe, Vec2 } from './spatial.js';
 export { sampleSpatialPath } from './spatial.js';
 
 export type { ObjectAnimations } from './transform.js';
@@ -57,10 +59,13 @@ export { motionBlurSampleOffsetsUs } from './blur.js';
 export type {
   MotionApplyResult,
   MotionCommand,
+  MotionCommandError,
   ReplaceAnimationCommand,
   SetParentCommand,
+  SetExpressionCommand,
+  SetSpatialPathCommand,
 } from './commands.js';
-export { applyMotionProjectCommand, MotionCommandError } from './commands.js';
+export { applyMotionProjectCommand } from './commands.js';
 
 export type {
   ExpressionChannelDiagnostic,

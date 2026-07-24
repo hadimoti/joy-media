@@ -70,6 +70,9 @@ export type {
   BezierHandlesV1,
   KeyframeV1,
   AnimationCurveV1,
+  SpatialKeyframe,
+  SpatialPathV1,
+  Vec2,
   MotionBlurV1,
   JsonValue,
 } from './v1.js';

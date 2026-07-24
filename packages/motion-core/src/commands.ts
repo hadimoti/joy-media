@@ -10,6 +10,7 @@ import type {
   AnimationCurveV1,
   JoyProjectV1,
   ProjectDiagnostic,
+  SpatialPathV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { validateAnimationCurve } from '@joy-media/project-schema';
@@ -46,7 +47,20 @@ export interface SetExpressionCommand {
   };
 }
 
-export type MotionCommand = ReplaceAnimationCommand | SetParentCommand | SetExpressionCommand;
+export interface SetSpatialPathCommand {
+  readonly type: 'object.setSpatialPath';
+  readonly payload: {
+    readonly objectId: string;
+    /** The object's new spatial path, or `undefined` to remove it. */
+    readonly spatialPath?: SpatialPathV1;
+  };
+}
+
+export type MotionCommand =
+  | ReplaceAnimationCommand
+  | SetParentCommand
+  | SetExpressionCommand
+  | SetSpatialPathCommand;
 
 export interface MotionApplyResult {
   readonly project: JoyProjectV1;
@@ -130,6 +144,12 @@ function commit(
   };
 }
 
+function clearSpatialPath(object: VisualObjectV1): VisualObjectV1 {
+  const next = { ...object };
+  delete (next as Record<string, unknown>).spatialPath;
+  return next as VisualObjectV1;
+}
+
 /** Applies a motion command to the durable v1 project, capturing a pre-state inverse. */
 export function applyMotionProjectCommand(
   project: JoyProjectV1,
@@ -183,7 +203,20 @@ export function applyMotionProjectCommand(
     return commit(project, objectId, replaceExpression(object, property, source), inverse);
   }
 
-  const { property, curve } = command.payload;
+  if (command.type === 'object.setSpatialPath') {
+    const previous = object.spatialPath;
+    const inverse: MotionCommand = {
+      type: 'object.setSpatialPath',
+      payload: previous === undefined ? { objectId } : { objectId, spatialPath: previous },
+    };
+    const next =
+      command.payload.spatialPath === undefined
+        ? clearSpatialPath(object)
+        : ({ ...object, spatialPath: command.payload.spatialPath } as unknown as VisualObjectV1);
+    return commit(project, objectId, next, inverse);
+  }
+
+  const { property, curve } = command.payload as Extract<MotionCommand, { readonly type: 'object.replaceAnimation' }>['payload'];
   if (curve !== undefined) {
     const diagnostics: ProjectDiagnostic[] = [];
     validateAnimationCurve(curve, `${objectId}.animations.${property}`, diagnostics);

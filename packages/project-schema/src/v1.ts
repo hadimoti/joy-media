@@ -83,6 +83,20 @@ export interface BezierHandlesV1 {
   readonly y2: number;
 }
 
+export interface Vec2 {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface SpatialKeyframe {
+  readonly timeUs: TimeUs;
+  readonly point: Vec2;
+  readonly interpolation: KeyframeInterpolationV1;
+  readonly bezier?: BezierHandlesV1;
+  readonly outTangent?: Vec2;
+  readonly inTangent?: Vec2;
+}
+
 export interface KeyframeV1 {
   /** Object-local (composition-local) time, integer microseconds. */
   readonly timeUs: TimeUs;
@@ -95,6 +109,11 @@ export interface KeyframeV1 {
 /** A scalar animation curve: at least one keyframe, strictly increasing in time. */
 export interface AnimationCurveV1 {
   readonly keyframes: readonly KeyframeV1[];
+}
+
+/** A durable 2D spatial path (P14.2). */
+export interface SpatialPathV1 {
+  readonly keyframes: readonly SpatialKeyframe[];
 }
 
 /** Basic motion blur (§20.3): a shutter interval sampled at a quality level. */
@@ -143,6 +162,8 @@ export interface VisualObjectV1 {
    * evaluation time rather than breaking the render.
    */
   readonly expressions?: Readonly<Partial<Record<AnimatablePropertyV1, string>>>;
+  /** Optional durable 2D spatial path (P14.2). */
+  readonly spatialPath?: SpatialPathV1;
   /** Parent object id for transform inheritance; must reference an existing, non-cyclic object. */
   readonly parentId?: string;
   readonly motionBlur?: MotionBlurV1;
