@@ -35,25 +35,24 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-24)
 
-**Live deploy (measured 2026-07-24T05:04Z UTC on `srv3820150057`):**
-- Web symlink: `/opt/joy-media/web` → `web-releases/residuals-piper-gpu-pixi` (`media.joyteam.ir`)
-- Git `main` tip: **`9fd9301`** (`Harden Worker HTTP client against Cloudflare HTML challenges.`) — matches `origin/main`
-- API `:8790`: **down** (`curl 127.0.0.1:8790/health` connection refused; no listener on 8790). Restart `joy-media` API release before provider/Jobs smoke.
-- Working tree: **dirty** — CapCut-style project library + timeline polish not committed/deployed yet (see session log).
+**Live deploy:** `/opt/joy-media/web` → `web-releases/937f388`. Tip **`937f388`** (`main` ahead of `origin/main` — push only if asked). API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health`.
 
-**Read this first.** Prior residuals context still in [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). UI contract: [`DESIGN.md`](DESIGN.md). Decisions: D-W23-* / D-W24-1 / **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** in [`plan/DECISIONS.md`](plan/DECISIONS.md).
+**Pro-tools:** Phases 0–6 + icon polish are on tip. **Hermes residuals** = [`plan/P14-pro-tools-hermes-runbook.md`](plan/P14-pro-tools-hermes-runbook.md) (Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md`). Invoke: *run next unchecked P14 STEP*.
 
-### Editor UX shipped in working tree (2026-07-24 session — commit + deploy next)
+**Read this first.** UI: [`DESIGN.md`](DESIGN.md). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
 
-1. **Project library gate (CapCut-like):** first paint is [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) — list / open / create / remove. Catalog `joy-media.project-catalog.v1`, active id `joy-media.active-project.v1`. `App` mounts `EditorWorkspace` only after open/create. Header **Projects** icon returns to library. Seeds sample “Local editor project” (`golden-social-edit` timeline + `local-editor-project` visual) on first catalog write.
-2. **Timeline NLE polish:** zoom bar + fit-to-width (`ResizeObserver`), Ctrl/Cmd+wheel zoom, icon transport (split/duplicate/delete), right-click drawer (speed presets + freeze), clip rate badges. Schema `VideoClip.playbackRate` (`0` freeze, `0.1…8`); commands `duplicateClip` / `setClipRate` / `freezeFrame` / `restoreTrackClips`. Shortcut **Mod+D** duplicate.
-3. **Persistence:** `ProjectStore.listProjectIds()` on browser/in-memory/desktop stores.
+### Editor UX on tip
+
+1. **Project library gate** — icon-only New/Create/Cancel; catalog `joy-media.project-catalog.v1`.
+2. **Timeline NLE** — trim, DnD media, zoom/fit, speed/freeze/dupe, markers, track CRUD; SVG + `data-guide`.
+3. **Panels** — Audio / Effects / Color / editable GraphEditor; export preset icons.
+4. **Residuals** — P14.1–P14.6 (mixer→preview, spatial persist, transitions/FX/grade in Pixi, agent stubs).
 
 ### Where things live
 
 | Path | Role |
 | --- | --- |
-| `/opt/joy-media/repo` | Working git checkout (`main` = `origin/main` + local dirty tree) |
+| `/opt/joy-media/repo` | Working git checkout |
 | `/opt/joy-media.git` | Bare remote `origin` |
 | `/opt/joy-media/web` → `web-releases/<release>` | Static editor (immutable releases) |
 | `/opt/joy-media/releases/current-api` → `releases/<short-sha>` | Node API (`dist/server.js`, user `joy-media`, port **8790**) |
