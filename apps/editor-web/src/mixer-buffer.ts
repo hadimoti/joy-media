@@ -49,7 +49,17 @@ function applyPan(samples: Float32Array, pan: number): { left: Float32Array; rig
 
 export function buildMixerBuffer(
   clipSources: readonly MixerClipSource[],
-  clips: Record<string, { readonly gain: number; readonly pan: number; readonly mute: boolean; readonly fadeInUs?: number; readonly fadeOutUs?: number }>,
+  clips: Record<
+    string,
+    {
+      readonly gain: number;
+      readonly pan: number;
+      readonly mute: boolean;
+      readonly solo?: boolean;
+      readonly fadeInUs?: number;
+      readonly fadeOutUs?: number;
+    }
+  >,
   buses: readonly { readonly id: string; readonly gain: number; readonly pan: number; readonly mute: boolean }[],
   durationUs: number,
   sampleRate: number,
@@ -58,9 +68,12 @@ export function buildMixerBuffer(
   const busBuffers = new Map<string, Float32Array>();
   for (const bus of buses) busBuffers.set(bus.id, new Float32Array(totalSamples));
 
+  const anySolo = Object.values(clips).some((clip) => clip.solo === true);
+
   for (const source of clipSources) {
     const config = clips[source.clipId];
     if (config === undefined || config.mute) continue;
+    if (anySolo && config.solo !== true) continue;
     let clipBuffer = source.samples;
     if (clipBuffer.length !== totalSamples) {
       const padded = new Float32Array(totalSamples);

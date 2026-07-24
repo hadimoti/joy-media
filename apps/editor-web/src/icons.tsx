@@ -591,3 +591,29 @@ export function MasterBusIcon() {
     </Svg>
   );
 }
+
+export function DissolveIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 13.5 7 3.5h4.5L13.5 13.5Z" />
+    </Svg>
+  );
+}
+
+export function WipeIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 3.5h9v9h-9Z" />
+      <path d="M13.5 3.5v9h-3.5l3.5-9Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+    </Svg>
+  );
+}
+
+export function SlideIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 8h9M8 2.5v9" />
+      <path d="M7 4.5 4.5 7 7 9.5ZM11 10.5 13.5 8 11 5.5Z" />
+    </Svg>
+  );
+}

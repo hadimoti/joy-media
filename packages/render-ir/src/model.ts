@@ -42,6 +42,7 @@ export interface SpriteNode extends RenderNodeBase {
   readonly width: number;
   readonly height: number;
   readonly color: Rgba;
+  readonly effects?: readonly EffectInstanceIR[];
 }
 
 /** A resolved video frame. Decoding has happened before this boundary. */
@@ -51,6 +52,7 @@ export interface VideoFrameNode extends RenderNodeBase {
   readonly height: number;
   readonly sourceTimeUs: number;
   readonly color: Rgba;
+  readonly effects?: readonly EffectInstanceIR[];
 }
 
 /** An inline styled run inside a TextNode (karaoke/keyword emphasis). */
@@ -78,6 +80,7 @@ export interface TextNode extends RenderNodeBase {
   readonly background?: Rgba;
   /** Styled runs; when present their concatenated text MUST equal `text`. */
   readonly spans?: readonly TextSpan[];
+  readonly effects?: readonly EffectInstanceIR[];
 }
 
 /** A transform/opacity container. Its children remain evaluated visual nodes. */
@@ -98,6 +101,31 @@ export interface TransitionNode extends RenderNodeBase {
   readonly rightClipId: string;
 }
 
+/** Per-object effect instance carried on visual nodes for GPU/CPU adapters. */
+export type EffectKindIR = 'blur' | 'glow' | 'shadow' | 'vignette' | 'sharpen' | 'grain';
+
+export interface EffectInstanceIR {
+  readonly id: string;
+  readonly kind: EffectKindIR;
+  readonly enabled: boolean;
+  readonly params: Readonly<Record<string, number>>;
+}
+
+/** Alias kept for call sites / docs that say EffectNode. */
+export type EffectNode = EffectInstanceIR;
+
+/** Master color grade applied once per frame (DaVinci-style lift/gamma/gain). */
+export interface ColorGradeIR {
+  readonly lift: number;
+  readonly gamma: number;
+  readonly gain: number;
+  readonly saturation: number;
+  readonly lutId?: 'none' | 'rec709' | 'contrast';
+}
+
+/** Alias kept for call sites / docs that say GradeNode. */
+export type GradeNode = ColorGradeIR;
+
 export type RenderNode = SpriteNode | VideoFrameNode | TextNode | GroupNode | TransitionNode;
 export type VisualRenderNode = Exclude<RenderNode, GroupNode>;
 
@@ -108,6 +136,8 @@ export interface RenderFrameIR {
   readonly viewport: Viewport;
   readonly background: Rgba;
   readonly nodes: readonly RenderNode[];
+  /** Optional master color grade for the frame. */
+  readonly colorGrade?: ColorGradeIR;
 }
 
 /** Editor-only affordances; deliberately excluded from RenderFrameIR/export. */

@@ -3,9 +3,12 @@ import {
   visualObjectToRenderNode,
   buildRenderFrameIR,
   transformToRenderTransform,
+  isTransitionActive,
+  transitionProgress,
+  clipTimesFromTracks,
 } from './index.js';
 import type { ResolvedObject } from './index.js';
-import type { VisualObjectV1 } from '@joy-media/project-schema';
+import type { TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 
 function makeObject(
@@ -155,5 +158,87 @@ describe('buildRenderFrameIR', () => {
     const a = buildRenderFrameIR('c', 0, 480, 360, [obj]);
     const b = buildRenderFrameIR('c', 0, 480, 360, [obj]);
     expect(a).toEqual(b);
+  });
+
+  it('attaches per-object effects and master color grade', () => {
+    const obj = resolved(makeObject({ id: 'img', kind: 'image' }));
+    const frame = buildRenderFrameIR('c', 0, 100, 100, [obj], {
+      colorGrade: { lift: 0.1, gamma: 1.1, gain: 0.9, saturation: 0.8 },
+      effectsByObjectId: {
+        img: {
+          effects: [
+            { id: 'e1', kind: 'blur', enabled: true, params: { amount: 4 } },
+            { id: 'e2', kind: 'grain', enabled: false, params: { amount: 0.2 } },
+          ],
+        },
+      },
+    });
+    expect(frame.colorGrade).toEqual({
+      lift: 0.1,
+      gamma: 1.1,
+      gain: 0.9,
+      saturation: 0.8,
+    });
+    const sprite = frame.nodes[0];
+    expect(sprite?.kind).toBe('sprite');
+    if (sprite?.kind !== 'sprite') throw new Error('expected sprite');
+    expect(sprite.effects).toEqual([
+      { id: 'e1', kind: 'blur', enabled: true, params: { amount: 4 } },
+      { id: 'e2', kind: 'grain', enabled: false, params: { amount: 0.2 } },
+    ]);
+  });
+});
+
+describe('transition timing', () => {
+  const transition: TransitionV1 = {
+    id: 't1',
+    trackId: 'track-v',
+    leftClipId: 'left',
+    rightClipId: 'right',
+    type: 'dissolve',
+    durationUs: 1_000_000,
+  };
+  const clipTimes = clipTimesFromTracks([
+    {
+      clips: [
+        { id: 'left', startUs: 0 },
+        { id: 'right', startUs: 5_000_000 },
+      ],
+    },
+  ]);
+
+  it('is inactive outside the right-clip junction window', () => {
+    expect(isTransitionActive(transition, 3_000_000, clipTimes)).toBe(false);
+    expect(isTransitionActive(transition, 5_000_000, clipTimes)).toBe(false);
+  });
+
+  it('is active in [startUs - durationUs, startUs)', () => {
+    expect(isTransitionActive(transition, 4_000_000, clipTimes)).toBe(true);
+    expect(isTransitionActive(transition, 4_999_999, clipTimes)).toBe(true);
+  });
+
+  it('computes progress relative to the junction window', () => {
+    expect(transitionProgress(transition, 4_000_000, clipTimes)).toBe(0);
+    expect(transitionProgress(transition, 4_500_000, clipTimes)).toBe(0.5);
+    expect(transitionProgress(transition, 4_999_999, clipTimes)).toBeCloseTo(0.999999, 5);
+  });
+
+  it('emits a transition node only while active', () => {
+    const objects: ResolvedObject[] = [resolved(makeObject({ id: 'a', kind: 'shape', shape: 'rectangle' }))];
+    const inactive = buildRenderFrameIR('c', 0, 100, 100, objects, {
+      transitions: [transition],
+      clipTimes,
+    });
+    expect(inactive.nodes.some((n) => n.kind === 'transition')).toBe(false);
+
+    const active = buildRenderFrameIR('c', 4_500_000, 100, 100, objects, {
+      transitions: [transition],
+      clipTimes,
+    });
+    const node = active.nodes.find((n) => n.kind === 'transition');
+    expect(node?.kind).toBe('transition');
+    if (node?.kind !== 'transition') throw new Error('expected transition');
+    expect(node.progress).toBe(0.5);
+    expect(node.transitionType).toBe('dissolve');
   });
 });

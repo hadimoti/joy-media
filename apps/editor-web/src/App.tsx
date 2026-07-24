@@ -28,7 +28,13 @@ import type {
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
-import { buildRenderFrameIR, type ResolvedObject } from '@joy-media/visual-object-renderer';
+import {
+  buildRenderFrameIR,
+  clipTimesFromTracks,
+  type BuildRenderFrameOptions,
+  type ResolvedObject,
+} from '@joy-media/visual-object-renderer';
+import { readEffectStacks } from './EffectsPanel.js';
 import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
@@ -115,6 +121,17 @@ import {
 } from './export-history.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
+
+/** IR options for preview/export: effects, grade, and clip-timed transitions. */
+function renderFrameOptions(project: JoyProjectV1): BuildRenderFrameOptions {
+  const composition = project.compositions[project.rootCompositionId];
+  return {
+    effectsByObjectId: readEffectStacks(project),
+    ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
+    ...(project.transitions ? { transitions: project.transitions } : {}),
+    ...(project.colorGrade ? { colorGrade: project.colorGrade } : {}),
+  };
+}
 
 /**
  * WP-11.2: resolves a timeline clip's assetId to a real, browser-fetchable
@@ -906,6 +923,8 @@ function EditorWorkspace({
       const objectsById = session.visualProject.visualObjects as Readonly<
         Record<string, VisualObjectV1>
       >;
+      const clipTimes = compositionV1 ? clipTimesFromTracks(compositionV1.tracks) : undefined;
+      const effectsByObjectId = readEffectStacks(session.visualProject);
       const buildFrame = (timeUs: number) => {
         const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
           (object) => ({
@@ -925,7 +944,7 @@ function EditorWorkspace({
           width,
           height,
           resolved,
-          session.visualProject.transitions,
+          renderFrameOptions(session.visualProject),
         );
       };
       const transitionTimes = Array.from(
@@ -1776,7 +1795,7 @@ function MonitorPanel() {
         composition.width,
         composition.height,
         resolved,
-        visualProject.transitions,
+        renderFrameOptions(visualProject),
       );
     const frame =
       previewVideoFrame === undefined

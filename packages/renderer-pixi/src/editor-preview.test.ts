@@ -21,4 +21,53 @@ describe('Pixi editor preview host', () => {
     expect(editorPreview.pixels).toEqual(contentPreview.pixels);
     expect(editorPreview.overlay.selections).toHaveLength(1);
   });
+
+  it('applies master color grade to content pixels', () => {
+    const graded: RenderFrameIR = {
+      ...content,
+      background: { r: 100, g: 100, b: 100, a: 255 },
+      colorGrade: { lift: 0, gamma: 1, gain: 2, saturation: 1 },
+    };
+    const plain = renderPixiPreview({
+      version: graded.version,
+      compositionId: graded.compositionId,
+      timeUs: graded.timeUs,
+      viewport: graded.viewport,
+      background: graded.background,
+      nodes: graded.nodes,
+    });
+    const withGrade = renderPixiPreview(graded);
+    expect(withGrade.pixels[0]).toBeGreaterThan(plain.pixels[0]!);
+  });
+
+  it('paints active transition overlays', () => {
+    const frame: RenderFrameIR = {
+      version: 1,
+      compositionId: 'root',
+      timeUs: 0,
+      viewport: { width: 4, height: 2, dpr: 1 },
+      background: { r: 0, g: 0, b: 0, a: 255 },
+      nodes: [
+        {
+          kind: 'transition',
+          id: 'tr-1',
+          zIndex: 10,
+          opacity: 1,
+          transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+          width: 4,
+          height: 2,
+          color: { r: 255, g: 0, b: 0, a: 255 },
+          transitionType: 'wipe',
+          progress: 0.5,
+          leftClipId: 'a',
+          rightClipId: 'b',
+        },
+      ],
+    };
+    const preview = renderPixiPreview(frame);
+    expect(preview.drawCalls).toEqual([{ nodeId: 'tr-1', kind: 'transition' }]);
+    // Left half covered by wipe at 0.5
+    expect(preview.pixels[0]).toBeGreaterThan(0);
+    expect(preview.pixels[(2 * 4 + 0) * 4] ?? preview.pixels[8]).toBeDefined();
+  });
 });

@@ -12,8 +12,20 @@
  * below so editor code can reference the same types from either entry.
  */
 
-import type { EditorOverlayIR, RenderFrameIR, Rgba, VisualRenderNode } from '@joy-media/render-ir';
+import type {
+  EditorOverlayIR,
+  EffectInstanceIR,
+  RenderFrameIR,
+  Rgba,
+  TransitionNode,
+  VisualRenderNode,
+} from '@joy-media/render-ir';
 import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import {
+  applyColorGradeToPixels,
+  applyCpuEffectsToColor,
+  applyVignetteToPixels,
+} from './effects-cpu.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
 
@@ -44,14 +56,26 @@ export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
     .map((node, index) => ({ node, index }))
     .sort((a, b) => a.node.zIndex - b.node.zIndex || a.index - b.index);
 
+  let maxVignette = 0;
   for (const { node } of nodes) {
     drawCalls.push({ nodeId: node.id, kind: node.kind });
+    if (node.kind === 'transition') {
+      paintTransition(pixels, width, height, node);
+      continue;
+    }
+    const effects =
+      node.kind === 'sprite' || node.kind === 'video-frame' || node.kind === 'text'
+        ? node.effects
+        : undefined;
+    maxVignette = Math.max(maxVignette, enabledVignetteAmount(effects));
     if (node.kind === 'text') {
-      paintText(pixels, width, height, node);
+      paintText(pixels, width, height, node, effects);
     } else {
-      paintRect(pixels, width, height, node);
+      paintRect(pixels, width, height, node, effects);
     }
   }
+  applyColorGradeToPixels(pixels, frame.colorGrade);
+  if (maxVignette > 0) applyVignetteToPixels(pixels, width, height, maxVignette);
   return { width, height, pixels, drawCalls };
 }
 
@@ -83,11 +107,13 @@ function paintRect(
   pixels: Uint8Array,
   frameWidth: number,
   frameHeight: number,
-  node: Exclude<VisualRenderNode, { kind: 'text' }>,
+  node: Exclude<VisualRenderNode, { kind: 'text' | 'transition' }>,
+  effects: readonly EffectInstanceIR[] | undefined,
 ): void {
-  forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) =>
-    localX >= 0 && localX < node.width && localY >= 0 && localY < node.height ? node.color : null,
-  );
+  forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
+    if (localX < 0 || localX >= node.width || localY < 0 || localY >= node.height) return null;
+    return applyCpuEffectsToColor(node.color, effects, localX, localY);
+  });
 }
 
 function paintText(
@@ -95,14 +121,53 @@ function paintText(
   frameWidth: number,
   frameHeight: number,
   node: Extract<VisualRenderNode, { kind: 'text' }>,
+  effects: readonly EffectInstanceIR[] | undefined,
 ): void {
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
     const x = Math.floor(localX);
     const y = Math.floor(localY);
     const character = Math.floor(x / 4);
     const glyphX = x % 4;
-    return glyph(node.text[character] ?? ' ', glyphX, y) ? node.color : null;
+    if (!glyph(node.text[character] ?? ' ', glyphX, y)) return null;
+    return applyCpuEffectsToColor(node.color, effects, localX, localY);
   });
+}
+
+function paintTransition(
+  pixels: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+  node: TransitionNode,
+): void {
+  const progress = Math.min(1, Math.max(0, node.progress));
+  for (let y = 0; y < frameHeight; y++) {
+    for (let x = 0; x < frameWidth; x++) {
+      let cover = false;
+      let alpha = progress;
+      switch (node.transitionType) {
+        case 'dissolve':
+          cover = true;
+          alpha = progress;
+          break;
+        case 'wipe':
+          cover = x < frameWidth * progress;
+          alpha = progress;
+          break;
+        case 'slide':
+          cover = x >= frameWidth * (1 - progress);
+          alpha = progress;
+          break;
+      }
+      if (!cover || alpha <= 0) continue;
+      const color: Rgba = {
+        r: node.color.r,
+        g: node.color.g,
+        b: node.color.b,
+        a: Math.round(255 * alpha),
+      };
+      blendPixel(pixels, (y * frameWidth + x) * 4, color, node.opacity);
+    }
+  }
 }
 
 function forEachLocalPixel(
@@ -146,6 +211,17 @@ function blendPixel(pixels: Uint8Array, offset: number, source: Rgba, opacity: n
 
 function channelName(channel: 0 | 1 | 2): 'r' | 'g' | 'b' {
   return channel === 0 ? 'r' : channel === 1 ? 'g' : 'b';
+}
+
+function enabledVignetteAmount(effects: readonly EffectInstanceIR[] | undefined): number {
+  if (effects === undefined) return 0;
+  let max = 0;
+  for (const effect of effects) {
+    if (effect.enabled && effect.kind === 'vignette') {
+      max = Math.max(max, effect.params.amount ?? 0.35);
+    }
+  }
+  return max;
 }
 
 const GLYPHS: Readonly<Record<string, readonly string[]>> = {

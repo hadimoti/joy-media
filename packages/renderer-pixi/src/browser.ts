@@ -37,6 +37,12 @@ import type {
   VisualRenderNode,
 } from '@joy-media/render-ir';
 import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import {
+  buildPixiColorGradeFilter,
+  buildPixiEffectFilters,
+  colorGradeSignature,
+  effectsSignature,
+} from './effects-pixi.js';
 
 export const BROWSER_PACKAGE_ENTRY = '@joy-media/renderer-pixi/browser' as const;
 
@@ -79,6 +85,8 @@ interface LayerContainer extends Container {
   visual: Graphics | Sprite | Text;
   /** Last kind observed for this layer — used to avoid reallocating on kind change. */
   kind: VisualRenderNode['kind'];
+  /** Last applied effect stack signature (skip filter rebuild when unchanged). */
+  effectsKey?: string;
   /** Persistent CPU canvas and GPU texture for a decoded video node. */
   videoCanvas?: HTMLCanvasElement | undefined;
   videoTexture?: Texture | undefined;
@@ -129,19 +137,26 @@ export async function createBrowserPixiRenderer(
   background.zIndex = -1;
   app.stage.addChild(background);
 
+  const content = new Container();
+  content.label = 'renderer-pixi:content';
+  content.zIndex = 0;
+  app.stage.addChild(content);
+
   const layers = new Container();
   layers.label = 'renderer-pixi:layers';
-  app.stage.addChild(layers);
+  content.addChild(layers);
 
   const transitionLayer = new Container();
   transitionLayer.label = 'renderer-pixi:transitions';
-  app.stage.addChild(transitionLayer);
+  content.addChild(transitionLayer);
   app.stage.sortableChildren = true;
+  layers.sortableChildren = true;
 
   const spriteMap = new Map<string, LayerContainer>();
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
   let disposed = false;
+  let lastGradeKey = '';
 
   const assertAlive = (): void => {
     if (disposed) throw new Error(`${BROWSER_PACKAGE_ENTRY}: renderer has been destroyed`);
@@ -232,6 +247,18 @@ export async function createBrowserPixiRenderer(
     layer.zIndex = node.zIndex;
   };
 
+  const syncLayerEffects = (layer: LayerContainer, node: VisualRenderNode): void => {
+    const effects =
+      node.kind === 'sprite' || node.kind === 'video-frame' || node.kind === 'text'
+        ? node.effects
+        : undefined;
+    const key = effectsSignature(effects);
+    if (layer.effectsKey === key) return;
+    layer.effectsKey = key;
+    const filters = buildPixiEffectFilters(effects);
+    layer.filters = filters.length > 0 ? filters : null;
+  };
+
   const createLayer = (
     node: VisualRenderNode,
     videoBitmap: BrowserVideoFrameBitmap | undefined,
@@ -252,6 +279,7 @@ export async function createBrowserPixiRenderer(
     }
     container.kind = node.kind;
     updateLayerTransform(container, node);
+    syncLayerEffects(container, node);
     return container;
   };
 
@@ -312,6 +340,7 @@ export async function createBrowserPixiRenderer(
           }
         }
         updateLayerTransform(existing, node);
+        syncLayerEffects(existing, node);
         reused += 1;
       }
       drawCalls += 1;
@@ -367,6 +396,12 @@ export async function createBrowserPixiRenderer(
         .clear()
         .rect(0, 0, width, height)
         .fill({ color: rgbaToHex(frame.background), alpha: frame.background.a / 255 });
+      const gradeKey = colorGradeSignature(frame.colorGrade);
+      if (gradeKey !== lastGradeKey) {
+        lastGradeKey = gradeKey;
+        const gradeFilter = buildPixiColorGradeFilter(frame.colorGrade);
+        content.filters = gradeFilter === undefined ? null : [gradeFilter];
+      }
       const { drawCalls, created, reused } = paint(frame, videoBitmaps);
       if (options.autoStart !== true) app.renderer.render(app.stage);
       return { width: frameWidth, height: frameHeight, drawCalls, created, reused };

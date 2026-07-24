@@ -3,7 +3,7 @@
 **Executable residual plan** for CapCut + Premiere + AE + DaVinci tooling after Phases 0–6 + icon polish.  
 Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md` (keep in sync when editing).
 
-Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `web-releases/937f388`.
+Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `web-releases/f88be65` (P14.1).
 
 ---
 
@@ -48,12 +48,12 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8790/health
 
 ## Work packages
 
-- [ ] **P14.0** Audit live editor vs shipped tip; fix regressions only (deploy if needed)
-- [ ] **P14.1** Preview/export honor mixer mute/solo/gain (deploy)
+- [x] **P14.0** Audit live editor vs shipped tip; fix regressions only (deploy if needed)
+- [x] **P14.1** Preview/export honor mixer mute/solo/gain (deploy) — `f88be65`
 - [x] **P14.2** Durable spatial path schema + UI persistence
-- [ ] **P14.3** Mixer graph drives audible preview/export end-to-end (deploy)
-- [x] **P14.4** Transitions icon browser + Pixi/export apply (deploy)
-- [x] **P14.5** Effects + color grade apply in Pixi/export; scopes honesty (deploy)
+- [x] **P14.3** Mixer graph drives audible preview/export end-to-end (deploy) — export `buildMixerBuffer` (mute/solo/gain/pan/fade); preview master bus via P14.1
+- [x] **P14.4** Transitions icon browser + Pixi/export apply (deploy) — junction window uses right clip `startUs`; progress `(timeUs - (startUs - durationUs)) / durationUs`
+- [x] **P14.5** Effects + color grade apply in Pixi/export; scopes honesty (deploy) — `EffectInstanceIR`/`ColorGradeIR` on render-ir; `pluginData['joy.effects']` + `project.colorGrade` → IR → Pixi filters / Node CPU grade
 - [ ] **P14.6** Agent/workflow stub retirement + caption burn-in icon (deploy)
 - [ ] **P14.7** STATE + Hermes skill sync (+ GBrain staging if asked)
 
