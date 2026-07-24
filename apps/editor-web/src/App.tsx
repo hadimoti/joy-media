@@ -395,6 +395,22 @@ function EditorWorkspace({
         .connect(audioContext.destination);
     }
   }, []);
+
+  // Sync live preview mixer to audioState (mute/solo/gain/pan) — P14.1
+  useEffect(() => {
+    ensurePreviewAudioGraph();
+    const gainNode = previewGainNodeRef.current;
+    const panNode = previewPanNodeRef.current;
+    if (!gainNode || !panNode) return;
+
+    // Master gain from master bus
+    const masterBus = audioState.buses.find((b) => b.id === 'master') ?? audioState.buses[0];
+    if (masterBus) {
+      gainNode.gain.value = masterBus.mute ? 0 : masterBus.gain;
+      panNode.pan.value = masterBus.pan;
+    }
+  }, [audioState, ensurePreviewAudioGraph]);
+
   if (sessionRef.current === null) {
     const entry = getCatalogProject(window.localStorage, projectId);
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
