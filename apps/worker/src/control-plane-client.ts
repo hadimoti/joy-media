@@ -113,7 +113,9 @@ export class WorkerControlPlaneClient {
     if (sessionToken === undefined) throw new Error('Worker is not paired');
     const headers: Record<string, string> = {
       authorization: `Bearer ${sessionToken}`,
+      accept: 'application/json',
       'content-type': result.descriptor.mimeType,
+      'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
       'x-joy-asset-id': result.assetId,
       'x-joy-sha256': result.sha256,
       'x-joy-bytes': String(result.bytes),
@@ -177,15 +179,29 @@ export class WorkerControlPlaneClient {
     body: Record<string, unknown>,
     sessionToken?: string,
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
-    const response = await this.#fetch(`${this.options.apiUrl.replace(/\/$/, '')}${pathname}`, {
+    const url = `${this.options.apiUrl.replace(/\/$/, '')}${pathname}`;
+    const response = await this.#fetch(url, {
       method: 'POST',
       headers: {
+        accept: 'application/json',
         'content-type': 'application/json',
+        // Cloudflare bot checks sometimes challenge bare undici/Node UAs from
+        // residential networks; identify as JOY Worker and prefer JSON.
+        'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
         ...(sessionToken === undefined ? {} : { authorization: `Bearer ${sessionToken}` }),
       },
       body: JSON.stringify(body),
     });
-    const envelope: unknown = await response.json();
+    const raw = await response.text();
+    let envelope: unknown;
+    try {
+      envelope = raw.length === 0 ? null : JSON.parse(raw);
+    } catch {
+      const prefix = raw.replace(/\s+/g, ' ').slice(0, 160);
+      throw new Error(
+        `Worker control-plane returned non-JSON (${response.status}) from ${url}: ${prefix}`,
+      );
+    }
     const bodyValue = isRecord(envelope) && 'data' in envelope ? envelope.data : envelope;
     return { ok: response.ok, status: response.status, body: bodyValue };
   }
