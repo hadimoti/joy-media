@@ -91,11 +91,6 @@ Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transpo
 - Motion presets (Fade/Pop/Slide) and Effects apply to the selected sticker via the clip↔object map.
 - **Remove background**: Assets action queues `image.comfy` / RemBG when a paired Worker advertises `image.comfy`; otherwise disabled with an honest tooltip. Matte alpha can bind via `pluginData['joy.imageMatte']`.
 
-## 3. Layout & panels (seed)
-
-Default dock seed key `joy-media.dockview.v5`: Monitor center, Timeline below, Assets left, right stack **creative** (Inspector → Motion → Effects → Transitions → Color → Captions) then **utilities** (Audio → Camera → History → Agent → Workflows → Jobs → Plugins → Diagnostics). `DEFAULT_WORKSPACE.panels` includes all `PANEL_IDS` (including `transitions`).
-
-
 ## 4d. Bidirectional text (Persian-first)
 
 Text fields that hold user content (`input[type=text]`, untyped inputs, search, textarea) carry `unicode-bidi: plaintext` so each field follows its own content direction — Persian is right-aligned, Latin filenames stay left-aligned, no global LTR forcing. Filenames/ids rendered in UI chrome get an explicit `dir="ltr"`. Explainers and empty states use `.empty-hint` (centered, muted, line-height 1.5); never leave a bare left-aligned paragraph floating in a panel.
