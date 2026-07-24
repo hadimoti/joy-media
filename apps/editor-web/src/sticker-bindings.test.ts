@@ -47,6 +47,7 @@ function emptyProject(): JoyProjectV1 {
         },
       },
     },
+    captionDocuments: {},
     pluginData: {},
   };
 }

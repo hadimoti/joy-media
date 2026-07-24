@@ -701,15 +701,20 @@ export function TimelinePanel({
               ))}
             </div>
           )}
-          {visible.map((track) => {
+          {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
             return (
               <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
                 <div className="timeline-track-header">
-                  <strong dir="ltr" title={track.id}>
-                    {track.id}
-                  </strong>
+                  <div className="timeline-track-label">
+                    <span className="track-code" dir="ltr">
+                      {`V${index + 1}`}
+                    </span>
+                    <span className="track-name" dir="ltr" title={track.id}>
+                      {index === 0 ? 'Main Video' : index === 1 ? 'B-roll' : `Video ${index + 1}`}
+                    </span>
+                  </div>
                   <button
                     className="icon-button"
                     aria-pressed={track.locked}

@@ -73,11 +73,16 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 4c. Header chrome
 
-- Brand lockup: small JOY mark (`public/assets/logo.png`, same asset as the main webapp / joy-agent header logo) + **JOY Media** wordmark in `.app-brand` (editor header and project library). Logo is decorative (`alt=""`); the strong text carries the product name. Size ~22×22 (`1.375rem`), never a large hero mark in chrome.
-- Header icon groups (L→R), separated by `.header-group` rules: **Nav** (Projects) · **Edit** (Undo/Redo) · **Find** (command palette) · spacer · **Deliver** (export-preset dropdown + Export MP4 + processes) · **Account**. Export presets live in one compact `header-menu`, not five peer icons.
-- No mid-header status copy (project title / save / preview quality stay out of chrome).
-- Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`. Status text lives in a centered `.export-toast` pinned under that bar (absolute, not in the icon row); the toast clears as soon as the file has downloaded (errors linger briefly). Durable history stays in the processes menu.
-- Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.
+- Brand lockup + **project name** + save status on the left; **Projects** returns to the library.
+- Center edit cluster: Undo · Redo · Cut · Split · Duplicate · command palette (icon-only + shortcuts in tooltips).
+- Right deliver cluster: export-preset menu · primary **Export** text button (accent) · processes · account.
+- Groups use `.header-group` separators. Accent is reserved for Export / selection / playhead — not every border.
+
+## 3. Layout & panels (seed)
+
+Default dock seed key `joy-media.dockview.v6`: **Timeline** full-width bottom; above it **Assets | LARGE Monitor | Inspector**. Creative/utility tools stack as tabs on the inspector side. Clear older `v1`–`v5` layout keys on load.
+
+Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transport under the canvas.
 
 ## 4e. Stickers / overlays (P15)
 

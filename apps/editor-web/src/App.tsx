@@ -102,14 +102,21 @@ import { panelLabel } from './panel-tab-icons.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
   CommandIcon,
+  CutIcon,
   DownloadIcon,
+  DuplicateIcon,
   ExportIcon,
   HighBitrateIcon,
   ListIcon,
   LogoutIcon,
+  PauseIcon,
+  PlayIcon,
   ProjectsIcon,
   RedoIcon,
   ReelsIcon,
+  ScissorsIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
   UndoIcon,
   UserIcon,
   YoutubeIcon,
@@ -1003,6 +1010,78 @@ function EditorWorkspace({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [dispatchTimeline, redo, seek, session, togglePlayback, undo]);
+
+  const runSelectedClipAction = useCallback(
+    (kind: 'split' | 'duplicate' | 'delete') => {
+      const current = stateRef.current;
+      const composition = session.timelineProject.compositions.root;
+      if (composition === undefined) return;
+      const selection = composition.tracks
+        .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
+        .find((item) => current.selectedIds.includes(item.clip.id));
+      if (selection === undefined) return;
+      if (kind === 'split') {
+        const endUs = selection.clip.startUs + selection.clip.durationUs;
+        if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
+        dispatchTimeline({
+          label: `Split ${selection.clip.id}`,
+          commands: [
+            {
+              type: 'timeline.splitClip',
+              payload: {
+                compositionId: composition.id,
+                trackId: selection.track.id,
+                clipId: selection.clip.id,
+                atUs: current.playheadUs,
+                newClipId: `${selection.clip.id}-split-${current.playheadUs}`,
+              },
+            },
+          ],
+        });
+        return;
+      }
+      if (kind === 'duplicate') {
+        dispatchTimeline({
+          label: `Duplicate ${selection.clip.id}`,
+          commands: [
+            duplicateClipCommand(
+              composition.id,
+              selection.track.id,
+              selection.clip,
+              selection.track.clips.map((clip) => ({
+                id: clip.id,
+                startUs: clip.startUs,
+                durationUs: clip.durationUs,
+              })),
+              `${selection.clip.id}-copy-${Date.now()}`,
+            ),
+          ],
+        });
+        return;
+      }
+      dispatchTimeline(
+        rippleDelete(
+          composition.id,
+          selection.track.id,
+          selection.track.clips.map((clip) => ({
+            id: clip.id,
+            startUs: clip.startUs,
+            durationUs: clip.durationUs,
+          })),
+          selection.clip.id,
+        ),
+      );
+      setState((active) => ({
+        ...active,
+        selectedIds: active.selectedIds.filter((id) => id !== selection.clip.id),
+      }));
+    },
+    [dispatchTimeline, session],
+  );
+
+  const projectTitle =
+    getCatalogProject(window.localStorage, projectId)?.title ?? session.visualProject.title;
+
   const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
@@ -1299,12 +1378,13 @@ function EditorWorkspace({
     }
   }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    // v5: creative stack (inspector→captions) then utilities; clears prior dock seeds.
-    const layoutKey = 'joy-media.dockview.v5';
+    // v6: Premiere-like hierarchy — Assets | LARGE Preview | Inspector; Timeline full-width bottom.
+    const layoutKey = 'joy-media.dockview.v6';
     window.localStorage.removeItem('joy-media.dockview.v1');
     window.localStorage.removeItem('joy-media.dockview.v2');
     window.localStorage.removeItem('joy-media.dockview.v3');
     window.localStorage.removeItem('joy-media.dockview.v4');
+    window.localStorage.removeItem('joy-media.dockview.v5');
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -1338,23 +1418,21 @@ function EditorWorkspace({
     };
 
     if (!restored) {
-      // CapCut-like seed: media | monitor/timeline | creative tabs | utility tabs.
-      addPanel('monitor', { inactive: false });
-      addPanel('timeline', { position: { referencePanel: 'monitor', direction: 'below' } });
+      // Timeline first so it owns the bottom row full width; preview stack above.
+      addPanel('timeline', { inactive: false });
+      addPanel('monitor', {
+        inactive: false,
+        position: { referencePanel: 'timeline', direction: 'above' },
+      });
       addPanel('media', { position: { referencePanel: 'monitor', direction: 'left' } });
       addPanel('inspector', { position: { referencePanel: 'monitor', direction: 'right' } });
-      const creativeStack = [
+      const inspectorTabs = [
         'motion',
         'effects',
+        'audio',
         'transitions',
         'color',
         'captions',
-      ] as const;
-      for (const id of creativeStack) {
-        addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
-      }
-      const utilityStack = [
-        'audio',
         'camera',
         'history',
         'agent',
@@ -1363,7 +1441,7 @@ function EditorWorkspace({
         'plugins',
         'diagnostics',
       ] as const;
-      for (const id of utilityStack) {
+      for (const id of inspectorTabs) {
         addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
       }
       event.api.getPanel('monitor')?.api.setActive();
@@ -1393,8 +1471,11 @@ function EditorWorkspace({
       return (
         <InspectorPanel
           object={object}
+          {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
           allObjects={visualProject.visualObjects}
           playheadUs={state.playheadUs}
+          audioState={context.audioState}
+          onAudioChange={(next) => context.setAudioState(next)}
           onSetStatic={updateVisualProperty}
           onDispatch={context.dispatchProject}
         />
@@ -1633,7 +1714,7 @@ function EditorWorkspace({
 
   return (
     <main>
-      <header>
+      <header className="app-header">
         {exportProgress !== undefined && (
           <div
             className="export-progress"
@@ -1651,18 +1732,24 @@ function EditorWorkspace({
             {exportStatus}
           </div>
         )}
-        <span className="app-brand">
-          <img
-            className="app-brand-logo"
-            src="/assets/logo.png"
-            alt=""
-            width={22}
-            height={22}
-            decoding="async"
-          />
-          <strong>JOY Media</strong>
-        </span>
-        <div className="header-group" role="group" aria-label="Navigation">
+        <div className="header-group" role="group" aria-label="Brand">
+          <span className="app-brand">
+            <img
+              className="app-brand-logo"
+              src="/assets/logo.png"
+              alt=""
+              width={22}
+              height={22}
+              decoding="async"
+            />
+            <strong>JOY Media</strong>
+          </span>
+          <div className="header-project">
+            <span className="header-project-name" title={projectTitle}>
+              {projectTitle}
+            </span>
+            <span className="header-save-status">Saved locally</span>
+          </div>
           <button
             className="icon-button"
             onClick={onBackToLibrary}
@@ -1672,7 +1759,7 @@ function EditorWorkspace({
             <ProjectsIcon />
           </button>
         </div>
-        <div className="header-group" role="group" aria-label="Edit">
+        <div className="header-group header-center" role="group" aria-label="Edit">
           <button
             className="icon-button"
             disabled={!session.canUndo}
@@ -1691,8 +1778,33 @@ function EditorWorkspace({
           >
             <RedoIcon />
           </button>
-        </div>
-        <div className="header-group" role="group" aria-label="Find">
+          <button
+            className="icon-button"
+            disabled={state.selectedIds.length === 0}
+            onClick={() => runSelectedClipAction('delete')}
+            aria-label="Cut / delete clip"
+            title="Ripple delete (Del)"
+          >
+            <CutIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={state.selectedIds.length === 0}
+            onClick={() => runSelectedClipAction('split')}
+            aria-label="Split clip"
+            title="Split at playhead (S)"
+          >
+            <ScissorsIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={state.selectedIds.length === 0}
+            onClick={() => runSelectedClipAction('duplicate')}
+            aria-label="Duplicate clip"
+            title="Duplicate (Ctrl+D)"
+          >
+            <DuplicateIcon />
+          </button>
           <button
             className="icon-button"
             onClick={() => setPaletteOpen(true)}
@@ -1702,7 +1814,6 @@ function EditorWorkspace({
             <CommandIcon />
           </button>
         </div>
-        <span className="header-spacer" aria-hidden="true" />
         <div className="header-group" role="group" aria-label="Deliver">
           <div className="header-menu">
             <button
@@ -1766,7 +1877,8 @@ function EditorWorkspace({
             )}
           </div>
           <button
-            className="icon-button"
+            type="button"
+            className="header-export-btn"
             onClick={handleExport}
             disabled={exporting}
             aria-label="Export MP4"
@@ -1774,7 +1886,7 @@ function EditorWorkspace({
             data-guide={exporting ? 'Exporting…' : 'Export MP4'}
             aria-busy={exporting}
           >
-            <ExportIcon />
+            {exporting ? 'Exporting…' : 'Export'}
           </button>
           <div className="header-menu">
             <button
@@ -1828,8 +1940,6 @@ function EditorWorkspace({
               </section>
             )}
           </div>
-        </div>
-        <div className="header-group" role="group" aria-label="Account">
           <div className="header-menu">
             <button
               className="icon-button"
@@ -1852,17 +1962,17 @@ function EditorWorkspace({
               }}
             >
               <UserIcon />
-              <span
-                className={`session-dot session-${joySession.kind}`}
-                aria-hidden="true"
-              />
+              <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
             </button>
             {accountOpen && (
               <section className="header-dropdown" aria-label="JOY account">
                 <h3>JOY account</h3>
                 {joySession.kind === 'ready' && (
                   <>
-                    <p>Signed in{joySession.subject !== undefined && ` · account ${joySession.subject}`}</p>
+                    <p>
+                      Signed in
+                      {joySession.subject !== undefined && ` · account ${joySession.subject}`}
+                    </p>
                     <button
                       className="icon-button icon-button-labeled"
                       title="Sign out of the shared JOY session"
@@ -1879,16 +1989,15 @@ function EditorWorkspace({
                 {joySession.kind === 'signed-out' && (
                   <>
                     <p className="empty-hint">
-                      Not signed in (expected without a JOY session cookie). Sign in with your JOY
-                      account; this editor uses the shared JOY session. Live Whisper/TTS APIs require
-                      an entitled signed-in session.
+                      Not signed in. Sign in with your JOY account; this editor uses the shared JOY
+                      session.
                     </p>
                     <a
                       className="icon-button icon-button-labeled"
                       href={JOY_LOGIN_URL}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="Opens joyteam.ir sign-in in a new tab; reopen this menu afterwards"
+                      title="Opens joyteam.ir sign-in in a new tab"
                     >
                       <UserIcon />
                       Sign in at joyteam.ir
@@ -1901,6 +2010,7 @@ function EditorWorkspace({
           </div>
         </div>
       </header>
+
       {paletteOpen && (
         <section className="palette" aria-label="Command palette">
           <input
@@ -1962,16 +2072,31 @@ function EditorWorkspace({
   );
 }
 
+function formatTimecode(timeUs: number, fps = 30): string {
+  const totalFrames = Math.max(0, Math.floor((timeUs / 1_000_000) * fps));
+  const frames = totalFrames % fps;
+  const totalSeconds = Math.floor(totalFrames / fps);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
+}
+
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, previewVideoFrame, visualProject, stickerTick } = context;
+  const { state, previewVideoFrame, visualProject, stickerTick, togglePlayback, seek } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [viewerZoom, setViewerZoom] = useState<'fit' | '50' | '100' | '200'>('fit');
+  const [fullscreen, setFullscreen] = useState(false);
+  const panelRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const mattes = readImageMatteMap(visualProject);
@@ -2075,12 +2200,113 @@ function MonitorPanel() {
 
   useEffect(() => {
     paintRef.current();
-  }, [previewVideoFrame, state.playheadUs, visualProject, sceneTick]);
+  }, [previewVideoFrame, state.playheadUs, visualProject, sceneTick, viewerZoom]);
+
+  const composition = visualProject.compositions[visualProject.rootCompositionId];
+  const width = composition?.width ?? 1920;
+  const height = composition?.height ?? 1080;
+  const durationUs = composition?.durationUs ?? 30_000_000;
+  const zoomScale =
+    viewerZoom === 'fit' ? 1 : viewerZoom === '50' ? 0.5 : viewerZoom === '200' ? 2 : 1;
+
+  const toggleFullscreen = () => {
+    const el = panelRef.current;
+    if (el === null) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen();
+      setFullscreen(false);
+      return;
+    }
+    void el.requestFullscreen().then(() => setFullscreen(true));
+  };
 
   return (
-    <article className="monitor-panel">
+    <article className="monitor-panel" ref={panelRef}>
+      <div className="monitor-toolbar">
+        <span className="monitor-meta" dir="ltr">
+          {width} × {height} · {formatTimecode(state.playheadUs)}
+        </span>
+        <div className="monitor-zoom-group" role="group" aria-label="Preview zoom">
+          {(
+            [
+              ['fit', 'Fit'],
+              ['50', '50%'],
+              ['100', '100%'],
+              ['200', '200%'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className="icon-button icon-button-labeled"
+              style={{
+                width: 'auto',
+                height: 'var(--control-sm)',
+                minHeight: 'var(--control-sm)',
+                fontSize: '0.72rem',
+              }}
+              aria-pressed={viewerZoom === id}
+              aria-label={`Zoom ${label}`}
+              title={`Zoom ${label}`}
+              onClick={() => setViewerZoom(id)}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="icon-button icon-button-labeled"
+            style={{ width: 'auto', height: 'var(--control-sm)', minHeight: 'var(--control-sm)' }}
+            aria-pressed={fullscreen}
+            aria-label="Fullscreen preview"
+            title="Fullscreen preview"
+            onClick={toggleFullscreen}
+          >
+            Full
+          </button>
+        </div>
+      </div>
       {error !== undefined && <p className="monitor-error">{error}</p>}
-      <div ref={containerRef} className="monitor-canvas" />
+      <div className="monitor-canvas-wrap">
+        <div
+          ref={containerRef}
+          className="monitor-canvas"
+          style={
+            viewerZoom === 'fit'
+              ? undefined
+              : { transform: `scale(${zoomScale})`, maxWidth: 'none', maxHeight: 'none' }
+          }
+        />
+      </div>
+      <div className="monitor-transport">
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Seek back 1s"
+          title="Seek back 1s (←)"
+          onClick={() => seek(Math.max(0, state.playheadUs - 1_000_000))}
+        >
+          <SkipBackIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={state.playing ? 'Pause' : 'Play'}
+          title={state.playing ? 'Pause (Space)' : 'Play (Space)'}
+          onClick={togglePlayback}
+        >
+          {state.playing ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Seek forward 1s"
+          title="Seek forward 1s (→)"
+          onClick={() => seek(Math.min(durationUs, state.playheadUs + 1_000_000))}
+        >
+          <SkipForwardIcon />
+        </button>
+      </div>
     </article>
   );
 }

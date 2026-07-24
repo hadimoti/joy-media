@@ -376,11 +376,11 @@ export function AssetLibraryPanel({
             <CloudIcon />
           </button>
         </div>
-        <details className="asset-register">
-          <summary>Register local media</summary>
+        <details className="asset-register" open={items.length === 0}>
+          <summary>Import media</summary>
           <p>
-            The selected file is hashed and cached only in this browser. Its opaque ID must match a
-            local Worker source mapping; a file path is never sent to JOY Media.
+            Files are hashed and cached in this browser only. Use an opaque Asset ID that matches a
+            Worker source mapping — paths are never uploaded.
           </p>
           <div className="asset-register-fields">
             <label>
@@ -403,10 +403,11 @@ export function AssetLibraryPanel({
             </label>
             <button
               type="button"
+              className="asset-import-btn"
               disabled={selectedFile === undefined || assetId.trim().length === 0}
               onClick={() => void registerSelectedAsset()}
             >
-              Register selected media
+              Import media
             </button>
           </div>
         </details>
@@ -441,7 +442,19 @@ export function AssetLibraryPanel({
           </section>
         )}
         {visible.length === 0 ? (
-          <p className="asset-library-empty">No assets match the current category and filters.</p>
+          <div className="asset-library-empty">
+            {status.includes('Initialize') ? (
+              <>
+                <p>This project is not initialized.</p>
+                <p>Open the Jobs panel to initialize it, then import media here.</p>
+              </>
+            ) : (
+              <>
+                <p>Drop media here or import files.</p>
+                <p>No assets match the current filters.</p>
+              </>
+            )}
+          </div>
         ) : (
           <ul className="asset-grid" aria-label="Assets">
             {visible.map(({ asset, derivatives }) => {
