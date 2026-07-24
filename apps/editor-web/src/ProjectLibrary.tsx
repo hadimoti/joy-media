@@ -5,7 +5,7 @@ import {
   removeCatalogProject,
   type ProjectCatalogEntry,
 } from './project-catalog.js';
-import { PlusIcon, ProjectsIcon, TrashIcon } from './icons.js';
+import { CheckIcon, CloseIcon, PlusIcon, ProjectsIcon, TrashIcon } from './icons.js';
 
 export function ProjectLibrary({
   storage,
@@ -70,18 +70,27 @@ export function ProjectLibrary({
                 onChange={(event) => setDraftTitle(event.currentTarget.value)}
               />
             </label>
-            <button type="submit" className="icon-button icon-button-labeled">
-              Create
+            <button
+              type="submit"
+              className="icon-button"
+              aria-label="Create project"
+              title="Create project"
+              data-guide="Create"
+            >
+              <CheckIcon />
             </button>
             <button
               type="button"
-              className="icon-button icon-button-labeled"
+              className="icon-button"
+              aria-label="Cancel"
+              title="Cancel"
+              data-guide="Cancel"
               onClick={() => {
                 setCreating(false);
                 setDraftTitle('');
               }}
             >
-              Cancel
+              <CloseIcon />
             </button>
           </form>
         )}
