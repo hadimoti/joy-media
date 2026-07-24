@@ -37,11 +37,13 @@ export function ProjectLibrary({
         </div>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
+          className="icon-button"
+          aria-label="New project"
+          title="New project"
+          data-guide="New project"
           onClick={() => setCreating(true)}
         >
           <PlusIcon />
-          New project
         </button>
       </header>
 
