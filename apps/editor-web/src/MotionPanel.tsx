@@ -16,8 +16,9 @@ import {
   parentChain,
   sampleCurve,
 } from '@joy-media/motion-core';
+import type { SetSpatialPathCommand } from '@joy-media/motion-core';
 import { FIRST_PARTY_SCENES, type FirstPartySceneId } from '@joy-media/html-scene-runtime/first-party';
-import { CheckIcon, CloseIcon, PlusIcon } from './icons.js';
+import { CheckIcon, CloseIcon, PlusIcon, SaveIcon } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
 
 interface MotionPanelProps {
@@ -178,6 +179,24 @@ export function MotionPanel({
     });
   };
 
+  const saveSpatialPath = () => {
+    const xCurve = object.animations?.x;
+    const yCurve = object.animations?.y;
+    if (xCurve === undefined || yCurve === undefined) return;
+    const samples = 48;
+    const keyframes = [];
+    for (let i = 0; i <= samples; i += 1) {
+      const timeUs = Math.round((duration * i) / samples);
+      const point = { x: sampleCurve(xCurve, timeUs), y: sampleCurve(yCurve, timeUs) };
+      keyframes.push({ timeUs, point, interpolation: 'linear' as const });
+    }
+    const command: SetSpatialPathCommand = {
+      type: 'object.setSpatialPath',
+      payload: { objectId: object.id, spatialPath: { keyframes } },
+    };
+    onDispatch({ label: 'Save spatial path', commands: [command] });
+  };
+
   // Parent candidates: every other object that is not a descendant of this one
   // (a descendant parent would form a cycle the command would reject anyway).
   const parentCandidates = Object.values(allObjects).filter(
@@ -222,6 +241,16 @@ export function MotionPanel({
           onClick={applyPreset}
         >
           <CheckIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          title="Save current XY motion as durable spatial path"
+          data-guide="Save spatial path"
+          aria-label="Save spatial path"
+          onClick={saveSpatialPath}
+        >
+          <SaveIcon />
         </button>
       </div>
 

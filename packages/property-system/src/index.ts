@@ -7,7 +7,7 @@ import type {
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { CaptionCommand } from '@joy-media/captions-core';
 import { applyMotionProjectCommand } from '@joy-media/motion-core';
-import type { MotionCommand } from '@joy-media/motion-core';
+import type { MotionCommand, SetSpatialPathCommand } from '@joy-media/motion-core';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type TransformProperties = VisualObjectTransformV1;
@@ -133,6 +133,7 @@ export function applyVisualObjectProjectCommand(
     case 'object.replaceAnimation':
     case 'object.setParent':
     case 'object.setExpression':
+    case 'object.setSpatialPath':
       return applyMotionProjectCommand(project, command);
     default:
       break;
