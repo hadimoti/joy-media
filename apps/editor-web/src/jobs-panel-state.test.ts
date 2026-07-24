@@ -7,7 +7,7 @@ describe('project Jobs panel state', () => {
   it('labels a missing control-plane record as ready to initialize, never offline', () => {
     const status = projectJobStatus(true, [], NOW);
 
-    expect(status).toContain('ready to initialize');
+    expect(status).toContain('Ready to initialize');
     expect(status).not.toContain('offline');
   });
 
@@ -26,15 +26,20 @@ describe('project Jobs panel state', () => {
     expect(jobStateLabel({ state: 'failed', cancelRequested: false })).toBe('Failed');
     expect(jobStateLabel({ state: 'completed', cancelRequested: false })).toBe('Completed');
   });
-  it('mentions local GPU Worker when Comfy/ML capabilities are absent or present', () => {
-    const noGpu = projectJobStatus(false, [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })], NOW);
-    expect(noGpu).toContain('local GPU Worker');
+  it('mentions GPU ready only when Comfy/ML capabilities are present', () => {
+    const noGpu = projectJobStatus(
+      false,
+      [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })],
+      NOW,
+    );
+    expect(noGpu).toBe('Initialized · Worker connected');
+    expect(noGpu).not.toContain('GPU ready');
     const withGpu = projectJobStatus(
       false,
       [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail', 'image.comfy'] })],
       NOW,
     );
-    expect(withGpu).toContain('Local GPU Worker capabilities are available');
+    expect(withGpu).toContain('GPU ready');
   });
 });
 

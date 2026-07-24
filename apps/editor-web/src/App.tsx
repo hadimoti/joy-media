@@ -87,7 +87,7 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { buildMixerBuffer } from './mixer-buffer.js';
 import type { ExportPresetId } from '@joy-media/project-schema';
-import { AgentPanel } from './AgentPanel.js';
+import { AgentPanel, type HermesAttachedAsset } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -414,6 +414,9 @@ function EditorWorkspace({
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
+  const [hermesAttachedAssets, setHermesAttachedAssets] = useState<
+    readonly HermesAttachedAsset[]
+  >([]);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
@@ -1686,7 +1689,15 @@ function EditorWorkspace({
       return (
         <AssetLibraryPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
+          projectTitle={controlPlaneProject.title}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
+          onEditWithAi={(asset) => {
+            setHermesAttachedAssets((current) => {
+              if (current.some((entry) => entry.assetId === asset.assetId)) return current;
+              return [...current, asset];
+            });
+            activatePanel('agent');
+          }}
         />
       );
     if (api.id === 'agent') {
@@ -1698,6 +1709,18 @@ function EditorWorkspace({
           agentContext={context.agentContext}
           onUndo={context.undo}
           session={session}
+          attachedAssets={hermesAttachedAssets}
+          onDetachAsset={(assetId) =>
+            setHermesAttachedAssets((current) =>
+              current.filter((entry) => entry.assetId !== assetId),
+            )
+          }
+          onAttachAsset={(asset) =>
+            setHermesAttachedAssets((current) => {
+              if (current.some((entry) => entry.assetId === asset.assetId)) return current;
+              return [...current, asset];
+            })
+          }
         />
       );
     }

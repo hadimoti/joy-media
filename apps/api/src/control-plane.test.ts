@@ -62,6 +62,78 @@ describe('local control plane', () => {
       expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
     );
   });
+
+  it('deletes an owned asset and its derivatives; strangers cannot access the project', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    api.createProject(owner, 'project-1', 'Project');
+    api.registerAsset(owner, 'project-1', assetRegistration(), 100);
+    api.registerLocalDerivative(owner, 'project-1', localDerivativeRegistration(), 101);
+    expect(api.deleteAsset(owner, 'project-1', 'asset-1')).toEqual({ id: 'asset-1' });
+    expect(api.assetsForProject(owner, 'project-1')).toHaveLength(0);
+    expect(() => api.derivativesForAsset(owner, 'project-1', 'asset-1')).toThrow(
+      expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
+    );
+    expect(() => api.deleteAsset(owner, 'project-1', 'asset-1')).toThrow(
+      expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
+    );
+    expect(() => api.deleteAsset({ id: 'other' }, 'project-1', 'asset-1')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
+    );
+  });
+
+  it('lists private-object assets in the shared cloud library for any authenticated Joy user', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-a' };
+    const peer = { id: 'owner-b' };
+    api.createProject(owner, 'project-a', 'A');
+    const image = api.registerAsset(
+      owner,
+      'project-a',
+      {
+        id: 'img-1',
+        kind: 'image',
+        displayName: 'shot.png',
+        sha256: SHA256,
+        bytes: 1200,
+        descriptor: { mimeType: 'image/png' },
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-img1' }],
+      },
+      200,
+    );
+    expect(api.sharedCloudAssets(peer)).toHaveLength(0);
+    api.attachCloudOriginal(owner, 'project-a', image.id, {
+      kind: 'private-object',
+      ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    expect(api.sharedCloudAssets(peer)).toMatchObject([
+      { id: 'img-1', kind: 'image', displayName: 'shot.png' },
+    ]);
+    expect(api.sharedCloudAsset(peer, 'img-1').id).toBe('img-1');
+  });
+
+  it('lists every owned asset across projects for the same Joy identity', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-cross' };
+    api.createProject(owner, 'project-chrome', 'Chrome');
+    api.createProject(owner, 'project-cursor', 'Cursor');
+    api.registerAsset(
+      owner,
+      'project-chrome',
+      {
+        id: 'chrome-img',
+        kind: 'image',
+        displayName: 'a.png',
+        sha256: SHA256,
+        bytes: 10,
+        descriptor: { mimeType: 'image/png' },
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-a' }],
+      },
+      1,
+    );
+    expect(api.assetsForOwner(owner)).toMatchObject([{ id: 'chrome-img' }]);
+    expect(api.assetsForProject(owner, 'project-cursor')).toHaveLength(0);
+  });
 });
 
 const SHA256 = 'a'.repeat(64);

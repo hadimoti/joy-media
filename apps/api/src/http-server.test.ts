@@ -102,6 +102,18 @@ describe('control-plane HTTP transport', () => {
         displayName: 'C:\\Users\\Hadi\\clip.mp4',
       }),
     ).toMatchObject({ status: 409, body: { error: { code: 'ASSET_INVALID' } } });
+    expect(await request(origin, 'DELETE', '/v1/projects/p/assets/asset-1')).toMatchObject({
+      status: 200,
+      body: { data: { id: 'asset-1' } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/p/assets')).toMatchObject({
+      status: 200,
+      body: { data: [] },
+    });
+    expect(await request(origin, 'DELETE', '/v1/projects/p/assets/asset-1')).toMatchObject({
+      status: 409,
+      body: { error: { code: 'ASSET_NOT_FOUND' } },
+    });
     expect(
       await request(origin, 'POST', '/v1/worker-pair/offers', {
         workerId: 'w',

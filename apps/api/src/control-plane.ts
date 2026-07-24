@@ -37,6 +37,10 @@ export interface MediaAssetRecord {
   readonly bytes: number;
   readonly descriptor: MediaDescriptor;
   readonly locations: readonly AssetLocationRecord[];
+  /** Hermes / catalog tags (lowercase opaque tokens). */
+  readonly tags: readonly string[];
+  /** Normalized name for alphabetical catalog sorting. */
+  readonly sortName: string;
   readonly createdAt: number;
 }
 
@@ -192,10 +196,56 @@ export interface ControlPlane {
     asset: AssetRegistration,
     now?: number,
   ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  /**
+   * Attach a private-object location for an owner-uploaded image original (ParsPack).
+   * Replaces any existing private-object location; keeps opfs-cache when present.
+   */
+  attachCloudOriginal(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    location: AssetLocationRecord & { readonly kind: 'private-object' },
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  /** Update Hermes tags / sort name / optional display name for catalog automation. */
+  updateAssetMetadata(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    patch: {
+      readonly tags?: readonly string[];
+      readonly sortName?: string;
+      readonly displayName?: string;
+    },
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  /**
+   * Owner-only hard delete of an asset and its derivative metadata rows.
+   * Private-object bytes in remote storage are not purged in v1.
+   */
+  deleteAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): { readonly id: string } | Promise<{ readonly id: string }>;
   assetsForProject(
     actor: Actor,
     projectId: string,
   ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  /**
+   * All assets across every project owned by this Joy identity (cross-browser catalog).
+   */
+  assetsForOwner(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  /**
+   * Shared cloud library: any authenticated Joy user may list assets that have a
+   * private-object original (cross-account catalog, login still required).
+   */
+  sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  /**
+   * Resolve a cloud-backed asset for any authenticated Joy user (private-object required).
+   */
+  sharedCloudAsset(
+    actor: Actor,
+    assetId: string,
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -365,16 +415,114 @@ export class LocalControlPlane implements ControlPlane {
     const record: MediaAssetRecord = {
       ...cloneAssetRegistration(asset),
       projectId,
+      tags: [],
+      sortName: asset.displayName.trim().toLocaleLowerCase(),
       createdAt: now,
     };
     this.#assets.set(record.id, record);
     return cloneAsset(record);
+  }
+  attachCloudOriginal(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    location: AssetLocationRecord & { readonly kind: 'private-object' },
+  ): MediaAssetRecord {
+    this.project(actor, projectId);
+    if (location.kind !== 'private-object')
+      throw new ControlPlaneError('ASSET_INVALID', 'cloud original requires private-object');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(location.ref))
+      throw new ControlPlaneError('ASSET_INVALID', 'asset location is invalid');
+    const current = this.#assets.get(assetId);
+    if (current === undefined || current.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    if (current.kind !== 'image')
+      throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
+    const kept = current.locations.filter((entry) => entry.kind !== 'private-object');
+    const locations = [...kept, { kind: 'private-object' as const, ref: location.ref }];
+    validateLocations(locations);
+    const next: MediaAssetRecord = { ...current, locations: cloneLocations(locations) };
+    this.#assets.set(assetId, next);
+    return cloneAsset(next);
+  }
+  updateAssetMetadata(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    patch: {
+      readonly tags?: readonly string[];
+      readonly sortName?: string;
+      readonly displayName?: string;
+    },
+  ): MediaAssetRecord {
+    this.project(actor, projectId);
+    const current = this.#assets.get(assetId);
+    if (current === undefined || current.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const tags =
+      patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
+    const sortName =
+      patch.sortName === undefined
+        ? current.sortName
+        : validateSortName(patch.sortName);
+    const displayName =
+      patch.displayName === undefined
+        ? current.displayName
+        : (validateDisplayName(patch.displayName), patch.displayName);
+    const next: MediaAssetRecord = { ...current, tags, sortName, displayName };
+    this.#assets.set(assetId, next);
+    return cloneAsset(next);
+  }
+  deleteAsset(actor: Actor, projectId: string, assetId: string): { readonly id: string } {
+    this.project(actor, projectId);
+    const current = this.#assets.get(assetId);
+    if (current === undefined || current.projectId !== projectId)
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    for (const [derivativeId, derivative] of this.#derivatives) {
+      if (derivative.projectId === projectId && derivative.assetId === assetId)
+        this.#derivatives.delete(derivativeId);
+    }
+    this.#assets.delete(assetId);
+    return { id: assetId };
   }
   assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
     this.project(actor, projectId);
     return [...this.#assets.values()]
       .filter((asset) => asset.projectId === projectId)
       .map(cloneAsset);
+  }
+  assetsForOwner(actor: Actor): readonly MediaAssetRecord[] {
+    this.auth(actor);
+    const ownedProjectIds = new Set(
+      [...this.#projects.values()]
+        .filter((project) => project.ownerId === actor.id)
+        .map((project) => project.id),
+    );
+    return [...this.#assets.values()]
+      .filter((asset) => ownedProjectIds.has(asset.projectId))
+      .map(cloneAsset)
+      .sort(
+        (left, right) =>
+          left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id),
+      );
+  }
+  sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] {
+    this.auth(actor);
+    return [...this.#assets.values()]
+      .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'))
+      .map(cloneAsset)
+      .sort((left, right) => left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id));
+  }
+  sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord {
+    this.auth(actor);
+    const asset = this.#assets.get(assetId);
+    if (
+      asset === undefined ||
+      !asset.locations.some((location) => location.kind === 'private-object')
+    ) {
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    }
+    return cloneAsset(asset);
   }
   registerLocalDerivative(
     actor: Actor,
@@ -913,6 +1061,27 @@ function validateDisplayName(value: string): void {
     throw new ControlPlaneError('ASSET_INVALID', 'display name must not contain a path');
 }
 
+export function validateAssetTags(value: readonly string[]): readonly string[] {
+  if (!Array.isArray(value) || value.length > 32)
+    throw new ControlPlaneError('ASSET_INVALID', 'tags must be at most 32 tokens');
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,47}$/.test(raw))
+      throw new ControlPlaneError('ASSET_INVALID', 'tag token is invalid');
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    out.push(raw);
+  }
+  return out;
+}
+
+export function validateSortName(value: string): string {
+  if (value.length === 0 || value.length > 255)
+    throw new ControlPlaneError('ASSET_INVALID', 'sort name is invalid');
+  return value;
+}
+
 function validateHashAndBytes(hash: string, bytes: number, label: string): void {
   if (!/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(bytes) || bytes < 1)
     throw new ControlPlaneError('ASSET_INVALID', `${label} hash or byte length is invalid`);
@@ -965,6 +1134,8 @@ function cloneAsset(value: MediaAssetRecord): MediaAssetRecord {
     ...value,
     descriptor: { ...value.descriptor },
     locations: cloneLocations(value.locations),
+    tags: [...value.tags],
+    sortName: value.sortName,
   };
 }
 

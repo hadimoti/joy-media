@@ -13,14 +13,18 @@ import {
   type AssetCategory,
   type AssetLibraryItem,
   type AssetSort,
+  type AssetViewMode,
 } from './asset-library-state.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
-import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import {
+  openOpfsOriginalAssetCache,
+  type OpfsOriginalAssetCache,
+} from './opfs-original-asset-cache.js';
+import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
 import {
   CloseIcon,
   CloudIcon,
   ImageIcon,
-  PlayIcon,
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
@@ -29,10 +33,14 @@ import {
   UploadIcon,
   CheckIcon,
   GridUiIcon,
+  ListIcon,
+  TrashIcon,
   VideoIcon,
   AudioIcon,
 } from './icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+
+const VIEW_CYCLE: readonly AssetViewMode[] = ['large', 'medium', 'list'];
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -59,13 +67,22 @@ interface Preview {
  */
 export function AssetLibraryPanel({
   projectId,
-  onAddSticker,
+  projectTitle = 'Editor project',
+  onAddSticker: _onAddSticker,
+  onEditWithAi,
 }: {
   readonly projectId: string;
+  readonly projectTitle?: string;
   readonly onAddSticker?: (asset: {
     readonly assetId: string;
     readonly displayName?: string;
     readonly blob?: Blob;
+  }) => void;
+  /** Attach image/video to Hermes Agent for further automations. */
+  readonly onEditWithAi?: (asset: {
+    readonly assetId: string;
+    readonly kind: 'image' | 'video';
+    readonly displayName: string;
   }) => void;
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
@@ -83,24 +100,28 @@ export function AssetLibraryPanel({
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
+  const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>('all');
   const [query, setQuery] = useState('');
   const [availability, setAvailability] = useState<AssetAvailability>('all');
-  const [sort, setSort] = useState<AssetSort>('recent');
+  const [sort, setSort] = useState<AssetSort>('name');
+  const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
   const [status, setStatus] = useState('Loading asset catalog…');
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [syncEnabled, setSyncEnabled] = useState(false);
-  const [comfyReady, setComfyReady] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
-  const filterActive = availability !== 'all' || sort !== 'recent';
-  const canImport = selectedFile !== undefined && assetId.trim().length > 0;
+  const filterActive = availability !== 'all' || sort !== 'name';
+  const canImport =
+    selectedFile !== undefined && assetId.trim().length > 0 && importProgress === undefined;
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -111,30 +132,54 @@ export function AssetLibraryPanel({
 
   const refresh = useCallback(async () => {
     try {
-      const assets = await client.assets(projectId);
+      // Auto-create control-plane project so Assets never depends on Jobs → Initialize.
+      await client.ensureProject(projectId, projectTitle);
+      const [ownedAssets, sharedAssets] = await Promise.all([
+        client.myAssets(),
+        client.sharedCloudAssets().catch(() => [] as readonly BrowserAsset[]),
+      ]);
+      const byId = new Map<string, BrowserAsset>();
+      for (const asset of ownedAssets) byId.set(asset.id, asset);
+      for (const asset of sharedAssets) {
+        const existing = byId.get(asset.id);
+        if (existing === undefined) {
+          byId.set(asset.id, asset);
+          continue;
+        }
+        byId.set(asset.id, {
+          ...existing,
+          ...(asset.tags !== undefined ? { tags: asset.tags } : {}),
+          ...(asset.sortName !== undefined ? { sortName: asset.sortName } : {}),
+        });
+      }
+      const assets = [...byId.values()];
       const derivatives = await Promise.all(
-        assets.map(
-          async (asset) => [asset.id, await client.derivatives(projectId, asset.id)] as const,
-        ),
+        assets.map(async (asset) => {
+          try {
+            return [
+              asset.id,
+              await client.derivatives(asset.projectId || projectId, asset.id),
+            ] as const;
+          } catch {
+            return [asset.id, [] as readonly BrowserDerivative[]] as const;
+          }
+        }),
       );
       const byAsset = new Map(derivatives);
+      setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
       setStatus(
         assets.length === 0
-          ? 'No media has been registered for this project yet.'
-          : 'Catalog ready.',
+          ? 'No media yet. Import images to sync them to the shared cloud library.'
+          : `Catalog ready · ${ownedAssets.length} yours · ${sharedAssets.length} cloud-shared`,
       );
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
       const detail = message(error);
-      if (detail.includes('PROJECT_NOT_FOUND')) {
-        setItems([]);
-        setStatus('Initialize this project in Jobs before registering media.');
-        return;
-      }
+      setItems([]);
       setStatus(`Could not load the asset catalog: ${detail}`);
     }
-  }, [client, projectId]);
+  }, [client, projectId, projectTitle]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -170,63 +215,26 @@ export function AssetLibraryPanel({
     };
   }, [filterOpen, searchOpen, importOpen, query, selectedFile, assetId]);
 
-  useEffect(() => {
-    void client
-      .workers()
-      .then((workers) => {
-        setComfyReady(
-          workers.some(
-            (worker) =>
-              !worker.revoked &&
-              worker.paired &&
-              worker.capabilities.includes('image.comfy'),
-          ),
-        );
-      })
-      .catch(() => setComfyReady(false));
-  }, [client, items]);
-
-  const addAsSticker = useCallback(
-    async (asset: BrowserAsset) => {
-      if (onAddSticker === undefined) {
-        setStatus('Sticker placement is unavailable in this session.');
+  const editWithAi = useCallback(
+    (asset: BrowserAsset) => {
+      if (asset.kind !== 'image' && asset.kind !== 'video') {
+        setStatus('Edit with AI supports image and video assets.');
         return;
       }
-      try {
-        const blob = await (await originalAssetCache).get(asset.id);
-        if (blob === undefined) {
-          setStatus('Open/register this image in this browser first so OPFS has the original bytes.');
-          return;
-        }
-        onAddSticker({ assetId: asset.id, displayName: asset.displayName, blob });
-        setStatus(`Added ${asset.displayName} as a sticker overlay.`);
-      } catch (error) {
-        setStatus(`Could not add sticker: ${message(error)}`);
-      }
-    },
-    [onAddSticker, originalAssetCache],
-  );
-
-  const removeBackground = useCallback(
-    async (asset: BrowserAsset) => {
-      if (!comfyReady) {
-        setStatus('Remove background needs a paired GPU Worker with image.comfy (ADR-0018).');
+      if (onEditWithAi === undefined) {
+        setStatus('Hermes Agent attachment is unavailable in this session.');
         return;
       }
-      try {
-        const job = await client.enqueueComfyRemoveBg(
-          projectId,
-          `rembg-${asset.id}-${Date.now()}`,
-          asset.id,
-        );
-        setStatus(
-          `Queued background removal job ${job.id} (Comfy RemBG). When the Worker completes, register the foreground PNG and Add as sticker.`,
-        );
-      } catch (error) {
-        setStatus(`Could not queue remove-background: ${message(error)}`);
-      }
+      onEditWithAi({
+        assetId: asset.id,
+        kind: asset.kind,
+        displayName: asset.displayName,
+      });
+      setStatus(
+        `Attached ${asset.displayName} to Hermes Agent. Drag onto the timeline, or automate from Agent.`,
+      );
     },
-    [client, comfyReady, projectId],
+    [onEditWithAi],
   );
 
   const visible = useMemo(
@@ -283,10 +291,15 @@ export function AssetLibraryPanel({
     try {
       const kind = assetKind(selectedFile);
       const mimeType = normalizedMimeType(selectedFile, kind);
-      setStatus(`Hashing and caching ${selectedFile.name} locally…`);
-      const sha256 = hex(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer())),
-      );
+      setImportProgress(0.02);
+      setStatus(`Reading ${selectedFile.name}…`);
+      const buffer = await readFileWithProgress(selectedFile, (ratio) => {
+        setImportProgress(0.02 + 0.38 * ratio);
+      });
+      setImportProgress(0.42);
+      setStatus(`Hashing ${selectedFile.name}…`);
+      const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
+      setImportProgress(0.55);
       const registration: BrowserAssetRegistration = {
         id: normalizedId,
         kind,
@@ -296,6 +309,8 @@ export function AssetLibraryPanel({
         descriptor: { mimeType },
         locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
       };
+      setStatus(`Caching ${selectedFile.name} locally…`);
+      setImportProgress(0.62);
       await (
         await originalAssetCache
       ).put(
@@ -307,16 +322,40 @@ export function AssetLibraryPanel({
         },
         selectedFile,
       );
-      await client.registerAsset(projectId, registration);
+      setImportProgress(0.88);
+      setStatus(`Registering ${selectedFile.name}…`);
+      const registered = await client.registerAsset(projectId, registration);
+      if (kind === 'image') {
+        setImportProgress(0.9);
+        setStatus(`Uploading ${selectedFile.name} to private cloud…`);
+        await client.uploadAssetOriginal(
+          projectId,
+          registered,
+          selectedFile,
+          (ratio) => setImportProgress(0.9 + 0.08 * ratio),
+        );
+        setStatus(
+          `Cloud-backed ${selectedFile.name}. Hermes tags applied; catalog will refresh.`,
+        );
+      } else {
+        try {
+          await client.retagAsset(projectId, registered.id);
+        } catch {
+          /* heuristic retag is best-effort for video/audio */
+        }
+        setStatus(
+          `Registered ${selectedFile.name} locally. Video/audio cloud backup is lower priority in v1.`,
+        );
+      }
+      setImportProgress(1);
       setSelectedFile(undefined);
       setAssetId('');
       if (fileInputRef.current !== null) fileInputRef.current.value = '';
       setImportOpen(false);
-      setStatus(
-        `Registered ${selectedFile.name}. Configure the same opaque ID on a local Worker before queuing a derivative.`,
-      );
       await refresh();
+      window.setTimeout(() => setImportProgress(undefined), 350);
     } catch (error) {
+      setImportProgress(undefined);
       setStatus(`Could not register asset: ${message(error)}`);
     }
   }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
@@ -329,20 +368,155 @@ export function AssetLibraryPanel({
       setStatus(`Could not enable private backup: ${message(error)}`);
     }
   }, [client, projectId]);
-  const queueThumbnail = useCallback(
+  const fetchCloudOriginal = useCallback(
+    (id: string) => client.sharedCloudOriginalBytes(id),
+    [client],
+  );
+
+  const toggleSelected = useCallback((assetId: string) => {
+    setSelectedAssetIds((current) => {
+      const next = new Set(current);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }, []);
+
+  const cycleViewMode = useCallback(() => {
+    const index = VIEW_CYCLE.indexOf(viewMode);
+    const next = VIEW_CYCLE[(index + 1) % VIEW_CYCLE.length] ?? 'medium';
+    setViewMode(next);
+    writeAssetViewMode(next);
+  }, [viewMode]);
+
+  const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
+      if (asset.kind !== 'image') {
+        setStatus('Share to cloud is image-only in v1.');
+        return;
+      }
+      if (cloudAssetIds.has(asset.id)) {
+        setStatus(`${asset.displayName} is already in the shared cloud library.`);
+        return;
+      }
       try {
-        await client.enqueueAssetThumbnail(projectId, `thumbnail-${crypto.randomUUID()}`, asset.id);
-        setStatus(
-          `Thumbnail queued for ${asset.displayName}. A Worker with this asset ID can claim it.`,
-        );
+        const blob = await (await originalAssetCache).get(asset.id);
+        if (blob === undefined) {
+          setStatus('This browser has no OPFS original to upload. Re-import the image here first.');
+          return;
+        }
+        setStatus(`Uploading ${asset.displayName} to private cloud…`);
+        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
+        setStatus(`Shared ${asset.displayName} to cloud.`);
         await refresh();
       } catch (error) {
-        setStatus(`Could not queue thumbnail: ${message(error)}`);
+        setStatus(`Could not share to cloud: ${message(error)}`);
+      }
+    },
+    [client, cloudAssetIds, originalAssetCache, projectId, refresh],
+  );
+
+  const deleteAsset = useCallback(
+    async (asset: BrowserAsset) => {
+      const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
+      if (!ok) return;
+      try {
+        await client.deleteAsset(asset.projectId || projectId, asset.id);
+        setSelectedAssetIds((current) => {
+          if (!current.has(asset.id)) return current;
+          const next = new Set(current);
+          next.delete(asset.id);
+          return next;
+        });
+        setStatus(`Deleted ${asset.displayName}.`);
+        await refresh();
+      } catch (error) {
+        setStatus(`Could not delete: ${message(error)}`);
       }
     },
     [client, projectId, refresh],
   );
+
+  const bulkShare = useCallback(async () => {
+    const targets = visible.filter(
+      ({ asset }) =>
+        selectedAssetIds.has(asset.id) &&
+        asset.kind === 'image' &&
+        !cloudAssetIds.has(asset.id),
+    );
+    if (targets.length === 0) {
+      setStatus('No selected images available to share (need OPFS originals).');
+      return;
+    }
+    let shared = 0;
+    for (const { asset } of targets) {
+      try {
+        const blob = await (await originalAssetCache).get(asset.id);
+        if (blob === undefined) continue;
+        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
+        shared += 1;
+      } catch {
+        /* continue remaining */
+      }
+    }
+    setStatus(`Shared ${shared} of ${targets.length} selected image(s) to cloud.`);
+    await refresh();
+  }, [
+    client,
+    cloudAssetIds,
+    originalAssetCache,
+    projectId,
+    refresh,
+    selectedAssetIds,
+    visible,
+  ]);
+
+  const bulkEditWithAi = useCallback(() => {
+    if (onEditWithAi === undefined) {
+      setStatus('Hermes Agent attachment is unavailable in this session.');
+      return;
+    }
+    let attached = 0;
+    for (const { asset } of visible) {
+      if (!selectedAssetIds.has(asset.id)) continue;
+      if (asset.kind !== 'image' && asset.kind !== 'video') continue;
+      onEditWithAi({
+        assetId: asset.id,
+        kind: asset.kind,
+        displayName: asset.displayName,
+      });
+      attached += 1;
+    }
+    setStatus(
+      attached === 0
+        ? 'No selected image/video assets to attach.'
+        : `Attached ${attached} asset(s) to Hermes Agent.`,
+    );
+  }, [onEditWithAi, selectedAssetIds, visible]);
+
+  const bulkDelete = useCallback(async () => {
+    const targets = visible.filter(({ asset }) => selectedAssetIds.has(asset.id));
+    if (targets.length === 0) return;
+    const ok = window.confirm(`Delete ${targets.length} selected asset(s) from the catalog?`);
+    if (!ok) return;
+    let deleted = 0;
+    for (const { asset } of targets) {
+      try {
+        await client.deleteAsset(asset.projectId || projectId, asset.id);
+        deleted += 1;
+      } catch {
+        /* continue remaining */
+      }
+    }
+    setSelectedAssetIds(new Set());
+    setStatus(`Deleted ${deleted} of ${targets.length} selected asset(s).`);
+    await refresh();
+  }, [client, projectId, refresh, selectedAssetIds, visible]);
+
+  const visibleIds = useMemo(() => visible.map(({ asset }) => asset.id), [visible]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.has(id));
+  const selectedCount = selectedAssetIds.size;
 
   return (
     <section className="asset-library" aria-label="Asset library">
@@ -371,6 +545,18 @@ export function AssetLibraryPanel({
       </nav>
       <div className="asset-library-content">
         <div className="asset-library-toolbar" ref={toolbarRef}>
+          {importProgress !== undefined && (
+            <div
+              className="asset-upload-progress"
+              role="progressbar"
+              aria-label="Asset upload progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(importProgress * 100)}
+            >
+              <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
+            </div>
+          )}
           <div className="asset-toolbar-icons" role="toolbar" aria-label="Asset tools">
             {searchOpen ? (
               <label className="asset-search asset-search-expanded">
@@ -472,6 +658,24 @@ export function AssetLibraryPanel({
             >
               <CloudIcon />
             </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`View: ${viewMode} — click for ${VIEW_CYCLE[(VIEW_CYCLE.indexOf(viewMode) + 1) % VIEW_CYCLE.length]}`}
+              title={`View: ${viewMode}`}
+              data-guide={`View: ${viewMode}`}
+              onClick={cycleViewMode}
+            >
+              {viewMode === 'large' ? (
+                <span className="asset-view-glyph asset-view-glyph--large" aria-hidden>
+                  ▦
+                </span>
+              ) : viewMode === 'medium' ? (
+                <GridUiIcon />
+              ) : (
+                <ListIcon />
+              )}
+            </button>
           </div>
           {importOpen && (
             <div className="asset-import-drawer" role="dialog" aria-label="Import media">
@@ -497,6 +701,7 @@ export function AssetLibraryPanel({
                   className="sr-only"
                   type="file"
                   accept="video/*,audio/*,image/*"
+                  disabled={importProgress !== undefined}
                   onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
                   aria-label="Media file"
                 />
@@ -505,6 +710,7 @@ export function AssetLibraryPanel({
                   className="icon-button"
                   aria-label="Choose media file"
                   title="Choose media file"
+                  disabled={importProgress !== undefined}
                   data-active={selectedFile !== undefined ? 'true' : undefined}
                   onClick={() => fileInputRef.current?.click()}
                 >
@@ -519,6 +725,7 @@ export function AssetLibraryPanel({
                   onChange={(event) => setAssetId(event.target.value)}
                   placeholder="Asset ID"
                   aria-label="Asset ID"
+                  disabled={importProgress !== undefined}
                 />
                 <button
                   type="button"
@@ -531,6 +738,18 @@ export function AssetLibraryPanel({
                   <CheckIcon />
                 </button>
               </div>
+              {importProgress !== undefined && (
+                <div
+                  className="asset-upload-progress asset-upload-progress--inline"
+                  role="progressbar"
+                  aria-label="Asset upload progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(importProgress * 100)}
+                >
+                  <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
+                </div>
+              )}
             </div>
           )}
           {filterOpen && (
@@ -572,6 +791,7 @@ export function AssetLibraryPanel({
                 >
                   <option value="recent">Newest</option>
                   <option value="name">Name</option>
+                  <option value="tags">Tags</option>
                   <option value="size">Largest file</option>
                 </select>
               </label>
@@ -581,7 +801,7 @@ export function AssetLibraryPanel({
                   className="asset-filter-reset"
                   onClick={() => {
                     setAvailability('all');
-                    setSort('recent');
+                    setSort('name');
                   }}
                 >
                   Reset filters
@@ -620,12 +840,57 @@ export function AssetLibraryPanel({
             )}
           </section>
         )}
+        {selectedCount > 0 && (
+          <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
+            <span className="asset-bulk-count">{selectedCount}</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Share selected images to cloud"
+              title="Share to cloud"
+              data-guide="Share to cloud"
+              onClick={() => void bulkShare()}
+            >
+              <CloudIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Edit selected with AI"
+              title="Edit with AI"
+              data-guide="Edit with AI"
+              onClick={bulkEditWithAi}
+            >
+              <AiEffectIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Delete selected assets"
+              title="Delete"
+              data-guide="Delete"
+              onClick={() => void bulkDelete()}
+            >
+              <TrashIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Clear selection"
+              title="Clear selection"
+              data-guide="Clear"
+              onClick={() => setSelectedAssetIds(new Set())}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        )}
         {visible.length === 0 ? (
           <div className="asset-library-empty">
-            {status.includes('Initialize') ? (
+            {status.includes('Could not load') ? (
               <>
-                <p>This project is not initialized.</p>
-                <p>Open the Jobs panel to initialize it, then import media here.</p>
+                <p>Could not load the asset catalog.</p>
+                <p>{status}</p>
               </>
             ) : (
               <>
@@ -644,89 +909,125 @@ export function AssetLibraryPanel({
             )}
           </div>
         ) : (
-          <ul className="asset-grid" aria-label="Assets">
-            {visible.map(({ asset, derivatives }) => {
-              const derivative = preferredDerivative(derivatives);
-              const status =
-                derivative?.availability ??
-                (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
-              return (
-                <li
-                  key={asset.id}
-                  className="asset-card"
-                  draggable
-                  title="Drag onto a timeline track"
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData(
-                      JOY_MEDIA_ASSET_DND,
-                      JSON.stringify({
-                        assetId: asset.id,
-                        kind: asset.kind,
-                        displayName: asset.displayName,
-                      }),
-                    );
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                >
-                  <div className="asset-card-heading">
-                    <strong title={asset.id}>{asset.displayName}</strong>
-                    <span className={`asset-kind asset-kind-${asset.kind}`}>{asset.kind}</span>
-                  </div>
-                  <p>
-                    {asset.descriptor.mimeType} · {formatBytes(asset.bytes)}
-                  </p>
-                  <p className={`asset-availability asset-availability-${status}`}>
-                    {availabilityLabel(status)}
-                  </p>
-                  {derivatives.length === 0 && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`Generate thumbnail for ${asset.displayName}`}
-                      title="Generate thumbnail"
-                      onClick={() => void queueThumbnail(asset)}
+          <>
+            {viewMode === 'list' && (
+              <div className="asset-list-header" aria-hidden={false}>
+                <label className="asset-card-tick">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    aria-label={allVisibleSelected ? 'Clear selection' : 'Select all visible'}
+                    onChange={() => {
+                      setSelectedAssetIds((current) => {
+                        if (allVisibleSelected) return new Set();
+                        return new Set(visibleIds);
+                      });
+                    }}
+                  />
+                </label>
+                <span className="asset-list-header-thumb" />
+                <span className="asset-list-header-name">Name</span>
+                <span className="asset-list-header-size">Size</span>
+                <span className="asset-list-header-actions">Actions</span>
+              </div>
+            )}
+            <ul className={`asset-grid asset-grid--${viewMode}`} aria-label="Assets">
+              {visible.map(({ asset, derivatives }) => {
+                const derivative = preferredDerivative(derivatives);
+                const avail =
+                  derivative?.availability ??
+                  (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
+                const cloudBacked = cloudAssetIds.has(asset.id);
+                const selected = selectedAssetIds.has(asset.id);
+                const detailHint = [
+                  asset.kind,
+                  asset.descriptor.mimeType,
+                  formatBytes(asset.bytes),
+                  cloudBacked ? 'Cloud original' : availabilityLabel(avail),
+                ].join(' · ');
+                return (
+                  <li
+                    key={asset.id}
+                    className={`asset-card${selected ? ' is-selected' : ''}`}
+                    draggable
+                    title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(
+                        JOY_MEDIA_ASSET_DND,
+                        JSON.stringify({
+                          assetId: asset.id,
+                          kind: asset.kind,
+                          displayName: asset.displayName,
+                        }),
+                      );
+                      event.dataTransfer.effectAllowed = 'copy';
+                    }}
+                  >
+                    <label
+                      className="asset-card-tick"
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
                     >
-                      <ImageIcon />
-                    </button>
-                  )}
-                  {derivative !== undefined && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`Preview verified ${derivative.kind} for ${asset.displayName}`}
-                      title={`Preview verified ${derivative.kind}`}
-                      onClick={() => void openPreview(asset, derivative)}
-                    >
-                      <PlayIcon />
-                    </button>
-                  )}
-                  {asset.kind === 'image' && (
-                    <>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`Select ${asset.displayName}`}
+                        onChange={() => toggleSelected(asset.id)}
+                      />
+                    </label>
+                    <div className="asset-card-media-wrap">
+                      <AssetCardMedia
+                        asset={asset}
+                        derivatives={derivatives}
+                        projectId={projectId}
+                        resolverPromise={resolver}
+                        originalCachePromise={originalAssetCache}
+                        fetchCloudOriginal={fetchCloudOriginal}
+                        {...(derivative !== undefined
+                          ? { onOpenDerivative: () => void openPreview(asset, derivative) }
+                          : {})}
+                      />
+                    </div>
+                    <strong className="asset-card-name" title={asset.displayName}>
+                      {asset.displayName}
+                    </strong>
+                    <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
+                    <div className="asset-card-actions">
+                      {(asset.kind === 'image' || asset.kind === 'video') && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Edit ${asset.displayName} with AI`}
+                          title="Edit with AI"
+                          data-guide="Edit with AI"
+                          onClick={() => editWithAi(asset)}
+                        >
+                          <AiEffectIcon />
+                        </button>
+                      )}
+                      {asset.kind === 'image' && !cloudBacked && (
+                        <AssetShareCloudButton
+                          asset={asset}
+                          originalCachePromise={originalAssetCache}
+                          onShare={() => void shareToCloud(asset)}
+                        />
+                      )}
                       <button
                         type="button"
                         className="icon-button"
-                        aria-label={`Add ${asset.displayName} as sticker`}
-                        data-guide="Add as sticker"
-                        onClick={() => void addAsSticker(asset)}
+                        aria-label={`Delete ${asset.displayName}`}
+                        title="Delete"
+                        data-guide="Delete"
+                        onClick={() => void deleteAsset(asset)}
                       >
-                        <PlusIcon />
+                        <TrashIcon />
                       </button>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={`Remove background from ${asset.displayName}`}
-                        data-guide="Remove background"
-                        disabled={!comfyReady}
-                        onClick={() => void removeBackground(asset)}
-                      >
-                        <AiEffectIcon />
-                      </button>
-                    </>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </div>
     </section>
@@ -751,6 +1052,138 @@ function availabilityLabel(status: AssetAvailability): string {
       return 'Unknown status';
   }
 }
+
+function AssetShareCloudButton({
+  asset,
+  originalCachePromise,
+  onShare,
+}: {
+  readonly asset: BrowserAsset;
+  readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
+  readonly onShare: () => void;
+}) {
+  const [hasLocal, setHasLocal] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void originalCachePromise.then((cache) =>
+      cache.get(asset.id).then((blob) => {
+        if (!cancelled) setHasLocal(blob !== undefined);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, originalCachePromise]);
+  if (!hasLocal) return null;
+  return (
+    <button
+      type="button"
+      className="icon-button"
+      aria-label={`Share ${asset.displayName} to cloud`}
+      title="Share to cloud"
+      data-guide="Share to cloud"
+      onClick={onShare}
+    >
+      <CloudIcon />
+    </button>
+  );
+}
+
+function AssetCardMedia({
+  asset,
+  derivatives,
+  projectId,
+  resolverPromise,
+  originalCachePromise,
+  fetchCloudOriginal,
+  onOpenDerivative,
+}: {
+  readonly asset: BrowserAsset;
+  readonly derivatives: readonly BrowserDerivative[];
+  readonly projectId: string;
+  readonly resolverPromise: Promise<AuthorizedDerivativeResolver>;
+  readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
+  readonly fetchCloudOriginal: (assetId: string) => Promise<Blob>;
+  readonly onOpenDerivative?: () => void;
+}) {
+  const [url, setUrl] = useState<string | undefined>(undefined);
+  const [mimeType, setMimeType] = useState<string | undefined>(undefined);
+  const [source, setSource] = useState<AssetThumbSource>('none');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let revoke: () => void = () => undefined;
+    setLoading(true);
+    void (async () => {
+      const [resolver, originalCache] = await Promise.all([
+        resolverPromise,
+        originalCachePromise,
+      ]);
+      const result = await resolveAssetThumb({
+        asset,
+        derivatives,
+        projectId,
+        resolver,
+        originalCache,
+        fetchCloudOriginal,
+      });
+      if (cancelled) {
+        result.revoke();
+        return;
+      }
+      revoke = result.revoke;
+      setUrl(result.url);
+      setMimeType(result.mimeType);
+      setSource(result.source);
+      setLoading(false);
+    })().catch(() => {
+      if (!cancelled) {
+        setUrl(undefined);
+        setSource('none');
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+      revoke();
+    };
+  }, [
+    asset,
+    derivatives,
+    projectId,
+    resolverPromise,
+    originalCachePromise,
+    fetchCloudOriginal,
+  ]);
+
+  const interactive = onOpenDerivative !== undefined;
+  return (
+    <button
+      type="button"
+      className={`asset-card-media asset-card-media--${asset.kind}${loading ? ' is-loading' : ''}`}
+      aria-label={
+        interactive
+          ? `Preview ${asset.displayName}`
+          : `${asset.kind} preview for ${asset.displayName}`
+      }
+      disabled={!interactive}
+      onClick={() => onOpenDerivative?.()}
+      data-source={source}
+    >
+      {url !== undefined && mimeType?.startsWith('video/') ? (
+        <video src={url} muted playsInline preload="metadata" />
+      ) : url !== undefined ? (
+        <img src={url} alt="" loading="lazy" decoding="async" />
+      ) : (
+        <span className="asset-card-placeholder" aria-hidden>
+          {asset.kind === 'video' ? '▶' : asset.kind === 'audio' ? '♪' : '▣'}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function previewStatus(
   state: 'missing' | 'invalid' | 'unsupported' | 'unavailable' | 'revoked',
 ): string {
@@ -788,4 +1221,55 @@ function normalizedMimeType(file: File, kind: BrowserAsset['kind']): string {
 }
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+const ASSET_VIEW_KEY = 'joy-media.asset-view.v1';
+
+function readAssetViewMode(): AssetViewMode {
+  try {
+    const raw = localStorage.getItem(ASSET_VIEW_KEY);
+    if (raw === 'large' || raw === 'medium' || raw === 'list') return raw;
+  } catch {
+    /* ignore */
+  }
+  return 'medium';
+}
+
+function writeAssetViewMode(mode: AssetViewMode): void {
+  try {
+    localStorage.setItem(ASSET_VIEW_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Stream a File into memory while reporting 0–1 read progress (falls back to arrayBuffer). */
+async function readFileWithProgress(
+  file: File,
+  onProgress: (ratio: number) => void,
+): Promise<ArrayBuffer> {
+  if (typeof file.stream !== 'function' || file.size <= 0) {
+    onProgress(1);
+    return file.arrayBuffer();
+  }
+  const reader = file.stream().getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value !== undefined) {
+      chunks.push(value);
+      received += value.byteLength;
+      onProgress(Math.min(1, received / file.size));
+    }
+  }
+  const merged = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  onProgress(1);
+  return merged.buffer;
 }

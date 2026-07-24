@@ -224,6 +224,49 @@ async function route(
     return;
   }
 
+  if (request.method === 'GET' && url.pathname === '/v1/library/cloud-assets') {
+    respondJson(response, 200, { data: await options.controlPlane.sharedCloudAssets(actor) });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/v1/library/my-assets') {
+    respondJson(response, 200, { data: await options.controlPlane.assetsForOwner(actor) });
+    return;
+  }
+
+  const sharedCloudContentMatch = /^\/v1\/library\/cloud-assets\/([^/]+)\/content$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && sharedCloudContentMatch !== null) {
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const asset = await options.controlPlane.sharedCloudAsset(
+      actor,
+      decodeURIComponent(sharedCloudContentMatch[1]!),
+    );
+    const location = asset.locations.find((candidate) => candidate.kind === 'private-object');
+    if (location === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', asset.id);
+    const bytes = await store.get({
+      ref: location.ref,
+      sha256: asset.sha256,
+      bytes: asset.bytes,
+      mimeType: asset.descriptor.mimeType,
+    });
+    response.writeHead(200, {
+      'content-type': asset.descriptor.mimeType,
+      'content-length': String(bytes.byteLength),
+      'cache-control': 'private, no-store',
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(Buffer.from(bytes));
+    return;
+  }
+
   const derivativeContentMatch =
     /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/derivatives\/([^/]+)\/content$/.exec(url.pathname);
   if (request.method === 'GET' && derivativeContentMatch !== null) {
@@ -418,6 +461,139 @@ async function route(
     return;
   }
 
+  const assetByIdMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'DELETE' && assetByIdMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.deleteAsset(
+        actor,
+        decodeURIComponent(assetByIdMatch[1]!),
+        decodeURIComponent(assetByIdMatch[2]!),
+      ),
+    });
+    return;
+  }
+
+  const assetOriginalMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'POST' && assetOriginalMatch !== null) {
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const projectId = decodeURIComponent(assetOriginalMatch[1]!);
+    const assetId = decodeURIComponent(assetOriginalMatch[2]!);
+    const assets = await options.controlPlane.assetsForProject(actor, projectId);
+    const asset = assets.find((entry) => entry.id === assetId);
+    if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    if (asset.kind !== 'image')
+      throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
+    const mimeType = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!/^image\/[a-z0-9.+-]+$/.test(mimeType))
+      throw new ControlPlaneError('REQUEST_INVALID', 'original upload must be an image MIME type');
+    const declaredSha = String(request.headers['x-joy-sha256'] ?? '').toLowerCase();
+    const declaredBytes = Number(request.headers['x-joy-bytes'] ?? NaN);
+    if (!/^[a-f0-9]{64}$/.test(declaredSha) || !Number.isSafeInteger(declaredBytes) || declaredBytes < 1)
+      throw new ControlPlaneError('REQUEST_INVALID', 'original integrity headers are invalid');
+    if (declaredSha !== asset.sha256 || declaredBytes !== asset.bytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'original does not match registered asset');
+    const bytes = await readBytes(request, 50 * 1024 * 1024);
+    if (bytes.byteLength !== asset.bytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'original byte length does not match asset');
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (digest !== asset.sha256)
+      throw new ControlPlaneError('REQUEST_INVALID', 'original sha256 does not match asset');
+    await options.controlPlane.setAssetSync(actor, projectId, true);
+    const ref = `orig-${asset.sha256.slice(0, 32)}`;
+    await store.put(
+      { ref, sha256: asset.sha256, bytes: asset.bytes, mimeType },
+      bytes,
+    );
+    try {
+      const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
+      const tagged = await tagAssetWithHermes({
+        kind: asset.kind,
+        displayName: asset.displayName,
+        mimeType: asset.descriptor.mimeType,
+        bytes: asset.bytes,
+        ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
+        ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
+        imageBytes: bytes,
+      });
+      let updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
+        kind: 'private-object',
+        ref,
+      });
+      updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+        tags: tagged.tags,
+        sortName: tagged.sortName,
+      });
+      respondJson(response, 201, {
+        data: {
+          asset: updated,
+          cloudRef: ref,
+          tagProvenance: tagged.provenance,
+        },
+      });
+    } catch (error) {
+      await store.remove(ref).catch(() => undefined);
+      throw error;
+    }
+    return;
+  }
+
+  const assetMetadataMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/metadata$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'POST' && assetMetadataMatch !== null) {
+    const body = await readJson(request);
+    const tags = Array.isArray(body.tags)
+      ? body.tags.filter((item): item is string => typeof item === 'string')
+      : undefined;
+    const sortName = typeof body.sortName === 'string' ? body.sortName : undefined;
+    const displayName = typeof body.displayName === 'string' ? body.displayName : undefined;
+    respondJson(response, 200, {
+      data: await options.controlPlane.updateAssetMetadata(
+        actor,
+        decodeURIComponent(assetMetadataMatch[1]!),
+        decodeURIComponent(assetMetadataMatch[2]!),
+        {
+          ...(tags !== undefined ? { tags } : {}),
+          ...(sortName !== undefined ? { sortName } : {}),
+          ...(displayName !== undefined ? { displayName } : {}),
+        },
+      ),
+    });
+    return;
+  }
+
+  const assetRetagMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/retag$/.exec(url.pathname);
+  if (request.method === 'POST' && assetRetagMatch !== null) {
+    const projectId = decodeURIComponent(assetRetagMatch[1]!);
+    const assetId = decodeURIComponent(assetRetagMatch[2]!);
+    const assets = await options.controlPlane.assetsForProject(actor, projectId);
+    const asset = assets.find((entry) => entry.id === assetId);
+    if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
+    const tagged = await tagAssetWithHermes({
+      kind: asset.kind,
+      displayName: asset.displayName,
+      mimeType: asset.descriptor.mimeType,
+      bytes: asset.bytes,
+      ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
+      ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
+    });
+    respondJson(response, 200, {
+      data: await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+        tags: tagged.tags,
+        sortName: tagged.sortName,
+      }),
+    });
+    return;
+  }
+
   const derivativeMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/derivatives$/.exec(
     url.pathname,
   );
@@ -545,7 +721,7 @@ async function readBytes(request: IncomingMessage, maximumBytes: number): Promis
     const bytes = Buffer.from(chunk);
     length += bytes.length;
     if (length > maximumBytes)
-      throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload exceeds the limit');
+      throw new ControlPlaneError('REQUEST_INVALID', 'upload exceeds the size limit');
     chunks.push(bytes);
   }
   return new Uint8Array(Buffer.concat(chunks));

@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import {
   ControlPlaneError,
+  type AssetLocationRecord,
   type AssetRegistration,
   type Actor,
   type AssetThumbnailReceipt,
@@ -18,8 +19,10 @@ import {
   type WorkerRecord,
   type WorkerSession,
   validateAssetRegistration,
+  validateAssetTags,
   validateCloudDerivativeRegistration,
   validateLocalDerivativeRegistration,
+  validateSortName,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
@@ -85,6 +88,8 @@ interface MediaAssetRow {
   readonly byte_length: string | number;
   readonly descriptor: unknown;
   readonly locations: unknown;
+  readonly tags: unknown;
+  readonly sort_name: string | null;
   readonly created_at: Date;
 }
 
@@ -182,13 +187,14 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
   ): Promise<MediaAssetRecord> {
     validateAssetRegistration(asset);
+    const sortName = asset.displayName.trim().toLocaleLowerCase();
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
       try {
         const result = await client.query<MediaAssetRow>(
           `INSERT INTO media_assets
-             (id, project_id, kind, display_name, sha256, byte_length, descriptor, locations, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9) RETURNING *`,
+             (id, project_id, kind, display_name, sha256, byte_length, descriptor, locations, tags, sort_name, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11) RETURNING *`,
           [
             asset.id,
             projectId,
@@ -198,6 +204,8 @@ export class PostgresControlPlane implements ControlPlane {
             asset.bytes,
             JSON.stringify(asset.descriptor),
             JSON.stringify(asset.locations),
+            JSON.stringify([]),
+            sortName,
             new Date(now),
           ],
         );
@@ -208,13 +216,151 @@ export class PostgresControlPlane implements ControlPlane {
     });
   }
 
+  async attachCloudOriginal(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    location: AssetLocationRecord & { readonly kind: 'private-object' },
+  ): Promise<MediaAssetRecord> {
+    if (location.kind !== 'private-object')
+      throw new ControlPlaneError('ASSET_INVALID', 'cloud original requires private-object');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(location.ref))
+      throw new ControlPlaneError('ASSET_INVALID', 'asset location is invalid');
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const existing = await client.query<MediaAssetRow>(
+        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
+        [assetId, projectId],
+      );
+      if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      const asset = mediaAssetOf(existing.rows[0]);
+      if (asset.kind !== 'image')
+        throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
+      const kept = asset.locations.filter((entry) => entry.kind !== 'private-object');
+      const locations = [...kept, { kind: 'private-object' as const, ref: location.ref }];
+      if (locations.length === 0 || locations.length > 2)
+        throw new ControlPlaneError('ASSET_INVALID', 'one or two opaque locations are required');
+      const result = await client.query<MediaAssetRow>(
+        `UPDATE media_assets SET locations = $3::jsonb
+         WHERE id = $1 AND project_id = $2 RETURNING *`,
+        [assetId, projectId, JSON.stringify(locations)],
+      );
+      return mediaAssetOf(requiredRow(result.rows[0], 'ASSET_UPDATE_FAILED'));
+    });
+  }
+
+  async updateAssetMetadata(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    patch: {
+      readonly tags?: readonly string[];
+      readonly sortName?: string;
+      readonly displayName?: string;
+    },
+  ): Promise<MediaAssetRecord> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const existing = await client.query<MediaAssetRow>(
+        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
+        [assetId, projectId],
+      );
+      if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      const current = mediaAssetOf(existing.rows[0]);
+      const tags = patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
+      const sortName =
+        patch.sortName === undefined ? current.sortName : validateSortName(patch.sortName);
+      const displayName = patch.displayName ?? current.displayName;
+      if (
+        typeof displayName !== 'string' ||
+        displayName.length === 0 ||
+        displayName.length > 255 ||
+        /[\\/]/.test(displayName)
+      ) {
+        throw new ControlPlaneError('ASSET_INVALID', 'display name must not contain a path');
+      }
+      const result = await client.query<MediaAssetRow>(
+        `UPDATE media_assets
+           SET tags = $3::jsonb, sort_name = $4, display_name = $5
+         WHERE id = $1 AND project_id = $2 RETURNING *`,
+        [assetId, projectId, JSON.stringify(tags), sortName, displayName],
+      );
+      return mediaAssetOf(requiredRow(result.rows[0], 'ASSET_UPDATE_FAILED'));
+    });
+  }
+
+  async deleteAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): Promise<{ readonly id: string }> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const existing = await client.query<{ id: string }>(
+        'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2',
+        [assetId, projectId],
+      );
+      if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      await client.query(
+        'DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
+        [projectId, assetId],
+      );
+      await client.query('DELETE FROM media_assets WHERE id = $1 AND project_id = $2', [
+        assetId,
+        projectId,
+      ]);
+      return { id: assetId };
+    });
+  }
+
   async assetsForProject(actor: Actor, projectId: string): Promise<readonly MediaAssetRecord[]> {
     await this.project(actor, projectId);
     const result = await this.pool.query<MediaAssetRow>(
-      'SELECT * FROM media_assets WHERE project_id = $1 ORDER BY id',
+      'SELECT * FROM media_assets WHERE project_id = $1 ORDER BY COALESCE(NULLIF(sort_name, \'\'), lower(display_name)), id',
       [projectId],
     );
     return result.rows.map(mediaAssetOf);
+  }
+
+  async assetsForOwner(actor: Actor): Promise<readonly MediaAssetRecord[]> {
+    assertActor(actor);
+    const result = await this.pool.query<MediaAssetRow>(
+      `SELECT a.*
+       FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE p.owner_id = $1
+       ORDER BY COALESCE(NULLIF(a.sort_name, ''), lower(a.display_name)), a.id`,
+      [actor.id],
+    );
+    return result.rows.map(mediaAssetOf);
+  }
+
+  async sharedCloudAssets(actor: Actor): Promise<readonly MediaAssetRecord[]> {
+    assertActor(actor);
+    const result = await this.pool.query<MediaAssetRow>(
+      `SELECT * FROM media_assets
+       WHERE EXISTS (
+         SELECT 1 FROM jsonb_array_elements(locations) AS loc
+         WHERE loc->>'kind' = 'private-object'
+       )
+       ORDER BY COALESCE(NULLIF(sort_name, ''), lower(display_name)), id`,
+    );
+    return result.rows.map(mediaAssetOf);
+  }
+
+  async sharedCloudAsset(actor: Actor, assetId: string): Promise<MediaAssetRecord> {
+    assertActor(actor);
+    const result = await this.pool.query<MediaAssetRow>(
+      `SELECT * FROM media_assets
+       WHERE id = $1
+         AND EXISTS (
+           SELECT 1 FROM jsonb_array_elements(locations) AS loc
+           WHERE loc->>'kind' = 'private-object'
+         )`,
+      [assetId],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    return mediaAssetOf(result.rows[0]);
   }
 
   async registerLocalDerivative(
@@ -886,6 +1032,8 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
 }
 
 function mediaAssetOf(row: MediaAssetRow): MediaAssetRecord {
+  const tagsRaw = row.tags === undefined || row.tags === null ? [] : jsonArray(row.tags);
+  const tags = tagsRaw.filter((item): item is string => typeof item === 'string');
   return {
     id: row.id,
     projectId: row.project_id,
@@ -895,6 +1043,11 @@ function mediaAssetOf(row: MediaAssetRow): MediaAssetRecord {
     bytes: safeByteLength(row.byte_length),
     descriptor: jsonObject(row.descriptor) as unknown as MediaAssetRecord['descriptor'],
     locations: jsonArray(row.locations) as MediaAssetRecord['locations'],
+    tags,
+    sortName:
+      typeof row.sort_name === 'string' && row.sort_name.length > 0
+        ? row.sort_name
+        : row.display_name.trim().toLocaleLowerCase(),
     createdAt: row.created_at.getTime(),
   };
 }

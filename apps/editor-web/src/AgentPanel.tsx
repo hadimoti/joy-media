@@ -23,6 +23,7 @@ import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
+import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
   CheckIcon,
   CloseIcon,
@@ -34,6 +35,12 @@ import {
   TrashIcon,
   UndoIcon,
 } from './icons.js';
+
+export interface HermesAttachedAsset {
+  readonly assetId: string;
+  readonly kind: 'image' | 'video';
+  readonly displayName: string;
+}
 
 type PolicyName = 'default' | 'permissive';
 
@@ -90,6 +97,9 @@ export function AgentPanel({
   agentContext,
   onUndo,
   session,
+  attachedAssets = [],
+  onDetachAsset,
+  onAttachAsset,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -97,6 +107,9 @@ export function AgentPanel({
   readonly agentContext: EditorContext;
   readonly onUndo: () => void;
   readonly session: EditorSession;
+  readonly attachedAssets?: readonly HermesAttachedAsset[];
+  readonly onDetachAsset?: (assetId: string) => void;
+  readonly onAttachAsset?: (asset: HermesAttachedAsset) => void;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -216,7 +229,35 @@ export function AgentPanel({
   }, [pending, project]);
 
   return (
-    <article className="agent-panel">
+    <article
+      className="agent-panel"
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        if (onAttachAsset === undefined) return;
+        const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+        if (!raw) return;
+        try {
+          const asset = JSON.parse(raw) as {
+            assetId: string;
+            kind: string;
+            displayName?: string;
+          };
+          if (asset.kind !== 'image' && asset.kind !== 'video') return;
+          onAttachAsset({
+            assetId: asset.assetId,
+            kind: asset.kind,
+            displayName: asset.displayName ?? asset.assetId,
+          });
+        } catch {
+          /* ignore malformed payload */
+        }
+      }}
+    >
       <div className="agent-policy" role="group" aria-label="Approval policy">
         <span className="agent-policy-label">Approval</span>
         <div className="agent-policy-seg">
@@ -240,6 +281,39 @@ export function AgentPanel({
           </button>
         </div>
       </div>
+
+      <section className="agent-attachments" aria-label="Hermes media attachments">
+        <h3>Attached for AI</h3>
+        {attachedAssets.length === 0 ? (
+          <p className="agent-attachments-empty">
+            Drop an image/video here, or use Edit with AI on an Assets card. Then run intents /
+            automations against the attachment.
+          </p>
+        ) : (
+          <ul className="agent-attachment-list">
+            {attachedAssets.map((asset) => (
+              <li key={asset.assetId} className="agent-attachment-chip">
+                <span className="agent-attachment-kind">{asset.kind}</span>
+                <span className="agent-attachment-name" title={asset.assetId}>
+                  {asset.displayName}
+                </span>
+                {onDetachAsset !== undefined && (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Detach ${asset.displayName}`}
+                    title="Detach"
+                    data-guide="Detach"
+                    onClick={() => onDetachAsset(asset.assetId)}
+                  >
+                    <CloseIcon />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="agent-intents" aria-label="Agent intents">
         <h3>Intents</h3>

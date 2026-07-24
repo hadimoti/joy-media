@@ -2,7 +2,8 @@ import type { BrowserAsset, BrowserDerivative } from './control-plane-client.js'
 
 export type AssetCategory = 'all' | BrowserAsset['kind'];
 export type AssetAvailability = 'all' | BrowserDerivative['availability'] | 'none';
-export type AssetSort = 'recent' | 'name' | 'size';
+export type AssetSort = 'recent' | 'name' | 'size' | 'tags';
+export type AssetViewMode = 'large' | 'medium' | 'list';
 
 export interface AssetLibraryItem {
   readonly asset: BrowserAsset;
@@ -19,21 +20,32 @@ export function filterAssetLibrary(
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return [...items]
     .filter(({ asset }) => category === 'all' || asset.kind === category)
-    .filter(({ asset }) =>
-      normalizedQuery.length === 0
-        ? true
-        : `${asset.displayName} ${asset.descriptor.mimeType}`
-            .toLocaleLowerCase()
-            .includes(normalizedQuery),
-    )
+    .filter(({ asset }) => {
+      if (normalizedQuery.length === 0) return true;
+      const tags = (asset.tags ?? []).join(' ');
+      return `${asset.displayName} ${asset.descriptor.mimeType} ${tags}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery);
+    })
     .filter(({ derivatives }) => {
       if (availability === 'all') return true;
       if (availability === 'none') return derivatives.length === 0;
       return derivatives.some((derivative) => derivative.availability === availability);
     })
     .sort((left, right) => {
-      if (sort === 'name') return left.asset.displayName.localeCompare(right.asset.displayName);
+      if (sort === 'name') {
+        const leftName = left.asset.sortName ?? left.asset.displayName;
+        const rightName = right.asset.sortName ?? right.asset.displayName;
+        return leftName.localeCompare(rightName);
+      }
       if (sort === 'size') return right.asset.bytes - left.asset.bytes;
+      if (sort === 'tags') {
+        const leftTags = (left.asset.tags ?? []).join(',');
+        const rightTags = (right.asset.tags ?? []).join(',');
+        const byTags = leftTags.localeCompare(rightTags);
+        if (byTags !== 0) return byTags;
+        return left.asset.displayName.localeCompare(right.asset.displayName);
+      }
       return right.asset.createdAt - left.asset.createdAt;
     });
 }

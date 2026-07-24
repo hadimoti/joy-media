@@ -36,6 +36,8 @@ export interface BrowserAsset {
   readonly sha256: string;
   readonly bytes: number;
   readonly descriptor: BrowserMediaDescriptor;
+  readonly tags?: readonly string[];
+  readonly sortName?: string;
   readonly createdAt: number;
 }
 
@@ -87,6 +89,33 @@ export class BrowserControlPlaneClient {
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
   }
+  /** Shared cloud library visible to any logged-in Joy user (private-object originals). */
+  async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
+    return this.get('/v1/library/cloud-assets');
+  }
+  /** All assets owned by this Joy identity across every local editor project. */
+  async myAssets(): Promise<readonly BrowserAsset[]> {
+    return this.get('/v1/library/my-assets');
+  }
+  /** Fetch cloud-backed original bytes for any logged-in Joy user. */
+  async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    );
+    if (response.status === 401 || response.status === 403)
+      throw new DerivativeAuthorityRevokedError();
+    if (!response.ok) throw new Error(`cloud original request failed (${response.status})`);
+    return response.blob();
+  }
+  async ensureProject(id: string, title: string): Promise<void> {
+    try {
+      await this.createProject(id, title);
+    } catch (error) {
+      if (!messageIncludes(error, 'PROJECT_EXISTS')) throw error;
+    }
+  }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
     return this.get(
       `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
@@ -94,6 +123,51 @@ export class BrowserControlPlaneClient {
   }
   async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
+  }
+  /** Owner-only hard delete of catalog asset metadata (and derivative rows). */
+  async deleteAsset(projectId: string, assetId: string): Promise<{ readonly id: string }> {
+    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, {
+      method: 'DELETE',
+    });
+  }
+  /**
+   * Upload image original bytes to private cloud (ParsPack) and apply Hermes tags.
+   * Videos are not accepted by the API in v1.
+   */
+  async uploadAssetOriginal(
+    projectId: string,
+    asset: Pick<BrowserAsset, 'id' | 'sha256' | 'bytes' | 'descriptor'>,
+    file: Blob,
+    onProgress?: (ratio: number) => void,
+  ): Promise<BrowserAsset> {
+    const token = await this.assertion();
+    onProgress?.(0.05);
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}/original`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': asset.descriptor.mimeType || file.type || 'application/octet-stream',
+          'x-joy-sha256': asset.sha256,
+          'x-joy-bytes': String(asset.bytes),
+        },
+        body: file,
+      },
+    );
+    onProgress?.(0.9);
+    const body = await responseBody(response);
+    if (!response.ok) throw new Error(errorMessage(body, response.status));
+    if (!isRecord(body) || !isRecord(body.data) || !isRecord(body.data.asset))
+      throw new Error('JOY Media API returned an invalid original-upload response');
+    onProgress?.(1);
+    return body.data.asset as unknown as BrowserAsset;
+  }
+  async retagAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/retag`,
+      {},
+    );
   }
   async setAssetSync(
     projectId: string,
@@ -297,4 +371,7 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function messageIncludes(error: unknown, code: string): boolean {
+  return error instanceof Error && error.message.includes(code);
 }

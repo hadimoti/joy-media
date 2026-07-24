@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS job_attempts (id bigserial primary key, job_id text n
 CREATE TABLE IF NOT EXISTS job_events (cursor bigserial primary key, job_id text not null, type text not null, created_at timestamptz not null);
 CREATE TABLE IF NOT EXISTS worker_pairing_offers (worker_id text primary key, pairing_code_hash text not null, owner_id text, expires_at timestamptz not null);
 CREATE TABLE IF NOT EXISTS media_assets (id text primary key, project_id text not null, kind text not null, display_name text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, locations jsonb not null, created_at timestamptz not null);
+ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS sort_name text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS media_derivatives (id text primary key, project_id text not null, asset_id text not null, kind text not null, profile text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, availability text not null, locations jsonb not null, verified_at timestamptz not null);
 CREATE INDEX IF NOT EXISTS jobs_lease_queue_idx ON jobs (state, lease_expires_at, id);
 CREATE INDEX IF NOT EXISTS jobs_project_idx ON jobs (project_id, id);
