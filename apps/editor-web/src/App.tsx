@@ -1524,9 +1524,7 @@ function EditorWorkspace({
           />
           <strong>JOY Media</strong>
         </span>
-        <span className="header-status">
-          {session.visualProject.title} · Saved locally · {scheduler.current.metrics.quality} preview
-        </span>
+        <span className="header-spacer" aria-hidden="true" />
         <button
           className="icon-button"
           onClick={onBackToLibrary}
