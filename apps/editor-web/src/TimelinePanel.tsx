@@ -40,6 +40,11 @@ import {
   TrackAddIcon,
 } from './icons.js';
 import {
+  getCommandsByGroup,
+  type CommandContext,
+  type TimelineCommand,
+} from './commands/timeline-commands.js';
+import {
   TimelineContextMenu,
   type TimelineContextMenuState,
 } from './TimelineContextMenu.js';
