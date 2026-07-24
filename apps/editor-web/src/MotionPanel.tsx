@@ -90,13 +90,13 @@ function HtmlScenesSection({
           <button
             key={scene.id}
             type="button"
-            className="icon-button icon-button-labeled"
+            className="icon-button"
             title={`Add ${scene.name}`}
+            data-guide={scene.name}
             aria-label={`Add HTML scene ${scene.name}`}
             onClick={() => addScene(scene.id)}
           >
             <PlusIcon />
-            <span>{scene.name}</span>
           </button>
         ))}
       </div>
@@ -215,12 +215,13 @@ export function MotionPanel({
         </label>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
-          title="Apply the selected preset at the playhead"
+          className="icon-button"
+          title="Apply preset at playhead"
+          data-guide="Apply preset"
+          aria-label="Apply motion preset"
           onClick={applyPreset}
         >
           <CheckIcon />
-          Apply
         </button>
       </div>
 

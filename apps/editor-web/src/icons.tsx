@@ -345,3 +345,249 @@ export function ProjectsIcon() {
     </Svg>
   );
 }
+
+export function MarkerIcon() {
+  return (
+    <Svg>
+      <path d="M8 13.5 4 8.5a4 4 0 1 1 8 0Z" />
+      <circle cx="8" cy="6.5" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function CopyIcon() {
+  return (
+    <Svg>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1" />
+      <path d="M10.5 5.5V3.5H2.5v8h2" />
+    </Svg>
+  );
+}
+
+export function PasteIcon() {
+  return (
+    <Svg>
+      <path d="M5.5 3.5h5v2h-5Z" />
+      <path d="M4 4.5h8v10H4Z" />
+      <path d="M6.5 8.5h3M6.5 11h3" />
+    </Svg>
+  );
+}
+
+export function KeyPrevIcon() {
+  return (
+    <Svg>
+      <path d="M13 8H5.5M8 4.5 4.5 8 8 11.5" />
+      <rect x="2" y="6.5" width="2.2" height="3" transform="rotate(45 3.1 8)" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function KeyNextIcon() {
+  return (
+    <Svg>
+      <path d="M3 8h7.5M8 4.5 11.5 8 8 11.5" />
+      <rect x="11.5" y="6.5" width="2.2" height="3" transform="rotate(45 12.6 8)" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function InterpHoldIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 11.5h5V4.5h5.5" />
+    </Svg>
+  );
+}
+
+export function InterpLinearIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 12.5 13.5 3.5" />
+      <circle cx="2.5" cy="12.5" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="13.5" cy="3.5" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function InterpEasedIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 12.5C5 12.5 5 3.5 8 3.5s3 9 5.5 9" />
+      <circle cx="2.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="13.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function InterpBezierIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 12.5C5 4 11 12 13.5 3.5" />
+      <path d="M2.5 12.5 5 6M13.5 3.5 11 9" />
+      <circle cx="2.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="13.5" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function GainIcon() {
+  return (
+    <Svg>
+      <path d="M3 12.5V8M6.5 12.5V5.5M10 12.5V7M13.5 12.5V3.5" />
+    </Svg>
+  );
+}
+
+export function PanIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 8h5.5M8 2.5v5.5" />
+      <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function FadeInIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 12.5 13.5 12.5 13.5 3.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+    </Svg>
+  );
+}
+
+export function FadeOutIcon() {
+  return (
+    <Svg>
+      <path d="M13.5 12.5 2.5 12.5 2.5 3.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+    </Svg>
+  );
+}
+
+export function BlurIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="4.5" opacity="0.45" />
+      <circle cx="8" cy="8" r="2.5" />
+    </Svg>
+  );
+}
+
+export function GlowIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none" />
+      <path d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M11.8 4.2l-1.4 1.4M5.6 10.4l-1.4 1.4" />
+    </Svg>
+  );
+}
+
+export function ShadowIcon() {
+  return (
+    <Svg>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <path d="M7 10.5h5.5v5.5H7Z" opacity="0.45" />
+    </Svg>
+  );
+}
+
+export function VignetteIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="3" width="11" height="10" rx="1" />
+      <ellipse cx="8" cy="8" rx="3.2" ry="2.6" />
+    </Svg>
+  );
+}
+
+export function SharpenIcon() {
+  return (
+    <Svg>
+      <path d="M8 2.5 13.5 13.5h-11Z" />
+      <path d="M8 6.5v4" />
+    </Svg>
+  );
+}
+
+export function GrainIcon() {
+  return (
+    <Svg>
+      <path d="M3.5 4.5h.01M6.5 5.5h.01M10 4h.01M13 5.5h.01M4.5 8h.01M8 8.5h.01M11.5 7.5h.01M3.5 11.5h.01M7 12h.01M10.5 11h.01M13 12.5h.01" strokeWidth="2" />
+    </Svg>
+  );
+}
+
+export function ColorWheelIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 2.5v11M2.5 8h11M4.2 4.2l7.6 7.6M11.8 4.2 4.2 11.8" />
+    </Svg>
+  );
+}
+
+export function TrackAddIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" />
+      <path d="M12 10v4M10 12h4" />
+    </Svg>
+  );
+}
+
+export function AutoCaptionIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="4" width="11" height="7" rx="1" />
+      <path d="M5 7.5h6M5.5 10h3" />
+      <path d="M6 13.5 8 11l2 2.5" />
+    </Svg>
+  );
+}
+
+export function LanguageIcon({ label }: { readonly label: string }) {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M3.5 8h9M8 2.5c1.8 1.8 2.7 3.6 2.7 5.5S9.8 11.7 8 13.5C6.2 11.7 5.3 9.9 5.3 8S6.2 4.3 8 2.5Z" />
+      <title>{label}</title>
+    </Svg>
+  );
+}
+
+export function ReelsIcon() {
+  return (
+    <Svg>
+      <rect x="5" y="2.5" width="6" height="11" rx="1" />
+      <path d="M6.5 4.5h3M6.5 11.5h3" />
+    </Svg>
+  );
+}
+
+export function YoutubeIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="4.5" width="11" height="7" rx="1.5" />
+      <path d="M7 6.5 10.5 8 7 9.5Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function HighBitrateIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 11.5 5.5 4.5 8 11.5 10.5 4.5 13.5 11.5" />
+    </Svg>
+  );
+}
+
+export function MasterBusIcon() {
+  return (
+    <Svg>
+      <path d="M8 2.5v6.5" />
+      <circle cx="8" cy="11.5" r="2" />
+      <path d="M4 5.5h8" />
+    </Svg>
+  );
+}

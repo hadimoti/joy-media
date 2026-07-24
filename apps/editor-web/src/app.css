@@ -229,6 +229,7 @@ a.icon-button {
   line-height: 1.5;
 }
 .icon-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -254,6 +255,64 @@ a.icon-button {
 }
 .icon-button svg {
   flex: none;
+}
+/* Hover guide: native title for a11y; visual tip via data-guide */
+.icon-button[data-guide]:hover:not(:disabled)::after,
+.icon-tool[data-guide]:hover::after {
+  content: attr(data-guide);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.35rem);
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 0.28rem 0.45rem;
+  border: 1px solid #5a5a60;
+  border-radius: 0.25rem;
+  background: #1c1c1e;
+  color: #e8e8ea;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 0.25rem 0.75rem #0008;
+}
+.icon-tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: #c8c8cc;
+}
+.icon-tool:hover,
+.icon-tool[aria-pressed='true'] {
+  border-color: #5a5a60;
+  background: #333335;
+  color: #e9b949;
+}
+.control-row {
+  display: grid;
+  grid-template-columns: 1.9rem 1fr auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+.control-row > span.value {
+  min-width: 2.4rem;
+  text-align: end;
+  font-size: 0.7rem;
+  color: #9d9da1;
+  font-variant-numeric: tabular-nums;
+}
+.preset-icon-group {
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: center;
 }
 .sr-only {
   position: absolute;
@@ -1730,8 +1789,17 @@ label {
   border-radius: 0.25rem;
   background: #2a2a2c;
 }
+.audio-clip-id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: #9d9da1;
+}
 .audio-strip-flags {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
 }
 .audio-meter {

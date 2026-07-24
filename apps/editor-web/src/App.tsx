@@ -89,12 +89,15 @@ import {
   CommandIcon,
   DownloadIcon,
   ExportIcon,
+  HighBitrateIcon,
   ListIcon,
   LogoutIcon,
   ProjectsIcon,
   RedoIcon,
+  ReelsIcon,
   UndoIcon,
   UserIcon,
+  YoutubeIcon,
 } from './icons.js';
 import {
   JOY_LOGIN_URL,
@@ -1400,26 +1403,38 @@ function EditorWorkspace({
         >
           <CommandIcon />
         </button>
-        <select
-          aria-label="Export preset"
-          className="export-preset-select"
-          value={exportPreset}
-          disabled={exporting}
-          onChange={(event) => setExportPreset(event.currentTarget.value as ExportPresetId)}
-          title="Export preset"
-        >
-          <option value="social-h264-aac">Social H.264</option>
-          <option value="reels-1080">Reels 1080×1920</option>
-          <option value="shorts-1080">Shorts 1080×1920</option>
-          <option value="youtube-1080">YouTube 1920×1080</option>
-          <option value="high-bitrate">High bitrate</option>
-        </select>
+        <div className="preset-icon-group" role="group" aria-label="Export preset">
+          {(
+            [
+              ['social-h264-aac', ExportIcon, 'Social H.264'],
+              ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
+              ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
+              ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
+              ['high-bitrate', HighBitrateIcon, 'High bitrate'],
+            ] as const
+          ).map(([id, Icon, label]) => (
+            <button
+              key={id}
+              type="button"
+              className="icon-button"
+              disabled={exporting}
+              aria-pressed={exportPreset === id}
+              aria-label={label}
+              title={label}
+              data-guide={label}
+              onClick={() => setExportPreset(id)}
+            >
+              <Icon />
+            </button>
+          ))}
+        </div>
         <button
           className="icon-button"
           onClick={handleExport}
           disabled={exporting}
           aria-label="Export MP4"
           title={exporting ? 'Exporting…' : 'Export MP4'}
+          data-guide={exporting ? 'Exporting…' : 'Export MP4'}
           aria-busy={exporting}
         >
           <ExportIcon />

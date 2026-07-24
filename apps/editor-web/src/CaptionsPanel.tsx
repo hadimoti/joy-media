@@ -21,7 +21,16 @@ import {
 import type { CaptionSlot } from '@joy-media/captions-core';
 import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import { DownloadIcon, MicIcon, PlusIcon, TrashIcon, UndoIcon, UploadIcon } from './icons.js';
+import {
+  AutoCaptionIcon,
+  DownloadIcon,
+  LanguageIcon,
+  MicIcon,
+  PlusIcon,
+  TrashIcon,
+  UndoIcon,
+  UploadIcon,
+} from './icons.js';
 
 /**
  * Transcript-first caption editing (WP-03.2/03.3). Every durable change goes
@@ -299,31 +308,31 @@ function CaptionSlotEditor({
           <PlusIcon />
         </button>
         <button
-          className="icon-button icon-button-labeled"
+          className="icon-button"
           aria-label="Auto caption"
-          title="Auto caption (Whisper / fixture)"
+          title="Auto caption"
+          data-guide="Auto caption"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >
-          <MicIcon />
-          Auto
+          <AutoCaptionIcon />
         </button>
         <button
-          className="icon-button icon-button-labeled"
+          className="icon-button"
           aria-label="Transcribe Persian"
           title="Transcribe Persian (fa-IR)"
+          data-guide="Persian (fa)"
           onClick={() => void onTranscribe(document.id, 'fa-IR')}
         >
-          <MicIcon />
-          FA
+          <LanguageIcon label="FA" />
         </button>
         <button
-          className="icon-button icon-button-labeled"
+          className="icon-button"
           aria-label="Transcribe English"
           title="Transcribe English (en-US)"
+          data-guide="English (en)"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >
           <MicIcon />
-          EN
         </button>
       </header>
       {importIssues > 0 && (

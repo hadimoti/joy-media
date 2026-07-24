@@ -287,17 +287,23 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
           </button>
           <button
             type="button"
-            className="icon-button icon-button-labeled asset-sync"
+            className="icon-button asset-sync"
             disabled={syncEnabled}
-            title={
+            aria-pressed={syncEnabled}
+            aria-label={
               syncEnabled
                 ? 'Private backup is enabled for this project'
                 : 'Enable private cloud backup for this project'
             }
+            title={
+              syncEnabled
+                ? 'Private backup on'
+                : 'Enable private cloud backup'
+            }
+            data-guide={syncEnabled ? 'Backup on' : 'Enable backup'}
             onClick={() => void enableSync()}
           >
             <CloudIcon />
-            {syncEnabled ? 'Backup on' : 'Backup'}
           </button>
         </div>
         <details className="asset-register">

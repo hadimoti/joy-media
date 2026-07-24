@@ -1,8 +1,9 @@
 /**
- * DaVinci-shaped color grade panel: lift/gamma/gain/sat + LUT + simple scopes.
+ * DaVinci-shaped color grade — icon-led controls with hover guides.
  */
 
 import type { ColorGradeV1, JoyProjectV1 } from '@joy-media/project-schema';
+import { ColorWheelIcon, GainIcon, HighBitrateIcon } from './icons.js';
 
 export const DEFAULT_GRADE: ColorGradeV1 = {
   lift: 0,
@@ -38,73 +39,97 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
 
   return (
     <article className="color-panel">
-      <h3>Color</h3>
-      <label>
-        Lift
+      <div className="control-row">
+        <span className="icon-tool" data-guide="Lift" title="Lift" aria-hidden="true">
+          <ColorWheelIcon />
+        </span>
         <input
           type="range"
           min={-0.5}
           max={0.5}
           step={0.01}
           value={grade.lift}
+          aria-label="Lift"
+          title="Lift"
           onChange={(event) => set({ lift: event.currentTarget.valueAsNumber })}
         />
-      </label>
-      <label>
-        Gamma
+        <span className="value">{grade.lift.toFixed(2)}</span>
+      </div>
+      <div className="control-row">
+        <span className="icon-tool" data-guide="Gamma" title="Gamma" aria-hidden="true">
+          <HighBitrateIcon />
+        </span>
         <input
           type="range"
           min={0.5}
           max={1.5}
           step={0.01}
           value={grade.gamma}
+          aria-label="Gamma"
+          title="Gamma"
           onChange={(event) => set({ gamma: event.currentTarget.valueAsNumber })}
         />
-      </label>
-      <label>
-        Gain
+        <span className="value">{grade.gamma.toFixed(2)}</span>
+      </div>
+      <div className="control-row">
+        <span className="icon-tool" data-guide="Gain" title="Gain" aria-hidden="true">
+          <GainIcon />
+        </span>
         <input
           type="range"
           min={0.5}
           max={1.5}
           step={0.01}
           value={grade.gain}
+          aria-label="Gain"
+          title="Gain"
           onChange={(event) => set({ gain: event.currentTarget.valueAsNumber })}
         />
-      </label>
-      <label>
-        Saturation
+        <span className="value">{grade.gain.toFixed(2)}</span>
+      </div>
+      <div className="control-row">
+        <span className="icon-tool" data-guide="Saturation" title="Saturation" aria-hidden="true">
+          <ColorWheelIcon />
+        </span>
         <input
           type="range"
           min={0}
           max={2}
           step={0.01}
           value={grade.saturation}
+          aria-label="Saturation"
+          title="Saturation"
           onChange={(event) => set({ saturation: event.currentTarget.valueAsNumber })}
         />
-      </label>
-      <label>
-        LUT
-        <select
-          value={grade.lutId ?? 'none'}
-          onChange={(event) => {
-            const lutId = event.currentTarget.value as 'none' | 'rec709' | 'contrast';
-            set({ lutId });
-          }}
-        >
-          <option value="none">None</option>
-          <option value="rec709">Rec.709</option>
-          <option value="contrast">Contrast</option>
-        </select>
-      </label>
+        <span className="value">{grade.saturation.toFixed(2)}</span>
+      </div>
+      <div className="preset-icon-group" role="group" aria-label="LUT">
+        {(
+          [
+            ['none', 'No LUT'],
+            ['rec709', 'Rec.709'],
+            ['contrast', 'Contrast'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className="icon-button"
+            aria-pressed={(grade.lutId ?? 'none') === id}
+            aria-label={label}
+            title={label}
+            data-guide={label}
+            onClick={() => set({ lutId: id })}
+          >
+            <ColorWheelIcon />
+          </button>
+        ))}
+      </div>
       <div className="color-scopes" aria-label="Parade scope">
         <div className="scope-bar scope-r" style={{ height: scopeHeight(grade.gain, 1) }} />
         <div className="scope-bar scope-g" style={{ height: scopeHeight(grade.gamma, 1) }} />
         <div className="scope-bar scope-b" style={{ height: scopeHeight(grade.lift + 1, 1) }} />
       </div>
-      <p className="empty-hint">
-        Grade persists on the project. Preview/export color path applies as renderer support lands.
-      </p>
     </article>
   );
 }

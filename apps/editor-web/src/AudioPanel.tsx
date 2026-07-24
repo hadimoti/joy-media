@@ -1,10 +1,18 @@
 /**
- * Fairlight-lite mixer: gain/pan/mute/solo/fade per clip + master bus.
+ * Fairlight-lite mixer: gain/pan/mute/solo/fade — icon rows with hover guides.
  */
 
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
-import { MuteIcon, SoloIcon } from './icons.js';
+import {
+  FadeInIcon,
+  FadeOutIcon,
+  GainIcon,
+  MasterBusIcon,
+  MuteIcon,
+  PanIcon,
+  SoloIcon,
+} from './icons.js';
 
 interface AudioPanelProps {
   readonly clipIds: readonly string[];
@@ -26,19 +34,20 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
 
   return (
     <article className="audio-panel">
-      <h3>Mixer</h3>
-      <p className="empty-hint">Gain and mute apply to preview/export mix when wired per clip.</p>
       {master !== undefined && (
         <div className="audio-strip">
-          <strong>{master.name}</strong>
-          <label>
-            Gain
+          <div className="control-row">
+            <span className="icon-tool" data-guide="Master bus" title="Master bus" aria-hidden="true">
+              <MasterBusIcon />
+            </span>
             <input
               type="range"
               min={0}
               max={2}
               step={0.01}
               value={master.gain}
+              aria-label="Master gain"
+              title="Master gain"
               onChange={(event) =>
                 dispatch(
                   {
@@ -49,8 +58,8 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 )
               }
             />
-            <span>{master.gain.toFixed(2)}</span>
-          </label>
+            <span className="value">{master.gain.toFixed(2)}</span>
+          </div>
         </div>
       )}
       {clipIds.map((clipId) => {
@@ -62,13 +71,18 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
         };
         return (
           <div className="audio-strip" key={clipId}>
-            <strong title={clipId}>{clipId}</strong>
             <div className="audio-strip-flags">
+              <strong className="sr-only">{clipId}</strong>
+              <span className="audio-clip-id" title={clipId}>
+                {clipId.length > 14 ? `${clipId.slice(0, 12)}…` : clipId}
+              </span>
               <button
                 type="button"
                 className="icon-button"
                 aria-pressed={clip.mute}
                 aria-label={`Mute ${clipId}`}
+                title="Mute"
+                data-guide="Mute"
                 onClick={() =>
                   dispatch(
                     { type: 'audioClip.setMute', payload: { clipId, mute: !clip.mute } },
@@ -83,6 +97,8 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 className="icon-button"
                 aria-pressed={clip.solo}
                 aria-label={`Solo ${clipId}`}
+                title="Solo"
+                data-guide="Solo"
                 onClick={() =>
                   dispatch(
                     { type: 'audioClip.setSolo', payload: { clipId, solo: !clip.solo } },
@@ -93,14 +109,18 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 <SoloIcon />
               </button>
             </div>
-            <label>
-              Gain
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Gain" title="Gain" aria-hidden="true">
+                <GainIcon />
+              </span>
               <input
                 type="range"
                 min={0}
                 max={2}
                 step={0.01}
                 value={clip.gain}
+                aria-label={`Gain ${clipId}`}
+                title="Gain"
                 onChange={(event) =>
                   dispatch(
                     {
@@ -111,15 +131,20 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                   )
                 }
               />
-            </label>
-            <label>
-              Pan
+              <span className="value">{clip.gain.toFixed(2)}</span>
+            </div>
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Pan" title="Pan" aria-hidden="true">
+                <PanIcon />
+              </span>
               <input
                 type="range"
                 min={-1}
                 max={1}
                 step={0.01}
                 value={clip.pan}
+                aria-label={`Pan ${clipId}`}
+                title="Pan"
                 onChange={(event) =>
                   dispatch(
                     {
@@ -130,14 +155,19 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                   )
                 }
               />
-            </label>
-            <label>
-              Fade in (ms)
+              <span className="value">{clip.pan.toFixed(2)}</span>
+            </div>
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Fade in" title="Fade in" aria-hidden="true">
+                <FadeInIcon />
+              </span>
               <input
                 type="number"
                 min={0}
                 step={50}
                 value={Math.round((clip.fadeInUs ?? 0) / 1000)}
+                aria-label={`Fade in ${clipId} (ms)`}
+                title="Fade in (ms)"
                 onChange={(event) =>
                   dispatch(
                     {
@@ -152,14 +182,19 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                   )
                 }
               />
-            </label>
-            <label>
-              Fade out (ms)
+              <span className="value">ms</span>
+            </div>
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Fade out" title="Fade out" aria-hidden="true">
+                <FadeOutIcon />
+              </span>
               <input
                 type="number"
                 min={0}
                 step={50}
                 value={Math.round((clip.fadeOutUs ?? 0) / 1000)}
+                aria-label={`Fade out ${clipId} (ms)`}
+                title="Fade out (ms)"
                 onChange={(event) =>
                   dispatch(
                     {
@@ -174,14 +209,15 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                   )
                 }
               />
-            </label>
+              <span className="value">ms</span>
+            </div>
             <div className="audio-meter" aria-hidden="true">
               <span style={{ width: `${Math.min(100, clip.gain * 50)}%` }} />
             </div>
           </div>
         );
       })}
-      {clipIds.length === 0 && <p className="empty-hint">No clips on the timeline yet.</p>}
+      {clipIds.length === 0 && <p className="empty-hint">Drop clips on the timeline to mix.</p>}
     </article>
   );
 }

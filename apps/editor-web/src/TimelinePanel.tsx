@@ -34,6 +34,8 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   PlusIcon,
+  MarkerIcon,
+  TrackAddIcon,
 } from './icons.js';
 import {
   TimelineContextMenu,
@@ -579,6 +581,7 @@ export function TimelinePanel({
           className="icon-button"
           aria-label="Add video track"
           title="Add track"
+          data-guide="Add track"
           onClick={() => {
             const order = composition.tracks.length;
             onDispatch({
@@ -601,15 +604,18 @@ export function TimelinePanel({
             });
           }}
         >
-          <PlusIcon />
+          <TrackAddIcon />
         </button>
         {onAddMarker !== undefined && (
           <button
             type="button"
-            className="icon-button icon-button-labeled"
+            className="icon-button"
+            aria-label="Add marker at playhead"
+            title="Add marker"
+            data-guide="Add marker"
             onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
           >
-            Marker
+            <MarkerIcon />
           </button>
         )}
         <input

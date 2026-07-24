@@ -19,6 +19,16 @@ import {
   setKeyframe,
   type KeyframeClipboard,
 } from '@joy-media/motion-core';
+import {
+  CopyIcon,
+  InterpBezierIcon,
+  InterpEasedIcon,
+  InterpHoldIcon,
+  InterpLinearIcon,
+  KeyNextIcon,
+  KeyPrevIcon,
+  PasteIcon,
+} from './icons.js';
 
 const LANE_WIDTH = 280;
 const GRAPH_HEIGHT = 120;
@@ -169,56 +179,98 @@ export function GraphEditor({
   return (
     <div className="motion-graph graph-editor">
       <div className="graph-editor-toolbar">
-        <select
-          aria-label="Keyframe interpolation"
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Hold"
+          title="Hold interpolation"
+          aria-label="Hold interpolation"
           disabled={selected.length === 0}
-          defaultValue=""
-          onChange={(event) => {
-            const value = event.currentTarget.value as KeyframeInterpolationV1 | '';
-            if (value !== '') setInterp(value);
-            event.currentTarget.value = '';
-          }}
+          onClick={() => setInterp('hold')}
         >
-          <option value="" disabled>
-            Interpolation…
-          </option>
-          <option value="hold">Hold</option>
-          <option value="linear">Linear</option>
-          <option value="eased">Eased</option>
-          <option value="bezier">Bezier</option>
-        </select>
-        <button type="button" className="icon-button icon-button-labeled" onClick={copySelected}>
-          Copy keys
+          <InterpHoldIcon />
         </button>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
+          className="icon-button"
+          data-guide="Linear"
+          title="Linear interpolation"
+          aria-label="Linear interpolation"
+          disabled={selected.length === 0}
+          onClick={() => setInterp('linear')}
+        >
+          <InterpLinearIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Eased"
+          title="Eased interpolation"
+          aria-label="Eased interpolation"
+          disabled={selected.length === 0}
+          onClick={() => setInterp('eased')}
+        >
+          <InterpEasedIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Bezier"
+          title="Bezier interpolation"
+          aria-label="Bezier interpolation"
+          disabled={selected.length === 0}
+          onClick={() => setInterp('bezier')}
+        >
+          <InterpBezierIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Copy keys"
+          title="Copy selected keys"
+          aria-label="Copy selected keys"
+          onClick={copySelected}
+        >
+          <CopyIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Paste keys"
+          title="Paste keys at playhead"
+          aria-label="Paste keys at playhead"
           onClick={pasteAtPlayhead}
           disabled={graphClipboard === undefined}
         >
-          Paste
+          <PasteIcon />
         </button>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
+          className="icon-button"
+          data-guide="Previous key"
+          title="Jump to previous key"
+          aria-label="Jump to previous key"
           onClick={() => {
             const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
             const prev = [...times].reverse().find((t) => t < playheadUs);
             if (prev !== undefined) onSeek(prev);
           }}
         >
-          Prev key
+          <KeyPrevIcon />
         </button>
         <button
           type="button"
-          className="icon-button icon-button-labeled"
+          className="icon-button"
+          data-guide="Next key"
+          title="Jump to next key"
+          aria-label="Jump to next key"
           onClick={() => {
             const times = curve.keyframes.map((k) => k.timeUs).sort((a, b) => a - b);
             const next = times.find((t) => t > playheadUs);
             if (next !== undefined) onSeek(next);
           }}
         >
-          Next key
+          <KeyNextIcon />
         </button>
       </div>
       <div className="motion-graph-scale">

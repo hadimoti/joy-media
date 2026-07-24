@@ -22,6 +22,12 @@ import {
   EASED_HANDLES,
 } from '@joy-media/motion-core';
 import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
+import {
+  InterpBezierIcon,
+  InterpEasedIcon,
+  InterpHoldIcon,
+  InterpLinearIcon,
+} from './icons.js';
 
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -141,21 +147,29 @@ export function InspectorPanel({
     <article>
       <p>Editing {object.id}</p>
       <p className="inspector-time">Playhead {(timeUs / 1_000_000).toFixed(2)}s</p>
-      <label className="inspector-row">
-        <span className="inspector-label">Interp</span>
-        <select
-          aria-label="Default keyframe interpolation"
-          value={interpolation}
-          onChange={(event) =>
-            setInterpolation(event.currentTarget.value as KeyframeInterpolationV1)
-          }
-        >
-          <option value="hold">Hold</option>
-          <option value="linear">Linear</option>
-          <option value="eased">Eased</option>
-          <option value="bezier">Bezier</option>
-        </select>
-      </label>
+      <div className="preset-icon-group" role="group" aria-label="Keyframe interpolation">
+        {(
+          [
+            ['hold', InterpHoldIcon, 'Hold'],
+            ['linear', InterpLinearIcon, 'Linear'],
+            ['eased', InterpEasedIcon, 'Eased'],
+            ['bezier', InterpBezierIcon, 'Bezier'],
+          ] as const
+        ).map(([id, Icon, label]) => (
+          <button
+            key={id}
+            type="button"
+            className="icon-button"
+            aria-pressed={interpolation === id}
+            aria-label={label}
+            title={label}
+            data-guide={label}
+            onClick={() => setInterpolation(id)}
+          >
+            <Icon />
+          </button>
+        ))}
+      </div>
       {NUMERIC_PROPERTIES.map((property) => {
         const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
         const curve = object.animations?.[key];
