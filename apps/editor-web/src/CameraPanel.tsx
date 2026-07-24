@@ -152,15 +152,22 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Create camera"
-          data-guide="Create camera"
-          onClick={createCamera}
-        >
-          <CameraUiIcon />
-        </button>
+        <div className="field-action">
+          <span className="field-action-label" aria-hidden>
+            &nbsp;
+          </span>
+          <div className="field-action-row">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Create camera"
+              data-guide="Create camera"
+              onClick={createCamera}
+            >
+              <CameraUiIcon />
+            </button>
+          </div>
+        </div>
       </div>
 
       <label className="camera-field">

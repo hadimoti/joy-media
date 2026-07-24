@@ -231,24 +231,31 @@ export function MotionPanel({
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Apply preset"
-          aria-label="Apply motion preset"
-          onClick={applyPreset}
-        >
-          <CheckIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Save spatial path"
-          aria-label="Save spatial path"
-          onClick={saveSpatialPath}
-        >
-          <SaveIcon />
-        </button>
+        <div className="field-action">
+          <span className="field-action-label" aria-hidden>
+            &nbsp;
+          </span>
+          <div className="field-action-row">
+            <button
+              type="button"
+              className="icon-button"
+              data-guide="Apply preset"
+              aria-label="Apply motion preset"
+              onClick={applyPreset}
+            >
+              <CheckIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              data-guide="Save spatial path"
+              aria-label="Save spatial path"
+              onClick={saveSpatialPath}
+            >
+              <SaveIcon />
+            </button>
+          </div>
+        </div>
       </div>
 
       {channels.length === 0 ? (

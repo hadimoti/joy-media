@@ -316,7 +316,7 @@ export class PostgresControlPlane implements ControlPlane {
   async assetsForProject(actor: Actor, projectId: string): Promise<readonly MediaAssetRecord[]> {
     await this.project(actor, projectId);
     const result = await this.pool.query<MediaAssetRow>(
-      'SELECT * FROM media_assets WHERE project_id = $1 ORDER BY COALESCE(NULLIF(sort_name, \'\'), lower(display_name)), id',
+      "SELECT * FROM media_assets WHERE project_id = $1 ORDER BY COALESCE(CASE WHEN sort_name = '' THEN NULL ELSE sort_name END, lower(display_name)), id",
       [projectId],
     );
     return result.rows.map(mediaAssetOf);
@@ -329,7 +329,7 @@ export class PostgresControlPlane implements ControlPlane {
        FROM media_assets a
        JOIN projects p ON p.id = a.project_id
        WHERE p.owner_id = $1
-       ORDER BY COALESCE(NULLIF(a.sort_name, ''), lower(a.display_name)), a.id`,
+       ORDER BY COALESCE(CASE WHEN a.sort_name = '' THEN NULL ELSE a.sort_name END, lower(a.display_name)), a.id`,
       [actor.id],
     );
     return result.rows.map(mediaAssetOf);
@@ -343,7 +343,7 @@ export class PostgresControlPlane implements ControlPlane {
          SELECT 1 FROM jsonb_array_elements(locations) AS loc
          WHERE loc->>'kind' = 'private-object'
        )
-       ORDER BY COALESCE(NULLIF(sort_name, ''), lower(display_name)), id`,
+       ORDER BY COALESCE(CASE WHEN sort_name = '' THEN NULL ELSE sort_name END, lower(display_name)), id`,
     );
     return result.rows.map(mediaAssetOf);
   }

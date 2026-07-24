@@ -1637,19 +1637,28 @@ label {
 }
 .jobs-field {
   display: grid;
-  grid-template-rows: auto 1.9rem;
+  grid-template-rows: 1.05rem 1.7rem;
   gap: 0.2rem;
+  margin: 0;
   min-width: 0;
   font-size: 0.68rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #8a8a90;
 }
+.jobs-field > span {
+  display: block;
+  min-height: 1.05rem;
+  line-height: 1.05rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .jobs-field input {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  height: 1.9rem;
+  height: 1.7rem;
   padding: 0 0.45rem;
   border: 1px solid #2e2e32;
   border-radius: 0.25rem;
@@ -1662,13 +1671,15 @@ label {
 }
 .jobs-pair-action {
   display: grid;
-  grid-template-rows: auto 1.9rem;
+  grid-template-rows: 1.05rem 1.7rem;
   gap: 0.2rem;
   align-self: start;
 }
 .jobs-pair-action-label {
+  display: block;
+  min-height: 1.05rem;
   font-size: 0.68rem;
-  line-height: 1;
+  line-height: 1.05rem;
   visibility: hidden;
   user-select: none;
 }
@@ -2011,28 +2022,6 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.motion-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.45rem;
-}
-.motion-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #8a8a90;
-}
-.motion-field select {
-  min-width: 8rem;
-  text-transform: none;
-  letter-spacing: normal;
-  font-size: 0.75rem;
-  color: #e4e4e6;
-}
 .motion-empty {
   color: #8c8c90;
   font-size: 0.72rem;
@@ -2095,28 +2084,64 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.camera-controls {
+.camera-controls,
+.motion-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: end;
   gap: 0.45rem;
 }
-.camera-field {
-  display: flex;
-  flex-direction: column;
+.camera-field,
+.motion-field {
+  display: grid;
+  grid-template-rows: 1.05rem 1.7rem;
   gap: 0.15rem;
+  align-content: start;
+  margin: 0;
   font-size: 0.68rem;
+  line-height: 1.05rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #8a8a90;
 }
 .camera-field select,
-.camera-field input {
+.camera-field input,
+.motion-field select {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 8rem;
+  height: 1.7rem;
+  margin: 0;
   text-transform: none;
   letter-spacing: normal;
   font-size: 0.75rem;
   color: #e4e4e6;
+}
+.field-action {
+  display: grid;
+  grid-template-rows: 1.05rem 1.7rem;
+  gap: 0.15rem;
+  align-content: start;
+  margin: 0;
+}
+.field-action-label {
+  display: block;
+  min-height: 1.05rem;
+  font-size: 0.68rem;
+  line-height: 1.05rem;
+  visibility: hidden;
+  user-select: none;
+}
+.field-action-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.15rem;
+  height: 1.7rem;
+}
+.field-action > .icon-button {
+  align-self: center;
+  justify-self: start;
 }
 .camera-empty {
   color: #8c8c90;
