@@ -59,6 +59,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
@@ -938,13 +939,16 @@ function EditorWorkspace({
             ).transform,
           }),
         );
-        return buildRenderFrameIR(
-          compositionV1?.id ?? 'root',
-          timeUs,
-          width,
-          height,
-          resolved,
-          renderFrameOptions(session.visualProject),
+        return withCaptionBurnInNodes(
+          buildRenderFrameIR(
+            compositionV1?.id ?? 'root',
+            timeUs,
+            width,
+            height,
+            resolved,
+            renderFrameOptions(session.visualProject),
+          ),
+          session.visualProject,
         );
       };
       const transitionTimes = Array.from(
@@ -1350,6 +1354,7 @@ function EditorWorkspace({
           onDispatch={context.dispatchProject}
           onTranscribe={context.transcribe}
           transcriptionError={context.transcriptionError}
+          onProjectChange={(next) => context.replaceVisualProject(next)}
         />
       );
     if (api.id === 'timeline')
@@ -1789,13 +1794,16 @@ function MonitorPanel() {
           composition.height,
         ).transform,
       }));
-      const visualFrame = buildRenderFrameIR(
-        composition.id,
-        state.playheadUs,
-        composition.width,
-        composition.height,
-        resolved,
-        renderFrameOptions(visualProject),
+      const visualFrame = withCaptionBurnInNodes(
+        buildRenderFrameIR(
+          composition.id,
+          state.playheadUs,
+          composition.width,
+          composition.height,
+          resolved,
+          renderFrameOptions(visualProject),
+        ),
+        visualProject,
       );
     const frame =
       previewVideoFrame === undefined

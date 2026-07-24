@@ -18,7 +18,7 @@ import {
   dryRunPlan,
   PlanExecutor,
 } from '@joy-media/agent-tools';
-import { AGENT_INTENTS, type AgentIntent } from './agent-panel-intents.js';
+import { AGENT_INTENTS, buildSplitTrimRecipe, type AgentIntent } from './agent-panel-intents.js';
 import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
@@ -82,17 +82,28 @@ export function AgentPanel({
   );
 
   const plan = (intent: AgentIntent) => {
-    const built = intent.buildStep(project, selectedClipIds, playheadUs);
+    const built =
+      intent.id === 'recipe-split-trim'
+        ? (() => {
+            const recipe = buildSplitTrimRecipe(project, selectedClipIds, playheadUs);
+            if (!recipe.ok) return recipe;
+            return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
+          })()
+        : (() => {
+            const single = intent.buildStep(project, selectedClipIds, playheadUs);
+            if (!single.ok) return single;
+            return { ok: true as const, steps: [single.step], goal: intent.label };
+          })();
     if (!built.ok) return;
-    const agentPlan = createPlan(intent.label, [built.step]);
+    const agentPlan = createPlan(built.goal, [...built.steps]);
     const dryRun = dryRunPlan(agentPlan, registry, agentContext);
     const approval = approvalEngine.evaluatePlan(agentPlan, agentContext)[0];
     if (approval === undefined) return;
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'plan-created',
-      tool: built.step.tool,
-      arguments: built.step.arguments,
+      ...(built.steps[0]?.tool !== undefined ? { tool: built.steps[0].tool } : {}),
+      ...(built.steps[0]?.arguments !== undefined ? { arguments: built.steps[0].arguments } : {}),
       userId: 'local-owner',
     });
     auditRef.current.record({
@@ -185,7 +196,10 @@ export function AgentPanel({
 
       <ul className="agent-intent-list">
         {AGENT_INTENTS.map((intent) => {
-          const built = intent.buildStep(project, selectedClipIds, playheadUs);
+          const built =
+            intent.id === 'recipe-split-trim'
+              ? buildSplitTrimRecipe(project, selectedClipIds, playheadUs)
+              : intent.buildStep(project, selectedClipIds, playheadUs);
           return (
             <li key={intent.id}>
               <button disabled={!built.ok} onClick={() => plan(intent)} title={intent.description}>

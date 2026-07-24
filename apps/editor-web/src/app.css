@@ -696,6 +696,13 @@ label {
   align-items: center;
   gap: 0.4rem;
 }
+.captions-toolbar,
+.captions-template-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
 .captions-slot-header > strong {
   flex: 1 1 8rem;
   min-width: 0;

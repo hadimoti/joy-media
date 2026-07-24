@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   captionCuesAt,
@@ -23,6 +23,10 @@ import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import {
   AutoCaptionIcon,
+  BurnInIcon,
+  CaptionCleanIcon,
+  CaptionKaraokeIcon,
+  CaptionRtlIcon,
   DownloadIcon,
   LanguageIcon,
   MicIcon,
@@ -31,6 +35,15 @@ import {
   UndoIcon,
   UploadIcon,
 } from './icons.js';
+import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
+
+const TEMPLATE_ICONS: Readonly<
+  Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
+> = {
+  'joy-clean': { Icon: CaptionCleanIcon, label: 'JOY Clean' },
+  'joy-karaoke-pop': { Icon: CaptionKaraokeIcon, label: 'JOY Karaoke Pop' },
+  'joy-rtl-classic': { Icon: CaptionRtlIcon, label: 'JOY RTL Classic' },
+};
 
 /**
  * Transcript-first caption editing (WP-03.2/03.3). Every durable change goes
@@ -46,6 +59,7 @@ export function CaptionsPanel({
   onDispatch,
   onTranscribe,
   transcriptionError,
+  onProjectChange,
 }: {
   readonly project: JoyProjectV1;
   readonly playheadUs: number;
@@ -53,11 +67,13 @@ export function CaptionsPanel({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
   readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
   readonly transcriptionError: string | undefined;
+  readonly onProjectChange: (next: JoyProjectV1) => void;
 }) {
   const [query, setQuery] = useState('');
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('captions root composition is unavailable');
   const slots = captionSlots(composition, project.captionDocuments);
+  const burnIn = readCaptionBurnIn(project);
   if (slots.length === 0) {
     return (
       <article className="captions-panel">
@@ -67,6 +83,19 @@ export function CaptionsPanel({
   }
   return (
     <article className="captions-panel">
+      <div className="captions-toolbar">
+        <button
+          type="button"
+          className="icon-button"
+          aria-pressed={burnIn}
+          aria-label={burnIn ? 'Disable caption burn-in' : 'Enable caption burn-in'}
+          title={burnIn ? 'Burn-in on (Monitor + Export)' : 'Burn-in off (sidecar only)'}
+          data-guide={burnIn ? 'Burn-in on' : 'Burn-in off'}
+          onClick={() => onProjectChange(withCaptionBurnIn(project, !burnIn))}
+        >
+          <BurnInIcon />
+        </button>
+      </div>
       <CaptionPreview project={project} playheadUs={playheadUs} />
       {transcriptionError !== undefined && (
         <p className="caption-warning" role="status">
@@ -251,34 +280,44 @@ function CaptionSlotEditor({
         <strong>
           {document.language} · {direction.toUpperCase()}
         </strong>
-        <select
-          aria-label="Caption template"
-          value={document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID}
-          onChange={(event) => applyTemplate(event.target.value)}
-        >
-          {JOY_CAPTION_TEMPLATES.map((template) => (
-            <option key={template.id} value={template.id} title={template.description}>
-              {template.name}
-            </option>
-          ))}
-        </select>
+        <div className="captions-template-icons" role="group" aria-label="Caption template">
+          {JOY_CAPTION_TEMPLATES.map((template) => {
+            const meta = TEMPLATE_ICONS[template.id];
+            const Icon = meta?.Icon ?? CaptionCleanIcon;
+            const active = (document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID) === template.id;
+            return (
+              <button
+                key={template.id}
+                type="button"
+                className="icon-button"
+                aria-pressed={active}
+                aria-label={meta?.label ?? template.name}
+                title={template.description}
+                data-guide={meta?.label ?? template.name}
+                onClick={() => applyTemplate(template.id)}
+              >
+                <Icon />
+              </button>
+            );
+          })}
+        </div>
         <button
-          className="icon-button icon-button-labeled"
+          className="icon-button"
           aria-label="Export captions as SRT"
           title="Export captions as SRT"
+          data-guide="Export SRT"
           onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
         >
           <DownloadIcon />
-          SRT
         </button>
         <button
-          className="icon-button icon-button-labeled"
+          className="icon-button"
           aria-label="Export captions as WebVTT"
           title="Export captions as WebVTT"
+          data-guide="Export VTT"
           onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
           <DownloadIcon />
-          VTT
         </button>
         <button
           className="icon-button"

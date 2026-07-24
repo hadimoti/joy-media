@@ -546,6 +546,49 @@ export function AutoCaptionIcon() {
   );
 }
 
+/** Burn-in captions into program/export frames. */
+export function BurnInIcon() {
+  return (
+    <Svg>
+      <rect x="2.5" y="3" width="11" height="8" rx="1" />
+      <path d="M4.5 12.5h7" />
+      <path d="M5 6.5h6M5.5 9h4" />
+    </Svg>
+  );
+}
+
+/** JOY Clean caption preset. */
+export function CaptionCleanIcon() {
+  return (
+    <Svg>
+      <path d="M3 11.5h10" />
+      <path d="M5 8.5h6" />
+    </Svg>
+  );
+}
+
+/** JOY Karaoke Pop caption preset. */
+export function CaptionKaraokeIcon() {
+  return (
+    <Svg>
+      <path d="M3 11.5h10" />
+      <path d="M5 8.5h3.5" strokeWidth="2" />
+      <path d="M9 8.5h2" />
+    </Svg>
+  );
+}
+
+/** JOY RTL Classic caption preset. */
+export function CaptionRtlIcon() {
+  return (
+    <Svg>
+      <path d="M13 11.5H3" />
+      <path d="M11 8.5H5" />
+      <path d="M12.5 5.5 10 8l2.5 2.5" />
+    </Svg>
+  );
+}
+
 export function LanguageIcon({ label }: { readonly label: string }) {
   return (
     <Svg>

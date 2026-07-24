@@ -84,6 +84,18 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     },
   },
   {
+    id: 'recipe-split-trim',
+    label: 'Recipe: split → trim tail',
+    description:
+      'Splits at playhead, then trims the new right half start to the playhead (real commands). Enable caption burn-in + Export for the full delivery path.',
+    destructive: false,
+    buildStep: (project, selectedClipIds, playheadUs) => {
+      const recipe = buildSplitTrimRecipe(project, selectedClipIds, playheadUs);
+      if (!recipe.ok) return recipe;
+      return { ok: true, step: recipe.steps[0]! };
+    },
+  },
+  {
     id: 'move-to-playhead',
     label: 'Move selected clip to playhead',
     description: "Moves the selected clip's start to the current playhead time.",
@@ -210,3 +222,57 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     },
   },
 ];
+
+export type RecipeBuildResult =
+  | { readonly ok: true; readonly steps: readonly AgentPlanStep[]; readonly goal: string }
+  | { readonly ok: false; readonly reason: string };
+
+/** P14.6: real split → trim recipe (caption burn-in + Export stay UI). */
+export function buildSplitTrimRecipe(
+  project: SpikeProject,
+  selectedClipIds: readonly string[],
+  playheadUs: number,
+): RecipeBuildResult {
+  const clipId = selectedClipIds[0];
+  if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
+  const location = findClipLocation(project, clipId);
+  if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
+  const { compositionId, trackId, clip } = location;
+  const endUs = clip.startUs + clip.durationUs;
+  if (!(playheadUs > clip.startUs && playheadUs < endUs))
+    return { ok: false, reason: 'Move the playhead strictly inside the selected clip.' };
+  const newClipId = `${clip.id}-split-${playheadUs}`;
+  return {
+    ok: true,
+    goal: 'Split at playhead, then trim the new right half to start at the playhead',
+    steps: [
+      {
+        id: 'step-1',
+        description: `Split ${clip.id} at ${playheadUs}µs`,
+        mode: 'command',
+        tool: 'splitClip',
+        arguments: { compositionId, trackId, clipId: clip.id, atUs: playheadUs, newClipId },
+        dependsOn: [],
+        expectedChange: `Split clip ${clip.id} into ${clip.id} and ${newClipId}`,
+        preconditions: [],
+        requiresConfirmation: false,
+      },
+      {
+        id: 'step-2',
+        description: `Trim ${newClipId} start to ${playheadUs}µs`,
+        mode: 'command',
+        tool: 'trimClip',
+        arguments: {
+          compositionId,
+          trackId,
+          clipId: newClipId,
+          newStartUs: playheadUs,
+        },
+        dependsOn: ['step-1'],
+        expectedChange: `Trim clip ${newClipId} start to ${playheadUs}`,
+        preconditions: [],
+        requiresConfirmation: false,
+      },
+    ],
+  };
+}

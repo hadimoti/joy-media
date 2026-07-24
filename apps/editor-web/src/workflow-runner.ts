@@ -157,10 +157,10 @@ export function normalizeFirstPartyInputs(
 ): unknown {
   const required = (workflow.inputs.required as string[] | undefined) ?? [];
   if (required.includes('asset') && inputs.asset === undefined && typeof inputs.assetId === 'string') {
-    return { ...inputs, asset: { assetId: inputs.assetId, __stub: true } };
+    return { ...inputs, asset: { assetId: inputs.assetId, fixture: true } };
   }
   if (typeof inputs.asset === 'string') {
-    return { ...inputs, asset: { assetId: inputs.asset, __stub: true } };
+    return { ...inputs, asset: { assetId: inputs.asset, fixture: true } };
   }
   return inputs;
 }

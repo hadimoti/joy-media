@@ -6,14 +6,16 @@ import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
- * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22).
+ * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22 / P14.6).
  *
- * Most ports remain deterministic stubs tagged `__stub: true`.
  * Real DSP: normalizeAudio, detectSilence, measureLoudness, denoise (noise-gate).
+ * Analysis fixtures return deterministic candidates with an honest `method` note
+ * (no `__stub: true` pretending the work already landed on disk/timeline).
+ * Branch / folder / metadata / caption-template ports defer to the editor UI.
  */
 
-function stubResult<T extends Record<string, unknown>>(value: T): T & { readonly __stub: true } {
-  return { ...value, __stub: true as const };
+function fixtureNote(detail: string): { readonly method: 'fixture'; readonly note: string } {
+  return { method: 'fixture', note: detail };
 }
 
 /** Quiet 1 kHz dialogue-like fixture PCM for browser-side normalize proofs. */
@@ -64,11 +66,11 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
   return buildNodeLibrary({
     ports: {
       analysis: {
-        transcribe: () =>
-          stubResult({
-            language: 'fa',
-            segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
-          }),
+        transcribe: () => ({
+          language: 'fa',
+          segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
+          ...fixtureNote('Fixture transcript for workflow park/resume; use Captions Auto caption for live Whisper'),
+        }),
         detectSilence: (args: {
           readonly source: unknown;
           readonly thresholdDb?: number;
@@ -107,22 +109,25 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             loudnessRange: loudness.range,
           };
         },
-        detectHighlights: (args: { readonly source: unknown }) =>
-          stubResult({
-            candidates: [
-              { title: 'Hook A', source: args.source, subjectHints: { focus: 'speaker' } },
-              { title: 'Hook B', source: args.source, subjectHints: { focus: 'product' } },
-              { title: 'Hook C', source: args.source, subjectHints: { focus: 'wide' } },
-            ],
-          }),
-        detectSpeakers: () => stubResult({ speakers: [{ id: 'spk-1' }, { id: 'spk-2' }] }),
-        generateChapters: (args: { readonly source: unknown }) =>
-          stubResult({
-            chapters: [
-              { title: 'Intro', startUs: 0, endUs: 60_000_000, source: args.source },
-              { title: 'Main topic', startUs: 60_000_000, endUs: 300_000_000, source: args.source },
-            ],
-          }),
+        detectHighlights: (args: { readonly source: unknown }) => ({
+          candidates: [
+            { title: 'Hook A', source: args.source, subjectHints: { focus: 'speaker' } },
+            { title: 'Hook B', source: args.source, subjectHints: { focus: 'product' } },
+            { title: 'Hook C', source: args.source, subjectHints: { focus: 'wide' } },
+          ],
+          ...fixtureNote('Deterministic hook fixtures for approval UI; not ML highlight detection'),
+        }),
+        detectSpeakers: () => ({
+          speakers: [{ id: 'spk-1' }, { id: 'spk-2' }],
+          ...fixtureNote('Fixture speaker ids; diarization is not wired in the browser runner'),
+        }),
+        generateChapters: (args: { readonly source: unknown }) => ({
+          chapters: [
+            { title: 'Intro', startUs: 0, endUs: 60_000_000, source: args.source },
+            { title: 'Main topic', startUs: 60_000_000, endUs: 300_000_000, source: args.source },
+          ],
+          ...fixtureNote('Fixture chapters for workflow continuity; not ASR chaptering'),
+        }),
       },
       transform: {
         trim: (args: {
@@ -161,13 +166,20 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             ranges: args.ranges,
           };
         },
-        applyCaptionTemplate: (args: { readonly templateId: string }) =>
-          stubResult({ captioned: true, templateId: args.templateId }),
-        reframe: (args: { readonly aspect: string; readonly subjectHints?: unknown }) =>
-          stubResult({
-            reframed: args.aspect,
-            subjectHints: args.subjectHints ?? null,
-          }),
+        applyCaptionTemplate: (args: { readonly templateId: string }) => ({
+          captioned: false,
+          deferred: true,
+          deferredCommand: 'caption.setStyle',
+          templateId: args.templateId,
+          reason: 'Apply caption templates in the Captions panel (icon presets)',
+        }),
+        reframe: (args: { readonly aspect: string; readonly subjectHints?: unknown }) => ({
+          reframed: false,
+          deferred: true,
+          aspect: args.aspect,
+          subjectHints: args.subjectHints ?? null,
+          reason: 'Reframe is not applied in the browser runner; set composition/crop in the editor',
+        }),
         denoise: (args: {
           readonly source: unknown;
           readonly strength?: number;
@@ -226,7 +238,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           readonly targetLufs?: number;
           readonly duckMusic?: boolean;
         }) => {
-          // WP-19: real audio-core DSP — not a stub. Other ports remain __stub.
+          // WP-19: real audio-core DSP — not a stub.
           const sampleRate = 48_000;
           const samples = generateFixtureDialoguePcm(sampleRate);
           const targetLoudness = args.targetLufs ?? -16;
@@ -248,7 +260,13 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         instantiateSceneTemplate: (args: {
           readonly templateId: string;
           readonly variables: unknown;
-        }) => stubResult({ sceneInstance: args.templateId, variables: args.variables }),
+        }) => ({
+          sceneInstance: args.templateId,
+          variables: args.variables,
+          applied: false,
+          deferred: true,
+          reason: 'Scene templates instantiate via html-scene objects in the editor, not silently here',
+        }),
       },
       generation: {
         synthesizeSpeech: (args: {
@@ -287,20 +305,25 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             requiresConsent: isCloned,
           };
         },
-        translate: (args: { readonly text: string; readonly targetLanguage: string }) =>
-          stubResult({
-            text: `[${args.targetLanguage}] ${args.text}`,
-            targetLanguage: args.targetLanguage,
-          }),
+        translate: (args: { readonly text: string; readonly targetLanguage: string }) => ({
+          text: args.text,
+          targetLanguage: args.targetLanguage,
+          translated: false,
+          deferred: true,
+          reason: 'Translation requires a provider port; browser runner does not fabricate translated copy',
+        }),
       },
       editor: {
         createBranch: (args: { readonly name: string; readonly source: unknown }) => {
           branchSeq += 1;
-          return stubResult({
-            branchId: `branch-${String(branchSeq)}`,
+          return {
+            branchId: `deferred-branch-${String(branchSeq)}`,
             name: args.name,
             source: args.source,
-          });
+            applied: false,
+            deferredToEditor: true,
+            note: 'In-memory branch id for workflow continuity only; duplicate clips in the editor for real variants',
+          };
         },
       },
       render: {
@@ -313,10 +336,19 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         }),
       },
       output: {
-        writeToFolder: (args: { readonly folderId: string }) =>
-          stubResult({ written: true, folderId: args.folderId }),
-        writeMetadataFile: (args: { readonly fileName: string }) =>
-          stubResult({ written: true, fileName: args.fileName }),
+        writeToFolder: (args: { readonly folderId: string }) => ({
+          written: false,
+          deferred: true,
+          folderId: args.folderId,
+          reason: 'Browser runner cannot write host folders; use Export or Jobs',
+        }),
+        writeMetadataFile: (args: { readonly fileName: string }) => ({
+          written: false,
+          deferred: true,
+          fileName: args.fileName,
+          inMemoryManifest: true,
+          reason: 'Manifest stays in workflow outputs; browser runner does not write the host filesystem',
+        }),
       },
     },
   });

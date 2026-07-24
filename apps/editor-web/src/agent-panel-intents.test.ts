@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
-import { AGENT_INTENTS, findClipLocation, findNextClip } from './agent-panel-intents.js';
+import {
+  AGENT_INTENTS,
+  buildSplitTrimRecipe,
+  findClipLocation,
+  findNextClip,
+} from './agent-panel-intents.js';
 
 function intent(id: string) {
   const found = AGENT_INTENTS.find((candidate) => candidate.id === id);
@@ -140,5 +145,16 @@ describe('agent panel intents', () => {
         },
       });
     }
+  });
+
+  it('recipe-split-trim builds real splitClip then trimClip steps', () => {
+    const project = buildReferenceSpikeProject();
+    const recipe = buildSplitTrimRecipe(project, ['intro'], 5_000_000);
+    expect(recipe.ok).toBe(true);
+    if (!recipe.ok) return;
+    expect(recipe.steps).toHaveLength(2);
+    expect(recipe.steps[0]?.tool).toBe('splitClip');
+    expect(recipe.steps[1]?.tool).toBe('trimClip');
+    expect(recipe.steps[1]?.dependsOn).toEqual(['step-1']);
   });
 });

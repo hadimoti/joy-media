@@ -56,7 +56,7 @@ describe('WP-17 first-party workflows', () => {
     if (workflow === undefined) return;
     expect(normalizeFirstPartyInputs(workflow, { assetId: 'asset-long-1' })).toEqual({
       assetId: 'asset-long-1',
-      asset: { assetId: 'asset-long-1', __stub: true },
+      asset: { assetId: 'asset-long-1', fixture: true },
     });
   });
 
@@ -97,9 +97,10 @@ describe('WP-17 first-party workflows', () => {
     expect(third.status).toBe('succeeded');
     if (third.status !== 'succeeded') return;
     expect(third.outputs).toMatchObject({
-      written: true,
+      written: false,
+      deferred: true,
       fileName: 'long-video-draft-reels-run.json',
-      __stub: true,
+      inMemoryManifest: true,
     });
   });
 });
