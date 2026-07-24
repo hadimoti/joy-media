@@ -1239,8 +1239,35 @@ label {
   margin: 0.2rem 0.25rem;
   background: #2e2e32;
 }
+
+.timeline-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.timeline-toolbar-group.timeline-toolbar-zoom {
+  flex-wrap: wrap;
+}
+
+.timeline-toolbar-zoom .timeline-zoom-slider {
+  flex: 0 0 10rem;
+  width: 10rem;
+  height: 1.35rem;
+  accent-color: var(--joy-accent);
+}
+
+/* Responsive: collapse to overflow menu on narrow viewports */
+@media (max-width: 768px) {
+  .timeline-toolbar-group:not(:first-child) {
+    display: none;
+  }
+  .timeline-toolbar-group.timeline-toolbar-overflow {
+    display: inline-flex;
+  }
+}
+
 /* Select tool: arrow cursor (hotspot near tip) over tracks/clips. */
-.timeline-panel.select-tool-active .timeline-tracks,
 .timeline-panel.select-tool-active .timeline-lane,
 .timeline-panel.select-tool-active .timeline-clip {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 16 16'%3E%3Cpath fill='%23e8e8ec' stroke='%23141416' stroke-width='0.8' d='M3.5 2.5 7 13.5l2-4 4-2Z'/%3E%3C/svg%3E")

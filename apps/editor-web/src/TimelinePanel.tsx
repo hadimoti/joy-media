@@ -779,129 +779,188 @@ export function TimelinePanel({
       }
     >
       <div className="timeline-toolbar">
-        <button
-          className="icon-button"
-          onClick={onTogglePlayback}
-          aria-label={playing ? 'Pause' : 'Play proxy'}
-          title={playing ? 'Pause (Space)' : 'Play proxy (Space)'}
-        >
-          {playing ? <PauseIcon /> : <PlayIcon />}
-        </button>
-        <button
-          className="icon-button"
-          onClick={() => onSeek(Math.max(0, playheadUs - 1_000_000))}
-          aria-label="Back one second"
-          title="Back 1s (←)"
-        >
-          <SkipBackIcon />
-        </button>
-        <button
-          className="icon-button"
-          onClick={() => onSeek(Math.min(composition.durationUs, playheadUs + 1_000_000))}
-          aria-label="Forward one second"
-          title="Forward 1s (→)"
-        >
-          <SkipForwardIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Add video track"
-          data-guide="Add track"
-          onClick={() => {
-            const order = composition.tracks.length;
-            onDispatch({
-              label: 'Add track',
-              commands: [
-                {
-                  type: 'timeline.addTrack',
-                  payload: {
-                    compositionId: composition.id,
-                    track: {
-                      id: `V${order + 1}`,
-                      kind: 'video',
-                      order,
-                      enabled: true,
-                      clips: [],
-                    },
-                  },
-                },
-              ],
-            });
-          }}
-        >
-          <TrackAddIcon />
-        </button>
-        {onAddMarker !== undefined && (
+        <div className="timeline-toolbar-group">
+          <button
+            className="icon-button"
+            onClick={onTogglePlayback}
+            aria-label={playing ? 'Pause' : 'Play proxy'}
+            title={playing ? 'Pause (Space)' : 'Play proxy (Space)'}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button
+            className="icon-button"
+            onClick={() => onSeek(Math.max(0, playheadUs - 1_000_000))}
+            aria-label="Back one second"
+            title="Back 1s (←)"
+          >
+            <SkipBackIcon />
+          </button>
+          <button
+            className="icon-button"
+            onClick={() => onSeek(Math.min(composition.durationUs, playheadUs + 1_000_000))}
+            aria-label="Forward one second"
+            title="Forward 1s (→)"
+          >
+            <SkipForwardIcon />
+          </button>
+        </div>
+
+        <span className="timeline-toolbar-sep" aria-hidden="true" />
+
+        <div className="timeline-toolbar-group">
           <button
             type="button"
             className="icon-button"
-            aria-label="Add marker at playhead"
-            data-guide="Add marker"
-            onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+            aria-label="Add video track"
+            data-guide="Add track"
+            onClick={() => {
+              const order = composition.tracks.length;
+              onDispatch({
+                label: 'Add track',
+                commands: [
+                  {
+                    type: 'timeline.addTrack',
+                    payload: {
+                      compositionId: composition.id,
+                      track: {
+                        id: `V${order + 1}`,
+                        kind: 'video',
+                        order,
+                        enabled: true,
+                        clips: [],
+                      },
+                    },
+                  },
+                ],
+              });
+            }}
           >
-            <MarkerIcon />
+            <TrackAddIcon />
           </button>
-        )}
+          {onAddMarker !== undefined && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Add marker at playhead"
+              data-guide="Add marker"
+              onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+            >
+              <MarkerIcon />
+            </button>
+          )}
+        </div>
+
         <span className="timeline-toolbar-sep" aria-hidden="true" />
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Select"
-          aria-label="Select tool"
-          title="Select tool"
-          aria-pressed={selectToolActive}
-          onClick={() => {
-            setSelectToolActive((active) => {
-              if (active) return false;
-              setSplitToolActive(false);
-              return true;
-            });
-          }}
-        >
-          <SelectIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          data-guide="Split"
-          aria-label="Split tool"
-          title="Split tool (S)"
-          aria-pressed={splitToolActive}
-          onClick={() => {
-            setSplitToolActive((active) => {
-              if (active) return false;
-              setSelectToolActive(false);
-              return true;
-            });
-          }}
-        >
-          <ScissorsIcon />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!canDuplicate}
-          aria-label="Duplicate clip"
-          title="Duplicate (⌘/Ctrl+D)"
-          onClick={() => {
-            if (selected === undefined) return;
-            dispatchDuplicate(selected.track.id, selected.clip);
-          }}
-        >
-          <DuplicateIcon />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!canDelete}
-          aria-label="Ripple delete"
-          title="Ripple delete (Del)"
-          onClick={() => {
-            if (selected === undefined) return;
-            dispatchDelete(selected.track.id, selected.clip.id);
-          }}
-        >
-          <TrashIcon />
-        </button>
+
+        <div className="timeline-toolbar-group">
+          <button
+            type="button"
+            className="icon-button"
+            data-guide="Select"
+            aria-label="Select tool"
+            title="Select tool"
+            aria-pressed={selectToolActive}
+            onClick={() => {
+              setSelectToolActive((active) => {
+                if (active) return false;
+                setSplitToolActive(false);
+                return true;
+              });
+            }}
+          >
+            <SelectIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            data-guide="Split"
+            aria-label="Split tool"
+            title="Split tool (S)"
+            aria-pressed={splitToolActive}
+            onClick={() => {
+              setSplitToolActive((active) => {
+                if (active) return false;
+                setSelectToolActive(false);
+                return true;
+              });
+            }}
+          >
+            <ScissorsIcon />
+          </button>
+        </div>
+
+        <span className="timeline-toolbar-sep" aria-hidden="true" />
+
+        <div className="timeline-toolbar-group">
+          <button
+            className="icon-button"
+            disabled={!canDuplicate}
+            aria-label="Duplicate clip"
+            title="Duplicate (⌘/Ctrl+D)"
+            onClick={() => {
+              if (selected === undefined) return;
+              dispatchDuplicate(selected.track.id, selected.clip);
+            }}
+          >
+            <DuplicateIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={!canDelete}
+            aria-label="Ripple delete"
+            title="Ripple delete (Del)"
+            onClick={() => {
+              if (selected === undefined) return;
+              dispatchDelete(selected.track.id, selected.clip.id);
+            }}
+          >
+            <TrashIcon />
+          </button>
+        </div>
+
+        <span className="timeline-toolbar-sep" aria-hidden="true" />
+
+        <div className="timeline-toolbar-group timeline-toolbar-zoom">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={() => applyZoom(viewport.pixelsPerSecond / 1.25)}
+          >
+            <ZoomOutIcon />
+          </button>
+          <input
+            aria-label="Timeline zoom"
+            className="timeline-zoom-slider"
+            type="range"
+            min={MIN_PIXELS_PER_SECOND}
+            max={MAX_PIXELS_PER_SECOND}
+            step={1}
+            value={Math.round(viewport.pixelsPerSecond)}
+            onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
+          />
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={() => applyZoom(viewport.pixelsPerSecond * 1.25)}
+          >
+            <ZoomInIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Fit timeline to width"
+            title="Fit to width"
+            aria-pressed={autoFit}
+            onClick={fitToWidth}
+          >
+            <FitWidthIcon />
+          </button>
+        </div>
       </div>
 
       <TimelineEmptyState
@@ -1186,47 +1245,6 @@ export function TimelinePanel({
             );
           })}
         </div>
-      </div>
-
-      <div className="timeline-zoombar">
-        <button
-          type="button"
-          className="timeline-zoom-btn"
-          aria-label="Zoom out"
-          title="Zoom out"
-          onClick={() => applyZoom(viewport.pixelsPerSecond / 1.25)}
-        >
-          <ZoomOutIcon />
-        </button>
-        <input
-          aria-label="Timeline zoom"
-          className="timeline-zoom-slider"
-          type="range"
-          min={MIN_PIXELS_PER_SECOND}
-          max={MAX_PIXELS_PER_SECOND}
-          step={1}
-          value={Math.round(viewport.pixelsPerSecond)}
-          onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
-        />
-        <button
-          type="button"
-          className="timeline-zoom-btn"
-          aria-label="Zoom in"
-          title="Zoom in"
-          onClick={() => applyZoom(viewport.pixelsPerSecond * 1.25)}
-        >
-          <ZoomInIcon />
-        </button>
-        <button
-          type="button"
-          className="timeline-zoom-btn"
-          aria-label="Fit timeline to width"
-          title="Fit to width"
-          aria-pressed={autoFit}
-          onClick={fitToWidth}
-        >
-          <FitWidthIcon />
-        </button>
       </div>
 
       {menu !== undefined && (
