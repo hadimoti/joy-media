@@ -74,9 +74,22 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 ## 4c. Header chrome
 
 - Brand lockup: small JOY mark (`public/assets/logo.png`, same asset as the main webapp / joy-agent header logo) + **JOY Media** wordmark in `.app-brand` (editor header and project library). Logo is decorative (`alt=""`); the strong text carries the product name. Size ~22×22 (`1.375rem`), never a large hero mark in chrome.
-- The header owns global state surfaces: **Projects** (back to library), undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)). No mid-header status copy (project title / save / preview quality stay out of chrome).
+- Header icon groups (L→R), separated by `.header-group` rules: **Nav** (Projects) · **Edit** (Undo/Redo) · **Find** (command palette) · spacer · **Deliver** (export-preset dropdown + Export MP4 + processes) · **Account**. Export presets live in one compact `header-menu`, not five peer icons.
+- No mid-header status copy (project title / save / preview quality stay out of chrome).
 - Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`. Status text lives in a centered `.export-toast` pinned under that bar (absolute, not in the icon row); the toast clears as soon as the file has downloaded (errors linger briefly). Durable history stays in the processes menu.
 - Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.
+
+## 4e. Stickers / overlays (P15)
+
+- Image assets: **Add as sticker** creates a `VisualObjectV1` `kind: 'image'`, places a Spike timeline clip for timing, and binds clip→object via `pluginData['joy.clipObjects']` ([`sticker-bindings.ts`](apps/editor-web/src/sticker-bindings.ts)). Seed `TIMELINE_OBJECT_IDS` remain defaults when pluginData is empty.
+- Real pixels: OPFS originals decode through [`sticker-image-cache.ts`](apps/editor-web/src/sticker-image-cache.ts) into Monitor/export bitmaps (PNG/WebP alpha preserved). Crop insets (0–0.49) apply in the cache; Inspector exposes crop for image objects.
+- Motion presets (Fade/Pop/Slide) and Effects apply to the selected sticker via the clip↔object map.
+- **Remove background**: Assets action queues `image.comfy` / RemBG when a paired Worker advertises `image.comfy`; otherwise disabled with an honest tooltip. Matte alpha can bind via `pluginData['joy.imageMatte']`.
+
+## 3. Layout & panels (seed)
+
+Default dock seed key `joy-media.dockview.v5`: Monitor center, Timeline below, Assets left, right stack **creative** (Inspector → Motion → Effects → Transitions → Color → Captions) then **utilities** (Audio → Camera → History → Agent → Workflows → Jobs → Plugins → Diagnostics). `DEFAULT_WORKSPACE.panels` includes all `PANEL_IDS` (including `transitions`).
+
 
 ## 4d. Bidirectional text (Persian-first)
 

@@ -16,7 +16,7 @@ import {
 } from './asset-library-state.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
-import { CloseIcon, CloudIcon, ImageIcon, PlayIcon, RefreshIcon } from './icons.js';
+import { CloseIcon, CloudIcon, ImageIcon, PlayIcon, PlusIcon, RefreshIcon, AiEffectIcon } from './icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
 const categories: readonly { readonly id: AssetCategory; readonly label: string }[] = [
@@ -38,7 +38,17 @@ interface Preview {
  * Asset discovery stays metadata-only. A preview is hydrated through the
  * authenticated API, verified, then cached in OPFS by AuthorizedDerivativeResolver.
  */
-export function AssetLibraryPanel({ projectId }: { readonly projectId: string }) {
+export function AssetLibraryPanel({
+  projectId,
+  onAddSticker,
+}: {
+  readonly projectId: string;
+  readonly onAddSticker?: (asset: {
+    readonly assetId: string;
+    readonly displayName?: string;
+    readonly blob?: Blob;
+  }) => void;
+}) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const resolver = useMemo(
     () =>
@@ -63,6 +73,7 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [syncEnabled, setSyncEnabled] = useState(false);
+  const [comfyReady, setComfyReady] = useState(false);
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -99,6 +110,65 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void client
+      .workers()
+      .then((workers) => {
+        setComfyReady(
+          workers.some(
+            (worker) =>
+              !worker.revoked &&
+              worker.paired &&
+              worker.capabilities.includes('image.comfy'),
+          ),
+        );
+      })
+      .catch(() => setComfyReady(false));
+  }, [client, items]);
+
+  const addAsSticker = useCallback(
+    async (asset: BrowserAsset) => {
+      if (onAddSticker === undefined) {
+        setStatus('Sticker placement is unavailable in this session.');
+        return;
+      }
+      try {
+        const blob = await (await originalAssetCache).get(asset.id);
+        if (blob === undefined) {
+          setStatus('Open/register this image in this browser first so OPFS has the original bytes.');
+          return;
+        }
+        onAddSticker({ assetId: asset.id, displayName: asset.displayName, blob });
+        setStatus(`Added ${asset.displayName} as a sticker overlay.`);
+      } catch (error) {
+        setStatus(`Could not add sticker: ${message(error)}`);
+      }
+    },
+    [onAddSticker, originalAssetCache],
+  );
+
+  const removeBackground = useCallback(
+    async (asset: BrowserAsset) => {
+      if (!comfyReady) {
+        setStatus('Remove background needs a paired GPU Worker with image.comfy (ADR-0018).');
+        return;
+      }
+      try {
+        const job = await client.enqueueComfyRemoveBg(
+          projectId,
+          `rembg-${asset.id}-${Date.now()}`,
+          asset.id,
+        );
+        setStatus(
+          `Queued background removal job ${job.id} (Comfy RemBG). When the Worker completes, register the foreground PNG and Add as sticker.`,
+        );
+      } catch (error) {
+        setStatus(`Could not queue remove-background: ${message(error)}`);
+      }
+    },
+    [client, comfyReady, projectId],
+  );
 
   const visible = useMemo(
     () => filterAssetLibrary(items, category, query, availability, sort),
@@ -428,6 +498,35 @@ export function AssetLibraryPanel({ projectId }: { readonly projectId: string })
                     >
                       <PlayIcon />
                     </button>
+                  )}
+                  {asset.kind === 'image' && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Add ${asset.displayName} as sticker`}
+                        title="Add as sticker"
+                        data-guide="Add as sticker"
+                        onClick={() => void addAsSticker(asset)}
+                      >
+                        <PlusIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Remove background from ${asset.displayName}`}
+                        title={
+                          comfyReady
+                            ? 'Remove background (GPU Worker RemBG)'
+                            : 'Needs paired GPU Worker with image.comfy'
+                        }
+                        data-guide="Remove background"
+                        disabled={!comfyReady}
+                        onClick={() => void removeBackground(asset)}
+                      >
+                        <AiEffectIcon />
+                      </button>
+                    </>
                   )}
                 </li>
               );

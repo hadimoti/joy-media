@@ -35,9 +35,9 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-24)
 
-**Live deploy:** `/opt/joy-media/web` → `web-releases/2d67808`. Git tip: latest `main` (P14.7 docs sync; ahead of live web). Push only if asked. API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health` → 200.
+**Live deploy:** `/opt/joy-media/web` → latest `web-releases/<sha>` after P15 deploy. Git tip: latest `main`. Push only if asked. API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health` → 200.
 
-**Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. Runbook: [`plan/P14-pro-tools-hermes-runbook.md`](plan/P14-pro-tools-hermes-runbook.md) (Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md`).
+**Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15 sticker overlays** runbook: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md).
 
 **Read this first.** UI: [`DESIGN.md`](DESIGN.md). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
 
@@ -45,8 +45,9 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 1. **Project library gate** — icon-only New/Create/Cancel; catalog `joy-media.project-catalog.v1`.
 2. **Timeline NLE** — trim, DnD media, zoom/fit, speed/freeze/dupe, markers, track CRUD; SVG + `data-guide`.
-3. **Panels** — Audio / Effects / Color / Transitions / editable GraphEditor; export preset icons.
+3. **Panels** — dockview **v5**: creative stack (Inspector/Motion/Effects/Transitions/Color/Captions) then utilities; header Deliver group collapses export presets.
 4. **P14 closed** — mixer→preview/export; spatial paths; transitions (junction-timed); FX/grade in Pixi; honest workflow ports; caption burn-in.
+5. **P15 stickers** — Assets **Add as sticker** (OPFS image → visual object + clip bind); real alpha pixels in Monitor/export; crop in Inspector; RemBG button gated on `image.comfy` Worker.
 
 ### Where things live
 
@@ -66,18 +67,20 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 4. Web: copy `apps/editor-web/dist` (+ `public/media/reference`) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
 5. Smoke: `GET :8790/health`; open `media.joyteam.ir` → **Projects** library → open sample → timeline.
 
-### Honest residuals (post-P14)
+### Honest residuals (post-P15)
 
 1. Playback preview may still ignore `playbackRate` (schema/commands durable; player wiring deferred).
-2. Pair local GPU Worker for Comfy/ML (ADR-0018) remains the highest leverage infra residual.
+2. Pair local GPU Worker for Comfy/ML (ADR-0018) — RemBG UI queues `image.comfy` but needs Worker + RemBG template to return a usable foreground asset.
 3. P09 marketplace transport still gated.
 4. Workflow analysis ports still use honest fixtures (not ML); write/branch ports defer to editor UI.
 5. `main` may be ahead of `origin/main` — push only if owner asks.
+6. Spike timeline still uses `kind: 'video'` clips for sticker timing (no native image clip kind); binding is via `joy.clipObjects`.
 
 ### Suggested next milestone
 
-1. Optional: wire playback-engine to `playbackRate` / freeze holds.
-2. Pair local GPU Worker; smoke Comfy/ML denoise.
+1. Pair GPU Worker; smoke RemBG → register foreground → Add as sticker.
+2. Optional: wire playback-engine to `playbackRate` / freeze holds.
+3. Monitor free-transform gizmo for stickers (Inspector numbers suffice for v1).
 3. Owner call on P09 marketplace transport.
 
 ### Docs updated this handoff

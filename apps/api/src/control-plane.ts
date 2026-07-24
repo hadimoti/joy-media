@@ -255,6 +255,7 @@ export interface ControlPlane {
     projectId: string,
     type: string,
     now?: number,
+    assetId?: string,
   ): Job | Promise<Job>;
   enqueueAssetThumbnail(
     actor: Actor,
@@ -559,14 +560,34 @@ export class LocalControlPlane implements ControlPlane {
     this.#workers.set(workerId, revoked);
     return revoked;
   }
-  enqueue(actor: Actor, id: string, projectId: string, type: string, now = Date.now()): Job {
+  enqueue(
+    actor: Actor,
+    id: string,
+    projectId: string,
+    type: string,
+    now = Date.now(),
+    assetId?: string,
+  ): Job {
     this.project(actor, projectId);
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',
         'asset thumbnail requires an opaque asset ID',
       );
-    const job: Job = { id, projectId, type, state: 'queued', progress: 0, cancelRequested: false };
+    if (type === 'image.comfy' && assetId !== undefined) {
+      const asset = this.#assets.get(assetId);
+      if (asset === undefined || asset.projectId !== projectId)
+        throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    }
+    const job: Job = {
+      id,
+      projectId,
+      type,
+      ...(assetId !== undefined ? { assetId } : {}),
+      state: 'queued',
+      progress: 0,
+      cancelRequested: false,
+    };
     this.#jobs.set(id, job);
     this.event(id, 'queued', now);
     return job;

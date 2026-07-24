@@ -28,6 +28,19 @@ export class OpfsOriginalAssetCache {
       await writable.close();
     }
   }
+
+  /** Returns the cached original blob when present in this browser profile. */
+  async get(assetId: string): Promise<Blob | undefined> {
+    if (this.root === undefined) return undefined;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId)) return undefined;
+    try {
+      const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: false });
+      const handle = await directory.getFileHandle(`${assetId}.bin`, { create: false });
+      return await handle.getFile();
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 export async function openOpfsOriginalAssetCache(): Promise<OpfsOriginalAssetCache> {

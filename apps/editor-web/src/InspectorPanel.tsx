@@ -270,6 +270,40 @@ export function InspectorPanel({
           </div>
         );
       })}
+      {object.kind === 'image' && (
+        <section className="inspector-crop" aria-label="Crop">
+          <h3>Crop</h3>
+          <p className="empty-hint">Fractional insets (0–0.49) on the sticker source.</p>
+          {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
+            <label key={edge} className="inspector-row">
+              <span className="inspector-label">{edge}</span>
+              <input
+                type="number"
+                min={0}
+                max={0.49}
+                step={0.01}
+                value={round(object.transform.crop[edge])}
+                onChange={(event) => {
+                  const next = event.currentTarget.valueAsNumber;
+                  if (!Number.isFinite(next)) return;
+                  onDispatch({
+                    label: `Crop ${edge}`,
+                    commands: [
+                      {
+                        type: 'object.setCrop',
+                        payload: {
+                          objectId: object.id,
+                          crop: { ...object.transform.crop, [edge]: Math.min(0.49, Math.max(0, next)) },
+                        },
+                      },
+                    ],
+                  });
+                }}
+              />
+            </label>
+          ))}
+        </section>
+      )}
     </article>
   );
 }

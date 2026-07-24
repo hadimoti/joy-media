@@ -98,6 +98,17 @@ header strong {
   background: #e9b949;
   transition: width 0.25s ease;
 }
+.header-group {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+.header-group + .header-group {
+  padding-inline-start: 0.55rem;
+  margin-inline-start: 0.15rem;
+  border-inline-start: 1px solid #2e2e32;
+}
 .header-menu {
   position: relative;
 }
@@ -357,6 +368,17 @@ a.icon-button {
   display: inline-flex;
   gap: 0.2rem;
   align-items: center;
+}
+.export-preset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.export-preset-list button {
+  width: 100%;
+  justify-content: flex-start;
 }
 .sr-only {
   position: absolute;

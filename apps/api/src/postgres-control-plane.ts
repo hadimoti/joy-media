@@ -456,6 +456,7 @@ export class PostgresControlPlane implements ControlPlane {
     projectId: string,
     type: string,
     now = Date.now(),
+    assetId?: string,
   ): Promise<Job> {
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
@@ -464,11 +465,14 @@ export class PostgresControlPlane implements ControlPlane {
       );
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
+      if (type === 'image.comfy' && assetId !== undefined) {
+        await this.asset(actor, projectId, assetId, client);
+      }
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, $3, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, type],
+          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, $3, $4, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, type, assetId ?? null],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);

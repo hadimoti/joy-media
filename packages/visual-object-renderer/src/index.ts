@@ -51,12 +51,14 @@ export interface BuildRenderFrameOptions {
   readonly colorGrade?: ColorGradeV1 | ColorGradeIR;
   /** Per-object effect stacks from `pluginData['joy.effects']`. */
   readonly effectsByObjectId?: Readonly<Record<string, EffectStackLike>>;
+  /** Intrinsic pixel size for image stickers when real bitmaps are available. */
+  readonly imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>;
 }
 
 /**
  * Convert a single resolved object to its render node(s).
  *
- * - `image` → `sprite` node (placeholder color until asset resolution lands)
+ * - `image` → `video-frame` when size known (real RGBA arrives via bitmap map), else placeholder sprite
  * - `text`  → `text` node
  * - `shape` → `sprite` node tinted per shape
  * - `null` / `camera` → **undefined** (controllers render nothing)
@@ -67,6 +69,7 @@ export interface BuildRenderFrameOptions {
 export function visualObjectToRenderNode(
   resolved: ResolvedObject,
   effects?: readonly EffectInstanceIR[],
+  imageSize?: { readonly width: number; readonly height: number },
 ): RenderNode | undefined {
   const { object, transform } = resolved;
   if (object.kind === 'null' || object.kind === 'camera') return undefined;
@@ -105,16 +108,31 @@ export function visualObjectToRenderNode(
     };
   }
 
-  // image / shape → sprite node
-  const color = shapeColor(object.kind, object.shape);
+  if (object.kind === 'image' && imageSize !== undefined) {
+    return {
+      kind: 'video-frame',
+      id: object.id,
+      zIndex: 10,
+      opacity,
+      transform: renderTransform,
+      width: imageSize.width,
+      height: imageSize.height,
+      sourceTimeUs: 0,
+      color: { r: 0, g: 0, b: 0, a: 0 },
+      ...(effectList ? { effects: effectList } : {}),
+    };
+  }
+
+  // shape (or image without pixels) → sprite placeholder
+  const color = shapeColor(object.kind === 'image' ? 'image' : 'shape', object.shape);
   return {
     kind: 'sprite',
     id: object.id,
     zIndex: 0,
     opacity,
     transform: renderTransform,
-    width: 100, // placeholder — real asset resolution will replace
-    height: 100, // placeholder
+    width: 100,
+    height: 100,
     color,
     ...(effectList ? { effects: effectList } : {}),
   };
@@ -140,7 +158,8 @@ export function buildRenderFrameIR(
   const nodes: RenderNode[] = [];
   for (const resolved of resolvedObjects) {
     const effects = normalizeEffects(options.effectsByObjectId?.[resolved.object.id]);
-    const node = visualObjectToRenderNode(resolved, effects);
+    const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
+    const node = visualObjectToRenderNode(resolved, effects, imageSize);
     if (node) nodes.push(node);
   }
 

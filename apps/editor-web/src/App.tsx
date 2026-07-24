@@ -46,7 +46,6 @@ import {
 } from '@joy-media/renderer-pixi/browser-export';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
-import { TIMELINE_OBJECT_IDS } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
@@ -70,6 +69,13 @@ import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
+import {
+  bindClipToObject,
+  readImageMatteMap,
+  resolveObjectIdForSelection,
+} from './sticker-bindings.js';
+import { StickerImageCache } from './sticker-image-cache.js';
+import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import {
   ensureClipAudio,
   loadAudioState,
@@ -124,14 +130,36 @@ import './app.css';
 import 'dockview/dist/styles/dockview.css';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
-function renderFrameOptions(project: JoyProjectV1): BuildRenderFrameOptions {
+function renderFrameOptions(
+  project: JoyProjectV1,
+  imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>,
+): BuildRenderFrameOptions {
   const composition = project.compositions[project.rootCompositionId];
   return {
     effectsByObjectId: readEffectStacks(project),
+    ...(project.colorGrade !== undefined ? { colorGrade: project.colorGrade } : {}),
+    ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
-    ...(project.transitions ? { transitions: project.transitions } : {}),
-    ...(project.colorGrade ? { colorGrade: project.colorGrade } : {}),
+    ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
   };
+}
+
+const stickerImageCache = new StickerImageCache();
+const originalAssetCachePromise = openOpfsOriginalAssetCache();
+
+async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> {
+  const cache = await originalAssetCachePromise;
+  return cache.get(assetId);
+}
+
+function imageSizesFromCache(): Readonly<
+  Record<string, { readonly width: number; readonly height: number }>
+> {
+  const sizes: Record<string, { width: number; height: number }> = {};
+  for (const [id, bitmap] of stickerImageCache.bitmaps()) {
+    sizes[id] = { width: bitmap.width, height: bitmap.height };
+  }
+  return sizes;
 }
 
 /**
@@ -271,6 +299,12 @@ interface EditorPanelContextValue {
   ) => void;
   readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
   readonly replaceVisualProject: (next: JoyProjectV1) => void;
+  readonly addStickerFromAsset: (asset: {
+    readonly assetId: string;
+    readonly displayName?: string;
+    readonly blob?: Blob;
+  }) => Promise<void>;
+  readonly stickerTick: number;
   readonly audioState: AudioState;
   readonly setAudioState: (next: AudioState, label?: string) => void;
   readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
@@ -369,6 +403,8 @@ function EditorWorkspace({
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
   const [processesOpen, setProcessesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [exportPresetOpen, setExportPresetOpen] = useState(false);
+  const [stickerTick, setStickerTick] = useState(0);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
@@ -693,6 +729,96 @@ function EditorWorkspace({
     [session],
   );
 
+  const syncStickerBitmaps = useCallback(async () => {
+    const mattes = readImageMatteMap(session.visualProject);
+    await Promise.all(
+      Object.values(session.visualProject.visualObjects).map(async (object) => {
+        if (object.kind !== 'image' || object.assetId === undefined) return;
+        await stickerImageCache.syncObject({
+          objectId: object.id,
+          assetId: object.assetId,
+          ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
+          crop: object.transform.crop,
+          loadBlob: loadStickerAssetBlob,
+        });
+      }),
+    );
+    setStickerTick((tick) => tick + 1);
+  }, [session]);
+
+  const addStickerFromAsset = useCallback(
+    async (asset: { readonly assetId: string; readonly displayName?: string; readonly blob?: Blob }) => {
+      if (asset.blob !== undefined) stickerImageCache.rememberBlob(asset.assetId, asset.blob);
+      const objectId = `sticker-${asset.assetId}-${Date.now().toString(36)}`;
+      const clipId = `clip-${objectId}`;
+      const composition = session.timelineProject.compositions.root;
+      if (composition === undefined) return;
+      const track =
+        composition.tracks.find((item) => item.kind === 'video' && item.enabled) ??
+        composition.tracks[0];
+      if (track === undefined) return;
+      const durationUs = 5_000_000;
+      let startUs = 0;
+      const sorted = [...track.clips].sort((a, b) => a.startUs - b.startUs);
+      for (const existing of sorted) {
+        const end = existing.startUs + existing.durationUs;
+        if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
+      }
+      const stickerCount = Object.values(session.visualProject.visualObjects).filter(
+        (item) => item.kind === 'image',
+      ).length;
+      session.dispatchVisualObjects({
+        label: `Add sticker ${asset.displayName ?? asset.assetId}`,
+        commands: [
+          {
+            type: 'image.create',
+            payload: {
+              object: {
+                id: objectId,
+                kind: 'image',
+                assetId: asset.assetId,
+                transform: {
+                  x: 120 + stickerCount * 40,
+                  y: 120 + stickerCount * 40,
+                  scaleX: 1,
+                  scaleY: 1,
+                  rotationDeg: 0,
+                  opacity: 1,
+                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                },
+              },
+            },
+          },
+        ],
+      });
+      session.dispatchTimeline({
+        label: `Place sticker ${asset.displayName ?? asset.assetId}`,
+        commands: [
+          {
+            type: 'timeline.insertClip',
+            payload: {
+              compositionId: composition.id,
+              trackId: track.id,
+              clip: {
+                id: clipId,
+                kind: 'video',
+                assetId: asset.assetId,
+                startUs,
+                durationUs,
+                sourceInUs: 0,
+              },
+            },
+          },
+        ],
+      });
+      session.replaceVisualProject(bindClipToObject(session.visualProject, clipId, objectId));
+      await syncStickerBitmaps();
+      setState((current) => ({ ...current, selectedIds: [clipId] }));
+      setRevision((revision) => revision + 1);
+    },
+    [session, syncStickerBitmaps],
+  );
+
   const setAudioState = useCallback(
     (next: AudioState) => {
       setAudioStateRaw(next);
@@ -888,6 +1014,7 @@ function EditorWorkspace({
     const exportFilename = `joy-media-export-${Date.now()}.mp4`;
     recordExportEntry({ id: entryId, filename: exportFilename, status: 'running', startedAt });
     try {
+      await syncStickerBitmaps();
       const compositionV1 =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
       const baseWidth = compositionV1?.width ?? 1920;
@@ -946,7 +1073,7 @@ function EditorWorkspace({
             width,
             height,
             resolved,
-            renderFrameOptions(session.visualProject),
+            renderFrameOptions(session.visualProject, imageSizesFromCache()),
           ),
           session.visualProject,
         );
@@ -1110,6 +1237,7 @@ function EditorWorkspace({
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
+            for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
             renderer.render(withVideoFrameNode(buildFrame(timeUs), node), bitmaps);
           },
           onProgress: (completed, total) => {
@@ -1169,14 +1297,14 @@ function EditorWorkspace({
     } finally {
       setExporting(false);
     }
-  }, [exportPreset, exporting, recordExportEntry, session]);
+  }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
   const onReady = useCallback((event: DockviewReadyEvent) => {
-    // v3: utilities stack as tabs in one group (`within`). v2 wrongly split each
-    // utility into its own column via repeated `direction: 'right'`.
-    const layoutKey = 'joy-media.dockview.v4';
+    // v5: creative stack (inspector→captions) then utilities; clears prior dock seeds.
+    const layoutKey = 'joy-media.dockview.v5';
     window.localStorage.removeItem('joy-media.dockview.v1');
     window.localStorage.removeItem('joy-media.dockview.v2');
     window.localStorage.removeItem('joy-media.dockview.v3');
+    window.localStorage.removeItem('joy-media.dockview.v4');
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -1210,28 +1338,33 @@ function EditorWorkspace({
     };
 
     if (!restored) {
-      // Adobe-like seed: media | monitor/timeline | one utility tab group.
+      // CapCut-like seed: media | monitor/timeline | creative tabs | utility tabs.
       addPanel('monitor', { inactive: false });
       addPanel('timeline', { position: { referencePanel: 'monitor', direction: 'below' } });
       addPanel('media', { position: { referencePanel: 'monitor', direction: 'left' } });
-      addPanel('captions', { position: { referencePanel: 'monitor', direction: 'right' } });
-      const stackedUtilities = [
-        'inspector',
+      addPanel('inspector', { position: { referencePanel: 'monitor', direction: 'right' } });
+      const creativeStack = [
         'motion',
-        'camera',
-        'audio',
         'effects',
+        'transitions',
         'color',
+        'captions',
+      ] as const;
+      for (const id of creativeStack) {
+        addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
+      }
+      const utilityStack = [
+        'audio',
+        'camera',
         'history',
-        'diagnostics',
-        'jobs',
         'agent',
         'workflows',
+        'jobs',
         'plugins',
-        'transitions',
+        'diagnostics',
       ] as const;
-      for (const id of stackedUtilities) {
-        addPanel(id, { position: { referencePanel: 'captions', direction: 'within' } });
+      for (const id of utilityStack) {
+        addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
       }
       event.api.getPanel('monitor')?.api.setActive();
     } else {
@@ -1255,7 +1388,7 @@ function EditorWorkspace({
     if (context === undefined) throw new Error('editor panel context is unavailable');
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
     if (api.id === 'inspector') {
-      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
       return (
         <InspectorPanel
@@ -1268,7 +1401,7 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'motion') {
-      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
       return (
         <MotionPanel
@@ -1306,7 +1439,7 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'effects') {
-      const objectId = state.selectedIds.flatMap((clipId) => TIMELINE_OBJECT_IDS[clipId] ?? [])[0];
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       return (
         <EffectsPanel
           project={visualProject}
@@ -1404,7 +1537,12 @@ function EditorWorkspace({
         />
       );
     if (api.id === 'media')
-      return <AssetLibraryPanel projectId={controlPlaneProject.controlPlaneProjectId} />;
+      return (
+        <AssetLibraryPanel
+          projectId={controlPlaneProject.controlPlaneProjectId}
+          onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
+        />
+      );
     if (api.id === 'agent') {
       return (
         <AgentPanel
@@ -1524,195 +1662,243 @@ function EditorWorkspace({
           />
           <strong>JOY Media</strong>
         </span>
+        <div className="header-group" role="group" aria-label="Navigation">
+          <button
+            className="icon-button"
+            onClick={onBackToLibrary}
+            aria-label="Back to projects"
+            title="Projects library"
+          >
+            <ProjectsIcon />
+          </button>
+        </div>
+        <div className="header-group" role="group" aria-label="Edit">
+          <button
+            className="icon-button"
+            disabled={!session.canUndo}
+            onClick={undo}
+            aria-label="Undo"
+            title="Undo (Ctrl+Z)"
+          >
+            <UndoIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={!session.canRedo}
+            onClick={redo}
+            aria-label="Redo"
+            title="Redo (Ctrl+Y)"
+          >
+            <RedoIcon />
+          </button>
+        </div>
+        <div className="header-group" role="group" aria-label="Find">
+          <button
+            className="icon-button"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Command palette"
+            title="Command palette (Ctrl+K)"
+          >
+            <CommandIcon />
+          </button>
+        </div>
         <span className="header-spacer" aria-hidden="true" />
-        <button
-          className="icon-button"
-          onClick={onBackToLibrary}
-          aria-label="Back to projects"
-          title="Projects library"
-        >
-          <ProjectsIcon />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!session.canUndo}
-          onClick={undo}
-          aria-label="Undo"
-          title="Undo (Ctrl+Z)"
-        >
-          <UndoIcon />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!session.canRedo}
-          onClick={redo}
-          aria-label="Redo"
-          title="Redo (Ctrl+Y)"
-        >
-          <RedoIcon />
-        </button>
-        <button
-          className="icon-button"
-          onClick={() => setPaletteOpen(true)}
-          aria-label="Command palette"
-          title="Command palette (Ctrl+K)"
-        >
-          <CommandIcon />
-        </button>
-        <div className="preset-icon-group" role="group" aria-label="Export preset">
-          {(
-            [
-              ['social-h264-aac', ExportIcon, 'Social H.264'],
-              ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
-              ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
-              ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
-              ['high-bitrate', HighBitrateIcon, 'High bitrate'],
-            ] as const
-          ).map(([id, Icon, label]) => (
+        <div className="header-group" role="group" aria-label="Deliver">
+          <div className="header-menu">
             <button
-              key={id}
               type="button"
               className="icon-button"
               disabled={exporting}
-              aria-pressed={exportPreset === id}
-              aria-label={label}
-              title={label}
-              data-guide={label}
-              onClick={() => setExportPreset(id)}
+              aria-label="Export preset"
+              aria-expanded={exportPresetOpen}
+              title={`Export preset: ${exportPreset}`}
+              data-guide="Export preset"
+              onClick={() => {
+                setExportPresetOpen((open) => !open);
+                setProcessesOpen(false);
+                setAccountOpen(false);
+              }}
             >
-              <Icon />
-            </button>
-          ))}
-        </div>
-        <button
-          className="icon-button"
-          onClick={handleExport}
-          disabled={exporting}
-          aria-label="Export MP4"
-          title={exporting ? 'Exporting…' : 'Export MP4'}
-          data-guide={exporting ? 'Exporting…' : 'Export MP4'}
-          aria-busy={exporting}
-        >
-          <ExportIcon />
-        </button>
-        <div className="header-menu">
-          <button
-            className="icon-button"
-            aria-label="Recent processes"
-            aria-expanded={processesOpen}
-            title="Recent processes"
-            onClick={() => {
-              setProcessesOpen((open) => !open);
-              setAccountOpen(false);
-            }}
-          >
-            <ListIcon />
-          </button>
-          {processesOpen && (
-            <section className="header-dropdown" aria-label="Recent processes">
-              <h3>Recent processes</h3>
-              {exportHistory.length === 0 ? (
-                <p className="empty-hint">No exports yet. Use Export to encode an MP4.</p>
+              {exportPreset === 'youtube-1080' ? (
+                <YoutubeIcon />
+              ) : exportPreset === 'high-bitrate' ? (
+                <HighBitrateIcon />
+              ) : exportPreset === 'reels-1080' || exportPreset === 'shorts-1080' ? (
+                <ReelsIcon />
               ) : (
-                <ul className="process-list">
-                  {exportHistory.map((entry) => (
-                    <li key={entry.id} className={`process-row process-${entry.status}`}>
-                      <span className="process-dot" aria-hidden="true" />
-                      <span className="process-name" dir="ltr">
-                        {entry.filename}
-                      </span>
-                      <span className="process-meta">
-                        {entry.status === 'completed' && entry.totalBytes !== undefined
-                          ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
-                          : entry.status === 'failed'
-                            ? (entry.error ?? 'failed')
-                            : 'encoding…'}
-                      </span>
-                      {lastExportRef.current?.entryId === entry.id && (
-                        <a
-                          className="icon-button"
-                          href={lastExportRef.current.url}
-                          download={entry.filename}
-                          aria-label={`Download ${entry.filename} again`}
-                          title="Download again"
-                        >
-                          <DownloadIcon />
-                        </a>
-                      )}
+                <ExportIcon />
+              )}
+            </button>
+            {exportPresetOpen && (
+              <section className="header-dropdown" aria-label="Export preset">
+                <h3>Export preset</h3>
+                <ul className="export-preset-list">
+                  {(
+                    [
+                      ['social-h264-aac', ExportIcon, 'Social H.264'],
+                      ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
+                      ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
+                      ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
+                      ['high-bitrate', HighBitrateIcon, 'High bitrate'],
+                    ] as const
+                  ).map(([id, Icon, label]) => (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        className="icon-button icon-button-labeled"
+                        disabled={exporting}
+                        aria-pressed={exportPreset === id}
+                        aria-label={label}
+                        title={label}
+                        data-guide={label}
+                        onClick={() => {
+                          setExportPreset(id);
+                          setExportPresetOpen(false);
+                        }}
+                      >
+                        <Icon />
+                        {label}
+                      </button>
                     </li>
                   ))}
                 </ul>
-              )}
-            </section>
-          )}
-        </div>
-        <div className="header-menu">
+              </section>
+            )}
+          </div>
           <button
             className="icon-button"
-            aria-label="JOY account"
-            aria-expanded={accountOpen}
-            title={
-              joySession.kind === 'ready'
-                ? `Signed in · JOY account ${joySession.subject ?? ''}`
-                : joySession.kind === 'no-access'
-                  ? 'Signed in, JOY Media access not enabled'
-                  : joySession.kind === 'signed-out'
-                    ? 'Signed out'
-                    : 'JOY account'
-            }
-            onClick={() => {
-              setAccountOpen((open) => !open);
-              setProcessesOpen(false);
-              refreshJoySession();
-            }}
+            onClick={handleExport}
+            disabled={exporting}
+            aria-label="Export MP4"
+            title={exporting ? 'Exporting…' : 'Export MP4'}
+            data-guide={exporting ? 'Exporting…' : 'Export MP4'}
+            aria-busy={exporting}
           >
-            <UserIcon />
-            <span
-              className={`session-dot session-${joySession.kind}`}
-              aria-hidden="true"
-            />
+            <ExportIcon />
           </button>
-          {accountOpen && (
-            <section className="header-dropdown" aria-label="JOY account">
-              <h3>JOY account</h3>
-              {joySession.kind === 'ready' && (
-                <>
-                  <p>Signed in{joySession.subject !== undefined && ` · account ${joySession.subject}`}</p>
-                  <button
-                    className="icon-button icon-button-labeled"
-                    title="Sign out of the shared JOY session"
-                    onClick={() => void signOut()}
-                  >
-                    <LogoutIcon />
-                    Sign out
-                  </button>
-                </>
-              )}
-              {joySession.kind === 'no-access' && (
-                <p className="empty-hint">{joySession.message}</p>
-              )}
-              {joySession.kind === 'signed-out' && (
-                <>
-                  <p className="empty-hint">
-                    Not signed in (expected without a JOY session cookie). Sign in with your JOY
-                    account; this editor uses the shared JOY session. Live Whisper/TTS APIs require
-                    an entitled signed-in session.
-                  </p>
-                  <a
-                    className="icon-button icon-button-labeled"
-                    href={JOY_LOGIN_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Opens joyteam.ir sign-in in a new tab; reopen this menu afterwards"
-                  >
-                    <UserIcon />
-                    Sign in at joyteam.ir
-                  </a>
-                </>
-              )}
-              {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
-            </section>
-          )}
+          <div className="header-menu">
+            <button
+              className="icon-button"
+              aria-label="Recent processes"
+              aria-expanded={processesOpen}
+              title="Recent processes"
+              onClick={() => {
+                setProcessesOpen((open) => !open);
+                setAccountOpen(false);
+                setExportPresetOpen(false);
+              }}
+            >
+              <ListIcon />
+            </button>
+            {processesOpen && (
+              <section className="header-dropdown" aria-label="Recent processes">
+                <h3>Recent processes</h3>
+                {exportHistory.length === 0 ? (
+                  <p className="empty-hint">No exports yet. Use Export to encode an MP4.</p>
+                ) : (
+                  <ul className="process-list">
+                    {exportHistory.map((entry) => (
+                      <li key={entry.id} className={`process-row process-${entry.status}`}>
+                        <span className="process-dot" aria-hidden="true" />
+                        <span className="process-name" dir="ltr">
+                          {entry.filename}
+                        </span>
+                        <span className="process-meta">
+                          {entry.status === 'completed' && entry.totalBytes !== undefined
+                            ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
+                            : entry.status === 'failed'
+                              ? (entry.error ?? 'failed')
+                              : 'encoding…'}
+                        </span>
+                        {lastExportRef.current?.entryId === entry.id && (
+                          <a
+                            className="icon-button"
+                            href={lastExportRef.current.url}
+                            download={entry.filename}
+                            aria-label={`Download ${entry.filename} again`}
+                            title="Download again"
+                          >
+                            <DownloadIcon />
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+        </div>
+        <div className="header-group" role="group" aria-label="Account">
+          <div className="header-menu">
+            <button
+              className="icon-button"
+              aria-label="JOY account"
+              aria-expanded={accountOpen}
+              title={
+                joySession.kind === 'ready'
+                  ? `Signed in · JOY account ${joySession.subject ?? ''}`
+                  : joySession.kind === 'no-access'
+                    ? 'Signed in, JOY Media access not enabled'
+                    : joySession.kind === 'signed-out'
+                      ? 'Signed out'
+                      : 'JOY account'
+              }
+              onClick={() => {
+                setAccountOpen((open) => !open);
+                setProcessesOpen(false);
+                setExportPresetOpen(false);
+                refreshJoySession();
+              }}
+            >
+              <UserIcon />
+              <span
+                className={`session-dot session-${joySession.kind}`}
+                aria-hidden="true"
+              />
+            </button>
+            {accountOpen && (
+              <section className="header-dropdown" aria-label="JOY account">
+                <h3>JOY account</h3>
+                {joySession.kind === 'ready' && (
+                  <>
+                    <p>Signed in{joySession.subject !== undefined && ` · account ${joySession.subject}`}</p>
+                    <button
+                      className="icon-button icon-button-labeled"
+                      title="Sign out of the shared JOY session"
+                      onClick={() => void signOut()}
+                    >
+                      <LogoutIcon />
+                      Sign out
+                    </button>
+                  </>
+                )}
+                {joySession.kind === 'no-access' && (
+                  <p className="empty-hint">{joySession.message}</p>
+                )}
+                {joySession.kind === 'signed-out' && (
+                  <>
+                    <p className="empty-hint">
+                      Not signed in (expected without a JOY session cookie). Sign in with your JOY
+                      account; this editor uses the shared JOY session. Live Whisper/TTS APIs require
+                      an entitled signed-in session.
+                    </p>
+                    <a
+                      className="icon-button icon-button-labeled"
+                      href={JOY_LOGIN_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Opens joyteam.ir sign-in in a new tab; reopen this menu afterwards"
+                    >
+                      <UserIcon />
+                      Sign in at joyteam.ir
+                    </a>
+                  </>
+                )}
+                {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
+              </section>
+            )}
+          </div>
         </div>
       </header>
       {paletteOpen && (
@@ -1754,6 +1940,8 @@ function EditorWorkspace({
           updateVisualProperty,
           dispatchProject,
           replaceVisualProject,
+          addStickerFromAsset,
+          stickerTick,
           audioState,
           setAudioState,
           transcribe,
@@ -1777,13 +1965,29 @@ function EditorWorkspace({
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, previewVideoFrame, visualProject } = context;
+  const { state, previewVideoFrame, visualProject, stickerTick } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const mattes = readImageMatteMap(visualProject);
+    void Promise.all(
+      Object.values(visualProject.visualObjects).map(async (object) => {
+        if (object.kind !== 'image' || object.assetId === undefined) return;
+        await stickerImageCache.syncObject({
+          objectId: object.id,
+          assetId: object.assetId,
+          ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
+          crop: object.transform.crop,
+          loadBlob: loadStickerAssetBlob,
+        });
+      }),
+    ).then(() => setSceneTick((tick) => tick + 1));
+  }, [visualProject, stickerTick]);
 
   paintRef.current = (): void => {
       const renderer = rendererRef.current;
@@ -1809,7 +2013,7 @@ function MonitorPanel() {
           composition.width,
           composition.height,
           resolved,
-          renderFrameOptions(visualProject),
+          renderFrameOptions(visualProject, imageSizesFromCache()),
         ),
         visualProject,
       );
@@ -1823,6 +2027,9 @@ function MonitorPanel() {
         : [[previewVideoFrame.node.id, previewVideoFrame.bitmap] as const],
     );
     for (const [id, bitmap] of sceneCacheRef.current.bitmaps()) {
+      videoBitmaps.set(id, bitmap);
+    }
+    for (const [id, bitmap] of stickerImageCache.bitmaps()) {
       videoBitmaps.set(id, bitmap);
     }
     renderer.render(frame, videoBitmaps);

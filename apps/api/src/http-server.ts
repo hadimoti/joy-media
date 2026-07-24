@@ -465,12 +465,21 @@ async function route(
               decodeURIComponent(jobMatch[1]!),
               requiredString(body, 'assetId'),
             )
-          : await options.controlPlane.enqueue(
-              actor,
-              requiredString(body, 'id'),
-              decodeURIComponent(jobMatch[1]!),
-              type,
-            ),
+          : type === 'image.comfy'
+            ? await options.controlPlane.enqueue(
+                actor,
+                requiredString(body, 'id'),
+                decodeURIComponent(jobMatch[1]!),
+                type,
+                Date.now(),
+                optionalString(body, 'assetId'),
+              )
+            : await options.controlPlane.enqueue(
+                actor,
+                requiredString(body, 'id'),
+                decodeURIComponent(jobMatch[1]!),
+                type,
+              ),
     });
     return;
   }
@@ -544,6 +553,14 @@ async function readBytes(request: IncomingMessage, maximumBytes: number): Promis
 
 function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
+  if (typeof value !== 'string' || value.length === 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
+  return value;
+}
+
+function optionalString(body: Record<string, unknown>, field: string): string | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
   if (typeof value !== 'string' || value.length === 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
   return value;

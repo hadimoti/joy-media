@@ -36,6 +36,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'camera',
     'audio',
     'effects',
+    'transitions',
     'color',
     'history',
     'diagnostics',

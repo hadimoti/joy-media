@@ -98,6 +98,15 @@ export type VisualObjectCommand =
       readonly type: 'htmlScene.remove';
       readonly payload: { readonly objectId: string };
     }
+  | {
+      /** Adds a `kind: 'image'` sticker / overlay object (P15). */
+      readonly type: 'image.create';
+      readonly payload: { readonly object: VisualObjectV1 };
+    }
+  | {
+      readonly type: 'image.remove';
+      readonly payload: { readonly objectId: string };
+    }
   | CaptionCommand
   | MotionCommand;
 export interface VisualObjectApplyResult {
@@ -273,6 +282,47 @@ export function applyVisualObjectProjectCommand(
     return {
       project: { ...project, visualObjects: remaining },
       inverse: { type: 'htmlScene.create', payload: { object: scene } },
+    };
+  }
+  if (command.type === 'image.create') {
+    const { object } = command.payload;
+    if (object.kind !== 'image')
+      throw new RangeError('image.create requires an image-kind object');
+    if (typeof object.assetId !== 'string' || object.assetId.length === 0)
+      throw new RangeError('image.create requires assetId');
+    if (project.visualObjects[object.id] !== undefined)
+      throw new RangeError(`visual object "${object.id}" already exists`);
+    return {
+      project: {
+        ...project,
+        visualObjects: { ...project.visualObjects, [object.id]: object },
+        assets: {
+          ...project.assets,
+          [object.assetId]: project.assets[object.assetId] ?? {
+            id: object.assetId,
+            kind: 'image',
+            displayName: object.assetId,
+          },
+        },
+      },
+      inverse: { type: 'image.remove', payload: { objectId: object.id } },
+    };
+  }
+  if (command.type === 'image.remove') {
+    const { objectId } = command.payload;
+    const image = project.visualObjects[objectId];
+    if (image === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
+    if (image.kind !== 'image') throw new RangeError(`object "${objectId}" is not an image`);
+    const parentOf = Object.values(project.visualObjects).find(
+      (candidate) => candidate.parentId === objectId,
+    );
+    if (parentOf !== undefined)
+      throw new RangeError(`image "${objectId}" is still the parent of "${parentOf.id}"`);
+    const remaining = { ...project.visualObjects };
+    delete remaining[objectId];
+    return {
+      project: { ...project, visualObjects: remaining },
+      inverse: { type: 'image.create', payload: { object: image } },
     };
   }
   const object = project.visualObjects[command.payload.objectId];
