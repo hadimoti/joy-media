@@ -54,6 +54,10 @@ export class BrowserProjectStore<P, T> implements ProjectStore<P, T> {
     return this.read().projects[projectId]?.transactions ?? [];
   }
 
+  listProjectIds(): readonly string[] {
+    return Object.keys(this.read().projects).sort();
+  }
+
   private read(): BrowserDatabase<P, T> {
     const serialized = this.storage.getItem(this.storageKey);
     if (serialized === null) return { projects: {} };

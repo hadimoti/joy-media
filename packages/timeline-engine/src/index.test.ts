@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampPixelsPerSecond,
+  clipRateLabel,
   commitMove,
+  fitPixelsPerSecond,
+  placeDuplicateAfter,
   pixelToTime,
   previewMove,
   rippleDelete,
@@ -61,5 +65,40 @@ describe('timeline coordinates', () => {
     ];
     expect(virtualTracks(tracks, 20, 20).map((track) => track.id)).toEqual(['a', 'b', 'c']);
     expect(toggleTrackFlag(tracks[0]!, 'muted').muted).toBe(true);
+  });
+  it('fits zoom to width and places duplicates after gaps', () => {
+    expect(fitPixelsPerSecond(10_000_000, 224, 24)).toBe(20);
+    expect(clampPixelsPerSecond(1000)).toBe(200);
+    expect(
+      placeDuplicateAfter(
+        { id: 'a', startUs: 0, durationUs: 10 },
+        [
+          { id: 'a', startUs: 0, durationUs: 10 },
+          { id: 'b', startUs: 10, durationUs: 5 },
+        ],
+      ),
+    ).toBe(15);
+    expect(
+      clipRateLabel({
+        kind: 'video',
+        id: 'x',
+        startUs: 0,
+        durationUs: 1,
+        assetId: 'a',
+        sourceInUs: 0,
+        playbackRate: 2,
+      }),
+    ).toBe('2×');
+    expect(
+      clipRateLabel({
+        kind: 'video',
+        id: 'x',
+        startUs: 0,
+        durationUs: 1,
+        assetId: 'a',
+        sourceInUs: 0,
+        playbackRate: 0,
+      }),
+    ).toBe('❄');
   });
 });

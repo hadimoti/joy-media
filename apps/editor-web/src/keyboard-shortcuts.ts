@@ -8,6 +8,7 @@ export type ShortcutAction =
   | 'palette.close'
   | 'clip.split'
   | 'clip.delete'
+  | 'clip.duplicate'
   | 'playhead.back'
   | 'playhead.forward'
   | 'playhead.backFine'
@@ -40,6 +41,7 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
     if (key === 'z') return event.shiftKey ? 'history.redo' : 'history.undo';
     if (key === 'y' && !event.shiftKey) return 'history.redo';
     if (key === 'k' && !event.shiftKey) return 'palette.toggle';
+    if (key === 'd' && !event.shiftKey) return 'clip.duplicate';
     return undefined;
   }
   if (event.altKey) return undefined;

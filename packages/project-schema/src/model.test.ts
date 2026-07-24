@@ -59,6 +59,26 @@ describe('validateSpikeProject', () => {
     expect(codes).toContain('PROJECT_SCHEMA_BAD_CLIP_RANGE');
   });
 
+  it('accepts freeze (0) and in-range playback rates', () => {
+    const project = baseProject();
+    const mutated: SpikeProject = JSON.parse(JSON.stringify(project));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mutated.compositions['comp-root']!.tracks[0]!.clips[0] as any).playbackRate = 0;
+    expect(validateSpikeProject(mutated)).toEqual([]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mutated.compositions['comp-root']!.tracks[0]!.clips[0] as any).playbackRate = 2;
+    expect(validateSpikeProject(mutated)).toEqual([]);
+  });
+
+  it('flags out-of-range playback rates', () => {
+    const project = baseProject();
+    const mutated: SpikeProject = JSON.parse(JSON.stringify(project));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mutated.compositions['comp-root']!.tracks[0]!.clips[0] as any).playbackRate = 0.05;
+    const codes = validateSpikeProject(mutated).map((d) => d.code);
+    expect(codes).toContain('PROJECT_SCHEMA_BAD_PLAYBACK_RATE');
+  });
+
   it('flags references to unknown compositions', () => {
     const project = baseProject();
     const mutated: SpikeProject = JSON.parse(JSON.stringify(project));

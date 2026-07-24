@@ -54,18 +54,30 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 4. Interaction standards
 
-- **Keyboard**: all global shortcuts live in [keyboard-shortcuts.ts](apps/editor-web/src/keyboard-shortcuts.ts) (pure resolver + tests). Space play/pause · S split · Del/Backspace ripple delete · Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+K palette · Esc close · ←/→ seek 1s (Shift = 100 ms) · Home/End. New shortcuts are added to the resolver (with a test) — never as ad-hoc listeners in panels. Shortcuts never fire while typing (`isEditableTarget`).
+- **Keyboard**: all global shortcuts live in [keyboard-shortcuts.ts](apps/editor-web/src/keyboard-shortcuts.ts) (pure resolver + tests). Space play/pause · S split · Del/Backspace ripple delete · **Ctrl/Cmd+D duplicate** · Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+K palette · Esc close · ←/→ seek 1s (Shift = 100 ms) · Home/End. New shortcuts are added to the resolver (with a test) — never as ad-hoc listeners in panels. Shortcuts never fire while typing (`isEditableTarget`).
 - **Drag**: pointer events (`setPointerCapture`), 4 px click-vs-drag threshold, 100 ms snap grid, invalid drops snap back silently. `touch-action: none` on draggables.
 - **Selection**: amber 2px outline (`aria-pressed='true'`), single accent everywhere.
 - Async/busy buttons set `aria-busy` and a disabled state; status text goes in an adjacent `aria-live="polite"` element, not inside the button.
 
-## 4b. Header chrome
+## 4a. Project library gate (CapCut-like entry)
 
-- The header owns global state surfaces: undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)).
+- **First paint is the projects library**, not the Dockview editor. [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) lists catalog entries; **Open** / **New project** set the active id and mount [`EditorWorkspace`](apps/editor-web/src/App.tsx). Header **Projects** (`ProjectsIcon`) clears active id and returns to the library.
+- Catalog keys: `joy-media.project-catalog.v1` (titles + paired timeline/visual ids), `joy-media.active-project.v1`. Creative docs remain in timeline/visual persistence logs; blank projects use one shared id for both slices ([`project-factory.ts`](apps/editor-web/src/project-factory.ts)).
+- Library chrome uses the same neutral-gray tokens as the editor (no purple themes, no emoji decoration). Cards are interactive surfaces (open on click); delete is an icon-only hover control.
+
+## 4b. Timeline NLE strip
+
+- Timeline panel fills Dockview height (`.timeline-panel` flex column; tracks scroll; zoom bar pinned). Zoom uses `TimelineViewport.pixelsPerSecond` (5–200) with fit-to-width via `ResizeObserver` and Ctrl/Cmd+wheel.
+- Clip actions: icon row (split / duplicate / ripple delete) + **right-click context drawer** ([`TimelineContextMenu.tsx`](apps/editor-web/src/TimelineContextMenu.tsx)) for select, split, duplicate, delete, speed presets (`0.5×…2×`), freeze frame (1s hold). No second text-heavy toolbar.
+- Durable ops: `timeline.duplicateClip`, `timeline.setClipRate`, `timeline.freezeFrame` (+ `restoreTrackClips` undo). Video clips may carry `playbackRate` (`0` = freeze, else `0.1…8`; omit = 1×). Non-1× / freeze show a compact clip badge.
+
+## 4c. Header chrome
+
+- The header owns global state surfaces: **Projects** (back to library), undo/redo, command palette, export, then at the inline end a **processes menu** (`ListIcon`, export history from [export-history.ts](apps/editor-web/src/export-history.ts)) and the **account menu** (`UserIcon` + status dot: green ready / amber no-access / red signed-out, session from [identity.ts](apps/editor-web/src/identity.ts)). Status line shows the active project title.
 - Long-running encodes show a 3px amber `.export-progress` bar pinned to the header's top edge with `role="progressbar"`. Status text lives in a centered `.export-toast` pinned under that bar (absolute, not in the icon row); the toast clears as soon as the file has downloaded (errors linger briefly). Durable history stays in the processes menu.
 - Dropdowns use `.header-menu` > `.header-dropdown` (bg-raised, border, 0.4rem radius, shadow, `inset-inline-end: 0`); Escape closes them via the shortcut resolver.
 
-## 4c. Bidirectional text (Persian-first)
+## 4d. Bidirectional text (Persian-first)
 
 Text fields that hold user content (`input[type=text]`, untyped inputs, search, textarea) carry `unicode-bidi: plaintext` so each field follows its own content direction — Persian is right-aligned, Latin filenames stay left-aligned, no global LTR forcing. Filenames/ids rendered in UI chrome get an explicit `dir="ltr"`. Explainers and empty states use `.empty-hint` (centered, muted, line-height 1.5); never leave a bare left-aligned paragraph floating in a panel.
 

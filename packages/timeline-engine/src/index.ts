@@ -1,5 +1,10 @@
-import type { TimeUs } from '@joy-media/project-schema';
+import type { Clip, TimeUs } from '@joy-media/project-schema';
 import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
+
+export const MIN_PIXELS_PER_SECOND = 5;
+export const MAX_PIXELS_PER_SECOND = 200;
+export const DEFAULT_FREEZE_HOLD_US = 1_000_000;
+
 export interface TimelineViewport {
   readonly originUs: TimeUs;
   readonly pixelsPerSecond: number;
@@ -13,6 +18,47 @@ export function pixelToTime(pixel: number, viewport: TimelineViewport): TimeUs {
     Math.round(viewport.originUs + (pixel / viewport.pixelsPerSecond) * 1_000_000),
   );
 }
+
+/** CapCut-style fit: map full composition duration into the visible lane width. */
+export function fitPixelsPerSecond(
+  durationUs: number,
+  widthPx: number,
+  paddingPx = 24,
+): number {
+  const usable = Math.max(1, widthPx - paddingPx);
+  const seconds = Math.max(1 / 1_000_000, durationUs / 1_000_000);
+  const fitted = usable / seconds;
+  return Math.min(MAX_PIXELS_PER_SECOND, Math.max(MIN_PIXELS_PER_SECOND, fitted));
+}
+
+export function clampPixelsPerSecond(value: number): number {
+  if (!Number.isFinite(value)) return MIN_PIXELS_PER_SECOND;
+  return Math.min(MAX_PIXELS_PER_SECOND, Math.max(MIN_PIXELS_PER_SECOND, value));
+}
+
+export interface TimedClip {
+  readonly id: string;
+  readonly startUs: TimeUs;
+  readonly durationUs: TimeUs;
+}
+
+/** Earliest start ≥ clip end that fits `clip.durationUs` without overlapping siblings. */
+export function placeDuplicateAfter(
+  clip: TimedClip,
+  trackClips: readonly TimedClip[],
+): TimeUs {
+  let candidate = clip.startUs + clip.durationUs;
+  const others = [...trackClips]
+    .filter((item) => item.id !== clip.id)
+    .sort((a, b) => a.startUs - b.startUs);
+  for (const other of others) {
+    const otherEnd = other.startUs + other.durationUs;
+    if (candidate + clip.durationUs <= other.startUs) break;
+    if (candidate < otherEnd) candidate = otherEnd;
+  }
+  return candidate;
+}
+
 /** Returns the closest magnetic candidate inside the screen-space threshold. */
 export function snapTime(
   proposedUs: TimeUs,
@@ -108,11 +154,6 @@ export function splitCommand(
     payload: { compositionId, trackId, clipId, atUs, newClipId },
   };
 }
-export interface TimedClip {
-  readonly id: string;
-  readonly startUs: TimeUs;
-  readonly durationUs: TimeUs;
-}
 export function rippleDelete(
   compositionId: string,
   trackId: string,
@@ -139,6 +180,48 @@ export function rippleDelete(
   return { label: 'Ripple delete', commands };
 }
 
+export function duplicateClipCommand(
+  compositionId: string,
+  trackId: string,
+  clip: TimedClip,
+  trackClips: readonly TimedClip[],
+  newClipId: string,
+): SpikeCommand {
+  return {
+    type: 'timeline.duplicateClip',
+    payload: {
+      compositionId,
+      trackId,
+      clipId: clip.id,
+      newClipId,
+      newStartUs: placeDuplicateAfter(clip, trackClips),
+    },
+  };
+}
+
+export function freezeFrameCommand(
+  compositionId: string,
+  trackId: string,
+  clipId: string,
+  atUs: TimeUs,
+  freezeClipId: string,
+  rightClipId: string,
+  holdUs: TimeUs = DEFAULT_FREEZE_HOLD_US,
+): SpikeCommand {
+  return {
+    type: 'timeline.freezeFrame',
+    payload: {
+      compositionId,
+      trackId,
+      clipId,
+      atUs,
+      holdUs,
+      freezeClipId,
+      rightClipId,
+    },
+  };
+}
+
 export interface TimelineTrackView {
   readonly id: string;
   readonly heightPx: number;
@@ -163,4 +246,14 @@ export function toggleTrackFlag(
   flag: 'locked' | 'muted' | 'solo',
 ): TimelineTrackView {
   return { ...track, [flag]: !track[flag] };
+}
+
+/** Clip rate badge label for the timeline UI (`2×`; freeze uses a snowflake). */
+export function clipRateLabel(clip: Clip): string | undefined {
+  if (clip.kind !== 'video') return undefined;
+  const rate = clip.playbackRate;
+  if (rate === undefined || rate === 1) return undefined;
+  if (rate === 0) return '❄';
+  const rounded = Number.isInteger(rate) ? String(rate) : rate.toFixed(2).replace(/\.?0+$/, '');
+  return `${rounded}×`;
 }

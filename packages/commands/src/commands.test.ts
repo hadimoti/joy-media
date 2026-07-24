@@ -45,10 +45,14 @@ describe('applyCommand', () => {
   it('publishes every supported command through the registry', () => {
     expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
       'property.setTrackEnabled',
+      'timeline.duplicateClip',
+      'timeline.freezeFrame',
       'timeline.insertClip',
       'timeline.joinClips',
       'timeline.moveClip',
       'timeline.removeClip',
+      'timeline.restoreTrackClips',
+      'timeline.setClipRate',
       'timeline.splitClip',
       'timeline.trimClipEnd',
       'timeline.trimClipStart',
@@ -303,5 +307,80 @@ describe('applyCommand', () => {
     };
     const revived = JSON.parse(JSON.stringify(command)) as SpikeCommand;
     expect(applyCommand(project, revived).project).toEqual(applyCommand(project, command).project);
+  });
+
+  it('duplicates a clip immediately after the original and inverts to remove', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.duplicateClip',
+      payload: { ...TARGET, clipId: 'clip-a', newClipId: 'clip-a-copy' },
+    });
+    expect(clipsOf(next)).toEqual([
+      { id: 'clip-a', startUs: 0, durationUs: 2 * SECOND_US },
+      { id: 'clip-a-copy', startUs: 2 * SECOND_US, durationUs: 2 * SECOND_US },
+    ]);
+    expect(inverse.type).toBe('timeline.removeClip');
+    expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('rejects duplicate when the landing range overlaps', () => {
+    const project = baseProject();
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.duplicateClip',
+          payload: { ...TARGET, clipId: 'clip-a', newClipId: 'clip-a-copy' },
+        }),
+      'COMMAND_VALIDATION_OVERLAP',
+    );
+  });
+
+  it('sets clip rate and preserves source range by rescaling duration', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setClipRate',
+      payload: { ...TARGET, clipId: 'clip-a', playbackRate: 2 },
+    });
+    const clip = next.compositions['root']!.tracks[0]!.clips[0]!;
+    expect(clip.kind).toBe('video');
+    if (clip.kind !== 'video') throw new Error('expected video');
+    expect(clip.playbackRate).toBe(2);
+    expect(clip.durationUs).toBe(SECOND_US);
+    const restored = applyCommand(next, inverse).project;
+    const back = restored.compositions['root']!.tracks[0]!.clips[0]!;
+    expect(back.durationUs).toBe(2 * SECOND_US);
+    expect(back.kind === 'video' && back.playbackRate === undefined).toBe(true);
+  });
+
+  it('freezes at playhead, ripples the right half, and restores on undo', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+      makeVideoClip('clip-b', 3 * SECOND_US, SECOND_US),
+    ]);
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.freezeFrame',
+      payload: {
+        ...TARGET,
+        clipId: 'clip-a',
+        atUs: SECOND_US,
+        holdUs: SECOND_US,
+        freezeClipId: 'clip-a-freeze',
+        rightClipId: 'clip-a-right',
+      },
+    });
+    expect(clipsOf(next)).toEqual([
+      { id: 'clip-a', startUs: 0, durationUs: SECOND_US },
+      { id: 'clip-a-freeze', startUs: SECOND_US, durationUs: SECOND_US },
+      { id: 'clip-a-right', startUs: 2 * SECOND_US, durationUs: SECOND_US },
+      { id: 'clip-b', startUs: 4 * SECOND_US, durationUs: SECOND_US },
+    ]);
+    const freeze = next.compositions['root']!.tracks[0]!.clips.find((c) => c.id === 'clip-a-freeze');
+    expect(freeze?.kind === 'video' && freeze.playbackRate === 0).toBe(true);
+    expect(inverse.type).toBe('timeline.restoreTrackClips');
+    expect(applyCommand(next, inverse).project).toEqual(project);
   });
 });

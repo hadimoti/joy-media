@@ -3,6 +3,7 @@
 import type { CompositionId, ProjectDiagnostic, TrackId } from './model.js';
 import type { Rational, TimeUs } from './time.js';
 import { clipTimeRange, rational } from './time.js';
+import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
 
 export interface JoyProjectV1 {
   readonly schemaVersion: 1;
@@ -180,6 +181,8 @@ export interface VideoClipV1 extends ClipV1Base {
   readonly kind: 'video';
   readonly assetId: string;
   readonly sourceInUs: TimeUs;
+  /** Optional; omit = 1×. `0` = freeze/hold. Otherwise `0.1…8`. */
+  readonly playbackRate?: number;
 }
 
 export interface CompositionClipV1 extends ClipV1Base {
@@ -932,6 +935,19 @@ function validateTrack(
             clipPath,
           ),
         );
+    }
+    if (
+      clip.kind === 'video' &&
+      clip.playbackRate !== undefined &&
+      (typeof clip.playbackRate !== 'number' || !isValidPlaybackRate(clip.playbackRate))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CLIP',
+          `playbackRate must be 0 (freeze) or in [${MIN_PLAYBACK_RATE}, ${MAX_PLAYBACK_RATE}]`,
+          `${path}.${value.id}.clips.${clip.id}`,
+        ),
+      );
     }
   }
 }

@@ -36,7 +36,13 @@ export type {
   CompositionClip,
   ProjectDiagnostic,
 } from './model.js';
-export { validateSpikeProject } from './model.js';
+export {
+  validateSpikeProject,
+  normalizePlaybackRate,
+  isValidPlaybackRate,
+  MIN_PLAYBACK_RATE,
+  MAX_PLAYBACK_RATE,
+} from './model.js';
 
 export type {
   JoyProjectV1,

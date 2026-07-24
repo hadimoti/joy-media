@@ -65,3 +65,12 @@ These four decisions unblock WP-16 (agent → workflow recorder). Each is **DEFA
 | D-W24-1 | Where do Comfy / ML denoise GPU jobs run? | DEFAULT | **Owner PC local Worker** advertising `image.comfy` / `audio.ml-denoise` (ADR-0018). No VPS GPU / no `JOY_MEDIA_COMFYUI_URL` on the API host. Spectral `afftdn` + Whisper + edge-tts remain on VPS CPU. |
 
 See [`WP-23-live-provider-residuals.md`](WP-23-live-provider-residuals.md).
+
+## Editor entry + timeline NLE decisions (2026-07-24)
+
+| # | Question | Status | Decision |
+| --- | --- | --- | --- |
+| D-UI-LIBRARY | How does the user enter the editor? | DEFAULT | **CapCut-like Projects library first.** List/open/create via local catalog (`joy-media.project-catalog.v1` + active id). Dockview editor mounts only after a project is chosen. Header Projects icon returns to the library. Sample seed project registered on first catalog write. |
+| D-UI-TIMELINE-NLE | What timeline editing affordances ship? | DEFAULT | **Icon + right-click drawer NLE:** zoom/fit, select, drag-move, split, duplicate (Mod+D), ripple delete, speed presets (`setClipRate`, CapCut-like preserve source range), freeze frame (1s hold). `VideoClip.playbackRate` (`0` freeze / `0.1…8`). No second text-heavy toolbar; no cross-track DnD in this pass. Playback consuming rate may lag schema. |
+
+Codified in [`DESIGN.md`](../DESIGN.md) §§4a–4b.

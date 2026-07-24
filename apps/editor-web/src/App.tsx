@@ -14,7 +14,7 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
-import { rippleDelete, toggleSelection } from '@joy-media/timeline-engine';
+import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
@@ -25,6 +25,7 @@ import type {
   VideoClip,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import { buildRenderFrameIR, type ResolvedObject } from '@joy-media/visual-object-renderer';
@@ -39,10 +40,19 @@ import {
 } from '@joy-media/renderer-pixi/browser-export';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
-import { INITIAL_EDITOR_PROJECT, TIMELINE_OBJECT_IDS } from './editor-project.js';
+import { TIMELINE_OBJECT_IDS } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
-import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { TimelinePanel } from './TimelinePanel.js';
+import { ProjectLibrary } from './ProjectLibrary.js';
+import {
+  clearActiveProjectId,
+  getCatalogProject,
+  loadActiveProjectId,
+  saveActiveProjectId,
+  upsertCatalogProject,
+  type ProjectCatalogEntry,
+} from './project-catalog.js';
+import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
@@ -70,6 +80,7 @@ import {
   ExportIcon,
   ListIcon,
   LogoutIcon,
+  ProjectsIcon,
   RedoIcon,
   UndoIcon,
   UserIcon,
@@ -131,6 +142,20 @@ function videoClipSpec(clip: VideoClip): VideoClipSpec {
     opacity: 1,
     zIndex: 0,
   };
+}
+
+/** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
+function sourceTimeForPlayhead(clip: VideoClip, playheadUs: number): number {
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) return clip.sourceInUs;
+  return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
+}
+
+/** Source media time → composition playhead (freeze holds last mapped start). */
+function playheadForSourceTime(clip: VideoClip, sourceTimeUs: number, freezePlayheadUs: number): number {
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) return freezePlayheadUs;
+  return clip.startUs + (sourceTimeUs - clip.sourceInUs) / rate;
 }
 
 function loadDetachedVideo(video: HTMLVideoElement, sourceUrl: string): Promise<void> {
@@ -220,6 +245,79 @@ interface EditorPanelContextValue {
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
 export function App() {
+  const storage = window.localStorage;
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    const id = loadActiveProjectId(storage);
+    if (id === null) return null;
+    if (getCatalogProject(storage, id) === undefined) {
+      clearActiveProjectId(storage);
+      return null;
+    }
+    return id;
+  });
+
+  const openProject = useCallback(
+    (entry: ProjectCatalogEntry) => {
+      const now = new Date().toISOString();
+      upsertCatalogProject(storage, { ...entry, updatedAt: now });
+      saveActiveProjectId(storage, entry.id);
+      setActiveProjectId(entry.id);
+    },
+    [storage],
+  );
+
+  const createProject = useCallback(
+    (title: string) => {
+      const id =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `project-${Date.now()}`;
+      const now = new Date().toISOString();
+      const seeds = createBlankProjectDocuments(id, title, now);
+      // Materialize durable empty docs via recover-or-initialize.
+      new EditorSession(storage, seeds.timeline, seeds.visual);
+      const entry: ProjectCatalogEntry = {
+        id,
+        title,
+        createdAt: now,
+        updatedAt: now,
+        timelineProjectId: id,
+        visualProjectId: id,
+      };
+      upsertCatalogProject(storage, entry);
+      saveActiveProjectId(storage, id);
+      setActiveProjectId(id);
+    },
+    [storage],
+  );
+
+  const backToLibrary = useCallback(() => {
+    clearActiveProjectId(storage);
+    setActiveProjectId(null);
+  }, [storage]);
+
+  if (activeProjectId === null) {
+    return (
+      <ProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />
+    );
+  }
+
+  return (
+    <EditorWorkspace
+      key={activeProjectId}
+      projectId={activeProjectId}
+      onBackToLibrary={backToLibrary}
+    />
+  );
+}
+
+function EditorWorkspace({
+  projectId,
+  onBackToLibrary,
+}: {
+  readonly projectId: string;
+  readonly onBackToLibrary: () => void;
+}) {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -252,12 +350,12 @@ export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
-  if (sessionRef.current === null)
-    sessionRef.current = new EditorSession(
-      window.localStorage,
-      buildReferenceSpikeProject(),
-      INITIAL_EDITOR_PROJECT,
-    );
+  if (sessionRef.current === null) {
+    const entry = getCatalogProject(window.localStorage, projectId);
+    if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
+    const seeds = seedsForCatalogEntry(entry);
+    sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
+  }
   const session = sessionRef.current;
   const controlPlaneProject =
     controlPlaneProjectRef.current ??
@@ -279,6 +377,7 @@ export function App() {
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
+  const freezeWallStartRef = useRef<{ wallMs: number; playheadUs: number } | undefined>(undefined);
   const playbackFrameRef = useRef<number | undefined>(undefined);
 
   const syncMediaToPlayhead = useCallback(
@@ -315,11 +414,27 @@ export function App() {
           video.addEventListener('error', onError, { once: true });
         });
       }
-      const sourceTimeUs = playheadUs - clip.startUs + clip.sourceInUs;
+      const rate = normalizePlaybackRate(clip.playbackRate);
+      const sourceTimeUs = sourceTimeForPlayhead(clip, playheadUs);
       video.currentTime = sourceTimeUs / 1_000_000;
+      video.playbackRate = rate === 0 ? 1 : rate;
       scheduler.current.seek(sourceTimeUs);
       lastMediaTimeUsRef.current = undefined;
-      if (play) await video.play();
+      if (play) {
+        if (rate === 0) {
+          video.pause();
+          freezeWallStartRef.current = {
+            wallMs: performance.now(),
+            playheadUs,
+          };
+        } else {
+          freezeWallStartRef.current = undefined;
+          await video.play();
+        }
+      } else {
+        freezeWallStartRef.current = undefined;
+        video.pause();
+      }
       return true;
     },
     [session],
@@ -349,13 +464,32 @@ export function App() {
         activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
         activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
       if (clip === undefined || clip.kind !== 'video') return;
-      const sourceTimeUs = clock.timeUs;
-      const compositionTimeUs = clip.startUs + sourceTimeUs - clip.sourceInUs;
+      const rate = normalizePlaybackRate(clip.playbackRate);
+      let compositionTimeUs: number;
+      let sourceTimeUs: number;
+      if (rate === 0) {
+        const freeze = freezeWallStartRef.current;
+        if (freeze === undefined) {
+          freezeWallStartRef.current = {
+            wallMs: performance.now(),
+            playheadUs: stateRef.current.playheadUs,
+          };
+          compositionTimeUs = stateRef.current.playheadUs;
+        } else {
+          compositionTimeUs =
+            freeze.playheadUs + Math.floor((performance.now() - freeze.wallMs) * 1_000);
+        }
+        sourceTimeUs = clip.sourceInUs;
+      } else {
+        sourceTimeUs = clock.timeUs;
+        compositionTimeUs = playheadForSourceTime(clip, sourceTimeUs, stateRef.current.playheadUs);
+      }
       if (compositionTimeUs >= clip.startUs + clip.durationUs) {
         const nextPlayheadUs = clip.startUs + clip.durationUs;
         const durationUs = session.timelineProject.compositions.root?.durationUs ?? nextPlayheadUs;
         if (nextPlayheadUs >= durationUs) {
           video.pause();
+          freezeWallStartRef.current = undefined;
           setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));
           setRevision((revision) => revision + 1);
           return;
@@ -367,16 +501,7 @@ export function App() {
       }
       const token = scheduler.current.requestToken();
       const frame = decoder.captureCurrentFrame(token);
-      const clipSpec: VideoClipSpec = {
-        id: clip.assetId,
-        originalToken: resolveReferenceMediaUrl(clip.assetId),
-        startUs: clip.startUs,
-        durationUs: clip.durationUs,
-        sourceInUs: clip.sourceInUs,
-        transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
-        opacity: 1,
-        zIndex: 0,
-      };
+      const clipSpec = videoClipSpec(clip);
       const node = videoFrameNodeFromDecoded(clipSpec, frame, {
         width: video.videoWidth,
         height: video.videoHeight,
@@ -394,10 +519,13 @@ export function App() {
       requestFrame();
     };
     const requestFrame = (): void => {
-      // Real decoded-video callback when available; unlike a UI animation
-      // ticker it follows the browser's media presentation cadence and stays
-      // meaningful when editor panels are switched or the UI is quiet.
-      if (typeof video.requestVideoFrameCallback === 'function')
+      // Freeze holds a still frame — drive with rAF. Otherwise follow media cadence.
+      const clip =
+        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
+        activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      const freeze =
+        clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
+      if (!freeze && typeof video.requestVideoFrameCallback === 'function')
         playbackFrameRef.current = video.requestVideoFrameCallback(() => capture());
       else playbackFrameRef.current = window.requestAnimationFrame(capture);
     };
@@ -608,6 +736,26 @@ export function App() {
             ...active,
             selectedIds: active.selectedIds.filter((id) => id !== selection.clip.id),
           }));
+          break;
+        }
+        case 'clip.duplicate': {
+          if (composition === undefined || selection === undefined) return;
+          dispatchTimeline({
+            label: `Duplicate ${selection.clip.id}`,
+            commands: [
+              duplicateClipCommand(
+                composition.id,
+                selection.track.id,
+                selection.clip,
+                selection.track.clips.map((clip) => ({
+                  id: clip.id,
+                  startUs: clip.startUs,
+                  durationUs: clip.durationUs,
+                })),
+                `${selection.clip.id}-copy-${Date.now()}`,
+              ),
+            ],
+          });
           break;
         }
       }
@@ -1094,8 +1242,16 @@ export function App() {
         )}
         <strong>JOY Media</strong>
         <span className="header-status">
-          Saved locally · {scheduler.current.metrics.quality} preview
+          {session.visualProject.title} · Saved locally · {scheduler.current.metrics.quality} preview
         </span>
+        <button
+          className="icon-button"
+          onClick={onBackToLibrary}
+          aria-label="Back to projects"
+          title="Projects library"
+        >
+          <ProjectsIcon />
+        </button>
         <button
           className="icon-button"
           disabled={!session.canUndo}

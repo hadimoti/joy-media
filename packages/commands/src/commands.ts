@@ -20,7 +20,13 @@ import type {
   TrackId,
   VideoClip,
 } from '@joy-media/project-schema';
-import { clipTimeRange, rangeEndUs, validateSpikeProject } from '@joy-media/project-schema';
+import {
+  clipTimeRange,
+  isValidPlaybackRate,
+  normalizePlaybackRate,
+  rangeEndUs,
+  validateSpikeProject,
+} from '@joy-media/project-schema';
 
 export class CommandError extends Error {
   readonly code: string;
@@ -68,6 +74,31 @@ export interface JoinClipsPayload extends TrackTarget {
 export interface SetTrackEnabledPayload extends TrackTarget {
   readonly enabled: boolean;
 }
+export interface DuplicateClipPayload extends TrackTarget {
+  readonly clipId: string;
+  readonly newClipId: string;
+  /** When omitted, the duplicate is placed immediately after the source clip. */
+  readonly newStartUs?: TimeUs;
+}
+export interface SetClipRatePayload extends TrackTarget {
+  readonly clipId: string;
+  readonly playbackRate: number;
+  /**
+   * CapCut-like default: keep the source window, rescale timeline duration.
+   * `newDuration = oldDuration * (oldRate / newRate)`. Forbidden when either rate is 0.
+   */
+  readonly preserveSourceRange?: boolean;
+}
+export interface FreezeFramePayload extends TrackTarget {
+  readonly clipId: string;
+  readonly atUs: TimeUs;
+  readonly holdUs: TimeUs;
+  readonly freezeClipId: string;
+  readonly rightClipId: string;
+}
+export interface RestoreTrackClipsPayload extends TrackTarget {
+  readonly clips: readonly Clip[];
+}
 
 export type SpikeCommand =
   | { readonly type: 'timeline.insertClip'; readonly payload: InsertClipPayload }
@@ -77,6 +108,10 @@ export type SpikeCommand =
   | { readonly type: 'timeline.trimClipEnd'; readonly payload: TrimClipEndPayload }
   | { readonly type: 'timeline.splitClip'; readonly payload: SplitClipPayload }
   | { readonly type: 'timeline.joinClips'; readonly payload: JoinClipsPayload }
+  | { readonly type: 'timeline.duplicateClip'; readonly payload: DuplicateClipPayload }
+  | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
+  | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
+  | { readonly type: 'timeline.restoreTrackClips'; readonly payload: RestoreTrackClipsPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
 
 export type SpikeCommandType = SpikeCommand['type'];
@@ -92,6 +127,10 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.trimClipEnd': { description: 'Trim a clip end.' },
   'timeline.splitClip': { description: 'Split a clip into source-continuous halves.' },
   'timeline.joinClips': { description: 'Join adjacent source-continuous clips.' },
+  'timeline.duplicateClip': { description: 'Clone a clip onto the same track after it.' },
+  'timeline.setClipRate': { description: 'Set clip playback rate (0.1–8×); rescale duration by default.' },
+  'timeline.freezeFrame': { description: 'Insert a freeze/hold segment at a time inside a video clip.' },
+  'timeline.restoreTrackClips': { description: 'Replace a track clip list (undo for compound edits).' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
 };
 
@@ -130,6 +169,14 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applySplitClip(project, command.payload);
     case 'timeline.joinClips':
       return applyJoinClips(project, command.payload);
+    case 'timeline.duplicateClip':
+      return applyDuplicateClip(project, command.payload);
+    case 'timeline.setClipRate':
+      return applySetClipRate(project, command.payload);
+    case 'timeline.freezeFrame':
+      return applyFreezeFrame(project, command.payload);
+    case 'timeline.restoreTrackClips':
+      return applyRestoreTrackClips(project, command.payload);
     case 'property.setTrackEnabled':
       return applySetTrackEnabled(project, command.payload);
     default: {
@@ -218,10 +265,11 @@ function assertNoOverlap(
   }
 }
 
-/** Source-side offset field for a clip kind: video shifts sourceInUs, nested shifts childOffsetUs. */
+/** Source-side offset field for a clip kind: video shifts sourceInUs by rate×delta. */
 function shiftSourceForStartTrim(clip: Clip, deltaUs: number): Clip {
   if (clip.kind === 'video') {
-    const sourceInUs = clip.sourceInUs + deltaUs;
+    const rate = normalizePlaybackRate(clip.playbackRate);
+    const sourceInUs = clip.sourceInUs + Math.round(deltaUs * rate);
     if (sourceInUs < 0) {
       throw new CommandError(
         'COMMAND_VALIDATION_SOURCE_UNDERFLOW',
@@ -238,6 +286,27 @@ function shiftSourceForStartTrim(clip: Clip, deltaUs: number): Clip {
     );
   }
   return { ...clip, childOffsetUs };
+}
+
+function sourceAdvanceUs(clip: Clip): number {
+  if (clip.kind === 'video') {
+    return Math.round(clip.durationUs * normalizePlaybackRate(clip.playbackRate));
+  }
+  return clip.durationUs;
+}
+
+function withPlaybackRate(clip: VideoClip, playbackRate: number): VideoClip {
+  if (playbackRate === 1) {
+    return {
+      kind: 'video',
+      id: clip.id,
+      startUs: clip.startUs,
+      durationUs: clip.durationUs,
+      assetId: clip.assetId,
+      sourceInUs: clip.sourceInUs,
+    };
+  }
+  return { ...clip, playbackRate };
 }
 
 // ---------- handlers ----------
@@ -427,7 +496,11 @@ function sourceContinuous(first: Clip, second: Clip): boolean {
   if (first.kind === 'video' && second.kind === 'video') {
     const a = first as VideoClip;
     const b = second as VideoClip;
-    return a.assetId === b.assetId && b.sourceInUs === a.sourceInUs + a.durationUs;
+    return (
+      a.assetId === b.assetId &&
+      normalizePlaybackRate(a.playbackRate) === normalizePlaybackRate(b.playbackRate) &&
+      b.sourceInUs === a.sourceInUs + sourceAdvanceUs(a)
+    );
   }
   if (first.kind === 'composition' && second.kind === 'composition') {
     return (
@@ -436,6 +509,212 @@ function sourceContinuous(first: Clip, second: Clip): boolean {
     );
   }
   return false;
+}
+
+function applyDuplicateClip(project: SpikeProject, payload: DuplicateClipPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (track.clips.some((c) => c.id === payload.newClipId)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_DUPLICATE_ID',
+      `duplicateClip: new clip id "${payload.newClipId}" already exists`,
+    );
+  }
+  const newStartUs = payload.newStartUs ?? clip.startUs + clip.durationUs;
+  assertClipRange(newStartUs, clip.durationUs, 'duplicateClip');
+  assertNoOverlap(track, newStartUs, clip.durationUs, undefined, 'duplicateClip');
+  const clone: Clip = { ...clip, id: payload.newClipId, startUs: newStartUs };
+  return {
+    project: withTrackClips(project, payload, [...track.clips, clone]),
+    inverse: {
+      type: 'timeline.removeClip',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clipId: payload.newClipId,
+      },
+    },
+  };
+}
+
+function applySetClipRate(project: SpikeProject, payload: SetClipRatePayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (clip.kind !== 'video') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `setClipRate: only video clips support playback rate (got "${clip.kind}")`,
+    );
+  }
+  if (!isValidPlaybackRate(payload.playbackRate) || payload.playbackRate === 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      `setClipRate: playbackRate must be in [0.1, 8] (use freezeFrame for rate 0)`,
+    );
+  }
+  const oldRate = normalizePlaybackRate(clip.playbackRate);
+  if (oldRate === payload.playbackRate) {
+    return {
+      project,
+      inverse: { type: 'timeline.setClipRate', payload },
+    };
+  }
+  const preserve = payload.preserveSourceRange !== false;
+  let durationUs = clip.durationUs;
+  if (preserve) {
+    if (oldRate === 0) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_RANGE',
+        'setClipRate: cannot preserve source range when leaving a freeze clip',
+      );
+    }
+    durationUs = Math.max(1, Math.round(clip.durationUs * (oldRate / payload.playbackRate)));
+  }
+  assertClipRange(clip.startUs, durationUs, 'setClipRate');
+  assertNoOverlap(track, clip.startUs, durationUs, clip.id, 'setClipRate');
+  const updated = withPlaybackRate({ ...clip, durationUs }, payload.playbackRate);
+  return {
+    project: withTrackClips(project, payload, [
+      ...track.clips.filter((c) => c.id !== clip.id),
+      updated,
+    ]),
+    inverse: {
+      type: 'timeline.setClipRate',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clipId: clip.id,
+        playbackRate: oldRate === 0 ? 1 : oldRate,
+        preserveSourceRange: preserve,
+      },
+    },
+  };
+}
+
+function applyFreezeFrame(project: SpikeProject, payload: FreezeFramePayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (clip.kind !== 'video') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `freezeFrame: only video clips can freeze (got "${clip.kind}")`,
+    );
+  }
+  const endUs = rangeEndUs({ startUs: clip.startUs, durationUs: clip.durationUs });
+  if (!(payload.atUs > clip.startUs && payload.atUs < endUs)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      `freezeFrame: atUs ${payload.atUs} must be strictly inside [${clip.startUs}, ${endUs})`,
+    );
+  }
+  if (!(payload.holdUs > 0)) {
+    throw new CommandError('COMMAND_VALIDATION_RANGE', 'freezeFrame: holdUs must be positive');
+  }
+  for (const id of [payload.freezeClipId, payload.rightClipId]) {
+    if (track.clips.some((c) => c.id === id) || id === clip.id) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_DUPLICATE_ID',
+        `freezeFrame: clip id "${id}" already exists`,
+      );
+    }
+  }
+  const previousClips = track.clips;
+  const localUs = payload.atUs - clip.startUs;
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  const sourceAtCut = clip.sourceInUs + Math.round(localUs * rate);
+  const left: VideoClip = { ...clip, durationUs: localUs };
+  const freeze: VideoClip = withPlaybackRate(
+    {
+      kind: 'video',
+      id: payload.freezeClipId,
+      startUs: payload.atUs,
+      durationUs: payload.holdUs,
+      assetId: clip.assetId,
+      sourceInUs: sourceAtCut,
+      playbackRate: 0,
+    },
+    0,
+  );
+  const right: VideoClip = {
+    ...clip,
+    id: payload.rightClipId,
+    startUs: payload.atUs + payload.holdUs,
+    durationUs: endUs - payload.atUs,
+    sourceInUs: sourceAtCut,
+  };
+  const others = track.clips
+    .filter((c) => c.id !== clip.id)
+    .map((c) =>
+      c.startUs >= payload.atUs ? { ...c, startUs: c.startUs + payload.holdUs } : c,
+    );
+  const nextClips = [...others, left, freeze, right];
+  for (const item of nextClips) {
+    assertClipRange(item.startUs, item.durationUs, 'freezeFrame');
+  }
+  // Overlap check across the rebuilt list.
+  const sorted = [...nextClips].sort((a, b) => a.startUs - b.startUs);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1]!;
+    const cur = sorted[i]!;
+    if (cur.startUs < prev.startUs + prev.durationUs) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_OVERLAP',
+        `freezeFrame: result overlaps at "${cur.id}"`,
+      );
+    }
+  }
+  return {
+    project: withTrackClips(project, payload, nextClips),
+    inverse: {
+      type: 'timeline.restoreTrackClips',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clips: previousClips,
+      },
+    },
+  };
+}
+
+function applyRestoreTrackClips(
+  project: SpikeProject,
+  payload: RestoreTrackClipsPayload,
+): ApplyResult {
+  const track = getTrack(project, payload);
+  const previousClips = track.clips;
+  const ids = new Set<string>();
+  for (const clip of payload.clips) {
+    if (ids.has(clip.id)) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_DUPLICATE_ID',
+        `restoreTrackClips: duplicate clip id "${clip.id}"`,
+      );
+    }
+    ids.add(clip.id);
+    assertClipRange(clip.startUs, clip.durationUs, 'restoreTrackClips');
+  }
+  const sorted = [...payload.clips].sort((a, b) => a.startUs - b.startUs);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1]!;
+    const cur = sorted[i]!;
+    if (cur.startUs < prev.startUs + prev.durationUs) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_OVERLAP',
+        `restoreTrackClips: overlaps at "${cur.id}"`,
+      );
+    }
+  }
+  return {
+    project: withTrackClips(project, payload, payload.clips),
+    inverse: {
+      type: 'timeline.restoreTrackClips',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clips: previousClips,
+      },
+    },
+  };
 }
 
 function applySetTrackEnabled(project: SpikeProject, payload: SetTrackEnabledPayload): ApplyResult {

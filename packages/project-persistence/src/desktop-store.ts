@@ -48,6 +48,10 @@ export class JsonFileProjectStore<P, T> implements ProjectStore<P, T> {
     return this.read().projects[projectId]?.transactions ?? [];
   }
 
+  listProjectIds(): readonly string[] {
+    return Object.keys(this.read().projects).sort();
+  }
+
   private read(): FileDatabase<P, T> {
     if (!existsSync(this.filePath)) return { projects: {} };
     return JSON.parse(readFileSync(this.filePath, 'utf8')) as FileDatabase<P, T>;

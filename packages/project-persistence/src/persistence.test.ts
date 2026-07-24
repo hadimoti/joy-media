@@ -143,4 +143,11 @@ describe('local project persistence', () => {
     locks.release('project-1', 'tab-a');
     expect(() => locks.acquire('project-1', 'tab-b')).not.toThrow();
   });
+
+  it('lists project ids that have snapshots or transactions', () => {
+    const store = new InMemoryProjectStore<SpikeProject, CommandTransaction>();
+    const persistence = new LocalProjectPersistence(store, adapter);
+    persistence.initialize(emptySpikeProject());
+    expect(store.listProjectIds()).toEqual(['spike-project']);
+  });
 });

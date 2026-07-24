@@ -28,6 +28,8 @@ describe('resolveShortcut', () => {
     expect(resolveShortcut(key('s'))).toBe('clip.split');
     expect(resolveShortcut(key('Delete'))).toBe('clip.delete');
     expect(resolveShortcut(key('Backspace'))).toBe('clip.delete');
+    expect(resolveShortcut(key('d', { ctrlKey: true }))).toBe('clip.duplicate');
+    expect(resolveShortcut(key('d', { metaKey: true }))).toBe('clip.duplicate');
     expect(resolveShortcut(key('ArrowLeft'))).toBe('playhead.back');
     expect(resolveShortcut(key('ArrowRight', { shiftKey: true }))).toBe('playhead.forwardFine');
     expect(resolveShortcut(key('Home'))).toBe('playhead.start');

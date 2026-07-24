@@ -48,11 +48,36 @@ interface ClipBase {
   readonly durationUs: number;
 }
 
+/**
+ * Legal video playback rates: `0` = freeze/hold (source frame locked at
+ * `sourceInUs`); otherwise `0.1…8`. Missing/`undefined` means `1`.
+ *
+ * Timeline duration stays `durationUs`. Source advance over the clip is
+ * `durationUs * playbackRate` (freeze advances 0).
+ */
+export const MIN_PLAYBACK_RATE = 0.1;
+export const MAX_PLAYBACK_RATE = 8;
+
+export function normalizePlaybackRate(rate: number | undefined): number {
+  return rate === undefined ? 1 : rate;
+}
+
+export function isValidPlaybackRate(rate: number): boolean {
+  if (!Number.isFinite(rate)) return false;
+  if (rate === 0) return true;
+  return rate >= MIN_PLAYBACK_RATE && rate <= MAX_PLAYBACK_RATE;
+}
+
 export interface VideoClip extends ClipBase {
   readonly kind: 'video';
   readonly assetId: AssetId;
-  /** Source in-point: composition time t maps to sourceInUs + (t - startUs). */
+  /**
+   * Source in-point. Composition time t maps to
+   * `sourceInUs + (t - startUs) * playbackRate` (rate 0 → locked frame).
+   */
   readonly sourceInUs: TimeUs;
+  /** See {@link normalizePlaybackRate}. Omit for 1×. */
+  readonly playbackRate?: number;
 }
 
 export interface CompositionClip extends ClipBase {
@@ -112,6 +137,13 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
           diagnostics.push({
             code: 'PROJECT_SCHEMA_MISSING_COMPOSITION',
             message: `clip references unknown composition "${clip.compositionId}"`,
+            path,
+          });
+        }
+        if (clip.kind === 'video' && clip.playbackRate !== undefined && !isValidPlaybackRate(clip.playbackRate)) {
+          diagnostics.push({
+            code: 'PROJECT_SCHEMA_BAD_PLAYBACK_RATE',
+            message: `playbackRate ${clip.playbackRate} must be 0 (freeze) or in [${MIN_PLAYBACK_RATE}, ${MAX_PLAYBACK_RATE}]`,
             path,
           });
         }

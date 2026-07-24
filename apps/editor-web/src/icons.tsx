@@ -271,3 +271,77 @@ export function BadgeIcon() {
     </Svg>
   );
 }
+
+export function ZoomInIcon() {
+  return (
+    <Svg>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.5 10.5 3 3M7 5v4M5 7h4" />
+    </Svg>
+  );
+}
+
+export function ZoomOutIcon() {
+  return (
+    <Svg>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.5 10.5 3 3M5 7h4" />
+    </Svg>
+  );
+}
+
+export function FitWidthIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 3.5v9M13.5 3.5v9M5.5 8H10.5M5.5 8l2-2M5.5 8l2 2M10.5 8l-2-2M10.5 8l-2 2" />
+    </Svg>
+  );
+}
+
+export function DuplicateIcon() {
+  return (
+    <Svg>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1" />
+      <path d="M10.5 5.5V3.5H2.5v8h2" />
+    </Svg>
+  );
+}
+
+export function SpeedIcon() {
+  return (
+    <Svg>
+      <path d="M3 12.5a6.5 6.5 0 1 1 10 0" />
+      <path d="M8 12.5 10.5 7" />
+      <circle cx="8" cy="12.5" r="1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function FreezeIcon() {
+  return (
+    <Svg>
+      <path d="M8 2.5v11M4.5 4.5 8 8l3.5-3.5M4.5 11.5 8 8l3.5 3.5M2.5 8h11" />
+    </Svg>
+  );
+}
+
+export function SelectIcon() {
+  return (
+    <Svg>
+      <path d="M3.5 2.5 7 13.5l2-4 4-2Z" />
+    </Svg>
+  );
+}
+
+/** Alias for cut/split affordances (scissors remain the primary glyph). */
+export function CutIcon() {
+  return <ScissorsIcon />;
+}
+
+export function ProjectsIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 4.5h4l1.5 1.5H13.5v7.5H2.5Z" />
+    </Svg>
+  );
+}

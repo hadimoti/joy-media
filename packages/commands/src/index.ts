@@ -19,6 +19,10 @@ export type {
   TrimClipEndPayload,
   SplitClipPayload,
   JoinClipsPayload,
+  DuplicateClipPayload,
+  SetClipRatePayload,
+  FreezeFramePayload,
+  RestoreTrackClipsPayload,
   SetTrackEnabledPayload,
 } from './commands.js';
 export { applyCommand, CommandError, COMMAND_REGISTRY } from './commands.js';

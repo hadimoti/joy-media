@@ -3,13 +3,13 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-23-tip-869d6f1)** below. Tip deployed: web + API `869d6f1`.
+> **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-24)** below. Committed tip: `9fd9301`. Live web symlink: `residuals-piper-gpu-pixi`. Working tree (2026-07-24) has **uncommitted** CapCut-style project library gate + timeline NLE polish.
 
 | Part                             | Status      | WPs done | Last session | Next action                                                                                                       |
 | -------------------------------- | ----------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | P00 architecture proofs          | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                              |
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
-| P02 editing slice                | done*       | 6/6      | 2026-07-24   | WP-11 preview/export; interruption closed by WP-12; residual audit packaging/Tauri only                            |
+| P02 editing slice                | done*       | 6/6      | 2026-07-24   | Timeline NLE polish + project library gate in working tree (uncommitted); deploy next |
 | P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                   |
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-24   | Editor `html-scene` seam + seeded first-party scenes; iframe→Pixi capture still open                              |
 | P05 audio + providers            | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                    |
@@ -33,75 +33,86 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                       |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
-## Handoff for next agent (2026-07-23)
+## Handoff for next agent (2026-07-24)
 
-**Live deploy tip:** web **`a0faad9-residuals`** (`media.joyteam.ir`); API **`a0faad9-residuals`** (`:8790`). Working tree includes uncommitted residual fixes (icon tabs, track width, M0–M6).
+**Live deploy (measured 2026-07-24T05:04Z UTC on `srv3820150057`):**
+- Web symlink: `/opt/joy-media/web` → `web-releases/residuals-piper-gpu-pixi` (`media.joyteam.ir`)
+- Git `main` tip: **`9fd9301`** (`Harden Worker HTTP client against Cloudflare HTML challenges.`) — matches `origin/main`
+- API `:8790`: **down** (`curl 127.0.0.1:8790/health` connection refused; no listener on 8790). Restart `joy-media` API release before provider/Jobs smoke.
+- Working tree: **dirty** — CapCut-style project library + timeline polish not committed/deployed yet (see session log).
 
-**Read this first.** Detailed WP notes: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). Decisions: D-W23-1…5 in [`plan/DECISIONS.md`](plan/DECISIONS.md).
+**Read this first.** Prior residuals context still in [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md). UI contract: [`DESIGN.md`](DESIGN.md). Decisions: D-W23-* / D-W24-1 / **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** in [`plan/DECISIONS.md`](plan/DECISIONS.md).
+
+### Editor UX shipped in working tree (2026-07-24 session — commit + deploy next)
+
+1. **Project library gate (CapCut-like):** first paint is [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) — list / open / create / remove. Catalog `joy-media.project-catalog.v1`, active id `joy-media.active-project.v1`. `App` mounts `EditorWorkspace` only after open/create. Header **Projects** icon returns to library. Seeds sample “Local editor project” (`golden-social-edit` timeline + `local-editor-project` visual) on first catalog write.
+2. **Timeline NLE polish:** zoom bar + fit-to-width (`ResizeObserver`), Ctrl/Cmd+wheel zoom, icon transport (split/duplicate/delete), right-click drawer (speed presets + freeze), clip rate badges. Schema `VideoClip.playbackRate` (`0` freeze, `0.1…8`); commands `duplicateClip` / `setClipRate` / `freezeFrame` / `restoreTrackClips`. Shortcut **Mod+D** duplicate.
+3. **Persistence:** `ProjectStore.listProjectIds()` on browser/in-memory/desktop stores.
 
 ### Where things live
 
 | Path | Role |
 | --- | --- |
-| `/opt/joy-media/repo` | Working git checkout (`main` = `origin/main`) |
+| `/opt/joy-media/repo` | Working git checkout (`main` = `origin/main` + local dirty tree) |
 | `/opt/joy-media.git` | Bare remote `origin` |
-| `/opt/joy-media/web` → `web-releases/<sha>` | Static editor (immutable releases) |
+| `/opt/joy-media/web` → `web-releases/<release>` | Static editor (immutable releases) |
 | `/opt/joy-media/releases/current-api` → `releases/<short-sha>` | Node API (`dist/server.js`, user `joy-media`, port **8790**) |
 | `/etc/joy-media/api.env` | DB + identity JWKS + object-store (mode 0600; never commit) |
-| `/opt/joy-media/data/whisper-models` | `faster-whisper` model cache |
-| `apps/api/scripts/whisper_transcribe.py` | Whisper CLI helper (must ship beside `dist/` in API release) |
 
 ### Deploy pattern (push after every step)
 
 1. `pnpm typecheck` + focused tests + `pnpm --filter @joy-media/api build` + editor `build`.
 2. Commit → `git push origin HEAD` (needs unrestricted FS for bare remote).
-3. API: copy `apps/api/dist` + `scripts` + `package.json` + `node_modules` into `/opt/joy-media/releases/<shortsha>`, `ln -sfn` → `current-api`, restart the node process (systemd `joy-media@api` may not be available in some agent shells — kill PID on `:8790` and relaunch as `joy-media` with `api.env`).
-4. Web: copy `apps/editor-web/dist` (+ ensure `public/media/reference` present) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
-5. Smoke: `GET :8790/health`; provider routes return **401** without Bearer (expected).
+3. API: copy `apps/api/dist` + `scripts` + `package.json` + `node_modules` into `/opt/joy-media/releases/<shortsha>`, `ln -sfn` → `current-api`, restart process on `:8790` as `joy-media` with `api.env`.
+4. Web: copy `apps/editor-web/dist` (+ `public/media/reference`) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
+5. Smoke: `GET :8790/health`; open `media.joyteam.ir` → **Projects** library → open sample → timeline.
+
+### Honest residuals
+
+1. **Commit + deploy** library/timeline working tree; live web still `residuals-piper-gpu-pixi` without library gate.
+2. **API `:8790` was down** at handoff measurement — restore before provider/Jobs checks.
+3. Playback preview may still ignore `playbackRate` (schema/commands durable; player wiring deferred).
+4. Pair local GPU Worker for Comfy/ML (ADR-0018) remains the highest leverage infra residual.
+5. P09 marketplace transport still gated.
+
+### Suggested next milestone
+
+1. Commit + deploy editor library/timeline polish; verify library → editor → Projects back.
+2. Bring API `:8790` back; smoke providers.
+3. Optional: wire playback-engine to `playbackRate` / freeze holds.
+
+### Docs updated this handoff
+
+- `STATE.md` (this file)
+- `DESIGN.md` (library gate + timeline NLE)
+- `ORCHESTRATION.md` (standing tip)
+- `README.md` (start-here)
+- `plan/DECISIONS.md` (D-UI-LIBRARY, D-UI-TIMELINE-NLE)
+- joy-vps `ATLAS.md` / `HANDOFF.md` / `joy-media/README.md`
+- Hermes skill `joy-media-monorepo-work` + GBrain import page
+
+## Handoff archive (2026-07-23)
+
+**Previous live tip notes** (still useful for providers/identity): web/API residuals era; owner `joymedia_allowed: true` for `68238523`; Piper + Worker GPU run + HTML→Pixi closed in session log below. Superseded tip SHA claims (`869d6f1` / `a0faad9-residuals`) by the **2026-07-24** handoff above.
 
 ### Live provider API (all require JOY Media assertion)
 
 | Method | Path | Backend |
 | --- | --- | --- |
 | POST | `/v1/providers/speech/transcribe` | faster-whisper (`referenceAssetId` or raw media) |
-| POST | `/v1/providers/speech/synthesize` | edge-tts → MP3 base64 (data leaves device) |
+| POST | `/v1/providers/speech/synthesize` | edge-tts → MP3 base64 (data leaves device); Piper when `JOY_MEDIA_TTS_ENGINE=piper` |
 | POST | `/v1/providers/audio/denoise` | ffmpeg `afftdn` |
-
-Captions UI: try live via `BrowserControlPlaneClient.transcribeSpeech`, else fixtures (`fixture-whisper-*-v1`).
 
 ### Identity
 
 - Probe `https://joyteam.ir/api/identity/joy-media` with credentials.
 - Unsigned/headless → HTTP **401** → UI `signed-out` (**expected**, not a Media bug).
 - **No** Media test-token bypass (ADR-0016).
-- Signed-in `ready` needs identity-owner **`joymedia_allowed`**. Flag code lives in joy-vps + live `/opt/joy-wg-bot`. **Owner Hadi Moti / @PersiaReborn (`68238523`) already has `joymedia_allowed: true`** (confirmed 2026-07-24). Admin toggle action must be `set_joymedia_access` (live admin JS mismatched as `set_joy_media_access` — fixed forward-only on joy-wg-bot).
-
-### Honest residuals (do not claim done)
-
-1. ~~Entitled signed-in Chromium gate proving Whisper provenance `faster-whisper-*` and TTS MP3.~~ **Closed 2026-07-24:** unsigned calm UI verified; entitled API smoke for owner subject `68238523` — transcribe `provenance.modelId=faster-whisper-tiny`, synthesize `engine=edge-tts` `mimeType=audio/mpeg` with MP3 base64, denoise `method=ffmpeg-afftdn`. (Headless browser remains signed-out; assertion minted via live issuer for API proof.)
-2. ~~GPU ComfyUI on VPS.~~ **Redesigned (ADR-0018 / D-W24-1):** no VPS GPU. Local PC Worker **executes** `image.comfy` (Comfy LoadImage→SaveImage via `JOY_MEDIA_LOCAL_COMFY_URL`) and `audio.ml-denoise` (`JOY_MEDIA_ML_DENOISE_CMD` or ffmpeg `arnndn` when `JOY_MEDIA_LOCAL_ML_DENOISE=1`). Pair a PC Worker to run live jobs.
-3. ~~ML denoise as VPS path.~~ **Closed:** Worker `run()` path for `audio.ml-denoise`; VPS remains gate + `afftdn` only.
-4. ~~Local TTS engines replacing edge-tts (Q8).~~ **Piper live:** API `engine=piper` + adapter-tts `piper` (local ONNX; `dataLeavesDevice: false`). Default remains edge-tts unless `JOY_MEDIA_TTS_ENGINE=piper`.
-5. ~~P04 HTML-scene iframe RGBA → Pixi.~~ **Closed:** `joy.scene.capture.v1` / `joy.scene.surface.v1`; browser preview host; Monitor/export feed scene RGBA into Pixi `video-frame` bitmaps.
-6. P09 marketplace transport (product decision). P02 interruption closed by WP-12 — not reopened.
-
-### Suggested next milestone (highest leverage)
-
-**Pair a local GPU Worker** on the owner PC (`JOY_MEDIA_LOCAL_COMFY_URL` + optional `JOY_MEDIA_LOCAL_ML_DENOISE=1`) and exercise Jobs `image.comfy` / `audio.ml-denoise`. Optional: set `JOY_MEDIA_TTS_ENGINE=piper` as default.
-
-### Docs updated this handoff
-
-- `STATE.md` (this file — detailed handoff)
-- `ORCHESTRATION.md` (WP-16…23 map + orient → handoff; standing facts tip)
-- `plan/WP-23-live-provider-residuals.md` (new)
-- `plan/WP-20-caption-fixtures.md` (supersession note)
-- `plan/P03-captions.md` / `plan/P05-audio-providers.md` (live status)
-- `plan/DECISIONS.md` (D-W23-1…5)
-- `AUDIT-2026-07-21-completion-matrix.md` (historical banner; P03 + item 10 superseded)
-- `docs/adr/0018-local-gpu-worker.md`
+- Signed-in `ready` needs identity-owner **`joymedia_allowed`**. Owner Hadi Moti / @PersiaReborn (`68238523`) already has `joymedia_allowed: true` (confirmed 2026-07-24).
 
 ## Session log (newest first)
 
+| 2026-07-24 | editor UX | **Project library gate + timeline NLE polish (working tree).** Library list/open/create; `playbackRate` + duplicate/speed/freeze commands; zoom/fit/context menu; Mod+D. Docs + Hermes skill + GBrain sync. API :8790 measured down. |
 | 2026-07-24 | residuals | **Piper + Worker GPU run + HTML→Pixi.** Piper TTS (API + adapter-tts); Worker `run()` for `image.comfy` / `audio.ml-denoise`; preview-protocol capture/surface + Monitor/export Pixi bitmaps. |
 | 2026-07-24 | residuals | **M2–M6 pass.** ADR-0018 + D-W24-1: GPU Comfy/ML on owner-PC Worker (`image.comfy`, `audio.ml-denoise`); Jobs status copy; Worker hello opt-in via `JOY_MEDIA_LOCAL_COMFY_URL` / `JOY_MEDIA_LOCAL_ML_DENOISE`. Denoise port `method: ml` defers to Worker. P04 seam: `html-scene` kind + `htmlScene.create/remove` + Motion panel first-party add/remove + seeded title/lower-third + Monitor text stand-in. Residual #6: WP-12 closed interruption; P09 transport still gated. Piper TTS still parked. |
 | 2026-07-24 | WP-23 gate | **M1 live provider gate.** Unsigned Chromium: calm signed-out account menu + identity POST 401. Entitled API (issuer JWT for `68238523`): `POST /v1/providers/speech/transcribe` → `faster-whisper-tiny`; `synthesize` → `edge-tts` `audio/mpeg` base64; `audio/denoise` → `ffmpeg-afftdn` WAV. Health 200; unauthenticated provider 401. |

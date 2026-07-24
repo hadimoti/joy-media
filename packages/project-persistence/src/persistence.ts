@@ -48,6 +48,8 @@ export interface ProjectStore<P, T> {
   writeTransaction(projectId: string, transaction: StoredTransaction<T>): void;
   snapshots(projectId: string): readonly StoredSnapshot<P>[];
   transactions(projectId: string): readonly StoredTransaction<T>[];
+  /** Stable project ids that currently have at least one snapshot or transaction. */
+  listProjectIds(): readonly string[];
 }
 
 /** Testable local store; a browser/desktop adapter implements the same snapshot/log semantics. */
@@ -74,6 +76,11 @@ export class InMemoryProjectStore<P, T> implements ProjectStore<P, T> {
 
   transactions(projectId: string): readonly StoredTransaction<T>[] {
     return this.#transactions.get(projectId) ?? [];
+  }
+
+  listProjectIds(): readonly string[] {
+    const ids = new Set<string>([...this.#snapshots.keys(), ...this.#transactions.keys()]);
+    return [...ids].sort();
   }
 
   /** Simulates a crash that leaves a truncated last log entry. */
