@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { UI_ICONS } from './ui-icons.js';
 
 /** Shared inline SVG icon set for common editor buttons (WP-16 UI pass). */
 
@@ -18,6 +19,22 @@ function Svg({ children, size = 14 }: { readonly children: ReactNode; readonly s
     >
       {children}
     </svg>
+  );
+}
+
+/** 24×24 PNG masked to currentColor (matches dockview panel tabs). */
+function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?: number }) {
+  return (
+    <span
+      className="png-mask-icon"
+      style={{
+        width: size,
+        height: size,
+        WebkitMaskImage: `url(${src})`,
+        maskImage: `url(${src})`,
+      }}
+      aria-hidden="true"
+    />
   );
 }
 
@@ -131,12 +148,11 @@ export function LockIcon() {
 }
 
 export function MuteIcon() {
-  return (
-    <Svg>
-      <path d="M2.5 6v4h2.5L9 13V3L5 6Z" fill="currentColor" stroke="none" />
-      <path d="m11 6 3.5 4M14.5 6 11 10" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.mute} />;
+}
+
+export function SpeakerOnIcon() {
+  return <PngMaskIcon src={UI_ICONS.speakerOn} />;
 }
 
 export function SoloIcon() {
@@ -201,12 +217,31 @@ export function UploadIcon() {
 }
 
 export function MicIcon() {
-  return (
-    <Svg>
-      <rect x="6" y="2" width="4" height="7" rx="2" />
-      <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.mic} />;
+}
+
+export function VoiceIcon() {
+  return <PngMaskIcon src={UI_ICONS.voice} />;
+}
+
+export function EffectsUiIcon() {
+  return <PngMaskIcon src={UI_ICONS.effects} />;
+}
+
+export function TransitionUiIcon() {
+  return <PngMaskIcon src={UI_ICONS.transition} />;
+}
+
+export function AiEffectIcon() {
+  return <PngMaskIcon src={UI_ICONS.aiEffect} />;
+}
+
+export function SettingsGearIcon() {
+  return <PngMaskIcon src={UI_ICONS.settings} />;
+}
+
+export function GridUiIcon() {
+  return <PngMaskIcon src={UI_ICONS.grid} />;
 }
 
 export function ImageIcon() {
@@ -339,11 +374,7 @@ export function CutIcon() {
 }
 
 export function ProjectsIcon() {
-  return (
-    <Svg>
-      <path d="M2.5 4.5h4l1.5 1.5H13.5v7.5H2.5Z" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.capcut} />;
 }
 
 export function MarkerIcon() {

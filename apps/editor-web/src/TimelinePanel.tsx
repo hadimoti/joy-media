@@ -30,6 +30,7 @@ import {
   SkipBackIcon,
   SkipForwardIcon,
   SoloIcon,
+  SpeakerOnIcon,
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -740,7 +741,7 @@ export function TimelinePanel({
                       });
                     }}
                   >
-                    <MuteIcon />
+                    {track.muted ? <MuteIcon /> : <SpeakerOnIcon />}
                   </button>
                   <button
                     className="icon-button"

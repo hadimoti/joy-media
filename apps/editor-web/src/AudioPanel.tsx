@@ -12,6 +12,7 @@ import {
   MuteIcon,
   PanIcon,
   SoloIcon,
+  SpeakerOnIcon,
 } from './icons.js';
 
 interface AudioPanelProps {
@@ -90,7 +91,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                   )
                 }
               >
-                <MuteIcon />
+                {clip.mute ? <MuteIcon /> : <SpeakerOnIcon />}
               </button>
               <button
                 type="button"
