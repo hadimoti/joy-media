@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
   clampPixelsPerSecond,
@@ -35,19 +35,40 @@ import {
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
-  PlusIcon,
   MarkerIcon,
+  SelectIcon,
   TrackAddIcon,
 } from './icons.js';
 import {
   TimelineContextMenu,
   type TimelineContextMenuState,
 } from './TimelineContextMenu.js';
+import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 const DEFAULT_PPS = 20;
+
+function frameDurationUs(frameRate: { readonly num: number; readonly den: number }): number {
+  return Math.max(1, Math.round((1_000_000 * frameRate.den) / frameRate.num));
+}
+
+/** Snap time to composition frames; clamp strictly inside a clip for razor splits. */
+function snapSplitUs(
+  rawUs: number,
+  clipStartUs: number,
+  clipDurationUs: number,
+  frameUs: number,
+): number | undefined {
+  const clipEndUs = clipStartUs + clipDurationUs;
+  const snapped = Math.round(rawUs / frameUs) * frameUs;
+  const minUs = clipStartUs + frameUs;
+  const maxUs = clipEndUs - frameUs;
+  if (maxUs < minUs) return undefined;
+  if (snapped < minUs || snapped > maxUs) return undefined;
+  return snapped;
+}
 
 function clipDisplayName(id: string): string {
   return id
@@ -88,10 +109,14 @@ function TimelineClip({
   viewport,
   locked,
   laneIndex,
+  splitToolActive,
+  frameUs,
   onToggleSelection,
   onMove,
   onTrim,
   onContextMenu,
+  onSplitHover,
+  onSplitAt,
 }: {
   readonly clip: Clip;
   readonly selected: boolean;
@@ -99,10 +124,14 @@ function TimelineClip({
   readonly viewport: TimelineViewport;
   readonly locked: boolean;
   readonly laneIndex: number;
+  readonly splitToolActive: boolean;
+  readonly frameUs: number;
   readonly onToggleSelection: (id: string) => void;
   readonly onMove: (clipId: string, newStartUs: number) => boolean;
   readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   readonly onContextMenu: (clipId: string, clientX: number, clientY: number) => void;
+  readonly onSplitHover: (atUs: number | undefined) => void;
+  readonly onSplitAt: (atUs: number) => void;
 }) {
   const [dragPx, setDragPx] = useState<number | undefined>(undefined);
   const [trimPreview, setTrimPreview] = useState<
@@ -113,6 +142,13 @@ function TimelineClip({
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
   const voice = isVoiceClip(clip);
+
+  const splitTimeFromClientX = (clientX: number, target: HTMLElement): number | undefined => {
+    const rect = target.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const rawUs = clip.startUs + localX / pxPerUs;
+    return snapSplitUs(rawUs, clip.startUs, clip.durationUs, frameUs);
+  };
 
   const dropTimeUs = (deltaPx: number): number => {
     const rawUs = clip.startUs + deltaPx / pxPerUs;
@@ -173,7 +209,14 @@ function TimelineClip({
         left: `${timeToPixel(displayStartUs, viewport) + gapPx}px`,
         width: `${layoutWidthPx}px`,
       }}
-      onClick={() => {
+      onClick={(event) => {
+        if (splitToolActive) {
+          const atUs = splitTimeFromClientX(event.clientX, event.currentTarget as HTMLElement);
+          if (atUs !== undefined) {
+            onSplitAt(atUs);
+          }
+          return;
+        }
         if (dragRef.current?.moved !== true && trimRef.current === null) onToggleSelection(clip.id);
         dragRef.current = null;
       }}
@@ -185,10 +228,19 @@ function TimelineClip({
       onPointerDown={(event) => {
         if (event.button !== 0 || locked) return;
         if ((event.target as HTMLElement).dataset.trimEdge) return;
+        if (splitToolActive) {
+          event.preventDefault();
+          return;
+        }
         event.currentTarget.setPointerCapture(event.pointerId);
         dragRef.current = { originX: event.clientX, moved: false };
       }}
       onPointerMove={(event) => {
+        if (splitToolActive) {
+          const atUs = splitTimeFromClientX(event.clientX, event.currentTarget);
+          onSplitHover(atUs);
+          return;
+        }
         const trim = trimRef.current;
         if (trim !== null) {
           setTrimPreview({ edge: trim.edge, timeUs: trimTimeUs(trim.edge, event.clientX, trim.originX) });
@@ -301,6 +353,7 @@ export function TimelinePanel({
   onTogglePlayback,
   onSeek,
   onToggleSelection,
+  onClearSelection,
   onDispatch,
   onAddMarker,
   onRemoveMarker,
@@ -313,6 +366,7 @@ export function TimelinePanel({
   readonly onTogglePlayback: () => void;
   readonly onSeek: (timeUs: number) => void;
   readonly onToggleSelection: (id: string) => void;
+  readonly onClearSelection: () => void;
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
   readonly onRemoveMarker?: (id: string) => void;
@@ -323,6 +377,9 @@ export function TimelinePanel({
     pixelsPerSecond: DEFAULT_PPS,
   });
   const [autoFit, setAutoFit] = useState(true);
+  const [selectToolActive, setSelectToolActive] = useState(true);
+  const [splitToolActive, setSplitToolActive] = useState(false);
+  const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
   const [menu, setMenu] = useState<TimelineContextMenuState | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -403,15 +460,34 @@ export function TimelinePanel({
   const selectedTrackView =
     selected === undefined ? undefined : tracks.find((t) => t.id === selected.track.id);
   const selectedLocked = selectedTrackView?.locked === true;
-  const selectedEndUs =
-    selected === undefined ? undefined : selected.clip.startUs + selected.clip.durationUs;
-  const canSplit =
-    selected !== undefined &&
-    !selectedLocked &&
-    playheadUs > selected.clip.startUs &&
-    playheadUs < (selectedEndUs ?? 0);
   const canDuplicate = selected !== undefined && !selectedLocked;
   const canDelete = selected !== undefined && !selectedLocked;
+
+  const frameUs = useMemo(
+    () => frameDurationUs(composition.frameRate),
+    [composition.frameRate],
+  );
+
+  const dispatchSplitAt = useCallback(
+    (trackId: string, clipId: string, atUs: number) => {
+      onDispatch({
+        label: `Split ${clipId}`,
+        commands: [
+          {
+            type: 'timeline.splitClip',
+            payload: {
+              compositionId: composition.id,
+              trackId,
+              clipId,
+              atUs,
+              newClipId: `${clipId}-split-${atUs}`,
+            },
+          },
+        ],
+      });
+    },
+    [composition.id, onDispatch],
+  );
 
   const moveClip = (trackId: string) => (clipId: string, newStartUs: number) => {
     try {
@@ -483,21 +559,7 @@ export function TimelinePanel({
   };
 
   const dispatchSplit = (trackId: string, clipId: string) => {
-    onDispatch({
-      label: `Split ${clipId}`,
-      commands: [
-        {
-          type: 'timeline.splitClip',
-          payload: {
-            compositionId: composition.id,
-            trackId,
-            clipId,
-            atUs: playheadUs,
-            newClipId: `${clipId}-split-${playheadUs}`,
-          },
-        },
-      ],
-    });
+    dispatchSplitAt(trackId, clipId, playheadUs);
   };
 
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
@@ -648,8 +710,74 @@ export function TimelinePanel({
     });
   };
 
+  const handleImportClick = useCallback(() => {
+      // Trigger file input for importing media
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'video/*,audio/*,image/*,.srt,.vtt,.ass,.webp,.gif';
+      input.onchange = async (event) => {
+        const files = Array.from((event.target as HTMLInputElement).files || []);
+        if (files.length === 0) return;
+
+        // Import assets into the project
+        const composition = project.compositions[project.rootCompositionId];
+        if (!composition) return;
+
+        // For each file, create an asset and insert a clip
+        for (const file of files) {
+          const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const isAudio = file.type.startsWith('audio/');
+
+          onDispatch({
+            label: `Import ${file.name}`,
+            commands: [
+              {
+                type: 'timeline.insertClip',
+                payload: {
+                  compositionId: composition.id,
+                  trackId: '', // Will be determined by finding target track
+                  clip: {
+                    id: `${isAudio ? 'voice' : 'clip'}-${assetId}-${Date.now()}`,
+                    kind: 'video',
+                    assetId,
+                    startUs: 0, // Will be set by finding space
+                    durationUs: 5_000_000,
+                    sourceInUs: 0,
+                  },
+                },
+              },
+            ],
+          });
+
+          // Insert clip on first compatible track or create new
+          const targetTrack = tracks.find(t =>
+            t.id === (isAudio ? 'audio' : 'video') && !t.locked
+          );
+          if (targetTrack) {
+            const dropUs = playheadUs > 0 ? playheadUs : 0;
+            insertAssetOnTrack(targetTrack.id, { assetId, kind: isAudio ? 'audio' : 'video', displayName: file.name }, dropUs);
+          }
+        }
+      };
+      input.click();
+    }, [project, composition, playheadUs, onDispatch, insertAssetOnTrack]);
+
+  const handleAddFromLibrary = useCallback(() => {
+    // TODO: Open media library modal
+    console.log('Add from library clicked');
+  }, []);
+
   return (
-    <article className="timeline-panel">
+    <article
+      className={
+        splitToolActive
+          ? 'timeline-panel split-tool-active'
+          : selectToolActive
+            ? 'timeline-panel select-tool-active'
+            : 'timeline-panel'
+      }
+    >
       <div className="timeline-toolbar">
         <button
           className="icon-button"
@@ -717,13 +845,35 @@ export function TimelinePanel({
         )}
         <span className="timeline-toolbar-sep" aria-hidden="true" />
         <button
+          type="button"
           className="icon-button"
-          disabled={!canSplit}
-          aria-label="Split at playhead"
-          title="Split at playhead (S)"
+          data-guide="Select"
+          aria-label="Select tool"
+          title="Select tool"
+          aria-pressed={selectToolActive}
           onClick={() => {
-            if (selected === undefined) return;
-            dispatchSplit(selected.track.id, selected.clip.id);
+            setSelectToolActive((active) => {
+              if (active) return false;
+              setSplitToolActive(false);
+              return true;
+            });
+          }}
+        >
+          <SelectIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          data-guide="Split"
+          aria-label="Split tool"
+          title="Split tool (S)"
+          aria-pressed={splitToolActive}
+          onClick={() => {
+            setSplitToolActive((active) => {
+              if (active) return false;
+              setSelectToolActive(false);
+              return true;
+            });
           }}
         >
           <ScissorsIcon />
@@ -753,6 +903,16 @@ export function TimelinePanel({
           <TrashIcon />
         </button>
       </div>
+
+      <TimelineEmptyState
+        project={project}
+        playheadUs={playheadUs}
+        compositionDurationUs={composition.durationUs}
+        viewportPixelsPerSecond={viewport.pixelsPerSecond}
+        onSeek={onSeek}
+        onImportClick={handleImportClick}
+        onAddFromLibrary={handleAddFromLibrary}
+      />
 
       <div
         className="timeline-tracks"
@@ -798,6 +958,15 @@ export function TimelinePanel({
             }}
             aria-hidden="true"
           />
+          {splitToolActive && splitGuideUs !== undefined && (
+            <span
+              className="timeline-split-guide"
+              style={{
+                left: `calc(9.5rem + ${timeToPixel(splitGuideUs, { ...viewport, originUs: 0 })}px)`,
+              }}
+              aria-hidden="true"
+            />
+          )}
           {markers.length > 0 && (
             <div className="timeline-marker-rail" style={{ minWidth: `${laneWidthPx}px` }}>
               {markers.map((marker) => (
@@ -921,7 +1090,40 @@ export function TimelinePanel({
                   className="timeline-lane"
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onPointerDown={(event) => {
-                    if (event.target === event.currentTarget) seekFromLane(event);
+                    if (event.target !== event.currentTarget) return;
+                    if (splitToolActive) {
+                      setSplitGuideUs(undefined);
+                      return;
+                    }
+                    if (selectToolActive) onClearSelection();
+                    seekFromLane(event);
+                  }}
+                  onPointerMove={(event) => {
+                    if (!splitToolActive) return;
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const localX = event.clientX - rect.left;
+                    const rawUs = pixelToTime(localX, {
+                      originUs: 0,
+                      pixelsPerSecond: viewport.pixelsPerSecond,
+                    });
+                    const snapped =
+                      Math.round(rawUs / frameUs) * frameUs;
+                    const source = composition.tracks.find(
+                      (t) => t.id === track.id,
+                    );
+                    if (source === undefined) return;
+                    const clip = source.clips.find((c) => {
+                      const end = c.startUs + c.durationUs;
+                      return snapped > c.startUs + frameUs && snapped < end - frameUs;
+                    });
+                    if (clip) {
+                      setSplitGuideUs(snapped);
+                    } else {
+                      setSplitGuideUs(undefined);
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    if (splitToolActive) setSplitGuideUs(undefined);
                   }}
                   onDragOver={(event) => {
                     if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
@@ -959,6 +1161,8 @@ export function TimelinePanel({
                       viewport={{ ...viewport, originUs: 0 }}
                       locked={track.locked}
                       laneIndex={index}
+                      splitToolActive={splitToolActive}
+                      frameUs={frameUs}
                       onToggleSelection={onToggleSelection}
                       onMove={track.locked ? () => false : moveClip(track.id)}
                       onTrim={track.locked ? () => false : trimClip(track.id)}
@@ -966,6 +1170,14 @@ export function TimelinePanel({
                         const target = source.clips.find((c) => c.id === clipId);
                         if (target === undefined) return;
                         openClipMenu(track.id, target, x, y);
+                      }}
+                      onSplitHover={(atUs) => {
+                        if (splitToolActive) setSplitGuideUs(atUs);
+                      }}
+                      onSplitAt={(atUs) => {
+                        if (splitToolActive) {
+                          dispatchSplitAt(track.id, clip.id, atUs);
+                        }
                       }}
                     />
                   ))}

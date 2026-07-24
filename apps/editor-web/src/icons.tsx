@@ -201,8 +201,27 @@ export function CloseIcon() {
   );
 }
 
+export function InfoIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 7.2V11.5" />
+      <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function PlusIcon() {
   return <PngMaskIcon src={UI_ICONS.add} />;
+}
+
+export function LibraryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="18" rx="2" />
+      <path d="M7 3v18M17 3v18M2 9h20" />
+    </svg>
+  );
 }
 
 export function DownloadIcon() {
@@ -274,14 +293,9 @@ export function VideoIcon() {
   );
 }
 
+/** Speaker cone + waves — used for Audio category / audio affordances. */
 export function AudioIcon() {
-  return (
-    <Svg>
-      <path d="M4 6.5v3a4 4 0 0 0 8 0v-3" />
-      <path d="M8 2.5v4" />
-      <circle cx="8" cy="11.5" r="1.2" fill="currentColor" stroke="none" />
-    </Svg>
-  );
+  return <SpeakerOnIcon />;
 }
 
 export function RefreshIcon() {
