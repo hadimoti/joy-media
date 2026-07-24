@@ -911,12 +911,38 @@ function EditorWorkspace({
           const audioResponse = await fetch(resolveReferenceMediaUrl(clip.assetId));
           if (!audioResponse.ok)
             throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
-          const audio = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
+          const audioBuffer = await audioContext.decodeAudioData(
+            await audioResponse.arrayBuffer(),
+          );
+          if (audioBuffer === null)
+            throw new Error(`Unable to decode export audio for ${clip.assetId}`);
+          const clipAudioConfig = audioState.clips[clip.id] ?? {
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          };
+          const channels = audioBuffer.numberOfChannels;
+          const length = audioBuffer.length;
+          const samples = new Float32Array(length);
+          const monoChannel = new Float32Array(length);
+          for (let channel = 0; channel < channels; channel++) {
+            audioBuffer.copyFromChannel(monoChannel, channel);
+            let index = 0;
+            for (const value of monoChannel) {
+              samples[index] = samples[index]! + value / channels;
+              index++;
+            }
+          }
           return {
             clip,
             video,
             decoder: createHtmlMediaDecoder(video, captureCanvas),
-            audio,
+            audio: {
+              samples,
+              sampleRate: audioBuffer.sampleRate,
+              config: clipAudioConfig,
+            },
           };
         }),
       );
@@ -958,7 +984,13 @@ function EditorWorkspace({
             const startAt = audioContext.currentTime;
             for (const media of exportMedia) {
               const audioSource = audioContext.createBufferSource();
-              audioSource.buffer = media.audio;
+              const playbackBuffer = audioContext.createBuffer(
+                media.audio.samples.length,
+                1,
+                media.audio.sampleRate,
+              );
+              playbackBuffer.copyToChannel(media.audio.samples, 0);
+              audioSource.buffer = playbackBuffer;
               audioSource.connect(audioDestination);
               audioSource.start(
                 startAt + media.clip.startUs / 1_000_000,
