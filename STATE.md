@@ -14,7 +14,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-24   | Editor `html-scene` seam + seeded first-party scenes; iframe→Pixi capture still open                              |
 | P05 audio + providers            | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                    |
 | P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                |
-| P07 workflows                    | done        | 4/4      | 2026-07-23   | WP-17 accepted: system workflows + stub-port park/resume live-verified; some ports still stub                     |
+| P07 workflows                    | done        | 4/4      | 2026-07-24   | WP-17 + P14.6: park/resume live; write/branch/caption ports honest-deferred (no fake `__stub` success)            |
 | P08 plugin SDK + templates       | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                        |
 | P09 marketplace/collab           | in-progress | 5/5      | 2026-07-24   | Honestly gated; no transport; product decision remains                                                            |
 | P10 advanced                     | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                    |
@@ -35,9 +35,9 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-24)
 
-**Live deploy:** `/opt/joy-media/web` → `web-releases/937f388`. Tip **`937f388`** (`main` ahead of `origin/main` — push only if asked). API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health`.
+**Live deploy:** `/opt/joy-media/web` → `web-releases/2d67808`. Git tip: latest `main` (P14.7 docs sync; ahead of live web). Push only if asked. API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health` → 200.
 
-**Pro-tools:** Phases 0–6 + icon polish are on tip. **Hermes residuals** = [`plan/P14-pro-tools-hermes-runbook.md`](plan/P14-pro-tools-hermes-runbook.md) (Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md`). Invoke: *run next unchecked P14 STEP*.
+**Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. Runbook: [`plan/P14-pro-tools-hermes-runbook.md`](plan/P14-pro-tools-hermes-runbook.md) (Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md`).
 
 **Read this first.** UI: [`DESIGN.md`](DESIGN.md). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
 
@@ -45,8 +45,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 1. **Project library gate** — icon-only New/Create/Cancel; catalog `joy-media.project-catalog.v1`.
 2. **Timeline NLE** — trim, DnD media, zoom/fit, speed/freeze/dupe, markers, track CRUD; SVG + `data-guide`.
-3. **Panels** — Audio / Effects / Color / editable GraphEditor; export preset icons.
-4. **Residuals** — P14.1–P14.6 (mixer→preview, spatial persist, transitions/FX/grade in Pixi, agent stubs).
+3. **Panels** — Audio / Effects / Color / Transitions / editable GraphEditor; export preset icons.
+4. **P14 closed** — mixer→preview/export; spatial paths; transitions (junction-timed); FX/grade in Pixi; honest workflow ports; caption burn-in.
 
 ### Where things live
 
@@ -66,29 +66,26 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 4. Web: copy `apps/editor-web/dist` (+ `public/media/reference`) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
 5. Smoke: `GET :8790/health`; open `media.joyteam.ir` → **Projects** library → open sample → timeline.
 
-### Honest residuals
+### Honest residuals (post-P14)
 
-1. **Commit + deploy** library/timeline working tree; live web still `residuals-piper-gpu-pixi` without library gate.
-2. **API `:8790` was down** at handoff measurement — restore before provider/Jobs checks.
-3. Playback preview may still ignore `playbackRate` (schema/commands durable; player wiring deferred).
-4. Pair local GPU Worker for Comfy/ML (ADR-0018) remains the highest leverage infra residual.
-5. P09 marketplace transport still gated.
+1. Playback preview may still ignore `playbackRate` (schema/commands durable; player wiring deferred).
+2. Pair local GPU Worker for Comfy/ML (ADR-0018) remains the highest leverage infra residual.
+3. P09 marketplace transport still gated.
+4. Workflow analysis ports still use honest fixtures (not ML); write/branch ports defer to editor UI.
+5. `main` may be ahead of `origin/main` — push only if owner asks.
 
 ### Suggested next milestone
 
-1. Commit + deploy editor library/timeline polish; verify library → editor → Projects back.
-2. Bring API `:8790` back; smoke providers.
-3. Optional: wire playback-engine to `playbackRate` / freeze holds.
+1. Optional: wire playback-engine to `playbackRate` / freeze holds.
+2. Pair local GPU Worker; smoke Comfy/ML denoise.
+3. Owner call on P09 marketplace transport.
 
 ### Docs updated this handoff
 
 - `STATE.md` (this file)
-- `DESIGN.md` (library gate + timeline NLE)
-- `ORCHESTRATION.md` (standing tip)
-- `README.md` (start-here)
-- `plan/DECISIONS.md` (D-UI-LIBRARY, D-UI-TIMELINE-NLE)
-- joy-vps `ATLAS.md` / `HANDOFF.md` / `joy-media/README.md`
-- Hermes skill `joy-media-monorepo-work` + GBrain import page
+- `plan/P14-pro-tools-hermes-runbook.md` (all STEPs checked)
+- Hermes skill `joy-media-monorepo-work` + plan copy under `/root/.hermes/plans/`
+- GBrain staging under `/root/gbrain-import/`
 
 ## Handoff archive (2026-07-23)
 
@@ -111,6 +108,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Session log (newest first)
 
+| 2026-07-24 | P14 | **P14.0–P14.7 complete.** Live web `web-releases/2d67808`; tip = latest `main` (P14.7 docs). Mixer preview/export; spatial paths; junction-timed transitions; FX/grade Pixi apply; honest workflow ports; caption burn-in; STATE + Hermes skill + GBrain staging synced. |
 | 2026-07-24 | editor UX | **Project library gate + timeline NLE polish (working tree).** Library list/open/create; `playbackRate` + duplicate/speed/freeze commands; zoom/fit/context menu; Mod+D. Docs + Hermes skill + GBrain sync. API :8790 measured down. |
 | 2026-07-24 | residuals | **Piper + Worker GPU run + HTML→Pixi.** Piper TTS (API + adapter-tts); Worker `run()` for `image.comfy` / `audio.ml-denoise`; preview-protocol capture/surface + Monitor/export Pixi bitmaps. |
 | 2026-07-24 | residuals | **M2–M6 pass.** ADR-0018 + D-W24-1: GPU Comfy/ML on owner-PC Worker (`image.comfy`, `audio.ml-denoise`); Jobs status copy; Worker hello opt-in via `JOY_MEDIA_LOCAL_COMFY_URL` / `JOY_MEDIA_LOCAL_ML_DENOISE`. Denoise port `method: ml` defers to Worker. P04 seam: `html-scene` kind + `htmlScene.create/remove` + Motion panel first-party add/remove + seeded title/lower-third + Monitor text stand-in. Residual #6: WP-12 closed interruption; P09 transport still gated. Piper TTS still parked. |

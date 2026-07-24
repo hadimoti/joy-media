@@ -3,7 +3,7 @@
 **Executable residual plan** for CapCut + Premiere + AE + DaVinci tooling after Phases 0–6 + icon polish.  
 Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md` (keep in sync when editing).
 
-Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `web-releases/f88be65` (P14.1).
+Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `web-releases/2d67808` (P14.6). P14.7 is docs-only after that tip.
 
 ---
 
@@ -53,17 +53,17 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8790/health
 - [x] **P14.2** Durable spatial path schema + UI persistence
 - [x] **P14.3** Mixer graph drives audible preview/export end-to-end (deploy) — export `buildMixerBuffer` (mute/solo/gain/pan/fade); preview master bus via P14.1
 - [x] **P14.4** Transitions icon browser + Pixi/export apply (deploy) — junction window uses right clip `startUs`; progress `(timeUs - (startUs - durationUs)) / durationUs`
-- [x] **P14.5** Effects + color grade apply in Pixi/export; scopes honesty (deploy) — `EffectInstanceIR`/`ColorGradeIR` on render-ir; `pluginData['joy.effects']` + `project.colorGrade` → IR → Pixi filters / Node CPU grade
-- [ ] **P14.6** Agent/workflow stub retirement + caption burn-in icon (deploy)
-- [ ] **P14.7** STATE + Hermes skill sync (+ GBrain staging if asked)
+- [x] **P14.5** Effects + color grade apply in Pixi/export; scopes honesty (deploy) — `92f6024`
+- [x] **P14.6** Agent/workflow stub retirement + caption burn-in icon (deploy) — `2d67808`
+- [x] **P14.7** STATE + Hermes skill sync (+ GBrain staging if asked)
 
 Related: [P11](P11-pro-nle.md) · [P12](P12-expert-motion.md) · [P13](P13-color-effects.md)
 
 ## Exit
-Each STEP leaves typecheck green, one reviewable commit, and (when required) live symlink on the new SHA. Full P14 exit = P14.0–P14.7 checked with no fabricated agent diffs and transitions/FX/grade visible in Monitor.
+Each STEP leaves typecheck green, one reviewable commit, and (when required) live symlink on the new SHA. Full P14 exit = P14.0–P14.7 checked with no fabricated agent diffs and transitions/FX/grade visible in Monitor. **Met 2026-07-24** (tip `2d67808` + P14.7 docs sync).
 
 ## Hermes prompt
 ```text
-Run the next unchecked STEP in plan/P14-pro-tools-hermes-runbook.md.
-Obey Standing rules. One STEP only. Review → commit → deploy if required. Report SHA.
+P14 is complete. Prefer STATE.md handoff + joy-media-monorepo-work skill live facts.
+Do not re-open P14 STEPs unless owner reports a regression.
 ```
