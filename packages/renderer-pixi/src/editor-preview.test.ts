@@ -58,6 +58,7 @@ describe('Pixi editor preview host', () => {
           height: 2,
           color: { r: 255, g: 0, b: 0, a: 255 },
           transitionType: 'wipe',
+          shaderId: 'wipe',
           progress: 0.5,
           leftClipId: 'a',
           rightClipId: 'b',

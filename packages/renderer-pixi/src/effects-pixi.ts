@@ -11,6 +11,10 @@ import {
 } from 'pixi.js';
 import type { ColorGradeIR, EffectInstanceIR } from '@joy-media/render-ir';
 import { isIdentityColorGrade } from './effects-cpu.js';
+import {
+  createBrightnessContrastFilter,
+  normalizeBrightnessContrastParams,
+} from '@joy-media/visual-effects';
 
 export {
   colorGradeSignature,
@@ -107,7 +111,8 @@ export function applyColorGradeMatrix(filter: ColorMatrixFilter, grade: ColorGra
 
 function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
   switch (effect.kind) {
-    case 'blur': {
+    case 'blur':
+    case 'gaussian-blur': {
       const amount = effect.params.amount ?? 4;
       return [new BlurFilter({ strength: amount, quality: 3 })];
     }
@@ -118,7 +123,8 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
       tint.brightness(1 + amount * 0.5, false);
       return [blur, tint];
     }
-    case 'shadow': {
+    case 'shadow':
+    case 'drop-shadow': {
       const distance = effect.params.distance ?? 8;
       const opacity = effect.params.opacity ?? 0.5;
       const blur = new BlurFilter({ strength: Math.max(1, distance / 2), quality: 2 });
@@ -137,9 +143,56 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
       matrix.contrast(amount, false);
       return [matrix];
     }
-    case 'grain': {
+    case 'grain':
+    case 'noise': {
       const amount = effect.params.amount ?? 0.2;
       return [new NoiseFilter({ noise: Math.min(1, Math.max(0.01, amount)), seed: 42 })];
+    }
+    case 'brightness-contrast': {
+      const params = normalizeBrightnessContrastParams(effect.params);
+      return [createBrightnessContrastFilter(params)];
+    }
+    case 'sepia': {
+      const amount = effect.params.amount ?? 0.5;
+      const matrix = new ColorMatrixFilter();
+      matrix.sepia(false);
+      matrix.brightness(amount, false);
+      return [matrix];
+    }
+    case 'hue-saturation': {
+      const matrix = new ColorMatrixFilter();
+      const hue = (effect.params.hue ?? 0) * 180;
+      const sat = (effect.params.saturation ?? 0) + 1;
+      if (hue !== 0) matrix.hue(hue, false);
+      if (sat !== 1) matrix.saturate(sat, true);
+      return [matrix];
+    }
+    case 'vibrance': {
+      const amount = effect.params.amount ?? 0;
+      const matrix = new ColorMatrixFilter();
+      matrix.saturate(1 + amount * 0.5, true);
+      return [matrix];
+    }
+    case 'bloom': {
+      const amount = effect.params.amount ?? 0.4;
+      const threshold = effect.params.threshold ?? 0.6;
+      const blur = new BlurFilter({ strength: Math.max(4, amount * 20), quality: 3 });
+      const tint = new ColorMatrixFilter();
+      tint.brightness(1 + amount * 0.3, false);
+      tint.contrast(1 + amount * 0.2, false);
+      return [blur, tint];
+    }
+    case 'posterize': {
+      const levels = effect.params.levels ?? 8;
+      const matrix = new ColorMatrixFilter();
+      const step = 1 / Math.max(1, levels - 1);
+      matrix.brightness(-step * 0.5, false);
+      matrix.contrast(1 + levels * 0.1, false);
+      return [matrix];
+    }
+    case 'pixelate': {
+      const blockSize = effect.params.blockSize ?? 8;
+      return [new BlurFilter({ strength: blockSize / 4, quality: 1 })];
     }
     default:
       return undefined;

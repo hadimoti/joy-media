@@ -75,6 +75,8 @@ export type {
   Vec2,
   MotionBlurV1,
   JsonValue,
+  EffectParamValue,
+  EffectInstanceV1,
 } from './v1.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type { MigrationReport, MigrationResult } from './migration.js';

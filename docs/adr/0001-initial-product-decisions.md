@@ -33,7 +33,7 @@ Recorded per-question in the prior DECISIONS.md defaults (e.g. thumbnails-only V
 
 - X01 gains systemd `MemoryMax`/`CPUQuota` limits (3 GB / 200%) and keeps them adjustable.
 - P01 auth work (WP-01.5) targets the existing JOY identity boundary + admin-panel per-user activation flag instead of standalone auth.
-- P03 treats Persian accuracy as a headline exit bar; UI localization work is dropped from scope (English-only UI), while §33.3 string-key discipline is retained for the future.
+- P03 treats Persian accuracy as a headline exit bar; UI localization work is dropped from scope (English-only UI labels), while §33.3 string-key discipline is retained for the future. **UI chrome typography** for English labels and Persian/Arabic user content is Fontiran **Modam Pro** (DESIGN.md §4f / D-UI-FONT) — not a localization of chrome copy.
 - P04 drops the "integrated scene editor" from any roadmap consideration; adds a Hermes-authoring integration point instead (contract-side only until P06).
 - P05 provider lineup: OpenRouter adapter + Windows-local model adapters.
 - P06/P07 must deliver a "record → reusable skill" path (D-AGENT) while keeping §22 approval/dry-run/audit/revert gates.

@@ -7,7 +7,17 @@ import type {
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { CaptionCommand } from '@joy-media/captions-core';
 import { applyMotionProjectCommand } from '@joy-media/motion-core';
-import type { MotionCommand, SetSpatialPathCommand } from '@joy-media/motion-core';
+import type {
+  MotionCommand,
+  SetSpatialPathCommand,
+  AddEffectCommand,
+  RemoveEffectCommand,
+  ReorderEffectCommand,
+  ToggleEffectCommand,
+  SetEffectParamCommand,
+  ClearEffectsCommand,
+  ReplaceEffectCommand,
+} from '@joy-media/motion-core';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type TransformProperties = VisualObjectTransformV1;
@@ -108,7 +118,14 @@ export type VisualObjectCommand =
       readonly payload: { readonly objectId: string };
     }
   | CaptionCommand
-  | MotionCommand;
+  | MotionCommand
+  | AddEffectCommand
+  | RemoveEffectCommand
+  | ReorderEffectCommand
+  | ToggleEffectCommand
+  | SetEffectParamCommand
+  | ClearEffectsCommand
+  | ReplaceEffectCommand;
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
   readonly inverse: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>;
@@ -143,6 +160,13 @@ export function applyVisualObjectProjectCommand(
     case 'object.setParent':
     case 'object.setExpression':
     case 'object.setSpatialPath':
+    case 'effect.add':
+    case 'effect.remove':
+    case 'effect.reorder':
+    case 'effect.toggle':
+    case 'effect.setParam':
+    case 'effect.clearAll':
+    case 'effect.replace':
       return applyMotionProjectCommand(project, command);
     default:
       break;

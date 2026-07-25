@@ -165,12 +165,10 @@ describe('buildRenderFrameIR', () => {
     const frame = buildRenderFrameIR('c', 0, 100, 100, [obj], {
       colorGrade: { lift: 0.1, gamma: 1.1, gain: 0.9, saturation: 0.8 },
       effectsByObjectId: {
-        img: {
-          effects: [
-            { id: 'e1', kind: 'blur', enabled: true, params: { amount: 4 } },
-            { id: 'e2', kind: 'grain', enabled: false, params: { amount: 0.2 } },
-          ],
-        },
+        img: [
+          { id: 'e1', effectId: 'blur', enabled: true, params: { amount: 4 } },
+          { id: 'e2', effectId: 'grain', enabled: false, params: { amount: 0.2 } },
+        ],
       },
     });
     expect(frame.colorGrade).toEqual({
@@ -240,5 +238,31 @@ describe('transition timing', () => {
     if (node?.kind !== 'transition') throw new Error('expected transition');
     expect(node.progress).toBe(0.5);
     expect(node.transitionType).toBe('dissolve');
+    expect(node.shaderId).toBe('dissolve');
+  });
+
+  it('maps curated gl:* types onto TransitionNode.shaderId + params', () => {
+    const glTransition: TransitionV1 = {
+      id: 't-gl',
+      trackId: 'track-v',
+      leftClipId: 'left',
+      rightClipId: 'right',
+      type: 'gl:CrossZoom',
+      durationUs: 1_000_000,
+      params: { strength: 0.4 },
+    };
+    const active = buildRenderFrameIR('c', 4_500_000, 100, 100, [], {
+      transitions: [glTransition],
+      clipTimes,
+    });
+    const node = active.nodes.find((n) => n.kind === 'transition');
+    expect(node?.kind).toBe('transition');
+    if (node?.kind !== 'transition') throw new Error('expected transition');
+    expect(node.shaderId).toBe('gl:CrossZoom');
+    expect(node.transitionType).toBe('gl:CrossZoom');
+    expect(node.params).toEqual({ strength: 0.4 });
+    expect(node.leftClipId).toBe('left');
+    expect(node.rightClipId).toBe('right');
+    expect(node.color.a).toBe(0);
   });
 });

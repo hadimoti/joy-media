@@ -1,6 +1,6 @@
 # JOY Media — Editor Design System
 
-Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); source of truth for toolbar/action icons is [icons.tsx](apps/editor-web/src/icons.tsx); source of truth for dockview panel-tab glyphs is [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
+Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-25): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels, with **Modam Pro** for Eng/Fa/Arabic UI type. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); for UI fonts, [public/assets/fonts/modam-pro/](apps/editor-web/public/assets/fonts/modam-pro/) + §4f; for toolbar/action icons, [icons.tsx](apps/editor-web/src/icons.tsx); for dockview panel-tab glyphs, [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
 
 ## 1. Color tokens
 
@@ -95,6 +95,21 @@ Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transpo
 ## 4d. Bidirectional text (Persian-first)
 
 Text fields that hold user content (`input[type=text]`, untyped inputs, search, textarea) carry `unicode-bidi: plaintext` so each field follows its own content direction — Persian is right-aligned, Latin filenames stay left-aligned, no global LTR forcing. Filenames/ids rendered in UI chrome get an explicit `dir="ltr"`. Explainers and empty states use `.empty-hint` (centered, muted, line-height 1.5); never leave a bare left-aligned paragraph floating in a panel.
+
+## 4f. Typography (Eng / Fa / Arabic)
+
+**UI chrome face is Fontiran Modam Pro** for English, Persian (Farsi), and Arabic UI strings — same licensed webfont pack as JOY Agent.
+
+| Token / face | Value | Use |
+| --- | --- | --- |
+| `--joy-font-ui` | `'Modam Pro', Tahoma, system-ui, sans-serif` | Root, body, buttons, inputs, selects, textareas, panel chrome |
+| `--joy-font-mono` | `ui-monospace, SFMono-Regular, Consolas, monospace` | Timecode, expressions, diagnostic/code wells only |
+| `'Modam Pro Condensed'` | Optional condensed weights in `modam-pro.css` | Dense labels only when explicitly requested — not the default UI stack |
+
+- Source files: [`apps/editor-web/public/assets/fonts/modam-pro/`](apps/editor-web/public/assets/fonts/modam-pro/) (`modam-pro.css` + WOFF2/WOFF). Preload Regular in [`index.html`](apps/editor-web/index.html); stack is applied in [`app.css`](apps/editor-web/src/app.css) `:root`.
+- **Do not** use Inter, Roboto, Arial, Segoe UI, or Helvetica as the editor UI family.
+- **HTML scene packages** (ADR-0006) keep package-local / system faces declared in each scene `source` for deterministic goldens — they are not the editor UI stack. Do not load Modam over the network inside a sandboxed scene.
+- License: Fontiran Modam Pro (commercial). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## 5. Accessibility non-negotiables
 

@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>thumb repro</title></head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      const ENDPOINT =
+        'http://localhost:7636/ingest/9749fbc8-ce98-4e3a-872e-85151b33994b';
+      const log = (message, data, hypothesisId = 'R') =>
+        fetch(ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': '96eba7',
+          },
+          body: JSON.stringify({
+            sessionId: '96eba7',
+            runId: 'vps-repro',
+            hypothesisId,
+            location: 'thumb-repro.html',
+            message,
+            data,
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+
+      const out = document.getElementById('out');
+      const line = (s) => {
+        out.textContent += '\n' + s;
+      };
+
+      // Minimal copy of preview bootstrap capture + first-party mount path.
+      const sceneSource = `
+globalThis.__joyScene = function (ctx) {
+  return React.createElement('div', {
+    style: { width: '100%', height: '100%', background: '#224', color: '#fff', fontSize: 40, padding: 20 }
+  }, 'THUMB', String(ctx.progress));
+};
+`;
+
+      const bundle = `
+const React = {
+  createElement(type, props, ...children) {
+    return { type, props: props || {}, children: children.flat().filter((c) => c != null && c !== false) };
+  }
+};
+${sceneSource}
+function applyStyle(el, style) {
+  if (!style || typeof style !== 'object') return;
+  for (const [key, value] of Object.entries(style)) {
+    if (value == null) continue;
+    const cssKey = key.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
+    el.style[cssKey] = typeof value === 'number' && key !== 'opacity' && key !== 'zIndex'
+      ? value + 'px' : String(value);
+  }
+}
+function mount(node, parent) {
+  if (typeof node === 'string' || typeof node === 'number') {
+    parent.appendChild(document.createTextNode(String(node)));
+    return;
+  }
+  if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+  const el = document.createElement(node.type);
+  const props = node.props || {};
+  for (const [key, value] of Object.entries(props)) {
+    if (key === 'style') applyStyle(el, value);
+    else if (key === 'className') el.setAttribute('class', String(value));
+    else if (key.startsWith('on')) continue;
+    else if (value != null) el.setAttribute(key, String(value));
+  }
+  for (const child of node.children || []) mount(child, el);
+  parent.appendChild(el);
+}
+function paint(detail) {
+  const root = document.getElementById('joy-scene-root');
+  if (!root || typeof globalThis.__joyScene !== 'function') return;
+  const durationUs = 5000000;
+  const progress = Math.min(1, Math.max(0, detail.timeUs / durationUs));
+  const ctx = { timeUs: detail.timeUs, durationUs, progress, variables: detail.variables, random: () => 0.5 };
+  root.replaceChildren();
+  root.style.width = '100%';
+  root.style.height = '100%';
+  mount(globalThis.__joyScene(ctx), root);
+}
+window.addEventListener('joy.scene.update.v1', (event) => paint(event.detail));
+if (window.__joySceneContext) paint(window.__joySceneContext);
+window.parent.postMessage({ type: 'joy.scene.module-ready.v1', instanceId: 'repro' }, '*');
+`;
+
+      const bootstrap = `(function () {
+  'use strict';
+  var instanceId = null;
+  function captureSurface(requestId, width, height) {
+    var root = document.getElementById('joy-scene-root');
+    if (!root) {
+      window.parent.postMessage({ type: 'joy.scene.failure.v1', instanceId: instanceId || '', diagnostic: { code: 'SCENE_CAPTURE', message: 'joy-scene-root missing' } }, '*');
+      return;
+    }
+    var canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    var html = new XMLSerializer().serializeToString(root);
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '">' +
+      '<foreignObject width="100%" height="100%" requiredExtensions="http://www.w3.org/1999/xhtml">' +
+      '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + width + 'px;height:' + height + 'px;">' + html + '</div></foreignObject></svg>';
+    var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var img = new Image();
+    img.onload = function () {
+      try {
+        ctx.drawImage(img, 0, 0, width, height);
+        var imageData = ctx.getImageData(0, 0, width, height);
+        var buffer = imageData.data.buffer.slice(imageData.data.byteOffset, imageData.data.byteOffset + imageData.data.byteLength);
+        var nonzero = -1;
+        for (var i = 0; i < imageData.data.length; i++) if (imageData.data[i] !== 0) { nonzero = i; break; }
+        window.parent.postMessage({ type: 'joy.scene.surface.v1', instanceId: instanceId || '', requestId: requestId, width: width, height: height, rgba: buffer, nonzero: nonzero }, '*', [buffer]);
+      } catch (error) {
+        window.parent.postMessage({ type: 'joy.scene.failure.v1', instanceId: instanceId || '', diagnostic: { code: 'SCENE_CAPTURE', message: String(error && error.message || error) } }, '*');
+      } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      window.parent.postMessage({ type: 'joy.scene.failure.v1', instanceId: instanceId || '', diagnostic: { code: 'SCENE_CAPTURE', message: 'svg rasterize failed' } }, '*');
+    };
+    img.src = url;
+  }
+  function receive(event) {
+    if (event.source !== window.parent) return;
+    var message = event.data;
+    if (!message || typeof message !== 'object') return;
+    instanceId = message.instanceId || instanceId;
+    if (message.type === 'joy.scene.capture.v1') {
+      captureSurface(message.requestId, message.width, message.height);
+      return;
+    }
+    if (message.type === 'joy.scene.update.v1') {
+      window.__joySceneContext = { timeUs: message.timeUs, variables: message.variables || {} };
+      window.dispatchEvent(new CustomEvent('joy.scene.update.v1', { detail: window.__joySceneContext }));
+    }
+  }
+  window.addEventListener('message', receive);
+  window.parent.postMessage({ type: 'joy.scene.ready.v1', instanceId: '' }, '*');
+})();`;
+
+      async function runVariant(label, sandbox, useModuleBlob) {
+        await log('variant start', { label, sandbox, useModuleBlob }, 'B');
+        const bundleUrl = URL.createObjectURL(new Blob([bundle], { type: 'text/javascript' }));
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('sandbox', sandbox);
+        const scriptTag = useModuleBlob
+          ? '<script type="module" src="' + bundleUrl + '"><\\/script>'
+          : '<script>' + bundle.replace(/<\/script>/g, '<\\\\/script>') + '<\\/script>';
+        iframe.srcdoc =
+          '<!doctype html><html><head></head><body><div id="joy-scene-root"></div><script>' +
+          bootstrap +
+          '<\\/script>' +
+          scriptTag +
+          '</body></html>';
+        iframe.style.cssText = 'width:200px;height:200px;border:1px solid #444';
+        document.body.appendChild(iframe);
+
+        const result = await new Promise((resolve) => {
+          const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), 5000);
+          const onMessage = (event) => {
+            if (event.source !== iframe.contentWindow) return;
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+            if (data.type === 'joy.scene.ready.v1') {
+              iframe.contentWindow.postMessage(
+                { type: 'joy.scene.update.v1', instanceId: 'repro', timeUs: 2_250_000, variables: {} },
+                '*',
+              );
+              setTimeout(() => {
+                iframe.contentWindow.postMessage(
+                  {
+                    type: 'joy.scene.capture.v1',
+                    instanceId: 'repro',
+                    requestId: 'r1',
+                    width: 64,
+                    height: 64,
+                  },
+                  '*',
+                );
+              }, 200);
+            }
+            if (data.type === 'joy.scene.module-ready.v1') {
+              log('module ready', { label }, 'B');
+            }
+            if (data.type === 'joy.scene.failure.v1') {
+              clearTimeout(timer);
+              window.removeEventListener('message', onMessage);
+              resolve({ ok: false, error: data.diagnostic?.message || 'failure', label });
+            }
+            if (data.type === 'joy.scene.surface.v1') {
+              clearTimeout(timer);
+              window.removeEventListener('message', onMessage);
+              resolve({
+                ok: true,
+                label,
+                width: data.width,
+                height: data.height,
+                rgbaBytes: data.rgba?.byteLength,
+                nonzero: data.nonzero,
+              });
+            }
+          };
+          window.addEventListener('message', onMessage);
+        });
+
+        await log('variant result', result, result.ok ? 'C' : 'B');
+        line(JSON.stringify(result));
+        URL.revokeObjectURL(bundleUrl);
+        return result;
+      }
+
+      const results = [];
+      results.push(await runVariant('sandbox-scripts-module', 'allow-scripts', true));
+      results.push(await runVariant('sandbox-scripts-inline', 'allow-scripts', false));
+      results.push(
+        await runVariant('sandbox-scripts-sameorigin-module', 'allow-scripts allow-same-origin', true),
+      );
+      await log('all variants done', { results }, 'R');
+      line('done');
+    </script>
+  </body>
+</html>

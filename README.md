@@ -13,7 +13,7 @@ Toolchain: Node ≥22, pnpm (via corepack). Run `pnpm install` then `pnpm check`
 | [`JOY_MEDIA_MASTER_PLAN.md`](JOY_MEDIA_MASTER_PLAN.md) | The architecture contract (v1.1, 50 sections). Read sections on demand, not linearly. |
 | [`ORCHESTRATION.md`](ORCHESTRATION.md)                 | **The execution front door.** Part map, dependency graph, session protocol.           |
 | [`STATE.md`](STATE.md)                                 | Progress ledger — which part/WP is active, what's next.                               |
-| [`DESIGN.md`](DESIGN.md)                               | Editor UI contract (gray Adobe-class chrome, library gate, timeline NLE).             |
+| [`DESIGN.md`](DESIGN.md)                               | Editor UI contract (gray Adobe-class chrome, library gate, timeline NLE, **Modam Pro** Eng/Fa/Arabic typography). |
 | [`plan/`](plan/)                                       | One file per part (P00–P10 + X01), each with work packages and exit criteria.         |
 | [`plan/DECISIONS.md`](plan/DECISIONS.md)               | Open product questions (§48) with working defaults and status.                        |
 

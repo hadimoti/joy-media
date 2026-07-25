@@ -31,7 +31,9 @@
     "@joy-media/renderer-headless": "workspace:*",
     "@joy-media/evaluator": "workspace:*",
     "@joy-media/html-scene-runtime": "workspace:*",
-    "@joy-media/visual-object-renderer": "workspace:*"
+    "@joy-media/visual-object-renderer": "workspace:*",
+    "@joy-media/transition-shaders": "workspace:*",
+    "@joy-media/visual-effects": "workspace:*"
   },
   "devDependencies": {
     "@joy-media/test-fixtures": "workspace:*",

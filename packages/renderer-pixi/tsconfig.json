@@ -12,6 +12,9 @@
     },
     {
       "path": "../export-core"
+    },
+    {
+      "path": "../transition-shaders"
     }
   ]
 }

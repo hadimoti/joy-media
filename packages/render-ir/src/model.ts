@@ -89,20 +89,24 @@ export interface GroupNode extends RenderNodeBase {
   readonly children: readonly RenderNode[];
 }
 
-/** A transition between two clips (dissolve, wipe, slide). */
+/** A transition between two clips (registry id + progress). */
 export interface TransitionNode extends RenderNodeBase {
   readonly kind: 'transition';
   readonly width: number;
   readonly height: number;
   readonly color: Rgba;
-  readonly transitionType: 'dissolve' | 'wipe' | 'slide';
+  /** Registry id (`dissolve` / `wipe` / `slide` / `gl:…`). */
+  readonly transitionType: string;
+  /** Resolved shader id for adapters (usually same as transitionType). */
+  readonly shaderId: string;
   readonly progress: number; // 0 to 1
   readonly leftClipId: string;
   readonly rightClipId: string;
+  readonly params?: Readonly<Record<string, number>>;
 }
 
 /** Per-object effect instance carried on visual nodes for GPU/CPU adapters. */
-export type EffectKindIR = 'blur' | 'glow' | 'shadow' | 'vignette' | 'sharpen' | 'grain';
+export type EffectKindIR = string;
 
 export interface EffectInstanceIR {
   readonly id: string;
@@ -113,6 +117,14 @@ export interface EffectInstanceIR {
 
 /** Alias kept for call sites / docs that say EffectNode. */
 export type EffectNode = EffectInstanceIR;
+
+/** Adapter-neutral evaluated effect representation for Render IR. */
+export interface EffectRenderSpec {
+  readonly instanceId: string;
+  readonly effectId: string;
+  readonly enabled: boolean;
+  readonly params: Readonly<Record<string, unknown>>;
+}
 
 /** Master color grade applied once per frame (DaVinci-style lift/gamma/gain). */
 export interface ColorGradeIR {

@@ -22,8 +22,10 @@ import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
+  EffectInstanceV1,
   JoyProjectV1,
   SpikeProject,
+  TransitionV1,
   VideoClip,
   VisualObjectV1,
 } from '@joy-media/project-schema';
@@ -33,10 +35,14 @@ import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import {
   buildRenderFrameIR,
   clipTimesFromTracks,
+  isTransitionActive,
   type BuildRenderFrameOptions,
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
-import { readEffectStacks } from './EffectsPanel.js';
+import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
+
+registerBuiltins();
+
 import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
@@ -138,13 +144,23 @@ import './app.css';
 import 'dockview/dist/styles/dockview.css';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
+function buildEffectsMap(project: JoyProjectV1): Readonly<Record<string, readonly EffectInstanceV1[]>> {
+  const map: Record<string, EffectInstanceV1[]> = {};
+  for (const [objectId, object] of Object.entries(project.visualObjects)) {
+    if (object.effects && object.effects.length > 0) {
+      map[objectId] = [...object.effects];
+    }
+  }
+  return map;
+}
+
 function renderFrameOptions(
   project: JoyProjectV1,
   imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>,
 ): BuildRenderFrameOptions {
   const composition = project.compositions[project.rootCompositionId];
   return {
-    effectsByObjectId: readEffectStacks(project),
+    effectsByObjectId: buildEffectsMap(project),
     ...(project.colorGrade !== undefined ? { colorGrade: project.colorGrade } : {}),
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
@@ -203,7 +219,8 @@ function activeVideoClipForSource(project: SpikeProject, sourceUrl: string) {
 
 function videoClipSpec(clip: VideoClip): VideoClipSpec {
   return {
-    id: clip.assetId,
+    // IR / bitmap map key — must match TransitionV1 left/right clip ids.
+    id: clip.id,
     originalToken: resolveReferenceMediaUrl(clip.assetId),
     startUs: clip.startUs,
     durationUs: clip.durationUs,
@@ -214,11 +231,60 @@ function videoClipSpec(clip: VideoClip): VideoClipSpec {
   };
 }
 
+/** Active transition (if any) at composition time. */
+function activeTransitionAt(
+  project: JoyProjectV1,
+  playheadUs: number,
+): TransitionV1 | undefined {
+  const composition = project.compositions[project.rootCompositionId];
+  if (composition === undefined || project.transitions === undefined) return undefined;
+  const clipTimes = clipTimesFromTracks(composition.tracks);
+  return project.transitions.find((transition) =>
+    isTransitionActive(transition, playheadUs, clipTimes),
+  );
+}
+
+function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
+  const clip = project.compositions.root?.tracks
+    .flatMap((track) => track.clips)
+    .find((item) => item.id === clipId);
+  return clip?.kind === 'video' ? clip : undefined;
+}
+
 /** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
 function sourceTimeForPlayhead(clip: VideoClip, playheadUs: number): number {
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return clip.sourceInUs;
   return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
+}
+
+/**
+ * Source time for a clip during an active A↔B transition. The outgoing clip
+ * keeps its normal mapping; the incoming clip advances from `sourceInUs` as if
+ * it began at the transition window start.
+ */
+function sourceTimeForTransitionSample(
+  clip: VideoClip,
+  playheadUs: number,
+  transition: TransitionV1 | undefined,
+): number {
+  if (
+    transition !== undefined &&
+    clip.id === transition.rightClipId &&
+    playheadUs < clip.startUs
+  ) {
+    const rate = normalizePlaybackRate(clip.playbackRate);
+    if (rate === 0) return clip.sourceInUs;
+    const windowStart = clip.startUs - transition.durationUs;
+    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate;
+  }
+  if (playheadUs < clip.startUs) return clip.sourceInUs;
+  if (playheadUs >= clip.startUs + clip.durationUs) {
+    const rate = normalizePlaybackRate(clip.playbackRate);
+    if (rate === 0) return clip.sourceInUs;
+    return clip.sourceInUs + Math.max(0, clip.durationUs * rate - 1);
+  }
+  return sourceTimeForPlayhead(clip, playheadUs);
 }
 
 /** Source media time → composition playhead (freeze holds last mapped start). */
@@ -289,6 +355,9 @@ interface DecodedPreviewFrame {
 interface EditorPanelContextValue {
   readonly state: EditorRuntimeState;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
+  /** Last decoded RGBA per timeline clip id (dual-texture transitions). */
+  readonly clipFrameCache: ReadonlyMap<string, ImageDataLike>;
+  readonly clipFrameTick: number;
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
   readonly controlPlaneProject: ControlPlaneProjectBinding;
@@ -299,6 +368,7 @@ interface EditorPanelContextValue {
   readonly togglePlayback: () => void;
   readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
+  readonly clearSelection: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
   readonly updateVisualProperty: (
     objectId: string,
@@ -312,6 +382,7 @@ interface EditorPanelContextValue {
     readonly displayName?: string;
     readonly blob?: Blob;
   }) => Promise<void>;
+  readonly addHtmlSceneToSelectedClip: (scenePackageId: string) => void;
   readonly stickerTick: number;
   readonly audioState: AudioState;
   readonly setAudioState: (next: AudioState, label?: string) => void;
@@ -438,6 +509,12 @@ function EditorWorkspace({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
+  /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
+  const clipFrameCacheRef = useRef<Map<string, ImageDataLike>>(new Map());
+  const [clipFrameTick, setClipFrameTick] = useState(0);
+  const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const partnerDecoderRef = useRef<HtmlMediaDecoder | null>(null);
+  const partnerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
@@ -513,12 +590,88 @@ function EditorWorkspace({
   const freezeWallStartRef = useRef<{ wallMs: number; playheadUs: number } | undefined>(undefined);
   const playbackFrameRef = useRef<number | undefined>(undefined);
 
+  const rememberClipFrame = useCallback((clipId: string, bitmap: ImageDataLike) => {
+    clipFrameCacheRef.current.set(clipId, bitmap);
+    setClipFrameTick((tick) => tick + 1);
+  }, []);
+
+  const ensurePartnerDecoder = useCallback((): {
+    video: HTMLVideoElement;
+    decoder: HtmlMediaDecoder;
+  } => {
+    if (partnerVideoRef.current === null) {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      partnerVideoRef.current = video;
+    }
+    if (partnerCanvasRef.current === null) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 0;
+      canvas.height = 0;
+      partnerCanvasRef.current = canvas;
+    }
+    if (partnerDecoderRef.current === null) {
+      partnerDecoderRef.current = createHtmlMediaDecoder(
+        partnerVideoRef.current,
+        partnerCanvasRef.current,
+      );
+    }
+    return { video: partnerVideoRef.current, decoder: partnerDecoderRef.current };
+  }, []);
+
+  const captureTransitionPartnerFrames = useCallback(
+    async (playheadUs: number): Promise<void> => {
+      const transition = activeTransitionAt(session.visualProject, playheadUs);
+      if (transition === undefined) return;
+      const { video, decoder } = ensurePartnerDecoder();
+      for (const clipId of [transition.leftClipId, transition.rightClipId]) {
+        const clip = findVideoClipById(session.timelineProject, clipId);
+        if (clip === undefined) continue;
+        const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href)
+          .href;
+        if (video.src !== sourceUrl) {
+          video.src = sourceUrl;
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+              video.removeEventListener('loadeddata', onLoaded);
+              video.removeEventListener('error', onError);
+            };
+            const onLoaded = () => {
+              cleanup();
+              resolve();
+            };
+            const onError = () => {
+              cleanup();
+              reject(new Error(`Unable to load transition partner ${clip.assetId}`));
+            };
+            video.addEventListener('loadeddata', onLoaded, { once: true });
+            video.addEventListener('error', onError, { once: true });
+          });
+        }
+        const sourceUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
+        await seekDetachedVideo(video, sourceUs);
+        const token = scheduler.current.requestToken();
+        const frame = decoder.captureCurrentFrame(token);
+        if (frame.bitmap !== undefined) rememberClipFrame(clip.id, frame.bitmap);
+      }
+    },
+    [ensurePartnerDecoder, rememberClipFrame, session],
+  );
+
   const syncMediaToPlayhead = useCallback(
     async (playheadUs: number, play: boolean): Promise<boolean> => {
       const video = videoRef.current;
       const clock = clockRef.current;
+      const decoder = decoderRef.current;
       const composition = session.timelineProject.compositions.root;
-      const clip = activeVideoClipAt(session.timelineProject, playheadUs);
+      const transition = activeTransitionAt(session.visualProject, playheadUs);
+      const clip =
+        activeVideoClipAt(session.timelineProject, playheadUs) ??
+        (transition !== undefined
+          ? findVideoClipById(session.timelineProject, transition.leftClipId)
+          : undefined);
       if (
         video === null ||
         clock === null ||
@@ -548,7 +701,7 @@ function EditorWorkspace({
         });
       }
       const rate = normalizePlaybackRate(clip.playbackRate);
-      const sourceTimeUs = sourceTimeForPlayhead(clip, playheadUs);
+      const sourceTimeUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
       video.currentTime = sourceTimeUs / 1_000_000;
       video.playbackRate = rate === 0 ? 1 : rate;
       scheduler.current.seek(sourceTimeUs);
@@ -568,10 +721,24 @@ function EditorWorkspace({
       } else {
         freezeWallStartRef.current = undefined;
         video.pause();
+        await seekDetachedVideo(video, sourceTimeUs);
+        if (decoder !== null) {
+          const token = scheduler.current.requestToken();
+          const frame = decoder.captureCurrentFrame(token);
+          if (frame.bitmap !== undefined) {
+            const node = videoFrameNodeFromDecoded(videoClipSpec(clip), frame, {
+              width: video.videoWidth,
+              height: video.videoHeight,
+            });
+            rememberClipFrame(clip.id, frame.bitmap);
+            setPreviewVideoFrame({ node, bitmap: frame.bitmap });
+          }
+        }
+        await captureTransitionPartnerFrames(playheadUs).catch(() => undefined);
       }
       return true;
     },
-    [session],
+    [captureTransitionPartnerFrames, rememberClipFrame, session],
   );
 
   const seek = useCallback(
@@ -642,10 +809,12 @@ function EditorWorkspace({
       });
       if (frame.bitmap === undefined) scheduler.current.recordDecodedFrame(token, false, false);
       else {
+        rememberClipFrame(clip.id, frame.bitmap);
         setPreviewVideoFrame({ node, bitmap: frame.bitmap });
         const previous = lastMediaTimeUsRef.current;
         if (previous === undefined) scheduler.current.recordDecodedFrame(token, true, true);
         else scheduler.current.driveTick(clock, true, Math.max(1, sourceTimeUs - previous));
+        void captureTransitionPartnerFrames(compositionTimeUs).catch(() => undefined);
       }
       lastMediaTimeUsRef.current = sourceTimeUs;
       setState((active) => ({ ...active, playheadUs: compositionTimeUs }));
@@ -672,7 +841,13 @@ function EditorWorkspace({
         else window.cancelAnimationFrame(playbackFrameRef.current);
       }
     };
-  }, [session, state.playing, syncMediaToPlayhead]);
+  }, [
+    captureTransitionPartnerFrames,
+    rememberClipFrame,
+    session,
+    state.playing,
+    syncMediaToPlayhead,
+  ]);
   const handleMediaReady = useCallback((decoder: HtmlMediaDecoder, clock: MediaClock) => {
     decoderRef.current = decoder;
     clockRef.current = clock;
@@ -830,6 +1005,120 @@ function EditorWorkspace({
       setRevision((revision) => revision + 1);
     },
     [session, syncStickerBitmaps],
+  );
+
+  const addHtmlSceneToSelectedClip = useCallback(
+    (scenePackageId: string) => {
+      const composition = session.timelineProject.compositions.root;
+      if (composition === undefined) return;
+      const selectedClipId = state.selectedIds[0];
+      if (selectedClipId === undefined) return;
+      const selection = composition.tracks
+        .flatMap((track) => track.clips.map((clip) => ({ clip, track })))
+        .find((item) => item.clip.id === selectedClipId);
+      if (selection === undefined) return;
+
+      const objectId = `scene-${scenePackageId.split('.').pop()}-${Date.now().toString(36)}`;
+      const clipId = `clip-${objectId}`;
+      const startUs = selection.clip.startUs;
+      const durationUs = selection.clip.durationUs;
+      const sceneCount = Object.values(session.visualProject.visualObjects).filter(
+        (item) => item.kind === 'html-scene',
+      ).length;
+
+      const overlaps = (
+        track: (typeof composition.tracks)[number],
+        spanStart: number,
+        spanDuration: number,
+      ): boolean => {
+        const spanEnd = spanStart + spanDuration;
+        return track.clips.some((clip) => {
+          const clipEnd = clip.startUs + clip.durationUs;
+          return spanStart < clipEnd && spanEnd > clip.startUs;
+        });
+      };
+
+      const aboveTracks = composition.tracks
+        .filter(
+          (track) =>
+            track.kind === 'video' &&
+            track.enabled &&
+            track.order > selection.track.order &&
+            !overlaps(track, startUs, durationUs),
+        )
+        .sort((a, b) => a.order - b.order);
+      const targetExisting = aboveTracks[0];
+      const order =
+        composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
+      const targetTrackId = targetExisting?.id ?? `V${order + 1}`;
+      const insertClipCommand = {
+        type: 'timeline.insertClip' as const,
+        payload: {
+          compositionId: composition.id,
+          trackId: targetTrackId,
+          clip: {
+            id: clipId,
+            kind: 'video' as const,
+            assetId: `html-scene:${scenePackageId}`,
+            startUs,
+            durationUs,
+            sourceInUs: 0,
+          },
+        },
+      };
+      const timelineCommands =
+        targetExisting === undefined
+          ? [
+              {
+                type: 'timeline.addTrack' as const,
+                payload: {
+                  compositionId: composition.id,
+                  track: {
+                    id: targetTrackId,
+                    kind: 'video' as const,
+                    order,
+                    enabled: true,
+                    clips: [],
+                  },
+                },
+              },
+              insertClipCommand,
+            ]
+          : [insertClipCommand];
+
+      session.dispatchVisualObjects({
+        label: `Add HTML scene ${scenePackageId}`,
+        commands: [
+          {
+            type: 'htmlScene.create',
+            payload: {
+              object: {
+                id: objectId,
+                kind: 'html-scene',
+                scenePackageId,
+                transform: {
+                  x: 80 + sceneCount * 40,
+                  y: 120,
+                  scaleX: 1,
+                  scaleY: 1,
+                  rotationDeg: 0,
+                  opacity: 1,
+                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                },
+              },
+            },
+          },
+        ],
+      });
+      session.dispatchTimeline({
+        label: `Place HTML scene ${scenePackageId}`,
+        commands: timelineCommands,
+      });
+      session.replaceVisualProject(bindClipToObject(session.visualProject, clipId, objectId));
+      setState((current) => ({ ...current, selectedIds: [clipId] }));
+      setRevision((revision) => revision + 1);
+    },
+    [session, state.selectedIds],
   );
 
   const setAudioState = useCallback(
@@ -1144,7 +1433,7 @@ function EditorWorkspace({
         Record<string, VisualObjectV1>
       >;
       const clipTimes = compositionV1 ? clipTimesFromTracks(compositionV1.tracks) : undefined;
-      const effectsByObjectId = readEffectStacks(session.visualProject);
+      const effectsByObjectId = buildEffectsMap(session.visualProject);
       const buildFrame = (timeUs: number) => {
         const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
           (object) => ({
@@ -1178,13 +1467,18 @@ function EditorWorkspace({
           ]),
         ),
       ).sort((left, right) => left - right);
-      const exportClips = transitionTimes
+      const clipsByBoundary = transitionTimes
         .map((timeUs) => activeVideoClipAt(session.timelineProject, timeUs))
-        .filter((clip): clip is VideoClip => clip?.kind === 'video')
-        .filter(
-          (clip, index, clips) =>
-            clips.findIndex((candidate) => candidate.id === clip.id) === index,
-        );
+        .filter((clip): clip is VideoClip => clip?.kind === 'video');
+      const transitionPartnerClips = (session.visualProject.transitions ?? []).flatMap(
+        (transition) =>
+          [transition.leftClipId, transition.rightClipId]
+            .map((clipId) => findVideoClipById(session.timelineProject, clipId))
+            .filter((clip): clip is VideoClip => clip !== undefined),
+      );
+      const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
+        (clip, index, clips) => clips.findIndex((candidate) => candidate.id === clip.id) === index,
+      );
       if (exportClips.length === 0)
         throw new Error('No playable video clips are available for export');
 
@@ -1308,23 +1602,41 @@ function EditorWorkspace({
               else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
             }
           },
-          paintFrame: (index) => {
+          paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-            const clip = activeVideoClipAt(session.timelineProject, timeUs);
+            const transition = activeTransitionAt(session.visualProject, timeUs);
+            const clip =
+              activeVideoClipAt(session.timelineProject, timeUs) ??
+              (transition !== undefined
+                ? findVideoClipById(session.timelineProject, transition.leftClipId)
+                : undefined);
             if (clip === undefined || clip.kind !== 'video')
               throw new Error(`No active video clip at ${timeUs}µs during export`);
-            const media = mediaForClip.get(clip.id);
-            if (media === undefined)
-              throw new Error(`Export media for ${clip.id} was not prepared`);
-            const token = index + 1;
-            const decoded = media.decoder.captureCurrentFrame(token);
-            if (decoded.bitmap === undefined)
-              throw new Error(`Export media frame ${index} for ${clip.assetId} is not drawable`);
-            const node = videoFrameNodeFromDecoded(videoClipSpec(clip), decoded, {
-              width: media.video.videoWidth,
-              height: media.video.videoHeight,
-            });
-            const bitmaps = new Map([[node.id, decoded.bitmap]]);
+            const bitmaps = new Map<string, ImageDataLike>();
+            const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
+              const media = mediaForClip.get(target.id);
+              if (media === undefined)
+                throw new Error(`Export media for ${target.id} was not prepared`);
+              const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
+              await seekDetachedVideo(media.video, sourceUs);
+              const token = index + 1;
+              const decoded = media.decoder.captureCurrentFrame(token);
+              if (decoded.bitmap === undefined)
+                throw new Error(`Export media frame ${index} for ${target.assetId} is not drawable`);
+              bitmaps.set(target.id, decoded.bitmap);
+              return videoFrameNodeFromDecoded(videoClipSpec(target), decoded, {
+                width: media.video.videoWidth,
+                height: media.video.videoHeight,
+              });
+            };
+            const node = await captureExportClip(clip);
+            if (transition !== undefined) {
+              for (const clipId of [transition.leftClipId, transition.rightClipId]) {
+                if (bitmaps.has(clipId)) continue;
+                const partner = findVideoClipById(session.timelineProject, clipId);
+                if (partner !== undefined) await captureExportClip(partner);
+              }
+            }
             const scenes = sceneFrames.get(index);
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
@@ -1560,6 +1872,8 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           onSeek={context.seek}
           onDispatch={context.dispatchProject}
+          {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
+          onAddHtmlSceneToSelection={context.addHtmlSceneToSelectedClip}
         />
       );
     }
@@ -1593,7 +1907,9 @@ function EditorWorkspace({
         <EffectsPanel
           project={visualProject}
           objectId={objectId}
-          onChange={context.replaceVisualProject}
+          onDispatch={(command) => {
+            context.dispatchProject(command as unknown as VisualObjectTransaction);
+          }}
         />
       );
     }
@@ -1650,6 +1966,7 @@ function EditorWorkspace({
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
+          onClearSelection={context.clearSelection}
           onDispatch={context.dispatchTimeline}
           onAddMarker={(timeUs, label) =>
             context.dispatchProject({
@@ -2082,6 +2399,8 @@ function EditorWorkspace({
         value={{
           state,
           previewVideoFrame,
+          clipFrameCache: clipFrameCacheRef.current,
+          clipFrameTick,
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
           controlPlaneProject,
@@ -2096,11 +2415,13 @@ function EditorWorkspace({
               ...current,
               selectedIds: toggleSelection({ clipIds: current.selectedIds }, id).clipIds,
             })),
+          clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
           dispatchTimeline,
           updateVisualProperty,
           dispatchProject,
           replaceVisualProject,
           addStickerFromAsset,
+          addHtmlSceneToSelectedClip,
           stickerTick,
           audioState,
           setAudioState,
@@ -2138,7 +2459,16 @@ function formatTimecode(timeUs: number, fps = 30): string {
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
-  const { state, previewVideoFrame, visualProject, stickerTick, togglePlayback, seek } = context;
+  const {
+    state,
+    previewVideoFrame,
+    clipFrameCache,
+    clipFrameTick,
+    visualProject,
+    stickerTick,
+    togglePlayback,
+    seek,
+  } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
@@ -2217,11 +2547,10 @@ function MonitorPanel() {
       previewVideoFrame === undefined
         ? visualFrame
         : withVideoFrameNode(visualFrame, previewVideoFrame.node);
-    const videoBitmaps = new Map(
-      previewVideoFrame === undefined
-        ? []
-        : [[previewVideoFrame.node.id, previewVideoFrame.bitmap] as const],
-    );
+    const videoBitmaps = new Map(clipFrameCache);
+    if (previewVideoFrame !== undefined) {
+      videoBitmaps.set(previewVideoFrame.node.id, previewVideoFrame.bitmap);
+    }
     for (const [id, bitmap] of sceneCacheRef.current.bitmaps()) {
       videoBitmaps.set(id, bitmap);
     }
@@ -2271,7 +2600,15 @@ function MonitorPanel() {
 
   useEffect(() => {
     paintRef.current();
-  }, [previewVideoFrame, state.playheadUs, visualProject, sceneTick, viewerZoom]);
+  }, [
+    clipFrameCache,
+    clipFrameTick,
+    previewVideoFrame,
+    state.playheadUs,
+    visualProject,
+    sceneTick,
+    viewerZoom,
+  ]);
 
   const composition = visualProject.compositions[visualProject.rootCompositionId];
   const width = composition?.width ?? 1080;

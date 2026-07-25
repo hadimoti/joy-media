@@ -18,7 +18,8 @@
   "dependencies": {
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/render-ir": "workspace:*",
-    "@joy-media/evaluator": "workspace:*"
+    "@joy-media/evaluator": "workspace:*",
+    "@joy-media/transition-shaders": "workspace:*"
   },
   "devDependencies": {
     "@joy-media/renderer-pixi": "workspace:*",

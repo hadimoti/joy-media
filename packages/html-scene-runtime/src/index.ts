@@ -93,6 +93,7 @@ export { createSceneDiagnosticPlaceholder } from './placeholder.js';
 export type {
   FirstPartySceneId,
   FirstPartyScenePackage,
+  ScenePreviewFocus,
   ResolvedSceneInstance,
 } from './first-party.js';
 export {

@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@joy-media/render-ir": "workspace:*",
+    "@joy-media/transition-shaders": "workspace:*",
+    "@joy-media/visual-effects": "workspace:*",
     "pixi.js": "^8.6.0"
   }
 }

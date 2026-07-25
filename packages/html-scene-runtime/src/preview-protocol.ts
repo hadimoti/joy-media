@@ -85,6 +85,72 @@ const PREVIEW_BOOTSTRAP = `(function () {
       return typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean';
     });
   }
+  function isTransparent(color) {
+    return !color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)';
+  }
+  function paintTree(ctx, root, width, height) {
+    var rootRect = root.getBoundingClientRect();
+    var rw = Math.max(1, rootRect.width || width);
+    var rh = Math.max(1, rootRect.height || height);
+    var sx = width / rw;
+    var sy = height / rh;
+    ctx.clearRect(0, 0, width, height);
+    function walk(node) {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        var text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (!text) return;
+        var parent = node.parentElement;
+        if (!parent) return;
+        var ps = window.getComputedStyle(parent);
+        if (ps.display === 'none' || ps.visibility === 'hidden') return;
+        var opacity = parseFloat(ps.opacity);
+        if (!(opacity > 0)) return;
+        var pr = parent.getBoundingClientRect();
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.fillStyle = ps.color || '#fff';
+        ctx.font = ps.font || '16px sans-serif';
+        ctx.textBaseline = 'alphabetic';
+        var metrics = ctx.measureText(text);
+        var textY = (pr.top - rootRect.top) * sy + Math.max(parseFloat(ps.fontSize) || 16, 12) * sy * 0.85;
+        ctx.fillText(text, (pr.left - rootRect.left) * sx, textY, Math.max(1, pr.width * sx));
+        void metrics;
+        ctx.restore();
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      var el = node;
+      var style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      var alpha = parseFloat(style.opacity);
+      if (!(alpha > 0)) return;
+      var rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        for (var c = el.firstChild; c; c = c.nextSibling) walk(c);
+        return;
+      }
+      var x = (rect.left - rootRect.left) * sx;
+      var y = (rect.top - rootRect.top) * sy;
+      var w = rect.width * sx;
+      var h = rect.height * sy;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (!isTransparent(style.backgroundColor)) {
+        ctx.fillStyle = style.backgroundColor;
+        ctx.fillRect(x, y, w, h);
+      }
+      var bw = parseFloat(style.borderTopWidth) || 0;
+      if (bw > 0 && !isTransparent(style.borderTopColor)) {
+        ctx.strokeStyle = style.borderTopColor;
+        ctx.lineWidth = Math.max(1, bw * Math.min(sx, sy));
+        ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+      }
+      for (var child = el.firstChild; child; child = child.nextSibling) walk(child);
+      ctx.restore();
+    }
+    walk(root);
+  }
   function captureSurface(requestId, width, height) {
     var root = document.getElementById('joy-scene-root');
     if (!root) {
@@ -107,68 +173,37 @@ const PREVIEW_BOOTSTRAP = `(function () {
       }, '*');
       return;
     }
-    var html = new XMLSerializer().serializeToString(root);
-    var svg =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="' +
-      width +
-      '" height="' +
-      height +
-      '">' +
-      '<foreignObject width="100%" height="100%" requiredExtensions="http://www.w3.org/1999/xhtml">' +
-      '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' +
-      width +
-      'px;height:' +
-      height +
-      'px;margin:0;padding:0;overflow:hidden;background:transparent;">' +
-      html +
-      '</div></foreignObject></svg>';
-    var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    var url = URL.createObjectURL(blob);
-    var img = new Image();
-    img.onload = function () {
-      try {
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        var imageData = ctx.getImageData(0, 0, width, height);
-        var buffer = imageData.data.buffer.slice(
-          imageData.data.byteOffset,
-          imageData.data.byteOffset + imageData.data.byteLength
-        );
-        window.parent.postMessage(
-          {
-            type: 'joy.scene.surface.v1',
-            instanceId: instanceId || '',
-            requestId: requestId,
-            width: width,
-            height: height,
-            rgba: buffer
-          },
-          '*',
-          [buffer]
-        );
-      } catch (error) {
-        window.parent.postMessage({
-          type: 'joy.scene.failure.v1',
+    // Paint the live laid-out DOM. SVG HTML embedding taints getImageData in Chromium.
+    try {
+      paintTree(ctx, root, width, height);
+      var imageData = ctx.getImageData(0, 0, width, height);
+      var buffer = imageData.data.buffer.slice(
+        imageData.data.byteOffset,
+        imageData.data.byteOffset + imageData.data.byteLength
+      );
+      window.parent.postMessage(
+        {
+          type: 'joy.scene.surface.v1',
           instanceId: instanceId || '',
-          diagnostic: {
-            code: 'SCENE_CAPTURE',
-            message: error && error.message ? String(error.message) : 'capture failed',
-            path: 'surface'
-          }
-        }, '*');
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    };
-    img.onerror = function () {
-      URL.revokeObjectURL(url);
+          requestId: requestId,
+          width: width,
+          height: height,
+          rgba: buffer
+        },
+        '*',
+        [buffer]
+      );
+    } catch (error) {
       window.parent.postMessage({
         type: 'joy.scene.failure.v1',
         instanceId: instanceId || '',
-        diagnostic: { code: 'SCENE_CAPTURE', message: 'svg rasterize failed', path: 'image' }
+        diagnostic: {
+          code: 'SCENE_CAPTURE',
+          message: error && error.message ? String(error.message) : 'capture failed',
+          path: 'surface'
+        }
       }, '*');
-    };
-    img.src = url;
+    }
   }
   function receive(event) {
     if (event.source !== window.parent) return;
@@ -197,7 +232,8 @@ const PREVIEW_BOOTSTRAP = `(function () {
     window.dispatchEvent(new CustomEvent('joy.scene.update.v1', { detail: context }));
   }
   window.addEventListener('message', receive);
-  window.parent.postMessage({ type: 'joy.scene.ready.v1', instanceId: '' }, '*');
+  // Ready is posted by the scene bundle after __joyScene is defined (not here),
+  // so host.update/capture never race an empty root.
 }());`;
 
 export interface ScenePreviewEndpoint {
@@ -225,6 +261,7 @@ export function createSandboxedIframeDescriptor(
       '<!doctype html>',
       '<html><head>',
       `<meta http-equiv="Content-Security-Policy" content="${escapedCsp}">`,
+      '<style>html,body,#joy-scene-root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;}</style>',
       '</head><body><div id="joy-scene-root"></div>',
       `<script>${PREVIEW_BOOTSTRAP}</script>`,
       `<script type="module" src="${escapedBundleUrl}"></script>`,

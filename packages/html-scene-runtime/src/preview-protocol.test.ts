@@ -17,6 +17,10 @@ describe('sandboxed scene preview protocol', () => {
     expect(descriptor.srcDoc).toContain("window.addEventListener('message', receive)");
     expect(descriptor.srcDoc).toContain('event.source !== window.parent');
     expect(descriptor.srcDoc).toContain('joy.scene.update.v1');
+    // Capture must paint laid-out DOM (SVG HTML embedding taints canvas in Chromium).
+    expect(descriptor.srcDoc).toContain('paintTree');
+    expect(descriptor.srcDoc).toContain('getBoundingClientRect');
+    expect(descriptor.srcDoc).not.toContain('image/svg+xml');
     expect(descriptor.csp).toContain('script-src');
     expect(descriptor.csp).toContain('blob:');
     expect(descriptor.csp).toContain("connect-src 'none'");

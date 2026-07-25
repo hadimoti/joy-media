@@ -108,6 +108,12 @@ importers:
       '@joy-media/timeline-engine':
         specifier: workspace:*
         version: link:../../packages/timeline-engine
+      '@joy-media/transition-shaders':
+        specifier: workspace:*
+        version: link:../../packages/transition-shaders
+      '@joy-media/visual-effects':
+        specifier: workspace:*
+        version: link:../../packages/visual-effects
       '@joy-media/visual-object-renderer':
         specifier: workspace:*
         version: link:../../packages/visual-object-renderer
@@ -346,6 +352,12 @@ importers:
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../render-ir
+      '@joy-media/transition-shaders':
+        specifier: workspace:*
+        version: link:../transition-shaders
+      '@joy-media/visual-effects':
+        specifier: workspace:*
+        version: link:../visual-effects
       pixi.js:
         specifier: ^8.6.0
         version: 8.19.0
@@ -365,6 +377,17 @@ importers:
         specifier: workspace:*
         version: link:../project-schema
 
+  packages/transition-shaders: {}
+
+  packages/visual-effects:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      pixi.js:
+        specifier: ^8.0.0
+        version: 8.19.0
+
   packages/visual-object-renderer:
     dependencies:
       '@joy-media/evaluator':
@@ -376,6 +399,9 @@ importers:
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../render-ir
+      '@joy-media/transition-shaders':
+        specifier: workspace:*
+        version: link:../transition-shaders
     devDependencies:
       '@joy-media/golden-render':
         specifier: workspace:*

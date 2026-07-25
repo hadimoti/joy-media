@@ -6,6 +6,7 @@
     { "path": "../project-schema" },
     { "path": "../render-ir" },
     { "path": "../evaluator" },
+    { "path": "../transition-shaders" },
     { "path": "../renderer-pixi" },
     { "path": "../renderer-headless" },
     { "path": "../../tooling/golden-render" }

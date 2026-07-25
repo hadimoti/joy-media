@@ -65,6 +65,12 @@
     },
     {
       "path": "../../packages/audio-core"
+    },
+    {
+      "path": "../../packages/transition-shaders"
+    },
+    {
+      "path": "../../packages/renderer-pixi"
     }
   ]
 }

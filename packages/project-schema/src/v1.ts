@@ -5,6 +5,25 @@ import type { Rational, TimeUs } from './time.js';
 import { clipTimeRange, rational } from './time.js';
 import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
 
+export type EffectParamValue =
+  | number
+  | string
+  | boolean
+  | readonly [number, number]
+  | readonly [number, number, number]
+  | readonly [number, number, number, number];
+
+export interface EffectInstanceV1 {
+  readonly id: string;
+  readonly effectId: string;
+  readonly enabled: boolean;
+  readonly params: Readonly<Record<string, EffectParamValue>>;
+  readonly animations?: Readonly<
+    Partial<Record<string, AnimationCurveV1>>
+  >;
+  readonly label?: string;
+}
+
 export interface JoyProjectV1 {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -174,6 +193,8 @@ export interface VisualObjectV1 {
   readonly camera?: CameraParamsV1;
   /** Present iff `kind === 'html-scene'` — first-party or package scene id (P04). */
   readonly scenePackageId?: string;
+  /** Applied visual effects (P16). Stable per-instance IDs; order = application order. */
+  readonly effects?: readonly EffectInstanceV1[];
 }
 
 export interface CompositionV1 {
@@ -338,13 +359,20 @@ export interface ColorGradeV1 {
   readonly lutId?: 'none' | 'rec709' | 'contrast';
 }
 
+/**
+ * Clip-junction transition. `type` is a registry id:
+ * legacy `dissolve` | `wipe` | `slide`, or curated `gl:*` shader ids
+ * from `@joy-media/transition-shaders`.
+ */
 export interface TransitionV1 {
   readonly id: string;
   readonly trackId: string;
   readonly leftClipId: string;
   readonly rightClipId: string;
-  readonly type: 'dissolve' | 'wipe' | 'slide';
+  readonly type: string;
   readonly durationUs: TimeUs;
+  /** Optional numeric overrides for gl-transition uniforms. */
+  readonly params?: Readonly<Record<string, number>>;
 }
 
 export type ExportPresetId =

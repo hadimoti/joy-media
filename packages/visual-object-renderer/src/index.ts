@@ -10,7 +10,7 @@
  * content is abstract (color-fills for now, resolved assets later).
  */
 
-import type { VisualObjectV1, VisualObjectTransformV1, ColorGradeV1 } from '@joy-media/project-schema';
+import type { VisualObjectV1, VisualObjectTransformV1, ColorGradeV1, EffectInstanceV1 } from '@joy-media/project-schema';
 import type {
   RenderNode,
   RenderFrameIR,
@@ -20,6 +20,7 @@ import type {
   ColorGradeIR,
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
+import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -35,22 +36,13 @@ export interface ResolvedObject {
 /** Clip id → timeline start for transition window math. */
 export type ClipTimingLookup = ReadonlyMap<string, { readonly startUs: TimeUs }>;
 
-export interface EffectStackLike {
-  readonly effects: readonly {
-    readonly id: string;
-    readonly kind: string;
-    readonly enabled: boolean;
-    readonly params: Readonly<Record<string, number>>;
-  }[];
-}
-
 export interface BuildRenderFrameOptions {
   readonly transitions?: readonly TransitionV1[];
   /** Right-clip start times used to activate transitions at the junction. */
   readonly clipTimes?: ClipTimingLookup;
   readonly colorGrade?: ColorGradeV1 | ColorGradeIR;
-  /** Per-object effect stacks from `pluginData['joy.effects']`. */
-  readonly effectsByObjectId?: Readonly<Record<string, EffectStackLike>>;
+  /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
+  readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
   readonly imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>;
 }
@@ -157,7 +149,7 @@ export function buildRenderFrameIR(
 
   const nodes: RenderNode[] = [];
   for (const resolved of resolvedObjects) {
-    const effects = normalizeEffects(options.effectsByObjectId?.[resolved.object.id]);
+    const effects = normalizeEffects(options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects);
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
     if (node) nodes.push(node);
@@ -246,6 +238,7 @@ function transitionToRenderNode(
   height: number,
   clipTimes: ClipTimingLookup,
 ): RenderNode {
+  const shaderId = resolveTransitionShaderId(transition.type);
   return {
     kind: 'transition',
     id: `transition-${transition.id}`,
@@ -256,9 +249,11 @@ function transitionToRenderNode(
     height,
     color: { r: 0, g: 0, b: 0, a: 0 },
     transitionType: transition.type,
+    shaderId,
     progress: transitionProgress(transition, timeUs, clipTimes),
     leftClipId: transition.leftClipId,
     rightClipId: transition.rightClipId,
+    ...(transition.params !== undefined ? { params: transition.params } : {}),
   };
 }
 
@@ -272,30 +267,29 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
   };
 }
 
-function normalizeEffects(stack: EffectStackLike | undefined): readonly EffectInstanceIR[] | undefined {
-  if (!stack?.effects?.length) return undefined;
-  const out: EffectInstanceIR[] = [];
-  for (const effect of stack.effects) {
-    if (!isEffectKind(effect.kind)) continue;
-    out.push({
-      id: effect.id,
-      kind: effect.kind,
-      enabled: effect.enabled !== false,
-      params: effect.params ?? {},
-    });
+function normalizeEffects(instances: readonly EffectInstanceV1[] | undefined): readonly EffectInstanceIR[] | undefined {
+  if (!instances?.length) return undefined;
+  return instances
+    .map((e): EffectInstanceIR => ({
+      id: e.id,
+      kind: e.effectId as EffectInstanceIR['kind'],
+      enabled: e.enabled,
+      params: mapParamsToNumbers(e.params),
+    }));
+}
+
+function mapParamsToNumbers(params: Readonly<Record<string, import('@joy-media/project-schema').EffectParamValue>>): Readonly<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === 'number') {
+      out[key] = value;
+    }
   }
-  return out.length > 0 ? out : undefined;
+  return out;
 }
 
 function isEffectKind(kind: string): kind is EffectInstanceIR['kind'] {
-  return (
-    kind === 'blur' ||
-    kind === 'glow' ||
-    kind === 'shadow' ||
-    kind === 'vignette' ||
-    kind === 'sharpen' ||
-    kind === 'grain'
-  );
+  return true;
 }
 
 function normalizeColorGrade(grade: ColorGradeV1 | ColorGradeIR): ColorGradeIR {

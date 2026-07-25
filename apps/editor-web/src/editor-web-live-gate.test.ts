@@ -77,8 +77,8 @@ describe('WP-15 live gate: agent edit → history → undo/redo', () => {
     expect(undoEntries.length).toBeGreaterThan(0);
     const lastUndoEntry = undoEntries[undoEntries.length - 1];
     expect(lastUndoEntry).toBeDefined();
-    expect(lastUndoEntry!.source).toBe('timeline');
-    expect(lastUndoEntry!.label).toContain('agent-clip-1');
+    expect(lastUndoEntry!.source).toBe('document');
+    expect(lastUndoEntry!.label).toBe('Document');
 
     session.undo();
     expect(clipIdsOf(session, 'track-0')).toEqual(beforeClips);

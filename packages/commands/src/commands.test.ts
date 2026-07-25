@@ -45,12 +45,14 @@ describe('applyCommand', () => {
   it('publishes every supported command through the registry', () => {
     expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
       'property.setTrackEnabled',
+      'timeline.addTrack',
       'timeline.duplicateClip',
       'timeline.freezeFrame',
       'timeline.insertClip',
       'timeline.joinClips',
       'timeline.moveClip',
       'timeline.removeClip',
+      'timeline.removeTrack',
       'timeline.restoreTrackClips',
       'timeline.setClipRate',
       'timeline.splitClip',

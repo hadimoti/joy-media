@@ -6,7 +6,7 @@
  * edits go through the durable command bus via `onDispatch`.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -17,9 +17,20 @@ import {
   sampleCurve,
 } from '@joy-media/motion-core';
 import type { SetSpatialPathCommand } from '@joy-media/motion-core';
-import { FIRST_PARTY_SCENES, type FirstPartySceneId } from '@joy-media/html-scene-runtime/first-party';
-import { CheckIcon, CloseIcon, PlusIcon, SaveIcon } from './icons.js';
+import {
+  createScenePreviewHost,
+  defaultVariablesForScene,
+  type ScenePreviewHost,
+} from '@joy-media/html-scene-runtime/browser';
+import {
+  FIRST_PARTY_SCENES,
+  findFirstPartyScene,
+  type FirstPartySceneId,
+  type FirstPartyScenePackage,
+} from '@joy-media/html-scene-runtime/first-party';
+import { CheckIcon, CloseIcon, InfoIcon, PlusIcon, SaveIcon } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
+import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -28,20 +39,22 @@ interface MotionPanelProps {
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly selectedClipId?: string;
+  readonly onAddHtmlSceneToSelection: (sceneId: FirstPartySceneId) => void;
 }
 
 const LANE_WIDTH = 280;
 const PRESET_DURATION_US = 1_000_000;
+/** Catalog live-preview tile (9:16). */
+const LIVE_TILE_W = 90;
+const LIVE_TILE_H = 160;
+/** Info-tab hero preview (9:16). */
+const INFO_PREVIEW_W = 168;
+const INFO_PREVIEW_H = 298;
+/** Loop length for catalog / info progress clocks (ms). */
+const LIVE_LOOP_MS = 3_200;
 
-const IDENTITY_TRANSFORM = {
-  x: 0,
-  y: 120,
-  scaleX: 1,
-  scaleY: 1,
-  rotationDeg: 0,
-  opacity: 1,
-  crop: { left: 0, top: 0, right: 0, bottom: 0 },
-} as const;
+type LiveProgressListener = (progress: number) => void;
 
 function animatedChannels(object: VisualObjectV1): readonly AnimatablePropertyV1[] {
   const animations = object.animations;
@@ -49,79 +62,452 @@ function animatedChannels(object: VisualObjectV1): readonly AnimatablePropertyV1
   return ANIMATABLE_PROPERTIES.filter((key) => animations[key] !== undefined);
 }
 
-function HtmlScenesSection({
-  allObjects,
-  onDispatch,
+/** Compact portrait still for rows in the on-timeline scene list. */
+function HtmlSceneListThumb({
+  sceneId,
+  height = 64,
 }: {
-  readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
-  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly sceneId: string;
+  readonly height?: number;
 }) {
-  const existing = Object.values(allObjects).filter((item) => item.kind === 'html-scene');
-  const addScene = (sceneId: FirstPartySceneId) => {
-    const id = `scene-${sceneId.split('.').pop()}-${Date.now().toString(36)}`;
-    onDispatch({
-      label: `Add HTML scene ${sceneId}`,
-      commands: [
-        {
-          type: 'htmlScene.create',
-          payload: {
-            object: {
-              id,
-              kind: 'html-scene',
-              scenePackageId: sceneId,
-              transform: {
-                ...IDENTITY_TRANSFORM,
-                x: existing.length * 80,
-              },
-            },
-          },
-        },
-      ],
+  const [url, setUrl] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void getFirstPartySceneThumbUrl(sceneId, height).then((next) => {
+      if (!cancelled) setUrl(next);
     });
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [sceneId, height]);
+  const width = Math.max(1, Math.round((height * 9) / 16));
+  if (url === undefined) {
+    return (
+      <span
+        className="html-scene-thumb-placeholder html-scene-thumb-portrait"
+        style={{ width, height }}
+        aria-hidden="true"
+      />
+    );
+  }
   return (
-    <section className="html-scenes-section">
-      <h3>HTML scenes</h3>
-      <p className="empty-hint">
-        First-party P04 packages. Instances preview as labeled layers in Monitor/export until iframe
-        capture is wired.
-      </p>
-      <div className="html-scene-actions">
-        {FIRST_PARTY_SCENES.map((scene) => (
-          <button
-            key={scene.id}
-            type="button"
-            className="icon-button"
-            data-guide={scene.name}
-            aria-label={`Add HTML scene ${scene.name}`}
-            onClick={() => addScene(scene.id)}
-          >
-            <PlusIcon />
-          </button>
-        ))}
-      </div>
-      {existing.length > 0 && (
-        <ul className="html-scene-list">
-          {existing.map((scene) => (
-            <li key={scene.id} dir="ltr">
-              <span>{scene.scenePackageId}</span>
-              <button
-                type="button"
-                className="icon-button"
-                title={`Remove ${scene.id}`}
-                aria-label={`Remove HTML scene ${scene.id}`}
-                onClick={() =>
-                  onDispatch({
-                    label: `Remove HTML scene ${scene.id}`,
-                    commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
-                  })
-                }
-              >
-                <CloseIcon />
-              </button>
+    <img
+      className="html-scene-thumb-img html-scene-thumb-portrait"
+      src={url}
+      width={width}
+      height={height}
+      alt=""
+      draggable={false}
+    />
+  );
+}
+
+function HtmlSceneLiveThumb({
+  scene,
+  listenersRef,
+  tileW = LIVE_TILE_W,
+  tileH = LIVE_TILE_H,
+  instancePrefix = 'live-thumb',
+  className = 'html-scene-live-thumb',
+}: {
+  readonly scene: FirstPartyScenePackage;
+  readonly listenersRef: MutableRefObject<Set<LiveProgressListener>>;
+  readonly tileW?: number;
+  readonly tileH?: number;
+  readonly instancePrefix?: string;
+  readonly className?: string;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    const root = rootRef.current;
+    if (mount === null || root === null) return;
+    let host: ScenePreviewHost | undefined;
+    let cancelled = false;
+    const variables = defaultVariablesForScene(scene.id);
+    const viewport = scene.manifest.viewport;
+    const { scale, tx, ty } = focusCoverTransform(
+      viewport.width,
+      viewport.height,
+      tileW,
+      tileH,
+      scene.previewFocus,
+    );
+
+    host = createScenePreviewHost({
+      instanceId: `${instancePrefix}-${scene.id}`,
+      scene,
+      parent: mount,
+      placement: 'inline',
+    });
+    host.iframe.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    host.iframe.setAttribute('tabindex', '-1');
+    host.iframe.setAttribute('aria-hidden', 'true');
+
+    const onProgress: LiveProgressListener = (progress) => {
+      if (cancelled || host === undefined) return;
+      const durationUs = scene.manifest.durationUs;
+      const timeUs = Math.max(0, Math.min(durationUs, Math.floor(progress * durationUs)));
+      host.update(timeUs, variables);
+      root.dataset.liveProgress = progress.toFixed(3);
+    };
+
+    void host.ready.then(() => {
+      if (cancelled) return;
+      listenersRef.current.add(onProgress);
+      onProgress(0.12);
+      setReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+      listenersRef.current.delete(onProgress);
+      host?.destroy();
+    };
+  }, [scene, listenersRef, tileW, tileH, instancePrefix]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={className}
+      data-scene-id={scene.id}
+      style={{ width: tileW, height: tileH }}
+      aria-hidden="true"
+    >
+      <div ref={mountRef} className="html-scene-live-thumb-mount" />
+      {!ready && <span className="html-scene-thumb-placeholder html-scene-thumb-portrait" />}
+    </div>
+  );
+}
+
+function HtmlSceneInfoPanel({ scene }: { readonly scene: FirstPartyScenePackage }) {
+  const durationSec = (scene.manifest.durationUs / 1_000_000).toFixed(1);
+  const { width, height } = scene.manifest.viewport;
+  const focus = scene.previewFocus;
+  return (
+    <div className="html-scene-info-panel" role="dialog" aria-label={`${scene.name} scene data`}>
+      <dl className="html-scene-info-dl">
+        <div>
+          <dt>Name</dt>
+          <dd>{scene.name}</dd>
+        </div>
+        <div>
+          <dt>Package id</dt>
+          <dd dir="ltr">{scene.id}</dd>
+        </div>
+        <div>
+          <dt>Duration</dt>
+          <dd dir="ltr">{durationSec}s</dd>
+        </div>
+        <div>
+          <dt>Viewport</dt>
+          <dd dir="ltr">
+            {width} × {height}
+          </dd>
+        </div>
+        <div>
+          <dt>Preview focus</dt>
+          <dd dir="ltr">
+            x {focus.x.toFixed(2)} · y {focus.y.toFixed(2)} · w {focus.w.toFixed(2)} · h{' '}
+            {focus.h.toFixed(2)}
+          </dd>
+        </div>
+      </dl>
+      <h4 className="html-scene-info-vars-title">Variables</h4>
+      {Object.keys(scene.variableSchema).length === 0 ? (
+        <p className="html-scene-info-empty">No variables.</p>
+      ) : (
+        <ul className="html-scene-info-vars">
+          {Object.entries(scene.variableSchema).map(([key, def]) => (
+            <li key={key}>
+              <span className="html-scene-info-var-key" dir="ltr">
+                {key}
+              </span>
+              <span className="html-scene-info-var-meta">
+                {def.label ?? key}
+                {' · '}
+                {def.type}
+                {' · default '}
+                <code dir="ltr">{String(def.default)}</code>
+              </span>
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function HtmlSceneAddButton({
+  scene,
+  onAdd,
+  canAdd,
+  listenersRef,
+  catalogLive,
+  infoActive,
+  onOpenInfo,
+}: {
+  readonly scene: FirstPartyScenePackage;
+  readonly onAdd: (sceneId: FirstPartySceneId) => void;
+  readonly canAdd: boolean;
+  readonly listenersRef: MutableRefObject<Set<LiveProgressListener>>;
+  readonly catalogLive: boolean;
+  readonly infoActive: boolean;
+  readonly onOpenInfo: () => void;
+}) {
+  return (
+    <div className={infoActive ? 'html-scene-card info-active' : 'html-scene-card'}>
+      <div className="html-scene-thumb" data-guide={scene.name} title={scene.name}>
+        {catalogLive ? (
+          <HtmlSceneLiveThumb scene={scene} listenersRef={listenersRef} />
+        ) : (
+          <HtmlSceneListThumb sceneId={scene.id} height={LIVE_TILE_H} />
+        )}
+        <span className="html-scene-thumb-label">{scene.name}</span>
+      </div>
+      <button
+        type="button"
+        className="icon-button html-scene-info-btn"
+        data-guide="Scene data"
+        aria-label={`Show data for ${scene.name}`}
+        aria-expanded={infoActive}
+        title={`Data · ${scene.name}`}
+        onClick={onOpenInfo}
+      >
+        <InfoIcon />
+      </button>
+      <button
+        type="button"
+        className="icon-button html-scene-add-btn"
+        data-guide={canAdd ? 'Add to selection' : 'Select a timeline clip'}
+        aria-label={
+          canAdd
+            ? `Add ${scene.name} to selected clip`
+            : `Select a timeline clip to add ${scene.name}`
+        }
+        title={canAdd ? `Add · ${scene.name}` : 'Select a timeline clip'}
+        disabled={!canAdd}
+        onClick={() => onAdd(scene.id)}
+      >
+        <PlusIcon />
+      </button>
+    </div>
+  );
+}
+
+function resolveInfoScene(
+  infoKey: string | undefined,
+  allObjects: Readonly<Record<string, VisualObjectV1>>,
+): FirstPartyScenePackage | undefined {
+  if (infoKey === undefined) return undefined;
+  if (infoKey.startsWith('inst:')) {
+    const object = allObjects[infoKey.slice(5)];
+    const packageId = object?.scenePackageId;
+    return packageId !== undefined ? findFirstPartyScene(packageId) : undefined;
+  }
+  return findFirstPartyScene(infoKey);
+}
+
+function HtmlSceneInfoTab({
+  scene,
+  listenersRef,
+  onClose,
+}: {
+  readonly scene: FirstPartyScenePackage;
+  readonly listenersRef: MutableRefObject<Set<LiveProgressListener>>;
+  readonly onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, [scene.id]);
+
+  return (
+    <div
+      className="html-scene-info-tab"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${scene.name} scene info`}
+    >
+      <header className="html-scene-info-tab-bar">
+        <span className="html-scene-info-tab-title">{scene.name}</span>
+        <button
+          ref={closeRef}
+          type="button"
+          className="icon-button"
+          data-guide="Close"
+          title="Close scene info"
+          aria-label="Close scene info"
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </button>
+      </header>
+      <div className="html-scene-info-tab-body">
+        <div className="html-scene-info-tab-preview">
+          <HtmlSceneLiveThumb
+            scene={scene}
+            listenersRef={listenersRef}
+            tileW={INFO_PREVIEW_W}
+            tileH={INFO_PREVIEW_H}
+            instancePrefix="live-info"
+            className="html-scene-live-thumb html-scene-info-live"
+          />
+        </div>
+        <HtmlSceneInfoPanel scene={scene} />
+      </div>
+    </div>
+  );
+}
+
+function HtmlScenesSection({
+  allObjects,
+  onDispatch,
+  selectedClipId,
+  onAddHtmlSceneToSelection,
+}: {
+  readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly selectedClipId?: string;
+  readonly onAddHtmlSceneToSelection: (sceneId: FirstPartySceneId) => void;
+}) {
+  const existing = Object.values(allObjects).filter((item) => item.kind === 'html-scene');
+  const catalogListenersRef = useRef<Set<LiveProgressListener>>(new Set());
+  const infoListenersRef = useRef<Set<LiveProgressListener>>(new Set());
+  const [infoSceneId, setInfoSceneId] = useState<string | undefined>(undefined);
+  const infoScene = resolveInfoScene(infoSceneId, allObjects);
+  const catalogLive = infoScene === undefined;
+  const canAdd = selectedClipId !== undefined;
+
+  useEffect(() => {
+    let raf = 0;
+    let start: number | undefined;
+    let lastEmit = 0;
+    // ~20fps; only the active surface set receives ticks (catalog XOR info hero).
+    const MIN_FRAME_MS = 50;
+    const tick = (now: number) => {
+      if (document.visibilityState === 'visible') {
+        if (start === undefined) start = now;
+        if (now - lastEmit >= MIN_FRAME_MS) {
+          lastEmit = now;
+          const progress = ((now - start) % LIVE_LOOP_MS) / LIVE_LOOP_MS;
+          const active =
+            infoListenersRef.current.size > 0
+              ? infoListenersRef.current
+              : catalogListenersRef.current;
+          for (const listener of active) listener(progress);
+        }
+      } else {
+        start = undefined;
+        lastEmit = 0;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    if (infoSceneId === undefined) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setInfoSceneId(undefined);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [infoSceneId]);
+
+  const openInfo = (key: string) => {
+    setInfoSceneId((current) => (current === key ? undefined : key));
+  };
+
+  return (
+    <section
+      className={
+        infoScene !== undefined ? 'html-scenes-section info-tab-open' : 'html-scenes-section'
+      }
+    >
+      <div className="html-scenes-layer" aria-hidden={infoScene !== undefined}>
+        <h3 className="html-scenes-heading">
+          <img
+            className="html-scenes-heading-logo"
+            src="/assets/icons/ui/html-scenes.png"
+            width={22}
+            height={17}
+            alt=""
+            draggable={false}
+          />
+          HTML scenes
+        </h3>
+        <div className="html-scene-actions" role="list" aria-label="HTML scene catalog">
+          {FIRST_PARTY_SCENES.map((scene) => (
+            <div key={scene.id} role="listitem">
+              <HtmlSceneAddButton
+                scene={scene}
+                onAdd={onAddHtmlSceneToSelection}
+                canAdd={canAdd}
+                listenersRef={catalogListenersRef}
+                catalogLive={catalogLive}
+                infoActive={infoScene?.id === scene.id}
+                onOpenInfo={() => openInfo(scene.id)}
+              />
+            </div>
+          ))}
+        </div>
+        {existing.length > 0 && (
+          <ul className="html-scene-list">
+            {existing.map((scene) => {
+              const packageId = scene.scenePackageId ?? '';
+              const pkg = findFirstPartyScene(packageId);
+              const label = pkg?.name ?? packageId;
+              const listInfoActive = infoSceneId === `inst:${scene.id}`;
+              return (
+                <li key={scene.id} dir="ltr">
+                  <HtmlSceneListThumb sceneId={packageId} height={56} />
+                  <span className="html-scene-list-label">{label}</span>
+                  {pkg !== undefined && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      data-guide="Scene data"
+                      title={`Data · ${label}`}
+                      aria-label={`Show data for ${label}`}
+                      aria-expanded={listInfoActive}
+                      onClick={() => openInfo(`inst:${scene.id}`)}
+                    >
+                      <InfoIcon />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title={`Remove ${scene.id}`}
+                    aria-label={`Remove HTML scene ${scene.id}`}
+                    onClick={() =>
+                      onDispatch({
+                        label: `Remove HTML scene ${scene.id}`,
+                        commands: [
+                          { type: 'htmlScene.remove', payload: { objectId: scene.id } },
+                        ],
+                      })
+                    }
+                  >
+                    <CloseIcon />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      {infoScene !== undefined && (
+        <HtmlSceneInfoTab
+          scene={infoScene}
+          listenersRef={infoListenersRef}
+          onClose={() => setInfoSceneId(undefined)}
+        />
       )}
     </section>
   );
@@ -134,14 +520,24 @@ export function MotionPanel({
   playheadUs,
   onSeek,
   onDispatch,
+  selectedClipId,
+  onAddHtmlSceneToSelection,
 }: MotionPanelProps) {
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
+  const scenesSection = (
+    <HtmlScenesSection
+      allObjects={allObjects}
+      onDispatch={onDispatch}
+      {...(selectedClipId !== undefined ? { selectedClipId } : {})}
+      onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
+    />
+  );
 
   if (object === undefined) {
     return (
       <article className="motion-panel">
-        <HtmlScenesSection allObjects={allObjects} onDispatch={onDispatch} />
+        {scenesSection}
         <p className="empty-hint">Select a visual clip to edit its motion.</p>
       </article>
     );
@@ -206,6 +602,7 @@ export function MotionPanel({
 
   return (
     <article className="motion-panel">
+      {scenesSection}
       <p>Motion · {object.id}</p>
 
       <div className="motion-controls">

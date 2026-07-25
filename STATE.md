@@ -11,7 +11,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | P01 platform foundation          | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                               |
 | P02 editing slice                | done*       | 6/6      | 2026-07-24   | Timeline NLE polish + project library gate in working tree (uncommitted); deploy next |
 | P03 captions                     | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                   |
-| P04 motion + HTML scenes         | in-progress | 5/5      | 2026-07-24   | Editor `html-scene` seam + seeded first-party scenes; iframe→Pixi capture still open                              |
+| P04 motion + HTML scenes         | done        | 5/5      | 2026-07-24   | iframe→RGBA→Pixi live; first-party catalog expanded in P16 (11 templates + goldens)                               |
 | P05 audio + providers            | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                    |
 | P06 agent                        | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                |
 | P07 workflows                    | done        | 4/4      | 2026-07-24   | WP-17 + P14.6: park/resume live; write/branch/caption ports honest-deferred (no fake `__stub` success)            |
@@ -33,21 +33,23 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                       |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                   |
 
-## Handoff for next agent (2026-07-24)
+## Handoff for next agent (2026-07-25)
 
-**Live deploy:** `/opt/joy-media/web` → latest `web-releases/<sha>` after P15 deploy. Git tip: latest `main`. Push only if asked. API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health` → 200.
+**Live deploy:** `/opt/joy-media/web` → `web-releases/f62beb8-timeline-select-tool` (timeline SelectIcon tool + select cursor; clip accent outline; HTML scene + still binds to selection). Git tip: working tree may be ahead of last push. Push only if asked. API: `systemctl restart joy-media@api` then `curl 127.0.0.1:8790/health` → 200.
 
-**Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15 sticker overlays** runbook: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md).
+**Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15** stickers: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md). **P16** gl-transitions + HTML scene pack: [`plan/P16-oss-transitions-html-scenes.md`](plan/P16-oss-transitions-html-scenes.md).
 
-**Read this first.** UI: [`DESIGN.md`](DESIGN.md). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
+**Read this first.** UI: [`DESIGN.md`](DESIGN.md) (incl. **§4f Typography — Modam Pro**). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-UI-FONT** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
 
 ### Editor UX on tip
 
 1. **Project library gate** — icon-only New/Create/Cancel; catalog `joy-media.project-catalog.v1`.
 2. **Timeline NLE** — trim, DnD media, zoom/fit, speed/freeze/dupe, markers, track CRUD; SVG + `data-guide`.
-3. **Panels** — dockview **v5**: creative stack (Inspector/Motion/Effects/Transitions/Color/Captions) then utilities; header Deliver group collapses export presets.
+3. **Panels** — dockview creative stack (Inspector/Motion/Effects/Transitions/Color/Captions) then utilities; header Deliver group.
 4. **P14 closed** — mixer→preview/export; spatial paths; transitions (junction-timed); FX/grade in Pixi; honest workflow ports; caption burn-in.
 5. **P15 stickers** — Assets **Add as sticker** (OPFS image → visual object + clip bind); real alpha pixels in Monitor/export; crop in Inspector; RemBG button gated on `image.comfy` Worker.
+6. **P16** — real A↔B gl-transitions; 15 first-party HTML scenes with live 9:16 focused previews in Motion.
+7. **Typography** — editor UI Eng/Fa/Arabic uses **Fontiran Modam Pro** (`public/assets/fonts/modam-pro/`); see DESIGN.md §4f.
 
 ### Where things live
 
@@ -111,6 +113,10 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Session log (newest first)
 
+| 2026-07-25 | timeline | **Select cursor tool.** Replaced text selection chip with `SelectIcon` toggle (default on); select-tool cursor over tracks/clips; stronger selected outline; empty-lane clears selection. Live `web-releases/f62beb8-timeline-select-tool`. |
+| 2026-07-25 | P16 UX | **Selection chip + HTML scene +.** Timeline toolbar shows selected clip chip (clear); HTML catalog ⓘ top-left, + top-right places scene as overlay clip (same span, track above) via `joy.clipObjects`. Live `web-releases/f62beb8-html-scene-plus`. |
+| 2026-07-25 | icons | **Motion/Effects tab glyphs.** Motion tab → `motion_24x24.png` (from attached html3); Effects tab → former Motion `effects-org_24x24.png`. Live `web-releases/f62beb8-motion-tab-icon`. |
+| 2026-07-25 | P16 UX | **HTML scenes hint → per-scene info.** Removed Motion catalog empty-hint; ⓘ on each catalog tile (and placed scenes) opens package id/duration/viewport/previewFocus + variable schema. Live `web-releases/f62beb8-html-scene-info`. |
 | 2026-07-24 | P14 | **P14.0–P14.7 complete.** Live web `web-releases/2d67808`; tip = latest `main` (P14.7 docs). Mixer preview/export; spatial paths; junction-timed transitions; FX/grade Pixi apply; honest workflow ports; caption burn-in; STATE + Hermes skill + GBrain staging synced. |
 | 2026-07-24 | editor UX | **Project library gate + timeline NLE polish (working tree).** Library list/open/create; `playbackRate` + duplicate/speed/freeze commands; zoom/fit/context menu; Mod+D. Docs + Hermes skill + GBrain sync. API :8790 measured down. |
 | 2026-07-24 | residuals | **Piper + Worker GPU run + HTML→Pixi.** Piper TTS (API + adapter-tts); Worker `run()` for `image.comfy` / `audio.ml-denoise`; preview-protocol capture/surface + Monitor/export Pixi bitmaps. |
@@ -145,6 +151,8 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | 2026-07-23 | fix | **Dockview layout + Captions a11y.** Fresh workspace uses Adobe-like 3-zone seed (media | monitor/timeline | utilities) under `joy-media.dockview.v2`; missing panels add `inactive` so they no longer steal focus; Captions SRT/VTT/FA/EN gained aria-labels. |
 
 | 2026-07-23 | WP-19/20/21 | **Normalize port, caption fixtures, baseline hygiene.** `transform.normalizeAudio` now runs `audio-core.normalizeDialogue` (no `__stub`); Captions FA/EN load fixture transcripts (`fixture-whisper-*-v1`); golden test keeps preview↔export parity and drops cross-Chromium SHA pins; eslint Node globals for bins. editor-web 73/73; typecheck clean; golden 2/2. |
+
+| 2026-07-25 | D-UI-FONT | **Modam Pro UI font for Eng/Fa/Arabic.** Vendored Fontiran Modam Pro into `apps/editor-web/public/assets/fonts/modam-pro/`; `index.html` preloads Regular; `app.css` `--joy-font-ui` applies to root/body/controls (mono kept for timecode/code). DESIGN.md §4f, DECISIONS **D-UI-FONT**, THIRD_PARTY_NOTICES + product/ADR notes. HTML scenes stay ADR-0006 local faces. Deploy tip `f62beb8-modam-pro`. |
 
 | 2026-07-23 | WP-18 | **Plugin host wired into editor.** Split browser-safe `@joy-media/plugin-sdk/browser` (`FirstPartyPluginHost` + policy, no Node crypto). Plugins panel lists first-party demo (install disabled → enable); safe mode default-on blocks enable/mount; project data survives disable. editor-web 71/71; plugin-sdk 19/19; vite build ok. |
 

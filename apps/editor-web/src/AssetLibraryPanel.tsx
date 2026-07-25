@@ -36,7 +36,7 @@ import {
   ListIcon,
   TrashIcon,
   VideoIcon,
-  AudioIcon,
+  SpeakerOnIcon,
 } from './icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
@@ -49,7 +49,7 @@ const categories: readonly {
 }[] = [
   { id: 'all', label: 'All assets', Icon: GridUiIcon },
   { id: 'video', label: 'Video', Icon: VideoIcon },
-  { id: 'audio', label: 'Audio', Icon: AudioIcon },
+  { id: 'audio', label: 'Audio', Icon: SpeakerOnIcon },
   { id: 'image', label: 'Images', Icon: ImageIcon },
 ];
 

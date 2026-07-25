@@ -99,18 +99,23 @@ function paint(detail) {
 }
 window.addEventListener('joy.scene.update.v1', (event) => paint(event.detail));
 if (window.__joySceneContext) paint(window.__joySceneContext);
+window.parent.postMessage({ type: 'joy.scene.ready.v1', instanceId: '' }, '*');
 `;
 }
 
 export function createFirstPartySceneBundleUrl(scene: FirstPartyScenePackage): string {
   const source = firstPartyBundleSource(scene.source, scene.manifest.durationUs);
-  return URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+  // Opaque sandboxed iframes cannot load parent-created blob: modules
+  // ("Not allowed to load local resource: blob:null/…"). data: works.
+  return `data:text/javascript,${encodeURIComponent(source)}`;
 }
 
 export function createScenePreviewHost(options: {
   readonly instanceId: string;
   readonly scene: FirstPartyScenePackage;
   readonly parent?: HTMLElement;
+  /** `inline` = visible in parent (catalog thumbs); default offscreen for capture. */
+  readonly placement?: 'offscreen' | 'inline';
 }): ScenePreviewHost {
   const bundleUrl = createFirstPartySceneBundleUrl(options.scene);
   const descriptor = createSandboxedIframeDescriptor(options.scene.manifest, bundleUrl);
@@ -118,8 +123,31 @@ export function createScenePreviewHost(options: {
   iframe.setAttribute('sandbox', descriptor.sandbox);
   iframe.srcdoc = descriptor.srcDoc;
   iframe.title = `joy-scene:${options.instanceId}`;
-  iframe.style.cssText =
-    'position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;';
+  const viewport = options.scene.manifest.viewport;
+  const inline = options.placement === 'inline';
+  // Full viewport so absolute/flex layout matches Monitor; catalog styles transform.
+  iframe.style.cssText = inline
+    ? [
+        'position:absolute',
+        'left:0',
+        'top:0',
+        `width:${viewport.width}px`,
+        `height:${viewport.height}px`,
+        'opacity:1',
+        'pointer-events:none',
+        'border:0',
+        'transform-origin:0 0',
+      ].join(';')
+    : [
+        'position:fixed',
+        'left:-10000px',
+        'top:0',
+        `width:${viewport.width}px`,
+        `height:${viewport.height}px`,
+        'opacity:0',
+        'pointer-events:none',
+        'border:0',
+      ].join(';');
   const parent = options.parent ?? document.body;
   parent.appendChild(iframe);
 
@@ -174,8 +202,8 @@ export function createScenePreviewHost(options: {
   };
   window.addEventListener('message', onMessage);
 
-  // Ready may race if iframe posts before listener attaches — also treat load as ready.
-  iframe.addEventListener('load', () => readyResolve(), { once: true });
+  // Do not resolve on iframe load alone — wait for bundle `joy.scene.ready.v1`
+  // so __joyScene exists before the first update/capture.
 
   return {
     instanceId: options.instanceId,
@@ -209,7 +237,7 @@ export function createScenePreviewHost(options: {
       }
       pending.clear();
       iframe.remove();
-      URL.revokeObjectURL(bundleUrl);
+      if (bundleUrl.startsWith('blob:')) URL.revokeObjectURL(bundleUrl);
     },
   };
 }

@@ -43,6 +43,13 @@ import {
   colorGradeSignature,
   effectsSignature,
 } from './effects-pixi.js';
+import {
+  createGlTransitionFilter,
+  type GlTransitionFilterHandle,
+} from './gl-transition-filter.js';
+import { dualTextureBitmapsReady } from './transition-bitmaps.js';
+
+export { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
 export const BROWSER_PACKAGE_ENTRY = '@joy-media/renderer-pixi/browser' as const;
 
@@ -351,23 +358,40 @@ export async function createBrowserPixiRenderer(
         spriteMap.delete(id);
       }
     }
-    // Paint transitions in their own layer
+    // Hide clip video layers that are being blended by an active transition.
+    const hiddenClipIds = new Set<string>();
+    for (const { node } of transitionNodes) {
+      hiddenClipIds.add(node.leftClipId);
+      hiddenClipIds.add(node.rightClipId);
+    }
+    for (const [id, layer] of spriteMap) {
+      if (hiddenClipIds.has(id)) layer.visible = false;
+      else if (layer.visible === false) layer.visible = true;
+    }
+
+    // Paint transitions in their own layer (dual-texture gl-transitions when bitmaps exist).
     const seenTransitionIds = new Set<string>();
     for (const { node } of transitionNodes) {
       seenTransitionIds.add(node.id);
-      const existing = transitionLayer.getChildByName(`transition:${node.id}`) as Container | undefined;
+      const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
+        | TransitionLayerContainer
+        | undefined;
       if (existing === undefined) {
-        const container = createTransitionLayer(node);
+        const container = createTransitionLayer(node, videoBitmaps);
         transitionLayer.addChild(container);
       } else {
-        updateTransitionLayer(existing, node);
+        updateTransitionLayer(existing, node, videoBitmaps);
       }
       drawCalls += 1;
     }
-    for (const child of transitionLayer.children) {
+    for (const child of [...transitionLayer.children]) {
       const name = child.name;
-      if (name.startsWith('transition:') && !seenTransitionIds.has(name.slice('transition:'.length))) {
-        child.destroy({ children: true });
+      if (
+        typeof name === 'string' &&
+        name.startsWith('transition:') &&
+        !seenTransitionIds.has(name.slice('transition:'.length))
+      ) {
+        destroyTransitionLayer(child as TransitionLayerContainer);
       }
     }
     return { drawCalls, created, reused };
@@ -415,52 +439,128 @@ export async function createBrowserPixiRenderer(
   };
 }
 
-function createTransitionLayer(node: TransitionNode): Container {
-  const container = new Container();
+interface TransitionLayerContainer extends Container {
+  fromCanvas?: HTMLCanvasElement | undefined;
+  fromTexture?: Texture | undefined;
+  toCanvas?: HTMLCanvasElement | undefined;
+  toTexture?: Texture | undefined;
+  sprite?: Sprite | undefined;
+  overlay?: Graphics | undefined;
+  glHandle?: GlTransitionFilterHandle | undefined;
+  shaderId?: string | undefined;
+}
+
+function createTransitionLayer(
+  node: TransitionNode,
+  videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+): TransitionLayerContainer {
+  const container = new Container() as TransitionLayerContainer;
   container.name = `transition:${node.id}`;
   container.zIndex = node.zIndex;
-
-  const graphic = new Graphics();
-  graphic.label = `transition:${node.id}:visual`;
-  container.addChild(graphic);
-  paintTransitionVisual(graphic, node);
-
+  updateTransitionLayer(container, node, videoBitmaps);
   return container;
 }
 
-function updateTransitionLayer(container: Container, node: TransitionNode): void {
-  const graphic = container.getChildByName(`transition:${node.id}:visual`) as Graphics | undefined;
-  if (graphic === undefined) return;
-  graphic.clear();
-  paintTransitionVisual(graphic, node);
+function destroyTransitionLayer(container: TransitionLayerContainer): void {
+  container.glHandle?.destroy();
+  container.fromTexture?.destroy(true);
+  container.toTexture?.destroy(true);
+  container.destroy({ children: true });
 }
 
-function paintTransitionVisual(graphic: Graphics, node: TransitionNode): void {
-  graphic.clear();
-  switch (node.transitionType) {
-    case 'dissolve': {
-      const alpha = node.progress;
-      graphic
-        .rect(0, 0, node.width, node.height)
-        .fill({ color: rgbaToHex(node.color), alpha });
-      break;
-    }
-    case 'wipe': {
-      graphic
-        .rect(0, 0, node.width, node.height)
-        .fill({ color: rgbaToHex({ ...node.color, a: Math.round(node.color.a * node.progress) }) });
-      graphic
-        .rect(node.width * node.progress, 0, node.width * (1 - node.progress), node.height)
-        .fill({ color: rgbaToHex(node.color), alpha: node.progress });
-      break;
-    }
-    case 'slide': {
-      graphic
-        .rect(node.width * (1 - node.progress), 0, node.width * node.progress, node.height)
-        .fill({ color: rgbaToHex(node.color), alpha: node.progress });
-      break;
-    }
+function ensureBitmapTexture(
+  canvas: HTMLCanvasElement | undefined,
+  texture: Texture | undefined,
+  bitmap: BrowserVideoFrameBitmap,
+): { canvas: HTMLCanvasElement; texture: Texture } {
+  const nextCanvas = canvas ?? document.createElement('canvas');
+  if (nextCanvas.width !== bitmap.width || nextCanvas.height !== bitmap.height) {
+    nextCanvas.width = bitmap.width;
+    nextCanvas.height = bitmap.height;
   }
+  const context = nextCanvas.getContext('2d');
+  if (context === null) throw new Error(`${BROWSER_PACKAGE_ENTRY}: transition canvas 2d unavailable`);
+  const image = context.createImageData(bitmap.width, bitmap.height);
+  image.data.set(bitmap.data);
+  context.putImageData(image, 0, 0);
+  const nextTexture = texture ?? Texture.from(nextCanvas, true);
+  nextTexture.source.update();
+  return { canvas: nextCanvas, texture: nextTexture };
+}
+
+function updateTransitionLayer(
+  container: TransitionLayerContainer,
+  node: TransitionNode,
+  videoBitmaps: ReadonlyMap<string, BrowserVideoFrameBitmap>,
+): void {
+  const fromBitmap = videoBitmaps.get(node.leftClipId);
+  const toBitmap = videoBitmaps.get(node.rightClipId);
+  const canBlend =
+    fromBitmap !== undefined &&
+    toBitmap !== undefined &&
+    dualTextureBitmapsReady(node.leftClipId, node.rightClipId, videoBitmaps);
+
+  if (!canBlend || fromBitmap === undefined || toBitmap === undefined) {
+    container.glHandle?.destroy();
+    container.glHandle = undefined;
+    container.sprite?.destroy();
+    container.sprite = undefined;
+    if (container.overlay === undefined) {
+      const overlay = new Graphics();
+      overlay.label = `transition:${node.id}:overlay`;
+      container.addChild(overlay);
+      container.overlay = overlay;
+    }
+    paintTransitionOverlay(container.overlay, node);
+    return;
+  }
+
+  if (container.overlay !== undefined) {
+    container.overlay.destroy();
+    container.overlay = undefined;
+  }
+
+  const from = ensureBitmapTexture(container.fromCanvas, container.fromTexture, fromBitmap);
+  container.fromCanvas = from.canvas;
+  container.fromTexture = from.texture;
+  const to = ensureBitmapTexture(container.toCanvas, container.toTexture, toBitmap);
+  container.toCanvas = to.canvas;
+  container.toTexture = to.texture;
+
+  if (container.sprite === undefined) {
+    const sprite = new Sprite(from.texture);
+    sprite.label = `transition:${node.id}:sprite`;
+    container.addChild(sprite);
+    container.sprite = sprite;
+  } else {
+    container.sprite.texture = from.texture;
+  }
+  container.sprite.width = node.width;
+  container.sprite.height = node.height;
+
+  if (container.glHandle === undefined || container.shaderId !== node.shaderId) {
+    container.glHandle?.destroy();
+    container.glHandle = createGlTransitionFilter(node.shaderId, node.params);
+    container.shaderId = node.shaderId;
+    container.sprite.filters = container.glHandle === undefined ? null : [container.glHandle.filter];
+  }
+
+  if (container.glHandle !== undefined) {
+    container.glHandle.setToTexture(to.texture);
+    container.glHandle.setProgress(node.progress);
+    container.glHandle.setRatio(node.width / Math.max(1, node.height));
+    if (node.params !== undefined) container.glHandle.setParams(node.params);
+  } else {
+    // Unknown shader — soft crossfade fallback in CPU-ish style via sprite alpha.
+    container.sprite.alpha = 1 - node.progress;
+  }
+}
+
+function paintTransitionOverlay(graphic: Graphics, node: TransitionNode): void {
+  graphic.clear();
+  const progress = Math.min(1, Math.max(0, node.progress));
+  // Fallback when A/B bitmaps are not yet available: soft dissolve plate.
+  graphic.rect(0, 0, node.width, node.height).fill({ color: 0x000000, alpha: progress * 0.35 });
 }
 
 function rgbaToHex(color: Rgba): number {

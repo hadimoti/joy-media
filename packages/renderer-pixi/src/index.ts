@@ -139,24 +139,23 @@ function paintTransition(
   frameHeight: number,
   node: TransitionNode,
 ): void {
+  // CPU path keeps lightweight approximations; browser/Pixi owns real gl-transitions.
   const progress = Math.min(1, Math.max(0, node.progress));
+  const kind = node.shaderId || node.transitionType;
   for (let y = 0; y < frameHeight; y++) {
     for (let x = 0; x < frameWidth; x++) {
       let cover = false;
       let alpha = progress;
-      switch (node.transitionType) {
-        case 'dissolve':
-          cover = true;
-          alpha = progress;
-          break;
-        case 'wipe':
-          cover = x < frameWidth * progress;
-          alpha = progress;
-          break;
-        case 'slide':
-          cover = x >= frameWidth * (1 - progress);
-          alpha = progress;
-          break;
+      if (kind === 'wipe' || kind === 'gl:wipeLeft' || kind.includes('wipe')) {
+        cover = x < frameWidth * progress;
+        alpha = progress;
+      } else if (kind === 'slide' || kind === 'gl:Directional' || kind.includes('slide')) {
+        cover = x >= frameWidth * (1 - progress);
+        alpha = progress;
+      } else {
+        // dissolve / fade / unknown gl:* — soft plate
+        cover = true;
+        alpha = progress;
       }
       if (!cover || alpha <= 0) continue;
       const color: Rgba = {

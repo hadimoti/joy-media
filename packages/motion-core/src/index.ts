@@ -64,6 +64,13 @@ export type {
   SetParentCommand,
   SetExpressionCommand,
   SetSpatialPathCommand,
+  AddEffectCommand,
+  RemoveEffectCommand,
+  ReorderEffectCommand,
+  ToggleEffectCommand,
+  SetEffectParamCommand,
+  ClearEffectsCommand,
+  ReplaceEffectCommand,
 } from './commands.js';
 export { applyMotionProjectCommand } from './commands.js';
 

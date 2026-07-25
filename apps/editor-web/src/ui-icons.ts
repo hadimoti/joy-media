@@ -13,6 +13,7 @@ export const UI_ICONS = {
   effects: '/assets/icons/ui/effects_24x24.png',
   effectsAlt: '/assets/icons/ui/effects2_24x24.png',
   effectsOrg: '/assets/icons/ui/effects-org_24x24.png',
+  motion: '/assets/icons/ui/motion_24x24.png',
   mic: '/assets/icons/ui/mic_24x24.png',
   mute: '/assets/icons/ui/mute_24x24.png',
   settings: '/assets/icons/ui/setting-gear_24x24.png',
