@@ -423,6 +423,15 @@ function EffectsSection({
             return (
               <li key={effect.id} className="inspector-effect-item">
                 <div className="inspector-effect-header">
+                  <button
+                    type="button"
+                    className="icon-button inspector-effect-drag"
+                    aria-label={`Reorder ${label}`}
+                    title="Drag to reorder"
+                    data-drag-handle
+                  >
+                    ⠿
+                  </button>
                   <span className="inspector-effect-label" title={effect.effectId}>
                     {label}
                   </span>

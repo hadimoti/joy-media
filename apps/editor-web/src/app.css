@@ -4099,6 +4099,127 @@ label {
   flex-wrap: wrap;
   gap: 0.35rem;
 }
+.effects-toolbar {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.effects-search {
+  flex: 1;
+  height: 1.7rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: 0.72rem;
+}
+.effects-categories {
+  display: flex;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.effects-category-tab {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--joy-border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-muted);
+  font-size: 0.66rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.effects-category-tab[aria-selected='true'] {
+  background: var(--joy-accent-soft);
+  border-color: var(--joy-accent-soft);
+  color: var(--joy-bg);
+  font-weight: 600;
+}
+.effects-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.effects-subsection-title {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 650;
+  color: #8a8a90;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.effects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+  gap: 0.3rem;
+}
+.effect-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--joy-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-surface);
+  font-size: 0.68rem;
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.12s;
+}
+.effect-card:hover {
+  border-color: var(--joy-accent-soft);
+}
+.effect-card:active {
+  cursor: grabbing;
+}
+.effect-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.2rem;
+}
+.effect-card-icon {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow: hidden;
+}
+.effect-card-cost[data-cost='high'] {
+  font-size: 0.6rem;
+}
+.effect-card-cost[data-cost='medium'] {
+  font-size: 0.55rem;
+  opacity: 0.7;
+}
+.effect-card-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.effect-card-actions {
+  display: flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.effect-favorite-btn {
+  font-size: 0.85rem;
+  padding: 0;
+}
+.effect-add-btn {
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 0;
+}
+.effect-card-warning {
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.15rem;
+  background: rgba(255, 200, 50, 0.12);
+  color: #ffc832;
+  font-size: 0.6rem;
+  text-align: center;
+}
 .color-scopes {
   display: flex;
   align-items: flex-end;
