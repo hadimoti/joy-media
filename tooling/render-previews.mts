@@ -3,294 +3,157 @@ import { resolve } from 'path';
 import { inflateSync, deflateSync } from 'zlib';
 
 const REPO = resolve(import.meta.dirname, '..');
-const REF_IMG = resolve(REPO, 'apps/editor-web/public/effects/preview/effects-test.png');
-const T1_IMG = resolve(REPO, 'apps/editor-web/public/transitions/preview/transition1.png');
-const T2_IMG = resolve(REPO, 'apps/editor-web/public/transitions/preview/transition2.png');
-const OUT_EFFECTS = resolve(REPO, 'apps/editor-web/public/effects/preview');
-const OUT_TRANSITIONS = resolve(REPO, 'apps/editor-web/public/transitions/preview');
-const SIZE = 120;
+const REF = resolve(REPO, 'apps/editor-web/public/effects/preview/effects-test.png');
+const T1 = resolve(REPO, 'apps/editor-web/public/transitions/preview/transition1.png');
+const T2 = resolve(REPO, 'apps/editor-web/public/transitions/preview/transition2.png');
+const OE = resolve(REPO, 'apps/editor-web/public/effects/preview');
+const OT = resolve(REPO, 'apps/editor-web/public/transitions/preview');
+const SZ = 120;
+mkdirSync(OE, { recursive: true }); mkdirSync(OT, { recursive: true });
 
-mkdirSync(OUT_EFFECTS, { recursive: true });
-mkdirSync(OUT_TRANSITIONS, { recursive: true });
-
-/* CRC-32 table */
-const CRC_TABLE = new Uint32Array(256);
-for (let i = 0; i < 256; i++) {
-  let c = i;
-  for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-  CRC_TABLE[i] = c;
+// PNG utils
+const C = new Uint32Array(256);
+for (let i = 0; i < 256; i++) { let c = i; for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1); C[i] = c; }
+function crc(d: Buffer): number { let c = 0xffffffff; for (let i = 0; i < d.length; i++) c = C[(c ^ d[i]!) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function ck(t: string, d: Buffer): Buffer { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const tb = Buffer.from(t, 'ascii'); const cb = Buffer.alloc(4); cb.writeUInt32BE(crc(Buffer.concat([tb, d]))); return Buffer.concat([l, tb, d, cb]); }
+function enc(w: number, h: number, rgba: Uint8Array): Buffer {
+  const r = Buffer.alloc(w * h * 4 + h);
+  for (let y = 0; y < h; y++) { r[y * (w * 4 + 1)] = 0; for (let x = 0; x < w * 4; x++) r[y * (w * 4 + 1) + 1 + x] = rgba[(y * w * 4) + x]!; }
+  const d = deflateSync(r);
+  const s = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ih = Buffer.alloc(13); ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 6; ih[10] = 0; ih[11] = 0; ih[12] = 0;
+  return Buffer.concat([s, ck('IHDR', ih), ck('IDAT', d), ck('IEND', Buffer.alloc(0))]);
 }
 
-function crc32(data: Buffer): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function chunk(type: string, data: Buffer): Buffer {
-  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-  const typeB = Buffer.from(type, 'ascii');
-  const crcB = Buffer.alloc(4); crcB.writeUInt32BE(crc32(Buffer.concat([typeB, data])));
-  return Buffer.concat([len, typeB, data, crcB]);
-}
-
-function encodePng(w: number, h: number, rgba: Uint8Array): Buffer {
-  const raw = Buffer.alloc(w * h * 4 + h);
-  for (let y = 0; y < h; y++) {
-    raw[y * (w * 4 + 1)] = 0;
-    for (let x = 0; x < w * 4; x++) raw[y * (w * 4 + 1) + 1 + x] = rgba[(y * w * 4) + x]!;
-  }
-  const deflated = deflateSync(raw);
-  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', deflated), chunk('IEND', Buffer.alloc(0))]);
-}
-
-function readPng(path: string): { w: number; h: number; pixels: Uint8Array } {
-  const buf = readFileSync(path);
-  let pos = 8;
-  let w = 0, h = 0, bpp = 4, idat: Buffer[] = [];
+function dec(path: string): { w: number; h: number; p: Uint8Array } {
+  const buf = readFileSync(path); let pos = 8, w = 0, h = 0, bpp = 3, id: Buffer[] = [];
   while (pos < buf.length) {
     const len = buf.readUInt32BE(pos); pos += 4;
     const type = buf.toString('ascii', pos, pos + 4); pos += 4;
     const data = buf.subarray(pos, pos + len); pos += len + 4;
     if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); const ct = data[9]!; bpp = ct === 6 || ct === 4 ? 4 : ct === 2 ? 3 : 4; }
-    else if (type === 'IDAT') idat.push(Buffer.from(data));
+    else if (type === 'IDAT') id.push(Buffer.from(data));
   }
-  const raw = inflateSync(Buffer.concat(idat));
-  const bppV = bpp;
-  const rowLen = 1 + w * bppV;
-  // Reconstruct rows in-place with proper PNG filter reversal
+  const raw = inflateSync(Buffer.concat(id)); const rl = 1 + w * bpp;
   for (let y = 0; y < h; y++) {
-    const filter = raw[y * rowLen]!;
-    const off = y * rowLen + 1;
-    for (let x = 0; x < w * bppV; x++) {
-      const filterVal = raw[off + x]!;
-      const a = x >= bppV ? raw[off + x - bppV]! : 0;
-      const b = y > 0 ? raw[off + x - rowLen]! : 0;
-      const c = y > 0 && x >= bppV ? raw[off + x - rowLen - bppV]! : 0;
-      let recon = filterVal;
-      if (filter === 0) recon = filterVal; // None
-      else if (filter === 1) recon = (filterVal + a) & 0xff; // Sub
-      else if (filter === 2) recon = (filterVal + b) & 0xff; // Up
-      else if (filter === 3) recon = (filterVal + ((a + b) >> 1)) & 0xff; // Average
-      else if (filter === 4) { // Paeth
-        const p = a + b - c;
-        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        const pr = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-        recon = (filterVal + pr) & 0xff;
-      }
-      raw[off + x] = recon;
+    const f = raw[y * rl]!, off = y * rl + 1;
+    for (let x = 0; x < w * bpp; x++) {
+      const fv = raw[off + x]!, a = x >= bpp ? raw[off + x - bpp]! : 0, bu = y > 0 ? raw[off + x - rl]! : 0, c2 = y > 0 && x >= bpp ? raw[off + x - rl - bpp]! : 0; let r = fv;
+      if (f === 0) r = fv; else if (f === 1) r = (fv + a) & 0xff; else if (f === 2) r = (fv + bu) & 0xff; else if (f === 3) r = (fv + ((a + bu) >> 1)) & 0xff;
+      else if (f === 4) { const p = a + bu - c2; const pa = Math.abs(p - a), pb = Math.abs(p - bu), pc = Math.abs(p - c2); r = (fv + (pa <= pb && pa <= pc ? a : pb <= pc ? bu : c2)) & 0xff; }
+      raw[off + x] = r;
     }
   }
-  // Convert to RGBA
-  const pixels = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const si = y * rowLen + 1 + x * bppV, di = (y * w + x) * 4;
-      pixels[di] = raw[si]!; pixels[di + 1] = raw[si + 1]!; pixels[di + 2] = raw[si + 2]!; pixels[di + 3] = bppV >= 4 ? raw[si + 3]! : 255;
-    }
-  }
-  return { w, h, pixels };
+  const p = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const si = y * rl + 1 + x * bpp, di = (y * w + x) * 4; p[di] = raw[si]!; p[di+1] = raw[si+1]!; p[di+2] = raw[si+2]!; p[di+3] = 255; }
+  return { w, h, p };
 }
 
-function resize(src: Uint8Array, sw: number, sh: number, d: number): Uint8Array {
+function rs(src: Uint8Array, sw: number, sh: number, d: number): Uint8Array {
   const out = new Uint8Array(d * d * 4);
-  for (let y = 0; y < d; y++) for (let x = 0; x < d; x++) {
-    const si = (Math.floor(y * sh / d) * sw + Math.floor(x * sw / d)) * 4, di = (y * d + x) * 4;
-    out[di] = src[si]!; out[di + 1] = src[si + 1]!; out[di + 2] = src[si + 2]!; out[di + 3] = 255;
-  }
+  for (let y = 0; y < d; y++) for (let x = 0; x < d; x++) { const si = (Math.floor(y * sh / d) * sw + Math.floor(x * sw / d)) * 4, di = (y * d + x) * 4; out[di] = src[si]!; out[di+1] = src[si+1]!; out[di+2] = src[si+2]!; out[di+3] = 255; }
   return out;
 }
 
-// ---- Effects ----
-function pixelOp(p: Uint8Array, fn: (r: number, g: number, b: number) => [number, number, number]): void {
-  for (let i = 0; i < p.length; i += 4) { const [r, g, b] = fn(p[i]!, p[i + 1]!, p[i + 2]!); p[i] = Math.round(Math.max(0, Math.min(255, r))); p[i + 1] = Math.round(Math.max(0, Math.min(255, g))); p[i + 2] = Math.round(Math.max(0, Math.min(255, b))); }
+// Pixel helpers
+function pxOp(p: Uint8Array, fn: (r: number, g: number, b: number) => [number, number, number]): void {
+  for (let i = 0; i < p.length; i += 4) { const [r, g, b] = fn(p[i]!, p[i+1]!, p[i+2]!); p[i] = Math.round(Math.max(0, Math.min(255, r))); p[i+1] = Math.round(Math.max(0, Math.min(255, g))); p[i+2] = Math.round(Math.max(0, Math.min(255, b))); }
 }
 function boxBlur(p: Uint8Array, w: number, h: number, r: number): void {
   const cp = new Uint8Array(p);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr = 0, sg = 0, sb = 0, c = 0;
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const ny = y + dy, nx = x + dx;
-      if (ny >= 0 && ny < h && nx >= 0 && nx < w) { const b = (ny * w + nx) * 4; sr += cp[b]!; sg += cp[b + 1]!; sb += cp[b + 2]!; c++; }}
-    if (c > 0) { const b = (y * w + x) * 4; p[b] = Math.round(sr / c); p[b + 1] = Math.round(sg / c); p[b + 2] = Math.round(sb / c); }}
-}
-function hsv(r: number, g: number, b: number, hue: number, sat: number): [number, number, number] {
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), c = mx - mn;
-  if (c === 0) return [Math.round(r * sat), Math.round(g * sat), Math.round(b * sat)];
-  let h = 0; if (mx === r) h = ((g - b) / c + 6) % 6; else if (mx === g) h = (b - r) / c + 2; else h = (r - g) / c + 4;
-  h = (h * 60 + hue * 180 + 360) % 360; const s = sat !== 1 ? Math.min(1, c / mx * sat + (1 - sat)) : c / mx;
-  const cv = mx * s, xv = cv * (1 - Math.abs((h / 60) % 2 - 1)), m = (Math.sqrt(r*r+g*g+b*b) / 3 * 1.5 - cv);
-  let r2 = 0, g2 = 0, b2 = 0;
-  if (h < 60) { r2 = cv; g2 = xv; } else if (h < 120) { r2 = xv; g2 = cv; } else if (h < 180) { g2 = cv; b2 = xv; } else if (h < 240) { g2 = xv; b2 = cv; } else if (h < 300) { r2 = xv; b2 = cv; } else { r2 = cv; b2 = xv; }
-  return [Math.round(r2 + m), Math.round(g2 + m), Math.round(b2 + m)];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr=0,sg=0,sb=0,c=0;
+    for (let dy=-r; dy<=r; dy++) for (let dx=-r; dx<=r; dx++) { const ny=y+dy, nx=x+dx;
+      if (ny>=0 && ny<h && nx>=0 && nx<w) { const b=(ny*w+nx)*4; sr+=cp[b]!; sg+=cp[b+1]!; sb+=cp[b+2]!; c++; }}
+    if (c>0) { const b=(y*w+x)*4; p[b]=Math.round(sr/c); p[b+1]=Math.round(sg/c); p[b+2]=Math.round(sb/c); }}
 }
 
-function applyEffect(p: Uint8Array, w: number, h: number, id: string, params: Record<string, number>): void {
+// ---- Inlined production headless effect engine ----
+function applyHeadlessEffects(pixels: Uint8Array, width: number, height: number, effects: readonly { readonly id: string; readonly kind: string; readonly enabled: boolean; readonly params: Record<string, number> }[]): void {
+  for (const ef of effects) {
+    if (!ef.enabled) continue;
+    switch (ef.kind) {
+      case 'brightness-contrast': {
+        const b = (ef.params.brightness ?? 0) * 255; const c = (ef.params.contrast ?? 0) + 1;
+        for (let i = 0; i < pixels.length; i += 4) {
+          pixels[i] = Math.round(Math.max(0, Math.min(255, (pixels[i]! - 128) * c + 128 + b)));
+          pixels[i + 1] = Math.round(Math.max(0, Math.min(255, (pixels[i + 1]! - 128) * c + 128 + b)));
+          pixels[i + 2] = Math.round(Math.max(0, Math.min(255, (pixels[i + 2]! - 128) * c + 128 + b)));
+        } break; }
+      case 'sepia': { const a = ef.params.amount ?? 0.5;
+        for (let i = 0; i < pixels.length; i += 4) { const r = pixels[i]!, g = pixels[i + 1]!, b = pixels[i + 2]!;
+          pixels[i] = Math.round(Math.min(255, Math.max(0, r * (1 - 0.607 * a) + g * 0.769 * a + b * 0.189 * a)));
+          pixels[i + 1] = Math.round(Math.min(255, Math.max(0, r * 0.349 * a + g * (1 - 0.314 * a) + b * 0.168 * a)));
+          pixels[i + 2] = Math.round(Math.min(255, Math.max(0, r * 0.272 * a + g * 0.534 * a + b * (1 - 0.869 * a))));
+        } break; }
+      case 'gaussian-blur': case 'blur': { const r = Math.max(1, Math.round(ef.params.amount ?? 4)); const cp = new Uint8Array(pixels);
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) { let sr=0,sg=0,sb=0,c=0;
+          for (let dy=-r; dy<=r; dy++) for (let dx=-r; dx<=r; dx++) { const ny=y+dy, nx=x+dx;
+            if (ny>=0 && ny<height && nx>=0 && nx<width) { const bi=(ny*width+nx)*4; sr+=cp[bi]!; sg+=cp[bi+1]!; sb+=cp[bi+2]!; c++; }}
+          if (c>0) { const bi=(y*width+x)*4; pixels[bi]=Math.round(sr/c); pixels[bi+1]=Math.round(sg/c); pixels[bi+2]=Math.round(sb/c); }}
+        break; }
+      case 'noise': case 'grain': { const n = Math.round((ef.params.amount ?? 0.2) * 255);
+        for (let i = 0; i < pixels.length; i += 4) { const s = (Math.random() - 0.5) * 2 * n;
+          pixels[i] = Math.round(Math.max(0, Math.min(255, pixels[i]! + s)));
+          pixels[i + 1] = Math.round(Math.max(0, Math.min(255, pixels[i + 1]! + s)));
+          pixels[i + 2] = Math.round(Math.max(0, Math.min(255, pixels[i + 2]! + s))); }
+        break; }
+      case 'posterize': { const lv = Math.max(2, ef.params.levels ?? 8); const f = 255 / (lv - 1);
+        for (let i = 0; i < pixels.length; i += 4) { pixels[i] = Math.round(Math.round(pixels[i]! / f) * f); pixels[i+1] = Math.round(Math.round(pixels[i+1]! / f) * f); pixels[i+2] = Math.round(Math.round(pixels[i+2]! / f) * f); } break; }
+      case 'vibrance': { const a = ef.params.amount ?? 0; const f = 1 + a * 0.5;
+        for (let i = 0; i < pixels.length; i += 4) { const r = pixels[i]!, g = pixels[i+1]!, b = pixels[i+2]!, gy = 0.299*r + 0.587*g + 0.114*b;
+          pixels[i] = Math.round(Math.min(255, Math.max(0, gy + (r - gy) * f))); pixels[i+1] = Math.round(Math.min(255, Math.max(0, gy + (g - gy) * f))); pixels[i+2] = Math.round(Math.min(255, Math.max(0, gy + (b - gy) * f))); }
+        break; }
+      case 'hue-saturation': { const hs = ef.params.hue ?? 0; const sm = (ef.params.saturation ?? 0) + 1;
+        for (let i = 0; i < pixels.length; i += 4) {
+          let r=pixels[i]!/255, g=pixels[i+1]!/255, b=pixels[i+2]!/255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b), ch=mx-mn;
+          if (ch > 0.001) { let h=0; if (mx===r) h=((g-b)/ch+6)%6; else if (mx===g) h=(b-r)/ch+2; else h=(r-g)/ch+4; h=(h/6+hs)%1;
+            const s=mx>0?ch/mx:0, c2=mx*sm*s, x2=c2*(1-Math.abs((h*6)%2-1)), m2=mx-c2;
+            if (h<1/6) { r=c2+m2; g=x2+m2; b=m2; } else if (h<2/6) { r=x2+m2; g=c2+m2; b=m2; } else if (h<3/6) { r=m2; g=c2+m2; b=x2+m2; }
+            else if (h<4/6) { r=m2; g=x2+m2; b=c2+m2; } else if (h<5/6) { r=x2+m2; g=m2; b=c2+m2; } else { r=c2+m2; g=m2; b=x2+m2; }
+          } else { r*=sm; g*=sm; b*=sm; }
+          pixels[i]=Math.round(Math.min(255,Math.max(0,r*255))); pixels[i+1]=Math.round(Math.min(255,Math.max(0,g*255))); pixels[i+2]=Math.round(Math.min(255,Math.max(0,b*255)));
+        } break; }
+    }
+  }
+}
+
+// Our own effect implementations for effects NOT handled by the headless renderer
+function applyManualEffect(p: Uint8Array, w: number, h: number, id: string, params: Record<string, number>): boolean {
   switch (id) {
-    case 'brightness-contrast': { const b = (params.brightness ?? 0) * 255; const ct = (params.contrast ?? 0) + 1; pixelOp(p, (r, g, bv) => [Math.round((r - 128) * ct + 128 + b), Math.round((g - 128) * ct + 128 + b), Math.round((bv - 128) * ct + 128 + b)]); break; }
-    case 'hue-saturation': { const hue = params.hue ?? 0; const sat = (params.saturation ?? 0) + 1; pixelOp(p, (r, g, b) => hsv(r, g, b, hue, sat)); break; }
-    case 'vibrance': { const a = params.amount ?? 0; const f = 1 + a * 0.5; pixelOp(p, (r, g, b) => { const gy = 0.299 * r + 0.587 * g + 0.114 * b; return [Math.round(gy + (r - gy) * f), Math.round(gy + (g - gy) * f), Math.round(gy + (b - gy) * f)]; }); break; }
-    case 'sepia': { const a = params.amount ?? 0.5; pixelOp(p, (r, g, b) => [Math.round(r * (1 - 0.607 * a) + g * 0.769 * a + b * 0.189 * a), Math.round(r * 0.349 * a + g * (1 - 0.314 * a) + b * 0.168 * a), Math.round(r * 0.272 * a + g * 0.534 * a + b * (1 - 0.869 * a))]); break; }
-    case 'gaussian-blur': case 'blur': boxBlur(p, w, h, Math.max(1, Math.round(params.amount ?? 4))); break;
-    case 'noise': case 'grain': { const n = Math.round((params.amount ?? 0.2) * 255); pixelOp(p, (r, g, b) => { const ns = (Math.random() - 0.5) * 2 * n; return [r + ns, g + ns, b + ns]; }); break; }
-    case 'posterize': { const lv = Math.max(2, params.levels ?? 8); const f = 255 / (lv - 1); pixelOp(p, (r, g, b) => [Math.round(Math.round(r / f) * f), Math.round(Math.round(g / f) * f), Math.round(Math.round(b / f) * f)]); break; }
-    case 'color-overlay': { const rv = params.r ?? 255; const gv = params.g ?? 0; const bv = params.b ?? 0; const o = params.opacity ?? 0.3; pixelOp(p, (pr, pg, pb) => [Math.round(pr * (1 - o) + rv * o), Math.round(pg * (1 - o) + gv * o), Math.round(pb * (1 - o) + bv * o)]); break; }
-    case 'vignette': { const a = params.amount ?? 0.35; const cx = w / 2, cy = h / 2, md = Math.hypot(cx, cy); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const vg = Math.max(0, (Math.hypot(x - cx, y - cy) / md - 0.35) / 0.65) * a; if (vg > 0) { const b = (y * w + x) * 4; const f = 1 - vg; p[b] = Math.round(p[b]! * f); p[b + 1] = Math.round(p[b + 1]! * f); p[b + 2] = Math.round(p[b + 2]! * f); }} break; }
-    // pixelate / mosaic: block averaging
-    case 'pixelate': { const bs = Math.max(2, Math.round(params.blockSize ?? 8)); blockAvg(p, w, h, bs); break; }
-    case 'mosaic': { const bs = Math.max(4, Math.round(params.blockSize ?? 16)); blockAvg(p, w, h, bs); break; }
-    // curves: shadows/midtones/highlights
+    case 'vignette': {
+      const a = Math.max(0, Math.min(1, params.amount ?? 0.35)); const cx = w/2, cy = h/2, md = Math.hypot(cx, cy);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const vg = Math.max(0, (Math.hypot(x-cx, y-cy)/md - 0.35)/0.65) * a; if (vg > 0) { const b = (y*w+x)*4; const f = 1-vg; p[b]=Math.round(p[b]!*f); p[b+1]=Math.round(p[b+1]!*f); p[b+2]=Math.round(p[b+2]!*f); }}
+      return true; }
+    case 'color-overlay': {
+      const rv = Math.round(params.r ?? 255); const gv = Math.round(params.g ?? 0); const bv = Math.round(params.b ?? 0); const o = Math.max(0, Math.min(1, params.opacity ?? 0.3));
+      pxOp(p, (pr, pg, pb) => [Math.round(pr*(1-o)+rv*o), Math.round(pg*(1-o)+gv*o), Math.round(pb*(1-o)+bv*o)]); return true; }
     case 'curves': {
-      const sh = Math.max(-0.5, Math.min(0.5, params.shadows ?? 0));
-      const mt = Math.max(-0.5, Math.min(0.5, params.midtones ?? 0));
-      const hl = Math.max(-0.5, Math.min(0.5, params.highlights ?? 0));
-      pixelOp(p, (r, g, b) => {
-        const curve = (v: number) => { const t = v / 255; const s = t < 0.33 ? t + sh * t : t; const m = t > 0.25 && t < 0.75 ? s + mt * Math.sin((t - 0.25) * Math.PI * 2) : s; const h = t > 0.5 ? m + hl * m : m; return clamp8(h * 255); };
-        return [curve(r), curve(g), curve(b)];
-      }); break; }
-    // glow: brightness boost
-    case 'glow': {
-      const a = Math.max(0, Math.min(1, params.amount ?? 0.4));
-      boxBlur(p, w, h, 3);
-      pixelOp(p, (r, g, b) => [Math.round(r + a * 40), Math.round(g + a * 40), Math.round(b + a * 40)]); break; }
-    // bloom: threshold + blur + add
-    case 'bloom': {
-      const a = Math.max(0, Math.min(1, params.amount ?? 0.4));
-      const th = params.threshold ?? 0.6;
-      const bright = new Uint8Array(p);
-      for (let i = 0; i < bright.length; i += 4) {
-        const avg = (bright[i]! + bright[i+1]! + bright[i+2]!) / 3 / 255;
-        if (avg < th) { bright[i] = 0; bright[i+1] = 0; bright[i+2] = 0; }
-      }
-      boxBlur(bright, w, h, 3);
-      pixelOp(p, (r, g, b) => { const idx = 0; return [Math.round(Math.min(255, r + bright[idx]! * a)), Math.round(Math.min(255, g + bright[idx + 1]! * a)), Math.round(Math.min(255, b + bright[idx + 2]! * a))]; });
-      // Re-do with correct indexing
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; p[i] = Math.round(Math.min(255, p[i]! + bright[i]! * a)); p[i+1] = Math.round(Math.min(255, p[i+1]! + bright[i+1]! * a)); p[i+2] = Math.round(Math.min(255, p[i+2]! + bright[i+2]! * a)); }
-      break; }
-    // drop-shadow: darken bottom-right
+      const sh = params.shadows ?? 0; const mt = params.midtones ?? 0; const hl = params.highlights ?? 0;
+      pxOp(p, (r, g, b) => { const cv = (v: number) => { const t = v/255; let r2 = t; if (t < 0.33) r2 = t + sh * t * 0.5; if (t > 0.5) r2 = r2 + hl * (t-0.5) * 2 * 0.3; if (t > 0.25 && t < 0.75) r2 = r2 + mt * Math.sin((t-0.25)*Math.PI*2) * 0.15; return Math.round(Math.max(0, Math.min(255, r2*255))); }; return [cv(r), cv(g), cv(b)]; });
+      return true; }
+    case 'glow': { const a = Math.max(0, Math.min(1, params.amount ?? 0.4)); boxBlur(p, w, h, 2); pxOp(p, (r, g, b) => [Math.round(Math.min(255, r + a * 50)), Math.round(Math.min(255, g + a * 50)), Math.round(Math.min(255, b + a * 50))]); return true; }
+    case 'bloom': { const a = Math.max(0, Math.min(1, params.amount ?? 0.4)); const th = params.threshold ?? 0.6; const br = new Uint8Array(p); for (let i = 0; i < br.length; i += 4) { const avg = (br[i]!+br[i+1]!+br[i+2]!)/3/255; if (avg < th) { br[i]=0; br[i+1]=0; br[i+2]=0; }} boxBlur(br, w, h, 2); for (let i = 0; i < p.length; i += 4) { p[i] = Math.round(Math.min(255, p[i]!+br[i]!*a)); p[i+1] = Math.round(Math.min(255, p[i+1]!+br[i+1]!*a)); p[i+2] = Math.round(Math.min(255, p[i+2]!+br[i+2]!*a)); } return true; }
     case 'drop-shadow': {
-      const o = Math.max(0, Math.min(1, params.opacity ?? 0.5));
-      const d = Math.max(0, Math.min(40, params.distance ?? 8));
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4;
-        const dx = Math.min(d, w - x), dy = Math.min(d, h - y); const f = 1 - (dx / d) * (dy / d) * o;
-        if (f < 1) { p[i] = Math.round(p[i]! * f); p[i+1] = Math.round(p[i+1]! * f); p[i+2] = Math.round(p[i+2]! * f); }}
-      break; }
-    // emboss: convolution kernel
-    case 'emboss': {
-      const cp = new Uint8Array(p); const s = params.strength ?? 1;
-      for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) { const i = (y * w + x) * 4;
-        const tl = (i - w * 4 - 4), tr = (i - w * 4 + 4), bl = (i + w * 4 - 4), br = (i + w * 4 + 4);
-        p[i] = clamp8(128 + (cp[tl]! - cp[br]! + cp[tl+1]! - cp[br+1]! + cp[tl+2]! - cp[br+2]!) / 3 * s);
-        p[i+1] = p[i]; p[i+2] = p[i]; }
-      break; }
-    // edge-detect: simple kernel
-    case 'edge-detect': {
-      const cp = new Uint8Array(p); const th = params.threshold ?? 0.3;
-      for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) { const i = (y * w + x) * 4;
-        let gx = 0, gy2 = 0;
-        for (let ky = -1; ky <= 1; ky++) for (let kx = -1; kx <= 1; kx++) { const si = ((y+ky) * w + (x+kx)) * 4;
-          const gray = (cp[si]! + cp[si+1]! + cp[si+2]!) / 3;
-          gx += gray * (kx === 1 ? 1 : kx === -1 ? -1 : 0) * (ky === 0 ? 1 : 0);
-          gy2 += gray * (ky === 1 ? 1 : ky === -1 ? -1 : 0) * (kx === 0 ? 1 : 0); }
-        const e = Math.min(255, Math.sqrt(gx*gx + gy2*gy2) * th * 8);
-        p[i] = e; p[i+1] = e; p[i+2] = e; }
-      break; }
-    // unsharp-mask: blur + subtract + add back
-    case 'unsharp-mask': {
-      const a = params.amount ?? 0.5; const r2 = Math.max(1, Math.round(params.radius ?? 1));
-      const blurred = new Uint8Array(p); boxBlur(blurred, w, h, r2);
-      pixelOp(p, (r, g, b) => {
-        const idx = 0; return [
-          Math.round(Math.min(255, Math.max(0, r + (r - blurred[idx]!) * a))),
-          Math.round(Math.min(255, Math.max(0, g + (g - blurred[idx + 1]!) * a))),
-          Math.round(Math.min(255, Math.max(0, b + (b - blurred[idx + 2]!) * a))),
-        ];
-      });
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4;
-        p[i] = clamp8(p[i]! + (p[i]! - blurred[i]!) * a); p[i+1] = clamp8(p[i+1]! + (p[i+1]! - blurred[i+1]!) * a); p[i+2] = clamp8(p[i+2]! + (p[i+2]! - blurred[i+2]!) * a); }
-      break; }
-    // zoom-blur: radial directional blur
-    case 'zoom-blur': {
-      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 6));
-      const cx = w/2, cy = h/2;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr = 0, sg = 0, sb = 0, c = 0;
-        const dx = x - cx, dy = y - cy;
-        for (let s = -a2; s <= a2; s++) { const sx = Math.round(x + dx * s / a2 / 2), sy = Math.round(y + dy * s / a2 / 2);
-          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
-        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
-      break; }
-    // radial-blur: circular blur
-    case 'radial-blur': {
-      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 5));
-      const cx = w/2, cy = h/2;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr = 0, sg = 0, sb = 0, c = 0;
-        const dx = x - cx, dy = y - cy; const dist = Math.sqrt(dx*dx+dy*dy) || 1;
-        for (let s = -a2; s <= a2; s++) { const angle = s * 0.1; const sx = Math.round(x + dy/dist * a2 * 0.3); const sy = Math.round(y - dx/dist * a2 * 0.3);
-          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
-        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
-      break; }
-    // tilt-shift: gradient blur
-    case 'tilt-shift': {
-      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 6));
-      const fy = params.focusY ?? 0.5; const fh = params.focusHeight ?? 0.3;
-      const focusCenter = h * fy; const focusHalf = h * fh / 2;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const dist = Math.abs(y - focusCenter);
-        const blurR = dist < focusHalf ? 0 : Math.min(a2, Math.round((dist - focusHalf) / h * a2 * 4));
-        if (blurR <= 0) continue;
-        let sr = 0, sg = 0, sb = 0, c = 0;
-        for (let dy = -blurR; dy <= blurR; dy++) for (let dx2 = -blurR; dx2 <= blurR; dx2++) {
-          const ny = y + dy, nx = x + dx2;
-          if (ny >= 0 && ny < h && nx >= 0 && nx < w) { const si = (ny * w + nx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
-        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
-      break; }
-    // bulge / twist / ripple: coordinate-based distortion
-    case 'bulge': {
-      const cp = new Uint8Array(p); const a2 = params.amount ?? 0; const r = params.radius ?? 0.4;
-      const cx = w/2, cy = h/2, maxR = r * w / 2;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = x - cx, dy = y - cy, dist = Math.sqrt(dx*dx+dy*dy);
-        if (dist < maxR && dist > 0) { const norm = 1 - dist/maxR; const factor = a2 > 0 ? 1 + a2 * norm * 0.3 : 1 / (1 - a2 * norm * 0.3);
-          const sx = Math.round(cx + dx * factor), sy = Math.round(cy + dy * factor);
-          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}}
-      break; }
-    case 'twist': {
-      const cp = new Uint8Array(p); const ang = params.angle ?? 0; const r = params.radius ?? 0.5;
-      const cx = w/2, cy = h/2, maxR = r * w / 2;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = x - cx, dy = y - cy, dist = Math.sqrt(dx*dx+dy*dy);
-        if (dist < maxR) { const t = (1 - dist/maxR) * ang * 0.5; const sx = Math.round(cx + dx * Math.cos(t) - dy * Math.sin(t)), sy = Math.round(cy + dx * Math.sin(t) + dy * Math.cos(t));
-          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}}
-      break; }
-    case 'ripple': {
-      const cp = new Uint8Array(p); const amp = params.amplitude ?? 0.02; const freq = params.frequency ?? 10;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const sx = Math.round(x + Math.sin(y * freq * 0.1) * amp * 30), sy = Math.round(y + Math.cos(x * freq * 0.1) * amp * 30);
-        if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}
-      break; }
-    // crt: scanlines
-    case 'crt': {
-      const s = Math.max(0, Math.min(1, params.scanlines ?? 0.5));
-      const n2 = Math.max(0, Math.min(0.5, params.noise ?? 0.08));
-      for (let y = 0; y < h; y++) { const isScan = y % 2 === 0; if (!isScan) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; const f = 1 - s * 0.4; p[i] = Math.round(p[i]! * f); p[i+1] = Math.round(p[i+1]! * f); p[i+2] = Math.round(p[i+2]! * f); }}
-      if (n2 > 0) { const nn = Math.round(n2 * 255); for (let i = 0; i < p.length; i += 4) { const ns2 = (Math.random() - 0.5) * 2 * nn; p[i] = clamp8(p[i]! + ns2); p[i+1] = clamp8(p[i+1]! + ns2); p[i+2] = clamp8(p[i+2]! + ns2); }}
-      break; }
+      const op = Math.max(0, Math.min(1, params.opacity ?? 0.5)); const d = Math.max(0, Math.min(40, Math.round(params.distance ?? 8)));
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y*w+x)*4; const sx = Math.min(d, w-x-1); const sy = Math.min(d, h-y-1); const sf = op * (sx/d) * (sy/d) * 0.5; if (sf > 0) { p[i] = Math.round(p[i]!*(1-sf)); p[i+1] = Math.round(p[i+1]!*(1-sf)); p[i+2] = Math.round(p[i+2]!*(1-sf)); }}
+      return true; }
+    case 'pixelate': { const bs = Math.max(2, Math.round(params.blockSize ?? 8)); blockAvg(p, w, h, bs); return true; }
+    case 'mosaic': { const bs = Math.max(4, Math.round(params.blockSize ?? 16)); blockAvg(p, w, h, bs); return true; }
+    default: return false;
   }
 }
 function blockAvg(p: Uint8Array, w: number, h: number, bs: number): void {
   const cp = new Uint8Array(p);
-  for (let y = 0; y < h; y += bs) for (let x = 0; x < w; x += bs) {
-    let sr = 0, sg = 0, sb = 0, c = 0;
-    for (let dy = 0; dy < bs && y+dy < h; dy++) for (let dx = 0; dx < bs && x+dx < w; dx++) { const si = ((y+dy) * w + (x+dx)) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }
-    const ar = Math.round(sr / c), ag = Math.round(sg / c), ab = Math.round(sb / c);
-    for (let dy = 0; dy < bs && y+dy < h; dy++) for (let dx = 0; dx < bs && x+dx < w; dx++) { const di = ((y+dy) * w + (x+dx)) * 4; p[di] = ar; p[di+1] = ag; p[di+2] = ab; }
-  }
+  for (let y = 0; y < h; y += bs) for (let x = 0; x < w; x += bs) { let sr=0,sg=0,sb=0,c=0;
+    for (let dy=0; dy<bs && y+dy<h; dy++) for (let dx=0; dx<bs && x+dx<w; dx++) { const si=((y+dy)*w+(x+dx))*4; sr+=cp[si]!; sg+=cp[si+1]!; sb+=cp[si+2]!; c++; }
+    const ar=Math.round(sr/c), ag=Math.round(sg/c), ab=Math.round(sb/c);
+    for (let dy=0; dy<bs && y+dy<h; dy++) for (let dx=0; dx<bs && x+dx<w; dx++) { const di=((y+dy)*w+(x+dx))*4; p[di]=ar; p[di+1]=ag; p[di+2]=ab; }}
 }
-function clamp8(v: number): number { return Math.round(Math.max(0, Math.min(255, v))); }
 
 // ---- Generate ----
-const ref = readPng(REF_IMG);
-const rPixels = resize(ref.pixels, ref.w, ref.h, SIZE);
-console.log(`Reference: ${ref.w}x${ref.h} → ${SIZE}x${SIZE}`);
+const ref = dec(REF);
+const rP = rs(ref.p, ref.w, ref.h, SZ);
+console.log(`Ref: ${ref.w}x${ref.h} -> ${SZ}x${SZ}`);
 
 const EFFECTS: { id: string; params: Record<string, number> }[] = [
   { id: 'brightness-contrast', params: { brightness: 0.1, contrast: 0.2 } },
@@ -321,27 +184,24 @@ const EFFECTS: { id: string; params: Record<string, number> }[] = [
 ];
 
 for (const e of EFFECTS) {
-  const p = new Uint8Array(rPixels);
-  applyEffect(p, SIZE, SIZE, e.id, e.params);
-  const png = encodePng(SIZE, SIZE, p);
-  writeFileSync(resolve(OUT_EFFECTS, `${e.id}.png`), png);
-  console.log(`  ${e.id}.png — ${png.length} bytes`);
+  const p = new Uint8Array(rP);
+  // First try the production headless renderer
+  const ir = { id: 'e1', kind: e.id, enabled: true, params: e.params as Record<string, number> };
+  applyHeadlessEffects(p, SZ, SZ, [ir]);
+  // Then apply manual fallback for effects not handled by headless
+  applyManualEffect(p, SZ, SZ, e.id, e.params);
+  writeFileSync(resolve(OE, `${e.id}.png`), enc(SZ, SZ, p));
+  console.log(`  ${e.id}.png`);
 }
 
-// Transition crossfade at progress 0.5
-const t1 = resize(readPng(T1_IMG).pixels, ref.w, ref.h, SIZE);
-const t2 = resize(readPng(T2_IMG).pixels, ref.w, ref.h, SIZE);
+// Transition crossfade
+const t1p = rs(dec(T1).p, ref.w, ref.h, SZ);
+const t2p = rs(dec(T2).p, ref.w, ref.h, SZ);
 for (const id of ['dissolve', 'wipe', 'slide', 'zoom', 'glitch', 'shape']) {
-  const p = new Uint8Array(SIZE * SIZE * 4);
-  for (let i = 0; i < p.length; i += 4) {
-    p[i] = Math.round(t1[i]! * 0.5 + t2[i]! * 0.5);
-    p[i + 1] = Math.round(t1[i + 1]! * 0.5 + t2[i + 1]! * 0.5);
-    p[i + 2] = Math.round(t1[i + 2]! * 0.5 + t2[i + 2]! * 0.5);
-    p[i + 3] = 255;
-  }
-  const png = encodePng(SIZE, SIZE, p);
-  writeFileSync(resolve(OUT_TRANSITIONS, `${id}.png`), png);
-  console.log(`  transitions/${id}.png — ${png.length} bytes`);
+  const p = new Uint8Array(SZ * SZ * 4);
+  for (let i = 0; i < p.length; i += 4) { p[i] = Math.round(t1p[i]!*0.5 + t2p[i]!*0.5); p[i+1] = Math.round(t1p[i+1]!*0.5 + t2p[i+1]!*0.5); p[i+2] = Math.round(t1p[i+2]!*0.5 + t2p[i+2]!*0.5); p[i+3] = 255; }
+  writeFileSync(resolve(OT, `${id}.png`), enc(SZ, SZ, p));
+  console.log(`  transitions/${id}.png`);
 }
 
 console.log('Done.');
