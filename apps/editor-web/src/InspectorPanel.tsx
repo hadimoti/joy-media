@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type { AnimatablePropertyV1, EffectInstanceV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import type { NumericTransformProperty, VisualObjectTransaction } from '@joy-media/property-system';
@@ -23,7 +23,9 @@ import {
   InterpEasedIcon,
   InterpHoldIcon,
   InterpLinearIcon,
+  TrashIcon,
 } from './icons.js';
+import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
 
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -75,6 +77,7 @@ export function InspectorPanel({
   const [commitError, setCommitError] = useState<string | undefined>(undefined);
   const [interpolation, setInterpolation] = useState<KeyframeInterpolationV1>('linear');
   const [transformOpen, setTransformOpen] = useState(true);
+  const [effectsOpen, setEffectsOpen] = useState(true);
   const [audioOpen, setAudioOpen] = useState(true);
 
   if (object === undefined && selectedClipId === undefined) {
@@ -334,6 +337,13 @@ export function InspectorPanel({
         )}
       </section>
 
+      <EffectsSection
+        object={object}
+        open={effectsOpen}
+        onToggle={() => setEffectsOpen((v) => !v)}
+        onDispatch={onDispatch}
+      />
+
       {object.kind === 'image' && (
         <section className="inspector-section" aria-label="Crop">
           <h3>Crop</h3>
@@ -383,6 +393,220 @@ export function InspectorPanel({
       )}
     </article>
   );
+}
+
+function EffectsSection({
+  object,
+  open,
+  onToggle,
+  onDispatch,
+}: {
+  readonly object: VisualObjectV1;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+}) {
+  const effects = object.effects ?? [];
+
+  if (effects.length === 0) return null;
+
+  return (
+    <section className="inspector-section">
+      <button type="button" className="inspector-section-toggle" aria-expanded={open} onClick={onToggle}>
+        <h3>Effects</h3>
+      </button>
+      {open && (
+        <ul className="inspector-effects-list">
+          {effects.map((effect) => {
+            const descriptor = effectRegistry.getEffect(effect.effectId);
+            const label = descriptor?.label ?? effect.effectId;
+            return (
+              <li key={effect.id} className="inspector-effect-item">
+                <div className="inspector-effect-header">
+                  <span className="inspector-effect-label" title={effect.effectId}>
+                    {label}
+                  </span>
+                  <div className="inspector-effect-actions">
+                    <button
+                      type="button"
+                      className="icon-button icon-button-labeled"
+                      aria-pressed={effect.enabled}
+                      onClick={() => {
+                        onDispatch({
+                          label: `${effect.enabled ? 'Disable' : 'Enable'} ${label}`,
+                          commands: [
+                            {
+                              type: 'effect.toggle',
+                              payload: {
+                                objectId: object.id,
+                                effectInstanceId: effect.id,
+                                enabled: !effect.enabled,
+                              },
+                            },
+                          ],
+                        });
+                      }}
+                    >
+                      {effect.enabled ? 'On' : 'Off'}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove ${label}`}
+                      title="Remove"
+                      onClick={() => {
+                        onDispatch({
+                          label: `Remove ${label}`,
+                          commands: [
+                            {
+                              type: 'effect.remove',
+                              payload: {
+                                objectId: object.id,
+                                effectInstanceId: effect.id,
+                              },
+                            },
+                          ],
+                        });
+                      }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                </div>
+                {descriptor && (
+                  <div className="inspector-effect-params">
+                    {descriptor.params.map((param) => (
+                      <EffectParamControl
+                        key={param.key}
+                        descriptor={descriptor}
+                        param={param}
+                        value={effect.params[param.key] ?? param.defaultValue}
+                        effectInstanceId={effect.id}
+                        objectId={object.id}
+                        onDispatch={onDispatch}
+                      />
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function EffectParamControl({
+  descriptor,
+  param,
+  value,
+  effectInstanceId,
+  objectId,
+  onDispatch,
+}: {
+  readonly descriptor: EffectDescriptor;
+  readonly param: EffectDescriptor['params'][number];
+  readonly value: unknown;
+  readonly effectInstanceId: string;
+  readonly objectId: string;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+}) {
+  const label = descriptor.id;
+  const setValue = (next: unknown) => {
+    onDispatch({
+      label: `Set ${param.label} on ${label}`,
+      commands: [
+        {
+          type: 'effect.setParam',
+          payload: {
+            objectId,
+            effectInstanceId,
+            paramKey: param.key,
+            value: next as never,
+          },
+        },
+      ],
+    });
+  };
+
+  if (param.type === 'number' || param.type === 'vector2') {
+    const numValue = typeof value === 'number' ? value : (param.defaultValue as number);
+    return (
+      <div className="inspector-prop">
+        <label>{param.label}</label>
+        <div className="inspector-prop-row">
+          <input
+            type="range"
+            min={param.min ?? -1}
+            max={param.max ?? 1}
+            step={param.step ?? 0.01}
+            value={numValue}
+            aria-label={`${param.label}`}
+            title={`${numValue.toFixed(2)}${param.unit ?? ''}`}
+            onChange={(e) => setValue(e.currentTarget.valueAsNumber)}
+          />
+          <span className="value">{numValue.toFixed(2)}{param.unit}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (param.type === 'boolean') {
+    const boolValue = typeof value === 'boolean' ? value : (param.defaultValue as boolean);
+    return (
+      <div className="inspector-prop">
+        <label>{param.label}</label>
+        <button
+          type="button"
+          className="icon-button icon-button-labeled"
+          aria-pressed={boolValue}
+          onClick={() => setValue(!boolValue)}
+        >
+          {boolValue ? 'On' : 'Off'}
+        </button>
+      </div>
+    );
+  }
+
+  if (param.type === 'enum' && param.options) {
+    const strValue = typeof value === 'string' ? value : String(param.defaultValue);
+    return (
+      <div className="inspector-prop">
+        <label>{param.label}</label>
+        <select
+          value={strValue}
+          onChange={(e) => setValue(e.currentTarget.value)}
+        >
+          {param.options.map((opt) => (
+            <option key={String(opt.value)} value={String(opt.value)}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (param.type === 'color') {
+    const strValue = typeof value === 'string' ? value : (param.defaultValue as string);
+    return (
+      <div className="inspector-prop">
+        <label>{param.label}</label>
+        <div className="inspector-prop-row">
+          <input
+            type="color"
+            value={strValue}
+            onChange={(e) => setValue(e.currentTarget.value)}
+            aria-label={param.label}
+          />
+          <span className="value">{strValue}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function AudioSection({

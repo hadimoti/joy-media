@@ -1908,7 +1908,10 @@ function EditorWorkspace({
           project={visualProject}
           objectId={objectId}
           onDispatch={(command) => {
-            context.dispatchProject(command as unknown as VisualObjectTransaction);
+            context.dispatchProject({
+              label: `Effect: ${(command.payload as { effectId: string }).effectId}`,
+              commands: [command],
+            } as unknown as VisualObjectTransaction);
           }}
         />
       );

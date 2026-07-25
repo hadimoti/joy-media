@@ -4198,6 +4198,60 @@ label {
   align-items: center;
   gap: var(--space-2);
 }
+
+.inspector-effects-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.inspector-effect-item {
+  border: 1px solid var(--joy-border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.45rem;
+  background: var(--joy-bg-surface);
+}
+
+.inspector-effect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.inspector-effect-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--joy-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-effect-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.inspector-effect-params {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--joy-border-soft);
+}
+
+.inspector-effect-params .inspector-prop label {
+  font-size: 0.66rem;
+}
+
+.inspector-effect-params .inspector-prop input[type='range'] {
+  width: 4rem;
+}
 .inspector-kf-row {
   display: flex;
   gap: 2px;

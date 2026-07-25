@@ -5,12 +5,11 @@
  */
 
 import {
-  type ReactElement,
   useState,
   useMemo,
   useCallback,
 } from 'react';
-import type { JoyProjectV1, EffectInstanceV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, listEffects, type EffectDescriptor, type EffectDragPayload } from '@joy-media/visual-effects';
 
 const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
