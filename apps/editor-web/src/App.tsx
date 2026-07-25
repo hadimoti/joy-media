@@ -115,6 +115,7 @@ import {
   ExportIcon,
   FullscreenIcon,
   HighBitrateIcon,
+  InfoIcon,
   ListIcon,
   LogoutIcon,
   PauseIcon,
@@ -489,6 +490,8 @@ function EditorWorkspace({
     readonly HermesAttachedAsset[]
   >([]);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const [toasts, setToasts] = useState<readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]>([]);
+  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -1186,6 +1189,16 @@ function EditorWorkspace({
   const refreshJoySession = useCallback(() => {
     void probeJoySession().then(setJoySession);
   }, []);
+  const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { id, message, kind }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+  const toggleKeyboardShortcuts = useCallback(() => {
+    setKeyboardShortcutsOpen((open) => !open);
+  }, []);
   useEffect(() => {
     refreshJoySession();
   }, [refreshJoySession]);
@@ -1247,6 +1260,9 @@ function EditorWorkspace({
           break;
         case 'playhead.end':
           seek(durationUs);
+          break;
+        case 'shortcuts.toggle':
+          setKeyboardShortcutsOpen((open) => !open);
           break;
         case 'clip.split': {
           if (composition === undefined || selection === undefined) return;
@@ -2178,6 +2194,14 @@ function EditorWorkspace({
           >
             <CommandIcon />
           </button>
+          <button
+            className="icon-button"
+            onClick={toggleKeyboardShortcuts}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <InfoIcon />
+          </button>
         </div>
         <div className="header-group" role="group" aria-label="Deliver">
           <div className="header-menu">
@@ -2443,6 +2467,60 @@ function EditorWorkspace({
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
+      {toasts.length > 0 && (
+        <div className="toast-container" aria-live="polite">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast toast-${toast.kind ?? 'info'}`} role="alert">
+              <span className="toast-message">{toast.message}</span>
+              <button
+                type="button"
+                className="toast-close"
+                aria-label="Dismiss"
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {keyboardShortcutsOpen && (
+        <div className="shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
+          <div className="shortcuts-panel">
+            <header className="shortcuts-header">
+              <h2>Keyboard Shortcuts</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close shortcuts"
+                onClick={() => setKeyboardShortcutsOpen(false)}
+              >
+                <CloseIcon />
+              </button>
+            </header>
+            <div className="shortcuts-list">
+              {[
+                { keys: 'Ctrl+Z', action: 'Undo' },
+                { keys: 'Ctrl+Y', action: 'Redo' },
+                { keys: 'Ctrl+K', action: 'Command palette' },
+                { keys: 'Ctrl+D', action: 'Duplicate clip' },
+                { keys: 'Space', action: 'Toggle playback' },
+                { keys: '← / →', action: 'Step back / forward 1s' },
+                { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
+                { keys: 'Home / End', action: 'Go to start / end' },
+                { keys: 'Delete / Backspace', action: 'Delete selected' },
+                { keys: 'S', action: 'Split clip at playhead' },
+                { keys: '?', action: 'Toggle this panel' },
+              ].map(({ keys, action }) => (
+                <div key={keys} className="shortcut-row">
+                  <span className="shortcut-action">{action}</span>
+                  <kbd className="shortcut-keys">{keys}</kbd>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

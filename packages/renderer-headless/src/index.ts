@@ -32,10 +32,27 @@ export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
     .sort((left, right) => left.node.zIndex - right.node.zIndex || left.position - right.position);
 
   for (const { node } of orderedNodes) {
-    if (node.kind === 'text') drawText(pixels, width, height, node);
-    else drawSurface(pixels, width, height, node);
+    const nodePixels = new Uint8Array(width * height * 4);
+    if (node.kind === 'text') drawTextRaw(nodePixels, width, height, node);
+    else drawSurfaceRaw(nodePixels, width, height, node);
+    if ('effects' in node && node.effects && node.effects.length > 0) {
+      applyHeadlessEffects(nodePixels, width, height, node.effects);
+    }
+    compositeNode(pixels, nodePixels, width, height, node.opacity);
   }
   return { width, height, pixels };
+}
+
+function compositeNode(dest: Uint8Array, src: Uint8Array, width: number, height: number, opacity: number): void {
+  for (let i = 0; i < width * height; i++) {
+    const base = i * 4;
+    composite(dest, base, {
+      r: src[base]!,
+      g: src[base + 1]!,
+      b: src[base + 2]!,
+      a: src[base + 3]!,
+    }, opacity);
+  }
 }
 
 function fillBackground(width: number, height: number, background: Rgba): Uint8Array {
@@ -76,6 +93,32 @@ function drawText(
   });
 }
 
+function drawSurfaceRaw(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  node: Exclude<VisualRenderNode, { kind: 'text' }>,
+): void {
+  rasterizeRaw(pixels, width, height, node, (u, v) =>
+    u >= 0 && u < node.width && v >= 0 && v < node.height ? node.color : undefined,
+  );
+}
+
+function drawTextRaw(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
+): void {
+  rasterizeRaw(pixels, width, height, node, (u, v) => {
+    const glyphColumn = Math.floor(u) % 4;
+    const characterIndex = Math.floor(Math.floor(u) / 4);
+    return bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))
+      ? node.color
+      : undefined;
+  });
+}
+
 function rasterize(
   pixels: Uint8Array,
   width: number,
@@ -89,6 +132,23 @@ function rasterize(
       const v = (row + 0.5 - node.transform.translateY) / node.transform.scaleY;
       const color = lookup(u, v);
       if (color !== undefined) composite(pixels, (row * width + column) * 4, color, node.opacity);
+    }
+  }
+}
+
+function rasterizeRaw(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  node: VisualRenderNode,
+  lookup: (u: number, v: number) => Rgba | undefined,
+): void {
+  for (let row = 0; row < height; row++) {
+    for (let column = 0; column < width; column++) {
+      const u = (column + 0.5 - node.transform.translateX) / node.transform.scaleX;
+      const v = (row + 0.5 - node.transform.translateY) / node.transform.scaleY;
+      const color = lookup(u, v);
+      if (color !== undefined) composite(pixels, (row * width + column) * 4, color, 1);
     }
   }
 }

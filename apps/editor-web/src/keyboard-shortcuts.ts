@@ -14,7 +14,8 @@ export type ShortcutAction =
   | 'playhead.backFine'
   | 'playhead.forwardFine'
   | 'playhead.start'
-  | 'playhead.end';
+  | 'playhead.end'
+  | 'shortcuts.toggle';
 
 export interface ShortcutKeyEvent {
   readonly key: string;
@@ -64,6 +65,8 @@ export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undef
     case 's':
     case 'S':
       return event.shiftKey ? undefined : 'clip.split';
+    case '?':
+      return 'shortcuts.toggle';
     default:
       return undefined;
   }

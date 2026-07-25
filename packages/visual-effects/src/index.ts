@@ -22,3 +22,15 @@ export {
 export type { BrightnessContrastParams } from "./factories/pixi/BrightnessContrastFilter.js";
 
 export { registerBuiltins } from "./builtin/metadata.js";
+
+export {
+  BUILTIN_PRESETS,
+  JoyEffectPresetV1,
+  findPreset,
+  listPresets,
+} from "./presets/types.js";
+
+export {
+  effectToFfmpegFilter,
+  effectStackToFfmpegFiltergraph,
+} from "./ffmpeg-backend.js";
