@@ -183,6 +183,7 @@ function EffectCard({
   readonly onToggleFavorite: () => void;
   readonly onDragStart: (event: React.DragEvent) => void;
 }) {
+  const [imgError, setImgError] = useState(false);
   return (
     <div
       className="effect-card"
@@ -191,6 +192,21 @@ function EffectCard({
       onDoubleClick={onAdd}
       title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})`}
     >
+      <div className="effect-card-thumb">
+        {!imgError ? (
+          <img
+            className="effect-card-img"
+            src={`/effects/preview/${descriptor.id}.png`}
+            alt=""
+            width={120}
+            height={120}
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="effect-card-thumb-fallback" aria-hidden="true" />
+        )}
+      </div>
       <div className="effect-card-header">
         <div className="effect-card-icon">
           {descriptor.cost !== 'low' && (

@@ -144,13 +144,21 @@ export function TransitionsPanel({
                       <button
                         key={type}
                         type="button"
-                        className="icon-button transition-type-btn"
+                        className="transition-type-btn"
                         aria-pressed={pendingType === type}
                         onClick={() => handleAddTransition(type)}
                         aria-label={label}
                         data-guide={label}
                       >
-                        <Icon />
+                        <img
+                          className="transition-type-thumb"
+                          src={`/transitions/preview/${type}.png`}
+                          alt=""
+                          width={60}
+                          height={60}
+                          loading="lazy"
+                        />
+                        <span className="transition-type-name">{label}</span>
                       </button>
                     );
                   })}
