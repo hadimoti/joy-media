@@ -137,8 +137,155 @@ function applyEffect(p: Uint8Array, w: number, h: number, id: string, params: Re
     case 'posterize': { const lv = Math.max(2, params.levels ?? 8); const f = 255 / (lv - 1); pixelOp(p, (r, g, b) => [Math.round(Math.round(r / f) * f), Math.round(Math.round(g / f) * f), Math.round(Math.round(b / f) * f)]); break; }
     case 'color-overlay': { const rv = params.r ?? 255; const gv = params.g ?? 0; const bv = params.b ?? 0; const o = params.opacity ?? 0.3; pixelOp(p, (pr, pg, pb) => [Math.round(pr * (1 - o) + rv * o), Math.round(pg * (1 - o) + gv * o), Math.round(pb * (1 - o) + bv * o)]); break; }
     case 'vignette': { const a = params.amount ?? 0.35; const cx = w / 2, cy = h / 2, md = Math.hypot(cx, cy); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const vg = Math.max(0, (Math.hypot(x - cx, y - cy) / md - 0.35) / 0.65) * a; if (vg > 0) { const b = (y * w + x) * 4; const f = 1 - vg; p[b] = Math.round(p[b]! * f); p[b + 1] = Math.round(p[b + 1]! * f); p[b + 2] = Math.round(p[b + 2]! * f); }} break; }
+    // pixelate / mosaic: block averaging
+    case 'pixelate': { const bs = Math.max(2, Math.round(params.blockSize ?? 8)); blockAvg(p, w, h, bs); break; }
+    case 'mosaic': { const bs = Math.max(4, Math.round(params.blockSize ?? 16)); blockAvg(p, w, h, bs); break; }
+    // curves: shadows/midtones/highlights
+    case 'curves': {
+      const sh = Math.max(-0.5, Math.min(0.5, params.shadows ?? 0));
+      const mt = Math.max(-0.5, Math.min(0.5, params.midtones ?? 0));
+      const hl = Math.max(-0.5, Math.min(0.5, params.highlights ?? 0));
+      pixelOp(p, (r, g, b) => {
+        const curve = (v: number) => { const t = v / 255; const s = t < 0.33 ? t + sh * t : t; const m = t > 0.25 && t < 0.75 ? s + mt * Math.sin((t - 0.25) * Math.PI * 2) : s; const h = t > 0.5 ? m + hl * m : m; return clamp8(h * 255); };
+        return [curve(r), curve(g), curve(b)];
+      }); break; }
+    // glow: brightness boost
+    case 'glow': {
+      const a = Math.max(0, Math.min(1, params.amount ?? 0.4));
+      boxBlur(p, w, h, 3);
+      pixelOp(p, (r, g, b) => [Math.round(r + a * 40), Math.round(g + a * 40), Math.round(b + a * 40)]); break; }
+    // bloom: threshold + blur + add
+    case 'bloom': {
+      const a = Math.max(0, Math.min(1, params.amount ?? 0.4));
+      const th = params.threshold ?? 0.6;
+      const bright = new Uint8Array(p);
+      for (let i = 0; i < bright.length; i += 4) {
+        const avg = (bright[i]! + bright[i+1]! + bright[i+2]!) / 3 / 255;
+        if (avg < th) { bright[i] = 0; bright[i+1] = 0; bright[i+2] = 0; }
+      }
+      boxBlur(bright, w, h, 3);
+      pixelOp(p, (r, g, b) => { const idx = 0; return [Math.round(Math.min(255, r + bright[idx]! * a)), Math.round(Math.min(255, g + bright[idx + 1]! * a)), Math.round(Math.min(255, b + bright[idx + 2]! * a))]; });
+      // Re-do with correct indexing
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; p[i] = Math.round(Math.min(255, p[i]! + bright[i]! * a)); p[i+1] = Math.round(Math.min(255, p[i+1]! + bright[i+1]! * a)); p[i+2] = Math.round(Math.min(255, p[i+2]! + bright[i+2]! * a)); }
+      break; }
+    // drop-shadow: darken bottom-right
+    case 'drop-shadow': {
+      const o = Math.max(0, Math.min(1, params.opacity ?? 0.5));
+      const d = Math.max(0, Math.min(40, params.distance ?? 8));
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4;
+        const dx = Math.min(d, w - x), dy = Math.min(d, h - y); const f = 1 - (dx / d) * (dy / d) * o;
+        if (f < 1) { p[i] = Math.round(p[i]! * f); p[i+1] = Math.round(p[i+1]! * f); p[i+2] = Math.round(p[i+2]! * f); }}
+      break; }
+    // emboss: convolution kernel
+    case 'emboss': {
+      const cp = new Uint8Array(p); const s = params.strength ?? 1;
+      for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) { const i = (y * w + x) * 4;
+        const tl = (i - w * 4 - 4), tr = (i - w * 4 + 4), bl = (i + w * 4 - 4), br = (i + w * 4 + 4);
+        p[i] = clamp8(128 + (cp[tl]! - cp[br]! + cp[tl+1]! - cp[br+1]! + cp[tl+2]! - cp[br+2]!) / 3 * s);
+        p[i+1] = p[i]; p[i+2] = p[i]; }
+      break; }
+    // edge-detect: simple kernel
+    case 'edge-detect': {
+      const cp = new Uint8Array(p); const th = params.threshold ?? 0.3;
+      for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) { const i = (y * w + x) * 4;
+        let gx = 0, gy2 = 0;
+        for (let ky = -1; ky <= 1; ky++) for (let kx = -1; kx <= 1; kx++) { const si = ((y+ky) * w + (x+kx)) * 4;
+          const gray = (cp[si]! + cp[si+1]! + cp[si+2]!) / 3;
+          gx += gray * (kx === 1 ? 1 : kx === -1 ? -1 : 0) * (ky === 0 ? 1 : 0);
+          gy2 += gray * (ky === 1 ? 1 : ky === -1 ? -1 : 0) * (kx === 0 ? 1 : 0); }
+        const e = Math.min(255, Math.sqrt(gx*gx + gy2*gy2) * th * 8);
+        p[i] = e; p[i+1] = e; p[i+2] = e; }
+      break; }
+    // unsharp-mask: blur + subtract + add back
+    case 'unsharp-mask': {
+      const a = params.amount ?? 0.5; const r2 = Math.max(1, Math.round(params.radius ?? 1));
+      const blurred = new Uint8Array(p); boxBlur(blurred, w, h, r2);
+      pixelOp(p, (r, g, b) => {
+        const idx = 0; return [
+          Math.round(Math.min(255, Math.max(0, r + (r - blurred[idx]!) * a))),
+          Math.round(Math.min(255, Math.max(0, g + (g - blurred[idx + 1]!) * a))),
+          Math.round(Math.min(255, Math.max(0, b + (b - blurred[idx + 2]!) * a))),
+        ];
+      });
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4;
+        p[i] = clamp8(p[i]! + (p[i]! - blurred[i]!) * a); p[i+1] = clamp8(p[i+1]! + (p[i+1]! - blurred[i+1]!) * a); p[i+2] = clamp8(p[i+2]! + (p[i+2]! - blurred[i+2]!) * a); }
+      break; }
+    // zoom-blur: radial directional blur
+    case 'zoom-blur': {
+      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 6));
+      const cx = w/2, cy = h/2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr = 0, sg = 0, sb = 0, c = 0;
+        const dx = x - cx, dy = y - cy;
+        for (let s = -a2; s <= a2; s++) { const sx = Math.round(x + dx * s / a2 / 2), sy = Math.round(y + dy * s / a2 / 2);
+          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
+        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
+      break; }
+    // radial-blur: circular blur
+    case 'radial-blur': {
+      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 5));
+      const cx = w/2, cy = h/2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let sr = 0, sg = 0, sb = 0, c = 0;
+        const dx = x - cx, dy = y - cy; const dist = Math.sqrt(dx*dx+dy*dy) || 1;
+        for (let s = -a2; s <= a2; s++) { const angle = s * 0.1; const sx = Math.round(x + dy/dist * a2 * 0.3); const sy = Math.round(y - dx/dist * a2 * 0.3);
+          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
+        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
+      break; }
+    // tilt-shift: gradient blur
+    case 'tilt-shift': {
+      const cp = new Uint8Array(p); const a2 = Math.max(1, Math.round(params.amount ?? 6));
+      const fy = params.focusY ?? 0.5; const fh = params.focusHeight ?? 0.3;
+      const focusCenter = h * fy; const focusHalf = h * fh / 2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const dist = Math.abs(y - focusCenter);
+        const blurR = dist < focusHalf ? 0 : Math.min(a2, Math.round((dist - focusHalf) / h * a2 * 4));
+        if (blurR <= 0) continue;
+        let sr = 0, sg = 0, sb = 0, c = 0;
+        for (let dy = -blurR; dy <= blurR; dy++) for (let dx2 = -blurR; dx2 <= blurR; dx2++) {
+          const ny = y + dy, nx = x + dx2;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < w) { const si = (ny * w + nx) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }}
+        if (c > 0) { const i = (y * w + x) * 4; p[i] = Math.round(sr / c); p[i+1] = Math.round(sg / c); p[i+2] = Math.round(sb / c); }}
+      break; }
+    // bulge / twist / ripple: coordinate-based distortion
+    case 'bulge': {
+      const cp = new Uint8Array(p); const a2 = params.amount ?? 0; const r = params.radius ?? 0.4;
+      const cx = w/2, cy = h/2, maxR = r * w / 2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = x - cx, dy = y - cy, dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist < maxR && dist > 0) { const norm = 1 - dist/maxR; const factor = a2 > 0 ? 1 + a2 * norm * 0.3 : 1 / (1 - a2 * norm * 0.3);
+          const sx = Math.round(cx + dx * factor), sy = Math.round(cy + dy * factor);
+          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}}
+      break; }
+    case 'twist': {
+      const cp = new Uint8Array(p); const ang = params.angle ?? 0; const r = params.radius ?? 0.5;
+      const cx = w/2, cy = h/2, maxR = r * w / 2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const dx = x - cx, dy = y - cy, dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist < maxR) { const t = (1 - dist/maxR) * ang * 0.5; const sx = Math.round(cx + dx * Math.cos(t) - dy * Math.sin(t)), sy = Math.round(cy + dx * Math.sin(t) + dy * Math.cos(t));
+          if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}}
+      break; }
+    case 'ripple': {
+      const cp = new Uint8Array(p); const amp = params.amplitude ?? 0.02; const freq = params.frequency ?? 10;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const sx = Math.round(x + Math.sin(y * freq * 0.1) * amp * 30), sy = Math.round(y + Math.cos(x * freq * 0.1) * amp * 30);
+        if (sx >= 0 && sx < w && sy >= 0 && sy < h) { const si = (sy * w + sx) * 4, i = (y * w + x) * 4; p[i] = cp[si]!; p[i+1] = cp[si+1]!; p[i+2] = cp[si+2]!; }}
+      break; }
+    // crt: scanlines
+    case 'crt': {
+      const s = Math.max(0, Math.min(1, params.scanlines ?? 0.5));
+      const n2 = Math.max(0, Math.min(0.5, params.noise ?? 0.08));
+      for (let y = 0; y < h; y++) { const isScan = y % 2 === 0; if (!isScan) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; const f = 1 - s * 0.4; p[i] = Math.round(p[i]! * f); p[i+1] = Math.round(p[i+1]! * f); p[i+2] = Math.round(p[i+2]! * f); }}
+      if (n2 > 0) { const nn = Math.round(n2 * 255); for (let i = 0; i < p.length; i += 4) { const ns2 = (Math.random() - 0.5) * 2 * nn; p[i] = clamp8(p[i]! + ns2); p[i+1] = clamp8(p[i+1]! + ns2); p[i+2] = clamp8(p[i+2]! + ns2); }}
+      break; }
   }
 }
+function blockAvg(p: Uint8Array, w: number, h: number, bs: number): void {
+  const cp = new Uint8Array(p);
+  for (let y = 0; y < h; y += bs) for (let x = 0; x < w; x += bs) {
+    let sr = 0, sg = 0, sb = 0, c = 0;
+    for (let dy = 0; dy < bs && y+dy < h; dy++) for (let dx = 0; dx < bs && x+dx < w; dx++) { const si = ((y+dy) * w + (x+dx)) * 4; sr += cp[si]!; sg += cp[si+1]!; sb += cp[si+2]!; c++; }
+    const ar = Math.round(sr / c), ag = Math.round(sg / c), ab = Math.round(sb / c);
+    for (let dy = 0; dy < bs && y+dy < h; dy++) for (let dx = 0; dx < bs && x+dx < w; dx++) { const di = ((y+dy) * w + (x+dx)) * 4; p[di] = ar; p[di+1] = ag; p[di+2] = ab; }
+  }
+}
+function clamp8(v: number): number { return Math.round(Math.max(0, Math.min(255, v))); }
 
 // ---- Generate ----
 const ref = readPng(REF_IMG);
