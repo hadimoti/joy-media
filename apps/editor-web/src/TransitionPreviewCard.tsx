@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import type { TransitionShaderEntry } from '@joy-media/transition-shaders';
 import { getTransitionShader } from '@joy-media/transition-shaders';
 
-const TRANSITION_A = new URL('../public/transitions/preview/transition1.png', import.meta.url).href;
-const TRANSITION_B = new URL('../public/transitions/preview/transition2.png', import.meta.url).href;
+const TRANSITION_A = '/transitions/preview/transition1.png';
+const TRANSITION_B = '/transitions/preview/transition2.png';
 
 let sharedImageA: HTMLImageElement | null = null;
 let sharedImageB: HTMLImageElement | null = null;
