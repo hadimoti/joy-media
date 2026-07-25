@@ -55,16 +55,41 @@ function readPng(path: string): { w: number; h: number; pixels: Uint8Array } {
     const len = buf.readUInt32BE(pos); pos += 4;
     const type = buf.toString('ascii', pos, pos + 4); pos += 4;
     const data = buf.subarray(pos, pos + len); pos += len + 4;
-    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bpp = data[9] === 4 ? 4 : data[9] === 2 ? 3 : 4; }
+    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); const ct = data[9]!; bpp = ct === 6 || ct === 4 ? 4 : ct === 2 ? 3 : 4; }
     else if (type === 'IDAT') idat.push(Buffer.from(data));
   }
   const raw = inflateSync(Buffer.concat(idat));
+  const bppV = bpp;
+  const rowLen = 1 + w * bppV;
+  // Reconstruct rows in-place with proper PNG filter reversal
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * rowLen]!;
+    const off = y * rowLen + 1;
+    for (let x = 0; x < w * bppV; x++) {
+      const filterVal = raw[off + x]!;
+      const a = x >= bppV ? raw[off + x - bppV]! : 0;
+      const b = y > 0 ? raw[off + x - rowLen]! : 0;
+      const c = y > 0 && x >= bppV ? raw[off + x - rowLen - bppV]! : 0;
+      let recon = filterVal;
+      if (filter === 0) recon = filterVal; // None
+      else if (filter === 1) recon = (filterVal + a) & 0xff; // Sub
+      else if (filter === 2) recon = (filterVal + b) & 0xff; // Up
+      else if (filter === 3) recon = (filterVal + ((a + b) >> 1)) & 0xff; // Average
+      else if (filter === 4) { // Paeth
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        const pr = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+        recon = (filterVal + pr) & 0xff;
+      }
+      raw[off + x] = recon;
+    }
+  }
+  // Convert to RGBA
   const pixels = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {
-    const rs = y * (1 + w * bpp) + 1;
     for (let x = 0; x < w; x++) {
-      const si = rs + x * bpp, di = (y * w + x) * 4;
-      pixels[di] = raw[si]!; pixels[di + 1] = raw[si + 1]!; pixels[di + 2] = raw[si + 2]!; pixels[di + 3] = bpp >= 4 ? raw[si + 3]! : 255;
+      const si = y * rowLen + 1 + x * bppV, di = (y * w + x) * 4;
+      pixels[di] = raw[si]!; pixels[di + 1] = raw[si + 1]!; pixels[di + 2] = raw[si + 2]!; pixels[di + 3] = bppV >= 4 ? raw[si + 3]! : 255;
     }
   }
   return { w, h, pixels };
