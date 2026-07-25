@@ -436,6 +436,24 @@ export function TimelinePanel({
   }, [autoFit, composition.durationUs]);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key === 'Tab') {
+          event.preventDefault();
+          const ids = Object.keys(project.compositions);
+          const current = ids.indexOf(activeCompositionId);
+          const next = event.shiftKey
+            ? ids[(current - 1 + ids.length) % ids.length]
+            : ids[(current + 1) % ids.length];
+          if (next) setActiveCompositionId(next);
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeCompositionId, project.compositions]);
+
+  useEffect(() => {
     if (!autoFit) return;
     const width = laneMeasureRef.current?.clientWidth ?? scrollRef.current?.clientWidth ?? 0;
     if (width <= 0) return;
