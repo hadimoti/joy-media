@@ -1,9 +1,11 @@
 /**
  * WP-00.3 deterministic reference path. It has no preview/GPU dependency and
  * consumes the same evaluated Render IR as the Pixi adapter.
+ *
+ * P16: CPU-side effect pass applied per-node before compositing into the frame.
  */
 
-import type { RenderFrameIR, Rgba, VisualRenderNode } from '@joy-media/render-ir';
+import type { RenderFrameIR, Rgba, VisualRenderNode, EffectInstanceIR } from '@joy-media/render-ir';
 import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
@@ -14,7 +16,12 @@ export interface HeadlessFrame {
   readonly pixels: Uint8Array;
 }
 
-/** Renders the spike's sprite, video-frame, and bitmap-text nodes in a pinned software path. */
+export interface EffectDiagnostic {
+  readonly instanceId: string;
+  readonly effectId: string;
+  readonly status: 'applied' | 'bypassed' | 'unsupported' | 'error';
+}
+
 export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
   validateRenderFrameIR(frame);
   const width = frame.viewport.width;
@@ -107,6 +114,177 @@ function composite(buffer: Uint8Array, base: number, source: Rgba, opacity: numb
     );
   }
   buffer[base + 3] = Math.round(outputAlpha * 255);
+}
+
+/** Apply CPU-side effects to pixel data. Returns diagnostics for unsupported effects. */
+export function applyHeadlessEffects(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  effects: readonly EffectInstanceIR[] | undefined,
+): EffectDiagnostic[] {
+  if (!effects || effects.length === 0) return [];
+  const diagnostics: EffectDiagnostic[] = [];
+
+  for (const effect of effects) {
+    if (!effect.enabled) {
+      diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'bypassed' });
+      continue;
+    }
+    switch (effect.kind) {
+      case 'brightness-contrast': {
+        const brightness = (effect.params.brightness ?? 0) * 255;
+        const contrast = (effect.params.contrast ?? 0) + 1;
+        pixelOp(pixels, (r, g, b) => [
+          clamp((r - 128) * contrast + 128 + brightness),
+          clamp((g - 128) * contrast + 128 + brightness),
+          clamp((b - 128) * contrast + 128 + brightness),
+        ]);
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'sepia': {
+        const amount = effect.params.amount ?? 0.5;
+        pixelOp(pixels, (r, g, b) => {
+          const tr = clamp(r * (1 - 0.607 * amount) + g * 0.769 * amount + b * 0.189 * amount);
+          const tg = clamp(r * 0.349 * amount + g * (1 - 0.314 * amount) + b * 0.168 * amount);
+          const tb = clamp(r * 0.272 * amount + g * 0.534 * amount + b * (1 - 0.869 * amount));
+          return [tr, tg, tb];
+        });
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'gaussian-blur':
+      case 'blur': {
+        const amount = effect.params.amount ?? 4;
+        boxBlur(pixels, width, height, Math.max(1, Math.round(amount)));
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'noise':
+      case 'grain': {
+        const amount = effect.params.amount ?? 0.2;
+        const n = Math.round(amount * 255);
+        pixelOp(pixels, (r, g, b) => {
+          const noise = (Math.random() - 0.5) * 2 * n;
+          return [clamp(r + noise), clamp(g + noise), clamp(b + noise)];
+        });
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'posterize': {
+        const levels = Math.max(2, effect.params.levels ?? 8);
+        const factor = 255 / (levels - 1);
+        pixelOp(pixels, (r, g, b) => [
+          Math.round(Math.round(r / factor) * factor),
+          Math.round(Math.round(g / factor) * factor),
+          Math.round(Math.round(b / factor) * factor),
+        ]);
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'vibrance': {
+        const amount = effect.params.amount ?? 0;
+        const satFactor = 1 + amount * 0.5;
+        pixelOp(pixels, (r, g, b) => {
+          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+          return [
+            clamp(gray + (r - gray) * satFactor),
+            clamp(gray + (g - gray) * satFactor),
+            clamp(gray + (b - gray) * satFactor),
+          ];
+        });
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      case 'hue-saturation': {
+        const hueShift = effect.params.hue ?? 0;
+        const satAmount = (effect.params.saturation ?? 0) + 1;
+        pixelOp(pixels, (r, g, b) => {
+          if (satAmount !== 1 || hueShift !== 0) {
+            return applyHueSaturation(r, g, b, hueShift, satAmount);
+          }
+          return [r, g, b];
+        });
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
+        break;
+      }
+      default:
+        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'unsupported' });
+    }
+  }
+  return diagnostics;
+}
+
+function pixelOp(pixels: Uint8Array, fn: (r: number, g: number, b: number) => [number, number, number]): void {
+  for (let i = 0; i < pixels.length; i += 4) {
+    const [r, g, b] = fn(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+    pixels[i] = r;
+    pixels[i + 1] = g;
+    pixels[i + 2] = b;
+  }
+}
+
+function boxBlur(pixels: Uint8Array, width: number, height: number, radius: number): void {
+  const copy = new Uint8Array(pixels);
+  const side = radius * 2 + 1;
+  const area = side * side;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const base = (y * width + x) * 4;
+      let sumR = 0, sumG = 0, sumB = 0, count = 0;
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const ny = y + dy, nx = x + dx;
+          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+            const pos = (ny * width + nx) * 4;
+            sumR += copy[pos]!;
+            sumG += copy[pos + 1]!;
+            sumB += copy[pos + 2]!;
+            count++;
+          }
+        }
+      }
+      if (count > 0) {
+        pixels[base] = Math.round(sumR / count);
+        pixels[base + 1] = Math.round(sumG / count);
+        pixels[base + 2] = Math.round(sumB / count);
+      }
+    }
+  }
+}
+
+function applyHueSaturation(r: number, g: number, b: number, hue: number, sat: number): [number, number, number] {
+  const len = Math.sqrt(r * r + g * g + b * b);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  if (chroma === 0) return [clamp(r * sat), clamp(g * sat), clamp(b * sat)];
+
+  let h = 0;
+  if (max === r) h = ((g - b) / chroma + 6) % 6;
+  else if (max === g) h = (b - r) / chroma + 2;
+  else h = (r - g) / chroma + 4;
+  h = (h * 60 + hue * 180 + 360) % 360;
+
+  const s = sat !== 1 ? Math.min(1, chroma / max * sat + (1 - sat)) : chroma / max;
+  const c = max * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = len / 3 * 1.5 - c;
+
+  let r2 = 0, g2 = 0, b2 = 0;
+  if (h < 60) { r2 = c; g2 = x; b2 = 0; }
+  else if (h < 120) { r2 = x; g2 = c; b2 = 0; }
+  else if (h < 180) { r2 = 0; g2 = c; b2 = x; }
+  else if (h < 240) { r2 = 0; g2 = x; b2 = c; }
+  else if (h < 300) { r2 = x; g2 = 0; b2 = c; }
+  else { r2 = c; g2 = 0; b2 = x; }
+
+  return [clamp(r2 + m), clamp(g2 + m), clamp(b2 + m)];
+}
+
+function clamp(v: number): number {
+  return Math.round(Math.max(0, Math.min(255, v)));
 }
 
 const BITMAP: Readonly<Record<string, readonly string[]>> = {
