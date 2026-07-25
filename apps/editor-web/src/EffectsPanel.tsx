@@ -89,10 +89,6 @@ export function EffectsPanel({ project, objectId, onDispatch }: EffectsPanelProp
     [],
   );
 
-  const selectedEffects = objectId
-    ? project.visualObjects[objectId]?.effects ?? []
-    : [];
-
   return (
     <article className="effects-panel">
       <div className="effects-toolbar">
