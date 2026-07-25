@@ -1,15 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import type { JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
 import { listTransitionShaders } from '@joy-media/transition-shaders';
-import { DissolveIcon, WipeIcon, SlideIcon, TrashIcon } from './icons.js';
+import type { TransitionDragPayload } from '@joy-media/visual-effects';
+import { TrashIcon } from './icons.js';
 
 const SHADER_CATALOG = listTransitionShaders();
-
-const LEGACY_ICONS: Readonly<Record<string, () => React.ReactElement>> = {
-  dissolve: DissolveIcon,
-  wipe: WipeIcon,
-  slide: SlideIcon,
-};
 
 interface TransitionsPanelProps {
   readonly project: JoyProjectV1;
@@ -17,6 +12,7 @@ interface TransitionsPanelProps {
   readonly onAddTransition: (transition: Omit<TransitionV1, 'id'>) => void;
   readonly onRemoveTransition: (transitionId: string) => void;
   readonly onUpdateTransition: (transitionId: string, updates: Partial<TransitionV1>) => void;
+  readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 
 export function TransitionsPanel({
@@ -25,6 +21,7 @@ export function TransitionsPanel({
   onAddTransition,
   onRemoveTransition,
   onUpdateTransition,
+  showToast,
 }: TransitionsPanelProps) {
   const rootComp = project.compositions[project.rootCompositionId];
   const transitions = project.transitions ?? [];
@@ -70,8 +67,11 @@ export function TransitionsPanel({
 
   const selectedJunction = availableJunctions[0] ?? null;
 
-  const handleAddTransition = (type: string) => {
-    if (!selectedJunction) return;
+  const handleAddTransition = useCallback((type: string) => {
+    if (!selectedJunction) {
+      showToast('Add two overlapping clips on a video track to create a transition.', 'info');
+      return;
+    }
     const entry = SHADER_CATALOG.find((item) => item.id === type);
     const params: Record<string, number> = {};
     if (entry !== undefined) {
@@ -88,7 +88,17 @@ export function TransitionsPanel({
       ...(Object.keys(params).length > 0 ? { params } : {}),
     });
     setPendingType(type);
-  };
+  }, [selectedJunction, onAddTransition, showToast]);
+
+  const handleDragStart = useCallback((type: string, event: React.DragEvent) => {
+    const payload: TransitionDragPayload = {
+      kind: 'joy/transition',
+      transitionId: type,
+      source: 'transitions-panel',
+    };
+    event.dataTransfer.setData('application/x-joy-transition', JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'copy';
+  }, []);
 
   const handleDurationChange = (transitionId: string, durationUs: number) => {
     onUpdateTransition(transitionId, {
@@ -118,78 +128,66 @@ export function TransitionsPanel({
     });
   };
 
-  if (!rootComp) return <div className="transitions-panel empty">No root composition</div>;
-
   return (
     <article className="transitions-panel">
       <section className="transitions-section" aria-label="Add transition">
         <h3>Add Transition</h3>
-        {availableJunctions.length === 0 ? (
-          <p className="empty-hint">
-            Select two adjacent clips on a video track to add a transition between them.
-          </p>
-        ) : (
+        {selectedJunction && (
           <div className="junction-info">
-            {selectedJunction && (
-              <>
-                <span className="junction-label">
-                  {selectedJunction.trackName}: {selectedJunction.leftClipId} →{' '}
-                  {selectedJunction.rightClipId}
-                </span>
-                <div className="transition-type-picker" role="group" aria-label="Transition type">
-                  {(['dissolve', 'wipe', 'slide'] as const).map((type) => {
-                    const Icon = LEGACY_ICONS[type] ?? DissolveIcon;
-                    const label = SHADER_CATALOG.find((e) => e.id === type)?.label ?? type;
-                    return (
-                      <button
-                        key={type}
-                        type="button"
-                        className="transition-type-btn"
-                        aria-pressed={pendingType === type}
-                        onClick={() => handleAddTransition(type)}
-                        aria-label={label}
-                        data-guide={label}
-                      >
-                        <img
-                          className="transition-type-thumb"
-                          src={`/transitions/preview/${type}.png`}
-                          alt=""
-                          width={60}
-                          height={60}
-                          loading="lazy"
-                        />
-                        <span className="transition-type-name">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <label className="control-row">
-                  <span>Catalog</span>
-                  <select
-                    value={pendingType}
-                    onChange={(event) => setPendingType(event.target.value)}
-                    aria-label="Transition catalog"
-                  >
-                    {SHADER_CATALOG.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="icon-button icon-button-labeled"
-                    onClick={() => handleAddTransition(pendingType)}
-                    aria-label={`Add ${pendingType}`}
-                    data-guide="Add transition"
-                  >
-                    Add
-                  </button>
-                </label>
-              </>
-            )}
+            <span className="junction-label">
+              {selectedJunction.trackName}: {selectedJunction.leftClipId} →{' '}
+              {selectedJunction.rightClipId}
+            </span>
           </div>
         )}
+        <div className="transition-type-picker" role="group" aria-label="Transition type">
+          {SHADER_CATALOG.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className="transition-type-btn"
+              aria-pressed={pendingType === entry.id}
+              onClick={() => handleAddTransition(entry.id)}
+              aria-label={entry.label}
+              data-guide={entry.label}
+              draggable
+              onDragStart={(e) => handleDragStart(entry.id, e)}
+            >
+              <img
+                className="transition-type-thumb"
+                src={`/transitions/preview/${entry.id}.png`}
+                alt=""
+                width={60}
+                height={60}
+                loading="lazy"
+              />
+              <span className="transition-type-name">{entry.label}</span>
+            </button>
+          ))}
+        </div>
+        <label className="control-row">
+          <span>Selected</span>
+          <select
+            value={pendingType}
+            onChange={(event) => setPendingType(event.target.value)}
+            aria-label="Transition catalog"
+          >
+            {SHADER_CATALOG.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="icon-button icon-button-labeled"
+            onClick={() => handleAddTransition(pendingType)}
+            aria-label={`Add ${pendingType}`}
+            data-guide="Add transition"
+          >
+            Add
+          </button>
+        </label>
       </section>
 
       {relevantTransitions.length > 0 && (

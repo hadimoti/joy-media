@@ -393,6 +393,7 @@ interface EditorPanelContextValue {
   readonly redo: () => void;
   readonly jumpToHistory: (sequence: number) => void;
   readonly agentContext: EditorContext;
+  readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
@@ -1929,6 +1930,7 @@ function EditorWorkspace({
               commands: [command],
             } as unknown as VisualObjectTransaction);
           }}
+          showToast={showToast}
         />
       );
     }
@@ -1957,6 +1959,7 @@ function EditorWorkspace({
               ),
             })
           }
+          showToast={showToast}
         />
       );
     }
@@ -2012,6 +2015,40 @@ function EditorWorkspace({
               commands: [{ type: 'marker.remove', payload: { markerId: id } }],
             })
           }
+          onEffectDrop={(effectId, clipId, trackId) => {
+            const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
+            if (!objectId) {
+              showToast('Could not resolve target for this clip.', 'error');
+              return;
+            }
+            const descriptor = effectRegistry.getEffect(effectId);
+            if (!descriptor) return;
+            const defaults: Record<string, unknown> = {};
+            for (const p of descriptor.params) {
+              defaults[p.key] = p.defaultValue;
+            }
+            context.dispatchProject({
+              label: `Effect: ${effectId}`,
+              commands: [{ type: 'effect.add', payload: { objectId, effectId, params: defaults } }],
+            } as unknown as VisualObjectTransaction);
+          }}
+          onTransitionDrop={(transitionId, leftClipId, rightClipId, trackId) => {
+            context.replaceVisualProject({
+              ...visualProject,
+              transitions: [
+                ...(visualProject.transitions ?? []),
+                {
+                  id: `transition-${Date.now()}`,
+                  trackId,
+                  leftClipId,
+                  rightClipId,
+                  type: transitionId,
+                  durationUs: 500_000,
+                },
+              ],
+            });
+          }}
+          showToast={showToast}
         />
       );
     if (api.id === 'jobs')
@@ -2458,6 +2495,7 @@ function EditorWorkspace({
           redo,
           jumpToHistory,
           agentContext,
+          showToast,
         }}
       >
         <DockviewReact
@@ -2549,8 +2587,11 @@ function MonitorPanel() {
     stickerTick,
     togglePlayback,
     seek,
+    dispatchProject,
+    showToast,
   } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [monitorDragOver, setMonitorDragOver] = useState(false);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
@@ -2711,10 +2752,51 @@ function MonitorPanel() {
     void el.requestFullscreen().then(() => setFullscreen(true));
   };
 
+  const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes('application/x-joy-effect')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setMonitorDragOver(true);
+  }, []);
+
+  const handleMonitorEffectDragLeave = useCallback(() => {
+    setMonitorDragOver(false);
+  }, []);
+
+  const handleMonitorEffectDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setMonitorDragOver(false);
+    const raw = event.dataTransfer.getData('application/x-joy-effect');
+    if (!raw) return;
+    try {
+      const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+      if (!objectId) {
+        showToast('Select a clip or drop effects directly on the timeline.', 'info');
+        return;
+      }
+      const descriptor = effectRegistry.getEffect(payload.effectId);
+      if (!descriptor) return;
+      const defaults: Record<string, unknown> = {};
+      for (const p of descriptor.params) {
+        defaults[p.key] = p.defaultValue;
+      }
+      dispatchProject({
+        label: `Effect: ${payload.effectId}`,
+        commands: [{ type: 'effect.add', payload: { objectId, effectId: payload.effectId, params: defaults } }],
+      } as unknown as VisualObjectTransaction);
+    } catch { /* ignore malformed */ }
+  }, [dispatchProject, visualProject, state.selectedIds, showToast]);
+
   return (
     <article className="monitor-panel" ref={panelRef}>
       {error !== undefined && <p className="monitor-error">{error}</p>}
-      <div className="monitor-canvas-wrap">
+      <div
+        className={`monitor-canvas-wrap${monitorDragOver ? ' drag-over' : ''}`}
+        onDragOver={handleMonitorEffectDragOver}
+        onDragLeave={handleMonitorEffectDragLeave}
+        onDrop={handleMonitorEffectDrop}
+      >
         <div
           ref={containerRef}
           className="monitor-canvas"

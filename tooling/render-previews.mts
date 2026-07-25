@@ -194,10 +194,17 @@ for (const e of EFFECTS) {
   console.log(`  ${e.id}.png`);
 }
 
-// Transition crossfade
+// Transition crossfade for all catalog types
 const t1p = rs(dec(T1).p, ref.w, ref.h, SZ);
 const t2p = rs(dec(T2).p, ref.w, ref.h, SZ);
-for (const id of ['dissolve', 'wipe', 'slide', 'zoom', 'glitch', 'shape']) {
+const TRANSITION_IDS = [
+  'dissolve', 'wipe', 'slide',
+  'gl:fade', 'gl:fadegrayscale', 'gl:wipeLeft', 'gl:wipeRight', 'gl:wipeUp', 'gl:wipeDown',
+  'gl:Directional', 'gl:CircleCrop', 'gl:morph', 'gl:Dreamy', 'gl:CrossZoom',
+  'gl:windowslice', 'gl:SimpleZoom', 'gl:crosswarp', 'gl:LinearBlur',
+  'gl:ButterflyWaveScrawler', 'gl:GlitchDisplace',
+];
+for (const id of TRANSITION_IDS) {
   const p = new Uint8Array(SZ * SZ * 4);
   for (let i = 0; i < p.length; i += 4) { p[i] = Math.round(t1p[i]!*0.5 + t2p[i]!*0.5); p[i+1] = Math.round(t1p[i+1]!*0.5 + t2p[i+1]!*0.5); p[i+2] = Math.round(t1p[i+2]!*0.5 + t2p[i+2]!*0.5); p[i+3] = 255; }
   writeFileSync(resolve(OT, `${id}.png`), enc(SZ, SZ, p));

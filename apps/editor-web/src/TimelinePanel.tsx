@@ -362,6 +362,9 @@ export function TimelinePanel({
   onDispatch,
   onAddMarker,
   onRemoveMarker,
+  onEffectDrop,
+  onTransitionDrop,
+  showToast,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -375,6 +378,9 @@ export function TimelinePanel({
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
   readonly onRemoveMarker?: (id: string) => void;
+  readonly onEffectDrop?: (effectId: string, clipId: string, trackId: string) => void;
+  readonly onTransitionDrop?: (transitionId: string, leftClipId: string, rightClipId: string, trackId: string) => void;
+  readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [viewport, setViewport] = useState<TimelineViewport>({
@@ -1019,6 +1025,7 @@ export function TimelinePanel({
           );
           setMenu({ x, y, items });
         }}
+        onToast={(message) => showToast?.(message, 'info')}
       />
 
       <div className="timeline-tabs" role="tablist" aria-label="Compositions">
@@ -1302,13 +1309,65 @@ export function TimelinePanel({
                     if (splitToolActive) setSplitGuideUs(undefined);
                   }}
                   onDragOver={(event) => {
-                    if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+                    if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
+                        !event.dataTransfer.types.includes('application/x-joy-effect') &&
+                        !event.dataTransfer.types.includes('application/x-joy-transition')) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
                     if (track.locked) return;
+
+                    // Effect drop
+                    const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
+                    if (effectRaw) {
+                      try {
+                        const payload = JSON.parse(effectRaw) as { kind: string; effectId: string; source: string };
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const dropUs = pixelToTime(event.clientX - rect.left, {
+                          originUs: 0,
+                          pixelsPerSecond: viewport.pixelsPerSecond,
+                        });
+                        const source = composition.tracks.find((t) => t.id === track.id);
+                        if (source === undefined) return;
+                        const clip = source.clips.find((c) => {
+                          const end = c.startUs + c.durationUs;
+                          return dropUs >= c.startUs && dropUs <= end;
+                        });
+                        if (clip) {
+                          onEffectDrop?.(payload.effectId, clip.id, track.id);
+                        }
+                        return;
+                      } catch { /* ignore malformed */ }
+                    }
+
+                    // Transition drop
+                    const transitionRaw = event.dataTransfer.getData('application/x-joy-transition');
+                    if (transitionRaw) {
+                      try {
+                        const payload = JSON.parse(transitionRaw) as { kind: string; transitionId: string; source: string };
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const dropUs = pixelToTime(event.clientX - rect.left, {
+                          originUs: 0,
+                          pixelsPerSecond: viewport.pixelsPerSecond,
+                        });
+                        const source = composition.tracks.find((t) => t.id === track.id);
+                        if (source === undefined) return;
+                        const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+                        for (let i = 0; i < sorted.length - 1; i++) {
+                          const left = sorted[i]!;
+                          const right = sorted[i + 1]!;
+                          const leftEnd = left.startUs + left.durationUs;
+                          if (dropUs >= leftEnd && dropUs <= right.startUs) {
+                            onTransitionDrop?.(payload.transitionId, left.id, right.id, track.id);
+                            return;
+                          }
+                        }
+                      } catch { /* ignore malformed */ }
+                    }
+
+                    // Existing media asset drop
                     const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
                     if (!raw) return;
                     try {

@@ -25,9 +25,10 @@ interface EffectsPanelProps {
   readonly project: JoyProjectV1;
   readonly objectId: string | undefined;
   readonly onDispatch: (transaction: { readonly type: 'effect.add'; readonly payload: { readonly objectId: string; readonly effectId: string; readonly params?: Readonly<Record<string, unknown>>; readonly index?: number } }) => void;
+  readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 
-export function EffectsPanel({ project, objectId, onDispatch }: EffectsPanelProps) {
+export function EffectsPanel({ project, objectId, onDispatch, showToast }: EffectsPanelProps) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -61,7 +62,10 @@ export function EffectsPanel({ project, objectId, onDispatch }: EffectsPanelProp
 
   const handleAdd = useCallback(
     (effectId: string) => {
-      if (!objectId) return;
+      if (!objectId) {
+        showToast('Select a clip or drag onto the timeline to apply effects.', 'info');
+        return;
+      }
       const descriptor = effectRegistry.getEffect(effectId);
       if (!descriptor) return;
       const defaults: Record<string, unknown> = {};
@@ -73,7 +77,7 @@ export function EffectsPanel({ project, objectId, onDispatch }: EffectsPanelProp
         payload: { objectId, effectId, params: defaults },
       });
     },
-    [objectId, onDispatch],
+    [objectId, onDispatch, showToast],
   );
 
   const handleDragStart = useCallback(
@@ -117,55 +121,49 @@ export function EffectsPanel({ project, objectId, onDispatch }: EffectsPanelProp
         ))}
       </div>
 
-      {!objectId ? (
-        <p className="empty-hint">Select a visual object to apply effects.</p>
-      ) : (
-        <>
-          <div className="effects-subsection">
-            <h4 className="effects-subsection-title">Favorites</h4>
-            <div className="effects-grid">
-              {(favorites.size === 0
-                ? []
-                : filtered.filter((d) => favorites.has(d.id))
-              ).map((desc) => (
-                <EffectCard
-                  key={desc.id}
-                  descriptor={desc}
-                  isFavorite={true}
-                  onAdd={() => handleAdd(desc.id)}
-                  onToggleFavorite={() => toggleFavorite(desc.id)}
-                  onDragStart={(e) => handleDragStart(desc.id, e)}
-                />
-              ))}
-              {favorites.size === 0 && (
-                <span className="empty-hint">Click ★ to add favorites.</span>
-              )}
-            </div>
-          </div>
+      <div className="effects-subsection">
+        <h4 className="effects-subsection-title">Favorites</h4>
+        <div className="effects-grid">
+          {(favorites.size === 0
+            ? []
+            : filtered.filter((d) => favorites.has(d.id))
+          ).map((desc) => (
+            <EffectCard
+              key={desc.id}
+              descriptor={desc}
+              isFavorite={true}
+              onAdd={() => handleAdd(desc.id)}
+              onToggleFavorite={() => toggleFavorite(desc.id)}
+              onDragStart={(e) => handleDragStart(desc.id, e)}
+            />
+          ))}
+          {favorites.size === 0 && (
+            <span className="empty-hint">Click ★ to add favorites.</span>
+          )}
+        </div>
+      </div>
 
-          <div className="effects-subsection">
-            <h4 className="effects-subsection-title">
-              {category === 'all' ? 'All Effects' : CATEGORIES.find((c) => c.id === category)?.label ?? category}
-            </h4>
-            <div className="effects-grid">
-              {filtered.length === 0 ? (
-                <p className="empty-hint">No effects match.</p>
-              ) : (
-                filtered.map((desc) => (
-                  <EffectCard
-                    key={desc.id}
-                    descriptor={desc}
-                    isFavorite={favorites.has(desc.id)}
-                    onAdd={() => handleAdd(desc.id)}
-                    onToggleFavorite={() => toggleFavorite(desc.id)}
-                    onDragStart={(e) => handleDragStart(desc.id, e)}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      <div className="effects-subsection">
+        <h4 className="effects-subsection-title">
+          {category === 'all' ? 'All Effects' : CATEGORIES.find((c) => c.id === category)?.label ?? category}
+        </h4>
+        <div className="effects-grid">
+          {filtered.length === 0 ? (
+            <p className="empty-hint">No effects match.</p>
+          ) : (
+            filtered.map((desc) => (
+              <EffectCard
+                key={desc.id}
+                descriptor={desc}
+                isFavorite={favorites.has(desc.id)}
+                onAdd={() => handleAdd(desc.id)}
+                onToggleFavorite={() => toggleFavorite(desc.id)}
+                onDragStart={(e) => handleDragStart(desc.id, e)}
+              />
+            ))
+          )}
+        </div>
+      </div>
     </article>
   );
 }

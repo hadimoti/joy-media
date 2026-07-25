@@ -761,6 +761,11 @@ h2 {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
   background-color: #121214;
 }
+.monitor-canvas-wrap.drag-over {
+  outline: 3px dashed #e9b949;
+  outline-offset: -3px;
+  background-color: rgba(233, 185, 73, 0.08);
+}
 .monitor-canvas {
   position: absolute;
   inset: 0;
@@ -4021,6 +4026,7 @@ label {
 }
 .transition-type-picker {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 .transition-type-btn {

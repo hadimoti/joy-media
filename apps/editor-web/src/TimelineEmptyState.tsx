@@ -11,6 +11,7 @@ export interface TimelineEmptyStateProps {
   readonly onImportClick: () => void;
   readonly onAddFromLibrary: () => void;
   readonly onContextMenu: (x: number, y: number) => void;
+  readonly onToast?: (message: string) => void;
 }
 
 export function TimelineEmptyState({
@@ -22,12 +23,15 @@ export function TimelineEmptyState({
   onImportClick,
   onAddFromLibrary,
   onContextMenu,
+  onToast,
 }: TimelineEmptyStateProps) {
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
     if (!event.dataTransfer.types.includes('application/x-joy-media-asset') &&
+        !event.dataTransfer.types.includes('application/x-joy-effect') &&
+        !event.dataTransfer.types.includes('application/x-joy-transition') &&
         !event.dataTransfer.types.includes('Files')) {
       return;
     }
@@ -46,8 +50,13 @@ export function TimelineEmptyState({
   const handleDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     setDragActive(false);
+    if (event.dataTransfer.types.includes('application/x-joy-effect') ||
+        event.dataTransfer.types.includes('application/x-joy-transition')) {
+      onToast?.('Add media to the timeline first, then drag effects onto clips.');
+      return;
+    }
     onImportClick();
-  }, [onImportClick]);
+  }, [onImportClick, onToast]);
 
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
