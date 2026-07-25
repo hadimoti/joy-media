@@ -15,6 +15,7 @@ export interface TimelineRulerProps {
   readonly widthPx: number;
   readonly ticks: readonly RulerTick[];
   readonly onSeek: (timeUs: number) => void;
+  readonly onContextMenu?: (timeUs: number, clientX: number, clientY: number) => void;
 }
 
 function snapSeek(timeUs: number, durationUs: number): number {
@@ -30,6 +31,7 @@ export function TimelineRuler({
   widthPx,
   ticks,
   onSeek,
+  onContextMenu,
 }: TimelineRulerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -87,6 +89,17 @@ export function TimelineRuler({
         } else if (event.key === 'End') {
           event.preventDefault();
           onSeek(durationUs);
+        }
+      }}
+      onContextMenu={(event) => {
+        if (onContextMenu) {
+          event.preventDefault();
+          event.stopPropagation();
+          const el = event.currentTarget;
+          const rect = el.getBoundingClientRect();
+          const localX = event.clientX - rect.left;
+          const timeUs = pixelToTime(localX, viewport);
+          onContextMenu(timeUs, event.clientX, event.clientY);
         }
       }}
     >

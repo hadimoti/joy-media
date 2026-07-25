@@ -4671,3 +4671,10 @@ label {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.timeline-context-shortcut {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}

@@ -40,14 +40,14 @@ import {
   TrackAddIcon,
 } from './icons.js';
 import {
-  getCommandsByGroup,
+  buildClipContextMenu,
+  buildEmptyCanvasContextMenu,
+  buildTrackHeaderContextMenu,
+  buildRulerContextMenu,
   type CommandContext,
-  type TimelineCommand,
+  type ContextMenuItem,
 } from './commands/timeline-commands.js';
-import {
-  TimelineContextMenu,
-  type TimelineContextMenuState,
-} from './TimelineContextMenu.js';
+import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
@@ -386,7 +386,7 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
-  const [menu, setMenu] = useState<TimelineContextMenuState | undefined>(undefined);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string } | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
 
@@ -695,24 +695,39 @@ export function TimelinePanel({
   };
 
   const openClipMenu = (trackId: string, clip: Clip, clientX: number, clientY: number) => {
-    const trackView = tracks.find((t) => t.id === trackId);
-    const locked = trackView?.locked === true;
-    const endUs = clip.startUs + clip.durationUs;
-    const canSplitClip = !locked && playheadUs > clip.startUs && playheadUs < endUs;
-    const canSpeed = !locked && clip.kind === 'video';
-    const canFreeze = !locked && clip.kind === 'video' && canSplitClip;
-    setMenu({
-      x: clientX,
-      y: clientY,
-      clipId: clip.id,
-      trackId,
-      locked,
-      selected: selectedIds.includes(clip.id),
-      canSplit: canSplitClip,
-      canSpeed,
-      canFreeze,
-      currentRate: clip.kind === 'video' ? normalizePlaybackRate(clip.playbackRate) : 1,
+    const fullTrack = composition.tracks.find((t) => t.id === trackId);
+
+    const ctx: CommandContext = {
+      project,
+      compositionId: project.rootCompositionId,
+      playheadUs,
+      selectedClip: fullTrack ? { track: fullTrack, clip } : undefined,
+      selectedTrackIds: [trackId],
+    };
+
+    const items = buildClipContextMenu(ctx, (cmd) => {
+      if (cmd) {
+        switch (cmd.type) {
+          case 'timeline.splitClip':
+            dispatchSplit(cmd.payload.trackId, cmd.payload.clipId);
+            break;
+          case 'timeline.duplicateClip':
+            dispatchDuplicate(cmd.payload.trackId, clip);
+            break;
+          case 'timeline.removeClip':
+            dispatchDelete(cmd.payload.trackId, cmd.payload.clipId);
+            break;
+          case 'timeline.freezeFrame':
+            dispatchFreeze(cmd.payload.trackId, cmd.payload.clipId);
+            break;
+          case 'timeline.setClipRate':
+            dispatchRate(cmd.payload.trackId, cmd.payload.clipId, cmd.payload.playbackRate);
+            break;
+        }
+      }
     });
+
+    setMenu({ x: clientX, y: clientY, items, trackId, clipId: clip.id });
   };
 
   const handleImportClick = useCallback(() => {
@@ -970,12 +985,19 @@ export function TimelinePanel({
 
       <TimelineEmptyState
         project={project}
-        playheadUs={playheadUs}
+        _playheadUs={playheadUs}
         compositionDurationUs={composition.durationUs}
         viewportPixelsPerSecond={viewport.pixelsPerSecond}
         onSeek={onSeek}
         onImportClick={handleImportClick}
         onAddFromLibrary={handleAddFromLibrary}
+        onContextMenu={(x, y) => {
+          const items = buildEmptyCanvasContextMenu(
+            handleImportClick,
+            handleAddFromLibrary
+          );
+          setMenu({ x, y, items });
+        }}
       />
 
       <div
@@ -1004,6 +1026,12 @@ export function TimelinePanel({
             widthPx={laneWidthPx}
             ticks={rulerTicks}
             onSeek={onSeek}
+            onContextMenu={(timeUs, clientX, clientY) => {
+              const items = buildRulerContextMenu((t) => {
+                console.log('Add marker at', t); // TODO: implement marker.add command
+              }, timeUs);
+              setMenu({ x: clientX, y: clientY, items });
+            }}
           />
           <span
             className="timeline-playhead timeline-playhead--scrub"
@@ -1066,7 +1094,56 @@ export function TimelinePanel({
               }).length;
             return (
               <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
-                <div className="timeline-track-header">
+                <div className="timeline-track-header" onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const items = buildTrackHeaderContextMenu(
+                      track.id,
+                      () => {
+                        const order = composition.tracks.length;
+                        onDispatch({
+                          label: 'Add video track',
+                          commands: [{
+                            type: 'timeline.addTrack',
+                            payload: {
+                              compositionId: composition.id,
+                              track: {
+                                id: `V${order + 1}`,
+                                kind: 'video',
+                                order,
+                                enabled: true,
+                                clips: [],
+                              },
+                            },
+                          }],
+                        });
+                      },
+                      () => {
+                        onDispatch({
+                          label: `Remove ${track.id}`,
+                          commands: [{
+                            type: 'timeline.removeTrack',
+                            payload: { compositionId: composition.id, trackId: track.id },
+                          }],
+                        });
+                      },
+                      (enabled: boolean) => {
+                        onDispatch({
+                          label: enabled ? `Enable ${track.id}` : `Mute ${track.id}`,
+                          commands: [{
+                            type: 'property.setTrackEnabled',
+                            payload: {
+                              compositionId: composition.id,
+                              trackId: track.id,
+                              enabled,
+                            },
+                          }],
+                        });
+                      },
+                      source.enabled ?? true
+                    );
+                    setMenu({ x: event.clientX, y: event.clientY, items });
+                  }}>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {voiceDominant ? `A${audioIndex}` : `V${index + 1}`}
@@ -1253,20 +1330,11 @@ export function TimelinePanel({
       </div>
 
       {menu !== undefined && (
-        <TimelineContextMenu
-          menu={menu}
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menu.items}
           onClose={() => setMenu(undefined)}
-          onSplit={() => dispatchSplit(menu.trackId, menu.clipId)}
-          onDuplicate={() => {
-            const track = composition.tracks.find((t) => t.id === menu.trackId);
-            const clip = track?.clips.find((c) => c.id === menu.clipId);
-            if (clip === undefined) return;
-            dispatchDuplicate(menu.trackId, clip);
-          }}
-          onDelete={() => dispatchDelete(menu.trackId, menu.clipId)}
-          onFreeze={() => dispatchFreeze(menu.trackId, menu.clipId)}
-          onToggleSelect={() => onToggleSelection(menu.clipId)}
-          onSetRate={(rate) => dispatchRate(menu.trackId, menu.clipId, rate)}
         />
       )}
     </article>

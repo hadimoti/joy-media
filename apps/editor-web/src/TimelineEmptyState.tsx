@@ -10,6 +10,7 @@ export interface TimelineEmptyStateProps {
   readonly onSeek: (timeUs: number) => void;
   readonly onImportClick: () => void;
   readonly onAddFromLibrary: () => void;
+  readonly onContextMenu: (x: number, y: number) => void;
 }
 
 export function TimelineEmptyState({
@@ -20,6 +21,7 @@ export function TimelineEmptyState({
   onSeek,
   onImportClick,
   onAddFromLibrary,
+  onContextMenu,
 }: TimelineEmptyStateProps) {
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -50,8 +52,8 @@ export function TimelineEmptyState({
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    (window as unknown as { __timelineEmptyContextMenu?: (x: number, y: number) => void }).__timelineEmptyContextMenu?.(event.clientX, event.clientY);
-  }, []);
+    onContextMenu(event.clientX, event.clientY);
+  }, [onContextMenu]);
 
   const handleClick = useCallback((event: React.MouseEvent) => {
     if (event.target !== event.currentTarget) return;

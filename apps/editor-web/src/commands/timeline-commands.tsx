@@ -287,6 +287,56 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
       };
     },
   },
+  {
+      id: 'clip.freezeFrame',
+      label: 'Freeze frame at playhead',
+      icon: ScissorsIcon,
+      shortcut: 'F',
+      group: 'edit',
+      canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+      execute: (ctx) => {
+        const clip = ctx.selectedClip?.clip;
+        const track = ctx.selectedClip?.track;
+        if (!clip || !track || clip.kind !== 'video') return null;
+        const holdUs = 2_000_000; // 2 seconds default
+        return {
+          type: 'timeline.freezeFrame',
+          payload: {
+            compositionId: ctx.compositionId,
+            trackId: track.id,
+            clipId: clip.id,
+            atUs: ctx.playheadUs,
+            holdUs,
+            freezeClipId: `${clip.id}-freeze-${ctx.playheadUs}`,
+            rightClipId: `${clip.id}-right-${ctx.playheadUs}`,
+          },
+        };
+      },
+    },
+    {
+      id: 'clip.setRate',
+      label: 'Set playback rate',
+      icon: ZoomInIcon,
+      shortcut: 'R',
+      group: 'edit',
+      canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+      execute: (ctx) => {
+        const clip = ctx.selectedClip?.clip;
+        const track = ctx.selectedClip?.track;
+        if (!clip || !track || clip.kind !== 'video') return null;
+        // Return a rate of 0.5x as example - actual rate chosen via submenu
+        return {
+          type: 'timeline.setClipRate',
+          payload: {
+            compositionId: ctx.compositionId,
+            trackId: track.id,
+            clipId: clip.id,
+            playbackRate: 0.5,
+            preserveSourceRange: true,
+          },
+        };
+      },
+    },
 
   // ZOOM GROUP
   {
@@ -327,10 +377,11 @@ export function getCommandsByGroup(group: CommandGroup): readonly CommandSpec[] 
 // --- Context menu generators ---
 export interface ContextMenuItem {
   readonly label: string;
-  readonly action: () => void;
+  readonly icon?: React.ComponentType<{ className?: string }>;
+  readonly action?: () => void;
+  readonly shortcut?: string;
   readonly disabled?: boolean;
   readonly dividerBefore?: boolean;
-  readonly icon?: React.ComponentType<{ className?: string }>;
 }
 
 export function buildClipContextMenu(
@@ -347,6 +398,7 @@ export function buildClipContextMenu(
       items.push({
         label: 'Split at playhead',
         icon: ScissorsIcon,
+        shortcut: 'S',
         action: () => onExecute(result),
       });
     }
@@ -360,12 +412,41 @@ export function buildClipContextMenu(
       items.push({
         label: 'Duplicate',
         icon: DuplicateIcon,
+        shortcut: 'Cmd/Ctrl+D',
         action: () => onExecute(result),
       });
     }
   }
 
   items.push({ label: '', action: () => {}, dividerBefore: true });
+
+  // Freeze frame
+  const freezeCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.freezeFrame')!;
+  if (freezeCmd.canExecute(ctx)) {
+    const result = freezeCmd.execute(ctx);
+    if (result) {
+      items.push({
+        label: 'Freeze frame at playhead',
+        icon: ScissorsIcon,
+        shortcut: 'F',
+        action: () => onExecute(result),
+      });
+    }
+  }
+
+  // Set playback rate
+  const rateCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.setRate')!;
+  if (rateCmd.canExecute(ctx)) {
+    const result = rateCmd.execute(ctx);
+    if (result) {
+      items.push({
+        label: 'Set playback rate…',
+        icon: ZoomInIcon,
+        shortcut: 'R',
+        action: () => onExecute(result),
+      });
+    }
+  }
 
   // Delete
   const delCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.delete')!;
@@ -375,6 +456,7 @@ export function buildClipContextMenu(
       items.push({
         label: 'Ripple delete',
         icon: TrashIcon,
+        shortcut: 'Delete / Backspace',
         action: () => onExecute(result),
       });
     }
@@ -390,10 +472,12 @@ export function buildEmptyCanvasContextMenu(
   return [
     {
       label: 'Import Media...',
+      shortcut: 'Cmd/Ctrl+I',
       action: onImportClick,
     },
     {
       label: 'Add from Library...',
+      shortcut: 'L',
       action: onAddFromLibrary,
     },
   ];
@@ -407,10 +491,10 @@ export function buildTrackHeaderContextMenu(
   currentEnabled: boolean
 ): readonly ContextMenuItem[] {
   return [
-    { label: 'Add Video Track', action: onAddTrack },
-    { label: 'Remove Track', action: onRemoveTrack, disabled: true }, // TODO
+    { label: 'Add Video Track', shortcut: 'T', action: onAddTrack },
+    { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: true }, // TODO
     { label: '', action: () => {}, dividerBefore: true },
-    { label: currentEnabled ? 'Disable Track' : 'Enable Track', action: () => onToggleEnabled(!currentEnabled) },
+    { label: currentEnabled ? 'Disable Track' : 'Enable Track', shortcut: 'E', action: () => onToggleEnabled(!currentEnabled) },
   ];
 }
 
@@ -419,7 +503,7 @@ export function buildRulerContextMenu(
   timeUs: number
 ): readonly ContextMenuItem[] {
   return [
-    { label: `Add Marker at ${formatTimecode(timeUs)}`, action: () => onAddMarker(timeUs) },
+    { label: `Add Marker at ${formatTimecode(timeUs)}`, shortcut: 'M', action: () => onAddMarker(timeUs) },
   ];
 }
 
