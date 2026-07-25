@@ -94,7 +94,8 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
   );
 
   return (
-    <article className="effects-panel">
+    <article className="joy-panel-root effects-panel">
+      <h3 className="panel-section-title">Effects</h3>
       <div className="effects-toolbar">
         <input
           type="search"
@@ -121,6 +122,7 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
         ))}
       </div>
 
+      <div className="joy-panel-scroll">
       <div className="effects-subsection">
         <h4 className="effects-subsection-title">Favorites</h4>
         <div className="effects-grid">
@@ -163,6 +165,7 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
             ))
           )}
         </div>
+      </div>
       </div>
     </article>
   );

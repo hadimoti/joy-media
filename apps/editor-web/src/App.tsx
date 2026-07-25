@@ -1814,31 +1814,40 @@ function EditorWorkspace({
 
     if (!restored) {
       addPanel('timeline', { inactive: false });
-      addPanel('inspector', {
+      addPanel('monitor', {
         inactive: false,
         position: { referencePanel: 'timeline', direction: 'above' },
       });
-      addPanel('media', { position: { referencePanel: 'inspector', direction: 'left' } });
-      addPanel('monitor', {
+      addPanel('inspector', {
         inactive: false,
-        position: { referencePanel: 'inspector', direction: 'right' },
+        position: { referencePanel: 'monitor', direction: 'left' },
       });
-      const inspectorTabs = [
-        'motion',
+      addPanel('media', {
+        position: { referencePanel: 'inspector', direction: 'left' },
+      });
+      // Browser Group – panel tabs within the left media group
+      const browserTabs = [
         'effects',
-        'audio',
         'transitions',
-        'color',
         'captions',
-        'camera',
-        'history',
-        'agent',
-        'workflows',
-        'jobs',
+        'audio',
+        'color',
         'plugins',
-        'diagnostics',
       ] as const;
-      for (const id of inspectorTabs) {
+      for (const id of browserTabs) {
+        addPanel(id, { position: { referencePanel: 'media', direction: 'within' } });
+      }
+      // Context Group – panel tabs within the center inspector group
+      const contextTabs = [
+        'motion',
+        'agent',
+        'history',
+        'jobs',
+        'diagnostics',
+        'workflows',
+        'camera',
+      ] as const;
+      for (const id of contextTabs) {
         addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
       }
       event.api.getPanel('monitor')?.api.setActive();

@@ -774,3 +774,27 @@ export function SlideIcon() {
     </Svg>
   );
 }
+
+export function KeyframeNoneIcon() {
+  return (
+    <Svg size={14}>
+      <circle cx="8" cy="8" r="4" />
+    </Svg>
+  );
+}
+
+export function KeyframeActiveIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M8 3 13 8 8 13 3 8Z" fill="currentColor" stroke="currentColor" strokeWidth="1" />
+    </Svg>
+  );
+}
+
+export function KeyframeBetweenIcon() {
+  return (
+    <Svg size={14}>
+      <circle cx="8" cy="8" r="3.5" fill="currentColor" stroke="currentColor" strokeWidth="0.5" />
+    </Svg>
+  );
+}

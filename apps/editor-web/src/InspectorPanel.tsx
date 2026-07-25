@@ -24,6 +24,9 @@ import {
   InterpHoldIcon,
   InterpLinearIcon,
   TrashIcon,
+  KeyframeNoneIcon,
+  KeyframeActiveIcon,
+  KeyframeBetweenIcon,
 } from './icons.js';
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
 
@@ -270,7 +273,7 @@ export function InspectorPanel({
                       title={keyed ? 'Remove keyframe (playhead)' : 'Add keyframe'}
                       onClick={() => toggleKeyframe(key, value)}
                     >
-                      {keyed ? '◆' : animated ? '◇' : '○'}
+                      {keyed ? <KeyframeActiveIcon /> : animated ? <KeyframeBetweenIcon /> : <KeyframeNoneIcon />}
                     </button>
                     <input
                       id={`insp-${key}`}
