@@ -140,7 +140,11 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
             />
           ))}
           {favorites.size === 0 && (
-            <span className="empty-hint">Click ★ to add favorites.</span>
+            <span className="panel-empty-icon" aria-label="No favorites yet">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
+                <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
+              </svg>
+            </span>
           )}
         </div>
       </div>
@@ -220,15 +224,26 @@ function EffectCard({
         <div className="effect-card-actions">
           <button
             type="button"
-            className="icon-button effect-favorite-btn"
+            className="icon-button card-fav-btn"
             aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             onClick={(e) => {
               e.stopPropagation();
               onToggleFavorite();
             }}
-            title={isFavorite ? '★ Remove favorite' : '☆ Add favorite'}
+            title={isFavorite ? 'Remove favorite' : 'Add favorite'}
           >
-            {isFavorite ? '★' : '☆'}
+            <svg
+              aria-hidden="true"
+              focusable="false"
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill={isFavorite ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
+            </svg>
           </button>
           <button
             type="button"

@@ -136,17 +136,17 @@ input[type='checkbox']:focus-visible {
 }
 
 /* —— Panel density breakpoints via container queries —— */
-@container (max-width: 340px) {
-  .effect-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-  .transition-type-picker { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-}
-@container (max-width: 420px) {
+@container (max-width: 320px) {
   .effect-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transition-type-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@container (min-width: 421px) {
+@container (min-width: 440px) {
   .effect-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .transition-type-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container (min-width: 560px) {
+  .effect-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .transition-type-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 main {
   height: 100vh;
@@ -4088,7 +4088,12 @@ label {
 }
 .duration-value {
   font-size: 0.7rem;
+  color: var(--joy-accent);
+  font-variant-numeric: tabular-nums;
+}
+.transition-type-picker {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
   padding: 0;
 }
@@ -4137,6 +4142,32 @@ label {
   text-align: center;
   max-width: 100%;
 }
+.transition-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 1.2rem;
+}
+.card-fav-btn {
+  width: 1.1rem !important;
+  height: 1.1rem !important;
+  min-width: 1.1rem !important;
+  min-height: 1.1rem !important;
+  color: var(--joy-text-faint);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.transition-card:hover .card-fav-btn,
+.effect-card:hover .card-fav-btn {
+  opacity: 1;
+}
+.card-fav-btn[data-filled="true"],
+.card-fav-btn:has(svg[fill="currentColor"]) {
+  opacity: 1;
+  color: var(--joy-accent);
+}
 .transition-card:hover {
   border-color: var(--joy-accent-soft);
 }
@@ -4148,6 +4179,19 @@ label {
 }
 .transition-card.is-active .transition-card-label {
   color: var(--joy-accent);
+}
+.panel-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) 0;
+  color: var(--joy-text-faint);
+}
+.transitions-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: var(--space-2);
 }
 .transition-footer {
   position: sticky;
