@@ -35,18 +35,16 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Handoff for next agent (2026-07-26)
 
-**Agentic editing Milestones A-F are complete locally.** The authoritative
+**Agentic editing Milestones A-F are complete and deployed.** The authoritative
 security/deployment handoff is
 [`AGENTIC_EDITING_NEXT_AGENT.md`](AGENTIC_EDITING_NEXT_AGENT.md). KiloCode is
 the sole editing-agent host through the VPS code-server extension; Hermes is
-limited to VPN diagnostics and user support. The current production web release
-is the Milestone B build until the final immutable web/API deployment described
-in that handoff completes.
+limited to VPN diagnostics and user support.
 
 **Live deploy:** `/opt/joy-media/web` →
-`web-releases/622ac0c-agent-policy` (Milestone B). Tracked branch commits
-`5127ae7`, `5968632`, and `006026e` are pushed but not yet deployed. API health
-is `curl -fsS 127.0.0.1:8790/health`.
+`web-releases/bd842d8-agentic-dual-lens`; API `current-api` →
+`releases/bd842d8-agentic-api`. Both are healthy. API binds only
+`127.0.0.1:8790`.
 
 **Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15** stickers: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md). **P16** gl-transitions + HTML scene pack: [`plan/P16-oss-transitions-html-scenes.md`](plan/P16-oss-transitions-html-scenes.md).
 
@@ -124,7 +122,8 @@ is `curl -fsS 127.0.0.1:8790/health`.
 
 ## Session log (newest first)
 
-| 2026-07-26 | Dual Lens | **Agentic Milestone F complete locally.** Added synchronized Time/Flow/Split projections over the live EditorSession Creative Document, playhead-driven Frame-to-Flow Trace, and seven advanced data lanes collapsed by default. Flow seek updates the shared Program Monitor. ADR-0022 records that the graph has no separate persistence/mutation engine. Focused 5/5 pass; full suite 1343 pass + the two documented environment failures; typecheck/build/format pass; lint baseline remains 51. |
+| 2026-07-26 | deploy | **Agentic Milestones A-F deployed.** Web `bd842d8-agentic-dual-lens`; API `bd842d8-agentic-api`. Public JS hash matches the commit build. API has zero restarts, binds loopback only, health 200, and unauthenticated `/v1` fails closed 401. Production browser verified KiloCode policy/menu/settings and Time/Flow/Split synchronization at Product 10s; only the pre-existing missing transition-preview fixture errors. |
+| 2026-07-26 | Dual Lens | **Agentic Milestone F complete.** Added synchronized Time/Flow/Split projections over the live EditorSession Creative Document, playhead-driven Frame-to-Flow Trace, and seven advanced data lanes collapsed by default. Flow seek updates the shared Program Monitor. ADR-0022 records that the graph has no separate persistence/mutation engine. Focused 5/5 pass; full suite 1343 pass + the two documented environment failures; typecheck/build/format pass; lint baseline remains 51. |
 | 2026-07-26 | agent UI | **Milestones C-E complete.** KiloCode-only host taxonomy + protected server secret reference (`5127ae7`); async generation jobs, verified opaque results, revision recheck, and provenance (`5968632`); Agent menu/settings with real persisted capability/budget/privacy policy (`006026e`). Hermes remains VPN/user-support only. |
 | 2026-07-26 | agent revision | **Durable agent revision + reload idempotency.** Replaced Agent Panel history-cursor revision with an opaque revision composed from the verified timeline/document persistence logs; plan creation now captures its base snapshot/revision; stale cross-slice edits reject and replan succeeds. Project-scoped atomic-run receipts make exact retries after reload a no-op. Added 7 tests: 35/35 focused pass; typecheck/build pass; full suite 1307 pass + 2 environment-only failures (missing faster-whisper/RNNoise model); lint baseline unchanged at 51. |
 | 2026-07-26 | agent policy | **Fine-grained capabilities + four execution modes.** Replaced affected-area `ToolScope` booleans with 12 explicit capabilities; added Suggest Only, Preview and Approve (default), Auto-apply Low-Risk, and Full Auto Within Explicit Limits. Manual decisions now need a matching plan-bound approval grant at the atomic runner; paid/remote/filesystem/export/overwrite/plugin/credential boundaries remain separately gated. Added 18 tests: 115/115 focused pass; full suite 1325 pass + the same 2 environment-only failures; typecheck/build pass; lint unchanged at 51. ADR-0020 also records KiloCode as the sole editing-agent host and limits Hermes to VPN/user support. |
