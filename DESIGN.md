@@ -53,6 +53,19 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 - Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
 - **History panel** is Photoshop-style: one linear list of restore points (Document → edits). Click a row to jump; future states after the cursor are dimmed. Undo/redo buttons live in the header/menubar only — not inside the History panel.
 
+## 3a. Panel header minimalism convention
+
+Every browser/library panel (Effects, Transitions, Motion Library, Audio, Plugins) follows the same compact header pattern. The goal: the content grid owns the space; chrome stays minimal until the user asks for it.
+
+| Element | Rule |
+| --- | --- |
+| **Header** | 3-column CSS Grid: `grid-template-columns: 1fr auto 1fr`. Left column is gutter; center column holds the title; right column holds one or two icon buttons. Never a full toolbar row by default. |
+| **Title** | `<h3>` in grid column 2, `justify-self: center`. Centered text, compact (0.72rem, `--joy-text`). May carry a small 16×16 leading icon. |
+| **Search** | Hidden by default. A single magnifier `icon-button` in grid column 3 (`justify-self: end`) toggles `aria-expanded` and reveals a search bar *below* the header. The bar auto-focuses on expand; Escape closes it and clears the query. Never show an always-visible search box eating panel space. |
+| **Filter** | Same pattern as search: a filter `icon-button` placed inside the search bar (visible only when search is open), or inside the header. `aria-expanded` driven. Filter chips render below the bar when active. |
+| **Create** | A compact `icon-button` or accent-bordered `+` button in the header grid column 3 (before the magnifier). Labeled only when the icon alone is not obvious. |
+| **Implementation** | Copy the `.effects-panel-header` CSS grid pattern and the `searchOpen`/`searchInputRef`/`closeSearch` hook pattern from [EffectsPanel.tsx](apps/editor-web/src/EffectsPanel.tsx). Every new browser panel must use this exact structure — no one-off header layouts.
+
 ## 4. Interaction standards
 
 - **Keyboard**: all global shortcuts live in [keyboard-shortcuts.ts](apps/editor-web/src/keyboard-shortcuts.ts) (pure resolver + tests). Space play/pause · S split · Del/Backspace ripple delete · **Ctrl/Cmd+D duplicate** · Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+K palette · Esc close · ←/→ seek 1s (Shift = 100 ms) · Home/End. New shortcuts are added to the resolver (with a test) — never as ad-hoc listeners in panels. Shortcuts never fire while typing (`isEditableTarget`).

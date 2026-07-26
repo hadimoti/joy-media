@@ -132,6 +132,19 @@ const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: st
 
 /* ─── Motion Card ─── */
 
+function categoryAccent(category: string): string | undefined {
+  switch (category) {
+    case 'fade': return 'rgba(244,183,47,0.12)';
+    case 'slide': return 'rgba(49,128,255,0.12)';
+    case 'scale': return 'rgba(111,207,151,0.12)';
+    case 'bounce': return 'rgba(239,106,106,0.12)';
+    case 'blur': return 'rgba(150,128,255,0.12)';
+    case 'text': return 'rgba(255,152,0,0.12)';
+    case 'title': return 'rgba(255,128,171,0.12)';
+    default: return undefined;
+  }
+}
+
 function MotionCard({
   motion,
   isFavorite,
@@ -145,14 +158,21 @@ function MotionCard({
   readonly onOpen: (id: string) => void;
   readonly onDuplicate: (id: string) => void;
 }) {
+  const previewUrl = motion.preview?.posterUrl;
+  const categoryColor = categoryAccent(motion.category);
   return (
     <div className="motion-card" role="listitem">
-      <div className="motion-card-preview" aria-hidden="true">
-        <div className="motion-card-preview-placeholder">
-          <span className="motion-card-duration">
-            {(motion.durationMs / 1000).toFixed(1)}s
-          </span>
-        </div>
+      <div className="motion-card-preview" aria-hidden="true" style={categoryColor ? { backgroundColor: categoryColor } : undefined}>
+        {previewUrl ? (
+          <img className="motion-card-thumb" src={previewUrl} alt="" loading="lazy" />
+        ) : (
+          <div className="motion-card-preview-placeholder">
+            <span className="motion-card-cat">{motion.category}</span>
+            <span className="motion-card-duration">
+              {(motion.durationMs / 1000).toFixed(1)}s
+            </span>
+          </div>
+        )}
       </div>
       <div className="motion-card-body">
         <span className="motion-card-name" title={motion.name}>
@@ -307,8 +327,19 @@ function LibraryTab({
   readonly onDuplicate: (id: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<MotionCategory | 'all'>('all');
   const [showFilter, setShowFilter] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = useCallback(() => {
+    setSearchQuery('');
+    setSearchOpen(false);
+  }, []);
 
   const allMotions = useMemo(() => registry.getAll(), [registry]);
   const builtin = useMemo(() => registry.findBySource('built-in'), [registry]);
@@ -328,51 +359,59 @@ function LibraryTab({
   return (
     <div className="motion-library">
       <div className="motion-library-header">
+        <h3 className="motion-library-title">Motion Library</h3>
         <button
           type="button"
-          className="motion-create-btn"
+          className="icon-button motion-create-btn"
           aria-label="Create new motion"
           title="Create new motion"
           onClick={onOpenMotionStudio}
         >
           <PlusIcon />
-          <span>Create Motion</span>
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={searchOpen ? 'Close search' : 'Search motions'}
+          title={searchOpen ? 'Close search' : 'Search motions'}
+          aria-expanded={searchOpen}
+          aria-controls="motion-search-field"
+          onClick={() => {
+            if (searchOpen) closeSearch();
+            else setSearchOpen(true);
+          }}
+        >
+          <SearchIcon />
         </button>
       </div>
 
-      <div className="motion-library-toolbar">
-        <div className="motion-search-wrap">
-          <SearchIcon />
+      {searchOpen && (
+        <div className="motion-library-toolbar">
           <input
+            id="motion-search-field"
+            ref={searchInputRef}
             type="search"
             className="motion-search-input"
-            placeholder="Search motions…"
+            placeholder="Search motions..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') closeSearch();
+            }}
             aria-label="Search motions"
           />
-          {searchQuery && (
-            <button
-              type="button"
-              className="icon-button motion-search-clear"
-              aria-label="Clear search"
-              onClick={() => setSearchQuery('')}
-            >
-              <CloseIcon />
-            </button>
-          )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Filter by category"
+            aria-expanded={showFilter}
+            title="Filter by category"
+            onClick={() => setShowFilter(!showFilter)}
+          >
+            <FilterIcon />
+          </button>
         </div>
-        <button
-          type="button"
-          className={`icon-button motion-filter-btn${showFilter ? ' active' : ''}`}
-          aria-label="Filter by category"
-          aria-expanded={showFilter}
-          title="Filter by category"
-          onClick={() => setShowFilter(!showFilter)}
-        >
-          <FilterIcon />
-        </button>
-      </div>
+      )}
 
       {showFilter && (
         <div className="motion-filter-bar" role="listbox" aria-label="Motion categories">
