@@ -4,7 +4,7 @@ Date: 2026-07-26
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `bd842d8` or newer on the tracked branch
+Required starting commit: `a326ba4` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `bd842d85f8fa0c9d9307db04680b65eba0a3f711`
+- Live application commit: `a326ba4`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/bd842d8-agentic-dual-lens`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/a326ba4-marker-icons`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/622ac0c-agent-policy`
+  `/opt/joy-media/web-releases/bd842d8-agentic-dual-lens`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,10 +72,10 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-B9Ue06HY.js` and
-   `assets/index-ul1bRlYH.css`.
+1. Public HTML loads `assets/index-Bq3tUnNA.js` and
+   `assets/index-C_qs4lVb.css`.
 2. The public, release, and commit-build JS SHA-256 all equal
-   `630be0285b2acab0261af8680d730cde04cba454f41af6f284b0bfcd716a2702`.
+   `756c8158824f8490cd1ea8b51c7b601bb24b380594314c4dd5c0c99f917be224`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -84,18 +84,21 @@ Production was verified after deployment:
 6. Production Chrome verified Time, Flow, Split, collapsed data lanes, and a
    Flow-node seek that moved Product, Frame-to-Flow Trace, and Program Monitor
    together to 10 seconds.
-7. The only browser error is the pre-existing missing
-   `/transitions/preview/transition1.png` fixture; no Agent or Dual Lens runtime
-   errors were observed.
-8. The earlier live Agent action produced:
+7. The only browser errors are the pre-existing missing
+   `/transitions/preview/transition*.png` fixtures; no Agent, Dual Lens, or
+   marker-icon runtime errors were observed.
+8. The marker-icon release was production-tested: the header uses the authored
+   multicolor flag and placed markers use the narrow accent-colored rail icon.
+   The test marker was removed with Undo.
+9. The earlier live Agent action produced:
    `Dry-run: 3 clip(s) modified`.
-9. Execute changed Intro from 10.0s to 8.0s and rippled Product and Outro left
-   by 2.0s.
-10. One `Undo this run` restored all three clips to their exact original
+10. Execute changed Intro from 10.0s to 8.0s and rippled Product and Outro left
+    by 2.0s.
+11. One `Undo this run` restored all three clips to their exact original
     positions.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=bd842d8` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=a326ba4` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete

@@ -42,7 +42,7 @@ the sole editing-agent host through the VPS code-server extension; Hermes is
 limited to VPN diagnostics and user support.
 
 **Live deploy:** `/opt/joy-media/web` →
-`web-releases/bd842d8-agentic-dual-lens`; API `current-api` →
+`web-releases/a326ba4-marker-icons`; API `current-api` →
 `releases/bd842d8-agentic-api`. Both are healthy. API binds only
 `127.0.0.1:8790`.
 
@@ -122,6 +122,7 @@ limited to VPN diagnostics and user support.
 
 ## Session log (newest first)
 
+| 2026-07-27 | timeline marker icons | **Dedicated marker artwork deployed.** Added both owner-supplied 24×24 PNGs to the fingerprinted UI icon library. The richer multicolor flag is the timeline-header Add Marker action; the narrow alpha marker is accent-masked above clips. Local and production add/undo smoke passed. Live web `a326ba4-marker-icons`; public JS hash matches the commit build; API/nginx healthy. |
 | 2026-07-26 | deploy | **Agentic Milestones A-F deployed.** Web `bd842d8-agentic-dual-lens`; API `bd842d8-agentic-api`. Public JS hash matches the commit build. API has zero restarts, binds loopback only, health 200, and unauthenticated `/v1` fails closed 401. Production browser verified KiloCode policy/menu/settings and Time/Flow/Split synchronization at Product 10s; only the pre-existing missing transition-preview fixture errors. |
 | 2026-07-26 | Dual Lens | **Agentic Milestone F complete.** Added synchronized Time/Flow/Split projections over the live EditorSession Creative Document, playhead-driven Frame-to-Flow Trace, and seven advanced data lanes collapsed by default. Flow seek updates the shared Program Monitor. ADR-0022 records that the graph has no separate persistence/mutation engine. Focused 5/5 pass; full suite 1343 pass + the two documented environment failures; typecheck/build/format pass; lint baseline remains 51. |
 | 2026-07-26 | agent UI | **Milestones C-E complete.** KiloCode-only host taxonomy + protected server secret reference (`5127ae7`); async generation jobs, verified opaque results, revision recheck, and provenance (`5968632`); Agent menu/settings with real persisted capability/budget/privacy policy (`006026e`). Hermes remains VPN/user-support only. |
