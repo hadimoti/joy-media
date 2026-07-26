@@ -259,215 +259,79 @@ function MotionLibrarySection({
   );
 }
 
-/* ─── Favorites section ─── */
-
-function MotionFavoritesSection({
-  motions,
-  favorites,
-  onToggleFavorite,
-  onOpenMotion,
-  onDuplicate,
-}: {
-  readonly motions: readonly MotionDescriptor[];
-  readonly favorites: Set<string>;
-  readonly onToggleFavorite: (id: string) => void;
-  readonly onOpenMotion: (id: string) => void;
-  readonly onDuplicate: (id: string) => void;
-}) {
-  const favMotions = motions.filter((m) => favorites.has(m.id));
-  if (favMotions.length === 0) {
-    return (
-      <section className="motion-library-section">
-        <h4 className="motion-library-section-title">
-          <StarIcon /> Favorites
-        </h4>
-        <p className="motion-library-empty motion-library-empty-fav">
-          <StarIcon />
-          {' '}No favorites yet. Star motions you use often.
-        </p>
-      </section>
-    );
-  }
-  return (
-    <section className="motion-library-section">
-        <h4 className="motion-library-section-title">
-          <StarFilledIcon /> Favorites
-      </h4>
-      <div className="motion-library-grid" role="list" aria-label="Favorite motions">
-        {favMotions.map((motion) => (
-          <MotionCard
-            key={motion.id}
-            motion={motion}
-            isFavorite={true}
-            onToggleFavorite={onToggleFavorite}
-            onOpen={onOpenMotion}
-            onDuplicate={onDuplicate}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
 /* ─── Library tab ─── */
 
 function LibraryTab({
   registry,
   favorites,
   onToggleFavorite,
-  onOpenMotionStudio,
   onOpenMotion,
   onDuplicate,
+  favoritesOnly,
 }: {
   readonly registry: MotionRegistry;
   readonly favorites: Set<string>;
   readonly onToggleFavorite: (id: string) => void;
-  readonly onOpenMotionStudio: () => void;
   readonly onOpenMotion: (id: string) => void;
   readonly onDuplicate: (id: string) => void;
+  readonly favoritesOnly: boolean;
 }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<MotionCategory | 'all'>('all');
-  const [showFilter, setShowFilter] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
-
-  const closeSearch = useCallback(() => {
-    setSearchQuery('');
-    setSearchOpen(false);
-  }, []);
-
   const allMotions = useMemo(() => registry.getAll(), [registry]);
   const builtin = useMemo(() => registry.findBySource('built-in'), [registry]);
   const userMotions = useMemo(() => registry.findBySource('user'), [registry]);
 
   const filtered = useMemo(() => {
-    let result = allMotions;
-    if (searchQuery.trim()) {
-      result = registry.search(searchQuery);
-    }
-    if (categoryFilter !== 'all') {
-      result = result.filter((m) => m.category === categoryFilter);
-    }
+    let result = favoritesOnly
+      ? allMotions.filter((m) => favorites.has(m.id))
+      : builtin.filter((m) => favorites.has(m.id));
     return result;
-  }, [allMotions, searchQuery, categoryFilter, registry]);
+  }, [allMotions, builtin, favorites, favoritesOnly]);
+
+  const rest = useMemo(() => {
+    if (favoritesOnly) return [];
+    return builtin.filter((m) => !favorites.has(m.id));
+  }, [builtin, favorites, favoritesOnly]);
 
   return (
     <div className="motion-library">
-      <div className="motion-library-header">
-        <h3 className="motion-library-title">Motion Library</h3>
-        <button
-          type="button"
-          className="icon-button motion-create-btn"
-          aria-label="Create new motion"
-          title="Create new motion"
-          onClick={onOpenMotionStudio}
-        >
-          <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={searchOpen ? 'Close search' : 'Search motions'}
-          title={searchOpen ? 'Close search' : 'Search motions'}
-          aria-expanded={searchOpen}
-          aria-controls="motion-search-field"
-          onClick={() => {
-            if (searchOpen) closeSearch();
-            else setSearchOpen(true);
-          }}
-        >
-          <SearchIcon />
-        </button>
-      </div>
-
-      {searchOpen && (
-        <div className="motion-library-toolbar">
-          <input
-            id="motion-search-field"
-            ref={searchInputRef}
-            type="search"
-            className="motion-search-input"
-            placeholder="Search motions..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') closeSearch();
-            }}
-            aria-label="Search motions"
-          />
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Filter by category"
-            aria-expanded={showFilter}
-            title="Filter by category"
-            onClick={() => setShowFilter(!showFilter)}
-          >
-            <FilterIcon />
-          </button>
-        </div>
-      )}
-
-      {showFilter && (
-        <div className="motion-filter-bar" role="listbox" aria-label="Motion categories">
-          {ALL_CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              type="button"
-              role="option"
-              aria-selected={categoryFilter === cat.id}
-              className={`motion-filter-chip${categoryFilter === cat.id ? ' active' : ''}`}
-              onClick={() => setCategoryFilter(cat.id)}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="motion-library-scroll">
-        {searchQuery || categoryFilter !== 'all' ? (
-          <MotionLibrarySection
-            motions={filtered}
-            label="Results"
-            emptyMessage="No motions match your search."
-            favorites={favorites}
-            onToggleFavorite={onToggleFavorite}
-            onOpenMotion={onOpenMotion}
-            onDuplicate={onDuplicate}
-          />
+        {(filtered.length === 0 && rest.length === 0 && !favoritesOnly) ? (
+          <p className="motion-library-empty">No motions available.</p>
         ) : (
           <>
-            <MotionFavoritesSection
-              motions={allMotions}
-              favorites={favorites}
-              onToggleFavorite={onToggleFavorite}
-              onOpenMotion={onOpenMotion}
-              onDuplicate={onDuplicate}
-            />
-            <MotionLibrarySection
-              motions={builtin}
-              label="Built-in"
-              emptyMessage="No built-in motions."
-              favorites={favorites}
-              onToggleFavorite={onToggleFavorite}
-              onOpenMotion={onOpenMotion}
-              onDuplicate={onDuplicate}
-            />
-            <MotionLibrarySection
-              motions={userMotions}
-              label="User-created"
-              emptyMessage="No user-created motions yet. Click + to create one."
-              favorites={favorites}
-              onToggleFavorite={onToggleFavorite}
-              onOpenMotion={onOpenMotion}
-              onDuplicate={onDuplicate}
-            />
+            {filtered.length > 0 && (
+              <MotionLibrarySection
+                motions={filtered}
+                label={favoritesOnly ? 'Favorites' : 'Favorited'}
+                emptyMessage=""
+                favorites={favorites}
+                onToggleFavorite={onToggleFavorite}
+                onOpenMotion={onOpenMotion}
+                onDuplicate={onDuplicate}
+              />
+            )}
+            {!favoritesOnly && rest.length > 0 && (
+              <MotionLibrarySection
+                motions={rest}
+                label="Built-in"
+                emptyMessage=""
+                favorites={favorites}
+                onToggleFavorite={onToggleFavorite}
+                onOpenMotion={onOpenMotion}
+                onDuplicate={onDuplicate}
+              />
+            )}
+            {!favoritesOnly && userMotions.length > 0 && (
+              <MotionLibrarySection
+                motions={userMotions}
+                label="User-created"
+                emptyMessage="No user motions yet."
+                favorites={favorites}
+                onToggleFavorite={onToggleFavorite}
+                onOpenMotion={onOpenMotion}
+                onDuplicate={onDuplicate}
+              />
+            )}
           </>
         )}
       </div>
@@ -945,6 +809,17 @@ export function MotionPanel({
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
   const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+  }, []);
 
   const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio ?? (() => {});
@@ -1030,6 +905,69 @@ export function MotionPanel({
 
   return (
     <article className="motion-panel">
+      <div className="motion-panel-header">
+        <h3 className="panel-section-title">
+          <img
+            className="panel-section-title-icon"
+            src="/assets/icons/ui/motion_24x24.png"
+            alt=""
+            width={16}
+            height={16}
+            aria-hidden="true"
+          />
+          Motion
+        </h3>
+        <div className="motion-panel-header-btns">
+          <button
+            type="button"
+            className="motion-create-btn"
+            aria-label="Create new motion"
+            title="Create new motion"
+            onClick={openMotionStudio}
+          >
+            <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className={`icon-button${favoritesOnly ? ' motion-fav-active' : ''}`}
+            aria-label={favoritesOnly ? 'Show all motions' : 'Show favorites only'}
+            title={favoritesOnly ? 'Show all motions' : 'Show favorites only'}
+            aria-pressed={favoritesOnly}
+            onClick={() => setFavoritesOnly((v) => !v)}
+          >
+            {favoritesOnly ? <StarFilledIcon /> : <StarIcon />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={searchOpen ? 'Close search' : 'Search motions'}
+            title={searchOpen ? 'Close search' : 'Search motions'}
+            aria-expanded={searchOpen}
+            aria-controls="motion-search-field"
+            onClick={() => {
+              if (searchOpen) closeSearch();
+              else setSearchOpen(true);
+            }}
+          >
+            <SearchIcon />
+          </button>
+        </div>
+      </div>
+      {searchOpen && (
+        <div className="motion-search-toolbar">
+          <input
+            id="motion-search-field"
+            ref={searchInputRef}
+            type="search"
+            placeholder="Search motions..."
+            className="motion-search-input"
+            aria-label="Search motions"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') closeSearch();
+            }}
+          />
+        </div>
+      )}
       <div className="motion-subtabs" role="tablist" aria-label="Motion sections">
         {LIBRARY_SUBTABS.map((tab) => (
           <button
@@ -1051,9 +989,9 @@ export function MotionPanel({
             registry={motionRegistry}
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
-            onOpenMotionStudio={openMotionStudio}
             onOpenMotion={openMotion}
             onDuplicate={duplicateMotion}
+            favoritesOnly={favoritesOnly}
           />
         )}
 
