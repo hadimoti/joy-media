@@ -5,7 +5,9 @@
     "outDir": "dist",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // import.meta.glob in icon-assets.ts needs Vite's client typings.
+    "types": ["vite/client"]
   },
   "include": ["src"],
   "references": [

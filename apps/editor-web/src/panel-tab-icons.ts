@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { SpeakerOnIcon } from './icons.js';
 import type { PanelId } from './workspace.js';
+import { iconUrl } from './icon-assets.js';
 
 /** Human panel names — used for tooltips, aria-label, overflow menus, and dockview title. */
 export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
@@ -30,22 +31,22 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
  * `currentColor` so active/inactive tab colors from DESIGN.md §1 apply.
  */
 export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
-  media: '/assets/icons/assets.png',
-  monitor: '/assets/icons/monitor.png',
-  timeline: '/assets/icons/timeline.png',
-  captions: '/assets/icons/captions.png',
-  inspector: '/assets/icons/ui/inspect_24x24.png',
-  motion: '/assets/icons/ui/motion_24x24.png',
-  camera: '/assets/icons/camera.png',
-  effects: '/assets/icons/ui/effects-org_24x24.png',
-  transitions: '/assets/icons/ui/blend_24x24.png',
-  color: '/assets/icons/ui/contrast_24x24.png',
-  history: '/assets/icons/history2.png',
-  diagnostics: '/assets/icons/diagnostic.png',
-  jobs: '/assets/icons/job.png',
-  agent: '/assets/icons/ui/agent-ai_24x24.png',
-  workflows: '/assets/icons/workflow.png',
-  plugins: '/assets/icons/plugin.png',
+  media: iconUrl('assets.png'),
+  monitor: iconUrl('monitor.png'),
+  timeline: iconUrl('timeline.png'),
+  captions: iconUrl('captions.png'),
+  inspector: iconUrl('ui/inspect_24x24.png'),
+  motion: iconUrl('ui/motion_24x24.png'),
+  camera: iconUrl('camera.png'),
+  effects: iconUrl('ui/effects-org_24x24.png'),
+  transitions: iconUrl('ui/blend_24x24.png'),
+  color: iconUrl('ui/contrast_24x24.png'),
+  history: iconUrl('history2.png'),
+  diagnostics: iconUrl('diagnostic.png'),
+  jobs: iconUrl('job.png'),
+  agent: iconUrl('ui/agent-ai_24x24.png'),
+  workflows: iconUrl('workflow.png'),
+  plugins: iconUrl('plugin.png'),
 };
 
 /** Inline SVG tab icons (preferred over PNG masks when present). */
