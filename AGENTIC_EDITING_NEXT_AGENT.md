@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `e05ccc2` or newer on the tracked branch
+Required starting commit: `5bdde55` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `e05ccc2`
+- Live application commit: `5bdde55`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/e05ccc2-track-icons`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/5bdde55-joy-code-brand`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/15ab721-marker-overlay`
+  `/opt/joy-media/web-releases/e05ccc2-track-icons`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-I7K0sxKj.js` and
-   `assets/index-hhAqC7Vz.css`.
+1. Public HTML loads `assets/index-BCT7x3mi.js` and
+   `assets/index-DnHkQJuW.css`.
 2. The immutable release JS SHA-256 is
-   `c1eb3fffe46243af80a9f087ca64092482d03d31f3e6c6ea16ad3f12d75222c5`;
+   `bc1e1b88a34bb9137b27a650c1d60147f579f1c02ebb077a5b5ebd6b6ff00215`;
    the CSS SHA-256 is
-   `08cb09debb514dce808d73a28a257b5fcf8024a0b7d1b5891f5cb36538188628`.
+   `5e95865eff3bd59630bcc1520df031cd472e767fff58cb58cdb6e5f66cc8d065`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -119,9 +119,16 @@ Production was verified after deployment:
     labels without changing the 9.5rem header width. Production browser QA
     verified the V1/V2 video icons, neutral token color, and content-hashed
     masks; classification tests cover audio and script rows.
+18. The supplied Joy Code mark and horizontal lockup were trimmed and optimized
+    from 1.38 MB / 2.08 MB PNGs to fingerprinted 7.76 KB / 29.88 KB WebP
+    assets. The mark appears in the panel title and assistant messages; the
+    horizontal lockup appears in the empty Composer. Only the active thinking
+    mark wiggles, and reduced-motion users receive a static mark. Production
+    browser QA verified both hashed assets, the live animation, response
+    completion, and cleanup of the test plan.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=e05ccc2` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=5bdde55` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
