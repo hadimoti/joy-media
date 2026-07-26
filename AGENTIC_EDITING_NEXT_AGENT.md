@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `39261d0` or newer on the tracked branch
+Required starting commit: `4b40c42` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `39261d0`
+- Live application commit: `4b40c42`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/39261d0-assets-header`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/4b40c42-persian-copy`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/eac1eb1-joy-code-color`
+  `/opt/joy-media/web-releases/39261d0-assets-header`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-B29Spu5p.js` and
-   `assets/index-Z0TZxyWS.css`.
+1. Public HTML loads `assets/index-B7zb1XvH.js` and
+   `assets/index-D8-HEt2T.css`.
 2. The immutable release JS SHA-256 is
-   `5370e795bde93733d82b623e937992163b6a2eb6c643463c4b02a93f4f942d2f`;
+   `370027ca06e0c4dd657420dc8030b1e8c6bf94d46d17b529b385a73e8311544b`;
    the CSS SHA-256 is
-   `d35d4ddfeb8950bcd7c654c35a28112e8cfa26ff4ff8f1ebeec6ce616fb9d8af`.
+   `b175235285f0f3d7492e2dece3d3799a5f86b6e1353a062ce3c6d6e0d9ec7d1f`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -135,9 +135,12 @@ Production was verified after deployment:
     layout-neutral `lang="fa"` styling without forced RTL/LTR direction;
     titles and controls stay English. The two visible header lockups read
     **JOY Studio** only—JOY Media infrastructure and identifiers are unchanged.
+    Production browser QA verified the new JS/CSS hashes, `JOY Studio`, centered
+    Modam Pro computed styles, `unicode-bidi: plaintext`, and zero Persian
+    explainer elements with a forced `dir`.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=39261d0` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=4b40c42` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
