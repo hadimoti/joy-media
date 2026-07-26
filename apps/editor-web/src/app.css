@@ -4180,13 +4180,6 @@ label {
 .transition-card.is-active .transition-card-label {
   color: var(--joy-accent);
 }
-.panel-empty-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--joy-text-faint);
-  flex-shrink: 0;
-}
 .transitions-subsection {
   display: flex;
   flex-direction: column;
@@ -4311,25 +4304,6 @@ label {
   border-color: var(--joy-accent-soft);
   color: var(--joy-bg);
   font-weight: 600;
-}
-.effects-subsection {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-.effects-subsection-title {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0;
-  font-size: 0.65rem;
-  font-weight: 650;
-  color: #8a8a90;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.effects-subsection-title .panel-empty-icon {
-  opacity: 0.45;
 }
 .effects-grid {
   display: grid;

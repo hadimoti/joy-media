@@ -19,6 +19,7 @@ const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
   { id: 'stylize', label: 'Stylize' },
   { id: 'artistic', label: 'Artistic' },
   { id: 'depth', label: 'Depth' },
+  { id: 'favorites', label: 'Favorites' },
 ];
 
 interface EffectsPanelProps {
@@ -35,9 +36,10 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 
   const descriptors = useMemo(() => {
     const all = listEffects();
-    if (category !== 'all') return all.filter((d) => d.category === category);
-    return all;
-  }, [category]);
+    if (category === 'all') return all;
+    if (category === 'favorites') return all.filter((d) => favorites.has(d.id));
+    return all.filter((d) => d.category === category);
+  }, [category, favorites]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return descriptors;
@@ -93,6 +95,11 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
     [],
   );
 
+  const emptyHint =
+    category === 'favorites' && favorites.size === 0
+      ? 'No favorites yet.'
+      : 'No effects match.';
+
   return (
     <article className="joy-panel-root effects-panel">
       <h3 className="panel-section-title">Effects</h3>
@@ -123,41 +130,9 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       </div>
 
       <div className="joy-panel-scroll">
-      <div className="effects-subsection">
-        <h4 className="effects-subsection-title">
-          {favorites.size === 0 && (
-            <span className="panel-empty-icon" aria-label="No favorites yet">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
-              </svg>
-            </span>
-          )}
-          Favorites
-        </h4>
-        <div className="effects-grid">
-          {(favorites.size === 0
-            ? []
-            : filtered.filter((d) => favorites.has(d.id))
-          ).map((desc) => (
-            <EffectCard
-              key={desc.id}
-              descriptor={desc}
-              isFavorite={true}
-              onAdd={() => handleAdd(desc.id)}
-              onToggleFavorite={() => toggleFavorite(desc.id)}
-              onDragStart={(e) => handleDragStart(desc.id, e)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="effects-subsection">
-        <h4 className="effects-subsection-title">
-          {category === 'all' ? 'All Effects' : CATEGORIES.find((c) => c.id === category)?.label ?? category}
-        </h4>
         <div className="effects-grid">
           {filtered.length === 0 ? (
-            <p className="empty-hint">No effects match.</p>
+            <p className="empty-hint">{emptyHint}</p>
           ) : (
             filtered.map((desc) => (
               <EffectCard
@@ -171,7 +146,6 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
             ))
           )}
         </div>
-      </div>
       </div>
     </article>
   );
