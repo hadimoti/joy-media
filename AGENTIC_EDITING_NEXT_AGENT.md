@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `4b40c42` or newer on the tracked branch
+Required starting commit: `b3d7787` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `4b40c42`
+- Live application commit: `b3d7787`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/4b40c42-persian-copy`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/b3d7787-identity-state`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/39261d0-assets-header`
+  `/opt/joy-media/web-releases/4b40c42-persian-copy`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-B7zb1XvH.js` and
-   `assets/index-D8-HEt2T.css`.
+1. Public HTML loads `assets/index-DZd-Ou8h.js` and
+   `assets/index-DI-3CxAh.css`.
 2. The immutable release JS SHA-256 is
-   `370027ca06e0c4dd657420dc8030b1e8c6bf94d46d17b529b385a73e8311544b`;
+   `0dd63e8f70c24715a1bf1ccf7be68c405334512d7adacf20b379c1bcd2e5a495`;
    the CSS SHA-256 is
-   `b175235285f0f3d7492e2dece3d3799a5f86b6e1353a062ce3c6d6e0d9ec7d1f`.
+   `06e3f9327f560af561da9f381d834a4e659aec0c2c9c126a739f5530b0b70700`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -138,9 +138,17 @@ Production was verified after deployment:
     Production browser QA verified the new JS/CSS hashes, `JOY Studio`, centered
     Modam Pro computed styles, `unicode-bidi: plaintext`, and zero Persian
     explainer elements with a forced `dir`.
+21. The rebuilt identity boundary is active with a newly generated 3072-bit
+    RSA signer at `/etc/joy-wg-bot/identity/joy-media-rs256.pem` (mode 0600);
+    no key from the compromised host was reused. `/etc/joy-media/api.env` and
+    the tracked API systemd override restore the PostgreSQL and public-JWKS
+    verifier configuration. Chrome verified the existing JOY session as
+    signed in and loaded 4 owned / 2 cloud-shared catalog assets. HTTP 503 or
+    network failures now render as an identity-service outage instead of a
+    false signed-out state.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=4b40c42` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=b3d7787` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
