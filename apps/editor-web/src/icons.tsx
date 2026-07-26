@@ -798,3 +798,19 @@ export function KeyframeBetweenIcon() {
     </Svg>
   );
 }
+
+export function StarIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M8 1.5 10.2 6l5 .7-3.6 3.5.9 5L8 12.5 3.5 15.2l.9-5L.8 6.7l5-.7Z" />
+    </Svg>
+  );
+}
+
+export function StarFilledIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M8 1.5 10.2 6l5 .7-3.6 3.5.9 5L8 12.5 3.5 15.2l.9-5L.8 6.7l5-.7Z" fill="currentColor" />
+    </Svg>
+  );
+}

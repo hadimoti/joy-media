@@ -2483,6 +2483,267 @@ label {
   color: #ff8080;
   font-size: 0.75rem;
 }
+/* ─── Motion Library ─── */
+
+.motion-library {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.motion-library-header {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.motion-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.motion-create-btn:hover {
+  background: var(--joy-accent);
+  color: var(--joy-bg-app);
+}
+
+.motion-library-toolbar {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.motion-search-wrap {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+}
+
+.motion-search-wrap:focus-within {
+  border-color: var(--joy-accent);
+}
+
+.motion-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--joy-text);
+  font-size: 0.72rem;
+  outline: none;
+  min-width: 0;
+}
+
+.motion-search-clear {
+  flex-shrink: 0;
+}
+
+.motion-filter-btn {
+  flex-shrink: 0;
+}
+
+.motion-filter-btn.active {
+  color: var(--joy-accent);
+}
+
+.motion-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  padding: 0.25rem 0;
+}
+
+.motion-filter-chip {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--joy-text-muted);
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.motion-filter-chip.active,
+.motion-filter-chip[aria-selected='true'] {
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 15%, transparent);
+  color: var(--joy-accent);
+}
+
+.motion-filter-chip:hover {
+  border-color: var(--joy-border-hover);
+}
+
+.motion-library-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.motion-library-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.motion-library-section-title {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--joy-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.motion-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.4rem;
+}
+
+.motion-library-empty {
+  margin: 0;
+  padding: 0.6rem 0.4rem;
+  color: var(--joy-text-faint);
+  font-size: 0.7rem;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+
+.motion-library-empty-fav {
+  font-style: italic;
+}
+
+/* ─── Motion Card ─── */
+
+.motion-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-elevated);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.motion-card:hover {
+  border-color: var(--joy-border-hover);
+}
+
+.motion-card-preview {
+  aspect-ratio: 9 / 16;
+  background: var(--joy-bg-inset);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  position: relative;
+}
+
+.motion-card-preview-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.motion-card-duration {
+  font-size: 0.6rem;
+  color: var(--joy-text-faint);
+  padding: 0.2rem 0.35rem;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-xs);
+  margin-bottom: 0.25rem;
+}
+
+.motion-card-body {
+  padding: 0.3rem 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.motion-card-name {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--joy-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motion-card-source {
+  font-size: 0.6rem;
+  color: var(--joy-text-faint);
+}
+
+.motion-card-actions {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.15rem 0.3rem 0.3rem;
+  justify-content: flex-end;
+}
+
+.motion-fav-btn {
+  color: var(--joy-text-faint);
+}
+
+.motion-fav-btn.favored {
+  color: var(--joy-accent);
+}
+
+/* ─── Motion Studio Overlay ─── */
+
+.motion-studio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--joy-bg-app);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.motion-studio-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--joy-text-muted);
+  font-size: 1rem;
+}
+
 .motion-panel {
   display: flex;
   flex-direction: column;
