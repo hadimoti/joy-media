@@ -8,9 +8,12 @@ import {
   useState,
   useMemo,
   useCallback,
+  useRef,
+  useEffect,
 } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, listEffects, type EffectDescriptor, type EffectDragPayload } from '@joy-media/visual-effects';
+import { SearchIcon } from './icons.js';
 
 const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
   { id: 'all', label: 'All' },
@@ -31,8 +34,14 @@ interface EffectsPanelProps {
 
 export function EffectsPanel({ project, objectId, onDispatch, showToast }: EffectsPanelProps) {
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const descriptors = useMemo(() => {
     const all = listEffects();
@@ -60,6 +69,11 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       else next.add(effectId);
       return next;
     });
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearch('');
+    setSearchOpen(false);
   }, []);
 
   const handleAdd = useCallback(
@@ -102,27 +116,50 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 
   return (
     <article className="joy-panel-root effects-panel">
-      <h3 className="panel-section-title">
-        <img
-          className="panel-section-title-icon"
-          src="/assets/icons/effects.png"
-          alt=""
-          width={16}
-          height={16}
-          aria-hidden="true"
-        />
-        Effects
-      </h3>
-      <div className="effects-toolbar">
-        <input
-          type="search"
-          placeholder="Search effects..."
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          className="effects-search"
-          aria-label="Search effects"
-        />
+      <div className="effects-panel-header">
+        <h3 className="panel-section-title">
+          <img
+            className="panel-section-title-icon"
+            src="/assets/icons/effects.png"
+            alt=""
+            width={16}
+            height={16}
+            aria-hidden="true"
+          />
+          Effects
+        </h3>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={searchOpen ? 'Close search' : 'Search effects'}
+          title={searchOpen ? 'Close search' : 'Search effects'}
+          aria-expanded={searchOpen}
+          aria-controls="effects-search-field"
+          onClick={() => {
+            if (searchOpen) closeSearch();
+            else setSearchOpen(true);
+          }}
+        >
+          <SearchIcon />
+        </button>
       </div>
+      {searchOpen && (
+        <div className="effects-toolbar">
+          <input
+            id="effects-search-field"
+            ref={searchInputRef}
+            type="search"
+            placeholder="Search effects..."
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') closeSearch();
+            }}
+            className="effects-search"
+            aria-label="Search effects"
+          />
+        </div>
+      )}
 
       <div className="effects-categories" role="tablist">
         {CATEGORIES.map((cat) => (

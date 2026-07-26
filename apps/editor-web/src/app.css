@@ -4280,10 +4280,22 @@ label {
   flex-wrap: wrap;
   gap: 0.35rem;
 }
+.effects-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.effects-panel-header .panel-section-title {
+  margin: 0;
+  min-width: 0;
+}
 .effects-toolbar {
   display: flex;
   gap: 0.35rem;
   flex-shrink: 0;
+  margin-bottom: 0.25rem;
 }
 .effects-search {
   flex: 1;
