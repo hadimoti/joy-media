@@ -52,7 +52,9 @@ export function AgentSettingsDialog({
       >
         <header>
           <div>
-            <p className="agent-settings-eyebrow">Editing intelligence</p>
+            <p className="agent-settings-eyebrow" lang="fa">
+              هوشمندی ویرایش
+            </p>
             <h2 id="agent-settings-title">Agent Settings</h2>
           </div>
           <button
@@ -72,7 +74,7 @@ export function AgentSettingsDialog({
               <strong>{manifest.displayName}</strong>
               <span>Active · {manifest.transport}</span>
             </div>
-            <p>KiloCode is the sole editing host. Hermes is not connected to editor tools.</p>
+            <p lang="fa">KiloCode تنها میزبان ویرایش است. Hermes به ابزارهای ویرایشگر متصل نیست.</p>
           </section>
 
           <section>
@@ -84,7 +86,10 @@ export function AgentSettingsDialog({
                 onChange={(event) => update('reasoningModel', event.target.value)}
               />
             </label>
-            <p>Selected by the KiloCode server adapter; model credentials stay server-side.</p>
+            <p lang="fa">
+              مدل توسط آداپتور سرور KiloCode انتخاب می‌شود و اطلاعات ورود مدل در سمت سرور باقی
+              می‌ماند.
+            </p>
           </section>
 
           <section>
@@ -96,7 +101,9 @@ export function AgentSettingsDialog({
                 onChange={(event) => update('mediaProvider', event.target.value)}
               />
             </label>
-            <p>Image, video, speech, audio, and transcription providers remain separate.</p>
+            <p lang="fa">
+              ارائه‌دهندگان تصویر، ویدئو، گفتار، صدا و رونویسی مستقل از یکدیگر باقی می‌مانند.
+            </p>
           </section>
 
           <section className="agent-settings-permissions">
@@ -175,7 +182,9 @@ export function AgentSettingsDialog({
                 <strong>{reference.scope}</strong>
               </div>
             ))}
-            <p>Raw values never enter the browser, project, prompt, plugin, or logs.</p>
+            <p lang="fa">
+              مقدار خام کلیدها هرگز وارد مرورگر، پروژه، درخواست، افزونه یا گزارش‌ها نمی‌شود.
+            </p>
           </section>
 
           <section>
@@ -195,12 +204,12 @@ export function AgentSettingsDialog({
                 <option value="any-approved">Any approved executor</option>
               </select>
             </label>
-            <p>Pairing, health, progress, cancellation, and retries remain visible in Jobs.</p>
+            <p lang="fa">جفت‌سازی، سلامت، پیشرفت، لغو و تلاش دوباره در بخش Jobs قابل مشاهده است.</p>
           </section>
         </div>
 
         <footer>
-          <span>Changes are saved for this browser.</span>
+          <span lang="fa">تغییرات برای همین مرورگر ذخیره می‌شوند.</span>
           <button type="button" className="agent-settings-done" onClick={onClose}>
             Done
           </button>

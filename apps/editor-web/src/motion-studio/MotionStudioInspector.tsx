@@ -1,5 +1,12 @@
 import { useCallback } from 'react';
-import type { MotionLayer, MotionTransform, MotionTypography, MotionFill, MotionSceneDocument, SceneBackground } from '@joy-media/motion-core';
+import type {
+  MotionLayer,
+  MotionTransform,
+  MotionTypography,
+  MotionFill,
+  MotionSceneDocument,
+  SceneBackground,
+} from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 
 interface InspectorProps {
@@ -35,7 +42,12 @@ function numberInput(
   );
 }
 
-function selectInput(label: string, value: string, options: readonly string[], onChange: (v: string) => void) {
+function selectInput(
+  label: string,
+  value: string,
+  options: readonly string[],
+  onChange: (v: string) => void,
+) {
   return (
     <div className="ms-inspector-row" key={label}>
       <label className="ms-inspector-label">{label}</label>
@@ -46,7 +58,9 @@ function selectInput(label: string, value: string, options: readonly string[], o
         style={{ width: '100%' }}
       >
         {options.map((opt) => (
-          <option key={opt} value={opt}>{opt}</option>
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
         ))}
       </select>
     </div>
@@ -66,7 +80,10 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
   const setTransform = useCallback(
     (patch: Partial<MotionTransform>) => {
       if (!layerId) return;
-      dispatch('Set transform', { type: 'scene.setLayerTransform', payload: { layerId, transform: patch } });
+      dispatch('Set transform', {
+        type: 'scene.setLayerTransform',
+        payload: { layerId, transform: patch },
+      });
     },
     [dispatch, layerId],
   );
@@ -82,7 +99,10 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
   const setTypography = useCallback(
     (patch: Partial<MotionTypography>) => {
       if (!layerId) return;
-      dispatch('Set typography', { type: 'scene.setLayerTypography', payload: { layerId, typography: patch } });
+      dispatch('Set typography', {
+        type: 'scene.setLayerTypography',
+        payload: { layerId, typography: patch },
+      });
     },
     [dispatch, layerId],
   );
@@ -129,7 +149,16 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
             {selectInput(
               'Kind',
               bg.kind,
-              ['transparent', 'solid', 'gradient', 'image', 'video', 'animated-gradient', 'noise', 'particles'],
+              [
+                'transparent',
+                'solid',
+                'gradient',
+                'image',
+                'video',
+                'animated-gradient',
+                'noise',
+                'particles',
+              ],
               (kind) => setBg({ kind: kind as SceneBackground['kind'] }),
             )}
             {bg.kind === 'solid' && (
@@ -143,13 +172,20 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
                 />
               </div>
             )}
-            {numberInput('Opacity', bg.opacity ?? 1, 0.05, (v) => setBg({ ...bg, opacity: Math.min(1, Math.max(0, v)) }), 0, 1)}
+            {numberInput(
+              'Opacity',
+              bg.opacity ?? 1,
+              0.05,
+              (v) => setBg({ ...bg, opacity: Math.min(1, Math.max(0, v)) }),
+              0,
+              1,
+            )}
           </div>
 
           <div className="ms-inspector-section">
             <h4 className="ms-inspector-section-title">Layers</h4>
-            <p style={{ fontSize: '11px', color: 'var(--joy-text-muted)', margin: 0 }}>
-              {document.layers.length} layer{document.layers.length !== 1 ? 's' : ''}
+            <p lang="fa" style={{ fontSize: '11px', color: 'var(--joy-text-muted)', margin: 0 }}>
+              {document.layers.length} لایه
             </p>
           </div>
         </div>
@@ -171,8 +207,22 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
           {numberInput('Y', t.y, 1, (v) => setTransform({ y: v }))}
           {numberInput('Width', t.width, 1, (v) => setTransform({ width: Math.max(1, v) }), 1)}
           {numberInput('Height', t.height, 1, (v) => setTransform({ height: Math.max(1, v) }), 1)}
-          {numberInput('Rotation', t.rotationDeg, 1, (v) => setTransform({ rotationDeg: v }), -360, 360)}
-          {numberInput('Opacity', t.opacity, 0.05, (v) => setTransform({ opacity: Math.min(1, Math.max(0, v)) }), 0, 1)}
+          {numberInput(
+            'Rotation',
+            t.rotationDeg,
+            1,
+            (v) => setTransform({ rotationDeg: v }),
+            -360,
+            360,
+          )}
+          {numberInput(
+            'Opacity',
+            t.opacity,
+            0.05,
+            (v) => setTransform({ opacity: Math.min(1, Math.max(0, v)) }),
+            0,
+            1,
+          )}
         </div>
 
         {layer.type === 'text' && (
@@ -184,14 +234,35 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
                 value={layer.text ?? ''}
                 onChange={(e) => setText(e.target.value)}
                 rows={3}
-                placeholder="Enter text..."
+                placeholder="متن را وارد کنید…"
               />
             </div>
             <div className="ms-inspector-section">
               <h4 className="ms-inspector-section-title">Typography</h4>
-              {numberInput('Font Size', typo?.fontSize ?? 48, 1, (v) => setTypography({ fontSize: v }), 1, 400)}
-              {numberInput('Line Height', typo?.lineHeight ?? 1.2, 0.1, (v) => setTypography({ lineHeight: v }), 0.5, 5)}
-              {numberInput('Letter Spacing', typo?.letterSpacing ?? 0, 0.1, (v) => setTypography({ letterSpacing: v }), -20, 100)}
+              {numberInput(
+                'Font Size',
+                typo?.fontSize ?? 48,
+                1,
+                (v) => setTypography({ fontSize: v }),
+                1,
+                400,
+              )}
+              {numberInput(
+                'Line Height',
+                typo?.lineHeight ?? 1.2,
+                0.1,
+                (v) => setTypography({ lineHeight: v }),
+                0.5,
+                5,
+              )}
+              {numberInput(
+                'Letter Spacing',
+                typo?.letterSpacing ?? 0,
+                0.1,
+                (v) => setTypography({ letterSpacing: v }),
+                -20,
+                100,
+              )}
             </div>
           </>
         )}
@@ -203,11 +274,13 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
             <input
               type="color"
               className="ms-inspector-color"
-              value={
-                (layer.fills[0]?.kind === 'solid' ? layer.fills[0].color : '#ffffff')
-              }
+              value={layer.fills[0]?.kind === 'solid' ? layer.fills[0].color : '#ffffff'}
               onChange={(e) =>
-                setFill({ kind: 'solid', color: e.target.value, opacity: layer.fills[0]?.kind === 'solid' ? layer.fills[0].opacity : 1 })
+                setFill({
+                  kind: 'solid',
+                  color: e.target.value,
+                  opacity: layer.fills[0]?.kind === 'solid' ? layer.fills[0].opacity : 1,
+                })
               }
             />
           </div>

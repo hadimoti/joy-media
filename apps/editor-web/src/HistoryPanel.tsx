@@ -21,7 +21,9 @@ export function HistoryPanel({ entries, onJumpTo }: HistoryPanelProps) {
       title="History"
       iconUrl={panelTabIconUrl('history')}
       className="history-panel"
-      {...(isFresh ? { note: 'No edits yet — restore points appear here.' } : {})}
+      {...(isFresh
+        ? { note: 'هنوز ویرایشی انجام نشده است؛ نقاط بازیابی اینجا نمایش داده می‌شوند.' }
+        : {})}
     >
       <ol className="history-list" aria-label="History restore points">
         {entries.map((entry) => (
@@ -62,11 +64,7 @@ function HistoryEntryRow({
         type="button"
         className={rowClass}
         aria-current={isCurrent ? 'step' : undefined}
-        aria-label={
-          isCurrent
-            ? `Current state: ${entry.label}`
-            : `Restore to: ${entry.label}`
-        }
+        aria-label={isCurrent ? `Current state: ${entry.label}` : `Restore to: ${entry.label}`}
         title={isCurrent ? 'Current state' : `Restore to “${entry.label}”`}
         onClick={() => {
           if (!isCurrent) onJumpTo(entry.sequence);

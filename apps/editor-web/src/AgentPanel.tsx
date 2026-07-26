@@ -240,7 +240,7 @@ export function AgentPanel({
         userId: 'local-owner',
         metadata: { source: 'agent-menu-stop' },
       });
-      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
+      appendMessage(pending.threadId, 'assistant', 'متوقف شد. ویرایش پیشنهادی اعمال نشد.');
       updateThreadStatus(pending.threadId, 'draft');
     }
     setPending(undefined);
@@ -325,7 +325,7 @@ export function AgentPanel({
       decisions.find((decision) => decision.decision === 'requires-manual') ??
       decisions[0];
     if (approval === undefined) {
-      appendMessage(threadId, 'assistant', 'No approval decision was produced for this plan.');
+      appendMessage(threadId, 'assistant', 'برای این برنامه هیچ تصمیم تأییدی ایجاد نشد.');
       return;
     }
     auditRef.current.record({
@@ -345,8 +345,8 @@ export function AgentPanel({
       threadId,
       'assistant',
       approval.decision === 'blocked'
-        ? `I built the plan, but policy blocked it: ${approval.reason}`
-        : `I prepared “${intent.label}”. Dry-run: ${dryRun.aggregateDiff.summary}. Review the change below.`,
+        ? `برنامه آماده شد، اما سیاست اجرایی آن را مسدود کرد: ${approval.reason}`
+        : `برنامهٔ «${intent.label}» آماده شد. اجرای آزمایشی: ${dryRun.aggregateDiff.summary}. تغییر زیر را بررسی کنید.`,
     );
     setPending({ threadId, intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
     setLastRun(undefined);
@@ -364,7 +364,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        'Review, execute, or reject the current plan before starting another edit.',
+        'پیش از شروع ویرایش تازه، برنامهٔ فعلی را بررسی، اجرا یا رد کنید.',
       );
       return;
     }
@@ -374,7 +374,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        'Joy Code currently accepts direct timeline requests such as shortening the intro, splitting, moving, joining, inserting, or removing clips. Free-form KiloCode streaming will appear here when the server session adapter is connected.',
+        'Joy Code اکنون درخواست‌های مستقیم تایم‌لاین مانند کوتاه‌کردن مقدمه، برش، جابه‌جایی، اتصال، افزودن یا حذف کلیپ را می‌پذیرد. پس از اتصال آداپتور نشست سرور، پاسخ آزاد KiloCode نیز اینجا نمایش داده می‌شود.',
       );
       return;
     }
@@ -396,7 +396,7 @@ export function AgentPanel({
       action: 'plan-rejected',
       userId: 'local-owner',
     });
-    appendMessage(pending.threadId, 'assistant', 'Rejected. No timeline changes were applied.');
+    appendMessage(pending.threadId, 'assistant', 'رد شد. هیچ تغییری روی تایم‌لاین اعمال نشد.');
     updateThreadStatus(pending.threadId, 'draft');
     setPending(undefined);
   }
@@ -464,7 +464,7 @@ export function AgentPanel({
         warnings: [],
         rollbackAvailable: false,
       };
-      appendMessage(threadId, 'assistant', `I did not apply the edit: ${error.message}`);
+      appendMessage(threadId, 'assistant', `ویرایش اعمال نشد: ${error.message}`);
       updateThreadStatus(threadId, 'failed');
       setPending(undefined);
       setLastRun({
@@ -488,8 +488,8 @@ export function AgentPanel({
       threadId,
       'assistant',
       executionResult.success
-        ? `Applied “${intent.label}” as one atomic timeline transaction.`
-        : `The edit failed: ${executionResult.errors.join(', ')}`,
+        ? `«${intent.label}» به‌صورت یک تراکنش اتمیک روی تایم‌لاین اعمال شد.`
+        : `ویرایش ناموفق بود: ${executionResult.errors.join(', ')}`,
     );
     updateThreadStatus(threadId, executionResult.success ? 'completed' : 'failed');
     setPending(undefined);
@@ -505,7 +505,11 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { workflowId: recorded.workflow.id },
     });
-    appendMessage(lastRun.threadId, 'assistant', `Saved as workflow ${recorded.workflow.id}.`);
+    appendMessage(
+      lastRun.threadId,
+      'assistant',
+      `به‌عنوان گردش‌کار ${recorded.workflow.id} ذخیره شد.`,
+    );
     setLastRun({ ...lastRun, savedWorkflowId: recorded.workflow.id });
   }
 
@@ -518,7 +522,7 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { transactionLabel: lastRun.executionResult.transactionLabel },
     });
-    appendMessage(lastRun.threadId, 'assistant', 'Reverted the complete run in one undo.');
+    appendMessage(lastRun.threadId, 'assistant', 'کل اجرا با یک Undo بازگردانی شد.');
     updateThreadStatus(lastRun.threadId, 'draft');
     setLastRun({ ...lastRun, reverted: true });
   }
@@ -583,7 +587,7 @@ export function AgentPanel({
             <div className="joy-code-history-intro">
               <div>
                 <strong>Recent tasks</strong>
-                <span>Saved for this project</span>
+                <span lang="fa">برای این پروژه ذخیره شده‌اند</span>
               </div>
               <button type="button" onClick={startNewTask}>
                 <PlusIcon />
@@ -592,7 +596,7 @@ export function AgentPanel({
             </div>
             <ul className="joy-code-thread-list">
               {joyCode.threads.map((thread) => {
-                const preview = thread.messages.at(-1)?.body ?? 'Ready for a prompt';
+                const preview = thread.messages.at(-1)?.body ?? 'آمادهٔ دریافت درخواست';
                 return (
                   <li key={thread.id}>
                     <button
@@ -625,9 +629,10 @@ export function AgentPanel({
                 <div className="joy-code-welcome">
                   <JoyCodeLogo variant="horizontal" label="Joy Code" />
                   <h3>What should we edit?</h3>
-                  <p>
-                    Joy Code uses KiloCode to prepare guarded timeline plans. Nothing changes until
-                    the plan passes policy and its execution mode allows it.
+                  <p lang="fa">
+                    Joy Code با استفاده از KiloCode برنامه‌های کنترل‌شدهٔ تایم‌لاین را آماده می‌کند.
+                    تا زمانی که برنامه از سیاست‌ها عبور نکند و حالت اجرا اجازه ندهد، چیزی تغییر
+                    نمی‌کند.
                   </p>
                 </div>
               )}
@@ -645,7 +650,15 @@ export function AgentPanel({
                   )}
                   <div>
                     <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
-                    <p>{message.body}</p>
+                    <p
+                      lang={
+                        message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
+                          ? 'fa'
+                          : undefined
+                      }
+                    >
+                      {message.body}
+                    </p>
                   </div>
                 </article>
               ))}
@@ -661,7 +674,7 @@ export function AgentPanel({
                   </span>
                   <div>
                     <strong>Joy Code</strong>
-                    <p>Thinking…</p>
+                    <p lang="fa">در حال فکر کردن…</p>
                   </div>
                 </article>
               )}
@@ -758,9 +771,11 @@ export function AgentPanel({
                   {!lastRun.executionResult.success && (
                     <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
                   )}
-                  {lastRun.reverted && <p>Reverted.</p>}
+                  {lastRun.reverted && <p lang="fa">بازگردانی شد.</p>}
                   {lastRun.savedWorkflowId !== undefined && (
-                    <p>Saved as {lastRun.savedWorkflowId}</p>
+                    <p lang="fa">
+                      با شناسهٔ <bdi>{lastRun.savedWorkflowId}</bdi> ذخیره شد.
+                    </p>
                   )}
                 </section>
               )}
@@ -792,7 +807,7 @@ export function AgentPanel({
                   rows={3}
                   value={draft}
                   aria-label="Message Joy Code"
-                  placeholder="Describe the timeline edit you want…"
+                  placeholder="ویرایش موردنظر خود برای تایم‌لاین را بنویسید…"
                   onChange={(event) => setDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {

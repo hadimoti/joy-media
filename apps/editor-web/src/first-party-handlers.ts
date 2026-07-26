@@ -69,7 +69,9 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
         transcribe: () => ({
           language: 'fa',
           segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
-          ...fixtureNote('Fixture transcript for workflow park/resume; use Captions Auto caption for live Whisper'),
+          ...fixtureNote(
+            'Fixture transcript for workflow park/resume; use Captions Auto caption for live Whisper',
+          ),
         }),
         detectSilence: (args: {
           readonly source: unknown;
@@ -149,8 +151,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             return {
               trimmed: true,
               deferredToEditor: true,
-              command:
-                args.edge === 'start' ? 'timeline.trimClipStart' : 'timeline.trimClipEnd',
+              command: args.edge === 'start' ? 'timeline.trimClipStart' : 'timeline.trimClipEnd',
               compositionId: args.compositionId,
               trackId: args.trackId,
               clipId: args.clipId,
@@ -178,7 +179,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           deferred: true,
           aspect: args.aspect,
           subjectHints: args.subjectHints ?? null,
-          reason: 'Reframe is not applied in the browser runner; set composition/crop in the editor',
+          reason:
+            'بازقاب‌بندی در اجراکنندهٔ مرورگر اعمال نمی‌شود؛ کامپوزیشن یا برش را در ویرایشگر تنظیم کنید.',
         }),
         denoise: (args: {
           readonly source: unknown;
@@ -196,7 +198,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
               strength,
               deferredJobType: 'audio.ml-denoise',
               requiredWorkerCapability: 'audio.ml-denoise',
-              note: 'ML denoise requires a paired local GPU Worker advertising audio.ml-denoise (DeepFilterNet via JOY_MEDIA_ML_DENOISE_CMD, else ffmpeg arnndn/RNNoise).',
+              note: 'نویزگیری ML به یک Worker محلی جفت‌شده با GPU و قابلیت audio.ml-denoise نیاز دارد (DeepFilterNet از راه JOY_MEDIA_ML_DENOISE_CMD، وگرنه ffmpeg arnndn/RNNoise).',
             };
           }
           const preferSpectral = args.method === 'spectral' || strength >= 0.75;
@@ -207,7 +209,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
               method: 'ffmpeg-afftdn',
               strength,
               deferredEndpoint: '/v1/providers/audio/denoise',
-              note: 'Spectral afftdn requires ffmpeg on the API/Worker; not ML denoise.',
+              note: 'نویزگیری طیفی afftdn به ffmpeg روی API یا Worker نیاز دارد و نویزگیری ML نیست.',
             };
           }
           // Local noise-gate DSP (not ML denoise). Strength maps to gate threshold.
@@ -265,7 +267,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           variables: args.variables,
           applied: false,
           deferred: true,
-          reason: 'Scene templates instantiate via html-scene objects in the editor, not silently here',
+          reason:
+            'قالب‌های صحنه از راه آبجکت‌های html-scene در ویرایشگر ساخته می‌شوند، نه به‌صورت پنهانی در این بخش.',
         }),
       },
       generation: {
@@ -288,7 +291,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
               method: 'piper',
               dataLeavesDevice: false,
               retentionDisclosure:
-                'Text is synthesized locally with Piper ONNX; it does not leave this host',
+                'متن با Piper ONNX به‌صورت محلی ساخته می‌شود و از این میزبان خارج نمی‌شود.',
               deferredEndpoint: '/v1/providers/speech/synthesize',
               deferredBody: { engine: 'piper' },
               requiresConsent: isCloned,
@@ -299,7 +302,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             voiceId: isCloned ? args.voiceId : stockVoice,
             method: 'edge-tts',
             dataLeavesDevice: true,
-            retentionDisclosure: 'Text is sent to Microsoft Edge online TTS for synthesis',
+            retentionDisclosure:
+              'متن برای ساخت صدا به سرویس آنلاین TTS مایکروسافت Edge فرستاده می‌شود.',
             deferredEndpoint: '/v1/providers/speech/synthesize',
             deferredBody: { engine: 'edge-tts' },
             requiresConsent: isCloned,
@@ -310,7 +314,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           targetLanguage: args.targetLanguage,
           translated: false,
           deferred: true,
-          reason: 'Translation requires a provider port; browser runner does not fabricate translated copy',
+          reason:
+            'ترجمه به درگاه ارائه‌دهنده نیاز دارد؛ اجراکنندهٔ مرورگر متن ترجمه‌شدهٔ ساختگی تولید نمی‌کند.',
         }),
       },
       editor: {
@@ -322,7 +327,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
             source: args.source,
             applied: false,
             deferredToEditor: true,
-            note: 'In-memory branch id for workflow continuity only; duplicate clips in the editor for real variants',
+            note: 'شناسهٔ شاخهٔ درون‌حافظه‌ای فقط برای پیوستگی گردش‌کار است؛ برای نسخه‌های واقعی، کلیپ‌ها را در ویرایشگر تکثیر کنید.',
           };
         },
       },
@@ -332,7 +337,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           deferred: true,
           mode: args.mode,
           profile: args.profile ?? 'social-h264-aac',
-          reason: 'Use editor Export with a delivery preset; Worker encode is not wired yet',
+          reason:
+            'از Export ویرایشگر با یک پیش‌تنظیم خروجی استفاده کنید؛ کدگذاری Worker هنوز متصل نشده است.',
         }),
       },
       output: {
@@ -340,14 +346,16 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           written: false,
           deferred: true,
           folderId: args.folderId,
-          reason: 'Browser runner cannot write host folders; use Export or Jobs',
+          reason:
+            'اجراکنندهٔ مرورگر نمی‌تواند در پوشه‌های میزبان بنویسد؛ از Export یا Jobs استفاده کنید.',
         }),
         writeMetadataFile: (args: { readonly fileName: string }) => ({
           written: false,
           deferred: true,
           fileName: args.fileName,
           inMemoryManifest: true,
-          reason: 'Manifest stays in workflow outputs; browser runner does not write the host filesystem',
+          reason:
+            'مانیفست در خروجی گردش‌کار می‌ماند؛ اجراکنندهٔ مرورگر در فایل‌سیستم میزبان نمی‌نویسد.',
         }),
       },
     },

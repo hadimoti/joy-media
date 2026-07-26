@@ -44,10 +44,9 @@ function TransitionCard({
   useEffect(() => {
     const el = cardRef.current;
     if (el === null) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => setVisible(entry!.isIntersecting),
-      { threshold: 0 },
-    );
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry!.isIntersecting), {
+      threshold: 0,
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -76,7 +75,10 @@ function TransitionCard({
           type="button"
           className="icon-button card-fav-btn"
           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-          onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
           title={isFavorite ? 'Remove favorite' : 'Add favorite'}
         >
           <svg
@@ -96,7 +98,6 @@ function TransitionCard({
     </div>
   );
 }
-
 
 export function TransitionsPanel({
   project,
@@ -164,28 +165,31 @@ export function TransitionsPanel({
 
   const selectedJunction = availableJunctions[0] ?? null;
 
-  const handleAddTransition = useCallback((type: string) => {
-    if (!selectedJunction) {
-      showToast('Add two overlapping clips on a video track to create a transition.', 'info');
-      return;
-    }
-    const entry = SHADER_CATALOG.find((item) => item.id === type);
-    const params: Record<string, number> = {};
-    if (entry !== undefined) {
-      for (const [key, value] of Object.entries(entry.defaultParams)) {
-        if (typeof value === 'number') params[key] = value;
+  const handleAddTransition = useCallback(
+    (type: string) => {
+      if (!selectedJunction) {
+        showToast('برای ساخت ترنزیشن، دو کلیپ هم‌پوشان روی یک ترک ویدئو قرار دهید.', 'info');
+        return;
       }
-    }
-    onAddTransition({
-      trackId: selectedJunction.trackId,
-      leftClipId: selectedJunction.leftClipId,
-      rightClipId: selectedJunction.rightClipId,
-      type,
-      durationUs: 500_000,
-      ...(Object.keys(params).length > 0 ? { params } : {}),
-    });
-    setPendingType(type);
-  }, [selectedJunction, onAddTransition, showToast]);
+      const entry = SHADER_CATALOG.find((item) => item.id === type);
+      const params: Record<string, number> = {};
+      if (entry !== undefined) {
+        for (const [key, value] of Object.entries(entry.defaultParams)) {
+          if (typeof value === 'number') params[key] = value;
+        }
+      }
+      onAddTransition({
+        trackId: selectedJunction.trackId,
+        leftClipId: selectedJunction.leftClipId,
+        rightClipId: selectedJunction.rightClipId,
+        type,
+        durationUs: 500_000,
+        ...(Object.keys(params).length > 0 ? { params } : {}),
+      });
+      setPendingType(type);
+    },
+    [selectedJunction, onAddTransition, showToast],
+  );
 
   const handleDragStart = useCallback((type: string, event: React.DragEvent) => {
     const payload: TransitionDragPayload = {
@@ -226,9 +230,7 @@ export function TransitionsPanel({
   };
 
   const hasFavorites = favorites.size > 0;
-  const favItems = hasFavorites
-    ? SHADER_CATALOG.filter((e) => favorites.has(e.id))
-    : [];
+  const favItems = hasFavorites ? SHADER_CATALOG.filter((e) => favorites.has(e.id)) : [];
 
   const q = query.trim().toLowerCase();
   const catalog = SHADER_CATALOG.filter(
@@ -245,7 +247,7 @@ export function TransitionsPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      search={{ value: query, onChange: setQuery, placeholder: 'Search transitions…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی ترنزیشن‌ها…' }}
       {...(selectedJunction
         ? {
             note: `${selectedJunction.trackName}: ${selectedJunction.leftClipId} → ${selectedJunction.rightClipId}`,
@@ -266,18 +268,42 @@ export function TransitionsPanel({
     >
       {tab === 'browse' && (
         <>
-        {hasFavorites && !favoritesOnly && (
+          {hasFavorites && !favoritesOnly && (
+            <div className="transitions-subsection">
+              <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+                Favorites
+              </h4>
+              <div
+                className="transition-type-picker"
+                role="group"
+                aria-label="Favorite transitions"
+              >
+                {favItems.map((entry) => (
+                  <TransitionCard
+                    key={entry.id}
+                    entry={entry}
+                    isActive={selectedTransition === entry.id || pendingType === entry.id}
+                    isFavorite={true}
+                    onAdd={() => handleAddTransition(entry.id)}
+                    onToggleFavorite={() => toggleFavorite(entry.id)}
+                    onDragStart={(e) => handleDragStart(entry.id, e)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="transitions-subsection">
             <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-              Favorites
+              {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
             </h4>
-            <div className="transition-type-picker" role="group" aria-label="Favorite transitions">
-              {favItems.map((entry) => (
+            <div className="transition-type-picker" role="group" aria-label="Transition type">
+              {catalog.map((entry) => (
                 <TransitionCard
                   key={entry.id}
                   entry={entry}
                   isActive={selectedTransition === entry.id || pendingType === entry.id}
-                  isFavorite={true}
+                  isFavorite={favorites.has(entry.id)}
                   onAdd={() => handleAddTransition(entry.id)}
                   onToggleFavorite={() => toggleFavorite(entry.id)}
                   onDragStart={(e) => handleDragStart(entry.id, e)}
@@ -285,138 +311,120 @@ export function TransitionsPanel({
               ))}
             </div>
           </div>
-        )}
 
-        <div className="transitions-subsection">
-          <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-            {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
-          </h4>
-          <div className="transition-type-picker" role="group" aria-label="Transition type">
-            {catalog.map((entry) => (
-              <TransitionCard
-                key={entry.id}
-                entry={entry}
-                isActive={selectedTransition === entry.id || pendingType === entry.id}
-                isFavorite={favorites.has(entry.id)}
-                onAdd={() => handleAddTransition(entry.id)}
-                onToggleFavorite={() => toggleFavorite(entry.id)}
-                onDragStart={(e) => handleDragStart(entry.id, e)}
-              />
-            ))}
+          <div className="transition-footer">
+            <label className="control-row">
+              <span>Selected</span>
+              <select
+                value={pendingType}
+                onChange={(event) => setPendingType(event.target.value)}
+                aria-label="Transition catalog"
+              >
+                {SHADER_CATALOG.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="icon-button icon-button-labeled"
+                onClick={() => handleAddTransition(pendingType)}
+                aria-label={`Add ${pendingType}`}
+                data-guide="Add transition"
+              >
+                Add
+              </button>
+            </label>
           </div>
-        </div>
-
-        <div className="transition-footer">
-          <label className="control-row">
-            <span>Selected</span>
-            <select
-              value={pendingType}
-              onChange={(event) => setPendingType(event.target.value)}
-              aria-label="Transition catalog"
-            >
-              {SHADER_CATALOG.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="icon-button icon-button-labeled"
-              onClick={() => handleAddTransition(pendingType)}
-              aria-label={`Add ${pendingType}`}
-              data-guide="Add transition"
-            >
-              Add
-            </button>
-          </label>
-        </div>
         </>
       )}
 
-        {tab === 'applied' && (
-          <section className="transitions-subsection" aria-label="Existing transitions">
-            {relevantTransitions.length === 0 && (
-              <p className="empty-hint">No transitions applied yet.</p>
-            )}
-            <ul className="transition-list" role="list">
-              {relevantTransitions.map((t) => {
-                const entry = SHADER_CATALOG.find((item) => item.id === t.type);
-                const numericParams = Object.entries(entry?.defaultParams ?? {}).filter(
-                  ([, value]) => typeof value === 'number',
-                ) as readonly [string, number][];
-                return (
-                  <li key={t.id} className="transition-item">
-                    <div className="transition-header">
-                      <span className="transition-type-badge">{entry?.label ?? t.type}</span>
-                      <span className="transition-clips">
-                        {t.leftClipId} → {t.rightClipId}
-                      </span>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        onClick={() => onRemoveTransition(t.id)}
-                        aria-label={`Remove ${t.type} transition`}
-                        title="Remove transition"
-                        data-guide="Remove"
+      {tab === 'applied' && (
+        <section className="transitions-subsection" aria-label="Existing transitions">
+          {relevantTransitions.length === 0 && (
+            <p className="empty-hint" lang="fa">
+              هنوز ترنزیشنی اعمال نشده است.
+            </p>
+          )}
+          <ul className="transition-list" role="list">
+            {relevantTransitions.map((t) => {
+              const entry = SHADER_CATALOG.find((item) => item.id === t.type);
+              const numericParams = Object.entries(entry?.defaultParams ?? {}).filter(
+                ([, value]) => typeof value === 'number',
+              ) as readonly [string, number][];
+              return (
+                <li key={t.id} className="transition-item">
+                  <div className="transition-header">
+                    <span className="transition-type-badge">{entry?.label ?? t.type}</span>
+                    <span className="transition-clips">
+                      {t.leftClipId} → {t.rightClipId}
+                    </span>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => onRemoveTransition(t.id)}
+                      aria-label={`Remove ${t.type} transition`}
+                      title="Remove transition"
+                      data-guide="Remove"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                  <div className="transition-controls">
+                    <label className="control-row">
+                      <span>Type</span>
+                      <select
+                        value={t.type}
+                        onChange={(e) => handleTypeChange(t.id, e.target.value)}
+                        aria-label="Transition type"
                       >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                    <div className="transition-controls">
-                      <label className="control-row">
-                        <span>Type</span>
-                        <select
-                          value={t.type}
-                          onChange={(e) => handleTypeChange(t.id, e.target.value)}
-                          aria-label="Transition type"
-                        >
-                          {SHADER_CATALOG.map(({ id, label }) => (
-                            <option key={id} value={id}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="control-row">
-                        <span>Duration</span>
+                        {SHADER_CATALOG.map(({ id, label }) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="control-row">
+                      <span>Duration</span>
+                      <input
+                        type="range"
+                        min={50000}
+                        max={5000000}
+                        step={50000}
+                        value={t.durationUs}
+                        onChange={(e) => handleDurationChange(t.id, Number(e.target.value))}
+                        aria-label="Transition duration in seconds"
+                      />
+                      <span className="duration-value">
+                        {(t.durationUs / 1_000_000).toFixed(1)}s
+                      </span>
+                    </label>
+                    {numericParams.map(([key, fallback]) => (
+                      <label key={key} className="control-row">
+                        <span>{key}</span>
                         <input
                           type="range"
-                          min={50000}
-                          max={5000000}
-                          step={50000}
-                          value={t.durationUs}
-                          onChange={(e) => handleDurationChange(t.id, Number(e.target.value))}
-                          aria-label="Transition duration in seconds"
+                          min={0}
+                          max={key === 'waves' ? 60 : 2}
+                          step={0.05}
+                          value={t.params?.[key] ?? fallback}
+                          onChange={(e) => handleParamChange(t.id, key, Number(e.target.value))}
+                          aria-label={`${key} parameter`}
                         />
                         <span className="duration-value">
-                          {(t.durationUs / 1_000_000).toFixed(1)}s
+                          {(t.params?.[key] ?? fallback).toFixed(2)}
                         </span>
                       </label>
-                      {numericParams.map(([key, fallback]) => (
-                        <label key={key} className="control-row">
-                          <span>{key}</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={key === 'waves' ? 60 : 2}
-                            step={0.05}
-                            value={t.params?.[key] ?? fallback}
-                            onChange={(e) => handleParamChange(t.id, key, Number(e.target.value))}
-                            aria-label={`${key} parameter`}
-                          />
-                          <span className="duration-value">
-                            {(t.params?.[key] ?? fallback).toFixed(2)}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </PanelShell>
   );
 }

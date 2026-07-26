@@ -102,11 +102,7 @@ import {
   type KiloCodeAttachedAsset,
 } from './AgentPanel.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
-import {
-  loadAgentSettings,
-  saveAgentSettings,
-  type AgentSettings,
-} from './agent-settings.js';
+import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -119,11 +115,7 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
-import {
-  DOCK_LAYOUT_KEY,
-  SUPERSEDED_DOCK_LAYOUT_KEYS,
-  defaultDockLayout,
-} from './dock-layout.js';
+import { DOCK_LAYOUT_KEY, SUPERSEDED_DOCK_LAYOUT_KEYS, defaultDockLayout } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
@@ -165,7 +157,9 @@ import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
-function buildEffectsMap(project: JoyProjectV1): Readonly<Record<string, readonly EffectInstanceV1[]>> {
+function buildEffectsMap(
+  project: JoyProjectV1,
+): Readonly<Record<string, readonly EffectInstanceV1[]>> {
   const map: Record<string, EffectInstanceV1[]> = {};
   for (const [objectId, object] of Object.entries(project.visualObjects)) {
     if (object.effects && object.effects.length > 0) {
@@ -177,7 +171,9 @@ function buildEffectsMap(project: JoyProjectV1): Readonly<Record<string, readonl
 
 function renderFrameOptions(
   project: JoyProjectV1,
-  imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>,
+  imageSizesByObjectId?: Readonly<
+    Record<string, { readonly width: number; readonly height: number }>
+  >,
 ): BuildRenderFrameOptions {
   const composition = project.compositions[project.rootCompositionId];
   return {
@@ -253,10 +249,7 @@ function videoClipSpec(clip: VideoClip): VideoClipSpec {
 }
 
 /** Active transition (if any) at composition time. */
-function activeTransitionAt(
-  project: JoyProjectV1,
-  playheadUs: number,
-): TransitionV1 | undefined {
+function activeTransitionAt(project: JoyProjectV1, playheadUs: number): TransitionV1 | undefined {
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined || project.transitions === undefined) return undefined;
   const clipTimes = clipTimesFromTracks(composition.tracks);
@@ -289,11 +282,7 @@ function sourceTimeForTransitionSample(
   playheadUs: number,
   transition: TransitionV1 | undefined,
 ): number {
-  if (
-    transition !== undefined &&
-    clip.id === transition.rightClipId &&
-    playheadUs < clip.startUs
-  ) {
+  if (transition !== undefined && clip.id === transition.rightClipId && playheadUs < clip.startUs) {
     const rate = normalizePlaybackRate(clip.playbackRate);
     if (rate === 0) return clip.sourceInUs;
     const windowStart = clip.startUs - transition.durationUs;
@@ -309,7 +298,11 @@ function sourceTimeForTransitionSample(
 }
 
 /** Source media time → composition playhead (freeze holds last mapped start). */
-function playheadForSourceTime(clip: VideoClip, sourceTimeUs: number, freezePlayheadUs: number): number {
+function playheadForSourceTime(
+  clip: VideoClip,
+  sourceTimeUs: number,
+  freezePlayheadUs: number,
+): number {
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return freezePlayheadUs;
   return clip.startUs + (sourceTimeUs - clip.sourceInUs) / rate;
@@ -475,9 +468,7 @@ export function App() {
   }, [storage]);
 
   if (activeProjectId === null) {
-    return (
-      <ProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />
-    );
+    return <ProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />;
   }
 
   return (
@@ -521,7 +512,9 @@ function EditorWorkspace({
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
-  const [toasts, setToasts] = useState<readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]>([]);
+  const [toasts, setToasts] = useState<
+    readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
+  >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [motionStudioOpen, setMotionStudioOpen] = useState(false);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
@@ -864,8 +857,7 @@ function EditorWorkspace({
       const clip =
         activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
         activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
-      const freeze =
-        clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
+      const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
       if (!freeze && typeof video.requestVideoFrameCallback === 'function')
         playbackFrameRef.current = video.requestVideoFrameCallback(() => capture());
       else playbackFrameRef.current = window.requestAnimationFrame(capture);
@@ -973,7 +965,11 @@ function EditorWorkspace({
   }, [session]);
 
   const addStickerFromAsset = useCallback(
-    async (asset: { readonly assetId: string; readonly displayName?: string; readonly blob?: Blob }) => {
+    async (asset: {
+      readonly assetId: string;
+      readonly displayName?: string;
+      readonly blob?: Blob;
+    }) => {
       if (asset.blob !== undefined) stickerImageCache.rememberBlob(asset.assetId, asset.blob);
       const objectId = `sticker-${asset.assetId}-${Date.now().toString(36)}`;
       const clipId = `clip-${objectId}`;
@@ -1086,8 +1082,7 @@ function EditorWorkspace({
         )
         .sort((a, b) => a.order - b.order);
       const targetExisting = aboveTracks[0];
-      const order =
-        composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
+      const order = composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
       const targetTrackId = targetExisting?.id ?? `V${order + 1}`;
       const insertClipCommand = {
         type: 'timeline.insertClip' as const,
@@ -1548,9 +1543,7 @@ function EditorWorkspace({
           const audioResponse = await fetch(resolveReferenceMediaUrl(clip.assetId));
           if (!audioResponse.ok)
             throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
-          const audioBuffer = await audioContext.decodeAudioData(
-            await audioResponse.arrayBuffer(),
-          );
+          const audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
           if (audioBuffer === null)
             throw new Error(`Unable to decode export audio for ${clip.assetId}`);
           const clipAudioConfig = audioState.clips[clip.id] ?? {
@@ -1591,7 +1584,11 @@ function EditorWorkspace({
         durationUs,
         exportMedia[0]?.audio.sampleRate ?? 48000,
       );
-      const mixedAudioBuffer = audioContext.createBuffer(1, mixedAudio.length, exportMedia[0]?.audio.sampleRate ?? 48000);
+      const mixedAudioBuffer = audioContext.createBuffer(
+        1,
+        mixedAudio.length,
+        exportMedia[0]?.audio.sampleRate ?? 48000,
+      );
       const mixedChannel = mixedAudioBuffer.getChannelData(0);
       for (let i = 0; i < mixedAudio.length; i++) mixedChannel[i] = mixedAudio[i]!;
       const mixedAudioSource = audioContext.createBufferSource();
@@ -1604,7 +1601,10 @@ function EditorWorkspace({
       const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
         (object) => object.kind === 'html-scene',
       );
-      const sceneFrames = new Map<number, Map<string, { width: number; height: number; data: Uint8ClampedArray }>>();
+      const sceneFrames = new Map<
+        number,
+        Map<string, { width: number; height: number; data: Uint8ClampedArray }>
+      >();
       if (hasHtmlScenes) {
         setExportStatus('Capturing HTML scene frames…');
         const sceneCache = new HtmlSceneSurfaceCache();
@@ -1673,7 +1673,9 @@ function EditorWorkspace({
               const token = index + 1;
               const decoded = media.decoder.captureCurrentFrame(token);
               if (decoded.bitmap === undefined)
-                throw new Error(`Export media frame ${index} for ${target.assetId} is not drawable`);
+                throw new Error(
+                  `Export media frame ${index} for ${target.assetId} is not drawable`,
+                );
               bitmaps.set(target.id, decoded.bitmap);
               return videoFrameNodeFromDecoded(videoClipSpec(target), decoded, {
                 width: media.video.videoWidth,
@@ -1936,7 +1938,9 @@ function EditorWorkspace({
         <MotionPanel
           object={object}
           allObjects={visualProject.visualObjects}
-          compositionDurationUs={context.timelineProject.compositions.root?.durationUs ?? 30_000_000}
+          compositionDurationUs={
+            context.timelineProject.compositions.root?.durationUs ?? 30_000_000
+          }
           playheadUs={state.playheadUs}
           onSeek={context.seek}
           onDispatch={context.dispatchProject}
@@ -1947,7 +1951,7 @@ function EditorWorkspace({
     }
     if (api.id === 'camera') {
       const composition = visualProject.compositions[visualProject.rootCompositionId];
-      if (composition === undefined) return <p>No root composition.</p>;
+      if (composition === undefined) return <p lang="fa">کامپوزیشن اصلی وجود ندارد.</p>;
       return (
         <CameraPanel
           allObjects={visualProject.visualObjects}
@@ -1993,7 +1997,10 @@ function EditorWorkspace({
           onAddTransition={(t) =>
             context.replaceVisualProject({
               ...visualProject,
-              transitions: [...(visualProject.transitions ?? []), { ...t, id: `transition-${Date.now()}` }],
+              transitions: [
+                ...(visualProject.transitions ?? []),
+                { ...t, id: `transition-${Date.now()}` },
+              ],
             })
           }
           onRemoveTransition={(transitionId) =>
@@ -2069,7 +2076,7 @@ function EditorWorkspace({
           onEffectDrop={(effectId, clipId, trackId) => {
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
-              showToast('Could not resolve target for this clip.', 'error');
+              showToast('هدف این کلیپ پیدا نشد.', 'error');
               return;
             }
             const descriptor = effectRegistry.getEffect(effectId);
@@ -2163,12 +2170,7 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'history') {
-      return (
-        <HistoryPanel
-          entries={context.historyEntries}
-          onJumpTo={context.jumpToHistory}
-        />
-      );
+      return <HistoryPanel entries={context.historyEntries} onJumpTo={context.jumpToHistory} />;
     }
     if (api.id === 'diagnostics')
       return (
@@ -2177,11 +2179,12 @@ function EditorWorkspace({
           iconUrl={panelTabIconUrl('diagnostics')}
           className="diagnostics-panel"
         >
-          <p>{context.playback.quality} proxy preview</p>
-          <p>
-            {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
+          <p lang="fa">پیش‌نمایش پراکسی با کیفیت {context.playback.quality}</p>
+          <p lang="fa">
+            {context.playback.decodedFrames} فریم رمزگشایی‌شده / {context.playback.droppedFrames}{' '}
+            فریم ازدست‌رفته
           </p>
-          <p>Maximum media drift: {context.playback.maxDriftUs} µs</p>
+          <p lang="fa">بیشترین اختلاف زمانی رسانه: {context.playback.maxDriftUs} میکروثانیه</p>
         </PanelShell>
       );
     if (api.id === 'monitor') return <MonitorPanel />;
@@ -2234,7 +2237,7 @@ function EditorWorkspace({
     }
     return (
       <article>
-        <p>{`${panelLabel(api.id)} panel`}</p>
+        <p lang="fa">{`پنل ${panelLabel(api.id)}`}</p>
       </article>
     );
   }
@@ -2269,7 +2272,7 @@ function EditorWorkspace({
               height={16}
               decoding="async"
             />
-            <strong>JOY Media</strong>
+            <strong>JOY Studio</strong>
           </span>
         </div>
         <div className="header-spacer" aria-hidden="true" />
@@ -2398,7 +2401,9 @@ function EditorWorkspace({
               <section className="header-dropdown" aria-label="Recent processes">
                 <h3>Recent processes</h3>
                 {exportHistory.length === 0 ? (
-                  <p className="empty-hint">No exports yet. Use Export to encode an MP4.</p>
+                  <p className="empty-hint" lang="fa">
+                    هنوز خروجی‌ای ساخته نشده است. برای ساخت فایل MP4 از Export استفاده کنید.
+                  </p>
                 ) : (
                   <ul className="process-list">
                     {exportHistory.map((entry) => (
@@ -2461,9 +2466,14 @@ function EditorWorkspace({
                 <h3>JOY account</h3>
                 {joySession.kind === 'ready' && (
                   <>
-                    <p>
-                      Signed in
-                      {joySession.subject !== undefined && ` · account ${joySession.subject}`}
+                    <p lang="fa">
+                      وارد حساب شده‌اید
+                      {joySession.subject !== undefined && (
+                        <>
+                          {' '}
+                          · حساب <bdi>{joySession.subject}</bdi>
+                        </>
+                      )}
                     </p>
                     <button
                       className="icon-button icon-button-labeled"
@@ -2476,13 +2486,15 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'no-access' && (
-                  <p className="empty-hint">{joySession.message}</p>
+                  <p className="empty-hint" lang="fa">
+                    دسترسی JOY Media برای این حساب فعال نیست.
+                  </p>
                 )}
                 {joySession.kind === 'signed-out' && (
                   <>
-                    <p className="empty-hint">
-                      Not signed in. Sign in with your JOY account; this editor uses the shared JOY
-                      session.
+                    <p className="empty-hint" lang="fa">
+                      وارد حساب نشده‌اید. با حساب JOY وارد شوید؛ این ویرایشگر از نشست مشترک JOY
+                      استفاده می‌کند.
                     </p>
                     <a
                       className="icon-button icon-button-labeled"
@@ -2496,7 +2508,11 @@ function EditorWorkspace({
                     </a>
                   </>
                 )}
-                {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
+                {joySession.kind === 'unknown' && (
+                  <p className="empty-hint" lang="fa">
+                    در حال بررسی نشست…
+                  </p>
+                )}
               </section>
             )}
           </div>
@@ -2517,7 +2533,7 @@ function EditorWorkspace({
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search commands"
+            placeholder="جست‌وجوی فرمان‌ها"
           />
           {searchActions(query).map((action) => (
             <button key={action.id} onClick={() => executeAction(action.id)}>
@@ -2725,33 +2741,33 @@ function MonitorPanel() {
   }, [visualProject, stickerTick]);
 
   paintRef.current = (): void => {
-      const renderer = rendererRef.current;
-      if (renderer === null) return;
-      const composition = visualProject.compositions[visualProject.rootCompositionId];
-      if (composition === undefined) return;
-      const cameraId = composition.activeCameraId;
-      const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-      const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
-        object,
-        transform: evaluateCameraExpressionTransform(
-          object.id,
-          cameraId,
-          objectsById,
-          state.playheadUs,
-          composition.height,
-        ).transform,
-      }));
-      const visualFrame = withCaptionBurnInNodes(
-        buildRenderFrameIR(
-          composition.id,
-          state.playheadUs,
-          composition.width,
-          composition.height,
-          resolved,
-          renderFrameOptions(visualProject, imageSizesFromCache()),
-        ),
-        visualProject,
-      );
+    const renderer = rendererRef.current;
+    if (renderer === null) return;
+    const composition = visualProject.compositions[visualProject.rootCompositionId];
+    if (composition === undefined) return;
+    const cameraId = composition.activeCameraId;
+    const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
+    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
+      object,
+      transform: evaluateCameraExpressionTransform(
+        object.id,
+        cameraId,
+        objectsById,
+        state.playheadUs,
+        composition.height,
+      ).transform,
+    }));
+    const visualFrame = withCaptionBurnInNodes(
+      buildRenderFrameIR(
+        composition.id,
+        state.playheadUs,
+        composition.width,
+        composition.height,
+        resolved,
+        renderFrameOptions(visualProject, imageSizesFromCache()),
+      ),
+      visualProject,
+    );
     const frame =
       previewVideoFrame === undefined
         ? visualFrame
@@ -2826,7 +2842,13 @@ function MonitorPanel() {
   const zoomScale =
     viewerZoom === 'fit' ? 1 : viewerZoom === '50' ? 0.5 : viewerZoom === '200' ? 2 : 1;
   const zoomLabel =
-    viewerZoom === 'fit' ? 'Fit' : viewerZoom === '50' ? '50%' : viewerZoom === '200' ? '200%' : '100%';
+    viewerZoom === 'fit'
+      ? 'Fit'
+      : viewerZoom === '50'
+        ? '50%'
+        : viewerZoom === '200'
+          ? '200%'
+          : '100%';
 
   const toggleFullscreen = () => {
     const el = panelRef.current;
@@ -2850,30 +2872,40 @@ function MonitorPanel() {
     setMonitorDragOver(false);
   }, []);
 
-  const handleMonitorEffectDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setMonitorDragOver(false);
-    const raw = event.dataTransfer.getData('application/x-joy-effect');
-    if (!raw) return;
-    try {
-      const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
-      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
-      if (!objectId) {
-        showToast('Select a clip or drop effects directly on the timeline.', 'info');
-        return;
+  const handleMonitorEffectDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setMonitorDragOver(false);
+      const raw = event.dataTransfer.getData('application/x-joy-effect');
+      if (!raw) return;
+      try {
+        const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
+        const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+        if (!objectId) {
+          showToast('یک کلیپ را انتخاب کنید یا افکت را مستقیماً روی تایم‌لاین رها کنید.', 'info');
+          return;
+        }
+        const descriptor = effectRegistry.getEffect(payload.effectId);
+        if (!descriptor) return;
+        const defaults: Record<string, unknown> = {};
+        for (const p of descriptor.params) {
+          defaults[p.key] = p.defaultValue;
+        }
+        dispatchProject({
+          label: `Effect: ${payload.effectId}`,
+          commands: [
+            {
+              type: 'effect.add',
+              payload: { objectId, effectId: payload.effectId, params: defaults },
+            },
+          ],
+        } as unknown as VisualObjectTransaction);
+      } catch {
+        /* ignore malformed */
       }
-      const descriptor = effectRegistry.getEffect(payload.effectId);
-      if (!descriptor) return;
-      const defaults: Record<string, unknown> = {};
-      for (const p of descriptor.params) {
-        defaults[p.key] = p.defaultValue;
-      }
-      dispatchProject({
-        label: `Effect: ${payload.effectId}`,
-        commands: [{ type: 'effect.add', payload: { objectId, effectId: payload.effectId, params: defaults } }],
-      } as unknown as VisualObjectTransaction);
-    } catch { /* ignore malformed */ }
-  }, [dispatchProject, visualProject, state.selectedIds, showToast]);
+    },
+    [dispatchProject, visualProject, state.selectedIds, showToast],
+  );
 
   return (
     <article className="monitor-panel" ref={panelRef}>
@@ -2887,9 +2919,7 @@ function MonitorPanel() {
         <div
           ref={containerRef}
           className="monitor-canvas"
-          style={
-            viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }
-          }
+          style={viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }}
         />
       </div>
       <div className="monitor-transport" ref={transportRef}>

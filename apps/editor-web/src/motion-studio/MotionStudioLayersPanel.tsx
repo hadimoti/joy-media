@@ -1,10 +1,6 @@
 import { useCallback } from 'react';
 import type { MotionSceneDocument, MotionLayer, MotionLayerId } from '@joy-media/motion-core';
-import {
-  createTextLayer,
-  createRectangleLayer,
-  createEllipseLayer,
-} from './state/layerFactory.js';
+import { createTextLayer, createRectangleLayer, createEllipseLayer } from './state/layerFactory.js';
 import {
   EyeIcon,
   EyeOffIcon,
@@ -28,15 +24,24 @@ interface LayersPanelProps {
 
 function layerIcon(type: MotionLayer['type']): string {
   switch (type) {
-    case 'text': return 'T';
-    case 'shape': return '\u25A0';
-    case 'svg': return '\u2B1A';
-    case 'image': return '\u2B1C';
-    case 'video': return '\u25B6';
-    case 'container': return '\u25A3';
-    case 'group': return '\u25A3';
-    case 'mask': return '\u2B1E';
-    default: return '\u25CB';
+    case 'text':
+      return 'T';
+    case 'shape':
+      return '\u25A0';
+    case 'svg':
+      return '\u2B1A';
+    case 'image':
+      return '\u2B1C';
+    case 'video':
+      return '\u25B6';
+    case 'container':
+      return '\u25A3';
+    case 'group':
+      return '\u25A3';
+    case 'mask':
+      return '\u2B1E';
+    default:
+      return '\u25CB';
   }
 }
 
@@ -69,20 +74,40 @@ export function MotionStudioLayersPanel({
       <div className="ms-panel-header">
         <h3 className="ms-panel-title">Layers</h3>
         <div className="ms-panel-actions">
-          <button type="button" className="ms-icon-btn" title="Add text" aria-label="Add text layer" onClick={handleAddText}>
+          <button
+            type="button"
+            className="ms-icon-btn"
+            title="Add text"
+            aria-label="Add text layer"
+            onClick={handleAddText}
+          >
             T
           </button>
-          <button type="button" className="ms-icon-btn" title="Add rectangle" aria-label="Add rectangle" onClick={handleAddRect}>
+          <button
+            type="button"
+            className="ms-icon-btn"
+            title="Add rectangle"
+            aria-label="Add rectangle"
+            onClick={handleAddRect}
+          >
             <span className="ms-shape-icon-rect" />
           </button>
-          <button type="button" className="ms-icon-btn" title="Add ellipse" aria-label="Add ellipse" onClick={handleAddEllipse}>
+          <button
+            type="button"
+            className="ms-icon-btn"
+            title="Add ellipse"
+            aria-label="Add ellipse"
+            onClick={handleAddEllipse}
+          >
             <span className="ms-shape-icon-ellipse" />
           </button>
         </div>
       </div>
       <div className="ms-panel-body ms-layer-list">
         {reversedLayers.length === 0 ? (
-          <div className="ms-empty-state">No layers yet. Add shapes, text, or images.</div>
+          <div className="ms-empty-state" lang="fa">
+            هنوز لایه‌ای وجود ندارد. شکل، متن یا تصویر اضافه کنید.
+          </div>
         ) : (
           reversedLayers.map((layer, idx) => {
             const selected = selectedLayerIds.includes(layer.id);
@@ -99,7 +124,10 @@ export function MotionStudioLayersPanel({
                   aria-label="Move layer up"
                   title="Move up"
                   disabled={origIdx >= document.layers.length - 1}
-                  onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveLayer(layer.id, 'up');
+                  }}
                 >
                   <ChevronUpIcon />
                 </button>
@@ -109,7 +137,10 @@ export function MotionStudioLayersPanel({
                   aria-label="Move layer down"
                   title="Move down"
                   disabled={origIdx <= 0}
-                  onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveLayer(layer.id, 'down');
+                  }}
                 >
                   <ChevronDownIcon />
                 </button>
@@ -119,7 +150,10 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle"
                   aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
-                  onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleVisibility(layer.id);
+                  }}
                 >
                   {layer.visible ? <EyeIcon /> : <EyeOffIcon />}
                 </button>
@@ -127,7 +161,10 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle"
                   aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'}
-                  onClick={(e) => { e.stopPropagation(); onToggleLocked(layer.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleLocked(layer.id);
+                  }}
                 >
                   {layer.locked ? <LockIcon /> : <UnlockIcon />}
                 </button>
@@ -135,7 +172,10 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle ms-layer-delete"
                   aria-label="Delete layer"
-                  onClick={(e) => { e.stopPropagation(); onRemoveLayer(layer.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveLayer(layer.id);
+                  }}
                 >
                   <CloseIcon />
                 </button>

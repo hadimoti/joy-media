@@ -26,4 +26,27 @@ describe('PanelShell header actions', () => {
     expect(markup).toContain('aria-label="Cloud backup"');
     expect(markup).toContain('aria-label="Search Assets"');
   });
+
+  it('marks Persian guidance without forcing a direction on the panel', () => {
+    const markup = renderToStaticMarkup(
+      <PanelShell title="History" note="هنوز ویرایشی انجام نشده است.">
+        <p>Body</p>
+      </PanelShell>,
+    );
+
+    expect(markup).toContain('class="joy-panel-note" lang="fa"');
+    expect(markup).not.toContain('dir="rtl"');
+    expect(markup).not.toContain('dir="ltr"');
+  });
+
+  it('does not label technical-only notes as Persian', () => {
+    const markup = renderToStaticMarkup(
+      <PanelShell title="Transitions" note="V1: clip-a → clip-b">
+        <p>Body</p>
+      </PanelShell>,
+    );
+
+    expect(markup).toContain('class="joy-panel-note"');
+    expect(markup).not.toContain('class="joy-panel-note" lang="fa"');
+  });
 });

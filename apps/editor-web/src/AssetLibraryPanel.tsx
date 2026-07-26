@@ -108,7 +108,7 @@ export function AssetLibraryPanel({
   const [availability, setAvailability] = useState<AssetAvailability>('all');
   const [sort, setSort] = useState<AssetSort>('name');
   const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
-  const [status, setStatus] = useState('Loading asset catalog…');
+  const [status, setStatus] = useState('در حال بارگذاری کاتالوگ رسانه…');
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
@@ -169,14 +169,14 @@ export function AssetLibraryPanel({
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
       setStatus(
         assets.length === 0
-          ? 'No media yet. Import images to sync them to the shared cloud library.'
-          : `Catalog ready · ${ownedAssets.length} yours · ${sharedAssets.length} cloud-shared`,
+          ? 'هنوز رسانه‌ای وجود ندارد. برای همگام‌سازی با کتابخانهٔ ابری مشترک، تصویر وارد کنید.'
+          : `کاتالوگ آماده است · ${ownedAssets.length} متعلق به شما · ${sharedAssets.length} اشتراک‌گذاری‌شده در ابر`,
       );
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
       const detail = message(error);
       setItems([]);
-      setStatus(`Could not load the asset catalog: ${detail}`);
+      setStatus(`بارگذاری کاتالوگ رسانه ناموفق بود: ${detail}`);
     }
   }, [client, projectId, projectTitle]);
   useEffect(() => {
@@ -207,11 +207,11 @@ export function AssetLibraryPanel({
   const editWithAi = useCallback(
     (asset: BrowserAsset) => {
       if (asset.kind !== 'image' && asset.kind !== 'video') {
-        setStatus('Edit with AI supports image and video assets.');
+        setStatus('ویرایش با هوش مصنوعی فقط از تصویر و ویدئو پشتیبانی می‌کند.');
         return;
       }
       if (onEditWithAi === undefined) {
-        setStatus('KiloCode attachment is unavailable in this session.');
+        setStatus('اتصال رسانه به KiloCode در این نشست در دسترس نیست.');
         return;
       }
       onEditWithAi({
@@ -220,7 +220,7 @@ export function AssetLibraryPanel({
         displayName: asset.displayName,
       });
       setStatus(
-        `Attached ${asset.displayName} to KiloCode. Drag onto the timeline, or automate from Agent.`,
+        `${asset.displayName} به KiloCode پیوست شد. آن را روی تایم‌لاین بکشید یا از Agent خودکارسازی کنید.`,
       );
     },
     [onEditWithAi],
@@ -233,7 +233,7 @@ export function AssetLibraryPanel({
   const openPreview = useCallback(
     async (asset: BrowserAsset, derivative: BrowserDerivative) => {
       clearPreview();
-      setStatus(`Opening verified ${derivative.kind}…`);
+      setStatus(`در حال باز کردن ${derivative.kind} تأییدشده…`);
       try {
         const outcome = await (
           await resolver
@@ -260,33 +260,33 @@ export function AssetLibraryPanel({
         };
         previewRef.current = nextPreview;
         setPreview(nextPreview);
-        setStatus(`Previewing ${asset.displayName} from this browser's verified local cache.`);
+        setStatus(`پیش‌نمایش ${asset.displayName} از کش محلی تأییدشدهٔ این مرورگر نمایش داده می‌شود.`);
       } catch (error) {
-        setStatus(`Could not open preview: ${message(error)}`);
+        setStatus(`باز کردن پیش‌نمایش ناموفق بود: ${message(error)}`);
       }
     },
     [clearPreview, projectId, resolver],
   );
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
-      setStatus('Choose a media file to register.');
+      setStatus('یک فایل رسانه برای ثبت انتخاب کنید.');
       return;
     }
     const normalizedId = assetId.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(normalizedId)) {
-      setStatus('Asset ID must use letters, numbers, dots, underscores, or hyphens.');
+      setStatus('شناسهٔ Asset باید فقط شامل حروف لاتین، عدد، نقطه، زیرخط یا خط تیره باشد.');
       return;
     }
     try {
       const kind = assetKind(selectedFile);
       const mimeType = normalizedMimeType(selectedFile, kind);
       setImportProgress(0.02);
-      setStatus(`Reading ${selectedFile.name}…`);
+      setStatus(`در حال خواندن ${selectedFile.name}…`);
       const buffer = await readFileWithProgress(selectedFile, (ratio) => {
         setImportProgress(0.02 + 0.38 * ratio);
       });
       setImportProgress(0.42);
-      setStatus(`Hashing ${selectedFile.name}…`);
+      setStatus(`در حال محاسبهٔ هش ${selectedFile.name}…`);
       const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
       setImportProgress(0.55);
       const registration: BrowserAssetRegistration = {
@@ -298,7 +298,7 @@ export function AssetLibraryPanel({
         descriptor: { mimeType },
         locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
       };
-      setStatus(`Caching ${selectedFile.name} locally…`);
+      setStatus(`در حال ذخیرهٔ محلی ${selectedFile.name}…`);
       setImportProgress(0.62);
       await (
         await originalAssetCache
@@ -312,11 +312,11 @@ export function AssetLibraryPanel({
         selectedFile,
       );
       setImportProgress(0.88);
-      setStatus(`Registering ${selectedFile.name}…`);
+      setStatus(`در حال ثبت ${selectedFile.name}…`);
       const registered = await client.registerAsset(projectId, registration);
       if (kind === 'image') {
         setImportProgress(0.9);
-        setStatus(`Uploading ${selectedFile.name} to private cloud…`);
+        setStatus(`در حال بارگذاری ${selectedFile.name} در فضای ابری خصوصی…`);
         await client.uploadAssetOriginal(
           projectId,
           registered,
@@ -324,7 +324,7 @@ export function AssetLibraryPanel({
           (ratio) => setImportProgress(0.9 + 0.08 * ratio),
         );
         setStatus(
-          `Cloud-backed ${selectedFile.name}. Agent tags applied; catalog will refresh.`,
+          `${selectedFile.name} در ابر پشتیبان‌گیری شد. برچسب‌های Agent اعمال شدند و کاتالوگ تازه می‌شود.`,
         );
       } else {
         try {
@@ -333,7 +333,7 @@ export function AssetLibraryPanel({
           /* heuristic retag is best-effort for video/audio */
         }
         setStatus(
-          `Registered ${selectedFile.name} locally. Video/audio cloud backup is lower priority in v1.`,
+          `${selectedFile.name} به‌صورت محلی ثبت شد. پشتیبان‌گیری ابری ویدئو و صدا در نسخهٔ اول اولویت پایین‌تری دارد.`,
         );
       }
       setImportProgress(1);
@@ -345,16 +345,16 @@ export function AssetLibraryPanel({
       window.setTimeout(() => setImportProgress(undefined), 350);
     } catch (error) {
       setImportProgress(undefined);
-      setStatus(`Could not register asset: ${message(error)}`);
+      setStatus(`ثبت رسانه ناموفق بود: ${message(error)}`);
     }
   }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
   const enableSync = useCallback(async () => {
     try {
       const result = await client.setAssetSync(projectId, true);
       setSyncEnabled(result.assetSyncEnabled);
-      setStatus('Private derivative backup is enabled for this project.');
+      setStatus('پشتیبان‌گیری خصوصی مشتق‌ها برای این پروژه فعال شد.');
     } catch (error) {
-      setStatus(`Could not enable private backup: ${message(error)}`);
+      setStatus(`فعال‌سازی پشتیبان‌گیری خصوصی ناموفق بود: ${message(error)}`);
     }
   }, [client, projectId]);
   const fetchCloudOriginal = useCallback(
@@ -381,25 +381,25 @@ export function AssetLibraryPanel({
   const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
       if (asset.kind !== 'image') {
-        setStatus('Share to cloud is image-only in v1.');
+        setStatus('اشتراک‌گذاری ابری در نسخهٔ اول فقط برای تصویر در دسترس است.');
         return;
       }
       if (cloudAssetIds.has(asset.id)) {
-        setStatus(`${asset.displayName} is already in the shared cloud library.`);
+        setStatus(`${asset.displayName} از قبل در کتابخانهٔ ابری مشترک وجود دارد.`);
         return;
       }
       try {
         const blob = await (await originalAssetCache).get(asset.id);
         if (blob === undefined) {
-          setStatus('This browser has no OPFS original to upload. Re-import the image here first.');
+          setStatus('نسخهٔ اصلی OPFS در این مرورگر موجود نیست. ابتدا تصویر را دوباره اینجا وارد کنید.');
           return;
         }
-        setStatus(`Uploading ${asset.displayName} to private cloud…`);
+        setStatus(`در حال بارگذاری ${asset.displayName} در فضای ابری خصوصی…`);
         await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        setStatus(`Shared ${asset.displayName} to cloud.`);
+        setStatus(`${asset.displayName} در فضای ابری به اشتراک گذاشته شد.`);
         await refresh();
       } catch (error) {
-        setStatus(`Could not share to cloud: ${message(error)}`);
+        setStatus(`اشتراک‌گذاری ابری ناموفق بود: ${message(error)}`);
       }
     },
     [client, cloudAssetIds, originalAssetCache, projectId, refresh],
@@ -407,7 +407,7 @@ export function AssetLibraryPanel({
 
   const deleteAsset = useCallback(
     async (asset: BrowserAsset) => {
-      const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
+      const ok = window.confirm(`«${asset.displayName}» از کاتالوگ حذف شود؟`);
       if (!ok) return;
       try {
         await client.deleteAsset(asset.projectId || projectId, asset.id);
@@ -417,10 +417,10 @@ export function AssetLibraryPanel({
           next.delete(asset.id);
           return next;
         });
-        setStatus(`Deleted ${asset.displayName}.`);
+        setStatus(`${asset.displayName} حذف شد.`);
         await refresh();
       } catch (error) {
-        setStatus(`Could not delete: ${message(error)}`);
+        setStatus(`حذف رسانه ناموفق بود: ${message(error)}`);
       }
     },
     [client, projectId, refresh],
@@ -434,7 +434,7 @@ export function AssetLibraryPanel({
         !cloudAssetIds.has(asset.id),
     );
     if (targets.length === 0) {
-      setStatus('No selected images available to share (need OPFS originals).');
+      setStatus('هیچ تصویر انتخاب‌شده‌ای برای اشتراک‌گذاری آماده نیست؛ نسخهٔ اصلی OPFS لازم است.');
       return;
     }
     let shared = 0;
@@ -448,7 +448,7 @@ export function AssetLibraryPanel({
         /* continue remaining */
       }
     }
-    setStatus(`Shared ${shared} of ${targets.length} selected image(s) to cloud.`);
+    setStatus(`${shared} تصویر از ${targets.length} تصویر انتخاب‌شده در ابر به اشتراک گذاشته شد.`);
     await refresh();
   }, [
     client,
@@ -462,7 +462,7 @@ export function AssetLibraryPanel({
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
-      setStatus('KiloCode attachment is unavailable in this session.');
+      setStatus('اتصال رسانه به KiloCode در این نشست در دسترس نیست.');
       return;
     }
     let attached = 0;
@@ -478,15 +478,15 @@ export function AssetLibraryPanel({
     }
     setStatus(
       attached === 0
-        ? 'No selected image/video assets to attach.'
-        : `Attached ${attached} asset(s) to KiloCode.`,
+        ? 'هیچ تصویر یا ویدئوی انتخاب‌شده‌ای برای پیوست وجود ندارد.'
+        : `${attached} رسانه به KiloCode پیوست شد.`,
     );
   }, [onEditWithAi, selectedAssetIds, visible]);
 
   const bulkDelete = useCallback(async () => {
     const targets = visible.filter(({ asset }) => selectedAssetIds.has(asset.id));
     if (targets.length === 0) return;
-    const ok = window.confirm(`Delete ${targets.length} selected asset(s) from the catalog?`);
+    const ok = window.confirm(`${targets.length} رسانهٔ انتخاب‌شده از کاتالوگ حذف شود؟`);
     if (!ok) return;
     let deleted = 0;
     for (const { asset } of targets) {
@@ -498,7 +498,7 @@ export function AssetLibraryPanel({
       }
     }
     setSelectedAssetIds(new Set());
-    setStatus(`Deleted ${deleted} of ${targets.length} selected asset(s).`);
+    setStatus(`${deleted} رسانه از ${targets.length} رسانهٔ انتخاب‌شده حذف شد.`);
     await refresh();
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
@@ -525,7 +525,7 @@ export function AssetLibraryPanel({
       tabs={categoryTabs}
       activeTab={category}
       onTabChange={(id) => setCategory(id as typeof category)}
-      search={{ value: query, onChange: setQuery, placeholder: 'Search assets…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی رسانه‌ها…' }}
       note={status}
       leadingActions={
         <>
@@ -635,9 +635,9 @@ export function AssetLibraryPanel({
                   <CloseIcon />
                 </button>
               </div>
-              <p className="asset-import-hint">
-                Hashed and cached in this browser. Use an opaque Asset ID that matches a Worker —
-                paths stay local.
+              <p className="asset-import-hint" lang="fa">
+                فایل در همین مرورگر هش و ذخیره می‌شود. از شناسهٔ مبهم Asset هماهنگ با Worker
+                استفاده کنید؛ مسیرها محلی می‌مانند.
               </p>
               <div className="asset-import-row">
                 <input
@@ -661,7 +661,7 @@ export function AssetLibraryPanel({
                   <PlusIcon />
                 </button>
                 <span className="asset-import-file" title={selectedFile?.name}>
-                  {selectedFile?.name ?? 'Choose file'}
+                  {selectedFile?.name ?? 'انتخاب فایل'}
                 </span>
                 <input
                   className="asset-import-id"
@@ -757,7 +757,7 @@ export function AssetLibraryPanel({
           <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
             <div>
               <strong>{preview.displayName}</strong>
-              <span>Verified private derivative</span>
+              <span lang="fa">نسخهٔ خصوصی تأییدشده</span>
             </div>
             <button
               type="button"
@@ -827,12 +827,12 @@ export function AssetLibraryPanel({
         )}
         {visible.length === 0 ? (
           <div className="asset-library-empty">
-            {status.includes('Could not load') ? (
+            {status.includes('بارگذاری کاتالوگ') ? (
               // The status line is the shell's note now — do not print it twice.
-              <p>Could not load the asset catalog.</p>
+              <p lang="fa">بارگذاری کاتالوگ رسانه ناموفق بود.</p>
             ) : (
               <>
-                <p>No assets match the current filters.</p>
+                <p lang="fa">هیچ رسانه‌ای با فیلترهای فعلی مطابقت ندارد.</p>
                 <button
                   type="button"
                   className="icon-button icon-button-labeled"
@@ -975,19 +975,19 @@ export function AssetLibraryPanel({
 function availabilityLabel(status: AssetAvailability): string {
   switch (status) {
     case 'available-cloud':
-      return 'Ready in private cloud';
+      return 'در فضای ابری خصوصی آماده است';
     case 'available-local':
-      return 'Available in local cache';
+      return 'در کش محلی در دسترس است';
     case 'pending':
-      return 'Derivative processing';
+      return 'مشتق در حال پردازش است';
     case 'evicted':
-      return 'Local cache evicted';
+      return 'کش محلی پاک شده است';
     case 'invalid':
-      return 'Derivative needs repair';
+      return 'مشتق نیاز به ترمیم دارد';
     case 'none':
-      return 'No derivative yet';
+      return 'هنوز مشتقی وجود ندارد';
     default:
-      return 'Unknown status';
+      return 'وضعیت ناشناخته';
   }
 }
 
@@ -1127,15 +1127,15 @@ function previewStatus(
 ): string {
   switch (state) {
     case 'missing':
-      return 'The local cache entry is missing and no cloud copy is available.';
+      return 'ورودی کش محلی موجود نیست و نسخهٔ ابری نیز در دسترس نیست.';
     case 'invalid':
-      return 'The local cache entry failed integrity checks and was removed.';
+      return 'ورودی کش محلی بررسی صحت را رد کرد و حذف شد.';
     case 'unsupported':
-      return 'This browser does not support OPFS local media caching.';
+      return 'این مرورگر از ذخیره‌سازی محلی رسانه با OPFS پشتیبانی نمی‌کند.';
     case 'revoked':
-      return 'Your access to this private derivative has been revoked.';
+      return 'دسترسی شما به این مشتق خصوصی لغو شده است.';
     case 'unavailable':
-      return 'The private derivative is unavailable right now.';
+      return 'مشتق خصوصی در حال حاضر در دسترس نیست.';
   }
 }
 function formatBytes(bytes: number): string {

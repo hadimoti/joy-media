@@ -30,7 +30,7 @@ export function JobsPanel({
   const [workerId, setWorkerId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [projectInitialized, setProjectInitialized] = useState(false);
-  const [status, setStatus] = useState('Checking JOY Media connection…');
+  const [status, setStatus] = useState('در حال بررسی اتصال JOY Media…');
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
@@ -51,7 +51,7 @@ export function JobsPanel({
       setProjectInitialized(!projectMissing);
       setStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
-      setStatus(`Offline or not signed in: ${message(error)}`);
+      setStatus(`اتصال برقرار نیست یا وارد حساب نشده‌اید: ${message(error)}`);
     }
   }, [client, projectId]);
 
@@ -79,10 +79,10 @@ export function JobsPanel({
     try {
       await client.pairWorker(workerId.trim(), pairingCode.trim());
       setPairingCode('');
-      setStatus('Pairing approved; restart the Worker so it can claim its session.');
+      setStatus('جفت‌سازی تأیید شد؛ Worker را دوباره راه‌اندازی کنید تا نشست خود را دریافت کند.');
       await refresh();
     } catch (error) {
-      setStatus(`Pairing failed: ${message(error)}`);
+      setStatus(`جفت‌سازی ناموفق بود: ${message(error)}`);
     }
   };
 
@@ -94,24 +94,24 @@ export function JobsPanel({
         if (!message(error).includes('PROJECT_EXISTS')) throw error;
       }
       setProjectInitialized(true);
-      setStatus('Project ready. Pair a Worker, then queue work.');
+      setStatus('پروژه آماده است. یک Worker را جفت کنید و سپس کار را در صف بگذارید.');
       await refresh();
     } catch (error) {
-      setStatus(`Could not initialize project: ${message(error)}`);
+      setStatus(`راه‌اندازی پروژه ناموفق بود: ${message(error)}`);
     }
   };
 
   const submit = async () => {
     if (!projectInitialized) {
-      setStatus('Initialize this project before queueing a derivative job.');
+      setStatus('پیش از افزودن کار مشتق به صف، این پروژه را راه‌اندازی کنید.');
       return;
     }
     try {
       await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
-      setStatus('Thumbnail derivative queued for a paired local Worker.');
+      setStatus('ساخت تصویر بندانگشتی برای Worker محلی جفت‌شده در صف قرار گرفت.');
       await refresh();
     } catch (error) {
-      setStatus(`Could not queue job: ${message(error)}`);
+      setStatus(`افزودن کار به صف ناموفق بود: ${message(error)}`);
     }
   };
 
@@ -163,42 +163,42 @@ export function JobsPanel({
       }
     >
       {tab === 'pair' && (
-      <section className="jobs-pair" aria-label="Pair local Worker">
-        <label className="jobs-field">
-          <span>Worker ID</span>
-          <input
-            value={workerId}
-            onChange={(event) => setWorkerId(event.target.value)}
-            placeholder="worker-…"
-            spellCheck={false}
-            aria-label="Worker ID"
-          />
-        </label>
-        <label className="jobs-field">
-          <span>Pairing code</span>
-          <input
-            value={pairingCode}
-            onChange={(event) => setPairingCode(event.target.value)}
-            placeholder="One-time code"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="One-time pairing code"
-          />
-        </label>
-        <div className="jobs-pair-action">
-          <span className="jobs-pair-action-label" aria-hidden>
-            &nbsp;
-          </span>
-          <button
-            type="button"
-            className="jobs-pair-submit"
-            disabled={!workerId.trim() || !pairingCode.trim()}
-            onClick={() => void pair()}
-          >
-            Approve
-          </button>
-        </div>
-      </section>
+        <section className="jobs-pair" aria-label="Pair local Worker">
+          <label className="jobs-field">
+            <span>Worker ID</span>
+            <input
+              value={workerId}
+              onChange={(event) => setWorkerId(event.target.value)}
+              placeholder="worker-…"
+              spellCheck={false}
+              aria-label="Worker ID"
+            />
+          </label>
+          <label className="jobs-field">
+            <span>Pairing code</span>
+            <input
+              value={pairingCode}
+              onChange={(event) => setPairingCode(event.target.value)}
+              placeholder="کد یک‌بارمصرف"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="One-time pairing code"
+            />
+          </label>
+          <div className="jobs-pair-action">
+            <span className="jobs-pair-action-label" aria-hidden>
+              &nbsp;
+            </span>
+            <button
+              type="button"
+              className="jobs-pair-submit"
+              disabled={!workerId.trim() || !pairingCode.trim()}
+              onClick={() => void pair()}
+            >
+              Approve
+            </button>
+          </div>
+        </section>
       )}
 
       {tab === 'workers' && (
@@ -210,7 +210,9 @@ export function JobsPanel({
             </span>
           </div>
           {visibleWorkers.length === 0 ? (
-            <p className="jobs-empty">No active workers. Pair one below using the guide.</p>
+            <p className="jobs-empty" lang="fa">
+              Worker فعالی وجود ندارد. با راهنمای زیر یکی را جفت کنید.
+            </p>
           ) : (
             <ul className="jobs-workers">
               {visibleWorkers.map((worker) => {
@@ -267,7 +269,9 @@ export function JobsPanel({
             <span className="jobs-section-meta">{jobs.length}</span>
           </div>
           {jobs.length === 0 ? (
-            <p className="jobs-empty">No derivative jobs yet.</p>
+            <p className="jobs-empty" lang="fa">
+              هنوز کار مشتقی وجود ندارد.
+            </p>
           ) : (
             <ul className="jobs-list">
               {jobs.map((job) => (
@@ -283,8 +287,8 @@ export function JobsPanel({
                       </div>
                       {job.derivative !== undefined && (
                         <p className="job-derivative">
-                          Verified · {job.derivative.bytes} B ·{' '}
-                          {job.derivative.sha256.slice(0, 12)}…
+                          Verified · {job.derivative.bytes} B · {job.derivative.sha256.slice(0, 12)}
+                          …
                         </p>
                       )}
                       {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
@@ -330,49 +334,51 @@ export function JobsPanel({
       )}
 
       {tab === 'pair' && (
-      <section className="jobs-guide" aria-label="How to find Worker ID and pairing code">
-        <button
-          type="button"
-          className="jobs-guide-toggle"
-          aria-expanded={guideOpen}
-          onClick={() => setGuideOpen((open) => !open)}
-        >
-          How to find Worker ID & pairing code
-          <span aria-hidden>{guideOpen ? '−' : '+'}</span>
-        </button>
-        {guideOpen && (
-          <ol className="jobs-guide-steps">
-            <li>
-              On your PC, start the local Worker with <code>JOY_MEDIA_API_URL</code> pointed at
-              this Media API. The Worker runs on your machine — not on the VPS.
-            </li>
-            <li>
-              <strong>Pairing code</strong> — Worker terminal prints{' '}
-              <code>Approve this Worker in JOY Media with pairing code: …</code>. Codes expire in
-              ~5 minutes; restart the Worker for a fresh offer.
-            </li>
-            <li>
-              <strong>Worker ID</strong> — copy <code>workerId</code> from the Worker startup JSON,
-              or from <code>~/.joy-media/worker-state.json</code> (or{' '}
-              <code>JOY_MEDIA_WORKER_STATE_PATH</code>).
-            </li>
-            <li>
-              Paste both above → <strong>Approve</strong> → <strong>restart the Worker</strong> so
-              it claims the session. It should show as connected within a few seconds.
-            </li>
-            <li>
-              GPU work needs local <code>image.comfy</code> / <code>audio.ml-denoise</code> on that
-              PC — never on the Media VPS.
-            </li>
-          </ol>
-        )}
-      </section>
+        <section className="jobs-guide" aria-label="How to find Worker ID and pairing code">
+          <button
+            type="button"
+            className="jobs-guide-toggle"
+            aria-expanded={guideOpen}
+            onClick={() => setGuideOpen((open) => !open)}
+          >
+            How to find Worker ID & pairing code
+            <span aria-hidden>{guideOpen ? '−' : '+'}</span>
+          </button>
+          {guideOpen && (
+            <ol className="jobs-guide-steps" lang="fa">
+              <li>
+                در رایانهٔ خود Worker محلی را با <code>JOY_MEDIA_API_URL</code> که به این Media API
+                اشاره می‌کند اجرا کنید. Worker روی دستگاه شما اجرا می‌شود، نه روی VPS.
+              </li>
+              <li>
+                <strong>Pairing code</strong> — ترمینال Worker پیام{' '}
+                <code>Approve this Worker in JOY Media with pairing code: …</code> را نمایش می‌دهد.
+                کدها حدود پنج دقیقه اعتبار دارند؛ برای دریافت پیشنهاد تازه Worker را دوباره اجرا
+                کنید.
+              </li>
+              <li>
+                <strong>Worker ID</strong> — مقدار <code>workerId</code> را از JSON آغاز به کار
+                Worker یا از <code>~/.joy-media/worker-state.json</code> (یا{' '}
+                <code>JOY_MEDIA_WORKER_STATE_PATH</code>) کپی کنید.
+              </li>
+              <li>
+                هر دو مقدار را بالا وارد کنید، <strong>Approve</strong> را بزنید و{' '}
+                <strong>Worker را دوباره اجرا کنید</strong> تا نشست را دریافت کند. اتصال باید ظرف
+                چند ثانیه نمایش داده شود.
+              </li>
+              <li>
+                کارهای GPU به <code>image.comfy</code> یا <code>audio.ml-denoise</code> محلی روی
+                همان رایانه نیاز دارند و هرگز روی Media VPS اجرا نمی‌شوند.
+              </li>
+            </ol>
+          )}
+        </section>
       )}
     </PanelShell>
   );
 
   function report(error: unknown): void {
-    setStatus(`Job action failed: ${message(error)}`);
+    setStatus(`انجام عملیات کار ناموفق بود: ${message(error)}`);
   }
 }
 

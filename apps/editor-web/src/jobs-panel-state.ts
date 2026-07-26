@@ -12,10 +12,7 @@ export function workerPresence(worker: BrowserWorker, now = Date.now()): WorkerP
 }
 
 /** True when any connected Worker advertises a local GPU capability (ADR-0018). */
-export function hasLocalGpuWorker(
-  workers: readonly BrowserWorker[],
-  now = Date.now(),
-): boolean {
+export function hasLocalGpuWorker(workers: readonly BrowserWorker[], now = Date.now()): boolean {
   return workers.some(
     (worker) =>
       workerPresence(worker, now) === 'connected' &&
@@ -32,11 +29,11 @@ export function projectJobStatus(
   const gpu = hasLocalGpuWorker(workers, now);
   if (projectMissing)
     return connected
-      ? 'Ready to initialize · Worker connected'
-      : 'Ready to initialize · no Worker connected';
+      ? 'آمادهٔ راه‌اندازی · Worker متصل است'
+      : 'آمادهٔ راه‌اندازی · هیچ Worker متصلی وجود ندارد';
   return connected
-    ? `Initialized · Worker connected${gpu ? ' · GPU ready' : ''}`
-    : 'Initialized · no Worker connected';
+    ? `راه‌اندازی‌شده · Worker متصل است${gpu ? ' · GPU آماده است' : ''}`
+    : 'راه‌اندازی‌شده · هیچ Worker متصلی وجود ندارد';
 }
 
 export function jobStateLabel(job: Pick<BrowserJob, 'state' | 'cancelRequested'>): string {

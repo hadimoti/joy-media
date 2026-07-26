@@ -38,7 +38,7 @@ export function DualLensPanel({
   return (
     <PanelShell title="Dual Lens" iconUrl={panelTabIconUrl('flow')} className="dual-lens-panel">
       <div className="dual-lens-intro">
-        <p>Edit in time. Understand in flow.</p>
+        <p lang="fa">در زمان ویرایش کنید؛ جریان را درک کنید.</p>
         <div className="dual-lens-modes" role="tablist" aria-label="Dual Lens mode">
           {(['time', 'flow', 'split'] as const).map((candidate) => (
             <button
@@ -151,7 +151,9 @@ function TimeProjection({
             <span className="dual-time-lane-label">{lane.label}</span>
             <div className="dual-time-lane-track">
               {lane.items.length === 0 ? (
-                <span className="dual-time-empty">No data</span>
+                <span className="dual-time-empty" lang="fa">
+                  داده‌ای وجود ندارد
+                </span>
               ) : (
                 lane.items.map((item) => {
                   const timed = item.startUs !== undefined && item.endUs !== undefined;
@@ -212,9 +214,11 @@ function FlowProjection({
       <div className="dual-lens-section-heading">
         <div>
           <strong>Flow View</strong>
-          <span>Creative Document projection</span>
+          <span lang="fa">نمایی از سند خلاق</span>
         </div>
-        <span className="dual-flow-legend">Bright = current frame</span>
+        <span className="dual-flow-legend" lang="fa">
+          روشن‌تر = فریم فعلی
+        </span>
       </div>
       <div className="dual-flow-canvas">
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Media and data flow graph">

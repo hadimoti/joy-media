@@ -41,7 +41,14 @@ interface ApprovalState {
 function parametersFromSchema(
   schema: Record<string, unknown>,
   selectedClip:
-    | { readonly trackId: string; readonly clip: { readonly id: string; readonly startUs: number; readonly durationUs: number } }
+    | {
+        readonly trackId: string;
+        readonly clip: {
+          readonly id: string;
+          readonly startUs: number;
+          readonly durationUs: number;
+        };
+      }
     | undefined,
 ): WorkflowInputParameter[] {
   const properties = (schema.properties as Record<string, unknown> | undefined) ?? {};
@@ -54,8 +61,10 @@ function parametersFromSchema(
     if (defaultValue === undefined) {
       if (name === 'trackId' && selectedClip !== undefined) defaultValue = selectedClip.trackId;
       else if (name === 'clipId' && selectedClip !== undefined) defaultValue = selectedClip.clip.id;
-      else if (name === 'clipStartUs' && selectedClip !== undefined) defaultValue = selectedClip.clip.startUs;
-      else if (name === 'clipDurationUs' && selectedClip !== undefined) defaultValue = selectedClip.clip.durationUs;
+      else if (name === 'clipStartUs' && selectedClip !== undefined)
+        defaultValue = selectedClip.clip.startUs;
+      else if (name === 'clipDurationUs' && selectedClip !== undefined)
+        defaultValue = selectedClip.clip.durationUs;
       else if (name === 'clipSourceInUs') defaultValue = 0;
       else if ((name === 'atUs' || name === 'newStartUs') && selectedClip !== undefined)
         defaultValue = selectedClip.clip.startUs;
@@ -99,7 +108,10 @@ export function WorkflowsPanel({
   readonly session: EditorSession;
   readonly selectedClipIds: readonly string[];
   readonly playheadUs: number;
-  readonly onRun: (workflowId: string, inputs: Record<string, unknown>) => Promise<WorkflowRunOutcome>;
+  readonly onRun: (
+    workflowId: string,
+    inputs: Record<string, unknown>,
+  ) => Promise<WorkflowRunOutcome>;
   readonly onResume: (
     runId: string,
     humanInputs: Record<string, unknown>,
@@ -107,9 +119,9 @@ export function WorkflowsPanel({
 }) {
   const [workflows, setWorkflows] = useState(() => listWorkflows(session));
   const [tab, setTab] = useState('saved');
-  const [runModal, setRunModal] = useState<{ workflowId: string; parameters: WorkflowInputParameter[] } | undefined>(
-    undefined,
-  );
+  const [runModal, setRunModal] = useState<
+    { workflowId: string; parameters: WorkflowInputParameter[] } | undefined
+  >(undefined);
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
   const [approval, setApproval] = useState<ApprovalState | undefined>(undefined);
   const [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
@@ -144,17 +156,19 @@ export function WorkflowsPanel({
         workflowId: outcome.workflowId,
         nodeId: outcome.nodeId,
         request: outcome.request,
-        selected: new Set(candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2)),
+        selected: new Set(
+          candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
+        ),
       });
-      setStatusMessage(`Waiting for approval: ${outcome.request.kind}`);
+      setStatusMessage(`در انتظار تأیید: ${outcome.request.kind}`);
       return;
     }
     setApproval(undefined);
     if (outcome.status === 'succeeded') {
-      setStatusMessage(`Finished ${outcome.workflowId}`);
+      setStatusMessage(`گردش‌کار ${outcome.workflowId} پایان یافت.`);
       return;
     }
-    setStatusMessage(`Failed: ${outcome.error}`);
+    setStatusMessage(`اجرای گردش‌کار ناموفق بود: ${outcome.error}`);
   }
 
   function openRunModal(workflowId: string) {
@@ -198,7 +212,8 @@ export function WorkflowsPanel({
 
   async function submitApproval() {
     if (approval === undefined) return;
-    const payload = approval.request.payload as { candidates?: readonly unknown[]; items?: readonly unknown[] } | undefined;
+    const payload = approval.request.payload as
+      { candidates?: readonly unknown[]; items?: readonly unknown[] } | undefined;
     let humanInputs: Record<string, unknown>;
 
     if (approval.request.kind === 'choose-candidates') {
@@ -229,8 +244,10 @@ export function WorkflowsPanel({
   function renderRecordedRow(recorded: RecordedWorkflow) {
     const derivedFrom = detectDerivedFrom(recorded);
     const hasInputs =
-      Object.keys((extractWorkflowInputs(recorded.workflow.nodes).properties as Record<string, unknown>) ?? {})
-        .length > 0;
+      Object.keys(
+        (extractWorkflowInputs(recorded.workflow.nodes).properties as Record<string, unknown>) ??
+          {},
+      ).length > 0;
     return (
       <li key={recorded.workflow.id} className="workflow-row">
         <div className="workflow-row-main">
@@ -246,7 +263,11 @@ export function WorkflowsPanel({
         <div className="workflow-row-actions">
           <button
             className="icon-button"
-            onClick={() => (hasInputs ? openRunModal(recorded.workflow.id) : void onRun(recorded.workflow.id, {}).then(applyOutcome))}
+            onClick={() =>
+              hasInputs
+                ? openRunModal(recorded.workflow.id)
+                : void onRun(recorded.workflow.id, {}).then(applyOutcome)
+            }
             aria-label={`Run ${recorded.workflow.name}`}
             title={`Run ${recorded.workflow.name}`}
           >
@@ -265,8 +286,16 @@ export function WorkflowsPanel({
     );
   }
 
-  function renderSystemRow(entry: { readonly workflow: { readonly id: string; readonly name: string; readonly version: string; readonly inputs: Record<string, unknown> } }) {
-    const properties = (entry.workflow.inputs.properties as Record<string, unknown> | undefined) ?? {};
+  function renderSystemRow(entry: {
+    readonly workflow: {
+      readonly id: string;
+      readonly name: string;
+      readonly version: string;
+      readonly inputs: Record<string, unknown>;
+    };
+  }) {
+    const properties =
+      (entry.workflow.inputs.properties as Record<string, unknown> | undefined) ?? {};
     const hasInputs = Object.keys(properties).length > 0;
     return (
       <li key={entry.workflow.id} className="workflow-row">
@@ -277,7 +306,11 @@ export function WorkflowsPanel({
         <div className="workflow-row-actions">
           <button
             className="icon-button"
-            onClick={() => (hasInputs ? openRunModal(entry.workflow.id) : void onRun(entry.workflow.id, {}).then(applyOutcome))}
+            onClick={() =>
+              hasInputs
+                ? openRunModal(entry.workflow.id)
+                : void onRun(entry.workflow.id, {}).then(applyOutcome)
+            }
             aria-label={`Run ${entry.workflow.name}`}
             title={`Run with inputs`}
           >
@@ -290,8 +323,8 @@ export function WorkflowsPanel({
 
   const approvalCandidates =
     approval?.request.kind === 'choose-candidates'
-      ? (((approval.request.payload as { candidates?: readonly unknown[] } | undefined)?.candidates ??
-          []) as readonly unknown[])
+      ? (((approval.request.payload as { candidates?: readonly unknown[] } | undefined)
+          ?.candidates ?? []) as readonly unknown[])
       : [];
 
   const isEmpty = workflows.length === 0 && systemWorkflows.length === 0;
@@ -307,7 +340,7 @@ export function WorkflowsPanel({
       {...(statusMessage !== undefined
         ? { note: statusMessage }
         : isEmpty
-          ? { note: 'Run an agent action and save it to create your first workflow.' }
+          ? { note: 'برای ساخت نخستین گردش‌کار، یک عملیات Agent را اجرا و ذخیره کنید.' }
           : {})}
       actions={
         <button
@@ -321,7 +354,6 @@ export function WorkflowsPanel({
         </button>
       }
     >
-
       {runModal !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
           <h4>Run: {runModal.workflowId}</h4>
@@ -339,11 +371,20 @@ export function WorkflowsPanel({
             </label>
           ))}
           <div className="workflow-run-actions">
-            <button className="icon-button icon-button-labeled" onClick={() => void submitRun()} title="Run workflow">
+            <button
+              className="icon-button icon-button-labeled"
+              onClick={() => void submitRun()}
+              title="Run workflow"
+            >
               <PlayIcon />
               Run
             </button>
-            <button className="icon-button" onClick={() => setRunModal(undefined)} title="Cancel" aria-label="Cancel">
+            <button
+              className="icon-button"
+              onClick={() => setRunModal(undefined)}
+              title="Cancel"
+              aria-label="Cancel"
+            >
               <TrashIcon />
             </button>
           </div>
@@ -376,7 +417,9 @@ export function WorkflowsPanel({
               })}
             </ul>
           ) : (
-            <p className="empty-hint">{approval.request.kind}: review and continue.</p>
+            <p className="empty-hint" lang="fa">
+              درخواست {approval.request.kind} را بررسی کنید و ادامه دهید.
+            </p>
           )}
           <div className="workflow-run-actions">
             <button

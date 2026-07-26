@@ -93,12 +93,12 @@ export function CaptionsPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      search={{ value: query, onChange: setQuery, placeholder: 'Search transcript…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی رونویسی…' }}
       inactive={idle}
       {...(idle
-        ? { note: 'Add a caption track to start a transcript.' }
+        ? { note: 'برای شروع رونویسی، یک ترک زیرنویس اضافه کنید.' }
         : transcriptionError !== undefined
-          ? { note: `${transcriptionError} You can continue editing captions manually.` }
+          ? { note: `${transcriptionError} می‌توانید ویرایش زیرنویس را به‌صورت دستی ادامه دهید.` }
           : {})}
       actions={
         <button
@@ -378,11 +378,11 @@ function CaptionSlotEditor({
         </button>
       </header>
       {importIssues > 0 && (
-        <p className="caption-warning">
-          Import skipped {importIssues} malformed cue{importIssues === 1 ? '' : 's'}.
+        <p className="caption-warning" lang="fa">
+          هنگام وارد کردن، {importIssues} کیوی معیوب نادیده گرفته شد.
         </p>
       )}
-      {segments.length === 0 && <p>No matching captions.</p>}
+      {segments.length === 0 && <p lang="fa">زیرنویس مطابقی پیدا نشد.</p>}
       <ol className="captions-list">
         {segments.map((segment) => {
           const range = segmentTimelineRange(clip, segment);

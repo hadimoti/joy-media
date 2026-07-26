@@ -8,34 +8,34 @@ Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red a
 
 **The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
 
-| Token                   | Hex       | Use                                                              |
-| ----------------------- | --------- | ---------------------------------------------------------------- |
-| `--joy-bg-app`          | `#0d0e10` | Root/page background                                              |
-| `--joy-bg-panel`        | `#111216` | Panel/article surfaces, dockview group + content background       |
-| `--joy-bg-chrome`       | `#16171b` | Header, menubar, tab strips                                       |
-| `--joy-bg-elevated`     | `#17181d` | Dropdowns, popovers, context menus                                |
-| `--joy-bg-raised`       | `#222226` | Cards, list rows (history entries, workflow rows, asset cards)    |
-| `--joy-bg-inset`        | `#101012` | Sunken sections (register form, category rail)                    |
-| `--joy-bg-control`      | `#2a2a2e` | Buttons, lanes, interactive fills                                 |
-| `--joy-bg-hover`        | `#1d1f25` | Hovered controls                                                  |
-| `--joy-bg-active`       | `#24262d` | Pressed / selected control fill                                   |
-| `--joy-bg-input`        | `#0e0e10` | Text inputs, selects                                              |
-| `--joy-bg-deep`         | `#080809` | Canvases, code/expression fields, preview wells                   |
-| `--joy-border-subtle`   | `rgb(255 255 255 / 7%)` | Hairlines inside a surface                          |
-| `--joy-border`          | `#2a2a2e` | Default borders/dividers                                          |
-| `--joy-border-strong`   | `#3c3c42` | Control borders                                                   |
-| `--joy-border-hover`    | `#5a5a62` | Hovered control borders, clip borders                             |
-| `--joy-gap`             | `#080809` | Dockview separators, workspace gaps                               |
-| `--joy-text`            | `#ececef` | Primary text                                                      |
-| `--joy-text-secondary`  | `rgb(255 255 255 / 64%)` | Supporting text inside a row                       |
-| `--joy-text-muted`      | `#a8a8b0` | Secondary text, inactive tabs                                     |
-| `--joy-text-faint`      | `#7e7e86` | Hints, timestamps, metadata                                       |
-| `--joy-text-disabled`   | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)           |
-| `--joy-accent`          | `#f4b72f` | **The** accent — see the scarcity list below                      |
-| `--joy-accent-hover`    | `#ffc94f` | Accent under hover only                                           |
-| `--joy-accent-dim`      | `rgb(244 183 47 / 22%)` | Accent washes: drag-over fill, active-tab underline |
-| `--joy-ok`              | `#6fcf97` | Success/connected status only                                     |
-| `--joy-danger`          | `#ef6a6a` | Failure/revoked status and error text only                        |
+| Token                  | Hex                      | Use                                                            |
+| ---------------------- | ------------------------ | -------------------------------------------------------------- |
+| `--joy-bg-app`         | `#0d0e10`                | Root/page background                                           |
+| `--joy-bg-panel`       | `#111216`                | Panel/article surfaces, dockview group + content background    |
+| `--joy-bg-chrome`      | `#16171b`                | Header, menubar, tab strips                                    |
+| `--joy-bg-elevated`    | `#17181d`                | Dropdowns, popovers, context menus                             |
+| `--joy-bg-raised`      | `#222226`                | Cards, list rows (history entries, workflow rows, asset cards) |
+| `--joy-bg-inset`       | `#101012`                | Sunken sections (register form, category rail)                 |
+| `--joy-bg-control`     | `#2a2a2e`                | Buttons, lanes, interactive fills                              |
+| `--joy-bg-hover`       | `#1d1f25`                | Hovered controls                                               |
+| `--joy-bg-active`      | `#24262d`                | Pressed / selected control fill                                |
+| `--joy-bg-input`       | `#0e0e10`                | Text inputs, selects                                           |
+| `--joy-bg-deep`        | `#080809`                | Canvases, code/expression fields, preview wells                |
+| `--joy-border-subtle`  | `rgb(255 255 255 / 7%)`  | Hairlines inside a surface                                     |
+| `--joy-border`         | `#2a2a2e`                | Default borders/dividers                                       |
+| `--joy-border-strong`  | `#3c3c42`                | Control borders                                                |
+| `--joy-border-hover`   | `#5a5a62`                | Hovered control borders, clip borders                          |
+| `--joy-gap`            | `#080809`                | Dockview separators, workspace gaps                            |
+| `--joy-text`           | `#ececef`                | Primary text                                                   |
+| `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                   |
+| `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                  |
+| `--joy-text-faint`     | `#7e7e86`                | Hints, timestamps, metadata                                    |
+| `--joy-text-disabled`  | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)                       |
+| `--joy-accent`         | `#f4b72f`                | **The** accent — see the scarcity list below                   |
+| `--joy-accent-hover`   | `#ffc94f`                | Accent under hover only                                        |
+| `--joy-accent-dim`     | `rgb(244 183 47 / 22%)`  | Accent washes: drag-over fill, active-tab underline            |
+| `--joy-ok`             | `#6fcf97`                | Success/connected status only                                  |
+| `--joy-danger`         | `#ef6a6a`                | Failure/revoked status and error text only                     |
 
 **Retired.** `--joy-accent-soft` (`#d4b06a`) and the hardcoded `#e9b949` are removed. Three yellows within one surface is why the editor reads mustard rather than Adobe-amber. Anything that used `accent-soft` for a "secondary active" state now uses `--joy-text` (active but not special) or `--joy-accent` (genuinely the current thing).
 
@@ -81,7 +81,7 @@ Owner direction, 2026-07-26: **every** panel is built from one shell, so that mo
 
 ```
 ┌──────────────────────────────────────────────┐
-│            ⬦ Title            ☆  ⌕  +        │  .joy-panel-header   (fixed)
+│  ⬆  ↻      ⬦ Title            ☆  ⌕  +        │  .joy-panel-header   (fixed)
 ├──────────────────────────────────────────────┤
 │  ⌕ search…                                   │  .joy-panel-search   (collapsed by default)
 ├──────────────────────────────────────────────┤
@@ -95,18 +95,19 @@ Owner direction, 2026-07-26: **every** panel is built from one shell, so that mo
 
 Nothing may be inserted above the header or between the header and the tabs except the collapsed search bar. No panel gets its own toolbar row.
 
-### The five parts
+### The six parts
 
-| Class | Rule |
-| --- | --- |
-| `.joy-panel-root` | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Padding lives here, once. |
-| `.joy-panel-header` | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. Column 1 is an empty gutter and stays empty — it exists so the title is optically centered against the actions. Height is one control (`--control-sm`). |
-| `.joy-panel-title` | `<h3>` in column 2, `justify-self:center`. 0.72rem, `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel. |
-| `.joy-panel-actions` | Column 3, `justify-self:end`, `gap:0.1rem`. Ordered inline-end-ward: **create (+) · favorites (☆) · filter · search (⌕)**. Only `icon-button`s. Two to four buttons; more than four means the panel needs tabs, not more chrome. |
-| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (0.66rem) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders. |
-| `.joy-panel-body` | The only scrolling element: `flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain`. Holds the item grid or the settings stack. |
+| Class                                | Rule                                                                                                                                                                                                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Padding lives here, once.                                                                                                                         |
+| `.joy-panel-header`                  | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. The center column never moves; the two outer columns balance each other so the title stays optically centered. Height is one control (`--control-sm`).                                                                              |
+| `.joy-panel-leading-actions`         | Optional icon-button group in column 1, `justify-self:start`. Use only when a panel has a meaningful start-edge action group; Assets uses Import, Filter/Sort, and Refresh here. It must not become a second toolbar.                                                              |
+| `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. 0.72rem, `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.                       |
+| `.joy-panel-actions`                 | Column 3, `justify-self:end`, `gap:0.1rem`. Ordered inline-end-ward: **create (+) · favorites (☆) · filter · search (⌕)**. Only `icon-button`s. Two to four buttons; more than four means the panel needs tabs or a justified `.joy-panel-leading-actions` split, not more chrome. |
+| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (0.66rem) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders.                                                                         |
+| `.joy-panel-body`                    | The only scrolling element: `flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain`. Holds the item grid or the settings stack.                                                                                                                                   |
 
-A panel with a single view still renders `.joy-panel-tabs` — with one tab, or omitted entirely if the panel genuinely has one view (Monitor, Timeline). It never renders a *different* structure.
+A panel with a single view still renders `.joy-panel-tabs` — with one tab, or omitted entirely if the panel genuinely has one view (Monitor, Timeline). It never renders a _different_ structure.
 
 ### Item cards inside `.joy-panel-body`
 
@@ -137,25 +138,25 @@ Panels whose content is genuinely independent of selection (Effects, Transitions
 
 Every panel, and what it owes. `✔` = already conforms.
 
-| Panel | Root | Centered title | Actions (inline end) | Tabs | Inactive state |
-| --- | --- | --- | --- | --- | --- |
-| Effects | ✔ | ✔ | ⌕ | ✔ categories | never |
-| Motion | ✔ | ✔ | + ☆ ⌕ | ✔ Library/Scenes/Presets/Spatial | ✔ on Presets + Spatial |
-| Transitions | ✔ | ✔ | ☆ ⌕ | ✔ Browse/Applied | never |
-| Assets (`media`) | ✔ | ✔ | ⬆ filter ↻ ☁ view ⌕ | ✔ All/Video/Audio/Images | never |
-| Captions | ✔ | ✔ | burn-in ⌕ | ✔ Transcript/Preview | ✔ when no caption track |
-| Inspector | ✔ | ✔ | — | ✔ Transform/Effects/Audio | ✔ |
-| Camera | ✔ | ✔ | + | ✔ Rig/Transform | ✔ |
-| Audio | ✔ | ✔ | — | ✔ Master/Clips | ✔ |
-| Color | ✔ | ✔ | ↻ reset | ✔ Grade/LUT/Scopes | never |
-| History | ✔ | ✔ | — | none | never |
-| Diagnostics | ✔ | ✔ | — | none | never |
-| Jobs | ✔ | ✔ | + thumb ↻ | ✔ Workers/Queue/Pair | never |
-| Agent | ✔ | ✔ | policy segment | ✔ Compose/Activity | never |
-| Workflows | ✔ | ✔ | ↻ | ✔ Saved/System | never |
-| Plugins | ✔ | ✔ | safe-mode lock | none | never |
-| Monitor | **exempt** | — | its own transport bar | — | — |
-| Timeline | **exempt** | — | NLE tool row (§4b) | — | — |
+| Panel            | Root       | Centered title | Actions (inline end)              | Tabs                             | Inactive state          |
+| ---------------- | ---------- | -------------- | --------------------------------- | -------------------------------- | ----------------------- |
+| Effects          | ✔          | ✔              | ⌕                                 | ✔ categories                     | never                   |
+| Motion           | ✔          | ✔              | + ☆ ⌕                             | ✔ Library/Scenes/Presets/Spatial | ✔ on Presets + Spatial  |
+| Transitions      | ✔          | ✔              | ☆ ⌕                               | ✔ Browse/Applied                 | never                   |
+| Assets (`media`) | ✔          | ✔              | start: ⬆ filter ↻ · end: ☁ view ⌕ | ✔ All/Video/Audio/Images         | never                   |
+| Captions         | ✔          | ✔              | burn-in ⌕                         | ✔ Transcript/Preview             | ✔ when no caption track |
+| Inspector        | ✔          | ✔              | —                                 | ✔ Transform/Effects/Audio        | ✔                       |
+| Camera           | ✔          | ✔              | +                                 | ✔ Rig/Transform                  | ✔                       |
+| Audio            | ✔          | ✔              | —                                 | ✔ Master/Clips                   | ✔                       |
+| Color            | ✔          | ✔              | ↻ reset                           | ✔ Grade/LUT/Scopes               | never                   |
+| History          | ✔          | ✔              | —                                 | none                             | never                   |
+| Diagnostics      | ✔          | ✔              | —                                 | none                             | never                   |
+| Jobs             | ✔          | ✔              | + thumb ↻                         | ✔ Workers/Queue/Pair             | never                   |
+| Agent            | ✔          | ✔              | policy segment                    | ✔ Compose/Activity               | never                   |
+| Workflows        | ✔          | ✔              | ↻                                 | ✔ Saved/System                   | never                   |
+| Plugins          | ✔          | ✔              | safe-mode lock                    | none                             | never                   |
+| Monitor          | **exempt** | —              | its own transport bar             | —                                | —                       |
+| Timeline         | **exempt** | —              | NLE tool row (§4b)                | —                                | —                       |
 
 **The two exemptions are deliberate.** Monitor and Timeline are viewports, not
 browsers: they have no item grid, their entire job is pixels and time, and a
@@ -213,21 +214,38 @@ Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transpo
 - Motion presets (Fade/Pop/Slide) and Effects apply to the selected sticker via the clip↔object map.
 - **Remove background**: Assets action queues `image.comfy` / RemBG when a paired Worker advertises `image.comfy`; otherwise disabled with an honest tooltip. Matte alpha can bind via `pluginData['joy.imageMatte']`.
 
-## 4d. Bidirectional text (Persian-first)
+## 4d. Persian explainer copy (centered and layout-neutral)
 
-Text fields that hold user content (`input[type=text]`, untyped inputs, search, textarea) carry `unicode-bidi: plaintext` so each field follows its own content direction — Persian is right-aligned, Latin filenames stay left-aligned, no global LTR forcing. Filenames/ids rendered in UI chrome get an explicit `dir="ltr"`. Explainers and empty states use `.empty-hint` (centered, muted, line-height 1.5); never leave a bare left-aligned paragraph floating in a panel.
+Visible panel titles, menu labels, tab labels, action labels, technical names, and
+product/domain identifiers stay English. Explanatory paragraphs, guidance,
+empty states, live status messages, and text-entry placeholders are Persian.
+
+Persian explainer elements carry `lang="fa"` and inherit `--joy-font-ui`
+(Modam Pro). The shared `[lang='fa']` rule centers the copy and applies
+`unicode-bidi: plaintext`; it does **not** set `direction`. Do not put explicit
+`dir="rtl"` or `dir="ltr"` on explainer blocks: those direction overrides have
+broken otherwise neutral panel layouts. Inline filenames, ids, API names, and
+code tokens stay isolated with `<bdi>` or `<code>` when embedded in Persian.
+
+Text fields that hold user content (`input[type=text]`, untyped inputs, search,
+textarea) keep `unicode-bidi: plaintext` so the user's own text remains
+readable. Explainers and empty states use `.empty-hint` or their panel-specific
+equivalent (centered, muted, line-height 1.5); never leave a bare left-aligned
+guidance paragraph floating in a panel.
 
 ## 4f. Typography (Eng / Fa / Arabic)
 
 **UI chrome face is Fontiran Modam Pro** for English, Persian (Farsi), and Arabic UI strings — same licensed webfont pack as JOY Agent.
 
-| Token / face | Value | Use |
-| --- | --- | --- |
-| `--joy-font-ui` | `'Modam Pro', Tahoma, system-ui, sans-serif` | Root, body, buttons, inputs, selects, textareas, panel chrome |
-| `--joy-font-mono` | `ui-monospace, SFMono-Regular, Consolas, monospace` | Timecode, expressions, diagnostic/code wells only |
-| `'Modam Pro Condensed'` | Optional condensed weights in `modam-pro.css` | Dense labels only when explicitly requested — not the default UI stack |
+| Token / face            | Value                                               | Use                                                                    |
+| ----------------------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
+| `--joy-font-ui`         | `'Modam Pro', Tahoma, system-ui, sans-serif`        | Root, body, buttons, inputs, selects, textareas, panel chrome          |
+| `--joy-font-mono`       | `ui-monospace, SFMono-Regular, Consolas, monospace` | Timecode, expressions, diagnostic/code wells only                      |
+| `'Modam Pro Condensed'` | Optional condensed weights in `modam-pro.css`       | Dense labels only when explicitly requested — not the default UI stack |
 
 - Source files: [`apps/editor-web/public/assets/fonts/modam-pro/`](apps/editor-web/public/assets/fonts/modam-pro/) (`modam-pro.css` + WOFF2/WOFF). Preload Regular in [`index.html`](apps/editor-web/index.html); stack is applied in [`app.css`](apps/editor-web/src/app.css) `:root`.
+- Persian explainer copy follows §4d: centered, layout-neutral, and tagged
+  `lang="fa"` so Modam Pro is applied without changing panel direction.
 - **Do not** use Inter, Roboto, Arial, Segoe UI, or Helvetica as the editor UI family.
 - **HTML scene packages** (ADR-0006) keep package-local / system faces declared in each scene `source` for deterministic goldens — they are not the editor UI stack. Do not load Modam over the network inside a sandboxed scene.
 - License: Fontiran Modam Pro (commercial). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

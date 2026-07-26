@@ -6,7 +6,12 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
-import { effectRegistry, listEffects, type EffectDescriptor, type EffectDragPayload } from '@joy-media/visual-effects';
+import {
+  effectRegistry,
+  listEffects,
+  type EffectDescriptor,
+  type EffectDragPayload,
+} from '@joy-media/visual-effects';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
@@ -24,7 +29,15 @@ const CATEGORIES: readonly PanelTabSpec[] = [
 interface EffectsPanelProps {
   readonly project: JoyProjectV1;
   readonly objectId: string | undefined;
-  readonly onDispatch: (transaction: { readonly type: 'effect.add'; readonly payload: { readonly objectId: string; readonly effectId: string; readonly params?: Readonly<Record<string, unknown>>; readonly index?: number } }) => void;
+  readonly onDispatch: (transaction: {
+    readonly type: 'effect.add';
+    readonly payload: {
+      readonly objectId: string;
+      readonly effectId: string;
+      readonly params?: Readonly<Record<string, unknown>>;
+      readonly index?: number;
+    };
+  }) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 
@@ -64,7 +77,10 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
   const handleAdd = useCallback(
     (effectId: string) => {
       if (!objectId) {
-        showToast('Select a clip or drag onto the timeline to apply effects.', 'info');
+        showToast(
+          'برای اعمال افکت، یک کلیپ را انتخاب کنید یا افکت را روی تایم‌لاین بکشید.',
+          'info',
+        );
         return;
       }
       const descriptor = effectRegistry.getEffect(effectId);
@@ -81,37 +97,36 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
     [objectId, onDispatch, showToast],
   );
 
-  const handleDragStart = useCallback(
-    (effectId: string, event: React.DragEvent) => {
-      const payload: EffectDragPayload = {
-        kind: 'joy/effect',
-        effectId,
-        source: 'effects-panel',
-      };
-      event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
-      event.dataTransfer.effectAllowed = 'copy';
-    },
-    [],
-  );
+  const handleDragStart = useCallback((effectId: string, event: React.DragEvent) => {
+    const payload: EffectDragPayload = {
+      kind: 'joy/effect',
+      effectId,
+      source: 'effects-panel',
+    };
+    event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'copy';
+  }, []);
 
   const emptyHint =
     category === 'favorites' && favorites.size === 0
-      ? 'No favorites yet.'
-      : 'No effects match.';
+      ? 'هنوز افکتی به علاقه‌مندی‌ها اضافه نشده است.'
+      : 'افکتی با جست‌وجوی شما مطابقت ندارد.';
 
   return (
     <PanelShell
       title="Effects"
       iconUrl={panelTabIconUrl('effects')}
       className="effects-panel"
-      search={{ value: search, onChange: setSearch, placeholder: 'Search effects…' }}
+      search={{ value: search, onChange: setSearch, placeholder: 'جست‌وجوی افکت‌ها…' }}
       tabs={CATEGORIES}
       activeTab={category}
       onTabChange={setCategory}
     >
       <div className="effects-grid">
         {filtered.length === 0 ? (
-          <p className="empty-hint">{emptyHint}</p>
+          <p className="empty-hint" lang="fa">
+            {emptyHint}
+          </p>
         ) : (
           filtered.map((desc) => (
             <EffectCard

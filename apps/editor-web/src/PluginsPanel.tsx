@@ -1,8 +1,5 @@
 import { CheckIcon, CloseIcon, LockIcon } from './icons.js';
-import {
-  DEMO_PANEL_PLUGIN_ID,
-  type EditorPluginHost,
-} from './plugin-host.js';
+import { DEMO_PANEL_PLUGIN_ID, type EditorPluginHost } from './plugin-host.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
@@ -25,8 +22,8 @@ export function PluginsPanel({
       className="plugins-panel"
       note={
         safeMode
-          ? 'Safe mode is on — UI entrypoints stay disabled.'
-          : 'Safe mode is off. Enable a plugin to mount its contribution.'
+          ? 'حالت امن روشن است؛ ورودی‌های رابط کاربری غیرفعال می‌مانند.'
+          : 'حالت امن خاموش است. برای نمایش رابط افزونه، آن را فعال کنید.'
       }
       actions={
         <button
@@ -91,8 +88,13 @@ export function PluginsPanel({
         <h4>Demo contribution</h4>
         {demoMounted ? (
           <div className="plugin-demo-surface">
-            <p>SDK host alive · capability ui.panel supported={String(pluginHost.sdk.supports('ui.panel'))}</p>
-            <p dir="ltr">Project data: {projectData === undefined ? '(empty)' : JSON.stringify(projectData)}</p>
+            <p lang="fa">
+              میزبان SDK فعال است · قابلیت <bdi>ui.panel</bdi> پشتیبانی می‌شود:
+              <bdi>{String(pluginHost.sdk.supports('ui.panel'))}</bdi>
+            </p>
+            <p dir="ltr">
+              Project data: {projectData === undefined ? '(empty)' : JSON.stringify(projectData)}
+            </p>
             <button
               className="icon-button icon-button-labeled"
               title="Write demo project data"
@@ -110,7 +112,9 @@ export function PluginsPanel({
             </button>
           </div>
         ) : (
-          <p className="empty-hint">Enable Demo Panel (with safe mode off) to mount this contribution.</p>
+          <p className="empty-hint" lang="fa">
+            برای نمایش این بخش، حالت امن را خاموش و Demo Panel را فعال کنید.
+          </p>
         )}
       </section>
     </PanelShell>

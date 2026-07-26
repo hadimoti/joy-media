@@ -130,6 +130,11 @@ Production was verified after deployment:
     left edge, keeps Cloud, View, and Search at the right edge, and preserves
     the Assets title at the exact panel center. Production browser measurement
     confirmed the header and title centers match within subpixel precision.
+20. User-facing explainers, guidance, empty states, live status, and
+    instructional placeholders are Persian in Modam Pro. They use centered,
+    layout-neutral `lang="fa"` styling without forced RTL/LTR direction;
+    titles and controls stay English. The two visible header lockups read
+    **JOY Studio** only—JOY Media infrastructure and identifiers are unchanged.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
 or use `https://media.joyteam.ir/?deploy=39261d0` once to force a fresh HTML

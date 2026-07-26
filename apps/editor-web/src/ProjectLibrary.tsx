@@ -40,7 +40,7 @@ export function ProjectLibrary({
             height={22}
             decoding="async"
           />
-          <strong>JOY Media</strong>
+          <strong>JOY Studio</strong>
         </div>
         <button
           type="button"
@@ -56,7 +56,9 @@ export function ProjectLibrary({
       <main className="project-library-main">
         <div className="project-library-intro">
           <h1>Projects</h1>
-          <p>Open a recent project or create a new one to enter the editor.</p>
+          <p lang="fa">
+            یک پروژهٔ اخیر را باز کنید یا برای ورود به ویرایشگر پروژهٔ تازه‌ای بسازید.
+          </p>
         </div>
 
         {creating && (
@@ -72,7 +74,7 @@ export function ProjectLibrary({
               <input
                 autoFocus
                 value={draftTitle}
-                placeholder="Project title"
+                placeholder="نام پروژه"
                 onChange={(event) => setDraftTitle(event.currentTarget.value)}
               />
             </label>
@@ -102,15 +104,13 @@ export function ProjectLibrary({
         <ul className="project-library-grid">
           {projects.map((entry) => (
             <li key={entry.id}>
-              <button
-                type="button"
-                className="project-library-card"
-                onClick={() => onOpen(entry)}
-              >
+              <button type="button" className="project-library-card" onClick={() => onOpen(entry)}>
                 <span className="project-library-card-thumb" aria-hidden="true" />
                 <span className="project-library-card-body">
                   <strong dir="auto">{entry.title}</strong>
-                  <span>Updated {formatUpdated(entry.updatedAt)}</span>
+                  <span lang="fa">
+                    آخرین تغییر: <bdi>{formatUpdated(entry.updatedAt)}</bdi>
+                  </span>
                 </span>
               </button>
               <button

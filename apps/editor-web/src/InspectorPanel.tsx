@@ -7,7 +7,11 @@
  */
 
 import { useState } from 'react';
-import type { AnimatablePropertyV1, EffectInstanceV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type {
+  AnimatablePropertyV1,
+  EffectInstanceV1,
+  VisualObjectV1,
+} from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import type { NumericTransformProperty, VisualObjectTransaction } from '@joy-media/property-system';
@@ -152,9 +156,10 @@ export function InspectorPanel({
   const noOverlay = object === undefined && selectedClipId !== undefined;
 
   const { transform: resolved, diagnostics } = idle
-    ? { transform: target.transform, diagnostics: [] as ReturnType<
-        typeof resolveObjectTransformWithExpressions
-      >['diagnostics'] }
+    ? {
+        transform: target.transform,
+        diagnostics: [] as ReturnType<typeof resolveObjectTransformWithExpressions>['diagnostics'],
+      }
     : resolveObjectTransformWithExpressions(target.id, allObjects, timeUs);
 
   const replaceChannel = (
@@ -221,8 +226,8 @@ export function InspectorPanel({
 
   const note = idle
     ? noOverlay
-      ? 'This clip has no linked visual overlay.'
-      : 'Select a clip to edit its properties.'
+      ? 'این کلیپ لایهٔ تصویری پیوندخورده‌ای ندارد.'
+      : 'برای ویرایش ویژگی‌ها، یک کلیپ را انتخاب کنید.'
     : undefined;
 
   return (
@@ -244,134 +249,152 @@ export function InspectorPanel({
       </p>
 
       {tab === 'transform' && (
-      <section className="inspector-section">
-        <button
-          type="button"
-          className="inspector-section-toggle"
-          aria-expanded={transformOpen}
-          onClick={() => setTransformOpen((v) => !v)}
-        >
-          <h3>Transform</h3>
-        </button>
-        {transformOpen && (
-          <>
-            <div className="preset-icon-group inspector-kf-row" role="group" aria-label="Keyframe interpolation">
-              {(
-                [
-                  ['hold', InterpHoldIcon, 'Hold'],
-                  ['linear', InterpLinearIcon, 'Linear'],
-                  ['eased', InterpEasedIcon, 'Eased'],
-                  ['bezier', InterpBezierIcon, 'Bezier'],
-                ] as const
-              ).map(([id, Icon, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className="icon-button"
-                  style={{ width: 'var(--control-sm)', height: 'var(--control-sm)', minWidth: 'var(--control-sm)', minHeight: 'var(--control-sm)' }}
-                  aria-pressed={interpolation === id}
-                  aria-label={label}
-                  data-guide={label}
-                  onClick={() => setInterpolation(id)}
-                >
-                  <Icon />
-                </button>
-              ))}
-            </div>
-            {NUMERIC_PROPERTIES.map((property) => {
-              const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
-              const curve = target.animations?.[key];
-              const animated = curve !== undefined;
-              const keyed = animated && hasKeyframeAt(curve, timeUs);
-              const expressionSource = target.expressions?.[key];
-              const hasExpression = expressionSource !== undefined;
-              const channelDiagnostic = diagnostics.find((d) => d.property === key);
-              const value = hasExpression
-                ? resolved[key]
-                : animated
-                  ? sampleCurve(curve, timeUs)
-                  : resolved[key];
-              const modified = Math.abs(value - (DEFAULTS[key] ?? 0)) > 0.0005;
-              return (
-                <div key={key} className={`inspector-prop${modified ? ' modified' : ''}`}>
-                  <label htmlFor={`insp-${key}`}>{property.label}</label>
-                  <div className="inspector-prop-row">
-                    <button
-                      type="button"
-                      className={keyed ? 'kf kf-active' : animated ? 'kf kf-on' : 'kf'}
-                      aria-label={`${keyed ? 'Remove' : 'Add'} ${property.label} keyframe`}
-                      aria-pressed={keyed}
-                      disabled={idle || hasExpression}
-                      title={keyed ? 'Remove keyframe (playhead)' : 'Add keyframe'}
-                      onClick={() => toggleKeyframe(key, value)}
-                    >
-                      {keyed ? <KeyframeActiveIcon /> : animated ? <KeyframeBetweenIcon /> : <KeyframeNoneIcon />}
-                    </button>
-                    <input
-                      id={`insp-${key}`}
-                      type="number"
-                      min={property.min}
-                      max={property.max}
-                      step={key === 'opacity' ? 0.01 : 1}
-                      value={round(value)}
-                      disabled={idle || hasExpression}
-                      onChange={(event) => {
-                        const next = event.currentTarget.valueAsNumber;
-                        if (!Number.isFinite(next)) return;
-                        if (animated) replaceChannel(key, setKeyframe(curve, keyframePayload(next)));
-                        else onSetStatic(target.id, key, next);
-                      }}
-                    />
-                    {key === 'opacity' && <span className="monitor-meta">{formatPercent(value)}</span>}
-                    <button
-                      type="button"
-                      className={hasExpression ? 'fx fx-on' : 'fx'}
-                      disabled={idle}
-                      aria-label={`${hasExpression ? 'Edit' : 'Add'} ${property.label} expression`}
-                      title="Expression"
-                      onClick={() => {
-                        setDraftSource(target.expressions?.[key] ?? '');
-                        setCommitError(undefined);
-                        setEditingExpression(editingExpression === key ? undefined : key);
-                      }}
-                    >
-                      ƒx
-                    </button>
-                  </div>
-                  {editingExpression === key && (
-                    <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>
+        <section className="inspector-section">
+          <button
+            type="button"
+            className="inspector-section-toggle"
+            aria-expanded={transformOpen}
+            onClick={() => setTransformOpen((v) => !v)}
+          >
+            <h3>Transform</h3>
+          </button>
+          {transformOpen && (
+            <>
+              <div
+                className="preset-icon-group inspector-kf-row"
+                role="group"
+                aria-label="Keyframe interpolation"
+              >
+                {(
+                  [
+                    ['hold', InterpHoldIcon, 'Hold'],
+                    ['linear', InterpLinearIcon, 'Linear'],
+                    ['eased', InterpEasedIcon, 'Eased'],
+                    ['bezier', InterpBezierIcon, 'Bezier'],
+                  ] as const
+                ).map(([id, Icon, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className="icon-button"
+                    style={{
+                      width: 'var(--control-sm)',
+                      height: 'var(--control-sm)',
+                      minWidth: 'var(--control-sm)',
+                      minHeight: 'var(--control-sm)',
+                    }}
+                    aria-pressed={interpolation === id}
+                    aria-label={label}
+                    data-guide={label}
+                    onClick={() => setInterpolation(id)}
+                  >
+                    <Icon />
+                  </button>
+                ))}
+              </div>
+              {NUMERIC_PROPERTIES.map((property) => {
+                const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
+                const curve = target.animations?.[key];
+                const animated = curve !== undefined;
+                const keyed = animated && hasKeyframeAt(curve, timeUs);
+                const expressionSource = target.expressions?.[key];
+                const hasExpression = expressionSource !== undefined;
+                const channelDiagnostic = diagnostics.find((d) => d.property === key);
+                const value = hasExpression
+                  ? resolved[key]
+                  : animated
+                    ? sampleCurve(curve, timeUs)
+                    : resolved[key];
+                const modified = Math.abs(value - (DEFAULTS[key] ?? 0)) > 0.0005;
+                return (
+                  <div key={key} className={`inspector-prop${modified ? ' modified' : ''}`}>
+                    <label htmlFor={`insp-${key}`}>{property.label}</label>
+                    <div className="inspector-prop-row">
+                      <button
+                        type="button"
+                        className={keyed ? 'kf kf-active' : animated ? 'kf kf-on' : 'kf'}
+                        aria-label={`${keyed ? 'Remove' : 'Add'} ${property.label} keyframe`}
+                        aria-pressed={keyed}
+                        disabled={idle || hasExpression}
+                        title={keyed ? 'Remove keyframe (playhead)' : 'Add keyframe'}
+                        onClick={() => toggleKeyframe(key, value)}
+                      >
+                        {keyed ? (
+                          <KeyframeActiveIcon />
+                        ) : animated ? (
+                          <KeyframeBetweenIcon />
+                        ) : (
+                          <KeyframeNoneIcon />
+                        )}
+                      </button>
                       <input
-                        type="text"
-                        className="inspector-expression-input"
-                        value={draftSource}
-                        autoFocus
-                        placeholder="e.g. sin(time) * 10"
-                        onChange={(event) => setDraftSource(event.currentTarget.value)}
-                        onBlur={() => commitExpression(key, draftSource)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') commitExpression(key, draftSource);
-                          if (event.key === 'Escape') {
-                            setEditingExpression(undefined);
-                            setCommitError(undefined);
-                          }
+                        id={`insp-${key}`}
+                        type="number"
+                        min={property.min}
+                        max={property.max}
+                        step={key === 'opacity' ? 0.01 : 1}
+                        value={round(value)}
+                        disabled={idle || hasExpression}
+                        onChange={(event) => {
+                          const next = event.currentTarget.valueAsNumber;
+                          if (!Number.isFinite(next)) return;
+                          if (animated)
+                            replaceChannel(key, setKeyframe(curve, keyframePayload(next)));
+                          else onSetStatic(target.id, key, next);
                         }}
                       />
-                      {commitError !== undefined && (
-                        <p className="inspector-expression-error">{commitError}</p>
+                      {key === 'opacity' && (
+                        <span className="monitor-meta">{formatPercent(value)}</span>
                       )}
+                      <button
+                        type="button"
+                        className={hasExpression ? 'fx fx-on' : 'fx'}
+                        disabled={idle}
+                        aria-label={`${hasExpression ? 'Edit' : 'Add'} ${property.label} expression`}
+                        title="Expression"
+                        onClick={() => {
+                          setDraftSource(target.expressions?.[key] ?? '');
+                          setCommitError(undefined);
+                          setEditingExpression(editingExpression === key ? undefined : key);
+                        }}
+                      >
+                        ƒx
+                      </button>
                     </div>
-                  )}
-                  {channelDiagnostic !== undefined && (
-                    <p className="inspector-expression-error" style={{ gridColumn: '1 / -1' }}>
-                      {channelDiagnostic.message}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </>
-        )}
-      </section>
+                    {editingExpression === key && (
+                      <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>
+                        <input
+                          type="text"
+                          className="inspector-expression-input"
+                          value={draftSource}
+                          autoFocus
+                          placeholder="e.g. sin(time) * 10"
+                          onChange={(event) => setDraftSource(event.currentTarget.value)}
+                          onBlur={() => commitExpression(key, draftSource)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') commitExpression(key, draftSource);
+                            if (event.key === 'Escape') {
+                              setEditingExpression(undefined);
+                              setCommitError(undefined);
+                            }
+                          }}
+                        />
+                        {commitError !== undefined && (
+                          <p className="inspector-expression-error">{commitError}</p>
+                        )}
+                      </div>
+                    )}
+                    {channelDiagnostic !== undefined && (
+                      <p className="inspector-expression-error" style={{ gridColumn: '1 / -1' }}>
+                        {channelDiagnostic.message}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </section>
       )}
 
       {tab === 'transform' && target.kind === 'image' && (
@@ -432,7 +455,9 @@ export function InspectorPanel({
             dispatch={dispatchAudio}
           />
         ) : (
-          <p className="empty-hint">Select a clip to mix its audio.</p>
+          <p className="empty-hint" lang="fa">
+            برای میکس صدای کلیپ، ابتدا آن را انتخاب کنید.
+          </p>
         ))}
     </PanelShell>
   );
@@ -455,7 +480,12 @@ function EffectsSection({
 
   return (
     <section className="inspector-section">
-      <button type="button" className="inspector-section-toggle" aria-expanded={open} onClick={onToggle}>
+      <button
+        type="button"
+        className="inspector-section-toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
         <h3>Effects</h3>
       </button>
       {open && (
@@ -598,7 +628,10 @@ function EffectParamControl({
             title={`${numValue.toFixed(2)}${param.unit ?? ''}`}
             onChange={(e) => setValue(e.currentTarget.valueAsNumber)}
           />
-          <span className="value">{numValue.toFixed(2)}{param.unit}</span>
+          <span className="value">
+            {numValue.toFixed(2)}
+            {param.unit}
+          </span>
         </div>
       </div>
     );
@@ -626,10 +659,7 @@ function EffectParamControl({
     return (
       <div className="inspector-prop">
         <label>{param.label}</label>
-        <select
-          value={strValue}
-          onChange={(e) => setValue(e.currentTarget.value)}
-        >
+        <select value={strValue} onChange={(e) => setValue(e.currentTarget.value)}>
           {param.options.map((opt) => (
             <option key={String(opt.value)} value={String(opt.value)}>
               {opt.label}
@@ -683,7 +713,12 @@ function AudioSection({
 }) {
   return (
     <section className="inspector-section">
-      <button type="button" className="inspector-section-toggle" aria-expanded={open} onClick={onToggle}>
+      <button
+        type="button"
+        className="inspector-section-toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
         <h3>Audio</h3>
       </button>
       {open && (

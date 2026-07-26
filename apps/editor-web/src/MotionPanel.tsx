@@ -97,10 +97,7 @@ function loadFavorites(): Set<string> {
 }
 
 function saveFavorites(favorites: Set<string>): void {
-  window.localStorage.setItem(
-    'joy-media.motion-favorites',
-    JSON.stringify([...favorites]),
-  );
+  window.localStorage.setItem('joy-media.motion-favorites', JSON.stringify([...favorites]));
 }
 
 /* ─── Categories ─── */
@@ -176,21 +173,23 @@ function MotionCard({
         <div className="motion-card-live" style={animStyle}>
           <img src="/assets/logo.png" alt="" draggable={false} />
         </div>
-        <span className="motion-card-duration">
-          {(motion.durationMs / 1000).toFixed(1)}s
-        </span>
+        <span className="motion-card-duration">{(motion.durationMs / 1000).toFixed(1)}s</span>
       </div>
       <div className="motion-card-body">
         <span className="motion-card-name" title={motion.name}>
           {motion.name}
         </span>
-        <span className="motion-card-source">{motion.source === 'built-in' ? 'Built-in' : 'User'}</span>
+        <span className="motion-card-source">
+          {motion.source === 'built-in' ? 'Built-in' : 'User'}
+        </span>
       </div>
       <div className="motion-card-actions">
         <button
           type="button"
           className={`icon-button motion-fav-btn${isFavorite ? ' favored' : ''}`}
-          aria-label={isFavorite ? `Remove ${motion.name} from favorites` : `Add ${motion.name} to favorites`}
+          aria-label={
+            isFavorite ? `Remove ${motion.name} from favorites` : `Add ${motion.name} to favorites`
+          }
           title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           onClick={() => onToggleFavorite(motion.id)}
         >
@@ -293,8 +292,7 @@ function LibraryTab({
     const q = query.trim().toLowerCase();
     if (q === '') return allMotions;
     return allMotions.filter(
-      (motion) =>
-        motion.name.toLowerCase().includes(q) || motion.id.toLowerCase().includes(q),
+      (motion) => motion.name.toLowerCase().includes(q) || motion.id.toLowerCase().includes(q),
     );
   }, [allMotions, query]);
 
@@ -308,17 +306,16 @@ function LibraryTab({
     return matching.filter((motion) => !favorites.has(motion.id));
   }, [matching, favorites, favoritesOnly]);
 
-  const builtinRest = useMemo(
-    () => rest.filter((motion) => motion.source === 'built-in'),
-    [rest],
-  );
+  const builtinRest = useMemo(() => rest.filter((motion) => motion.source === 'built-in'), [rest]);
   const userRest = useMemo(() => rest.filter((motion) => motion.source !== 'built-in'), [rest]);
 
   return (
     <div className="motion-library">
       <div className="motion-library-scroll">
-        {(filtered.length === 0 && rest.length === 0) ? (
-          <p className="motion-library-empty">No motions available.</p>
+        {filtered.length === 0 && rest.length === 0 ? (
+          <p className="motion-library-empty" lang="fa">
+            موشنی در دسترس نیست.
+          </p>
         ) : (
           <>
             {filtered.length > 0 && (
@@ -376,7 +373,9 @@ function HtmlSceneListThumb({
     void getFirstPartySceneThumbUrl(sceneId, height).then((next) => {
       if (!cancelled) setUrl(next);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sceneId, height]);
   const width = Math.max(1, Math.round((height * 9) / 16));
   if (url === undefined) {
@@ -502,23 +501,33 @@ function HtmlSceneInfoPanel({ scene }: { readonly scene: FirstPartyScenePackage 
         </div>
         <div>
           <dt>Viewport</dt>
-          <dd dir="ltr">{width} × {height}</dd>
+          <dd dir="ltr">
+            {width} × {height}
+          </dd>
         </div>
         <div>
           <dt>Preview focus</dt>
-          <dd dir="ltr">x {focus.x.toFixed(2)} · y {focus.y.toFixed(2)} · w {focus.w.toFixed(2)} · h {focus.h.toFixed(2)}</dd>
+          <dd dir="ltr">
+            x {focus.x.toFixed(2)} · y {focus.y.toFixed(2)} · w {focus.w.toFixed(2)} · h{' '}
+            {focus.h.toFixed(2)}
+          </dd>
         </div>
       </dl>
       <h4 className="html-scene-info-vars-title">Variables</h4>
       {Object.keys(scene.variableSchema).length === 0 ? (
-        <p className="html-scene-info-empty">No variables.</p>
+        <p className="html-scene-info-empty" lang="fa">
+          متغیری وجود ندارد.
+        </p>
       ) : (
         <ul className="html-scene-info-vars">
           {Object.entries(scene.variableSchema).map(([key, def]) => (
             <li key={key}>
-              <span className="html-scene-info-var-key" dir="ltr">{key}</span>
+              <span className="html-scene-info-var-key" dir="ltr">
+                {key}
+              </span>
               <span className="html-scene-info-var-meta">
-                {def.label ?? key} · {def.type} · default <code dir="ltr">{String(def.default)}</code>
+                {def.label ?? key} · {def.type} · default{' '}
+                <code dir="ltr">{String(def.default)}</code>
               </span>
             </li>
           ))}
@@ -572,7 +581,11 @@ function HtmlSceneAddButton({
         type="button"
         className="icon-button html-scene-add-btn"
         data-guide={canAdd ? 'Add to selection' : 'Select a timeline clip'}
-        aria-label={canAdd ? `Add ${scene.name} to selected clip` : `Select a timeline clip to add ${scene.name}`}
+        aria-label={
+          canAdd
+            ? `Add ${scene.name} to selected clip`
+            : `Select a timeline clip to add ${scene.name}`
+        }
         title={canAdd ? `Add · ${scene.name}` : 'Select a timeline clip'}
         disabled={!canAdd}
         onClick={() => onAdd(scene.id)}
@@ -606,9 +619,16 @@ function HtmlSceneInfoTab({
   readonly onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { closeRef.current?.focus(); }, [scene.id]);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, [scene.id]);
   return (
-    <div className="html-scene-info-tab" role="dialog" aria-modal="true" aria-label={`${scene.name} scene info`}>
+    <div
+      className="html-scene-info-tab"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${scene.name} scene info`}
+    >
       <header className="html-scene-info-tab-bar">
         <span className="html-scene-info-tab-title">{scene.name}</span>
         <button
@@ -670,10 +690,16 @@ function HtmlScenesSection({
         if (now - lastEmit >= MIN_FRAME_MS) {
           lastEmit = now;
           const progress = ((now - start) % LIVE_LOOP_MS) / LIVE_LOOP_MS;
-          const active = infoListenersRef.current.size > 0 ? infoListenersRef.current : catalogListenersRef.current;
+          const active =
+            infoListenersRef.current.size > 0
+              ? infoListenersRef.current
+              : catalogListenersRef.current;
           for (const listener of active) listener(progress);
         }
-      } else { start = undefined; lastEmit = 0; }
+      } else {
+        start = undefined;
+        lastEmit = 0;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -689,10 +715,16 @@ function HtmlScenesSection({
     return () => window.removeEventListener('keydown', onKey);
   }, [infoSceneId]);
 
-  const openInfo = (key: string) => { setInfoSceneId((current) => (current === key ? undefined : key)); };
+  const openInfo = (key: string) => {
+    setInfoSceneId((current) => (current === key ? undefined : key));
+  };
 
   return (
-    <section className={infoScene !== undefined ? 'html-scenes-section info-tab-open' : 'html-scenes-section'}>
+    <section
+      className={
+        infoScene !== undefined ? 'html-scenes-section info-tab-open' : 'html-scenes-section'
+      }
+    >
       <div className="html-scenes-layer" aria-hidden={infoScene !== undefined}>
         <h3 className="html-scenes-heading sr-only">HTML scenes</h3>
         <div className="html-scene-actions" role="list" aria-label="HTML scene catalog">
@@ -739,10 +771,12 @@ function HtmlScenesSection({
                     className="icon-button"
                     title={`Remove ${scene.id}`}
                     aria-label={`Remove HTML scene ${scene.id}`}
-                    onClick={() => onDispatch({
-                      label: `Remove HTML scene ${scene.id}`,
-                      commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
-                    })}
+                    onClick={() =>
+                      onDispatch({
+                        label: `Remove HTML scene ${scene.id}`,
+                        commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
+                      })
+                    }
                   >
                     <CloseIcon />
                   </button>
@@ -753,7 +787,11 @@ function HtmlScenesSection({
         )}
       </div>
       {infoScene !== undefined && (
-        <HtmlSceneInfoTab scene={infoScene} listenersRef={infoListenersRef} onClose={() => setInfoSceneId(undefined)} />
+        <HtmlSceneInfoTab
+          scene={infoScene}
+          listenersRef={infoListenersRef}
+          onClose={() => setInfoSceneId(undefined)}
+        />
       )}
     </section>
   );
@@ -781,7 +819,9 @@ function SpatialPathPreview({
   if (xCurve === undefined || yCurve === undefined) {
     return (
       <section className="motion-spatial">
-        <p className="empty-hint">Animate both X and Y to preview the 2D motion path.</p>
+        <p className="empty-hint" lang="fa">
+          برای پیش‌نمایش مسیر حرکت دوبعدی، هر دو محور X و Y را متحرک کنید.
+        </p>
       </section>
     );
   }
@@ -803,7 +843,9 @@ function SpatialPathPreview({
   const h = 100;
   const px = (v: number) => ((v - minX) / spanX) * (w - 16) + 8;
   const py = (v: number) => h - 8 - ((v - minY) / spanY) * (h - 16);
-  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(' ');
+  const d = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`)
+    .join(' ');
   const now = { x: sampleCurve(xCurve, playheadUs), y: sampleCurve(yCurve, playheadUs) };
   return (
     <section className="motion-spatial">
@@ -859,13 +901,20 @@ export function MotionPanel({
     });
   }, []);
 
-  const openMotion = useCallback((_id: string) => {
-    openMotionStudio();
-  }, [openMotionStudio]);
+  const openMotion = useCallback(
+    (_id: string) => {
+      openMotionStudio();
+    },
+    [openMotionStudio],
+  );
 
   const duplicateMotion = useCallback((id: string) => {
     const newId = `user-${crypto.randomUUID()}`;
-    const duplicated = motionRegistry.duplicate(id, newId, `${motionRegistry.get(id)?.name ?? 'Motion'} (Copy)`);
+    const duplicated = motionRegistry.duplicate(
+      id,
+      newId,
+      `${motionRegistry.get(id)?.name ?? 'Motion'} (Copy)`,
+    );
     if (duplicated) {
       setFavorites((prev) => prev);
     }
@@ -889,10 +938,12 @@ export function MotionPanel({
     if (object === undefined) return;
     onDispatch({
       label: 'Set parent',
-      commands: [{
-        type: 'object.setParent',
-        payload: parentId === '' ? { objectId: object.id } : { objectId: object.id, parentId },
-      }],
+      commands: [
+        {
+          type: 'object.setParent',
+          payload: parentId === '' ? { objectId: object.id } : { objectId: object.id, parentId },
+        },
+      ],
     });
   };
 
@@ -908,16 +959,25 @@ export function MotionPanel({
       const point = { x: sampleCurve(xCurve, timeUs), y: sampleCurve(yCurve, timeUs) };
       keyframes.push({ timeUs, point, interpolation: 'linear' as const });
     }
-    const command: SetSpatialPathCommand = { type: 'object.setSpatialPath', payload: { objectId: object.id, spatialPath: { keyframes } } };
+    const command: SetSpatialPathCommand = {
+      type: 'object.setSpatialPath',
+      payload: { objectId: object.id, spatialPath: { keyframes } },
+    };
     onDispatch({ label: 'Save spatial path', commands: [command] });
   };
 
-  const parentCandidates = object === undefined ? [] : Object.values(allObjects).filter(
-    (candidate) =>
-      candidate.id !== object.id &&
-      !parentChain(candidate.id, allObjects).some((ancestor) => ancestor.id === object.id),
-  );
-  const canSaveSpatial = object !== undefined && object.animations?.x !== undefined && object.animations?.y !== undefined;
+  const parentCandidates =
+    object === undefined
+      ? []
+      : Object.values(allObjects).filter(
+          (candidate) =>
+            candidate.id !== object.id &&
+            !parentChain(candidate.id, allObjects).some((ancestor) => ancestor.id === object.id),
+        );
+  const canSaveSpatial =
+    object !== undefined &&
+    object.animations?.x !== undefined &&
+    object.animations?.y !== undefined;
 
   // 3c: Motion and Spatial need a selected visual clip. They keep their
   // controls on screen and disable them rather than swapping in a sentence.
@@ -930,12 +990,12 @@ export function MotionPanel({
       title="Motion"
       iconUrl={panelTabIconUrl('motion')}
       className="motion-panel"
-      search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی موشن‌ها…' }}
       tabs={LIBRARY_SUBTABS}
       activeTab={subtab}
       onTabChange={(id) => setSubtab(id as LibrarySubtab)}
       inactive={inactive}
-      {...(inactive ? { note: 'Select a visual clip to edit its motion.' } : {})}
+      {...(inactive ? { note: 'برای ویرایش موشن، یک کلیپ تصویری را انتخاب کنید.' } : {})}
       actions={
         <>
           <button
@@ -974,92 +1034,149 @@ export function MotionPanel({
         )}
 
         {subtab === 'presets' && (
-            <>
-              <p className="motion-object-id" title={target.id}>
-                {inactive ? '(no clip selected)' : target.id}
-              </p>
-              <div className="motion-controls">
-                <label className="motion-field">
-                  Parent
-                  <select value={target.parentId ?? ''} disabled={inactive} onChange={(event) => setParent(event.target.value)}>
-                    <option value="">(none)</option>
-                    {parentCandidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {candidate.id}{candidate.kind === 'null' ? ' (null)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="motion-field">
-                  Preset
-                  <select value={presetId} disabled={inactive} onChange={(event) => setPresetId(event.target.value)}>
-                    {JOY_MOTION_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="field-action">
-                  <span className="field-action-label" aria-hidden>&nbsp;</span>
-                  <div className="field-action-row">
-                    <button type="button" className="icon-button" data-guide="Apply preset" aria-label="Apply motion preset" onClick={applyPreset}>
-                      <CheckIcon />
-                    </button>
-                  </div>
+          <>
+            <p className="motion-object-id" title={target.id}>
+              {inactive ? '(no clip selected)' : target.id}
+            </p>
+            <div className="motion-controls">
+              <label className="motion-field">
+                Parent
+                <select
+                  value={target.parentId ?? ''}
+                  disabled={inactive}
+                  onChange={(event) => setParent(event.target.value)}
+                >
+                  <option value="">(none)</option>
+                  {parentCandidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.id}
+                      {candidate.kind === 'null' ? ' (null)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="motion-field">
+                Preset
+                <select
+                  value={presetId}
+                  disabled={inactive}
+                  onChange={(event) => setPresetId(event.target.value)}
+                >
+                  {JOY_MOTION_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field-action">
+                <span className="field-action-label" aria-hidden>
+                  &nbsp;
+                </span>
+                <div className="field-action-row">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    data-guide="Apply preset"
+                    aria-label="Apply motion preset"
+                    onClick={applyPreset}
+                  >
+                    <CheckIcon />
+                  </button>
                 </div>
               </div>
-              {channels.length === 0 ? (
-                <p className="motion-empty">No keyframes yet — add them in the Inspector or apply a preset above.</p>
-              ) : (
-                <div className="motion-lanes">
-                  {channels.map((channel) => {
-                    const curve = target.animations![channel]!;
-                    return (
-                      <div key={channel} className="motion-lane">
-                        <button
-                          type="button"
-                          className={activeGraph === channel ? 'motion-lane-label active' : 'motion-lane-label'}
-                          onClick={() => setGraphChannel(channel)}
-                          title="Show this channel in the graph"
-                        >{channel}</button>
-                        <svg
-                          className="motion-lane-track"
-                          viewBox={`0 0 ${LANE_WIDTH} 16`}
-                          width={LANE_WIDTH}
-                          height={16}
-                          role="img"
-                          aria-label={`${channel} keyframes`}
-                        >
-                          <line x1={0} y1={8} x2={LANE_WIDTH} y2={8} stroke={JOY_COLORS.border} strokeWidth={1} />
-                          <line x1={timeToX(playheadUs)} y1={0} x2={timeToX(playheadUs)} y2={16} stroke={JOY_COLORS.accent} strokeWidth={1} />
-                          {curve.keyframes.map((kf) => (
-                            <rect
-                              key={kf.timeUs}
-                              x={timeToX(kf.timeUs) - 4} y={4}
-                              width={8} height={8}
-                              transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
-                              fill={JOY_COLORS.textMuted}
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => onSeek(kf.timeUs)}
-                            >
-                              <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
-                            </rect>
-                          ))}
-                        </svg>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {activeGraph !== undefined && (
-                <GraphEditor object={target} channel={activeGraph} duration={duration} playheadUs={playheadUs} onSeek={onSeek} onDispatch={onDispatch} />
-              )}
-            </>
+            </div>
+            {channels.length === 0 ? (
+              <p className="motion-empty" lang="fa">
+                هنوز کی‌فریمی وجود ندارد؛ آن را در Inspector اضافه کنید یا یکی از پریست‌های بالا را
+                اعمال کنید.
+              </p>
+            ) : (
+              <div className="motion-lanes">
+                {channels.map((channel) => {
+                  const curve = target.animations![channel]!;
+                  return (
+                    <div key={channel} className="motion-lane">
+                      <button
+                        type="button"
+                        className={
+                          activeGraph === channel ? 'motion-lane-label active' : 'motion-lane-label'
+                        }
+                        onClick={() => setGraphChannel(channel)}
+                        title="Show this channel in the graph"
+                      >
+                        {channel}
+                      </button>
+                      <svg
+                        className="motion-lane-track"
+                        viewBox={`0 0 ${LANE_WIDTH} 16`}
+                        width={LANE_WIDTH}
+                        height={16}
+                        role="img"
+                        aria-label={`${channel} keyframes`}
+                      >
+                        <line
+                          x1={0}
+                          y1={8}
+                          x2={LANE_WIDTH}
+                          y2={8}
+                          stroke={JOY_COLORS.border}
+                          strokeWidth={1}
+                        />
+                        <line
+                          x1={timeToX(playheadUs)}
+                          y1={0}
+                          x2={timeToX(playheadUs)}
+                          y2={16}
+                          stroke={JOY_COLORS.accent}
+                          strokeWidth={1}
+                        />
+                        {curve.keyframes.map((kf) => (
+                          <rect
+                            key={kf.timeUs}
+                            x={timeToX(kf.timeUs) - 4}
+                            y={4}
+                            width={8}
+                            height={8}
+                            transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
+                            fill={JOY_COLORS.textMuted}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => onSeek(kf.timeUs)}
+                          >
+                            <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
+                          </rect>
+                        ))}
+                      </svg>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {activeGraph !== undefined && (
+              <GraphEditor
+                object={target}
+                channel={activeGraph}
+                duration={duration}
+                playheadUs={playheadUs}
+                onSeek={onSeek}
+                onDispatch={onDispatch}
+              />
+            )}
+          </>
         )}
 
         {subtab === 'spatial' && (
           <>
             <div className="motion-spatial-actions">
-              <button type="button" className="icon-button" data-guide="Save spatial path" aria-label="Save spatial path" title="Save spatial path" disabled={inactive || !canSaveSpatial} onClick={saveSpatialPath}>
+              <button
+                type="button"
+                className="icon-button"
+                data-guide="Save spatial path"
+                aria-label="Save spatial path"
+                title="Save spatial path"
+                disabled={inactive || !canSaveSpatial}
+                onClick={saveSpatialPath}
+              >
                 <SaveIcon />
               </button>
             </div>

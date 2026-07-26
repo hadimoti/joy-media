@@ -29,10 +29,12 @@ export function TimelineEmptyState({
   const dropRef = useRef<HTMLDivElement>(null);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('application/x-joy-media-asset') &&
-        !event.dataTransfer.types.includes('application/x-joy-effect') &&
-        !event.dataTransfer.types.includes('application/x-joy-transition') &&
-        !event.dataTransfer.types.includes('Files')) {
+    if (
+      !event.dataTransfer.types.includes('application/x-joy-media-asset') &&
+      !event.dataTransfer.types.includes('application/x-joy-effect') &&
+      !event.dataTransfer.types.includes('application/x-joy-transition') &&
+      !event.dataTransfer.types.includes('Files')
+    ) {
       return;
     }
     event.preventDefault();
@@ -47,34 +49,48 @@ export function TimelineEmptyState({
     setDragActive(false);
   }, []);
 
-  const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setDragActive(false);
-    if (event.dataTransfer.types.includes('application/x-joy-effect') ||
-        event.dataTransfer.types.includes('application/x-joy-transition')) {
-      onToast?.('Add media to the timeline first, then drag effects onto clips.');
-      return;
-    }
-    onImportClick();
-  }, [onImportClick, onToast]);
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setDragActive(false);
+      if (
+        event.dataTransfer.types.includes('application/x-joy-effect') ||
+        event.dataTransfer.types.includes('application/x-joy-transition')
+      ) {
+        onToast?.('ابتدا رسانه را به تایم‌لاین اضافه کنید، سپس افکت را روی کلیپ بکشید.');
+        return;
+      }
+      onImportClick();
+    },
+    [onImportClick, onToast],
+  );
 
-  const handleContextMenu = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onContextMenu(event.clientX, event.clientY);
-  }, [onContextMenu]);
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onContextMenu(event.clientX, event.clientY);
+    },
+    [onContextMenu],
+  );
 
-  const handleClick = useCallback((event: React.MouseEvent) => {
-    if (event.target !== event.currentTarget) return;
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const localX = event.clientX - rect.left;
-    const pxPerUs = viewportPixelsPerSecond / 1_000_000;
-    const timeUs = Math.max(0, Math.min(compositionDurationUs, localX / pxPerUs));
-    onSeek(timeUs);
-  }, [compositionDurationUs, viewportPixelsPerSecond, onSeek]);
+  const handleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (event.target !== event.currentTarget) return;
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      const localX = event.clientX - rect.left;
+      const pxPerUs = viewportPixelsPerSecond / 1_000_000;
+      const timeUs = Math.max(0, Math.min(compositionDurationUs, localX / pxPerUs));
+      onSeek(timeUs);
+    },
+    [compositionDurationUs, viewportPixelsPerSecond, onSeek],
+  );
 
   const composition = project.compositions[project.rootCompositionId];
-  const isTimelineEmpty = composition === undefined || composition.tracks.length === 0 || composition.tracks.every(track => track.clips.length === 0);
+  const isTimelineEmpty =
+    composition === undefined ||
+    composition.tracks.length === 0 ||
+    composition.tracks.every((track) => track.clips.length === 0);
 
   if (!isTimelineEmpty) return null;
 
@@ -95,12 +111,17 @@ export function TimelineEmptyState({
         <div className="timeline-empty-icon" aria-hidden="true">
           <UploadIcon />
         </div>
-        <p className="timeline-empty-text">Drag media here to start editing</p>
+        <p className="timeline-empty-text" lang="fa">
+          برای شروع ویرایش، رسانه را اینجا بکشید
+        </p>
         <div className="timeline-empty-actions">
           <button
             type="button"
             className="timeline-empty-btn primary"
-            onClick={(e) => { e.stopPropagation(); onImportClick(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onImportClick();
+            }}
             aria-label="Import media files"
           >
             Import Media
@@ -108,14 +129,17 @@ export function TimelineEmptyState({
           <button
             type="button"
             className="timeline-empty-btn secondary"
-            onClick={(e) => { e.stopPropagation(); onAddFromLibrary(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddFromLibrary();
+            }}
             aria-label="Add from media library"
           >
             Add from Library
           </button>
         </div>
-        <p className="timeline-empty-hint">
-          Supports video, audio, images, and subtitles
+        <p className="timeline-empty-hint" lang="fa">
+          از ویدئو، صدا، تصویر و زیرنویس پشتیبانی می‌شود
         </p>
       </div>
     </div>

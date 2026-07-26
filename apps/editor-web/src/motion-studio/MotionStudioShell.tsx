@@ -12,16 +12,8 @@ export interface MotionStudioShellProps {
 }
 
 export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProps) {
-  const {
-    document,
-    selectedLayerIds,
-    canUndo,
-    canRedo,
-    dispatch,
-    undo,
-    redo,
-    selectLayer,
-  } = useSceneEditor();
+  const { document, selectedLayerIds, canUndo, canRedo, dispatch, undo, redo, selectLayer } =
+    useSceneEditor();
 
   const [mode, setMode] = useState<MotionStudioMode>('visual-edit');
   const [layersOpen, setLayersOpen] = useState(true);
@@ -64,9 +56,12 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
     });
   }, [playheadMs, document.durationMs]);
 
-  const seek = useCallback((timeMs: number) => {
-    setPlayheadMs(Math.max(0, Math.min(document.durationMs, timeMs)));
-  }, [document.durationMs]);
+  const seek = useCallback(
+    (timeMs: number) => {
+      setPlayheadMs(Math.max(0, Math.min(document.durationMs, timeMs)));
+    },
+    [document.durationMs],
+  );
 
   const toggleMode = useCallback(() => {
     setMode((current) => (current === 'visual-edit' ? 'code' : 'visual-edit'));
@@ -136,9 +131,10 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
     [dispatch, document.layers],
   );
 
-  const selectedLayer = selectedLayerIds.length === 1
-    ? document.layers.find((l) => l.id === selectedLayerIds[0])
-    : undefined;
+  const selectedLayer =
+    selectedLayerIds.length === 1
+      ? document.layers.find((l) => l.id === selectedLayerIds[0])
+      : undefined;
 
   const hasLeftPanel = layersOpen;
   const hasRightPanel = inspectorOpen;
@@ -196,7 +192,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
               <div className="ms-code-placeholder">
                 <textarea
                   className="ms-code-textarea"
-                  placeholder="// HTML / CSS / JavaScript&#10;// The visual editor generates code here.&#10;// Switch back to Visual Edit to use the canvas."
+                  placeholder="// HTML / CSS / JavaScript&#10;// ویرایشگر بصری اینجا کد تولید می‌کند.&#10;// برای استفاده از بوم به Visual Edit برگردید."
                   readOnly
                 />
               </div>
@@ -233,8 +229,8 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
                     aria-label="Playhead position"
                   />
                 </div>
-                <div className="ms-empty-state">
-                  Keyframes and animation tracks will appear here.
+                <div className="ms-empty-state" lang="fa">
+                  کی‌فریم‌ها و ترک‌های انیمیشن اینجا نمایش داده می‌شوند.
                 </div>
               </div>
             </footer>
@@ -242,11 +238,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
         </section>
 
         {hasRightPanel && (
-          <MotionStudioInspector
-            layer={selectedLayer}
-            document={document}
-            dispatch={dispatch}
-          />
+          <MotionStudioInspector layer={selectedLayer} document={document} dispatch={dispatch} />
         )}
       </div>
     </div>

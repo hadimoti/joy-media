@@ -69,6 +69,14 @@ textarea:focus:not(:focus-visible) {
   background: var(--joy-bg-app);
   font-family: var(--joy-font-ui);
 }
+
+/* Persian explainer/guidance copy stays centered and layout-neutral. Titles,
+   controls, ids, filenames, and timeline chrome keep their existing direction. */
+[lang='fa'] {
+  font-family: var(--joy-font-ui);
+  text-align: center;
+  unicode-bidi: plaintext;
+}
 body {
   margin: 0;
   font-family: var(--joy-font-ui);
