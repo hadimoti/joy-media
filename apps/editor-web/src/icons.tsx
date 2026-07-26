@@ -38,21 +38,6 @@ function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?:
   );
 }
 
-/** Preserve authored multicolor artwork for icons whose internal detail is not an alpha mask. */
-function PngColorIcon({ src, size = 16 }: { readonly src: string; readonly size?: number }) {
-  return (
-    <img
-      className="png-color-icon"
-      src={src}
-      width={size}
-      height={size}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-    />
-  );
-}
-
 export function PlayIcon() {
   return (
     <Svg>
@@ -232,7 +217,16 @@ export function PlusIcon() {
 
 export function LibraryIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="2" y="3" width="20" height="18" rx="2" />
       <path d="M7 3v18M17 3v18M2 9h20" />
     </svg>
@@ -454,7 +448,7 @@ export function ProjectsIcon() {
 }
 
 export function MarkerIcon() {
-  return <PngColorIcon src={UI_ICONS.marker} />;
+  return <PngMaskIcon src={UI_ICONS.marker} />;
 }
 
 export function TimelineMarkerIcon() {
@@ -484,7 +478,15 @@ export function KeyPrevIcon() {
   return (
     <Svg>
       <path d="M13 8H5.5M8 4.5 4.5 8 8 11.5" />
-      <rect x="2" y="6.5" width="2.2" height="3" transform="rotate(45 3.1 8)" fill="currentColor" stroke="none" />
+      <rect
+        x="2"
+        y="6.5"
+        width="2.2"
+        height="3"
+        transform="rotate(45 3.1 8)"
+        fill="currentColor"
+        stroke="none"
+      />
     </Svg>
   );
 }
@@ -493,7 +495,15 @@ export function KeyNextIcon() {
   return (
     <Svg>
       <path d="M3 8h7.5M8 4.5 11.5 8 8 11.5" />
-      <rect x="11.5" y="6.5" width="2.2" height="3" transform="rotate(45 12.6 8)" fill="currentColor" stroke="none" />
+      <rect
+        x="11.5"
+        y="6.5"
+        width="2.2"
+        height="3"
+        transform="rotate(45 12.6 8)"
+        fill="currentColor"
+        stroke="none"
+      />
     </Svg>
   );
 }
@@ -590,7 +600,12 @@ export function PanIcon() {
 export function FadeInIcon() {
   return (
     <Svg>
-      <path d="M2.5 12.5 13.5 12.5 13.5 3.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+      <path
+        d="M2.5 12.5 13.5 12.5 13.5 3.5Z"
+        fill="currentColor"
+        fillOpacity="0.35"
+        stroke="currentColor"
+      />
     </Svg>
   );
 }
@@ -598,7 +613,12 @@ export function FadeInIcon() {
 export function FadeOutIcon() {
   return (
     <Svg>
-      <path d="M13.5 12.5 2.5 12.5 2.5 3.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+      <path
+        d="M13.5 12.5 2.5 12.5 2.5 3.5Z"
+        fill="currentColor"
+        fillOpacity="0.35"
+        stroke="currentColor"
+      />
     </Svg>
   );
 }
@@ -646,7 +666,10 @@ export function SharpenIcon() {
 export function GrainIcon() {
   return (
     <Svg>
-      <path d="M3.5 4.5h.01M6.5 5.5h.01M10 4h.01M13 5.5h.01M4.5 8h.01M8 8.5h.01M11.5 7.5h.01M3.5 11.5h.01M7 12h.01M10.5 11h.01M13 12.5h.01" strokeWidth="2" />
+      <path
+        d="M3.5 4.5h.01M6.5 5.5h.01M10 4h.01M13 5.5h.01M4.5 8h.01M8 8.5h.01M11.5 7.5h.01M3.5 11.5h.01M7 12h.01M10.5 11h.01M13 12.5h.01"
+        strokeWidth="2"
+      />
     </Svg>
   );
 }
@@ -775,7 +798,12 @@ export function WipeIcon() {
   return (
     <Svg>
       <path d="M2.5 3.5h9v9h-9Z" />
-      <path d="M13.5 3.5v9h-3.5l3.5-9Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" />
+      <path
+        d="M13.5 3.5v9h-3.5l3.5-9Z"
+        fill="currentColor"
+        fillOpacity="0.35"
+        stroke="currentColor"
+      />
     </Svg>
   );
 }
@@ -824,7 +852,10 @@ export function StarIcon() {
 export function StarFilledIcon() {
   return (
     <Svg size={14}>
-      <path d="M8 1.5 10.2 6l5 .7-3.6 3.5.9 5L8 12.5 3.5 15.2l.9-5L.8 6.7l5-.7Z" fill="currentColor" />
+      <path
+        d="M8 1.5 10.2 6l5 .7-3.6 3.5.9 5L8 12.5 3.5 15.2l.9-5L.8 6.7l5-.7Z"
+        fill="currentColor"
+      />
     </Svg>
   );
 }
@@ -877,7 +908,16 @@ export function LayersIcon() {
     <Svg size={14}>
       <rect x="2.5" y="2.5" width="11" height="7" rx="0.5" />
       <path d="m4 5 4-2 4 2" />
-      <rect x="2.5" y="9.5" width="11" height="4" rx="0.5" fill="currentColor" fillOpacity="0.3" stroke="currentColor" />
+      <rect
+        x="2.5"
+        y="9.5"
+        width="11"
+        height="4"
+        rx="0.5"
+        fill="currentColor"
+        fillOpacity="0.3"
+        stroke="currentColor"
+      />
     </Svg>
   );
 }

@@ -89,7 +89,7 @@ function hashUnit(seed: string, salt: number): number {
     h ^= seed.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return (h >>> 0) % 1000 / 1000;
+  return ((h >>> 0) % 1000) / 1000;
 }
 
 function filmstripCellCount(widthPx: number): number {
@@ -249,7 +249,10 @@ function TimelineClip({
         }
         const trim = trimRef.current;
         if (trim !== null) {
-          setTrimPreview({ edge: trim.edge, timeUs: trimTimeUs(trim.edge, event.clientX, trim.originX) });
+          setTrimPreview({
+            edge: trim.edge,
+            timeUs: trimTimeUs(trim.edge, event.clientX, trim.originX),
+          });
           return;
         }
         const drag = dragRef.current;
@@ -371,7 +374,11 @@ export function TimelinePanel({
   readonly playheadUs: number;
   readonly playing: boolean;
   readonly selectedIds: readonly string[];
-  readonly markers?: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
+  readonly markers?: readonly {
+    readonly id: string;
+    readonly timeUs: number;
+    readonly label: string;
+  }[];
   readonly onTogglePlayback: () => void;
   readonly onSeek: (timeUs: number) => void;
   readonly onToggleSelection: (id: string) => void;
@@ -380,7 +387,12 @@ export function TimelinePanel({
   readonly onAddMarker?: (timeUs: number, label: string) => void;
   readonly onRemoveMarker?: (id: string) => void;
   readonly onEffectDrop?: (effectId: string, clipId: string, trackId: string) => void;
-  readonly onTransitionDrop?: (transitionId: string, leftClipId: string, rightClipId: string, trackId: string) => void;
+  readonly onTransitionDrop?: (
+    transitionId: string,
+    leftClipId: string,
+    rightClipId: string,
+    trackId: string,
+  ) => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
@@ -393,7 +405,10 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string } | undefined>(undefined);
+  const [menu, setMenu] = useState<
+    | { x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string }
+    | undefined
+  >(undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
 
@@ -475,10 +490,7 @@ export function TimelinePanel({
   const canDuplicate = selected !== undefined && !selectedLocked;
   const canDelete = selected !== undefined && !selectedLocked;
 
-  const frameUs = useMemo(
-    () => frameDurationUs(composition.frameRate),
-    [composition.frameRate],
-  );
+  const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
 
   const dispatchSplitAt = useCallback(
     (trackId: string, clipId: string, atUs: number) => {
@@ -631,8 +643,7 @@ export function TimelinePanel({
   const dispatchRate = (trackId: string, clipId: string, playbackRate: number) => {
     const track = composition.tracks.find((t) => t.id === trackId);
     const clip = track?.clips.find((c) => c.id === clipId);
-    const fromFreeze =
-      clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
+    const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
     onDispatch({
       label: `Speed ${clipId} → ${playbackRate}×`,
       commands: [
@@ -680,7 +691,10 @@ export function TimelinePanel({
     if (lane !== null && anchorClientX !== undefined) {
       const rect = lane.getBoundingClientRect();
       const localX = anchorClientX - rect.left + (scrollRef.current?.scrollLeft ?? 0);
-      const timeUnder = pixelToTime(localX, { originUs: 0, pixelsPerSecond: viewport.pixelsPerSecond });
+      const timeUnder = pixelToTime(localX, {
+        originUs: 0,
+        pixelsPerSecond: viewport.pixelsPerSecond,
+      });
       const newLocalX = timeToPixel(timeUnder, { originUs: 0, pixelsPerSecond: clamped });
       const scrollLeft = Math.max(0, newLocalX - (anchorClientX - rect.left));
       requestAnimationFrame(() => {
@@ -738,57 +752,59 @@ export function TimelinePanel({
   };
 
   const handleImportClick = useCallback(() => {
-      // Trigger file input for importing media
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.multiple = true;
-      input.accept = 'video/*,audio/*,image/*,.srt,.vtt,.ass,.webp,.gif';
-      input.onchange = async (event) => {
-        const files = Array.from((event.target as HTMLInputElement).files || []);
-        if (files.length === 0) return;
+    // Trigger file input for importing media
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = 'video/*,audio/*,image/*,.srt,.vtt,.ass,.webp,.gif';
+    input.onchange = async (event) => {
+      const files = Array.from((event.target as HTMLInputElement).files || []);
+      if (files.length === 0) return;
 
-        // Import assets into the project
-        const composition = project.compositions[project.rootCompositionId];
-        if (!composition) return;
+      // Import assets into the project
+      const composition = project.compositions[project.rootCompositionId];
+      if (!composition) return;
 
-        // For each file, create an asset and insert a clip
-        for (const file of files) {
-          const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const isAudio = file.type.startsWith('audio/');
+      // For each file, create an asset and insert a clip
+      for (const file of files) {
+        const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const isAudio = file.type.startsWith('audio/');
 
-          onDispatch({
-            label: `Import ${file.name}`,
-            commands: [
-              {
-                type: 'timeline.insertClip',
-                payload: {
-                  compositionId: composition.id,
-                  trackId: '', // Will be determined by finding target track
-                  clip: {
-                    id: `${isAudio ? 'voice' : 'clip'}-${assetId}-${Date.now()}`,
-                    kind: 'video',
-                    assetId,
-                    startUs: 0, // Will be set by finding space
-                    durationUs: 5_000_000,
-                    sourceInUs: 0,
-                  },
+        onDispatch({
+          label: `Import ${file.name}`,
+          commands: [
+            {
+              type: 'timeline.insertClip',
+              payload: {
+                compositionId: composition.id,
+                trackId: '', // Will be determined by finding target track
+                clip: {
+                  id: `${isAudio ? 'voice' : 'clip'}-${assetId}-${Date.now()}`,
+                  kind: 'video',
+                  assetId,
+                  startUs: 0, // Will be set by finding space
+                  durationUs: 5_000_000,
+                  sourceInUs: 0,
                 },
               },
-            ],
-          });
+            },
+          ],
+        });
 
-          // Insert clip on first compatible track or create new
-          const targetTrack = tracks.find(t =>
-            t.id === (isAudio ? 'audio' : 'video') && !t.locked
+        // Insert clip on first compatible track or create new
+        const targetTrack = tracks.find((t) => t.id === (isAudio ? 'audio' : 'video') && !t.locked);
+        if (targetTrack) {
+          const dropUs = playheadUs > 0 ? playheadUs : 0;
+          insertAssetOnTrack(
+            targetTrack.id,
+            { assetId, kind: isAudio ? 'audio' : 'video', displayName: file.name },
+            dropUs,
           );
-          if (targetTrack) {
-            const dropUs = playheadUs > 0 ? playheadUs : 0;
-            insertAssetOnTrack(targetTrack.id, { assetId, kind: isAudio ? 'audio' : 'video', displayName: file.name }, dropUs);
-          }
         }
-      };
-      input.click();
-    }, [project, composition, playheadUs, onDispatch, insertAssetOnTrack]);
+      }
+    };
+    input.click();
+  }, [project, composition, playheadUs, onDispatch, insertAssetOnTrack]);
 
   const handleAddFromLibrary = useCallback(() => {
     // TODO: Open media library modal
@@ -870,6 +886,7 @@ export function TimelinePanel({
               type="button"
               className="icon-button"
               aria-label="Add marker at playhead"
+              title="Add marker at playhead"
               data-guide="Add marker"
               onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
             >
@@ -999,10 +1016,7 @@ export function TimelinePanel({
         onImportClick={handleImportClick}
         onAddFromLibrary={handleAddFromLibrary}
         onContextMenu={(x, y) => {
-          const items = buildEmptyCanvasContextMenu(
-            handleImportClick,
-            handleAddFromLibrary
-          );
+          const items = buildEmptyCanvasContextMenu(handleImportClick, handleAddFromLibrary);
           setMenu({ x, y, items });
         }}
         onToast={(message) => showToast?.(message, 'info')}
@@ -1018,10 +1032,7 @@ export function TimelinePanel({
           applyZoom(viewport.pixelsPerSecond * factor, event.clientX);
         }}
       >
-        <div
-          className="timeline-scrub-row"
-          style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}
-        >
+        <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
           <div className="timeline-scrub-gutter">
             <output className="timeline-timecode" aria-live="polite">
               {(playheadUs / 1_000_000).toFixed(2)} s
@@ -1094,15 +1105,15 @@ export function TimelinePanel({
             if (source === undefined) return null;
             const voiceDominant =
               source.clips.length > 0 && source.clips.every((c) => isVoiceClip(c));
-            const audioIndex = visible
-              .slice(0, index + 1)
-              .filter((t) => {
-                const s = composition.tracks.find((item) => item.id === t.id);
-                return s !== undefined && s.clips.length > 0 && s.clips.every((c) => isVoiceClip(c));
-              }).length;
+            const audioIndex = visible.slice(0, index + 1).filter((t) => {
+              const s = composition.tracks.find((item) => item.id === t.id);
+              return s !== undefined && s.clips.length > 0 && s.clips.every((c) => isVoiceClip(c));
+            }).length;
             return (
               <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
-                <div className="timeline-track-header" onContextMenu={(event) => {
+                <div
+                  className="timeline-track-header"
+                  onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     const items = buildTrackHeaderContextMenu(
@@ -1111,47 +1122,54 @@ export function TimelinePanel({
                         const order = composition.tracks.length;
                         onDispatch({
                           label: 'Add video track',
-                          commands: [{
-                            type: 'timeline.addTrack',
-                            payload: {
-                              compositionId: composition.id,
-                              track: {
-                                id: `V${order + 1}`,
-                                kind: 'video',
-                                order,
-                                enabled: true,
-                                clips: [],
+                          commands: [
+                            {
+                              type: 'timeline.addTrack',
+                              payload: {
+                                compositionId: composition.id,
+                                track: {
+                                  id: `V${order + 1}`,
+                                  kind: 'video',
+                                  order,
+                                  enabled: true,
+                                  clips: [],
+                                },
                               },
                             },
-                          }],
+                          ],
                         });
                       },
                       () => {
                         onDispatch({
                           label: `Remove ${track.id}`,
-                          commands: [{
-                            type: 'timeline.removeTrack',
-                            payload: { compositionId: composition.id, trackId: track.id },
-                          }],
+                          commands: [
+                            {
+                              type: 'timeline.removeTrack',
+                              payload: { compositionId: composition.id, trackId: track.id },
+                            },
+                          ],
                         });
                       },
                       (enabled: boolean) => {
                         onDispatch({
                           label: enabled ? `Enable ${track.id}` : `Mute ${track.id}`,
-                          commands: [{
-                            type: 'property.setTrackEnabled',
-                            payload: {
-                              compositionId: composition.id,
-                              trackId: track.id,
-                              enabled,
+                          commands: [
+                            {
+                              type: 'property.setTrackEnabled',
+                              payload: {
+                                compositionId: composition.id,
+                                trackId: track.id,
+                                enabled,
+                              },
                             },
-                          }],
+                          ],
                         });
                       },
-                      source.enabled ?? true
+                      source.enabled ?? true,
                     );
                     setMenu({ x: event.clientX, y: event.clientY, items });
-                  }}>
+                  }}
+                >
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {voiceDominant ? `A${audioIndex}` : `V${index + 1}`}
@@ -1255,11 +1273,8 @@ export function TimelinePanel({
                       originUs: 0,
                       pixelsPerSecond: viewport.pixelsPerSecond,
                     });
-                    const snapped =
-                      Math.round(rawUs / frameUs) * frameUs;
-                    const source = composition.tracks.find(
-                      (t) => t.id === track.id,
-                    );
+                    const snapped = Math.round(rawUs / frameUs) * frameUs;
+                    const source = composition.tracks.find((t) => t.id === track.id);
                     if (source === undefined) return;
                     const clip = source.clips.find((c) => {
                       const end = c.startUs + c.durationUs;
@@ -1275,9 +1290,12 @@ export function TimelinePanel({
                     if (splitToolActive) setSplitGuideUs(undefined);
                   }}
                   onDragOver={(event) => {
-                    if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
-                        !event.dataTransfer.types.includes('application/x-joy-effect') &&
-                        !event.dataTransfer.types.includes('application/x-joy-transition')) return;
+                    if (
+                      !event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
+                      !event.dataTransfer.types.includes('application/x-joy-effect') &&
+                      !event.dataTransfer.types.includes('application/x-joy-transition')
+                    )
+                      return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
                   }}
@@ -1289,7 +1307,11 @@ export function TimelinePanel({
                     const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
                     if (effectRaw) {
                       try {
-                        const payload = JSON.parse(effectRaw) as { kind: string; effectId: string; source: string };
+                        const payload = JSON.parse(effectRaw) as {
+                          kind: string;
+                          effectId: string;
+                          source: string;
+                        };
                         const rect = event.currentTarget.getBoundingClientRect();
                         const dropUs = pixelToTime(event.clientX - rect.left, {
                           originUs: 0,
@@ -1305,14 +1327,22 @@ export function TimelinePanel({
                           onEffectDrop?.(payload.effectId, clip.id, track.id);
                         }
                         return;
-                      } catch { /* ignore malformed */ }
+                      } catch {
+                        /* ignore malformed */
+                      }
                     }
 
                     // Transition drop
-                    const transitionRaw = event.dataTransfer.getData('application/x-joy-transition');
+                    const transitionRaw = event.dataTransfer.getData(
+                      'application/x-joy-transition',
+                    );
                     if (transitionRaw) {
                       try {
-                        const payload = JSON.parse(transitionRaw) as { kind: string; transitionId: string; source: string };
+                        const payload = JSON.parse(transitionRaw) as {
+                          kind: string;
+                          transitionId: string;
+                          source: string;
+                        };
                         const rect = event.currentTarget.getBoundingClientRect();
                         const dropUs = pixelToTime(event.clientX - rect.left, {
                           originUs: 0,
@@ -1330,7 +1360,9 @@ export function TimelinePanel({
                             return;
                           }
                         }
-                      } catch { /* ignore malformed */ }
+                      } catch {
+                        /* ignore malformed */
+                      }
                     }
 
                     // Existing media asset drop
@@ -1390,12 +1422,7 @@ export function TimelinePanel({
       </div>
 
       {menu !== undefined && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={menu.items}
-          onClose={() => setMenu(undefined)}
-        />
+        <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(undefined)} />
       )}
     </article>
   );
