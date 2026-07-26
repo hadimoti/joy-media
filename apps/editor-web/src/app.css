@@ -5605,14 +5605,10 @@ label {
   opacity: 1;
 }
 
-.timeline-marker-rail {
-  position: relative;
-  height: 0.9rem;
-  margin-left: 7.5rem;
-}
 .timeline-marker {
   position: absolute;
-  top: 0;
+  top: 0.2rem;
+  z-index: 6;
   display: grid;
   width: 1rem;
   height: 1rem;

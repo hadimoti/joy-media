@@ -1078,28 +1078,6 @@ export function TimelinePanel({
               aria-hidden="true"
             />
           )}
-          {markers.length > 0 && (
-            <div className="timeline-marker-rail" style={{ minWidth: `${laneWidthPx}px` }}>
-              {markers.map((marker) => (
-                <button
-                  key={marker.id}
-                  type="button"
-                  className="timeline-marker"
-                  style={{
-                    left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
-                  }}
-                  title={marker.label}
-                  onClick={() => onSeek(marker.timeUs)}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    onRemoveMarker?.(marker.id);
-                  }}
-                >
-                  <TimelineMarkerIcon />
-                </button>
-              ))}
-            </div>
-          )}
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
@@ -1385,6 +1363,25 @@ export function TimelinePanel({
                     }
                   }}
                 >
+                  {index === 0 &&
+                    markers.map((marker) => (
+                      <button
+                        key={marker.id}
+                        type="button"
+                        className="timeline-marker"
+                        style={{
+                          left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                        }}
+                        title={marker.label}
+                        onClick={() => onSeek(marker.timeUs)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          onRemoveMarker?.(marker.id);
+                        }}
+                      >
+                        <TimelineMarkerIcon />
+                      </button>
+                    ))}
                   {source.clips.map((clip) => (
                     <TimelineClip
                       key={clip.id}
