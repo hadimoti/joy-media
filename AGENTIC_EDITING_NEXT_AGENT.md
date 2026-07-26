@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `eac1eb1` or newer on the tracked branch
+Required starting commit: `39261d0` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `eac1eb1`
+- Live application commit: `39261d0`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/eac1eb1-joy-code-color`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/39261d0-assets-header`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/5bdde55-joy-code-brand`
+  `/opt/joy-media/web-releases/eac1eb1-joy-code-color`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-Cr2ON3YO.js` and
-   `assets/index-DnHkQJuW.css`.
+1. Public HTML loads `assets/index-B29Spu5p.js` and
+   `assets/index-Z0TZxyWS.css`.
 2. The immutable release JS SHA-256 is
-   `98a8a368581810663ac5ace6dc4d72727985fcfc0f61c16baab1137b61e3fc31`;
+   `5370e795bde93733d82b623e937992163b6a2eb6c643463c4b02a93f4f942d2f`;
    the CSS SHA-256 is
-   `5e95865eff3bd59630bcc1520df031cd472e767fff58cb58cdb6e5f66cc8d065`.
+   `d35d4ddfeb8950bcd7c654c35a28112e8cfa26ff4ff8f1ebeec6ce616fb9d8af`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -126,9 +126,13 @@ Production was verified after deployment:
     thinking mark wiggles, and reduced-motion users receive a static mark.
     Production browser QA verified both replacement hashes, corrected colors,
     live animation, response completion, and cleanup of the test plan.
+19. The Assets panel header now anchors Import, Filter/Sort, and Refresh at the
+    left edge, keeps Cloud, View, and Search at the right edge, and preserves
+    the Assets title at the exact panel center. Production browser measurement
+    confirmed the header and title centers match within subpixel precision.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=eac1eb1` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=39261d0` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
