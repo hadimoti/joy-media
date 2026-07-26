@@ -107,6 +107,11 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
+import {
+  DOCK_LAYOUT_KEY,
+  SUPERSEDED_DOCK_LAYOUT_KEYS,
+  defaultDockLayout,
+} from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
@@ -1778,15 +1783,12 @@ function EditorWorkspace({
   );
   const onReady = useCallback((event: DockviewReadyEvent) => {
     dockviewApiRef.current = event.api;
-    // v7: Assets | Inspector (center) | Monitor (right); Timeline full-width bottom.
-    // Clears v6 layouts that left the preview unconstrained in the center column.
-    const layoutKey = 'joy-media.dockview.v7';
-    window.localStorage.removeItem('joy-media.dockview.v1');
-    window.localStorage.removeItem('joy-media.dockview.v2');
-    window.localStorage.removeItem('joy-media.dockview.v3');
-    window.localStorage.removeItem('joy-media.dockview.v4');
-    window.localStorage.removeItem('joy-media.dockview.v5');
-    window.localStorage.removeItem('joy-media.dockview.v6');
+    // v8: Browser | Context | Agent across the top, Timeline beneath them, and
+    // Monitor as a full-height right column — see dock-layout.ts for why.
+    const layoutKey = DOCK_LAYOUT_KEY;
+    for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
+      window.localStorage.removeItem(stale);
+    }
     const saved = window.localStorage.getItem(layoutKey);
     let restored = false;
     if (saved !== null) {
@@ -1820,42 +1822,15 @@ function EditorWorkspace({
     };
 
     if (!restored) {
-      addPanel('timeline', { inactive: false });
-      addPanel('monitor', {
-        inactive: false,
-        position: { referencePanel: 'timeline', direction: 'above' },
-      });
-      addPanel('inspector', {
-        inactive: false,
-        position: { referencePanel: 'monitor', direction: 'left' },
-      });
-      addPanel('media', {
-        position: { referencePanel: 'inspector', direction: 'left' },
-      });
-      // Browser Group – panel tabs within the left media group
-      const browserTabs = [
-        'effects',
-        'transitions',
-        'captions',
-        'audio',
-        'color',
-        'plugins',
-      ] as const;
-      for (const id of browserTabs) {
-        addPanel(id, { position: { referencePanel: 'media', direction: 'within' } });
+      // Seeded from JSON so the column proportions survive; sequential splits
+      // would leave the monitor at half the width instead of a quarter.
+      try {
+        event.api.fromJSON(defaultDockLayout() as never, { reuseExistingPanels: false });
+      } catch (error) {
+        console.warn('default dock layout rejected, falling back to a stack', error);
       }
-      // Context Group – panel tabs within the center inspector group
-      const contextTabs = [
-        'motion',
-        'agent',
-        'history',
-        'jobs',
-        'diagnostics',
-        'workflows',
-        'camera',
-      ] as const;
-      for (const id of contextTabs) {
-        addPanel(id, { position: { referencePanel: 'inspector', direction: 'within' } });
+      for (const panel of DEFAULT_WORKSPACE.panels) {
+        addPanel(panel, { inactive: true });
       }
       event.api.getPanel('monitor')?.api.setActive();
     } else {

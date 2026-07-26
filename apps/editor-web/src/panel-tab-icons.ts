@@ -33,7 +33,7 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   media: '/assets/icons/assets.png',
   monitor: '/assets/icons/monitor.png',
   timeline: '/assets/icons/timeline.png',
-  captions: '/assets/icons/ui/voice-memo_24x24.png',
+  captions: '/assets/icons/captions.png',
   inspector: '/assets/icons/ui/inspect_24x24.png',
   motion: '/assets/icons/ui/motion_24x24.png',
   camera: '/assets/icons/camera.png',
