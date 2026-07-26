@@ -54,14 +54,49 @@ function selectInput(label: string, value: string, options: readonly string[], o
 }
 
 export function MotionStudioInspector({ layer, document, dispatch }: InspectorProps) {
+  const layerId = layer?.id ?? '';
+
+  const setBg = useCallback(
+    (background: SceneBackground) => {
+      dispatch('Set background', { type: 'scene.setSceneBackground', payload: { background } });
+    },
+    [dispatch],
+  );
+
+  const setTransform = useCallback(
+    (patch: Partial<MotionTransform>) => {
+      if (!layerId) return;
+      dispatch('Set transform', { type: 'scene.setLayerTransform', payload: { layerId, transform: patch } });
+    },
+    [dispatch, layerId],
+  );
+
+  const setText = useCallback(
+    (text: string) => {
+      if (!layerId) return;
+      dispatch('Set text', { type: 'scene.setLayerText', payload: { layerId, text } });
+    },
+    [dispatch, layerId],
+  );
+
+  const setTypography = useCallback(
+    (patch: Partial<MotionTypography>) => {
+      if (!layerId) return;
+      dispatch('Set typography', { type: 'scene.setLayerTypography', payload: { layerId, typography: patch } });
+    },
+    [dispatch, layerId],
+  );
+
+  const setFill = useCallback(
+    (fill: MotionFill) => {
+      if (!layerId) return;
+      dispatch('Set fill', { type: 'scene.setLayerFills', payload: { layerId, fills: [fill] } });
+    },
+    [dispatch, layerId],
+  );
+
   if (!layer) {
     const bg = document.background;
-    const setBg = useCallback(
-      (background: SceneBackground) => {
-        dispatch('Set background', { type: 'scene.setSceneBackground', payload: { background } });
-      },
-      [dispatch],
-    );
 
     return (
       <aside className="ms-panel ms-right" aria-label="Inspector">
@@ -123,34 +158,6 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
   }
 
   const { transform: t, typography: typo } = layer;
-
-  const setTransform = useCallback(
-    (patch: Partial<MotionTransform>) => {
-      dispatch('Set transform', { type: 'scene.setLayerTransform', payload: { layerId: layer.id, transform: patch } });
-    },
-    [dispatch, layer.id],
-  );
-
-  const setText = useCallback(
-    (text: string) => {
-      dispatch('Set text', { type: 'scene.setLayerText', payload: { layerId: layer.id, text } });
-    },
-    [dispatch, layer.id],
-  );
-
-  const setTypography = useCallback(
-    (patch: Partial<MotionTypography>) => {
-      dispatch('Set typography', { type: 'scene.setLayerTypography', payload: { layerId: layer.id, typography: patch } });
-    },
-    [dispatch, layer.id],
-  );
-
-  const setFill = useCallback(
-    (fill: MotionFill) => {
-      dispatch('Set fill', { type: 'scene.setLayerFills', payload: { layerId: layer.id, fills: [fill] } });
-    },
-    [dispatch, layer.id],
-  );
 
   return (
     <aside className="ms-panel ms-right" aria-label="Inspector">
