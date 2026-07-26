@@ -52,13 +52,6 @@ const TABS: readonly PanelTabSpec[] = [
   { id: 'composer', label: 'Composer' },
 ];
 
-const SUGGESTED_INTENT_IDS = [
-  'shorten-intro',
-  'split-at-playhead',
-  'move-to-playhead',
-  'recipe-split-trim',
-] as const;
-
 interface PendingPlan {
   readonly threadId: string;
   readonly intent: AgentIntent;
@@ -364,7 +357,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        'Joy Code can currently plan the timeline commands shown below. Free-form KiloCode streaming will appear here when the server session adapter is connected.',
+        'Joy Code currently accepts direct timeline requests such as shortening the intro, splitting, moving, joining, inserting, or removing clips. Free-form KiloCode streaming will appear here when the server session adapter is connected.',
       );
       return;
     }
@@ -509,10 +502,6 @@ export function AgentPanel({
     if (pending === undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
-
-  const suggestions = SUGGESTED_INTENT_IDS.map((id) =>
-    AGENT_INTENTS.find((intent) => intent.id === id),
-  ).filter((intent): intent is AgentIntent => intent !== undefined);
 
   return (
     <PanelShell
@@ -758,30 +747,12 @@ export function AgentPanel({
                   ))}
                 </ul>
               )}
-              <div className="joy-code-suggestions" aria-label="Suggested timeline prompts">
-                {suggestions.map((intent) => {
-                  const available = buildIntent(intent);
-                  return (
-                    <button
-                      key={intent.id}
-                      type="button"
-                      aria-disabled={!available.ok}
-                      title={available.ok ? intent.description : available.reason}
-                      onClick={() => submitPrompt(intent.label)}
-                    >
-                      {intent.label
-                        .replace(' selected clip at playhead', '')
-                        .replace('Recipe: ', '')}
-                    </button>
-                  );
-                })}
-              </div>
               <div className="joy-code-input">
                 <textarea
                   rows={3}
                   value={draft}
                   aria-label="Message Joy Code"
-                  placeholder="Ask Joy Code to edit the timeline…"
+                  placeholder="Describe the timeline edit you want…"
                   onChange={(event) => setDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {

@@ -5045,35 +5045,6 @@ label {
   color: var(--joy-text-faint);
   cursor: pointer;
 }
-.joy-code-suggestions {
-  display: flex;
-  gap: 0.25rem;
-  overflow-x: auto;
-  padding-bottom: 0.05rem;
-}
-.joy-code-suggestions button {
-  flex: none;
-  max-width: 10.5rem;
-  overflow: hidden;
-  padding: 0.28rem 0.45rem;
-  border: 1px solid var(--joy-border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--joy-text-muted);
-  font: inherit;
-  font-size: 0.62rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.joy-code-suggestions button:hover {
-  border-color: var(--joy-border-hover);
-  color: var(--joy-text);
-}
-.joy-code-suggestions button[aria-disabled='true'] {
-  border-style: dashed;
-  color: var(--joy-text-faint);
-}
 .joy-code-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
