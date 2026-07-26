@@ -393,14 +393,11 @@ export function TimelinePanel({
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
   const [menu, setMenu] = useState<{ x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string } | undefined>(undefined);
-  const [activeCompositionId, setActiveCompositionId] = useState(project.rootCompositionId);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
 
-  const activeComposition = project.compositions[activeCompositionId];
-  if (activeComposition === undefined) throw new Error('timeline root composition is unavailable');
-
-  const composition = activeComposition;
+  const composition = project.compositions[project.rootCompositionId];
+  if (composition === undefined) throw new Error('timeline root composition is unavailable');
 
   const tracks = composition.tracks.map((track, index) => {
     const saved = trackFlags.find((item) => item.id === track.id);
@@ -440,24 +437,6 @@ export function TimelinePanel({
     observer.observe(root);
     return () => observer.disconnect();
   }, [autoFit, composition.durationUs]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey) {
-        if (event.key === 'Tab') {
-          event.preventDefault();
-          const ids = Object.keys(project.compositions);
-          const current = ids.indexOf(activeCompositionId);
-          const next = event.shiftKey
-            ? ids[(current - 1 + ids.length) % ids.length]
-            : ids[(current + 1) % ids.length];
-          if (next) setActiveCompositionId(next);
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeCompositionId, project.compositions]);
 
   useEffect(() => {
     if (!autoFit) return;
@@ -1027,20 +1006,6 @@ export function TimelinePanel({
         }}
         onToast={(message) => showToast?.(message, 'info')}
       />
-
-      <div className="timeline-tabs" role="tablist" aria-label="Compositions">
-        {Object.entries(project.compositions).map(([compId, comp]) => (
-          <button
-            key={compId}
-            className={`timeline-tab ${compId === activeCompositionId ? 'active' : ''}`}
-            role="tab"
-            aria-selected={compId === activeCompositionId}
-            onClick={() => setActiveCompositionId(compId)}
-          >
-            {comp.name}
-          </button>
-        ))}
-      </div>
 
       <div
         className="timeline-tracks"
