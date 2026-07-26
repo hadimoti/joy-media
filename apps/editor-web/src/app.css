@@ -2047,6 +2047,14 @@ label {
   min-width: 0;
   line-height: 1.15;
 }
+.timeline-track-kind-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: var(--joy-text-muted);
+}
 .timeline-track-label .track-code {
   font-size: 0.68rem;
   font-weight: 700;

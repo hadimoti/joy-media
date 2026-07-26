@@ -37,6 +37,9 @@ import {
   ZoomOutIcon,
   MarkerIcon,
   TimelineMarkerIcon,
+  TimelineAudioTrackIcon,
+  TimelineScriptTrackIcon,
+  TimelineVideoTrackIcon,
   SelectIcon,
   TrackAddIcon,
 } from './icons.js';
@@ -51,6 +54,7 @@ import {
 import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
+import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -100,6 +104,12 @@ function filmstripCellCount(widthPx: number): number {
 function waveformBarCount(widthPx: number, pixelsPerSecond: number): number {
   const barPitchPx = Math.max(1.25, Math.min(8, 140 / Math.max(5, pixelsPerSecond)));
   return Math.max(8, Math.min(512, Math.round(widthPx / barPitchPx)));
+}
+
+function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
+  if (kind === 'audio') return <TimelineAudioTrackIcon />;
+  if (kind === 'script') return <TimelineScriptTrackIcon />;
+  return <TimelineVideoTrackIcon />;
 }
 
 function isVoiceClip(clip: Clip): boolean {
@@ -1081,11 +1091,10 @@ export function TimelinePanel({
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
-            const voiceDominant =
-              source.clips.length > 0 && source.clips.every((c) => isVoiceClip(c));
-            const audioIndex = visible.slice(0, index + 1).filter((t) => {
+            const kind = timelineTrackKind(source);
+            const kindIndex = visible.slice(0, index + 1).filter((t) => {
               const s = composition.tracks.find((item) => item.id === t.id);
-              return s !== undefined && s.clips.length > 0 && s.clips.every((c) => isVoiceClip(c));
+              return s !== undefined && timelineTrackKind(s) === kind;
             }).length;
             return (
               <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
@@ -1148,20 +1157,34 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
+                  <span
+                    className="timeline-track-kind-icon"
+                    title={`${kind[0]?.toUpperCase()}${kind.slice(1)} track`}
+                  >
+                    <TimelineTrackKindIcon kind={kind} />
+                  </span>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
-                      {voiceDominant ? `A${audioIndex}` : `V${index + 1}`}
+                      {kind === 'audio'
+                        ? `A${kindIndex}`
+                        : kind === 'script'
+                          ? `S${kindIndex}`
+                          : `V${kindIndex}`}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {voiceDominant
-                        ? audioIndex === 1
+                      {kind === 'audio'
+                        ? kindIndex === 1
                           ? 'Voice'
-                          : `Audio ${audioIndex}`
-                        : index === 0
-                          ? 'Main Video'
-                          : index === 1
-                            ? 'B-roll'
-                            : `Video ${index + 1}`}
+                          : `Audio ${kindIndex}`
+                        : kind === 'script'
+                          ? kindIndex === 1
+                            ? 'Script'
+                            : `Script ${kindIndex}`
+                          : kindIndex === 1
+                            ? 'Main Video'
+                            : kindIndex === 2
+                              ? 'B-roll'
+                              : `Video ${kindIndex}`}
                     </span>
                   </div>
                   <button

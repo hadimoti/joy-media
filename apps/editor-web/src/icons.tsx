@@ -455,6 +455,18 @@ export function TimelineMarkerIcon() {
   return <PngMaskIcon src={UI_ICONS.markerTimeline} size={16} />;
 }
 
+export function TimelineVideoTrackIcon() {
+  return <PngMaskIcon src={UI_ICONS.timelineVideo} size={14} />;
+}
+
+export function TimelineAudioTrackIcon() {
+  return <PngMaskIcon src={UI_ICONS.timelineAudio} size={14} />;
+}
+
+export function TimelineScriptTrackIcon() {
+  return <PngMaskIcon src={UI_ICONS.timelineScript} size={14} />;
+}
+
 export function CopyIcon() {
   return (
     <Svg>
