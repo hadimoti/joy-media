@@ -4288,10 +4288,11 @@ label {
   gap: 0.15rem;
   flex-shrink: 0;
   flex-wrap: wrap;
+  margin-bottom: 5px;
 }
 .effects-category-tab {
   padding: 0.2rem 0.55rem;
-  border: 1px solid var(--joy-border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--joy-text-muted);
@@ -4300,9 +4301,9 @@ label {
   white-space: nowrap;
 }
 .effects-category-tab[aria-selected='true'] {
-  background: var(--joy-accent-soft);
-  border-color: var(--joy-accent-soft);
-  color: var(--joy-bg);
+  background: transparent;
+  border-color: transparent;
+  color: var(--joy-accent-soft);
   font-weight: 600;
 }
 .effects-grid {
