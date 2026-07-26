@@ -1,10 +1,10 @@
 # JOY Media Agentic Editing — Next-Agent Handoff
 
-Date: 2026-07-26
+Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `a326ba4` or newer on the tracked branch
+Required starting commit: `a7ee900` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `a326ba4`
+- Live application commit: `a7ee900`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/a326ba4-marker-icons`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/a7ee900-joy-code`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/bd842d8-agentic-dual-lens`
+  `/opt/joy-media/web-releases/a326ba4-marker-icons`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,15 +72,17 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-Bq3tUnNA.js` and
-   `assets/index-C_qs4lVb.css`.
-2. The public, release, and commit-build JS SHA-256 all equal
-   `756c8158824f8490cd1ea8b51c7b601bb24b380594314c4dd5c0c99f917be224`.
+1. Public HTML loads `assets/index-BWyVVZ4f.js` and
+   `assets/index-DLT_2vfR.css`.
+2. The immutable release JS SHA-256 is
+   `8a545ea13a711e5ccec00e38d936a18f119d99481c462bf7a88eea4d18ee6514`;
+   the CSS SHA-256 is
+   `bf05b7b2e4550862fea94700b9b1e5dc152a633fe88cc4de261600364cc6f7ee`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
-5. Production Chrome verified KiloCode, Preview and Approve, the Agent menu,
-   server-only secret references, and no visible raw key.
+5. Production browser verified the Joy Code menu/panel, History and Composer,
+   the KiloCode host label, Preview and Approve, and no visible raw key.
 6. Production Chrome verified Time, Flow, Split, collapsed data lanes, and a
    Flow-node seek that moved Product, Frame-to-Flow Trace, and Program Monitor
    together to 10 seconds.
@@ -96,9 +98,14 @@ Production was verified after deployment:
     by 2.0s.
 11. One `Undo this run` restored all three clips to their exact original
     positions.
+12. Joy Code replaced the intent-card dashboard with a conversational
+    History/Composer surface, project-scoped task persistence, compact prompt
+    suggestions, plan/run cards, and an anchored composer.
+13. Production Joy Code built the real three-command dry-run, then Reject left
+    the timeline unchanged and recorded the task in History.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=a326ba4` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=a7ee900` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
@@ -136,6 +143,7 @@ Implemented:
   references and a separate model/provider/local-executor taxonomy.
 - Real asynchronous job lifecycle and durable generation provenance.
 - Agent menu and settings surface, with policy changes applied to execution.
+- Joy Code History/Composer UX over the KiloCode-only editing adapter.
 - Dual Lens Time/Flow/Split projections with Frame-to-Flow Trace and advanced
   data lanes collapsed by default.
 - ADR-0019 through ADR-0022.
