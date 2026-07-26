@@ -15,6 +15,7 @@ import {
   useCallback,
   useContext,
   type MutableRefObject,
+  type CSSProperties,
 } from 'react';
 import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
@@ -132,16 +133,26 @@ const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: st
 
 /* ─── Motion Card ─── */
 
-function categoryAccent(category: string): string | undefined {
-  switch (category) {
-    case 'fade': return 'rgba(244,183,47,0.12)';
-    case 'slide': return 'rgba(49,128,255,0.12)';
-    case 'scale': return 'rgba(111,207,151,0.12)';
-    case 'bounce': return 'rgba(239,106,106,0.12)';
-    case 'blur': return 'rgba(150,128,255,0.12)';
-    case 'text': return 'rgba(255,152,0,0.12)';
-    case 'title': return 'rgba(255,128,171,0.12)';
-    default: return undefined;
+function animationForMotion(motion: MotionDescriptor): CSSProperties | undefined {
+  switch (motion.id) {
+    case 'joy-fade-in':
+      return {
+        animation: `m-fade-in ${motion.durationMs}ms ease-in infinite alternate`,
+      };
+    case 'joy-fade-out':
+      return {
+        animation: `m-fade-out ${motion.durationMs}ms ease-out infinite alternate`,
+      };
+    case 'joy-pop-in':
+      return {
+        animation: `m-pop-in ${motion.durationMs}ms ease-out infinite alternate`,
+      };
+    case 'joy-slide-up':
+      return {
+        animation: `m-slide-up ${motion.durationMs}ms ease-out infinite alternate`,
+      };
+    default:
+      return undefined;
   }
 }
 
@@ -158,21 +169,16 @@ function MotionCard({
   readonly onOpen: (id: string) => void;
   readonly onDuplicate: (id: string) => void;
 }) {
-  const previewUrl = motion.preview?.posterUrl;
-  const categoryColor = categoryAccent(motion.category);
+  const animStyle = animationForMotion(motion);
   return (
     <div className="motion-card" role="listitem">
-      <div className="motion-card-preview" aria-hidden="true" style={categoryColor ? { backgroundColor: categoryColor } : undefined}>
-        {previewUrl ? (
-          <img className="motion-card-thumb" src={previewUrl} alt="" loading="lazy" />
-        ) : (
-          <div className="motion-card-preview-placeholder">
-            <span className="motion-card-cat">{motion.category}</span>
-            <span className="motion-card-duration">
-              {(motion.durationMs / 1000).toFixed(1)}s
-            </span>
-          </div>
-        )}
+      <div className="motion-card-preview" aria-hidden="true">
+        <div className="motion-card-live" style={animStyle}>
+          <img src="/assets/logo.png" alt="" draggable={false} />
+        </div>
+        <span className="motion-card-duration">
+          {(motion.durationMs / 1000).toFixed(1)}s
+        </span>
       </div>
       <div className="motion-card-body">
         <span className="motion-card-name" title={motion.name}>
