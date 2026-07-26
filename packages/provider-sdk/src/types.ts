@@ -206,6 +206,76 @@ export interface SecretStore {
   redact(logLine: string, providerId: string): string;
 }
 
+// ===== Runtime / Agent Host Taxonomy =====
+
+/**
+ * A server-resolved pointer to a credential. It is safe to serialize because
+ * it identifies the secret but never contains the secret value.
+ */
+export interface ServerSecretReference {
+  readonly providerId: string;
+  readonly fieldName: string;
+  readonly scope: 'server-only';
+}
+
+export interface ReasoningModelReference {
+  readonly kind: 'reasoning-model';
+  readonly providerId: string;
+  readonly model: ModelDescriptor;
+}
+
+export interface MediaProviderReference {
+  readonly kind: 'media-provider';
+  readonly providerId: string;
+  readonly capabilities: readonly CapabilityId[];
+}
+
+export interface LocalExecutorReference {
+  readonly kind: 'local-executor';
+  readonly executorId: string;
+  readonly displayName: string;
+  readonly capabilities: readonly string[];
+}
+
+export interface AgentHostToolDescriptor {
+  readonly name: string;
+  readonly requiredCapabilities: readonly string[];
+}
+
+/**
+ * Describes an agent host's integration boundary. An agent host orchestrates
+ * tools; it is not itself a reasoning model, media provider, or job executor.
+ */
+export interface AgentHostManifest {
+  readonly manifestVersion: 1;
+  readonly kind: 'agent-host';
+  readonly id: string;
+  readonly displayName: string;
+  readonly adapterVersion: string;
+  readonly transport: 'code-server-extension';
+  readonly tools: readonly AgentHostToolDescriptor[];
+  readonly reasoningModels: readonly ReasoningModelReference[];
+  readonly mediaProviders: readonly MediaProviderReference[];
+  readonly localExecutors: readonly LocalExecutorReference[];
+  readonly health: {
+    readonly strategy: 'extension-heartbeat';
+    readonly timeoutMs: number;
+  };
+  readonly cancellation: {
+    readonly supported: boolean;
+    readonly mode: 'cooperative' | 'unsupported';
+  };
+  readonly costReporting: {
+    readonly supported: boolean;
+    readonly source: 'adapter' | 'provider-usage';
+  };
+  readonly settings: {
+    readonly surface: 'code-server-extension';
+    readonly configurationSchema: JsonSchema;
+    readonly secretReferences: readonly ServerSecretReference[];
+  };
+}
+
 // ===== Provenance Types =====
 
 export interface GenerationProvenance {

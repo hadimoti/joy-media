@@ -39,7 +39,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
 /** Every edit this panel commits is attributed to the local agent adapter. */
-const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
+const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
 
 /**
  * The last-run UI is shaped around `ExecutionResult`; the atomic runner reports

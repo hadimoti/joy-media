@@ -31,7 +31,7 @@ export type ProjectRevisionId = string;
 /** Who issued the command. Recorded so the audit trail can distinguish them. */
 export interface AgentActor {
   readonly type: 'agent' | 'human' | 'plugin';
-  /** Adapter or user id, e.g. `hermes`, `kilocode`. */
+  /** Adapter or user id, e.g. `kilocode`. */
   readonly id: string;
 }
 

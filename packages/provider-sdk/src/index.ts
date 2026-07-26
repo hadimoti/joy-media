@@ -33,6 +33,12 @@ export type {
   // Secret types
   SecretHandle,
   SecretStore,
+  ServerSecretReference,
+  ReasoningModelReference,
+  MediaProviderReference,
+  LocalExecutorReference,
+  AgentHostToolDescriptor,
+  AgentHostManifest,
   // Provenance types
   GenerationProvenance,
   ProviderUsage,
@@ -51,6 +57,8 @@ export { resolveProvider } from './resolution.js';
 export { ProviderLifecycle } from './lifecycle.js';
 export { computePrivacyPreflight } from './privacy.js';
 export { createMemorySecretStore } from './secrets.js';
+export type { AgentHostManifestValidation } from './agent-host.js';
+export { validateAgentHostManifest } from './agent-host.js';
 export { aggregateUsage } from './provenance.js';
 export {
   createMockProvider,
