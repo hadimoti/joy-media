@@ -13,6 +13,9 @@
       "path": "../commands"
     },
     {
+      "path": "../job-protocol"
+    },
+    {
       "path": "../project-schema"
     },
     {

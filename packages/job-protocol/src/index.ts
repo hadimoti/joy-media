@@ -26,3 +26,10 @@ export {
   WorkerProtocolError,
   InMemoryWorkerCoordinator,
 } from './protocol.js';
+export type {
+  AgentJobState,
+  AgentJobRequest,
+  AgentJobResult,
+  AgentJobSnapshot,
+  AgentJobClient,
+} from './agent-jobs.js';

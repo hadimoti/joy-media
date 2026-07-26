@@ -72,6 +72,9 @@ importers:
       '@joy-media/html-scene-runtime':
         specifier: workspace:*
         version: link:../../packages/html-scene-runtime
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../../packages/job-protocol
       '@joy-media/motion-core':
         specifier: workspace:*
         version: link:../../packages/motion-core
@@ -200,6 +203,9 @@ importers:
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../commands
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../job-protocol
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
@@ -278,7 +284,11 @@ importers:
         specifier: ^19.1.1
         version: 19.2.7(react@19.2.7)
 
-  packages/job-protocol: {}
+  packages/job-protocol:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
 
   packages/media-core: {}
 

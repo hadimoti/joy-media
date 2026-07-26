@@ -57,6 +57,7 @@ export type {
   CaptionSpeakerV1,
   CaptionDocumentV1,
   AssetRecordV1,
+  GenerationProvenanceV1,
   MarkerV1,
   ProjectAudioV1,
   ColorGradeV1,

@@ -310,6 +310,24 @@ export interface AssetRecordV1 {
   readonly id: string;
   readonly kind: 'video' | 'audio' | 'image' | 'other';
   readonly displayName: string;
+  /** Reproducibility record for provider/Worker-generated media. */
+  readonly generationProvenance?: GenerationProvenanceV1;
+}
+
+export interface GenerationProvenanceV1 {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly modelVersion: string;
+  readonly prompt: string;
+  readonly seed?: string | number;
+  readonly inputAssetHashes: readonly string[];
+  readonly parameters: JsonValue;
+  readonly generatedAssetId: string;
+  readonly cost?: {
+    readonly amount: string;
+    readonly currency: string;
+  };
+  readonly createdAt: string;
 }
 
 export interface MarkerV1 {
@@ -444,6 +462,10 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
   }
   if (!isRecord(value.assets))
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_ASSETS', 'assets must be an object', 'assets'));
+  else {
+    for (const [assetId, asset] of Object.entries(value.assets))
+      validateAsset(asset, `assets.${assetId}`, assetId, diagnostics);
+  }
   if (!isRecord(value.variables))
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VARIABLES', 'variables must be an object', 'variables'),
@@ -484,6 +506,80 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
   return diagnostics;
+}
+
+function validateAsset(
+  value: unknown,
+  path: string,
+  assetId: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (
+    !isRecord(value) ||
+    value.id !== assetId ||
+    !isNonEmptyString(value.displayName) ||
+    !['video', 'audio', 'image', 'other'].includes(String(value.kind))
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_ASSET',
+        'asset must match its key and include a valid kind and display name',
+        path,
+      ),
+    );
+    return;
+  }
+  if (value.generationProvenance === undefined) return;
+  const provenance = value.generationProvenance;
+  if (
+    !isRecord(provenance) ||
+    provenance.generatedAssetId !== assetId ||
+    !isNonEmptyString(provenance.providerId) ||
+    !isNonEmptyString(provenance.modelId) ||
+    !isNonEmptyString(provenance.modelVersion) ||
+    typeof provenance.prompt !== 'string' ||
+    !Array.isArray(provenance.inputAssetHashes) ||
+    provenance.inputAssetHashes.some((hash) => !isNonEmptyString(hash)) ||
+    !isJsonValue(provenance.parameters) ||
+    !isNonEmptyString(provenance.createdAt) ||
+    Number.isNaN(Date.parse(provenance.createdAt))
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_GENERATION_PROVENANCE',
+        'generated asset provenance is incomplete or invalid',
+        `${path}.generationProvenance`,
+      ),
+    );
+    return;
+  }
+  if (
+    provenance.seed !== undefined &&
+    typeof provenance.seed !== 'string' &&
+    (typeof provenance.seed !== 'number' || !Number.isFinite(provenance.seed))
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_GENERATION_PROVENANCE',
+        'generation seed must be a string or finite number',
+        `${path}.generationProvenance.seed`,
+      ),
+    );
+  }
+  if (
+    provenance.cost !== undefined &&
+    (!isRecord(provenance.cost) ||
+      !isNonEmptyString(provenance.cost.amount) ||
+      !isNonEmptyString(provenance.cost.currency))
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_GENERATION_PROVENANCE',
+        'generation cost must include amount and currency',
+        `${path}.generationProvenance.cost`,
+      ),
+    );
+  }
 }
 
 function validateCaptionDocument(
@@ -1072,6 +1168,19 @@ function diagnostic(code: string, message: string, path: string): ProjectDiagnos
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
 function isNonEmptyString(value: unknown): value is string {

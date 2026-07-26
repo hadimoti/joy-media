@@ -722,7 +722,9 @@ export class LocalControlPlane implements ControlPlane {
         'ASSET_JOB_INVALID',
         'asset thumbnail requires an opaque asset ID',
       );
-    if (type === 'image.comfy' && assetId !== undefined) {
+    if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
+      throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
+    if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
       const asset = this.#assets.get(assetId);
       if (asset === undefined || asset.projectId !== projectId)
         throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);

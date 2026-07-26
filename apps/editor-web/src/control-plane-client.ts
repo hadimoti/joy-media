@@ -193,11 +193,18 @@ export class BrowserControlPlaneClient {
   }
   /** Queues a local-GPU Comfy RemBG job when a Worker advertises `image.comfy`. */
   async enqueueComfyRemoveBg(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
+    return this.enqueueWorkerGeneration(projectId, id, 'image.comfy', assetId);
+  }
+  async enqueueWorkerGeneration(
+    projectId: string,
+    id: string,
+    type: 'image.comfy' | 'audio.ml-denoise',
+    assetId: string,
+  ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,
-      type: 'image.comfy',
+      type,
       assetId,
-      templateId: 'background-removal-v1',
     });
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<void> {

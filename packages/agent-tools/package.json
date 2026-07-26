@@ -19,6 +19,7 @@
   "dependencies": {
     "@joy-media/audio-core": "workspace:*",
     "@joy-media/commands": "workspace:*",
+    "@joy-media/job-protocol": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*"
   },

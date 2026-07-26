@@ -159,6 +159,14 @@ export type {
 } from './atomic.js';
 export { runPlanAtomically } from './atomic.js';
 
+export type {
+  AgentJobRequestTemplate,
+  AsyncAgentRunOptions,
+  AsyncAgentJobOutcome,
+  AsyncAgentRunResult,
+} from './async-jobs.js';
+export { runPlanWithAsyncJobs } from './async-jobs.js';
+
 export type { AgentBranch, BranchComparison } from './branch.js';
 export { BranchManager, createBranchManager } from './branch.js';
 

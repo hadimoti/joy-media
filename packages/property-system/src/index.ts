@@ -1,4 +1,5 @@
 import type {
+  AssetRecordV1,
   JoyProjectV1,
   MarkerV1,
   VisualObjectTransformV1,
@@ -66,6 +67,20 @@ export function setVisualProperty(
 
 export type NumericTransformProperty = Exclude<keyof TransformProperties, 'crop'>;
 export type VisualObjectCommand =
+  | {
+      /** Registers a completed generation result and its reproducibility record. */
+      readonly type: 'asset.registerGenerated';
+      readonly payload: {
+        readonly asset: AssetRecordV1 & {
+          readonly generationProvenance: NonNullable<AssetRecordV1['generationProvenance']>;
+        };
+      };
+    }
+  | {
+      /** Removes only a generated project reference; provider spend is not reversible. */
+      readonly type: 'asset.unregisterGenerated';
+      readonly payload: { readonly assetId: string };
+    }
   | {
       readonly type: 'object.setTransformProperty';
       readonly payload: {
@@ -170,6 +185,39 @@ export function applyVisualObjectProjectCommand(
       return applyMotionProjectCommand(project, command);
     default:
       break;
+  }
+  if (command.type === 'asset.registerGenerated') {
+    const { asset } = command.payload;
+    if (project.assets[asset.id] !== undefined)
+      throw new RangeError(`asset "${asset.id}" already exists`);
+    if (asset.generationProvenance.generatedAssetId !== asset.id)
+      throw new RangeError('generated asset id must match its provenance');
+    return {
+      project: { ...project, assets: { ...project.assets, [asset.id]: asset } },
+      inverse: { type: 'asset.unregisterGenerated', payload: { assetId: asset.id } },
+    };
+  }
+  if (command.type === 'asset.unregisterGenerated') {
+    const asset = project.assets[command.payload.assetId];
+    if (asset === undefined) throw new RangeError(`unknown asset "${command.payload.assetId}"`);
+    if (asset.generationProvenance === undefined)
+      throw new RangeError(`asset "${command.payload.assetId}" is not generated`);
+    if (
+      Object.values(project.visualObjects).some(
+        (object) => object.kind === 'image' && object.assetId === asset.id,
+      )
+    ) {
+      throw new RangeError(`generated asset "${asset.id}" is still referenced`);
+    }
+    const assets = { ...project.assets };
+    delete assets[asset.id];
+    return {
+      project: { ...project, assets },
+      inverse: {
+        type: 'asset.registerGenerated',
+        payload: { asset: { ...asset, generationProvenance: asset.generationProvenance } },
+      },
+    };
   }
   if (command.type === 'marker.add') {
     if (project.markers.some((marker) => marker.id === command.payload.marker.id))

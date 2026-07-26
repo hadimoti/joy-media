@@ -18,6 +18,9 @@
       "path": "../../packages/commands"
     },
     {
+      "path": "../../packages/job-protocol"
+    },
+    {
       "path": "../../packages/property-system"
     },
     {

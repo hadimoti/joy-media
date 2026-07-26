@@ -641,14 +641,14 @@ async function route(
               decodeURIComponent(jobMatch[1]!),
               requiredString(body, 'assetId'),
             )
-          : type === 'image.comfy'
+          : type === 'image.comfy' || type === 'audio.ml-denoise'
             ? await options.controlPlane.enqueue(
                 actor,
                 requiredString(body, 'id'),
                 decodeURIComponent(jobMatch[1]!),
                 type,
                 Date.now(),
-                optionalString(body, 'assetId'),
+                requiredString(body, 'assetId'),
               )
             : await options.controlPlane.enqueue(
                 actor,
