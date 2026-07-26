@@ -92,7 +92,7 @@ Production was verified after deployment:
 9. Execute changed Intro from 10.0s to 8.0s and rippled Product and Outro left
    by 2.0s.
 10. One `Undo this run` restored all three clips to their exact original
-   positions.
+    positions.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
 or use `https://media.joyteam.ir/?deploy=bd842d8` once to force a fresh HTML
