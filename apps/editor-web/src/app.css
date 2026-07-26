@@ -4714,6 +4714,452 @@ label {
   margin: 0;
   text-align: center;
 }
+
+/* Joy Code — KiloCode-backed History / Composer experience. */
+.joy-code-panel {
+  gap: 0.35rem;
+  padding: 0.5rem 0.55rem;
+}
+.joy-code-panel .joy-panel-body {
+  overflow: hidden;
+}
+.joy-code-drop-target,
+.joy-code-composer {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.joy-code-history {
+  min-height: 0;
+  overflow: auto;
+}
+.joy-code-history-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.35rem 0.2rem 0.55rem;
+}
+.joy-code-history-intro > div {
+  display: grid;
+  gap: 0.1rem;
+}
+.joy-code-history-intro strong {
+  color: var(--joy-text);
+  font-size: 0.76rem;
+}
+.joy-code-history-intro span {
+  color: var(--joy-text-faint);
+  font-size: 0.64rem;
+}
+.joy-code-history-intro button,
+.joy-code-plan-actions button,
+.joy-code-run-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.7rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-secondary);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+.joy-code-history-intro button:hover,
+.joy-code-plan-actions button:hover,
+.joy-code-run-actions button:hover {
+  border-color: var(--joy-border-hover);
+  color: var(--joy-text);
+}
+.joy-code-thread-list {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.joy-code-thread {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 3.2rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--joy-text);
+  text-align: start;
+  cursor: pointer;
+}
+.joy-code-thread:hover,
+.joy-code-thread[aria-current='true'] {
+  border-color: var(--joy-border-subtle);
+  background: var(--joy-bg-hover);
+}
+.joy-code-thread-status {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--joy-text-disabled);
+}
+.joy-code-thread-status.is-planning {
+  background: var(--joy-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--joy-accent) 12%, transparent);
+}
+.joy-code-thread-status.is-completed {
+  background: var(--joy-ok);
+}
+.joy-code-thread-status.is-failed {
+  background: var(--joy-danger);
+}
+.joy-code-thread-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+.joy-code-thread-copy strong,
+.joy-code-thread-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.joy-code-thread-copy strong {
+  font-size: 0.72rem;
+}
+.joy-code-thread-copy span,
+.joy-code-thread time {
+  color: var(--joy-text-faint);
+  font-size: 0.62rem;
+}
+.joy-code-thread time {
+  white-space: nowrap;
+}
+.joy-code-messages {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow: auto;
+  padding: 0.55rem 0.35rem 0.8rem;
+  scrollbar-gutter: stable;
+}
+.joy-code-welcome {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  max-width: 23rem;
+  margin: auto;
+  padding: 1.1rem 0.65rem;
+  text-align: center;
+}
+.joy-code-mark,
+.joy-code-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-accent) 12%, var(--joy-bg-inset));
+  color: var(--joy-accent);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.joy-code-mark {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.55rem;
+  font-size: 0.72rem;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--joy-accent) 14%, transparent);
+}
+.joy-code-welcome h3 {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: 0.9rem;
+}
+.joy-code-welcome p {
+  margin: 0;
+  color: var(--joy-text-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+.joy-code-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  max-width: 94%;
+}
+.joy-code-message.is-user {
+  align-self: flex-end;
+  padding: 0.45rem 0.58rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md) var(--radius-md) 0.15rem var(--radius-md);
+  background: var(--joy-bg-control);
+}
+.joy-code-message.is-assistant {
+  align-self: stretch;
+}
+.joy-code-avatar {
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.48rem;
+}
+.joy-code-message > div {
+  min-width: 0;
+}
+.joy-code-message strong {
+  color: var(--joy-text-faint);
+  font-size: 0.59rem;
+  font-weight: 650;
+}
+.joy-code-message p {
+  margin: 0.1rem 0 0;
+  color: var(--joy-text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.joy-code-message.is-user strong {
+  display: none;
+}
+.joy-code-message.is-user p {
+  margin: 0;
+  color: var(--joy-text);
+}
+.joy-code-plan-card,
+.joy-code-run-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+}
+.joy-code-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.joy-code-plan-head > div,
+.joy-code-run-card > div:first-child {
+  display: grid;
+  gap: 0.1rem;
+}
+.joy-code-plan-head > div > span,
+.joy-code-run-card span,
+.joy-code-plan-reason {
+  color: var(--joy-text-faint);
+  font-size: 0.62rem;
+}
+.joy-code-plan-head strong,
+.joy-code-run-card strong {
+  color: var(--joy-text);
+  font-size: 0.72rem;
+}
+.joy-code-plan-card > p,
+.joy-code-run-card > p {
+  margin: 0;
+  color: var(--joy-text-muted);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+.joy-code-plan-card canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+}
+.joy-code-plan-actions,
+.joy-code-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.joy-code-plan-actions button.is-primary {
+  border-color: color-mix(in srgb, var(--joy-accent) 65%, var(--joy-border));
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font-weight: 700;
+}
+.joy-code-run-card.is-success {
+  border-color: color-mix(in srgb, var(--joy-ok) 35%, var(--joy-border));
+}
+.joy-code-run-card.is-failed {
+  border-color: color-mix(in srgb, var(--joy-danger) 45%, var(--joy-border));
+}
+.joy-code-compose-dock {
+  flex: none;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  box-shadow: 0 -8px 22px rgb(0 0 0 / 14%);
+}
+.joy-code-attachments {
+  display: flex;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+.joy-code-attachments li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 7rem;
+  max-width: 12rem;
+  padding: 0.22rem 0.3rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+}
+.joy-code-attachments li > span {
+  color: var(--joy-accent);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+}
+.joy-code-attachments li > strong {
+  overflow: hidden;
+  color: var(--joy-text-secondary);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.joy-code-attachments button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--joy-text-faint);
+  cursor: pointer;
+}
+.joy-code-suggestions {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding-bottom: 0.05rem;
+}
+.joy-code-suggestions button {
+  flex: none;
+  max-width: 10.5rem;
+  overflow: hidden;
+  padding: 0.28rem 0.45rem;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--joy-text-muted);
+  font: inherit;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.joy-code-suggestions button:hover {
+  border-color: var(--joy-border-hover);
+  color: var(--joy-text);
+}
+.joy-code-suggestions button[aria-disabled='true'] {
+  border-style: dashed;
+  color: var(--joy-text-faint);
+}
+.joy-code-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.3rem;
+}
+.joy-code-input textarea {
+  width: 100%;
+  min-height: 3.1rem;
+  max-height: 9rem;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 0.35rem 0.15rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--joy-text);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.joy-code-input textarea::placeholder {
+  color: var(--joy-text-disabled);
+}
+.joy-code-send {
+  display: inline-grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-bottom: 0.1rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
+  border-radius: 50%;
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  cursor: pointer;
+}
+.joy-code-send:disabled {
+  border-color: var(--joy-border);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-disabled);
+  cursor: default;
+}
+.joy-code-compose-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--joy-text-faint);
+  font-size: 0.57rem;
+  text-transform: capitalize;
+}
+.joy-code-compose-footer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+.joy-code-compose-footer > span + span {
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--joy-border-subtle);
+}
+.joy-code-compose-footer .joy-code-privacy {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.joy-code-online-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--joy-ok);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-ok) 12%, transparent);
+}
+@container (max-width: 300px) {
+  .joy-code-compose-footer > span:nth-child(3),
+  .joy-code-compose-footer .joy-code-privacy,
+  .joy-code-thread time {
+    display: none;
+  }
+}
 .asset-library-empty {
   text-align: center;
   padding: 1.2rem 0.8rem !important;

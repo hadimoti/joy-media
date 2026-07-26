@@ -88,15 +88,15 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
   },
   {
     id: 'agent',
-    label: 'Agent',
+    label: 'Joy Code',
     items: [
-      { id: 'agent.open', label: 'Open Agent Panel' },
+      { id: 'agent.open', label: 'Open Joy Code' },
       { id: 'agent.newTask', label: 'New Task', separatorAfter: true },
-      { id: 'agent.active', label: 'Active Agent: KiloCode', disabled: true },
+      { id: 'agent.active', label: 'Editing Host: KiloCode', disabled: true },
       { id: 'agent.executionMode', label: 'Execution Mode…', separatorAfter: true },
       { id: 'agent.stop', label: 'Pause / Stop Task' },
-      { id: 'agent.activity', label: 'Agent Activity', separatorAfter: true },
-      { id: 'agent.settings', label: 'Agent Settings…' },
+      { id: 'agent.activity', label: 'Joy Code History', separatorAfter: true },
+      { id: 'agent.settings', label: 'Joy Code Settings…' },
     ],
   },
   {

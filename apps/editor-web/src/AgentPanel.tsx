@@ -3,7 +3,6 @@ import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
   ApprovalDecision,
-  AuditEntry,
   DryRunResult,
   EditorContext,
   ExecutionResult,
@@ -34,13 +33,70 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
+import {
+  addJoyCodeMessage,
+  createJoyCodeThread,
+  loadJoyCodeThreads,
+  matchJoyCodeIntentId,
+  saveJoyCodeThreads,
+  setJoyCodeThreadStatus,
+  type JoyCodeThread,
+} from './joy-code-history.js';
+import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 
-/** Every edit this panel commits is attributed to the local agent adapter. */
+/** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
 
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'history', label: 'History' },
+  { id: 'composer', label: 'Composer' },
+];
+
+const SUGGESTED_INTENT_IDS = [
+  'shorten-intro',
+  'split-at-playhead',
+  'move-to-playhead',
+  'recipe-split-trim',
+] as const;
+
+interface PendingPlan {
+  readonly threadId: string;
+  readonly intent: AgentIntent;
+  readonly plan: AgentEditPlan;
+  readonly baseRevision: ProjectRevisionId;
+  readonly baseProject: SpikeProject;
+  readonly dryRun: DryRunResult;
+  readonly approval: ApprovalDecision;
+}
+
+interface LastRun {
+  readonly threadId: string;
+  readonly intent: AgentIntent;
+  readonly plan: AgentEditPlan;
+  readonly executionResult: ExecutionResult;
+  readonly reverted: boolean;
+  readonly savedWorkflowId?: string;
+}
+
+interface JoyCodeState {
+  readonly threads: readonly JoyCodeThread[];
+  readonly activeThreadId: string;
+}
+
+export interface KiloCodeAttachedAsset {
+  readonly assetId: string;
+  readonly kind: 'image' | 'video';
+  readonly displayName: string;
+}
+
+export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop';
+export interface AgentPanelCommand {
+  readonly serial: number;
+  readonly type: AgentPanelCommandType;
+}
+
 /**
- * The last-run UI is shaped around `ExecutionResult`; the atomic runner reports
- * an `AtomicRunResult`. Only the fields the panel actually reads are mapped.
+ * Maps the atomic runner into the result shape used by the run summary UI.
  */
 function toExecutionResult(run: AtomicRunResult): ExecutionResult {
   return {
@@ -73,81 +129,42 @@ function toExecutionResult(run: AtomicRunResult): ExecutionResult {
   };
 }
 
-const TABS: readonly PanelTabSpec[] = [
-  { id: 'compose', label: 'Compose' },
-  { id: 'activity', label: 'Activity' },
-];
-import {
-  CheckIcon,
-  CloseIcon,
-  CutIcon,
-  PlayIcon,
-  PlusIcon,
-  SaveIcon,
-  ScissorsIcon,
-  TrashIcon,
-  UndoIcon,
-} from './icons.js';
-
-export interface KiloCodeAttachedAsset {
-  readonly assetId: string;
-  readonly kind: 'image' | 'video';
-  readonly displayName: string;
+function makeJoyCodeId(prefix: string): string {
+  const randomPart =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return `${prefix}-${randomPart}`;
 }
 
-interface PendingPlan {
-  readonly intent: AgentIntent;
-  readonly plan: AgentEditPlan;
-  readonly baseRevision: ProjectRevisionId;
-  readonly baseProject: SpikeProject;
-  readonly dryRun: DryRunResult;
-  readonly approval: ApprovalDecision;
-}
-
-interface LastRun {
-  readonly intent: AgentIntent;
-  readonly plan: AgentEditPlan;
-  readonly executionResult: ExecutionResult;
-  readonly reverted: boolean;
-  readonly savedWorkflowId?: string;
-}
-
-function intentIcon(intentId: string) {
-  switch (intentId) {
-    case 'split-at-playhead':
-    case 'recipe-split-trim':
-      return <ScissorsIcon />;
-    case 'move-to-playhead':
-      return <CutIcon />;
-    case 'remove-selected':
-      return <TrashIcon />;
-    case 'join-with-next':
-      return <CheckIcon />;
-    case 'insert-test-clip':
-      return <PlusIcon />;
-    default:
-      return <PlayIcon />;
+function initialJoyCodeState(projectId: string): JoyCodeState {
+  let threads: readonly JoyCodeThread[] = [];
+  try {
+    threads = loadJoyCodeThreads(window.localStorage, projectId);
+  } catch {
+    // Storage can be disabled by browser policy. The composer still works in memory.
   }
+  const existing = threads[0];
+  if (existing !== undefined) return { threads, activeThreadId: existing.id };
+  const thread = createJoyCodeThread(makeJoyCodeId('task'), new Date().toISOString());
+  return { threads: [thread], activeThreadId: thread.id };
 }
 
-function shortIntentLabel(label: string): string {
-  if (label.startsWith('Recipe:')) return 'Recipe';
-  if (label.startsWith('Split')) return 'Split';
-  if (label.startsWith('Move')) return 'Move';
-  if (label.startsWith('Remove')) return 'Remove';
-  if (label.startsWith('Join')) return 'Join';
-  if (label.startsWith('Insert')) return 'Insert';
-  return label;
-}
-
-export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop';
-export interface AgentPanelCommand {
-  readonly serial: number;
-  readonly type: AgentPanelCommandType;
+function threadTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 /**
- * WP-15.2 — structured agent intents on the real EditorSession command bus.
+ * Joy Code — a conversational shell over the guarded KiloCode editing adapter.
+ * Prompt routing currently exposes the same deterministic timeline intents as
+ * the former dashboard; unsupported free-form prompts are reported honestly.
  */
 export function AgentPanel({
   project,
@@ -176,20 +193,39 @@ export function AgentPanel({
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
+  const handledCommandRef = useRef<number | undefined>(undefined);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
-  const [, forceRender] = useState(0);
-  const [tab, setTab] = useState('compose');
+  const [tab, setTab] = useState('composer');
+  const [draft, setDraft] = useState('');
+  const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
 
   const approvalEngine = useMemo(
     () => new ApprovalEngine(approvalPolicyForAgentSettings(settings)),
     [settings],
   );
 
+  const activeThread =
+    joyCode.threads.find((thread) => thread.id === joyCode.activeThreadId) ?? joyCode.threads[0];
+
   useEffect(() => {
-    if (command === undefined) return;
+    try {
+      saveJoyCodeThreads(window.localStorage, project.id, joyCode.threads);
+    } catch {
+      // History persistence is optional; never block editing when storage is unavailable.
+    }
+  }, [joyCode.threads, project.id]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeThread?.messages.length, pending, lastRun, tab]);
+
+  useEffect(() => {
+    if (command === undefined || handledCommandRef.current === command.serial) return;
+    handledCommandRef.current = command.serial;
     if (command.type === 'activity') {
-      setTab('activity');
+      setTab('history');
       return;
     }
     if (command.type === 'stop' && pending !== undefined) {
@@ -199,36 +235,74 @@ export function AgentPanel({
         userId: 'local-owner',
         metadata: { source: 'agent-menu-stop' },
       });
+      appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
+      updateThreadStatus(pending.threadId, 'draft');
     }
     setPending(undefined);
-    if (command.type === 'new-task') {
-      setLastRun(undefined);
-      setTab('compose');
-    }
+    if (command.type === 'new-task') startNewTask();
   }, [command, pending]);
 
-  const plan = (intent: AgentIntent) => {
-    const baseRevision = session.projectRevisionId;
-    const baseProject = project;
-    const built =
-      intent.id === 'recipe-split-trim'
+  function startNewTask() {
+    const now = new Date().toISOString();
+    const thread = createJoyCodeThread(makeJoyCodeId('task'), now);
+    setJoyCode((current) => ({
+      threads: [thread, ...current.threads],
+      activeThreadId: thread.id,
+    }));
+    setPending(undefined);
+    setLastRun(undefined);
+    setDraft('');
+    setTab('composer');
+  }
+
+  function appendMessage(threadId: string, role: 'user' | 'assistant', body: string): void {
+    const now = new Date().toISOString();
+    setJoyCode((current) => ({
+      ...current,
+      threads: addJoyCodeMessage(current.threads, threadId, {
+        id: makeJoyCodeId('message'),
+        role,
+        body,
+        createdAt: now,
+      }),
+    }));
+  }
+
+  function updateThreadStatus(threadId: string, status: JoyCodeThread['status']): void {
+    setJoyCode((current) => ({
+      ...current,
+      threads: setJoyCodeThreadStatus(current.threads, threadId, status, new Date().toISOString()),
+    }));
+  }
+
+  function buildIntent(intent: AgentIntent) {
+    return intent.id === 'recipe-split-trim'
+      ? (() => {
+          const recipe = buildSplitTrimRecipe(project, selectedClipIds, playheadUs);
+          if (!recipe.ok) return recipe;
+          return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
+        })()
+      : intent.id === 'shorten-intro'
         ? (() => {
-            const recipe = buildSplitTrimRecipe(project, selectedClipIds, playheadUs);
+            const recipe = buildShortenIntroRecipe(project);
             if (!recipe.ok) return recipe;
             return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
           })()
-        : intent.id === 'shorten-intro'
-          ? (() => {
-              const recipe = buildShortenIntroRecipe(project);
-              if (!recipe.ok) return recipe;
-              return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
-            })()
-          : (() => {
-              const single = intent.buildStep(project, selectedClipIds, playheadUs);
-              if (!single.ok) return single;
-              return { ok: true as const, steps: [single.step], goal: intent.label };
-            })();
-    if (!built.ok) return;
+        : (() => {
+            const single = intent.buildStep(project, selectedClipIds, playheadUs);
+            if (!single.ok) return single;
+            return { ok: true as const, steps: [single.step], goal: intent.label };
+          })();
+  }
+
+  function plan(intent: AgentIntent, threadId: string) {
+    const baseRevision = session.projectRevisionId;
+    const baseProject = project;
+    const built = buildIntent(intent);
+    if (!built.ok) {
+      appendMessage(threadId, 'assistant', built.reason);
+      return;
+    }
     const agentPlan = createPlan(built.goal, [...built.steps]);
     const dryRun = dryRunPlan(agentPlan, registry, buildEditorContext(baseProject));
     const decisions = approvalEngine.evaluatePlan(
@@ -240,7 +314,10 @@ export function AgentPanel({
       decisions.find((decision) => decision.decision === 'blocked') ??
       decisions.find((decision) => decision.decision === 'requires-manual') ??
       decisions[0];
-    if (approval === undefined) return;
+    if (approval === undefined) {
+      appendMessage(threadId, 'assistant', 'No approval decision was produced for this plan.');
+      return;
+    }
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'plan-created',
@@ -254,32 +331,66 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { summary: dryRun.aggregateDiff.summary, decision: approval.decision },
     });
-    setPending({ intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
+    appendMessage(
+      threadId,
+      'assistant',
+      approval.decision === 'blocked'
+        ? `I built the plan, but policy blocked it: ${approval.reason}`
+        : `I prepared “${intent.label}”. Dry-run: ${dryRun.aggregateDiff.summary}. Review the change below.`,
+    );
+    setPending({ threadId, intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
     setLastRun(undefined);
-  };
+    updateThreadStatus(threadId, 'planning');
+  }
 
-  const reject = () => {
+  function submitPrompt(prompt: string) {
+    const body = prompt.trim();
+    if (body.length === 0 || activeThread === undefined) return;
+    const threadId = activeThread.id;
+    setDraft('');
+    setTab('composer');
+    appendMessage(threadId, 'user', body);
+    if (pending !== undefined) {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Review, execute, or reject the current plan before starting another edit.',
+      );
+      return;
+    }
+    const intentId = matchJoyCodeIntentId(body);
+    const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+    if (intent === undefined) {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Joy Code can currently plan the timeline commands shown below. Free-form KiloCode streaming will appear here when the server session adapter is connected.',
+      );
+      return;
+    }
+    plan(intent, threadId);
+  }
+
+  function reject() {
     if (pending === undefined) return;
     auditRef.current.record({
       planId: pending.plan.planId,
       action: 'plan-rejected',
       userId: 'local-owner',
     });
+    appendMessage(pending.threadId, 'assistant', 'Rejected. No timeline changes were applied.');
+    updateThreadStatus(pending.threadId, 'draft');
     setPending(undefined);
-    forceRender((n) => n + 1);
-  };
+  }
 
-  const executePending = async (manualApprovalGranted: boolean) => {
+  async function executePending(manualApprovalGranted: boolean) {
     if (pending === undefined) return;
-    const { intent, plan: agentPlan, baseRevision, baseProject } = pending;
+    const { threadId, intent, plan: agentPlan, baseRevision, baseProject } = pending;
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'execution-started',
       userId: 'local-owner',
     });
-    // Atomic path: stage every step, then commit once. The previous
-    // per-step executor produced one undo entry per step, so `undoLastRun`'s
-    // single onUndo() only reverted the final step of a multi-step recipe.
     let atomic: AtomicRunResult;
     try {
       atomic = runPlanAtomically(agentPlan, {
@@ -314,31 +425,35 @@ export function AgentPanel({
         userId: 'local-owner',
         error: error.message,
       });
+      const failedResult: ExecutionResult = {
+        planId: agentPlan.planId,
+        success: false,
+        transactionLabel: '',
+        stepResults: [],
+        aggregateDiff: {
+          clipsCreated: 0,
+          clipsModified: 0,
+          clipsDeleted: 0,
+          tracksAffected: [],
+          timeRangesAffected: [],
+          effectsAdded: 0,
+          captionsAdded: 0,
+          jobsRequired: 0,
+          summary: 'not applied',
+        },
+        durationMs: 0,
+        errors: [error.message],
+        warnings: [],
+        rollbackAvailable: false,
+      };
+      appendMessage(threadId, 'assistant', `I did not apply the edit: ${error.message}`);
+      updateThreadStatus(threadId, 'failed');
       setPending(undefined);
       setLastRun({
+        threadId,
         intent,
         plan: agentPlan,
-        executionResult: {
-          planId: agentPlan.planId,
-          success: false,
-          transactionLabel: '',
-          stepResults: [],
-          aggregateDiff: {
-            clipsCreated: 0,
-            clipsModified: 0,
-            clipsDeleted: 0,
-            tracksAffected: [],
-            timeRangesAffected: [],
-            effectsAdded: 0,
-            captionsAdded: 0,
-            jobsRequired: 0,
-            summary: 'not applied',
-          },
-          durationMs: 0,
-          errors: [error.message],
-          warnings: [],
-          rollbackAvailable: false,
-        },
+        executionResult: failedResult,
         reverted: false,
       });
       return;
@@ -351,11 +466,19 @@ export function AgentPanel({
       ...(executionResult.errors[0] !== undefined && { error: executionResult.errors[0] }),
       metadata: { transactionLabel: executionResult.transactionLabel },
     });
+    appendMessage(
+      threadId,
+      'assistant',
+      executionResult.success
+        ? `Applied “${intent.label}” as one atomic timeline transaction.`
+        : `The edit failed: ${executionResult.errors.join(', ')}`,
+    );
+    updateThreadStatus(threadId, executionResult.success ? 'completed' : 'failed');
     setPending(undefined);
-    setLastRun({ intent, plan: agentPlan, executionResult, reverted: false });
-  };
+    setLastRun({ threadId, intent, plan: agentPlan, executionResult, reverted: false });
+  }
 
-  const saveLastRunAsWorkflow = () => {
+  function saveLastRunAsWorkflow() {
     if (lastRun === undefined || !lastRun.executionResult.success) return;
     const recorded = saveWorkflow(session, lastRun.plan);
     auditRef.current.record({
@@ -364,10 +487,11 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { workflowId: recorded.workflow.id },
     });
+    appendMessage(lastRun.threadId, 'assistant', `Saved as workflow ${recorded.workflow.id}.`);
     setLastRun({ ...lastRun, savedWorkflowId: recorded.workflow.id });
-  };
+  }
 
-  const undoLastRun = () => {
+  function undoLastRun() {
     if (lastRun === undefined) return;
     onUndo();
     auditRef.current.record({
@@ -376,27 +500,42 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { transactionLabel: lastRun.executionResult.transactionLabel },
     });
+    appendMessage(lastRun.threadId, 'assistant', 'Reverted the complete run in one undo.');
+    updateThreadStatus(lastRun.threadId, 'draft');
     setLastRun({ ...lastRun, reverted: true });
-  };
-
-  const entries: readonly AuditEntry[] = [...auditRef.current.getAllEntries()].reverse();
+  }
 
   const pendingChanges = useMemo(() => {
     if (pending === undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
 
+  const suggestions = SUGGESTED_INTENT_IDS.map((id) =>
+    AGENT_INTENTS.find((intent) => intent.id === id),
+  ).filter((intent): intent is AgentIntent => intent !== undefined);
+
   return (
     <PanelShell
-      title="Agent"
+      title="Joy Code"
       iconUrl={panelTabIconUrl('agent')}
-      className="agent-panel"
+      className="joy-code-panel"
+      actions={
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="New Joy Code task"
+          title="New task"
+          onClick={startNewTask}
+        >
+          <PlusIcon />
+        </button>
+      }
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
     >
       <div
-        className="agent-drop-target"
+        className="joy-code-drop-target"
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
           event.preventDefault();
@@ -420,41 +559,196 @@ export function AgentPanel({
               displayName: asset.displayName ?? asset.assetId,
             });
           } catch {
-            /* ignore malformed payload */
+            /* Ignore malformed asset payloads. */
           }
         }}
       >
-        {tab === 'compose' && (
-          <>
-            <section className="agent-runtime-summary" aria-label="Active agent policy">
-              <strong>KiloCode</strong>
-              <span>{settings.executionMode.replaceAll('-', ' ')}</span>
-              <span>
-                {settings.privacyMode === 'local-only' ? 'local only' : 'remote actions ask first'}
-              </span>
-            </section>
-            <section className="agent-attachments" aria-label="KiloCode media attachments">
-              <h3>Attached for AI</h3>
-              {attachedAssets.length === 0 ? (
-                <p className="agent-attachments-empty">
-                  Drop an image/video here, or use Edit with AI on an Assets card. Then run intents
-                  / automations against the attachment.
-                </p>
-              ) : (
-                <ul className="agent-attachment-list">
-                  {attachedAssets.map((asset) => (
-                    <li key={asset.assetId} className="agent-attachment-chip">
-                      <span className="agent-attachment-kind">{asset.kind}</span>
-                      <span className="agent-attachment-name" title={asset.assetId}>
-                        {asset.displayName}
+        {tab === 'history' && (
+          <section className="joy-code-history" aria-label="Joy Code task history">
+            <div className="joy-code-history-intro">
+              <div>
+                <strong>Recent tasks</strong>
+                <span>Saved for this project</span>
+              </div>
+              <button type="button" onClick={startNewTask}>
+                <PlusIcon />
+                New task
+              </button>
+            </div>
+            <ul className="joy-code-thread-list">
+              {joyCode.threads.map((thread) => {
+                const preview = thread.messages.at(-1)?.body ?? 'Ready for a prompt';
+                return (
+                  <li key={thread.id}>
+                    <button
+                      type="button"
+                      className="joy-code-thread"
+                      aria-current={thread.id === joyCode.activeThreadId ? 'true' : undefined}
+                      onClick={() => {
+                        setJoyCode((current) => ({ ...current, activeThreadId: thread.id }));
+                        setTab('composer');
+                      }}
+                    >
+                      <span className={`joy-code-thread-status is-${thread.status}`} />
+                      <span className="joy-code-thread-copy">
+                        <strong>{thread.title}</strong>
+                        <span>{preview}</span>
                       </span>
+                      <time dateTime={thread.updatedAt}>{threadTimestamp(thread.updatedAt)}</time>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {tab === 'composer' && (
+          <section className="joy-code-composer" aria-label="Joy Code composer">
+            <div className="joy-code-messages" aria-live="polite">
+              {activeThread?.messages.length === 0 && (
+                <div className="joy-code-welcome">
+                  <span className="joy-code-mark" aria-hidden="true">
+                    JC
+                  </span>
+                  <h3>What should we edit?</h3>
+                  <p>
+                    Joy Code uses KiloCode to prepare guarded timeline plans. Nothing changes until
+                    the plan passes policy and its execution mode allows it.
+                  </p>
+                </div>
+              )}
+
+              {activeThread?.messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`joy-code-message is-${message.role}`}
+                  aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
+                >
+                  {message.role === 'assistant' && (
+                    <span className="joy-code-avatar" aria-hidden="true">
+                      JC
+                    </span>
+                  )}
+                  <div>
+                    <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
+                    <p>{message.body}</p>
+                  </div>
+                </article>
+              ))}
+
+              {pending !== undefined && pending.threadId === activeThread?.id && (
+                <section className="joy-code-plan-card" aria-label="Proposed timeline plan">
+                  <div className="joy-code-plan-head">
+                    <div>
+                      <span>Proposed edit</span>
+                      <strong>{pending.intent.label}</strong>
+                    </div>
+                    <span className={`agent-decision agent-decision-${pending.approval.decision}`}>
+                      {pending.approval.decision.replaceAll('-', ' ')}
+                    </span>
+                  </div>
+                  <p>{pending.dryRun.aggregateDiff.summary}</p>
+                  <AgentTimelineCanvas
+                    project={project}
+                    playheadUs={playheadUs}
+                    highlightedClipIds={selectedClipIds}
+                    pendingChanges={pendingChanges}
+                    width={400}
+                    height={120}
+                  />
+                  {pending.dryRun.errors.length > 0 && (
+                    <p className="agent-error">
+                      Dry-run errors: {pending.dryRun.errors.join(', ')}
+                    </p>
+                  )}
+                  <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                  <div className="joy-code-plan-actions">
+                    {pending.approval.decision === 'blocked' && (
+                      <button type="button" onClick={reject}>
+                        Dismiss
+                      </button>
+                    )}
+                    {pending.approval.decision === 'requires-manual' && (
+                      <>
+                        <button
+                          type="button"
+                          className="is-primary"
+                          onClick={() => void executePending(true)}
+                        >
+                          <CheckIcon />
+                          Approve &amp; apply
+                        </button>
+                        <button type="button" onClick={reject}>
+                          <CloseIcon />
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {pending.approval.decision === 'auto-approved' && (
+                      <button
+                        type="button"
+                        className="is-primary"
+                        onClick={() => void executePending(false)}
+                      >
+                        <PlayIcon />
+                        Apply edit
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
+                <section
+                  className={`joy-code-run-card ${
+                    lastRun.executionResult.success ? 'is-success' : 'is-failed'
+                  }`}
+                  aria-label="Last Joy Code run"
+                >
+                  <div>
+                    <strong>
+                      {lastRun.executionResult.success ? 'Edit applied' : 'Edit failed'}
+                    </strong>
+                    <span>{lastRun.intent.label}</span>
+                  </div>
+                  <div className="joy-code-run-actions">
+                    {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
+                      <button type="button" onClick={undoLastRun}>
+                        <UndoIcon />
+                        Undo run
+                      </button>
+                    )}
+                    {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
+                      <button type="button" onClick={saveLastRunAsWorkflow}>
+                        <SaveIcon />
+                        Save workflow
+                      </button>
+                    )}
+                  </div>
+                  {!lastRun.executionResult.success && (
+                    <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
+                  )}
+                  {lastRun.reverted && <p>Reverted.</p>}
+                  {lastRun.savedWorkflowId !== undefined && (
+                    <p>Saved as {lastRun.savedWorkflowId}</p>
+                  )}
+                </section>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="joy-code-compose-dock">
+              {attachedAssets.length > 0 && (
+                <ul className="joy-code-attachments" aria-label="Attached media">
+                  {attachedAssets.map((asset) => (
+                    <li key={asset.assetId}>
+                      <span>{asset.kind}</span>
+                      <strong title={asset.assetId}>{asset.displayName}</strong>
                       {onDetachAsset !== undefined && (
                         <button
                           type="button"
-                          className="icon-button"
                           aria-label={`Detach ${asset.displayName}`}
-                          title="Detach"
-                          data-guide="Detach"
                           onClick={() => onDetachAsset(asset.assetId)}
                         >
                           <CloseIcon />
@@ -464,180 +758,66 @@ export function AgentPanel({
                   ))}
                 </ul>
               )}
-            </section>
-
-            <section className="agent-intents" aria-label="Agent intents">
-              <h3>Intents</h3>
-              <ul className="agent-intent-grid">
-                {AGENT_INTENTS.map((intent) => {
-                  const built =
-                    intent.id === 'recipe-split-trim'
-                      ? buildSplitTrimRecipe(project, selectedClipIds, playheadUs)
-                      : intent.buildStep(project, selectedClipIds, playheadUs);
+              <div className="joy-code-suggestions" aria-label="Suggested timeline prompts">
+                {suggestions.map((intent) => {
+                  const available = buildIntent(intent);
                   return (
-                    <li key={intent.id}>
-                      <button
-                        type="button"
-                        className={
-                          intent.destructive
-                            ? 'agent-intent-card agent-intent-card-danger'
-                            : 'agent-intent-card'
-                        }
-                        disabled={!built.ok}
-                        aria-label={intent.label}
-                        data-guide={shortIntentLabel(intent.label)}
-                        onClick={() => plan(intent)}
-                      >
-                        <span className="agent-intent-icon" aria-hidden="true">
-                          {intentIcon(intent.id)}
-                        </span>
-                        <span className="agent-intent-name">{shortIntentLabel(intent.label)}</span>
-                      </button>
-                      {!built.ok && <p className="agent-intent-reason">{built.reason}</p>}
-                    </li>
+                    <button
+                      key={intent.id}
+                      type="button"
+                      aria-disabled={!available.ok}
+                      title={available.ok ? intent.description : available.reason}
+                      onClick={() => submitPrompt(intent.label)}
+                    >
+                      {intent.label
+                        .replace(' selected clip at playhead', '')
+                        .replace('Recipe: ', '')}
+                    </button>
                   );
                 })}
-              </ul>
-            </section>
-
-            {pending !== undefined && (
-              <section className="agent-pending-plan" aria-live="polite">
-                <div className="agent-pending-head">
-                  <h3>{pending.intent.label}</h3>
-                  <span
-                    className={`agent-decision agent-decision-${pending.approval.decision}`}
-                    title={pending.approval.reason}
-                  >
-                    {pending.approval.decision}
-                  </span>
-                </div>
-                <p className="agent-pending-summary">
-                  Dry-run: {pending.dryRun.aggregateDiff.summary}
-                </p>
-                <AgentTimelineCanvas
-                  project={project}
-                  playheadUs={playheadUs}
-                  highlightedClipIds={selectedClipIds}
-                  pendingChanges={pendingChanges}
-                  width={400}
-                  height={120}
+              </div>
+              <div className="joy-code-input">
+                <textarea
+                  rows={3}
+                  value={draft}
+                  aria-label="Message Joy Code"
+                  placeholder="Ask Joy Code to edit the timeline…"
+                  onChange={(event) => setDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      submitPrompt(draft);
+                    }
+                  }}
                 />
-                {pending.dryRun.errors.length > 0 && (
-                  <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
-                )}
-                <p className="agent-pending-reason">{pending.approval.reason}</p>
-                <div className="agent-pending-actions">
-                  {pending.approval.decision === 'blocked' && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="Dismiss blocked plan"
-                      title="Dismiss"
-                      onClick={reject}
-                    >
-                      <CloseIcon />
-                    </button>
-                  )}
-                  {pending.approval.decision === 'requires-manual' && (
-                    <>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label="Approve and execute"
-                        data-guide="Approve"
-                        onClick={() => void executePending(true)}
-                      >
-                        <CheckIcon />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label="Reject plan"
-                        title="Reject plan"
-                        onClick={reject}
-                      >
-                        <CloseIcon />
-                      </button>
-                    </>
-                  )}
-                  {pending.approval.decision === 'auto-approved' && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="Execute plan"
-                      data-guide="Execute"
-                      onClick={() => void executePending(false)}
-                    >
-                      <PlayIcon />
-                    </button>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {lastRun !== undefined && (
-              <section className="agent-last-run" aria-live="polite">
-                <div className="agent-last-run-row">
-                  <p>
-                    {lastRun.executionResult.success ? 'Executed' : 'Failed'}:{' '}
-                    {lastRun.intent.label}
-                  </p>
-                  <div className="agent-pending-actions">
-                    {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label="Undo this run"
-                        title="Undo this run"
-                        onClick={undoLastRun}
-                      >
-                        <UndoIcon />
-                      </button>
-                    )}
-                    {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label="Save as reusable workflow"
-                        title="Save as reusable workflow"
-                        onClick={saveLastRunAsWorkflow}
-                      >
-                        <SaveIcon />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {!lastRun.executionResult.success && (
-                  <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
-                )}
-                {lastRun.savedWorkflowId !== undefined && (
-                  <p className="agent-workflow-saved">Saved as {lastRun.savedWorkflowId}</p>
-                )}
-                {lastRun.reverted && <p className="agent-pending-reason">Reverted.</p>}
-              </section>
-            )}
-          </>
-        )}
-
-        {tab === 'activity' && (
-          <section className="agent-activity">
-            {entries.length === 0 ? (
-              <p className="agent-activity-empty">No agent activity yet</p>
-            ) : (
-              <ul className="agent-activity-list">
-                {entries.map((entry) => (
-                  <li key={entry.id} className="agent-activity-row">
-                    <span className="agent-activity-action">{entry.action}</span>
-                    {entry.tool !== undefined && (
-                      <span className="agent-activity-tool">{entry.tool}</span>
-                    )}
-                    {entry.error !== undefined && (
-                      <span className="agent-error">{entry.error}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+                <button
+                  type="button"
+                  className="joy-code-send"
+                  aria-label={pending === undefined ? 'Send message' : 'Stop current plan'}
+                  title={pending === undefined ? 'Send' : 'Stop'}
+                  disabled={pending === undefined && draft.trim().length === 0}
+                  onClick={() => {
+                    if (pending !== undefined) reject();
+                    else submitPrompt(draft);
+                  }}
+                >
+                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                </button>
+              </div>
+              <footer className="joy-code-compose-footer">
+                <span>
+                  <i className="joy-code-online-dot" />
+                  KiloCode
+                </span>
+                <span>{settings.executionMode.replaceAll('-', ' ')}</span>
+                <span>{settings.reasoningModel}</span>
+                <span className="joy-code-privacy">
+                  {settings.privacyMode === 'local-only'
+                    ? 'Local only'
+                    : 'Remote actions ask first'}
+                </span>
+              </footer>
+            </div>
           </section>
         )}
       </div>

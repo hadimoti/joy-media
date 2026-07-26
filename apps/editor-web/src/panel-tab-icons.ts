@@ -21,7 +21,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   history: 'History',
   diagnostics: 'Diagnostics',
   jobs: 'Jobs',
-  agent: 'Agent',
+  agent: 'Joy Code',
   workflows: 'Workflows',
   plugins: 'Plugins',
 };

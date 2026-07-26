@@ -18,16 +18,16 @@ describe('app-menu catalog', () => {
     expect(file?.items.some((item) => item.id === 'file.projects')).toBe(true);
   });
 
-  it('keeps the Agent menu focused on task entry points and settings', () => {
+  it('keeps the Joy Code menu focused on KiloCode task entry points and settings', () => {
     const agent = APP_MENU_GROUPS.find((group) => group.id === 'agent');
     expect(agent?.items.map((item) => item.label)).toEqual([
-      'Open Agent Panel',
+      'Open Joy Code',
       'New Task',
-      'Active Agent: KiloCode',
+      'Editing Host: KiloCode',
       'Execution Mode…',
       'Pause / Stop Task',
-      'Agent Activity',
-      'Agent Settings…',
+      'Joy Code History',
+      'Joy Code Settings…',
     ]);
   });
 
