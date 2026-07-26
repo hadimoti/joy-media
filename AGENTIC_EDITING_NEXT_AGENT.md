@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `a7ee900` or newer on the tracked branch
+Required starting commit: `f620215` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `a7ee900`
+- Live application commit: `f620215`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/a7ee900-joy-code`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/f620215-marker-style`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/a326ba4-marker-icons`
+  `/opt/joy-media/web-releases/a7ee900-joy-code`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-BWyVVZ4f.js` and
-   `assets/index-DLT_2vfR.css`.
+1. Public HTML loads `assets/index-C3MXzmUb.js` and
+   `assets/index-BDBqVoPJ.css`.
 2. The immutable release JS SHA-256 is
-   `8a545ea13a711e5ccec00e38d936a18f119d99481c462bf7a88eea4d18ee6514`;
+   `74df8893c90d1fc701e063f2ee5413b891824642c46cd03ea1af8d37a2d1a891`;
    the CSS SHA-256 is
-   `bf05b7b2e4550862fea94700b9b1e5dc152a633fe88cc4de261600364cc6f7ee`.
+   `da2bc0c972741e4b62748370c0ac65acd99e5f6bdb28506234840f322fca5a78`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -103,9 +103,13 @@ Production was verified after deployment:
     suggestions, plan/run cards, and an anchored composer.
 13. Production Joy Code built the real three-command dry-run, then Reject left
     the timeline unchanged and recorded the task in History.
+14. Both uploaded marker assets render through `currentColor` masks. The
+    toolbar and placed marker glyphs are neutral at rest per `DESIGN.md` §1a;
+    the placed marker uses the standard neutral hover color. A production test
+    marker was added, visually checked, and removed.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=a7ee900` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=f620215` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
