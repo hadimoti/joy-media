@@ -1355,6 +1355,13 @@ label {
 
 .timeline-toolbar-group.timeline-toolbar-zoom {
   flex-wrap: wrap;
+  margin-left: auto;
+}
+.timeline-toolbar-sep:has(+ .timeline-toolbar-zoom) {
+  margin-left: auto;
+}
+.timeline-toolbar-sep:has(+ .timeline-toolbar-zoom) + .timeline-toolbar-zoom {
+  margin-left: 0;
 }
 
 .timeline-toolbar-zoom .timeline-zoom-slider {
