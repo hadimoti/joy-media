@@ -4,7 +4,7 @@ Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `f620215` or newer on the tracked branch
+Required starting commit: `963000a` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live application commit: `f620215`
+- Live application commit: `963000a`
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/f620215-marker-style`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/963000a-manual-composer`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/a7ee900-joy-code`
+  `/opt/joy-media/web-releases/f620215-marker-style`
 - Live API symlink:
   `/opt/joy-media/releases/current-api -> /opt/joy-media/releases/bd842d8-agentic-api`
 - API rollback release retained:
@@ -72,12 +72,12 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-C3MXzmUb.js` and
-   `assets/index-BDBqVoPJ.css`.
+1. Public HTML loads `assets/index-SpIm7kK6.js` and
+   `assets/index-BMyCrnXn.css`.
 2. The immutable release JS SHA-256 is
-   `74df8893c90d1fc701e063f2ee5413b891824642c46cd03ea1af8d37a2d1a891`;
+   `5ada0c7b5e37320a141070476a6b1d2e5947ec541508b3681d5226f78238da22`;
    the CSS SHA-256 is
-   `da2bc0c972741e4b62748370c0ac65acd99e5f6bdb28506234840f322fca5a78`.
+   `b88c18ec85c34a92248e029150960fed911514eba565f885ff79427633f60ab4`.
 3. `joy-media@api` and `nginx` are active.
 4. The API has zero restarts, listens only on `127.0.0.1:8790`, returns health
    200, and fails closed with 401 for an unauthenticated `/v1` job request.
@@ -107,9 +107,12 @@ Production was verified after deployment:
     toolbar and placed marker glyphs are neutral at rest per `DESIGN.md` §1a;
     the placed marker uses the standard neutral hover color. A production test
     marker was added, visually checked, and removed.
+15. Joy Code Composer is manual-only: the preset suggestion row is removed,
+    the text field is the direct task entry point, and typed requests retain
+    the guarded plan, approval, execution, undo, and history path.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=f620215` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=963000a` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
