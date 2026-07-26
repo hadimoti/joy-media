@@ -13,6 +13,7 @@ import {
   useState,
   useMemo,
   useCallback,
+  useContext,
   type MutableRefObject,
 } from 'react';
 import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
@@ -54,6 +55,7 @@ import {
 } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
+import { EditorPanelContext } from './App.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -903,7 +905,9 @@ export function MotionPanel({
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
   const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
-  const [motionStudioOpen, setMotionStudioOpen] = useState(false);
+
+  const editorContext = useContext(EditorPanelContext);
+  const openMotionStudio = editorContext?.openMotionStudio ?? (() => {});
 
   const duration = Math.max(1, compositionDurationUs);
   const timeToX = (timeUs: number) =>
@@ -924,20 +928,9 @@ export function MotionPanel({
     });
   }, []);
 
-  const openMotionStudio = useCallback(() => {
-    setMotionStudioOpen(true);
-  }, []);
-
-  const closeMotionStudio = useCallback(() => {
-    setMotionStudioOpen(false);
-  }, []);
-
-  const openMotion = useCallback((id: string) => {
-    const motion = motionRegistry.get(id);
-    if (motion) {
-      setMotionStudioOpen(true);
-    }
-  }, []);
+  const openMotion = useCallback((_id: string) => {
+    openMotionStudio();
+  }, [openMotionStudio]);
 
   const duplicateMotion = useCallback((id: string) => {
     const newId = `user-${crypto.randomUUID()}`;
@@ -1124,18 +1117,6 @@ export function MotionPanel({
           )
         )}
       </div>
-
-      {/* Hidden full-screen container — replaced by routed Mode in Phase 3 */}
-      {motionStudioOpen && (
-        <div className="motion-studio-overlay">
-          <div className="motion-studio-placeholder">
-            <p>Motion Studio full-screen editor will open here.</p>
-            <button type="button" className="icon-button" onClick={closeMotionStudio}>
-              <CloseIcon />
-            </button>
-          </div>
-        </div>
-      )}
     </article>
   );
 }

@@ -814,3 +814,94 @@ export function StarFilledIcon() {
     </Svg>
   );
 }
+
+export function ChevronLeftIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M10.5 3.5 5 8l5.5 4.5" />
+    </Svg>
+  );
+}
+
+export function ChevronRightIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M5.5 3.5 11 8l-5.5 4.5" />
+    </Svg>
+  );
+}
+
+export function EyeIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M1.5 8s2.5-4.5 6.5-4.5 6.5 4.5 6.5 4.5-2.5 4.5-6.5 4.5S1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="1.5" />
+    </Svg>
+  );
+}
+
+export function EyeOffIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M2.5 2.5 13.5 13.5M6 6l.5-.5a3 3 0 0 1 4.7 3.7" />
+      <path d="M1.5 8s2.5-4.5 6.5-4.5h.5m4 1.5.5.5s-2.5 4.5-6.5 4.5h-.5m-1-1.5-.5-.5" />
+    </Svg>
+  );
+}
+
+export function UnlockIcon() {
+  return (
+    <Svg size={14}>
+      <rect x="3.5" y="6.5" width="9" height="7" rx="1" />
+      <path d="M5.5 6.5v-2a2.5 2.5 0 0 1 5 0v1M9.5 10.5v-1" />
+    </Svg>
+  );
+}
+
+export function LayersIcon() {
+  return (
+    <Svg size={14}>
+      <rect x="2.5" y="2.5" width="11" height="7" rx="0.5" />
+      <path d="m4 5 4-2 4 2" />
+      <rect x="2.5" y="9.5" width="11" height="4" rx="0.5" fill="currentColor" fillOpacity="0.3" stroke="currentColor" />
+    </Svg>
+  );
+}
+
+export function SlidersIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M2.5 5.5h6" strokeWidth="2" />
+      <circle cx="8.5" cy="5.5" r="1.5" />
+      <path d="M7.5 10.5h4" strokeWidth="2" />
+      <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor" />
+    </Svg>
+  );
+}
+
+export function CanvasIcon() {
+  return (
+    <Svg size={14}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
+      <path d="M2.5 8h5l3.5 5.5" />
+      <circle cx="10" cy="5.5" r="1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function TimelineIcon() {
+  return (
+    <Svg size={14}>
+      <rect x="2.5" y="2.5" width="11" height="3" rx="1" />
+      <path d="M5 13.5V5.5m5 8V5.5" />
+    </Svg>
+  );
+}
+
+export function CodeIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M4.5 4.5 1 8l3.5 3.5M11.5 4.5 15 8l-3.5 3.5M9.5 3 6 13" />
+    </Svg>
+  );
+}

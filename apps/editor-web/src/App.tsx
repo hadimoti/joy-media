@@ -70,6 +70,7 @@ import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
+import { MotionStudioShell } from './motion-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
@@ -394,8 +395,11 @@ interface EditorPanelContextValue {
   readonly jumpToHistory: (sequence: number) => void;
   readonly agentContext: EditorContext;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+  readonly motionStudioOpen: boolean;
+  readonly openMotionStudio: () => void;
+  readonly closeMotionStudio: () => void;
 }
-const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
+export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
 export function App() {
   const storage = window.localStorage;
@@ -493,6 +497,7 @@ function EditorWorkspace({
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const [toasts, setToasts] = useState<readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]>([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const [motionStudioOpen, setMotionStudioOpen] = useState(false);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -2505,6 +2510,9 @@ function EditorWorkspace({
           jumpToHistory,
           agentContext,
           showToast,
+          motionStudioOpen,
+          openMotionStudio: () => setMotionStudioOpen(true),
+          closeMotionStudio: () => setMotionStudioOpen(false),
         }}
       >
         <DockviewReact
@@ -2514,6 +2522,12 @@ function EditorWorkspace({
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
+      {motionStudioOpen && (
+        <MotionStudioShell
+          motionName="Untitled Motion"
+          onClose={() => setMotionStudioOpen(false)}
+        />
+      )}
       {toasts.length > 0 && (
         <div className="toast-container" aria-live="polite">
           {toasts.map((toast) => (
