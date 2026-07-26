@@ -99,7 +99,7 @@ export { dryRunPlan } from './dry-run.js';
 export type { ExecutionResult, ExecutionStepResult, ExecutionOptions } from './execution.js';
 export { PlanExecutor, createDefaultExecutionOptions } from './execution.js';
 
-export type { IdempotencyRecord } from './idempotency.js';
+export type { IdempotencyRecord, IdempotencyTracker } from './idempotency.js';
 export { IdempotencyStore, createIdempotencyStore } from './idempotency.js';
 
 export {
@@ -128,6 +128,7 @@ export type {
   AgentCommandEnvelope,
   EnvelopeOptions,
   EnvelopeValidation,
+  ProjectRevisionId,
 } from './envelope.js';
 export {
   AGENT_COMMAND_SCHEMA_VERSION,

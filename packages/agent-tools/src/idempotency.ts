@@ -9,7 +9,14 @@ export interface IdempotencyRecord {
   readonly status: 'pending' | 'completed' | 'failed';
 }
 
-export class IdempotencyStore {
+/** Minimal seam used by atomic execution; browser/desktop stores can persist it. */
+export interface IdempotencyTracker {
+  hasExecuted(key: string): boolean;
+  recordExecution(key: string, planId: string, stepId: string, result: ToolResult): void;
+  recordFailure(key: string, planId: string, stepId: string, error: string): void;
+}
+
+export class IdempotencyStore implements IdempotencyTracker {
   private records = new Map<string, IdempotencyRecord>();
 
   generateKey(planId: string, stepId: string, attempt: number): string {

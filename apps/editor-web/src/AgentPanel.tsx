@@ -20,7 +20,11 @@ import {
   runPlanAtomically,
   RevisionConflictError,
 } from '@joy-media/agent-tools';
-import type { AgentActor, AtomicRunResult } from '@joy-media/agent-tools';
+import type {
+  AgentActor,
+  AtomicRunResult,
+  ProjectRevisionId,
+} from '@joy-media/agent-tools';
 import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
@@ -45,7 +49,7 @@ const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
 function toExecutionResult(run: AtomicRunResult): ExecutionResult {
   return {
     planId: run.planId,
-    success: run.committed,
+    success: run.committed || run.replayed,
     transactionLabel: run.transactionLabel,
     stepResults: run.steps.map((step) => ({
       stepId: step.stepId,
@@ -62,7 +66,9 @@ function toExecutionResult(run: AtomicRunResult): ExecutionResult {
       effectsAdded: 0,
       captionsAdded: 0,
       jobsRequired: 0,
-      summary: `${run.commands.length} command(s) in one transaction`,
+      summary: run.replayed
+        ? 'already applied; retry was a no-op'
+        : `${run.commands.length} command(s) in one transaction`,
     },
     durationMs: 0,
     errors: run.errors,
@@ -98,6 +104,8 @@ type PolicyName = 'default' | 'permissive';
 interface PendingPlan {
   readonly intent: AgentIntent;
   readonly plan: AgentEditPlan;
+  readonly baseRevision: ProjectRevisionId;
+  readonly baseProject: SpikeProject;
   readonly dryRun: DryRunResult;
   readonly approval: ApprovalDecision;
 }
@@ -181,6 +189,8 @@ export function AgentPanel({
   );
 
   const plan = (intent: AgentIntent) => {
+    const baseRevision = session.projectRevisionId;
+    const baseProject = project;
     const built =
       intent.id === 'recipe-split-trim'
         ? (() => {
@@ -201,7 +211,7 @@ export function AgentPanel({
           })();
     if (!built.ok) return;
     const agentPlan = createPlan(built.goal, [...built.steps]);
-    const dryRun = dryRunPlan(agentPlan, registry, agentContext);
+    const dryRun = dryRunPlan(agentPlan, registry, buildEditorContext(baseProject));
     const approval = approvalEngine.evaluatePlan(agentPlan, agentContext)[0];
     if (approval === undefined) return;
     auditRef.current.record({
@@ -219,7 +229,7 @@ export function AgentPanel({
       userId: 'local-owner',
       metadata: { summary: dryRun.aggregateDiff.summary, decision: approval.decision },
     });
-    setPending({ intent, plan: agentPlan, dryRun, approval });
+    setPending({ intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
     setLastRun(undefined);
   };
 
@@ -236,7 +246,7 @@ export function AgentPanel({
 
   const executePending = async () => {
     if (pending === undefined) return;
-    const { intent, plan: agentPlan } = pending;
+    const { intent, plan: agentPlan, baseRevision, baseProject } = pending;
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'execution-started',
@@ -251,11 +261,12 @@ export function AgentPanel({
         registry,
         approvalEngine,
         actor: AGENT_ACTOR,
-        projectId: project.id,
-        baseRevision: session.historyCursorSequence,
-        baseProject: project,
+        projectId: baseProject.id,
+        baseRevision,
+        baseProject,
         contextFor: (staged) => buildEditorContext(staged),
-        currentRevision: () => session.historyCursorSequence,
+        currentRevision: () => session.projectRevisionId,
+        idempotency: session.agentIdempotency,
         commit: (transaction) =>
           agentContext.dispatch?.dispatchTimeline(transaction.commands, transaction.label) ?? {
             success: false,
@@ -551,7 +562,7 @@ export function AgentPanel({
               {lastRun.executionResult.success ? 'Executed' : 'Failed'}: {lastRun.intent.label}
             </p>
             <div className="agent-pending-actions">
-              {lastRun.executionResult.success && !lastRun.reverted && (
+              {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
                 <button
                   type="button"
                   className="icon-button"

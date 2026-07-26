@@ -13,8 +13,10 @@ import {
 import type { BrowserKeyValueStore, PersistenceAdapter } from '@joy-media/project-persistence';
 import { validateJoyProjectV1, validateSpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { ProjectRevisionId } from '@joy-media/agent-tools';
 import { EditorCommandController } from './command-controller.js';
 import { withDefaultPortraitComposition } from './editor-project.js';
+import { BrowserAgentIdempotencyStore } from './agent-idempotency-store.js';
 
 export interface HistoryEntry {
   readonly id: string;
@@ -61,6 +63,9 @@ export class EditorSession {
   readonly #visualObjects: VisualObjectProjectHistory;
   readonly #undo: HistoryStackEntry[] = [];
   readonly #redo: HistoryStackEntry[] = [];
+  readonly agentIdempotency: BrowserAgentIdempotencyStore;
+  #timelineRevision: number;
+  #visualObjectRevision: number;
   #sequence = 0;
 
   constructor(
@@ -78,11 +83,17 @@ export class EditorSession {
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
     // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
-    const visualObjects = withDefaultPortraitComposition(
-      recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject),
+    const visualObjects = recoverOrInitialize(
+      this.#visualObjectPersistence,
+      initialVisualProject,
     );
-    this.#timeline = new EditorCommandController(timeline);
-    this.#visualObjects = new VisualObjectProjectHistory(visualObjects);
+    this.#timelineRevision = timeline.revision;
+    this.#visualObjectRevision = visualObjects.revision;
+    this.#timeline = new EditorCommandController(timeline.project);
+    this.#visualObjects = new VisualObjectProjectHistory(
+      withDefaultPortraitComposition(visualObjects.project),
+    );
+    this.agentIdempotency = new BrowserAgentIdempotencyStore(storage, initialTimeline.id);
   }
 
   get timelineProject(): SpikeProject {
@@ -91,6 +102,21 @@ export class EditorSession {
 
   get visualProject(): JoyProjectV1 {
     return this.#visualObjects.present;
+  }
+
+  /**
+   * Durable, opaque revision id for the complete local creative document.
+   *
+   * Both component revisions come from the verified persistence logs and are
+   * recovered on reopen. The string shape is intentionally an implementation
+   * detail; agent envelopes compare it as an opaque ADR-0012-compatible id.
+   */
+  get projectRevisionId(): ProjectRevisionId {
+    return encodeProjectRevision(
+      this.timelineProject.id,
+      this.#timelineRevision,
+      this.#visualObjectRevision,
+    );
   }
 
   get canUndo(): boolean {
@@ -170,6 +196,7 @@ export class EditorSession {
     const before = this.#timeline.project;
     const project = this.#timeline.dispatch(transaction);
     this.#timelinePersistence.saveTransaction(before, transaction, false);
+    this.#timelineRevision += 1;
     this.#record('timeline', transaction.label, transaction.commands.length);
     return project;
   }
@@ -178,6 +205,7 @@ export class EditorSession {
     const before = this.#visualObjects.present;
     const project = this.#visualObjects.apply(transaction);
     this.#visualObjectPersistence.saveTransaction(before, transaction, false);
+    this.#visualObjectRevision += 1;
     this.#record('visual-object', transaction.label, transaction.commands.length);
     return project;
   }
@@ -190,6 +218,7 @@ export class EditorSession {
       { label: 'Replace project document', commands: [] },
       false,
     );
+    this.#visualObjectRevision += 1;
     this.#record('visual-object', 'Replace project document', 0);
     return project;
   }
@@ -205,10 +234,12 @@ export class EditorSession {
         { label: `Undo ${mutation.record.label}`, commands: mutation.record.inverses },
         false,
       );
+      this.#timelineRevision += 1;
     } else {
       const before = this.#visualObjects.present;
       const mutation = this.#visualObjects.undo();
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
+      this.#visualObjectRevision += 1;
     }
     this.#redo.push(entry);
   }
@@ -224,10 +255,12 @@ export class EditorSession {
         { label: `Redo ${mutation.record.label}`, commands: mutation.record.commands },
         false,
       );
+      this.#timelineRevision += 1;
     } else {
       const before = this.#visualObjects.present;
       const mutation = this.#visualObjects.redo();
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
+      this.#visualObjectRevision += 1;
     }
     this.#undo.push(entry);
   }
@@ -238,14 +271,26 @@ export class EditorSession {
   }
 }
 
-function recoverOrInitialize<P, T>(persistence: LocalProjectPersistence<P, T>, initial: P): P {
+function recoverOrInitialize<P, T>(
+  persistence: LocalProjectPersistence<P, T>,
+  initial: P,
+): { readonly project: P; readonly revision: number } {
   try {
-    return persistence.recover(persistenceProjectId(initial)).project;
+    const recovered = persistence.recover(persistenceProjectId(initial));
+    return { project: recovered.project, revision: recovered.revision };
   } catch (error) {
     if (!(error instanceof PersistenceError) || error.code !== 'PERSISTENCE_NOT_FOUND') throw error;
     persistence.initialize(initial);
-    return initial;
+    return { project: initial, revision: 0 };
   }
+}
+
+function encodeProjectRevision(
+  projectId: string,
+  timelineRevision: number,
+  visualObjectRevision: number,
+): ProjectRevisionId {
+  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}`;
 }
 
 function persistenceProjectId(project: unknown): string {

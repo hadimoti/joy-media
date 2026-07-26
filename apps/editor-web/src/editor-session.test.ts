@@ -12,6 +12,52 @@ function memoryStorage() {
 }
 
 describe('EditorSession', () => {
+  it('recovers the same durable project revision and advances it for either document slice', () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const initialRevision = session.projectRevisionId;
+
+    session.dispatchTimeline({
+      label: 'Trim intro',
+      commands: [
+        {
+          type: 'timeline.trimClipEnd',
+          payload: {
+            compositionId: 'root',
+            trackId: 'track-0',
+            clipId: 'intro',
+            newEndUs: 9_000_000,
+          },
+        },
+      ],
+    });
+    const timelineRevision = session.projectRevisionId;
+    expect(timelineRevision).not.toBe(initialRevision);
+
+    session.dispatchVisualObjects({
+      label: 'Move title',
+      commands: [
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: 'intro-title', key: 'x', value: 40 },
+        },
+      ],
+    });
+    const completeDocumentRevision = session.projectRevisionId;
+    expect(completeDocumentRevision).not.toBe(timelineRevision);
+
+    const reopened = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(reopened.projectRevisionId).toBe(completeDocumentRevision);
+  });
+
   it('persists timeline and inspector commands, including undo and redo', () => {
     const storage = memoryStorage();
     const session = new EditorSession(

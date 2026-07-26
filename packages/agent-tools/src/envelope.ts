@@ -18,6 +18,16 @@ import type { Precondition } from './types.js';
 
 export const AGENT_COMMAND_SCHEMA_VERSION = '1.0' as const;
 
+/**
+ * Opaque immutable project revision id.
+ *
+ * ADR-0012 already models collaboration revisions as string ids. Keeping the
+ * agent contract opaque lets a local persisted revision and a future accepted
+ * collaboration head use the same envelope field without another schema
+ * migration.
+ */
+export type ProjectRevisionId = string;
+
 /** Who issued the command. Recorded so the audit trail can distinguish them. */
 export interface AgentActor {
   readonly type: 'agent' | 'human' | 'plugin';
@@ -34,7 +44,7 @@ export interface AgentCommandEnvelope<TParams = unknown> {
    * Project revision the plan was built against. Commit is refused if the
    * project has moved on — see `checkBaseRevision`.
    */
-  readonly baseRevision: number;
+  readonly baseRevision: ProjectRevisionId;
   /** Groups every command of one plan into a single undoable transaction. */
   readonly transactionId: string;
   /** Stable across retries of the same logical step, so replay is a no-op. */
@@ -49,7 +59,7 @@ export interface AgentCommandEnvelope<TParams = unknown> {
 export interface EnvelopeOptions<TParams> {
   readonly commandId?: string;
   readonly projectId: string;
-  readonly baseRevision: number;
+  readonly baseRevision: ProjectRevisionId;
   readonly transactionId: string;
   readonly idempotencyKey: string;
   readonly actor: AgentActor;
@@ -100,8 +110,8 @@ export function validateEnvelope(envelope: AgentCommandEnvelope): EnvelopeValida
       errors.push(`${field} is required`);
     }
   }
-  if (!Number.isInteger(envelope.baseRevision) || envelope.baseRevision < 0) {
-    errors.push('baseRevision must be a non-negative integer');
+  if (typeof envelope.baseRevision !== 'string' || envelope.baseRevision.trim().length === 0) {
+    errors.push('baseRevision must be a non-empty revision id');
   }
   if (envelope.actor === undefined || typeof envelope.actor.id !== 'string' || envelope.actor.id === '') {
     errors.push('actor.id is required');
@@ -118,10 +128,10 @@ export function validateEnvelope(envelope: AgentCommandEnvelope): EnvelopeValida
 /** Raised when the project moved on between planning and commit. */
 export class RevisionConflictError extends Error {
   readonly code = 'AGENT_REVISION_CONFLICT';
-  readonly baseRevision: number;
-  readonly currentRevision: number;
+  readonly baseRevision: ProjectRevisionId;
+  readonly currentRevision: ProjectRevisionId;
 
-  constructor(baseRevision: number, currentRevision: number) {
+  constructor(baseRevision: ProjectRevisionId, currentRevision: ProjectRevisionId) {
     super(
       `plan was built against revision ${baseRevision} but the project is now at ${currentRevision}; re-plan against the current state`,
     );
@@ -136,7 +146,10 @@ export class RevisionConflictError extends Error {
  * commit, so the window between the check and the write is as small as it can
  * be on a single-threaded client.
  */
-export function checkBaseRevision(baseRevision: number, currentRevision: number): void {
+export function checkBaseRevision(
+  baseRevision: ProjectRevisionId,
+  currentRevision: ProjectRevisionId,
+): void {
   if (baseRevision !== currentRevision) {
     throw new RevisionConflictError(baseRevision, currentRevision);
   }

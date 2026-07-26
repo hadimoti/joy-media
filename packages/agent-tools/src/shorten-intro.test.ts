@@ -53,8 +53,8 @@ class FakeSession {
   }
 
   /** Monotonic per commit — the revision the envelope pins to. */
-  get revision(): number {
-    return this.committed.length;
+  get revision(): string {
+    return `rev-${this.committed.length}`;
   }
 
   commit = (transaction: CommandTransaction) => {
@@ -199,7 +199,7 @@ describe('shorten the intro — atomic execution', () => {
       expect(validateEnvelope(envelope).valid).toBe(true);
       expect(envelope.schemaVersion).toBe('1.0');
       expect(envelope.projectId).toBe('golden-social-edit');
-      expect(envelope.baseRevision).toBe(0);
+      expect(envelope.baseRevision).toBe('rev-0');
       expect(envelope.actor).toEqual(AGENT);
       expect(envelope.transactionId).toBe(run.transactionId);
     }
@@ -297,7 +297,7 @@ describe('shorten the intro — revision safety', () => {
     });
 
     expect(() =>
-      runPlanAtomically(result.plan, runOptions(session, 0)),
+      runPlanAtomically(result.plan, runOptions(session, 'rev-0')),
     ).toThrow(RevisionConflictError);
     // The stale run must not have landed.
     expect(session.committed).toHaveLength(1);
@@ -318,7 +318,7 @@ describe('command envelope', () => {
   const valid = () =>
     createEnvelope({
       projectId: 'p1',
-      baseRevision: 3,
+      baseRevision: 'rev-3',
       transactionId: 'tx-1',
       idempotencyKey: 'plan:step:0',
       actor: AGENT,
@@ -330,11 +330,13 @@ describe('command envelope', () => {
     expect(validateEnvelope(valid()).valid).toBe(true);
   });
 
-  it('rejects a negative or fractional baseRevision', () => {
-    expect(validateEnvelope({ ...valid(), baseRevision: -1 }).errors).toContain(
-      'baseRevision must be a non-negative integer',
+  it('rejects an empty or non-string baseRevision', () => {
+    expect(validateEnvelope({ ...valid(), baseRevision: '' }).errors).toContain(
+      'baseRevision must be a non-empty revision id',
     );
-    expect(validateEnvelope({ ...valid(), baseRevision: 1.5 }).valid).toBe(false);
+    expect(
+      validateEnvelope({ ...valid(), baseRevision: 1.5 as unknown as string }).valid,
+    ).toBe(false);
   });
 
   it('rejects an unknown actor type', () => {

@@ -39,7 +39,9 @@ depends on:
 `idempotencyKey`, `actor`, `preconditions`. It wraps *agent* commands only.
 Human edits continue through `EditorSession.dispatchTimeline` unchanged, so the
 editor's own undo semantics (ADR-0003) are untouched. The full core-bus
-hardening reserved for P01 is explicitly **not** done here.
+hardening reserved for P01 is explicitly **not** done here. `baseRevision` is
+an opaque string revision id, matching ADR-0012's collaboration contract rather
+than exposing one persistence implementation's counter shape.
 
 **Execute plans atomically** (`agent-tools/atomic.ts`). `runPlanAtomically`
 stages every step against a scratch project, rebuilding the tool-facing context
@@ -48,6 +50,20 @@ predecessor's result. Nothing touches the real project until every step has
 succeeded; commit is a single `CommandTransaction`, hence a single undo.
 `checkBaseRevision` runs immediately before commit and throws
 `RevisionConflictError` rather than applying a stale plan.
+
+**Amendment — durable local revision, 2026-07-26.** `EditorSession` now retains
+the verified revisions recovered from both durable project logs and exposes one
+opaque `projectRevisionId`. Any successful timeline or document/Inspector
+transaction advances the corresponding component, so a plan identifies the
+complete creative document state and the same id is recovered after reload.
+The Agent panel captures that id and the immutable project snapshot when the
+plan is created; it no longer reads a history cursor at execution time.
+
+Atomic runs also accept a durable transaction-level idempotency tracker. The
+browser implementation stores project-scoped completion receipts. Retrying an
+already completed logical plan, including after reload, is a successful no-op
+before revision validation; a fresh replan receives a new key and can commit
+against the current revision. Failed receipts remain retryable.
 
 **Prove it with one vertical slice.** "Shorten the intro"
 (`agent-tools/shorten-intro.ts`) is a ripple edit: trimming the opening clip
@@ -78,6 +94,8 @@ rational frame mapping, and re-opening it was out of scope.
 - A multi-step agent run is one undo entry and one history row.
 - A failed step commits nothing; the user's project is never left mid-plan.
 - A plan built against a stale revision fails loudly instead of overwriting.
+- Revisions and completed-run receipts survive browser reload.
+- An exact retry cannot apply the same agent transaction twice.
 - Every agent-issued command is attributable to an actor and a transaction.
 - The staged project is available before commit, so a change-set preview can be
   rendered from real applied state rather than predicted diffs.
@@ -104,10 +122,10 @@ Recorded so they are chosen, not forgotten:
 - **No async job path in the agent loop.** `job-protocol` exists but plan steps
   of `mode: 'job'` are not dispatched to the Worker; only synchronous timeline
   commands run.
-- **Revision is the editor's history cursor**, not a durable per-project
-  revision id. It is monotonic within a session, which is enough to catch a
-  concurrent edit, but it does not survive reload and is not the
-  `collaboration-core` revision.
+- **No collaboration transport is wired.** The local revision id is durable and
+  deliberately opaque/ADR-0012-compatible, but it is not yet a remotely
+  accepted `collaboration-core` head. When transport lands, the accepted head
+  id replaces the local adapter value without changing the envelope schema.
 - **Determinism claim corrected.** The source proposal asserted "everything
   must be deterministic". That cannot hold once generative providers are
   involved. The rule adopted is: *command execution is deterministic and
@@ -123,6 +141,12 @@ query, plan ordering, dry-run purity, one-transaction commit, exact rippled
 result, other tracks untouched, envelope completeness, one-step undo,
 all-or-nothing failure, policy blocking, and revision conflict in both
 directions.
+
+`apps/editor-web/src/agent-durable-revision.test.ts`,
+`editor-session.test.ts`, and `agent-idempotency-store.test.ts` add seven tests
+for cross-document conflict detection, replan, reload-stable revision,
+reload-stable idempotency, failed-stage immutability, and one-step undo from a
+reopened durable session.
 
 Rollback is contained: `runPlanAtomically` and `envelope.ts` are additive, and
 the Agent panel can be pointed back at `PlanExecutor.execute` by reverting one

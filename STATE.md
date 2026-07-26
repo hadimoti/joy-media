@@ -113,6 +113,7 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Session log (newest first)
 
+| 2026-07-26 | agent revision | **Durable agent revision + reload idempotency.** Replaced Agent Panel history-cursor revision with an opaque revision composed from the verified timeline/document persistence logs; plan creation now captures its base snapshot/revision; stale cross-slice edits reject and replan succeeds. Project-scoped atomic-run receipts make exact retries after reload a no-op. Added 7 tests: 35/35 focused pass; typecheck/build pass; full suite 1307 pass + 2 environment-only failures (missing faster-whisper/RNNoise model); lint baseline unchanged at 51. |
 | 2026-07-25 | timeline | **Select cursor tool.** Replaced text selection chip with `SelectIcon` toggle (default on); select-tool cursor over tracks/clips; stronger selected outline; empty-lane clears selection. Live `web-releases/f62beb8-timeline-select-tool`. |
 | 2026-07-25 | P16 UX | **Selection chip + HTML scene +.** Timeline toolbar shows selected clip chip (clear); HTML catalog ⓘ top-left, + top-right places scene as overlay clip (same span, track above) via `joy.clipObjects`. Live `web-releases/f62beb8-html-scene-plus`. |
 | 2026-07-25 | icons | **Motion/Effects tab glyphs.** Motion tab → `motion_24x24.png` (from attached html3); Effects tab → former Motion `effects-org_24x24.png`. Live `web-releases/f62beb8-motion-tab-icon`. |

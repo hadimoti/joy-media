@@ -29,7 +29,12 @@ import type { AgentEditPlan } from './plan.js';
 import { resolveExecutionOrder } from './execution-order.js';
 import { generateTransactionLabel } from './transaction-naming.js';
 import { createEnvelope, checkBaseRevision } from './envelope.js';
-import type { AgentActor, AgentCommandEnvelope } from './envelope.js';
+import type {
+  AgentActor,
+  AgentCommandEnvelope,
+  ProjectRevisionId,
+} from './envelope.js';
+import type { IdempotencyTracker } from './idempotency.js';
 
 export interface AtomicRunOptions {
   readonly registry: ToolRegistry;
@@ -37,7 +42,7 @@ export interface AtomicRunOptions {
   readonly actor: AgentActor;
   readonly projectId: string;
   /** Revision the plan was built against. */
-  readonly baseRevision: number;
+  readonly baseRevision: ProjectRevisionId;
   /** The project as of `baseRevision`; staged edits start here. */
   readonly baseProject: SpikeProject;
   /** Rebuilds a tool-facing context for a staged project. */
@@ -46,9 +51,15 @@ export interface AtomicRunOptions {
    * Read lazily and compared to `baseRevision` immediately before commit, so a
    * project that moved on during planning is caught rather than overwritten.
    */
-  readonly currentRevision: () => number;
+  readonly currentRevision: () => ProjectRevisionId;
   /** Applies the accumulated commands as one transaction. */
   readonly commit: (transaction: CommandTransaction) => CommandDispatchResult;
+  /**
+   * Durable run-level receipt. A retry with the same key is a successful no-op,
+   * even after reload and even though the project revision has advanced.
+   */
+  readonly idempotency?: IdempotencyTracker;
+  readonly idempotencyKey?: string;
   readonly transactionLabel?: string;
 }
 
@@ -63,6 +74,8 @@ export interface AtomicRunResult {
   readonly planId: string;
   readonly transactionId: string;
   readonly committed: boolean;
+  readonly replayed: boolean;
+  readonly idempotencyKey: string;
   readonly transactionLabel: string;
   readonly steps: readonly AtomicStepOutcome[];
   /** Every command the run would apply, in order. Empty when nothing staged. */
@@ -70,7 +83,7 @@ export interface AtomicRunResult {
   readonly envelopes: readonly AgentCommandEnvelope[];
   /** The staged project. Present even when `committed` is false, for preview. */
   readonly stagedProject: SpikeProject;
-  readonly baseRevision: number;
+  readonly baseRevision: ProjectRevisionId;
   readonly errors: readonly string[];
 }
 
@@ -119,9 +132,27 @@ export function runPlanAtomically(
 ): AtomicRunResult {
   const transactionId = `tx-${++transactionCounter}-${Date.now()}`;
   const transactionLabel = options.transactionLabel ?? generateTransactionLabel(plan);
+  const idempotencyKey = options.idempotencyKey ?? `agent-plan:${plan.planId}`;
   const steps: AtomicStepOutcome[] = [];
   const envelopes: AgentCommandEnvelope[] = [];
   const errors: string[] = [];
+
+  if (options.idempotency?.hasExecuted(idempotencyKey) === true) {
+    return {
+      planId: plan.planId,
+      transactionId,
+      committed: false,
+      replayed: true,
+      idempotencyKey,
+      transactionLabel,
+      steps: [],
+      commands: [],
+      envelopes: [],
+      stagedProject: options.baseProject,
+      baseRevision: options.baseRevision,
+      errors: [],
+    };
+  }
 
   const order = resolveExecutionOrder(plan);
   if (order.hasCycle) {
@@ -129,6 +160,8 @@ export function runPlanAtomically(
       planId: plan.planId,
       transactionId,
       committed: false,
+      replayed: false,
+      idempotencyKey,
       transactionLabel,
       steps: [],
       commands: [],
@@ -217,6 +250,8 @@ export function runPlanAtomically(
       planId: plan.planId,
       transactionId,
       committed: false,
+      replayed: false,
+      idempotencyKey,
       transactionLabel,
       steps,
       commands: staged,
@@ -238,12 +273,24 @@ export function runPlanAtomically(
 
   if (!commitResult.success) {
     errors.push(`commit failed: ${commitResult.error ?? 'unknown error'}`);
+    options.idempotency?.recordFailure(
+      idempotencyKey,
+      plan.planId,
+      '__transaction__',
+      commitResult.error ?? 'unknown error',
+    );
+  } else {
+    options.idempotency?.recordExecution(idempotencyKey, plan.planId, '__transaction__', {
+      success: true,
+    });
   }
 
   return {
     planId: plan.planId,
     transactionId,
     committed: commitResult.success,
+    replayed: false,
+    idempotencyKey,
     transactionLabel,
     steps,
     commands: staged,
