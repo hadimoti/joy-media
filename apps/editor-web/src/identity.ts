@@ -20,6 +20,7 @@ export type JoySessionState =
   | { readonly kind: 'unknown' }
   | { readonly kind: 'signed-out' }
   | { readonly kind: 'no-access'; readonly message: string }
+  | { readonly kind: 'unavailable' }
   | { readonly kind: 'ready'; readonly subject: string | undefined };
 
 /** Base64url-decode a JWT payload and return its `sub`, display-only. */
@@ -58,10 +59,11 @@ export async function probeJoySession(
       }
       return { kind: 'no-access', message };
     }
-    return { kind: 'signed-out' };
+    if (response.status === 401) return { kind: 'signed-out' };
+    return { kind: 'unavailable' };
   } catch {
-    // Network failure: report unknown rather than falsely claiming signed-out.
-    return { kind: 'unknown' };
+    // An issuer/network outage is not evidence that the JOY session ended.
+    return { kind: 'unavailable' };
   }
 }
 

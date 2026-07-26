@@ -656,6 +656,9 @@ main {
 .session-no-access {
   background: var(--joy-accent);
 }
+.session-unavailable {
+  background: var(--joy-accent);
+}
 .session-signed-out {
   background: #d37a7a;
 }

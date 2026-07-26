@@ -2449,7 +2449,9 @@ function EditorWorkspace({
                     ? 'Signed in, JOY Media access not enabled'
                     : joySession.kind === 'signed-out'
                       ? 'Signed out'
-                      : 'JOY account'
+                      : joySession.kind === 'unavailable'
+                        ? 'JOY identity service unavailable'
+                        : 'JOY account'
               }
               onClick={() => {
                 setAccountOpen((open) => !open);
@@ -2511,6 +2513,12 @@ function EditorWorkspace({
                 {joySession.kind === 'unknown' && (
                   <p className="empty-hint" lang="fa">
                     در حال بررسی نشست…
+                  </p>
+                )}
+                {joySession.kind === 'unavailable' && (
+                  <p className="empty-hint" lang="fa">
+                    سرویس هویت JOY در دسترس نیست. وضعیت ورود شما تغییر نکرده است؛ کمی بعد دوباره
+                    تلاش کنید.
                   </p>
                 )}
               </section>

@@ -50,11 +50,18 @@ describe('probeJoySession', () => {
     expect(state).not.toMatchObject({ kind: 'ready' });
   });
 
-  it('reports unknown on network failure instead of guessing', async () => {
+  it('reports issuer unavailable on 503 instead of claiming signed-out', async () => {
+    const state = await probeJoySession(async () =>
+      jsonResponse(503, { ok: false, error: 'JOY Media identity issuer unavailable.' }),
+    );
+    expect(state).toEqual({ kind: 'unavailable' });
+  });
+
+  it('reports unavailable on network failure instead of guessing the login state', async () => {
     const state = await probeJoySession(async () => {
       throw new TypeError('network down');
     });
-    expect(state).toEqual({ kind: 'unknown' });
+    expect(state).toEqual({ kind: 'unavailable' });
   });
 });
 
