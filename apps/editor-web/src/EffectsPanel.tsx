@@ -102,7 +102,17 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 
   return (
     <article className="joy-panel-root effects-panel">
-      <h3 className="panel-section-title">Effects</h3>
+      <h3 className="panel-section-title">
+        <img
+          className="panel-section-title-icon"
+          src="/assets/icons/effects.png"
+          alt=""
+          width={16}
+          height={16}
+          aria-hidden="true"
+        />
+        Effects
+      </h3>
       <div className="effects-toolbar">
         <input
           type="search"
