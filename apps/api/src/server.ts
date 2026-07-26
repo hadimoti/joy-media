@@ -8,6 +8,8 @@ import { RclonePrivateObjectStore } from './private-object-store.js';
 await start();
 
 async function start(): Promise<void> {
+  const host = process.env.JOY_MEDIA_API_HOST ?? '127.0.0.1';
+  const port = Number(process.env.JOY_MEDIA_API_PORT ?? 8790);
   const databaseUrl = process.env.JOY_MEDIA_DATABASE_URL;
   const identity = createIdentityVerifier();
   const durableControlPlane =
@@ -35,8 +37,8 @@ async function start(): Promise<void> {
               : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
           }),
         }),
-  }).listen(Number(process.env.JOY_MEDIA_API_PORT ?? 8790));
-  console.log('JOY Media API listening');
+  }).listen(port, host);
+  console.log(`JOY Media API listening on ${host}:${port}`);
 }
 
 function createIdentityVerifier(): JoyIdentityVerifier | undefined {
