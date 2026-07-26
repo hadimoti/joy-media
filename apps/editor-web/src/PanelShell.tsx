@@ -30,6 +30,8 @@ export interface PanelShellProps {
   readonly icon?: ReactNode;
   /** Extra class on the root, for the handful of genuinely panel-specific rules. */
   readonly className?: string | undefined;
+  /** Icon buttons anchored to the header's inline start, across from `actions`. */
+  readonly leadingActions?: ReactNode;
   /** Icon buttons for the header's inline end. Order: create · favourites · filter. */
   readonly actions?: ReactNode;
   /** Renders the ⌕ toggle and the collapsible field when provided. */
@@ -55,6 +57,7 @@ export function PanelShell({
   iconUrl,
   icon,
   className,
+  leadingActions,
   actions,
   search,
   tabs,
@@ -81,6 +84,9 @@ export function PanelShell({
   return (
     <article className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}>
       <div className="joy-panel-header">
+        {leadingActions !== undefined && (
+          <div className="joy-panel-leading-actions">{leadingActions}</div>
+        )}
         <h3 className="joy-panel-title">
           {icon !== undefined ? (
             <span className="joy-panel-title-icon" aria-hidden="true">

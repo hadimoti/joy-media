@@ -527,7 +527,7 @@ export function AssetLibraryPanel({
       onTabChange={(id) => setCategory(id as typeof category)}
       search={{ value: query, onChange: setQuery, placeholder: 'Search assets…' }}
       note={status}
-      actions={
+      leadingActions={
         <>
           <button
               type="button"
@@ -568,6 +568,10 @@ export function AssetLibraryPanel({
             >
               <RefreshIcon />
             </button>
+        </>
+      }
+      actions={
+        <>
             <button
               type="button"
               className="icon-button asset-sync"

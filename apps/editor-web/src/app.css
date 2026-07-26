@@ -144,8 +144,8 @@ input[type='checkbox']:focus-visible {
   container-type: inline-size;
 }
 
-/* Header: 1fr | title | 1fr. Column 1 stays empty on purpose — it is the
-   counterweight that keeps the title optically centred against the actions. */
+/* Header: leading actions | centered title | trailing actions. The symmetric
+   outer columns keep the title centered even when the groups differ in width. */
 .joy-panel-header {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -185,13 +185,21 @@ input[type='checkbox']:focus-visible {
 .joy-panel-actions {
   grid-column: 3;
   justify-self: end;
+}
+.joy-panel-leading-actions {
+  grid-column: 1;
+  justify-self: start;
+}
+.joy-panel-actions,
+.joy-panel-leading-actions {
   display: flex;
   align-items: center;
   gap: 0.1rem;
 }
 /* An engaged toggle (favourites-on, solo, record) is one of the six places
    amber is allowed to appear. */
-.joy-panel-actions .icon-button[aria-pressed='true'] {
+.joy-panel-actions .icon-button[aria-pressed='true'],
+.joy-panel-leading-actions .icon-button[aria-pressed='true'] {
   color: var(--joy-accent);
 }
 
