@@ -520,6 +520,7 @@ describe('Plan Executor', () => {
     const plan = createPlan('Test goal', steps);
     const executor = new PlanExecutor(registry, strictEngine, {
       stopOnPolicyFailure: false,
+      manualApprovalGranted: true,
     });
 
     const result = await executor.execute(plan, context, {});
@@ -647,5 +648,6 @@ describe('Default Execution Options', () => {
     expect(options.stopOnPolicyFailure).toBe(true);
     expect(options.allowIndependentContinue).toBe(false);
     expect(options.idempotencyPrefix).toBe('exec');
+    expect(options.manualApprovalGranted).toBe(false);
   });
 });

@@ -51,6 +51,7 @@ export interface ExecutionOptions {
   readonly allowIndependentContinue: boolean;
   readonly idempotencyPrefix: string;
   readonly transactionLabel: string;
+  readonly manualApprovalGranted: boolean;
 }
 
 export function createDefaultExecutionOptions(): ExecutionOptions {
@@ -60,6 +61,7 @@ export function createDefaultExecutionOptions(): ExecutionOptions {
     allowIndependentContinue: false,
     idempotencyPrefix: 'exec',
     transactionLabel: '',
+    manualApprovalGranted: false,
   };
 }
 
@@ -123,8 +125,16 @@ export class PlanExecutor {
 
       const stepStartTime = Date.now();
 
-      const approvalDecision = this.approvalEngine.evaluateStep(step, context);
-      if (approvalDecision.decision === 'blocked') {
+      const approvalTool = this.registry.getTool(step.tool);
+      const approvalScope =
+        approvalTool !== undefined && 'definition' in approvalTool
+          ? approvalTool.definition.scope
+          : undefined;
+      const approvalDecision = this.approvalEngine.evaluateStep(step, context, approvalScope);
+      if (
+        approvalDecision.decision === 'blocked' ||
+        (approvalDecision.decision === 'requires-manual' && !this.options.manualApprovalGranted)
+      ) {
         const result: ExecutionStepResult = {
           stepId,
           status: 'blocked-by-policy',

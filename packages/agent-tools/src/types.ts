@@ -12,13 +12,23 @@ export interface ToolDefinition {
   readonly returnsStableIds: boolean;
 }
 
+export type ToolCapability =
+  | 'timeline.read'
+  | 'timeline.write'
+  | 'assets.read'
+  | 'assets.import'
+  | 'filesystem.read'
+  | 'filesystem.write'
+  | 'provider.generate'
+  | 'provider.spend'
+  | 'render.preview'
+  | 'export.write'
+  | 'project.overwrite'
+  | 'plugin.invoke';
+
 export interface ToolScope {
-  readonly affectsTracks: boolean;
-  readonly affectsTimeline: boolean;
-  readonly affectsAudio: boolean;
-  readonly affectsCaptions: boolean;
-  readonly affectsVoice: boolean;
-  readonly requiresProvider: boolean;
+  /** Explicit authority requested by this tool. Empty means no project access. */
+  readonly capabilities: readonly ToolCapability[];
   readonly isReversible: boolean;
 }
 

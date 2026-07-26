@@ -147,7 +147,9 @@ function checkStepIsLocal(
   }
 
   const toolDef = 'definition' in tool ? tool.definition : null;
-  const requiresProvider = toolDef?.scope.requiresProvider ?? false;
+  const requiresProvider =
+    toolDef?.scope.capabilities.includes('provider.generate') === true ||
+    toolDef?.scope.capabilities.includes('provider.spend') === true;
 
   if (requiresProvider) {
     const provider = context.providers.availableProviders[0];

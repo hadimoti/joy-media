@@ -7,8 +7,52 @@ import type {
   Money,
   PrivacyImpact,
 } from './plan.js';
+import type { ToolCapability, ToolScope } from './types.js';
+
+export type AgentExecutionMode =
+  'suggest-only' | 'preview-and-approve' | 'auto-apply-low-risk' | 'full-auto-limited';
+
+export const ALL_TOOL_CAPABILITIES: readonly ToolCapability[] = [
+  'timeline.read',
+  'timeline.write',
+  'assets.read',
+  'assets.import',
+  'filesystem.read',
+  'filesystem.write',
+  'provider.generate',
+  'provider.spend',
+  'render.preview',
+  'export.write',
+  'project.overwrite',
+  'plugin.invoke',
+];
+
+const READ_ONLY_CAPABILITIES: readonly ToolCapability[] = [
+  'timeline.read',
+  'assets.read',
+  'filesystem.read',
+  'render.preview',
+];
+
+const LOW_RISK_CAPABILITIES: readonly ToolCapability[] = [
+  ...READ_ONLY_CAPABILITIES,
+  'timeline.write',
+];
+
+const HIGH_RISK_CAPABILITIES: readonly ToolCapability[] = [
+  'assets.import',
+  'filesystem.write',
+  'provider.generate',
+  'provider.spend',
+  'export.write',
+  'project.overwrite',
+  'plugin.invoke',
+];
 
 export interface ApprovalPolicy {
+  readonly executionMode: AgentExecutionMode;
+  readonly allowedCapabilities: readonly ToolCapability[];
+  readonly manualApprovalCapabilities: readonly ToolCapability[];
   readonly autoApproveLimit?: Money;
   readonly requireApprovalFor: readonly ApprovalReason[];
   readonly blockRemoteUploads: boolean;
@@ -31,124 +75,147 @@ export class ApprovalEngine {
     this.policy = policy;
   }
 
-  evaluateStep(step: AgentPlanStep, _context: EditorContext): ApprovalDecision {
+  evaluateStep(step: AgentPlanStep, _context: EditorContext, scope?: ToolScope): ApprovalDecision {
+    const capabilities = resolveCapabilities(step, scope);
     const requiresRemote = step.estimatedCost !== undefined && !step.estimatedCost.localOnly;
-    const isReversible = !step.requiresConfirmation;
+    const isReversible = scope?.isReversible ?? !step.requiresConfirmation;
+
+    if (looksLikeCredentialAccess(step.tool)) {
+      return this.decision(
+        step,
+        'project-settings-change',
+        'Credential access is never available to agents or plugins',
+        'blocked',
+        requiresRemote,
+        isReversible,
+      );
+    }
+
+    if (this.policy.executionMode === 'suggest-only') {
+      return this.decision(
+        step,
+        capabilityReason(capabilities),
+        'Suggest Only mode does not execute tools',
+        'blocked',
+        requiresRemote,
+        isReversible,
+      );
+    }
+
+    const denied = capabilities.find(
+      (capability) => !this.policy.allowedCapabilities.includes(capability),
+    );
+    if (denied !== undefined) {
+      return this.decision(
+        step,
+        capabilityReason([denied]),
+        `Capability ${denied} is not allowed by policy`,
+        'blocked',
+        requiresRemote,
+        isReversible,
+      );
+    }
 
     if (requiresRemote && this.policy.blockRemoteUploads) {
-      return {
-        request: this.createRequest(
-          step,
-          'remote-upload',
-          'Remote upload blocked by policy',
-          {
-            dataLeavesDevice: true,
-            dataTypes: ['unknown'],
-          },
-          isReversible,
-        ),
-        decision: 'blocked',
-        reason: 'Remote uploads are blocked by policy',
-      };
+      return this.decision(
+        step,
+        'remote-upload',
+        'Remote uploads are blocked by policy',
+        'blocked',
+        true,
+        isReversible,
+      );
     }
 
     const isVoiceTool =
       step.tool.toLowerCase().includes('voice') || step.tool.toLowerCase().includes('clone');
     if (isVoiceTool && this.policy.blockVoiceCloning) {
-      return {
-        request: this.createRequest(
-          step,
-          'voice-cloning',
-          'Voice cloning blocked by policy',
-          {
-            dataLeavesDevice: false,
-            dataTypes: ['voice profile'],
-          },
-          isReversible,
-        ),
-        decision: 'blocked',
-        reason: 'Voice cloning is blocked by policy',
-      };
+      return this.decision(
+        step,
+        'voice-cloning',
+        'Voice cloning is blocked by policy',
+        'blocked',
+        requiresRemote,
+        isReversible,
+      );
     }
 
-    if (step.requiresConfirmation && this.policy.blockDestructiveEdits) {
-      return {
-        request: this.createRequest(
-          step,
-          'destructive-edit',
-          'Destructive edit blocked by policy',
-          {
-            dataLeavesDevice: false,
-            dataTypes: [],
-          },
-          false,
-        ),
-        decision: 'blocked',
-        reason: 'Destructive edits are blocked by policy',
-      };
+    if ((!isReversible || step.requiresConfirmation) && this.policy.blockDestructiveEdits) {
+      return this.decision(
+        step,
+        'destructive-edit',
+        'Destructive edits are blocked by policy',
+        'blocked',
+        requiresRemote,
+        false,
+      );
     }
 
-    if (step.estimatedCost?.providerCost) {
-      const costAmount = parseFloat(step.estimatedCost.providerCost.amount);
+    const providerCost = step.estimatedCost?.providerCost;
+    if (providerCost !== undefined) {
+      const costAmount = parseMoney(providerCost);
       const limitAmount = this.policy.autoApproveLimit
-        ? parseFloat(this.policy.autoApproveLimit.amount)
+        ? parseMoney(this.policy.autoApproveLimit)
         : 0;
-
       if (costAmount > limitAmount) {
-        return {
-          request: this.createRequest(
-            step,
-            'paid-generation',
-            `Cost exceeds auto-approve limit`,
-            { dataLeavesDevice: requiresRemote, dataTypes: [] },
-            isReversible,
-            step.estimatedCost.providerCost,
-          ),
-          decision: 'requires-manual',
-          reason: `Cost ${costAmount} exceeds auto-approve limit ${limitAmount}`,
-        };
+        return this.decision(
+          step,
+          'paid-generation',
+          `Cost ${costAmount} exceeds auto-approve limit ${limitAmount}`,
+          'requires-manual',
+          requiresRemote,
+          isReversible,
+          providerCost,
+        );
       }
     }
 
-    if (step.requiresConfirmation) {
-      return {
-        request: this.createRequest(
-          step,
-          'destructive-edit',
-          'Step requires confirmation',
-          {
-            dataLeavesDevice: false,
-            dataTypes: [],
-          },
-          false,
-        ),
-        decision: 'requires-manual',
-        reason: 'Step requires manual confirmation',
-      };
+    const reason = capabilityReason(capabilities);
+    const modeRequiresApproval =
+      (this.policy.executionMode === 'preview-and-approve' &&
+        capabilities.some((capability) => !READ_ONLY_CAPABILITIES.includes(capability))) ||
+      (this.policy.executionMode === 'auto-apply-low-risk' &&
+        capabilities.some((capability) => !LOW_RISK_CAPABILITIES.includes(capability))) ||
+      capabilities.some((capability) =>
+        this.policy.manualApprovalCapabilities.includes(capability),
+      ) ||
+      this.policy.requireApprovalFor.includes(reason) ||
+      (capabilities.includes('provider.spend') && providerCost === undefined) ||
+      requiresRemote ||
+      isVoiceTool ||
+      step.requiresConfirmation ||
+      !isReversible;
+
+    if (modeRequiresApproval) {
+      return this.decision(
+        step,
+        step.requiresConfirmation || !isReversible ? 'destructive-edit' : reason,
+        `Manual approval required for ${formatCapabilities(capabilities)}`,
+        'requires-manual',
+        requiresRemote,
+        isReversible,
+        providerCost,
+      );
     }
 
-    return {
-      request: this.createRequest(
-        step,
-        'unresolved-assumptions',
-        'Auto-approved',
-        {
-          dataLeavesDevice: false,
-          dataTypes: [],
-        },
-        isReversible,
-      ),
-      decision: 'auto-approved',
-      reason: 'Step meets auto-approval criteria',
-    };
+    return this.decision(
+      step,
+      reason,
+      'Step meets auto-approval criteria',
+      'auto-approved',
+      false,
+      isReversible,
+    );
   }
 
-  evaluatePlan(plan: AgentEditPlan, context: EditorContext): readonly ApprovalDecision[] {
-    const decisions: ApprovalDecision[] = [];
-
-    for (const step of plan.steps) {
-      decisions.push(this.evaluateStep(step, context));
-    }
+  evaluatePlan(
+    plan: AgentEditPlan,
+    context: EditorContext,
+    scopeFor?: (toolName: string) => ToolScope | undefined,
+  ): readonly ApprovalDecision[] {
+    const decisions = plan.steps.map((step) =>
+      this.evaluateStep(step, context, scopeFor?.(step.tool)),
+    );
 
     if (plan.assumptions.length > 0 && !this.policy.allowUnresolvedAssumptions) {
       decisions.push({
@@ -186,26 +253,49 @@ export class ApprovalEngine {
   }
 
   canProceed(plan: AgentEditPlan): boolean {
-    const pending = plan.requiredApprovals.filter((a) => a.status === 'pending');
-    const rejected = plan.requiredApprovals.filter((a) => a.status === 'rejected');
+    const pending = plan.requiredApprovals.filter((approval) => approval.status === 'pending');
+    const rejected = plan.requiredApprovals.filter((approval) => approval.status === 'rejected');
     return pending.length === 0 && rejected.length === 0;
   }
 
   getPendingApprovals(plan: AgentEditPlan): readonly ApprovalRequest[] {
-    return plan.requiredApprovals.filter((a) => a.status === 'pending');
+    return plan.requiredApprovals.filter((approval) => approval.status === 'pending');
   }
 
   recordApproval(plan: AgentEditPlan, requestId: string, approved: boolean): AgentEditPlan {
-    const updatedApprovals = plan.requiredApprovals.map((a) =>
-      a.id === requestId
-        ? { ...a, status: approved ? ('approved' as const) : ('rejected' as const) }
-        : a,
+    const updatedApprovals = plan.requiredApprovals.map((approval) =>
+      approval.id === requestId
+        ? { ...approval, status: approved ? ('approved' as const) : ('rejected' as const) }
+        : approval,
     );
     return { ...plan, requiredApprovals: updatedApprovals };
   }
 
   getPolicy(): ApprovalPolicy {
     return this.policy;
+  }
+
+  private decision(
+    step: AgentPlanStep,
+    reason: ApprovalReason,
+    description: string,
+    decision: ApprovalDecision['decision'],
+    dataLeavesDevice: boolean,
+    isReversible: boolean,
+    estimatedCost?: Money,
+  ): ApprovalDecision {
+    return {
+      request: this.createRequest(
+        step,
+        reason,
+        description,
+        { dataLeavesDevice, dataTypes: dataLeavesDevice ? ['project media'] : [] },
+        isReversible,
+        estimatedCost,
+      ),
+      decision,
+      reason: description,
+    };
   }
 
   private createRequest(
@@ -216,16 +306,7 @@ export class ApprovalEngine {
     isReversible: boolean,
     estimatedCost?: Money,
   ): ApprovalRequest {
-    const base: {
-      id: string;
-      stepId: string;
-      reason: ApprovalReason;
-      description: string;
-      privacyImpact: PrivacyImpact;
-      isReversible: boolean;
-      status: 'pending' | 'approved' | 'rejected';
-      estimatedCost?: Money;
-    } = {
+    return {
       id: `approval-${step.id}-${Date.now()}`,
       stepId: step.id,
       reason,
@@ -233,49 +314,49 @@ export class ApprovalEngine {
       privacyImpact,
       isReversible,
       status: 'pending',
+      ...(estimatedCost !== undefined ? { estimatedCost } : {}),
     };
-
-    if (estimatedCost) {
-      base.estimatedCost = estimatedCost;
-    }
-
-    return base;
   }
 }
 
-export function createDefaultApprovalPolicy(): ApprovalPolicy {
+export function createSuggestOnlyApprovalPolicy(): ApprovalPolicy {
   return {
-    autoApproveLimit: { amount: '0.00', currency: 'USD' },
+    ...basePolicy(),
+    executionMode: 'suggest-only',
+    blockRemoteUploads: true,
+    blockVoiceCloning: true,
+    blockDestructiveEdits: true,
+    maxPlanSteps: 50,
+  };
+}
+
+export function createPreviewAndApprovePolicy(): ApprovalPolicy {
+  return {
+    ...basePolicy(),
+    executionMode: 'preview-and-approve',
+    manualApprovalCapabilities: ALL_TOOL_CAPABILITIES.filter(
+      (capability) => !READ_ONLY_CAPABILITIES.includes(capability),
+    ),
     requireApprovalFor: [
+      'project-edit',
       'paid-generation',
       'remote-upload',
       'voice-cloning',
       'destructive-edit',
       'publish-export',
+      'plugin-install',
+      'overwrite-output',
     ],
-    blockRemoteUploads: true,
     blockVoiceCloning: true,
-    blockDestructiveEdits: true,
     maxPlanSteps: 50,
-    allowUnresolvedAssumptions: false,
   };
 }
 
-export function createPermissiveApprovalPolicy(): ApprovalPolicy {
+export function createAutoApplyLowRiskPolicy(): ApprovalPolicy {
   return {
-    autoApproveLimit: { amount: '10.00', currency: 'USD' },
-    requireApprovalFor: ['publish-export', 'plugin-install'],
-    blockRemoteUploads: false,
-    blockVoiceCloning: false,
-    blockDestructiveEdits: false,
-    maxPlanSteps: 100,
-    allowUnresolvedAssumptions: true,
-  };
-}
-
-export function createStrictApprovalPolicy(): ApprovalPolicy {
-  return {
-    autoApproveLimit: { amount: '0.00', currency: 'USD' },
+    ...basePolicy(),
+    executionMode: 'auto-apply-low-risk',
+    manualApprovalCapabilities: HIGH_RISK_CAPABILITIES,
     requireApprovalFor: [
       'paid-generation',
       'remote-upload',
@@ -283,14 +364,116 @@ export function createStrictApprovalPolicy(): ApprovalPolicy {
       'destructive-edit',
       'publish-export',
       'plugin-install',
-      'project-settings-change',
-      'unresolved-assumptions',
       'overwrite-output',
     ],
-    blockRemoteUploads: true,
     blockVoiceCloning: true,
-    blockDestructiveEdits: true,
+    maxPlanSteps: 50,
+  };
+}
+
+export function createFullAutoWithinLimitsPolicy(): ApprovalPolicy {
+  return {
+    ...basePolicy(),
+    executionMode: 'full-auto-limited',
+    autoApproveLimit: { amount: '10.00', currency: 'USD' },
+    manualApprovalCapabilities: [
+      'filesystem.write',
+      'export.write',
+      'project.overwrite',
+      'plugin.invoke',
+    ],
+    requireApprovalFor: [
+      'voice-cloning',
+      'destructive-edit',
+      'publish-export',
+      'plugin-install',
+      'overwrite-output',
+    ],
+    maxPlanSteps: 100,
+    allowUnresolvedAssumptions: true,
+  };
+}
+
+/** Compatibility name. The product default is Preview and Approve. */
+export function createDefaultApprovalPolicy(): ApprovalPolicy {
+  return createPreviewAndApprovePolicy();
+}
+
+/** Compatibility name for existing integrations that opted into broad authority. */
+export function createPermissiveApprovalPolicy(): ApprovalPolicy {
+  return createFullAutoWithinLimitsPolicy();
+}
+
+/** Compatibility name for callers that require a non-executing policy. */
+export function createStrictApprovalPolicy(): ApprovalPolicy {
+  return {
+    ...createSuggestOnlyApprovalPolicy(),
     maxPlanSteps: 20,
     allowUnresolvedAssumptions: false,
   };
+}
+
+function basePolicy(): ApprovalPolicy {
+  return {
+    executionMode: 'preview-and-approve',
+    allowedCapabilities: ALL_TOOL_CAPABILITIES,
+    manualApprovalCapabilities: [],
+    autoApproveLimit: { amount: '0.00', currency: 'USD' },
+    requireApprovalFor: [],
+    blockRemoteUploads: false,
+    blockVoiceCloning: false,
+    blockDestructiveEdits: false,
+    maxPlanSteps: 50,
+    allowUnresolvedAssumptions: false,
+  };
+}
+
+function resolveCapabilities(
+  step: AgentPlanStep,
+  scope: ToolScope | undefined,
+): readonly ToolCapability[] {
+  const capabilities = new Set<ToolCapability>(
+    scope?.capabilities ??
+      (step.mode === 'analysis' || step.mode === 'decision'
+        ? ['timeline.read']
+        : step.mode === 'job'
+          ? ['provider.generate']
+          : ['timeline.write']),
+  );
+  if (step.estimatedCost !== undefined && !step.estimatedCost.localOnly) {
+    capabilities.add('provider.generate');
+  }
+  if (
+    step.estimatedCost?.providerCost !== undefined &&
+    parseMoney(step.estimatedCost.providerCost) > 0
+  ) {
+    capabilities.add('provider.spend');
+  }
+  return [...capabilities];
+}
+
+function capabilityReason(capabilities: readonly ToolCapability[]): ApprovalReason {
+  if (capabilities.includes('provider.spend')) return 'paid-generation';
+  if (capabilities.includes('provider.generate')) return 'remote-upload';
+  if (capabilities.includes('project.overwrite')) return 'overwrite-output';
+  if (capabilities.includes('export.write')) return 'publish-export';
+  if (capabilities.includes('plugin.invoke')) return 'plugin-install';
+  if (capabilities.includes('filesystem.write')) return 'destructive-edit';
+  if (capabilities.includes('timeline.write') || capabilities.includes('assets.import')) {
+    return 'project-edit';
+  }
+  return 'unresolved-assumptions';
+}
+
+function parseMoney(money: Money): number {
+  const parsed = Number.parseFloat(money.amount);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function formatCapabilities(capabilities: readonly ToolCapability[]): string {
+  return capabilities.length > 0 ? capabilities.join(', ') : 'this operation';
+}
+
+function looksLikeCredentialAccess(toolName: string): boolean {
+  return /(credential|secret|api[-_]?key|token)/i.test(toolName);
 }

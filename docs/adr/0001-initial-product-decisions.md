@@ -1,6 +1,7 @@
 # ADR-0001: Initial product decisions (owner round 1)
 
 Status: Accepted
+Partially superseded: Q11/D-HERMES by ADR-0020
 Date: 2026-07-19
 
 ## Context

@@ -3,7 +3,7 @@ import {
   ApprovalEngine,
   analyseShortenIntro,
   buildEditorContext,
-  createDefaultApprovalPolicy,
+  createAutoApplyLowRiskPolicy,
   createToolRegistry,
   RevisionConflictError,
   runPlanAtomically,
@@ -15,7 +15,7 @@ import { createAgentCommandBus } from './agent-command-bus.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
 
-const approvalEngine = () => new ApprovalEngine(createDefaultApprovalPolicy());
+const approvalEngine = () => new ApprovalEngine(createAutoApplyLowRiskPolicy());
 
 function memoryStorage() {
   const values = new Map<string, string>();

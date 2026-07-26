@@ -4,7 +4,7 @@ Date: 2026-07-26
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `342868fd5c27f216a2a392fc76d63f25ea7ed222`
+Required starting commit: `bc771e4` or newer on the tracked branch
 
 ## Read this first
 
@@ -203,7 +203,7 @@ Exit gate:
 - The same idempotency key cannot apply the transaction twice.
 - Failed or stale runs leave the project byte-for-byte unchanged.
 
-### Milestone B — Fine-grained policy and four execution modes — next
+### Milestone B — Fine-grained policy and four execution modes — complete locally
 
 Replace coarse `ToolScope` booleans with explicit capabilities:
 
@@ -233,11 +233,32 @@ Paid generation, external upload, overwrite, destructive file action, and
 credential access require separate policy checks even in Full Auto. Raw API
 keys must never reach browser code, project files, agents, plugins, or logs.
 
-### Milestone C — Agent/model/provider taxonomy
+Implemented:
+
+- `ToolScope.capabilities` contains the 12 explicit capabilities above; the
+  coarse affected-area booleans are gone.
+- All four modes exist in the Agent panel, with Preview and Approve selected by
+  default.
+- Suggest Only previews but cannot execute. Low-Risk auto-applies only local,
+  reversible timeline edits. Full Auto still gates external egress, spend,
+  filesystem writes, export, overwrite, plugins, and destructive operations.
+- Credential-like tools fail closed.
+- `requires-manual` no longer executes implicitly. The atomic runner requires
+  a trusted-UI grant bound to the exact `planId`.
+
+Validation: 115/115 focused tests pass. Full suite: 1,325 pass plus the same two
+local environment failures (missing `faster_whisper` and RNNoise model).
+Typecheck and editor build pass; lint remains at the pre-existing 51 errors.
+The live localhost UI was checked in all three relevant states (manual,
+non-executable suggestion, and low-risk auto approval). Production is not
+updated.
+
+### Milestone C — KiloCode/model/provider taxonomy — next
 
 Model these as distinct concepts:
 
-- Agent host/adapter: Hermes, KiloCode, native JOY Agent.
+- Agent host/adapter: **KiloCode only**, through its extension in the VPS
+  code-server/VS Code-fork UI (ADR-0020).
 - Reasoning model: GPT, Claude, Gemini, local model.
 - Media provider: image, video, speech, audio, transcription.
 - Local execution: JOY Windows Worker, ComfyUI, FFmpeg.
@@ -245,6 +266,12 @@ Model these as distinct concepts:
 Define an adapter capability manifest for supported tools, models, health,
 cancellation, cost reporting, and settings. Reuse `provider-sdk`; do not create
 a parallel provider framework.
+
+Do not implement Hermes or a native JOY Agent editing adapter. Hermes is
+reserved for VPN diagnostics and user-support work. The existing KiloCode API
+credential is a live server secret: do not read, print, copy, commit, or send
+its raw value. Resolve it only through a protected server-side secret reference
+when deployment of the adapter is explicitly authorized.
 
 ### Milestone D — Async jobs and generation provenance
 
@@ -414,20 +441,20 @@ Then test the public Agent vertical slice and one-step undo in Chrome.
 ## Prompt for the next coding session
 
 ```text
-Continue JOY Media from commit
-342868fd5c27f216a2a392fc76d63f25ea7ed222 on
+Continue JOY Media from the tracked branch tip after Milestone B on
 C:\Users\HadiMoti\joy-media.
 
 Read AGENTIC_EDITING_NEXT_AGENT.md, ORCHESTRATION.md, the current STATE.md
-handoff, ADR-0019, ADR-0012, ADR-0003, P06, and WP-15 before editing.
+handoff, ADR-0020, ADR-0019, ADR-0012, ADR-0003, P06, and WP-15 before
+editing.
 
-Implement only Milestone A: replace the Agent Panel's session-history cursor
-baseRevision with the durable persisted/collaboration project revision. Carry
-it through query snapshot, plan, command envelope, atomic pre-commit validation,
-save, and reload. Preserve human undo behavior. Add focused tests for
-save/reload survival, stale-plan conflict, retry/replan, idempotency, atomic
-failure, and one-step undo after reload. Run typecheck, the focused tests, the
-full suite, and the editor build. Record any boundary decision in ADR-0019 or a
-new ADR. Do not build the Agent menu/settings, provider taxonomy, async jobs, or
-Dual-Lens UI in this session. Do not deploy unless Hadi explicitly asks.
+Implement only Milestone C: model KiloCode as the sole editing-agent host,
+separate from reasoning models, media providers, and local execution. Define
+its adapter capability manifest for tools, models, health, cancellation, cost
+reporting, and settings. Reuse provider-sdk. Do not build Hermes or a native
+JOY Agent editing adapter. Do not read or copy the live KiloCode API value from
+Hermes's .env; define only a protected server-side secret reference. Add
+focused contract tests, run typecheck/full suite/editor build, and amend the
+handoff. Do not start async jobs, Agent menu/settings, or Dual-Lens UI. Do not
+deploy unless Hadi explicitly asks.
 ```

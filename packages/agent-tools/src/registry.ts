@@ -95,12 +95,7 @@ function createQueryDefinition(tool: QueryTool): ToolDefinition {
     inputSchema: { type: 'object' },
     outputSchema: { type: 'object' },
     scope: {
-      affectsTracks: false,
-      affectsTimeline: false,
-      affectsAudio: false,
-      affectsCaptions: false,
-      affectsVoice: false,
-      requiresProvider: false,
+      capabilities: ['timeline.read'],
       isReversible: true,
     },
     preconditions: [],

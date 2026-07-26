@@ -203,7 +203,7 @@ describe('Approval Engine', () => {
     expect(decision.decision).toBe('auto-approved');
   });
 
-  it('blocks remote uploads when policy says so', () => {
+  it('requires explicit approval before remote uploads in the default mode', () => {
     const policy = createDefaultApprovalPolicy();
     const engine = new ApprovalEngine(policy);
     const step = createTestStep({
@@ -216,8 +216,8 @@ describe('Approval Engine', () => {
     const context = createMockContext();
 
     const decision = engine.evaluateStep(step, context);
-    expect(decision.decision).toBe('blocked');
-    expect(decision.reason).toContain('Remote');
+    expect(decision.decision).toBe('requires-manual');
+    expect(decision.request.privacyImpact.dataLeavesDevice).toBe(true);
   });
 
   it('blocks voice cloning when policy says so', () => {
@@ -231,15 +231,15 @@ describe('Approval Engine', () => {
     expect(decision.reason).toContain('Voice');
   });
 
-  it('blocks destructive edits when policy says so', () => {
+  it('requires explicit approval before destructive edits in the default mode', () => {
     const policy = createDefaultApprovalPolicy();
     const engine = new ApprovalEngine(policy);
     const step = createTestStep({ requiresConfirmation: true });
     const context = createMockContext();
 
     const decision = engine.evaluateStep(step, context);
-    expect(decision.decision).toBe('blocked');
-    expect(decision.reason).toContain('Destructive');
+    expect(decision.decision).toBe('requires-manual');
+    expect(decision.request.reason).toBe('destructive-edit');
   });
 
   it('requires approval for high cost operations', () => {
@@ -469,13 +469,15 @@ describe('Plan Modification', () => {
 describe('Policy Presets', () => {
   it('creates default policy', () => {
     const policy = createDefaultApprovalPolicy();
-    expect(policy.blockRemoteUploads).toBe(true);
+    expect(policy.executionMode).toBe('preview-and-approve');
+    expect(policy.blockRemoteUploads).toBe(false);
     expect(policy.blockVoiceCloning).toBe(true);
-    expect(policy.blockDestructiveEdits).toBe(true);
+    expect(policy.blockDestructiveEdits).toBe(false);
   });
 
   it('creates permissive policy', () => {
     const policy = createPermissiveApprovalPolicy();
+    expect(policy.executionMode).toBe('full-auto-limited');
     expect(policy.blockRemoteUploads).toBe(false);
     expect(policy.blockVoiceCloning).toBe(false);
     expect(policy.blockDestructiveEdits).toBe(false);

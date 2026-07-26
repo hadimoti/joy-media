@@ -36,7 +36,7 @@ depends on:
 
 **Add a minimum agent command envelope** (`agent-tools/envelope.ts`):
 `schemaVersion`, `commandId`, `projectId`, `baseRevision`, `transactionId`,
-`idempotencyKey`, `actor`, `preconditions`. It wraps *agent* commands only.
+`idempotencyKey`, `actor`, `preconditions`. It wraps _agent_ commands only.
 Human edits continue through `EditorSession.dispatchTimeline` unchanged, so the
 editor's own undo semantics (ADR-0003) are untouched. The full core-bus
 hardening reserved for P01 is explicitly **not** done here. `baseRevision` is
@@ -64,6 +64,21 @@ browser implementation stores project-scoped completion receipts. Retrying an
 already completed logical plan, including after reload, is a successful no-op
 before revision validation; a fresh replan receives a new key and can commit
 against the current revision. Failed receipts remain retryable.
+
+**Amendment — capability policy and execution modes, 2026-07-26.**
+`ToolScope` now declares explicit read/write/import/provider/spend/render/export/
+overwrite/plugin capabilities instead of approximate affected-area booleans.
+The policy engine implements Suggest Only, Preview and Approve (the product
+default), Auto-apply Low-Risk Changes, and Full Auto Within Explicit Limits.
+Remote egress, provider spend, filesystem writes, export, project overwrite,
+plugins, destructive edits, and credential-like tools cross separate gates
+even in Full Auto.
+
+A `requires-manual` decision is no longer sufficient to execute by itself.
+The atomic runner requires a trusted-UI approval grant whose `planId` matches
+the exact pending plan. Suggest Only cannot receive such a grant. This closes
+the previous gap where the executor labelled a step manual but still staged
+and committed it.
 
 **Prove it with one vertical slice.** "Shorten the intro"
 (`agent-tools/shorten-intro.ts`) is a ripple edit: trimming the opening clip
@@ -109,14 +124,8 @@ Recorded so they are chosen, not forgotten:
 - **No Agent menu or settings UI.** The menubar is still
   `File · Edit · Clip · View · Window`; `app-menu.ts` types it as a closed
   union. Provider/model/budget configuration has no home yet.
-- **`ToolScope` is coarse.** It is `affectsTimeline: boolean` and friends, not
-  the read/write/spend split the architecture wants
-  (`timeline.read` vs `timeline.write` vs `provider.spend`).
-- **Two execution modes, not four.** Default and Permissive exist; "suggest
-  only" and "auto-apply low-risk" do not, and paid or destructive actions have
-  no policy separate from ordinary edits.
 - **No agent/model/provider taxonomy.** `provider-sdk` exists but Hermes and
-  KiloCode are not modelled as *adapters* distinct from reasoning models
+  KiloCode are not modelled as _adapters_ distinct from reasoning models
   (GPT/Claude) and media providers (Flux/Kling), and nothing publishes a
   capability manifest.
 - **No async job path in the agent loop.** `job-protocol` exists but plan steps
@@ -128,10 +137,10 @@ Recorded so they are chosen, not forgotten:
   id replaces the local adapter value without changing the envelope schema.
 - **Determinism claim corrected.** The source proposal asserted "everything
   must be deterministic". That cannot hold once generative providers are
-  involved. The rule adopted is: *command execution is deterministic and
+  involved. The rule adopted is: _command execution is deterministic and
   replayable; generative operations must record enough provenance (provider,
   model, version, prompt, seed, input hashes, cost) to be reproduced as closely
-  as the provider permits.* Undo can remove a generated asset from the project;
+  as the provider permits._ Undo can remove a generated asset from the project;
   it cannot reverse credits already spent.
 
 ## Validation and rollback
@@ -147,6 +156,10 @@ directions.
 for cross-document conflict detection, replan, reload-stable revision,
 reload-stable idempotency, failed-stage immutability, and one-step undo from a
 reopened durable session.
+
+`packages/agent-tools/src/approval-modes.test.ts` adds 15 capability-policy
+tests. `shorten-intro.test.ts` now has 25 tests, including proof that an absent
+or wrong-plan approval grant cannot commit and a matching grant can.
 
 Rollback is contained: `runPlanAtomically` and `envelope.ts` are additive, and
 the Agent panel can be pointed back at `PlanExecutor.execute` by reverting one

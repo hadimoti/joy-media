@@ -64,6 +64,7 @@ export interface ApprovalRequest {
 }
 
 export type ApprovalReason =
+  | 'project-edit'
   | 'paid-generation'
   | 'remote-upload'
   | 'voice-cloning'

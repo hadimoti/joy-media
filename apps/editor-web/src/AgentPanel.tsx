@@ -3,6 +3,7 @@ import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
   ApprovalDecision,
+  AgentExecutionMode,
   AuditEntry,
   DryRunResult,
   EditorContext,
@@ -11,20 +12,18 @@ import type {
 import {
   ApprovalEngine,
   createAuditTrail,
-  createDefaultApprovalPolicy,
-  createPermissiveApprovalPolicy,
+  createAutoApplyLowRiskPolicy,
+  createFullAutoWithinLimitsPolicy,
   createPlan,
+  createPreviewAndApprovePolicy,
+  createSuggestOnlyApprovalPolicy,
   createToolRegistry,
   dryRunPlan,
   buildEditorContext,
   runPlanAtomically,
   RevisionConflictError,
 } from '@joy-media/agent-tools';
-import type {
-  AgentActor,
-  AtomicRunResult,
-  ProjectRevisionId,
-} from '@joy-media/agent-tools';
+import type { AgentActor, AtomicRunResult, ProjectRevisionId } from '@joy-media/agent-tools';
 import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
@@ -93,13 +92,11 @@ import {
   UndoIcon,
 } from './icons.js';
 
-export interface HermesAttachedAsset {
+export interface KiloCodeAttachedAsset {
   readonly assetId: string;
   readonly kind: 'image' | 'video';
   readonly displayName: string;
 }
-
-type PolicyName = 'default' | 'permissive';
 
 interface PendingPlan {
   readonly intent: AgentIntent;
@@ -146,6 +143,19 @@ function shortIntentLabel(label: string): string {
   return label;
 }
 
+function policyForMode(mode: AgentExecutionMode) {
+  switch (mode) {
+    case 'suggest-only':
+      return createSuggestOnlyApprovalPolicy();
+    case 'preview-and-approve':
+      return createPreviewAndApprovePolicy();
+    case 'auto-apply-low-risk':
+      return createAutoApplyLowRiskPolicy();
+    case 'full-auto-limited':
+      return createFullAutoWithinLimitsPolicy();
+  }
+}
+
 /**
  * WP-15.2 — structured agent intents on the real EditorSession command bus.
  */
@@ -166,26 +176,21 @@ export function AgentPanel({
   readonly agentContext: EditorContext;
   readonly onUndo: () => void;
   readonly session: EditorSession;
-  readonly attachedAssets?: readonly HermesAttachedAsset[];
+  readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
-  readonly onAttachAsset?: (asset: HermesAttachedAsset) => void;
+  readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
-  const [policyName, setPolicyName] = useState<PolicyName>('default');
+  const [executionMode, setExecutionMode] = useState<AgentExecutionMode>('preview-and-approve');
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [, forceRender] = useState(0);
   const [tab, setTab] = useState('compose');
 
   const approvalEngine = useMemo(
-    () =>
-      new ApprovalEngine(
-        policyName === 'permissive'
-          ? createPermissiveApprovalPolicy()
-          : createDefaultApprovalPolicy(),
-      ),
-    [policyName],
+    () => new ApprovalEngine(policyForMode(executionMode)),
+    [executionMode],
   );
 
   const plan = (intent: AgentIntent) => {
@@ -199,28 +204,34 @@ export function AgentPanel({
             return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
           })()
         : intent.id === 'shorten-intro'
-        ? (() => {
-            const recipe = buildShortenIntroRecipe(project);
-            if (!recipe.ok) return recipe;
-            return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
-          })()
-        : (() => {
-            const single = intent.buildStep(project, selectedClipIds, playheadUs);
-            if (!single.ok) return single;
-            return { ok: true as const, steps: [single.step], goal: intent.label };
-          })();
+          ? (() => {
+              const recipe = buildShortenIntroRecipe(project);
+              if (!recipe.ok) return recipe;
+              return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
+            })()
+          : (() => {
+              const single = intent.buildStep(project, selectedClipIds, playheadUs);
+              if (!single.ok) return single;
+              return { ok: true as const, steps: [single.step], goal: intent.label };
+            })();
     if (!built.ok) return;
     const agentPlan = createPlan(built.goal, [...built.steps]);
     const dryRun = dryRunPlan(agentPlan, registry, buildEditorContext(baseProject));
-    const approval = approvalEngine.evaluatePlan(agentPlan, agentContext)[0];
+    const decisions = approvalEngine.evaluatePlan(
+      agentPlan,
+      agentContext,
+      (toolName) => registry.tools.get(toolName)?.scope,
+    );
+    const approval =
+      decisions.find((decision) => decision.decision === 'blocked') ??
+      decisions.find((decision) => decision.decision === 'requires-manual') ??
+      decisions[0];
     if (approval === undefined) return;
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'plan-created',
       ...(built.steps[0]?.tool !== undefined ? { tool: built.steps[0].tool } : {}),
-      ...(built.steps[0]?.arguments !== undefined
-        ? { arguments: built.steps[0].arguments }
-        : {}),
+      ...(built.steps[0]?.arguments !== undefined ? { arguments: built.steps[0].arguments } : {}),
       userId: 'local-owner',
     });
     auditRef.current.record({
@@ -244,7 +255,7 @@ export function AgentPanel({
     forceRender((n) => n + 1);
   };
 
-  const executePending = async () => {
+  const executePending = async (manualApprovalGranted: boolean) => {
     if (pending === undefined) return;
     const { intent, plan: agentPlan, baseRevision, baseProject } = pending;
     auditRef.current.record({
@@ -267,6 +278,14 @@ export function AgentPanel({
         contextFor: (staged) => buildEditorContext(staged),
         currentRevision: () => session.projectRevisionId,
         idempotency: session.agentIdempotency,
+        ...(manualApprovalGranted
+          ? {
+              manualApproval: {
+                planId: agentPlan.planId,
+                approvedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
         commit: (transaction) =>
           agentContext.dispatch?.dispatchTimeline(transaction.commands, transaction.label) ?? {
             success: false,
@@ -362,264 +381,297 @@ export function AgentPanel({
       activeTab={tab}
       onTabChange={setTab}
       actions={
-        <div className="agent-policy-seg" role="group" aria-label="Approval policy">
+        <div className="agent-policy-seg" role="group" aria-label="Agent execution mode">
           <button
             type="button"
             className="agent-policy-btn"
-            aria-pressed={policyName === 'default'}
-            title="Default — blocks destructive edits"
-            onClick={() => setPolicyName('default')}
+            aria-pressed={executionMode === 'suggest-only'}
+            title="Suggest Only — never executes tools"
+            onClick={() => {
+              setExecutionMode('suggest-only');
+              setPending(undefined);
+            }}
           >
-            Default
+            Suggest
           </button>
           <button
             type="button"
             className="agent-policy-btn"
-            aria-pressed={policyName === 'permissive'}
-            title="Permissive — asks before destructive edits"
-            onClick={() => setPolicyName('permissive')}
+            aria-pressed={executionMode === 'preview-and-approve'}
+            title="Preview and Approve — default; every project change needs approval"
+            onClick={() => {
+              setExecutionMode('preview-and-approve');
+              setPending(undefined);
+            }}
           >
-            Permissive
+            Approve
+          </button>
+          <button
+            type="button"
+            className="agent-policy-btn"
+            aria-pressed={executionMode === 'auto-apply-low-risk'}
+            title="Auto-apply Low-Risk Changes — local reversible timeline edits only"
+            onClick={() => {
+              setExecutionMode('auto-apply-low-risk');
+              setPending(undefined);
+            }}
+          >
+            Low risk
+          </button>
+          <button
+            type="button"
+            className="agent-policy-btn"
+            aria-pressed={executionMode === 'full-auto-limited'}
+            title="Full Auto Within Explicit Limits — risky boundaries still need approval"
+            onClick={() => {
+              setExecutionMode('full-auto-limited');
+              setPending(undefined);
+            }}
+          >
+            Full auto
           </button>
         </div>
       }
     >
-    <div
-      className="agent-drop-target"
-      onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'copy';
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        if (onAttachAsset === undefined) return;
-        const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
-        if (!raw) return;
-        try {
-          const asset = JSON.parse(raw) as {
-            assetId: string;
-            kind: string;
-            displayName?: string;
-          };
-          if (asset.kind !== 'image' && asset.kind !== 'video') return;
-          onAttachAsset({
-            assetId: asset.assetId,
-            kind: asset.kind,
-            displayName: asset.displayName ?? asset.assetId,
-          });
-        } catch {
-          /* ignore malformed payload */
-        }
-      }}
-    >
-      {tab === 'compose' && (
-      <>
-      <section className="agent-attachments" aria-label="Hermes media attachments">
-        <h3>Attached for AI</h3>
-        {attachedAssets.length === 0 ? (
-          <p className="agent-attachments-empty">
-            Drop an image/video here, or use Edit with AI on an Assets card. Then run intents /
-            automations against the attachment.
-          </p>
-        ) : (
-          <ul className="agent-attachment-list">
-            {attachedAssets.map((asset) => (
-              <li key={asset.assetId} className="agent-attachment-chip">
-                <span className="agent-attachment-kind">{asset.kind}</span>
-                <span className="agent-attachment-name" title={asset.assetId}>
-                  {asset.displayName}
-                </span>
-                {onDetachAsset !== undefined && (
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Detach ${asset.displayName}`}
-                    title="Detach"
-                    data-guide="Detach"
-                    onClick={() => onDetachAsset(asset.assetId)}
+      <div
+        className="agent-drop-target"
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (onAttachAsset === undefined) return;
+          const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+          if (!raw) return;
+          try {
+            const asset = JSON.parse(raw) as {
+              assetId: string;
+              kind: string;
+              displayName?: string;
+            };
+            if (asset.kind !== 'image' && asset.kind !== 'video') return;
+            onAttachAsset({
+              assetId: asset.assetId,
+              kind: asset.kind,
+              displayName: asset.displayName ?? asset.assetId,
+            });
+          } catch {
+            /* ignore malformed payload */
+          }
+        }}
+      >
+        {tab === 'compose' && (
+          <>
+            <section className="agent-attachments" aria-label="KiloCode media attachments">
+              <h3>Attached for AI</h3>
+              {attachedAssets.length === 0 ? (
+                <p className="agent-attachments-empty">
+                  Drop an image/video here, or use Edit with AI on an Assets card. Then run intents
+                  / automations against the attachment.
+                </p>
+              ) : (
+                <ul className="agent-attachment-list">
+                  {attachedAssets.map((asset) => (
+                    <li key={asset.assetId} className="agent-attachment-chip">
+                      <span className="agent-attachment-kind">{asset.kind}</span>
+                      <span className="agent-attachment-name" title={asset.assetId}>
+                        {asset.displayName}
+                      </span>
+                      {onDetachAsset !== undefined && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Detach ${asset.displayName}`}
+                          title="Detach"
+                          data-guide="Detach"
+                          onClick={() => onDetachAsset(asset.assetId)}
+                        >
+                          <CloseIcon />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="agent-intents" aria-label="Agent intents">
+              <h3>Intents</h3>
+              <ul className="agent-intent-grid">
+                {AGENT_INTENTS.map((intent) => {
+                  const built =
+                    intent.id === 'recipe-split-trim'
+                      ? buildSplitTrimRecipe(project, selectedClipIds, playheadUs)
+                      : intent.buildStep(project, selectedClipIds, playheadUs);
+                  return (
+                    <li key={intent.id}>
+                      <button
+                        type="button"
+                        className={
+                          intent.destructive
+                            ? 'agent-intent-card agent-intent-card-danger'
+                            : 'agent-intent-card'
+                        }
+                        disabled={!built.ok}
+                        aria-label={intent.label}
+                        data-guide={shortIntentLabel(intent.label)}
+                        onClick={() => plan(intent)}
+                      >
+                        <span className="agent-intent-icon" aria-hidden="true">
+                          {intentIcon(intent.id)}
+                        </span>
+                        <span className="agent-intent-name">{shortIntentLabel(intent.label)}</span>
+                      </button>
+                      {!built.ok && <p className="agent-intent-reason">{built.reason}</p>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            {pending !== undefined && (
+              <section className="agent-pending-plan" aria-live="polite">
+                <div className="agent-pending-head">
+                  <h3>{pending.intent.label}</h3>
+                  <span
+                    className={`agent-decision agent-decision-${pending.approval.decision}`}
+                    title={pending.approval.reason}
                   >
-                    <CloseIcon />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="agent-intents" aria-label="Agent intents">
-        <h3>Intents</h3>
-        <ul className="agent-intent-grid">
-          {AGENT_INTENTS.map((intent) => {
-            const built =
-              intent.id === 'recipe-split-trim'
-                ? buildSplitTrimRecipe(project, selectedClipIds, playheadUs)
-                : intent.buildStep(project, selectedClipIds, playheadUs);
-            return (
-              <li key={intent.id}>
-                <button
-                  type="button"
-                  className={
-                    intent.destructive
-                      ? 'agent-intent-card agent-intent-card-danger'
-                      : 'agent-intent-card'
-                  }
-                  disabled={!built.ok}
-                  aria-label={intent.label}
-                  data-guide={shortIntentLabel(intent.label)}
-                  onClick={() => plan(intent)}
-                >
-                  <span className="agent-intent-icon" aria-hidden="true">
-                    {intentIcon(intent.id)}
+                    {pending.approval.decision}
                   </span>
-                  <span className="agent-intent-name">{shortIntentLabel(intent.label)}</span>
-                </button>
-                {!built.ok && <p className="agent-intent-reason">{built.reason}</p>}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      {pending !== undefined && (
-        <section className="agent-pending-plan" aria-live="polite">
-          <div className="agent-pending-head">
-            <h3>{pending.intent.label}</h3>
-            <span
-              className={`agent-decision agent-decision-${pending.approval.decision}`}
-              title={pending.approval.reason}
-            >
-              {pending.approval.decision}
-            </span>
-          </div>
-          <p className="agent-pending-summary">Dry-run: {pending.dryRun.aggregateDiff.summary}</p>
-          <AgentTimelineCanvas
-            project={project}
-            playheadUs={playheadUs}
-            highlightedClipIds={selectedClipIds}
-            pendingChanges={pendingChanges}
-            width={400}
-            height={120}
-          />
-          {pending.dryRun.errors.length > 0 && (
-            <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
-          )}
-          <p className="agent-pending-reason">{pending.approval.reason}</p>
-          <div className="agent-pending-actions">
-            {pending.approval.decision === 'blocked' && (
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Dismiss blocked plan"
-                title="Dismiss"
-                onClick={reject}
-              >
-                <CloseIcon />
-              </button>
-            )}
-            {pending.approval.decision === 'requires-manual' && (
-              <>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Approve and execute"
-                  data-guide="Approve"
-                  onClick={() => void executePending()}
-                >
-                  <CheckIcon />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Reject plan"
-                  title="Reject plan"
-                  onClick={reject}
-                >
-                  <CloseIcon />
-                </button>
-              </>
-            )}
-            {pending.approval.decision === 'auto-approved' && (
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Execute plan"
-                data-guide="Execute"
-                onClick={() => void executePending()}
-              >
-                <PlayIcon />
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      {lastRun !== undefined && (
-        <section className="agent-last-run" aria-live="polite">
-          <div className="agent-last-run-row">
-            <p>
-              {lastRun.executionResult.success ? 'Executed' : 'Failed'}: {lastRun.intent.label}
-            </p>
-            <div className="agent-pending-actions">
-              {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Undo this run"
-                  title="Undo this run"
-                  onClick={undoLastRun}
-                >
-                  <UndoIcon />
-                </button>
-              )}
-              {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Save as reusable workflow"
-                  title="Save as reusable workflow"
-                  onClick={saveLastRunAsWorkflow}
-                >
-                  <SaveIcon />
-                </button>
-              )}
-            </div>
-          </div>
-          {!lastRun.executionResult.success && (
-            <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
-          )}
-          {lastRun.savedWorkflowId !== undefined && (
-            <p className="agent-workflow-saved">Saved as {lastRun.savedWorkflowId}</p>
-          )}
-          {lastRun.reverted && <p className="agent-pending-reason">Reverted.</p>}
-        </section>
-      )}
-      </>
-      )}
-
-      {tab === 'activity' && (
-      <section className="agent-activity">
-        {entries.length === 0 ? (
-          <p className="agent-activity-empty">No agent activity yet</p>
-        ) : (
-          <ul className="agent-activity-list">
-            {entries.map((entry) => (
-              <li key={entry.id} className="agent-activity-row">
-                <span className="agent-activity-action">{entry.action}</span>
-                {entry.tool !== undefined && (
-                  <span className="agent-activity-tool">{entry.tool}</span>
+                </div>
+                <p className="agent-pending-summary">
+                  Dry-run: {pending.dryRun.aggregateDiff.summary}
+                </p>
+                <AgentTimelineCanvas
+                  project={project}
+                  playheadUs={playheadUs}
+                  highlightedClipIds={selectedClipIds}
+                  pendingChanges={pendingChanges}
+                  width={400}
+                  height={120}
+                />
+                {pending.dryRun.errors.length > 0 && (
+                  <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
                 )}
-                {entry.error !== undefined && (
-                  <span className="agent-error">{entry.error}</span>
+                <p className="agent-pending-reason">{pending.approval.reason}</p>
+                <div className="agent-pending-actions">
+                  {pending.approval.decision === 'blocked' && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Dismiss blocked plan"
+                      title="Dismiss"
+                      onClick={reject}
+                    >
+                      <CloseIcon />
+                    </button>
+                  )}
+                  {pending.approval.decision === 'requires-manual' && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Approve and execute"
+                        data-guide="Approve"
+                        onClick={() => void executePending(true)}
+                      >
+                        <CheckIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Reject plan"
+                        title="Reject plan"
+                        onClick={reject}
+                      >
+                        <CloseIcon />
+                      </button>
+                    </>
+                  )}
+                  {pending.approval.decision === 'auto-approved' && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Execute plan"
+                      data-guide="Execute"
+                      onClick={() => void executePending(false)}
+                    >
+                      <PlayIcon />
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {lastRun !== undefined && (
+              <section className="agent-last-run" aria-live="polite">
+                <div className="agent-last-run-row">
+                  <p>
+                    {lastRun.executionResult.success ? 'Executed' : 'Failed'}:{' '}
+                    {lastRun.intent.label}
+                  </p>
+                  <div className="agent-pending-actions">
+                    {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Undo this run"
+                        title="Undo this run"
+                        onClick={undoLastRun}
+                      >
+                        <UndoIcon />
+                      </button>
+                    )}
+                    {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Save as reusable workflow"
+                        title="Save as reusable workflow"
+                        onClick={saveLastRunAsWorkflow}
+                      >
+                        <SaveIcon />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {!lastRun.executionResult.success && (
+                  <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
                 )}
-              </li>
-            ))}
-          </ul>
+                {lastRun.savedWorkflowId !== undefined && (
+                  <p className="agent-workflow-saved">Saved as {lastRun.savedWorkflowId}</p>
+                )}
+                {lastRun.reverted && <p className="agent-pending-reason">Reverted.</p>}
+              </section>
+            )}
+          </>
         )}
-      </section>
-      )}
-    </div>
+
+        {tab === 'activity' && (
+          <section className="agent-activity">
+            {entries.length === 0 ? (
+              <p className="agent-activity-empty">No agent activity yet</p>
+            ) : (
+              <ul className="agent-activity-list">
+                {entries.map((entry) => (
+                  <li key={entry.id} className="agent-activity-row">
+                    <span className="agent-activity-action">{entry.action}</span>
+                    {entry.tool !== undefined && (
+                      <span className="agent-activity-tool">{entry.tool}</span>
+                    )}
+                    {entry.error !== undefined && (
+                      <span className="agent-error">{entry.error}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
     </PanelShell>
   );
 }

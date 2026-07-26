@@ -29,11 +29,7 @@ import type { AgentEditPlan } from './plan.js';
 import { resolveExecutionOrder } from './execution-order.js';
 import { generateTransactionLabel } from './transaction-naming.js';
 import { createEnvelope, checkBaseRevision } from './envelope.js';
-import type {
-  AgentActor,
-  AgentCommandEnvelope,
-  ProjectRevisionId,
-} from './envelope.js';
+import type { AgentActor, AgentCommandEnvelope, ProjectRevisionId } from './envelope.js';
 import type { IdempotencyTracker } from './idempotency.js';
 
 export interface AtomicRunOptions {
@@ -61,6 +57,13 @@ export interface AtomicRunOptions {
   readonly idempotency?: IdempotencyTracker;
   readonly idempotencyKey?: string;
   readonly transactionLabel?: string;
+  /** Created by the trusted UI only after the user approves this pending plan. */
+  readonly manualApproval?: AtomicApprovalGrant;
+}
+
+export interface AtomicApprovalGrant {
+  readonly planId: string;
+  readonly approvedAt: string;
 }
 
 export interface AtomicStepOutcome {
@@ -126,10 +129,7 @@ class StagingDispatcher {
   }
 }
 
-export function runPlanAtomically(
-  plan: AgentEditPlan,
-  options: AtomicRunOptions,
-): AtomicRunResult {
+export function runPlanAtomically(plan: AgentEditPlan, options: AtomicRunOptions): AtomicRunResult {
   const transactionId = `tx-${++transactionCounter}-${Date.now()}`;
   const transactionLabel = options.transactionLabel ?? generateTransactionLabel(plan);
   const idempotencyKey = options.idempotencyKey ?? `agent-plan:${plan.planId}`;
@@ -181,8 +181,23 @@ export function runPlanAtomically(
       break;
     }
 
-    const decision = options.approvalEngine.evaluateStep(step, options.contextFor(staging.project));
-    if (decision.decision === 'blocked') {
+    const tool = options.registry.getTool(step.tool);
+    if (tool === undefined) {
+      steps.push({ stepId, status: 'failed', envelopes: [], error: `tool ${step.tool} not found` });
+      errors.push(`step ${stepId}: tool ${step.tool} not found`);
+      break;
+    }
+
+    const toolScope = 'definition' in tool ? tool.definition.scope : undefined;
+    const decision = options.approvalEngine.evaluateStep(
+      step,
+      options.contextFor(staging.project),
+      toolScope,
+    );
+    if (
+      decision.decision === 'blocked' ||
+      (decision.decision === 'requires-manual' && options.manualApproval?.planId !== plan.planId)
+    ) {
       steps.push({
         stepId,
         status: 'blocked-by-policy',
@@ -190,13 +205,6 @@ export function runPlanAtomically(
         ...(decision.reason !== undefined ? { error: decision.reason } : {}),
       });
       errors.push(`step ${stepId} blocked by policy: ${decision.reason ?? 'no reason given'}`);
-      break;
-    }
-
-    const tool = options.registry.getTool(step.tool);
-    if (tool === undefined) {
-      steps.push({ stepId, status: 'failed', envelopes: [], error: `tool ${step.tool} not found` });
-      errors.push(`step ${stepId}: tool ${step.tool} not found`);
       break;
     }
 
@@ -210,9 +218,10 @@ export function runPlanAtomically(
       },
     };
 
-    const result = 'execute' in tool
-      ? tool.execute(context, step.arguments)
-      : { success: false, error: 'tool does not support execution' };
+    const result =
+      'execute' in tool
+        ? tool.execute(context, step.arguments)
+        : { success: false, error: 'tool does not support execution' };
 
     if (!result.success) {
       steps.push({

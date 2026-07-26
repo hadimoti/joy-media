@@ -79,7 +79,7 @@ export function AssetLibraryPanel({
     readonly displayName?: string;
     readonly blob?: Blob;
   }) => void;
-  /** Attach image/video to Hermes Agent for further automations. */
+  /** Attach image/video to KiloCode for further editing automations. */
   readonly onEditWithAi?: (asset: {
     readonly assetId: string;
     readonly kind: 'image' | 'video';
@@ -211,7 +211,7 @@ export function AssetLibraryPanel({
         return;
       }
       if (onEditWithAi === undefined) {
-        setStatus('Hermes Agent attachment is unavailable in this session.');
+        setStatus('KiloCode attachment is unavailable in this session.');
         return;
       }
       onEditWithAi({
@@ -220,7 +220,7 @@ export function AssetLibraryPanel({
         displayName: asset.displayName,
       });
       setStatus(
-        `Attached ${asset.displayName} to Hermes Agent. Drag onto the timeline, or automate from Agent.`,
+        `Attached ${asset.displayName} to KiloCode. Drag onto the timeline, or automate from Agent.`,
       );
     },
     [onEditWithAi],
@@ -324,7 +324,7 @@ export function AssetLibraryPanel({
           (ratio) => setImportProgress(0.9 + 0.08 * ratio),
         );
         setStatus(
-          `Cloud-backed ${selectedFile.name}. Hermes tags applied; catalog will refresh.`,
+          `Cloud-backed ${selectedFile.name}. Agent tags applied; catalog will refresh.`,
         );
       } else {
         try {
@@ -462,7 +462,7 @@ export function AssetLibraryPanel({
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
-      setStatus('Hermes Agent attachment is unavailable in this session.');
+      setStatus('KiloCode attachment is unavailable in this session.');
       return;
     }
     let attached = 0;
@@ -479,7 +479,7 @@ export function AssetLibraryPanel({
     setStatus(
       attached === 0
         ? 'No selected image/video assets to attach.'
-        : `Attached ${attached} asset(s) to Hermes Agent.`,
+        : `Attached ${attached} asset(s) to KiloCode.`,
     );
   }, [onEditWithAi, selectedAssetIds, visible]);
 

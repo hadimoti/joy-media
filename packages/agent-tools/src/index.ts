@@ -3,6 +3,7 @@ export const PACKAGE_NAME = '@joy-media/agent-tools' as const;
 export type {
   ToolDefinition,
   ToolScope,
+  ToolCapability,
   Precondition,
   CostEstimate,
   ToolResult,
@@ -75,9 +76,14 @@ export type {
 } from './plan.js';
 export { createPlan, validatePlan, addStepToPlan, updatePlanStatus } from './plan.js';
 
-export type { ApprovalPolicy, ApprovalDecision } from './approval.js';
+export type { AgentExecutionMode, ApprovalPolicy, ApprovalDecision } from './approval.js';
 export {
+  ALL_TOOL_CAPABILITIES,
   ApprovalEngine,
+  createSuggestOnlyApprovalPolicy,
+  createPreviewAndApprovePolicy,
+  createAutoApplyLowRiskPolicy,
+  createFullAutoWithinLimitsPolicy,
   createDefaultApprovalPolicy,
   createPermissiveApprovalPolicy,
   createStrictApprovalPolicy,
@@ -145,7 +151,12 @@ export type {
 } from './shorten-intro.js';
 export { analyseShortenIntro } from './shorten-intro.js';
 
-export type { AtomicRunOptions, AtomicRunResult, AtomicStepOutcome } from './atomic.js';
+export type {
+  AtomicApprovalGrant,
+  AtomicRunOptions,
+  AtomicRunResult,
+  AtomicStepOutcome,
+} from './atomic.js';
 export { runPlanAtomically } from './atomic.js';
 
 export type { AgentBranch, BranchComparison } from './branch.js';

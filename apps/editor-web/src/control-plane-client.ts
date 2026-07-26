@@ -131,7 +131,7 @@ export class BrowserControlPlaneClient {
     });
   }
   /**
-   * Upload image original bytes to private cloud (ParsPack) and apply Hermes tags.
+   * Upload image original bytes to private cloud (ParsPack) and apply agent tags.
    * Videos are not accepted by the API in v1.
    */
   async uploadAssetOriginal(

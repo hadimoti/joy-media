@@ -19,7 +19,12 @@ import { runPlanAtomically } from './atomic.js';
 import { RevisionConflictError, validateEnvelope, createEnvelope } from './envelope.js';
 import type { AgentActor } from './envelope.js';
 import { createToolRegistry } from './registry.js';
-import { ApprovalEngine, createDefaultApprovalPolicy, createStrictApprovalPolicy } from './approval.js';
+import {
+  ApprovalEngine,
+  createAutoApplyLowRiskPolicy,
+  createPreviewAndApprovePolicy,
+  createStrictApprovalPolicy,
+} from './approval.js';
 import { buildEditorContext } from './context.js';
 import { dryRunPlan } from './dry-run.js';
 import { updatePlanStatus } from './plan.js';
@@ -72,7 +77,7 @@ class FakeSession {
 function runOptions(session: FakeSession, baseRevision = session.revision) {
   return {
     registry: registry(),
-    approvalEngine: new ApprovalEngine(createDefaultApprovalPolicy()),
+    approvalEngine: new ApprovalEngine(createAutoApplyLowRiskPolicy()),
     actor: AGENT,
     projectId: session.project.id,
     baseRevision,
@@ -272,6 +277,58 @@ describe('shorten the intro — failure is all-or-nothing', () => {
       expect(session.committed).toHaveLength(1);
     }
   });
+
+  it('does not accept a manual policy decision without an approval grant', () => {
+    const session = new FakeSession(buildReferenceSpikeProject());
+    const result = analyseShortenIntro(session.project, { byUs: TWO_SECONDS });
+    if (!result.ok) throw new Error(result.reason);
+
+    const run = runPlanAtomically(result.plan, {
+      ...runOptions(session),
+      approvalEngine: new ApprovalEngine(createPreviewAndApprovePolicy()),
+    });
+
+    expect(run.committed).toBe(false);
+    expect(run.steps[0]?.status).toBe('blocked-by-policy');
+    expect(session.committed).toHaveLength(0);
+  });
+
+  it('commits a manually gated plan only after the approval grant reaches the runner', () => {
+    const session = new FakeSession(buildReferenceSpikeProject());
+    const result = analyseShortenIntro(session.project, { byUs: TWO_SECONDS });
+    if (!result.ok) throw new Error(result.reason);
+
+    const run = runPlanAtomically(result.plan, {
+      ...runOptions(session),
+      approvalEngine: new ApprovalEngine(createPreviewAndApprovePolicy()),
+      manualApproval: {
+        planId: result.plan.planId,
+        approvedAt: '2026-07-26T00:00:00.000Z',
+      },
+    });
+
+    expect(run.committed).toBe(true);
+    expect(session.committed).toHaveLength(1);
+  });
+
+  it('rejects a manual approval grant issued for a different plan', () => {
+    const session = new FakeSession(buildReferenceSpikeProject());
+    const result = analyseShortenIntro(session.project, { byUs: TWO_SECONDS });
+    if (!result.ok) throw new Error(result.reason);
+
+    const run = runPlanAtomically(result.plan, {
+      ...runOptions(session),
+      approvalEngine: new ApprovalEngine(createPreviewAndApprovePolicy()),
+      manualApproval: {
+        planId: 'another-plan',
+        approvedAt: '2026-07-26T00:00:00.000Z',
+      },
+    });
+
+    expect(run.committed).toBe(false);
+    expect(run.steps[0]?.status).toBe('blocked-by-policy');
+    expect(session.committed).toHaveLength(0);
+  });
 });
 
 describe('shorten the intro — revision safety', () => {
@@ -296,9 +353,9 @@ describe('shorten the intro — revision safety', () => {
       ],
     });
 
-    expect(() =>
-      runPlanAtomically(result.plan, runOptions(session, 'rev-0')),
-    ).toThrow(RevisionConflictError);
+    expect(() => runPlanAtomically(result.plan, runOptions(session, 'rev-0'))).toThrow(
+      RevisionConflictError,
+    );
     // The stale run must not have landed.
     expect(session.committed).toHaveLength(1);
   });
@@ -334,9 +391,9 @@ describe('command envelope', () => {
     expect(validateEnvelope({ ...valid(), baseRevision: '' }).errors).toContain(
       'baseRevision must be a non-empty revision id',
     );
-    expect(
-      validateEnvelope({ ...valid(), baseRevision: 1.5 as unknown as string }).valid,
-    ).toBe(false);
+    expect(validateEnvelope({ ...valid(), baseRevision: 1.5 as unknown as string }).valid).toBe(
+      false,
+    );
   });
 
   it('rejects an unknown actor type', () => {

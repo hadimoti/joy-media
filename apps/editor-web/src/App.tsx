@@ -94,7 +94,7 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { buildMixerBuffer } from './mixer-buffer.js';
 import type { ExportPresetId } from '@joy-media/project-schema';
-import { AgentPanel, type HermesAttachedAsset } from './AgentPanel.js';
+import { AgentPanel, type KiloCodeAttachedAsset } from './AgentPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -498,8 +498,8 @@ function EditorWorkspace({
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
-  const [hermesAttachedAssets, setHermesAttachedAssets] = useState<
-    readonly HermesAttachedAsset[]
+  const [kiloCodeAttachedAssets, setKiloCodeAttachedAssets] = useState<
+    readonly KiloCodeAttachedAsset[]
   >([]);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const [toasts, setToasts] = useState<readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]>([]);
@@ -2056,7 +2056,7 @@ function EditorWorkspace({
           projectTitle={controlPlaneProject.title}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onEditWithAi={(asset) => {
-            setHermesAttachedAssets((current) => {
+            setKiloCodeAttachedAssets((current) => {
               if (current.some((entry) => entry.assetId === asset.assetId)) return current;
               return [...current, asset];
             });
@@ -2073,14 +2073,14 @@ function EditorWorkspace({
           agentContext={context.agentContext}
           onUndo={context.undo}
           session={session}
-          attachedAssets={hermesAttachedAssets}
+          attachedAssets={kiloCodeAttachedAssets}
           onDetachAsset={(assetId) =>
-            setHermesAttachedAssets((current) =>
+            setKiloCodeAttachedAssets((current) =>
               current.filter((entry) => entry.assetId !== assetId),
             )
           }
           onAttachAsset={(asset) =>
-            setHermesAttachedAssets((current) => {
+            setKiloCodeAttachedAssets((current) => {
               if (current.some((entry) => entry.assetId === asset.assetId)) return current;
               return [...current, asset];
             })
