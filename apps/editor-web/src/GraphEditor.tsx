@@ -11,6 +11,7 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { JOY_COLORS } from './theme.js';
 import {
   copyKeyframes,
   EASED_HANDLES,
@@ -284,13 +285,13 @@ export function GraphEditor({
           dragRef.current = null;
         }}
       >
-        <polyline points={path} fill="none" stroke="#7cc4ff" strokeWidth={1.5} />
+        <polyline points={path} fill="none" stroke={JOY_COLORS.textMuted} strokeWidth={1.5} />
         <line
           x1={x(playheadUs)}
           y1={0}
           x2={x(playheadUs)}
           y2={GRAPH_HEIGHT}
-          stroke="#e9b949"
+          stroke={JOY_COLORS.accent}
           strokeWidth={1}
         />
         {curve.keyframes.map((keyframe, index) => {
@@ -307,14 +308,14 @@ export function GraphEditor({
                     y1={cy}
                     x2={bezier.x2 * LANE_WIDTH}
                     y2={(1 - bezier.y2) * GRAPH_HEIGHT}
-                    stroke="#9ad0ff"
+                    stroke={JOY_COLORS.borderHover}
                     strokeWidth={1}
                   />
                   <circle
                     cx={bezier.x2 * LANE_WIDTH}
                     cy={(1 - bezier.y2) * GRAPH_HEIGHT}
                     r={3}
-                    fill="#9ad0ff"
+                    fill={JOY_COLORS.borderHover}
                     onPointerDown={(event) => {
                       event.stopPropagation();
                       (event.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(
@@ -331,8 +332,8 @@ export function GraphEditor({
                 width={8}
                 height={8}
                 transform={`rotate(45 ${cx} ${cy})`}
-                fill={active ? '#e9b949' : '#cfcfd2'}
-                stroke="#1a1a1c"
+                fill={active ? JOY_COLORS.accent : JOY_COLORS.textMuted}
+                stroke={JOY_COLORS.bgPanel}
                 strokeWidth={1}
                 onPointerDown={(event) => {
                   event.stopPropagation();

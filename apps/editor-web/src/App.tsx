@@ -107,7 +107,8 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
-import { panelLabel } from './panel-tab-icons.js';
+import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
+import { PanelShell } from './PanelShell.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
   CloseIcon,
@@ -144,6 +145,7 @@ import {
 } from './export-history.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
+import { JOY_COLORS } from './theme.js';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
 function buildEffectsMap(project: JoyProjectV1): Readonly<Record<string, readonly EffectInstanceV1[]>> {
@@ -2016,7 +2018,7 @@ function EditorWorkspace({
                       timeUs,
                       label,
                       kind: 'marker',
-                      color: '#e9b949',
+                      color: JOY_COLORS.accent,
                     },
                   },
                 },
@@ -2121,13 +2123,17 @@ function EditorWorkspace({
     }
     if (api.id === 'diagnostics')
       return (
-        <article className="diagnostics-panel">
+        <PanelShell
+          title="Diagnostics"
+          iconUrl={panelTabIconUrl('diagnostics')}
+          className="diagnostics-panel"
+        >
           <p>{context.playback.quality} proxy preview</p>
           <p>
             {context.playback.decodedFrames} decoded / {context.playback.droppedFrames} dropped frames
           </p>
           <p>Maximum media drift: {context.playback.maxDriftUs} µs</p>
-        </article>
+        </PanelShell>
       );
     if (api.id === 'monitor') return <MonitorPanel />;
     if (api.id === 'workflows') {

@@ -2,6 +2,7 @@
  * DaVinci-shaped color grade — icon-led controls with hover guides.
  */
 
+import { useState } from 'react';
 import type { ColorGradeV1, JoyProjectV1 } from '@joy-media/project-schema';
 import {
   BlendIcon,
@@ -10,8 +11,17 @@ import {
   GammaIcon,
   InvertColorIcon,
   LiftIcon,
+  RefreshIcon,
   SaturationIcon,
 } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'grade', label: 'Grade' },
+  { id: 'lut', label: 'LUT' },
+  { id: 'scopes', label: 'Scopes' },
+];
 
 export const DEFAULT_GRADE: ColorGradeV1 = {
   lift: 0,
@@ -39,6 +49,7 @@ const LUT_ICONS = {
 } as const;
 
 export function ColorPanel({ project, onChange }: ColorPanelProps) {
+  const [tab, setTab] = useState('grade');
   const grade = readColorGrade(project);
   const set = (patch: Partial<ColorGradeV1>) => {
     onChange({
@@ -51,8 +62,36 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
   const scopeHeight = (value: number, mid: number) =>
     `${Math.max(8, Math.min(100, 40 + (value - mid) * 40))}%`;
 
+  const isDefault =
+    grade.lift === DEFAULT_GRADE.lift &&
+    grade.gamma === DEFAULT_GRADE.gamma &&
+    grade.gain === DEFAULT_GRADE.gain &&
+    grade.saturation === DEFAULT_GRADE.saturation &&
+    (grade.lutId ?? 'none') === DEFAULT_GRADE.lutId;
+
   return (
-    <article className="color-panel">
+    <PanelShell
+      title="Color"
+      iconUrl={panelTabIconUrl('color')}
+      className="color-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      actions={
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Reset grade"
+          title="Reset grade"
+          disabled={isDefault}
+          onClick={() => set(DEFAULT_GRADE)}
+        >
+          <RefreshIcon />
+        </button>
+      }
+    >
+      {tab === 'grade' && (
+        <>
       <div className="control-row">
         <span className="icon-tool" data-guide="Lift" aria-hidden="true">
           <LiftIcon />
@@ -117,35 +156,44 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
         />
         <span className="value">{grade.saturation.toFixed(2)}</span>
       </div>
-      <div className="preset-icon-group" role="group" aria-label="LUT">
-        {(
-          [
-            ['none', 'No LUT'],
-            ['rec709', 'Rec.709'],
-            ['contrast', 'Contrast'],
-          ] as const
-        ).map(([id, label]) => {
-          const Icon = LUT_ICONS[id];
-          return (
-            <button
-              key={id}
-              type="button"
-              className="icon-button"
-              aria-pressed={(grade.lutId ?? 'none') === id}
-              aria-label={label}
-              data-guide={label}
-              onClick={() => set({ lutId: id })}
-            >
-              <Icon />
-            </button>
-          );
-        })}
-      </div>
-      <div className="color-scopes" aria-label="Parade scope">
-        <div className="scope-bar scope-r" style={{ height: scopeHeight(grade.gain, 1) }} />
-        <div className="scope-bar scope-g" style={{ height: scopeHeight(grade.gamma, 1) }} />
-        <div className="scope-bar scope-b" style={{ height: scopeHeight(grade.lift + 1, 1) }} />
-      </div>
-    </article>
+        </>
+      )}
+
+      {tab === 'lut' && (
+        <div className="preset-icon-group" role="group" aria-label="LUT">
+          {(
+            [
+              ['none', 'No LUT'],
+              ['rec709', 'Rec.709'],
+              ['contrast', 'Contrast'],
+            ] as const
+          ).map(([id, label]) => {
+            const Icon = LUT_ICONS[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                className="icon-button"
+                aria-pressed={(grade.lutId ?? 'none') === id}
+                aria-label={label}
+                data-guide={label}
+                title={label}
+                onClick={() => set({ lutId: id })}
+              >
+                <Icon />
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'scopes' && (
+        <div className="color-scopes" aria-label="Parade scope">
+          <div className="scope-bar scope-r" style={{ height: scopeHeight(grade.gain, 1) }} />
+          <div className="scope-bar scope-g" style={{ height: scopeHeight(grade.gamma, 1) }} />
+          <div className="scope-bar scope-b" style={{ height: scopeHeight(grade.lift + 1, 1) }} />
+        </div>
+      )}
+    </PanelShell>
   );
 }

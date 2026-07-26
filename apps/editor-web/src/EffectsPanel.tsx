@@ -4,18 +4,14 @@
  * EditorSession for undo/redo support.
  */
 
-import {
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-  useEffect,
-} from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { effectRegistry, listEffects, type EffectDescriptor, type EffectDragPayload } from '@joy-media/visual-effects';
-import { SearchIcon } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 
-const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
+const CATEGORIES: readonly PanelTabSpec[] = [
   { id: 'all', label: 'All' },
   { id: 'color', label: 'Color' },
   { id: 'blur', label: 'Blur' },
@@ -34,14 +30,8 @@ interface EffectsPanelProps {
 
 export function EffectsPanel({ project, objectId, onDispatch, showToast }: EffectsPanelProps) {
   const [search, setSearch] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
 
   const descriptors = useMemo(() => {
     const all = listEffects();
@@ -69,11 +59,6 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       else next.add(effectId);
       return next;
     });
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setSearch('');
-    setSearchOpen(false);
   }, []);
 
   const handleAdd = useCallback(
@@ -115,86 +100,32 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       : 'No effects match.';
 
   return (
-    <article className="joy-panel-root effects-panel">
-      <div className="effects-panel-header">
-        <h3 className="panel-section-title">
-          <img
-            className="panel-section-title-icon"
-            src="/assets/icons/effects.png"
-            alt=""
-            width={16}
-            height={16}
-            aria-hidden="true"
-          />
-          Effects
-        </h3>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={searchOpen ? 'Close search' : 'Search effects'}
-          title={searchOpen ? 'Close search' : 'Search effects'}
-          aria-expanded={searchOpen}
-          aria-controls="effects-search-field"
-          onClick={() => {
-            if (searchOpen) closeSearch();
-            else setSearchOpen(true);
-          }}
-        >
-          <SearchIcon />
-        </button>
+    <PanelShell
+      title="Effects"
+      iconUrl={panelTabIconUrl('effects')}
+      className="effects-panel"
+      search={{ value: search, onChange: setSearch, placeholder: 'Search effects…' }}
+      tabs={CATEGORIES}
+      activeTab={category}
+      onTabChange={setCategory}
+    >
+      <div className="effects-grid">
+        {filtered.length === 0 ? (
+          <p className="empty-hint">{emptyHint}</p>
+        ) : (
+          filtered.map((desc) => (
+            <EffectCard
+              key={desc.id}
+              descriptor={desc}
+              isFavorite={favorites.has(desc.id)}
+              onAdd={() => handleAdd(desc.id)}
+              onToggleFavorite={() => toggleFavorite(desc.id)}
+              onDragStart={(e) => handleDragStart(desc.id, e)}
+            />
+          ))
+        )}
       </div>
-      {searchOpen && (
-        <div className="effects-toolbar">
-          <input
-            id="effects-search-field"
-            ref={searchInputRef}
-            type="search"
-            placeholder="Search effects..."
-            value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') closeSearch();
-            }}
-            className="effects-search"
-            aria-label="Search effects"
-          />
-        </div>
-      )}
-
-      <div className="effects-categories" role="tablist">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.id}
-            type="button"
-            role="tab"
-            aria-selected={category === cat.id}
-            className={`effects-category-tab${category === cat.id ? ' active' : ''}`}
-            onClick={() => setCategory(cat.id)}
-          >
-            {cat.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="joy-panel-scroll">
-        <div className="effects-grid">
-          {filtered.length === 0 ? (
-            <p className="empty-hint">{emptyHint}</p>
-          ) : (
-            filtered.map((desc) => (
-              <EffectCard
-                key={desc.id}
-                descriptor={desc}
-                isFavorite={favorites.has(desc.id)}
-                onAdd={() => handleAdd(desc.id)}
-                onToggleFavorite={() => toggleFavorite(desc.id)}
-                onDragStart={(e) => handleDragStart(desc.id, e)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-    </article>
+    </PanelShell>
   );
 }
 
@@ -255,18 +186,7 @@ function EffectCard({
             }}
             title={isFavorite ? 'Remove favorite' : 'Add favorite'}
           >
-            <svg
-              aria-hidden="true"
-              focusable="false"
-              width="12"
-              height="12"
-              viewBox="0 0 16 16"
-              fill={isFavorite ? 'currentColor' : 'none'}
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
-            </svg>
+            {isFavorite ? <StarFilledIcon /> : <StarIcon />}
           </button>
           <button
             type="button"
@@ -278,7 +198,7 @@ function EffectCard({
             }}
             title="Add effect"
           >
-            +
+            <PlusIcon />
           </button>
         </div>
       </div>

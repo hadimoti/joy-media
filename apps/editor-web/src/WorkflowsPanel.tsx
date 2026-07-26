@@ -15,6 +15,13 @@ import {
 } from './first-party-workflows.js';
 import type { WorkflowRunOutcome } from './workflow-runner.js';
 import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'saved', label: 'Saved' },
+  { id: 'system', label: 'System' },
+];
 
 export interface WorkflowInputParameter {
   readonly name: string;
@@ -99,6 +106,7 @@ export function WorkflowsPanel({
   ) => Promise<WorkflowRunOutcome>;
 }) {
   const [workflows, setWorkflows] = useState(() => listWorkflows(session));
+  const [tab, setTab] = useState('saved');
   const [runModal, setRunModal] = useState<{ workflowId: string; parameters: WorkflowInputParameter[] } | undefined>(
     undefined,
   );
@@ -286,11 +294,24 @@ export function WorkflowsPanel({
           []) as readonly unknown[])
       : [];
 
+  const isEmpty = workflows.length === 0 && systemWorkflows.length === 0;
+
   return (
-    <article className="workflows-panel">
-      <div className="workflows-header">
-        <h3>Workflows</h3>
+    <PanelShell
+      title="Workflows"
+      iconUrl={panelTabIconUrl('workflows')}
+      className="workflows-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      {...(statusMessage !== undefined
+        ? { note: statusMessage }
+        : isEmpty
+          ? { note: 'Run an agent action and save it to create your first workflow.' }
+          : {})}
+      actions={
         <button
+          type="button"
           className="icon-button"
           aria-label="Refresh workflow list"
           title="Refresh workflow list"
@@ -298,9 +319,8 @@ export function WorkflowsPanel({
         >
           <RefreshIcon />
         </button>
-      </div>
-
-      {statusMessage !== undefined && <p className="workflow-status-hint">{statusMessage}</p>}
+      }
+    >
 
       {runModal !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
@@ -379,32 +399,21 @@ export function WorkflowsPanel({
         </div>
       )}
 
-      {workflows.length === 0 && systemWorkflows.length === 0 ? (
-        <p className="empty-hint">No saved workflows yet. Run an agent action and save it as a workflow.</p>
-      ) : (
-        <>
-          {workflows.length > 0 && (
-            <>
-              <div className="workflow-section-header">
-                <h4>Your workflows</h4>
-              </div>
-              <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
-            </>
-          )}
+      {tab === 'saved' && (
+        <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
+      )}
 
-          {systemWorkflows.length > 0 && (
-            <>
-              <div className="workflow-section-header">
-                <h4>System workflows</h4>
-                <span className="system-version-badge" title="FIRST_PARTY_WORKFLOWS_VERSION">
-                  v{systemWorkflowVersion}
-                </span>
-              </div>
-              <ul className="workflow-list">{systemWorkflows.map((wf) => renderSystemRow(wf))}</ul>
-            </>
-          )}
+      {tab === 'system' && (
+        <>
+          <div className="workflow-section-header">
+            <h4>Bundled with JOY Media</h4>
+            <span className="system-version-badge" title="FIRST_PARTY_WORKFLOWS_VERSION">
+              v{systemWorkflowVersion}
+            </span>
+          </div>
+          <ul className="workflow-list">{systemWorkflows.map((wf) => renderSystemRow(wf))}</ul>
         </>
       )}
-    </article>
+    </PanelShell>
   );
 }

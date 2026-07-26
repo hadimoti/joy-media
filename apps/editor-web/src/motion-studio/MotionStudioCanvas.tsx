@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import type { MotionSceneDocument, MotionLayer, MotionFill, SceneBackground } from '@joy-media/motion-core';
+import { JOY_COLORS } from '../theme.js';
 
 interface LayerElementProps {
   readonly layer: MotionLayer;
@@ -227,7 +228,7 @@ function SelectionOverlay({ layer, onDragMove }: SelectionOverlayProps) {
     top: t.y,
     width: t.width,
     height: t.height,
-    border: '2px dashed #f4b72f',
+    border: `2px dashed ${JOY_COLORS.accent}`,
     pointerEvents: 'none',
     zIndex: 1000,
   };
@@ -236,8 +237,8 @@ function SelectionOverlay({ layer, onDragMove }: SelectionOverlayProps) {
     position: 'absolute',
     width: handleSize,
     height: handleSize,
-    backgroundColor: '#f4b72f',
-    border: '1px solid #0d0e10',
+    backgroundColor: JOY_COLORS.accent,
+    border: `1px solid ${JOY_COLORS.bgDeep}`,
     pointerEvents: 'auto',
     cursor: 'pointer',
   };

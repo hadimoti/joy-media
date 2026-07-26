@@ -23,12 +23,9 @@ export type { BrightnessContrastParams } from "./factories/pixi/BrightnessContra
 
 export { registerBuiltins } from "./builtin/metadata.js";
 
-export {
-  BUILTIN_PRESETS,
-  JoyEffectPresetV1,
-  findPreset,
-  listPresets,
-} from "./presets/types.js";
+export { BUILTIN_PRESETS, findPreset, listPresets } from "./presets/types.js";
+// `isolatedModules` requires types to leave through a type-only re-export.
+export type { JoyEffectPresetV1 } from "./presets/types.js";
 
 export {
   effectToFfmpegFilter,

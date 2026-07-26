@@ -2,6 +2,7 @@
  * Fairlight-lite mixer: gain/pan/mute/solo/fade — icon rows with hover guides.
  */
 
+import { useState } from 'react';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import {
@@ -14,6 +15,13 @@ import {
   SoloIcon,
   SpeakerOnIcon,
 } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'master', label: 'Master' },
+  { id: 'clips', label: 'Clips' },
+];
 
 interface AudioPanelProps {
   readonly clipIds: readonly string[];
@@ -22,6 +30,7 @@ interface AudioPanelProps {
 }
 
 export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelProps) {
+  const [tab, setTab] = useState('master');
   const dispatch = (command: AudioCommand, label: string) => {
     try {
       const { state } = applyAudioCommand(audioState, command);
@@ -32,10 +41,27 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
   };
 
   const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
+  // §3c: the Clips tab keeps its shape when the timeline is empty — the strips
+  // render disabled rather than being replaced by a sentence.
+  const noClips = clipIds.length === 0;
+  const clipsInactive = tab === 'clips' && noClips;
 
   return (
-    <article className="audio-panel">
-      {master !== undefined && (
+    <PanelShell
+      title="Audio"
+      iconUrl={panelTabIconUrl('audio')}
+      icon={(() => {
+        const Svg = panelTabSvgIcon('audio');
+        return Svg === undefined ? undefined : <Svg />;
+      })()}
+      className="audio-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      inactive={clipsInactive}
+      {...(clipsInactive ? { note: 'Drop clips on the timeline to mix them.' } : {})}
+    >
+      {tab === 'master' && master !== undefined && (
         <div className="audio-strip">
           <div className="control-row">
             <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
@@ -63,7 +89,10 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
           </div>
         </div>
       )}
-      {clipIds.map((clipId) => {
+      {tab === 'clips' &&
+        // One placeholder strip when there is nothing to mix, so the panel
+        // still shows what it does (§3c.3) instead of collapsing to a hint.
+        (noClips ? ['—'] : clipIds).map((clipId) => {
         const clip = audioState.clips[clipId] ?? {
           gain: 1,
           pan: 0,
@@ -83,6 +112,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 aria-pressed={clip.mute}
                 aria-label={`Mute ${clipId}`}
                 data-guide="Mute"
+                disabled={noClips}
                 onClick={() =>
                   dispatch(
                     { type: 'audioClip.setMute', payload: { clipId, mute: !clip.mute } },
@@ -98,6 +128,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 aria-pressed={clip.solo}
                 aria-label={`Solo ${clipId}`}
                 data-guide="Solo"
+                disabled={noClips}
                 onClick={() =>
                   dispatch(
                     { type: 'audioClip.setSolo', payload: { clipId, solo: !clip.solo } },
@@ -120,6 +151,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 value={clip.gain}
                 aria-label={`Gain ${clipId}`}
                 title="Gain"
+                disabled={noClips}
                 onChange={(event) =>
                   dispatch(
                     {
@@ -144,6 +176,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 value={clip.pan}
                 aria-label={`Pan ${clipId}`}
                 title="Pan"
+                disabled={noClips}
                 onChange={(event) =>
                   dispatch(
                     {
@@ -167,6 +200,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 value={Math.round((clip.fadeInUs ?? 0) / 1000)}
                 aria-label={`Fade in ${clipId} (ms)`}
                 title="Fade in (ms)"
+                disabled={noClips}
                 onChange={(event) =>
                   dispatch(
                     {
@@ -194,6 +228,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 value={Math.round((clip.fadeOutUs ?? 0) / 1000)}
                 aria-label={`Fade out ${clipId} (ms)`}
                 title="Fade out (ms)"
+                disabled={noClips}
                 onChange={(event) =>
                   dispatch(
                     {
@@ -216,7 +251,6 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
           </div>
         );
       })}
-      {clipIds.length === 0 && <p className="empty-hint">Drop clips on the timeline to mix.</p>}
-    </article>
+    </PanelShell>
   );
 }

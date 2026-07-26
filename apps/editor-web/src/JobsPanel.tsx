@@ -6,8 +6,16 @@ import {
 } from './control-plane-client.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'workers', label: 'Workers' },
+  { id: 'queue', label: 'Queue' },
+  { id: 'pair', label: 'Pair' },
+];
 
 export function JobsPanel({
   projectId,
@@ -25,6 +33,7 @@ export function JobsPanel({
   const [status, setStatus] = useState('Checking JOY Media connection…');
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
+  const [tab, setTab] = useState('workers');
 
   const refresh = useCallback(async () => {
     try {
@@ -107,15 +116,16 @@ export function JobsPanel({
   };
 
   return (
-    <article className="jobs-panel">
-      <header className="jobs-toolbar">
-        <div className="jobs-toolbar-copy">
-          <strong className="jobs-title">Jobs</strong>
-          <p className="jobs-status" aria-live="polite">
-            {status}
-          </p>
-        </div>
-        <div className="jobs-toolbar-actions">
+    <PanelShell
+      title="Jobs"
+      iconUrl={panelTabIconUrl('jobs')}
+      className="jobs-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      note={status}
+      actions={
+        <>
           {!projectInitialized && (
             <button
               type="button"
@@ -149,9 +159,10 @@ export function JobsPanel({
           >
             <RefreshIcon />
           </button>
-        </div>
-      </header>
-
+        </>
+      }
+    >
+      {tab === 'pair' && (
       <section className="jobs-pair" aria-label="Pair local Worker">
         <label className="jobs-field">
           <span>Worker ID</span>
@@ -188,8 +199,9 @@ export function JobsPanel({
           </button>
         </div>
       </section>
+      )}
 
-      <div className="jobs-scroll">
+      {tab === 'workers' && (
         <section className="jobs-section" aria-label="Workers">
           <div className="jobs-section-head">
             <h3>Workers</h3>
@@ -246,7 +258,9 @@ export function JobsPanel({
             </button>
           )}
         </section>
+      )}
 
+      {tab === 'queue' && (
         <section className="jobs-section" aria-label="Derivative jobs">
           <div className="jobs-section-head">
             <h3>Queue</h3>
@@ -313,8 +327,9 @@ export function JobsPanel({
             </ul>
           )}
         </section>
-      </div>
+      )}
 
+      {tab === 'pair' && (
       <section className="jobs-guide" aria-label="How to find Worker ID and pairing code">
         <button
           type="button"
@@ -352,7 +367,8 @@ export function JobsPanel({
           </ol>
         )}
       </section>
-    </article>
+      )}
+    </PanelShell>
   );
 
   function report(error: unknown): void {

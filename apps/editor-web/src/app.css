@@ -38,7 +38,10 @@ textarea:focus:not(:focus-visible) {
   --joy-text-disabled: rgba(255, 255, 255, 0.28);
   --joy-accent: #f4b72f;
   --joy-accent-hover: #ffc94f;
-  --joy-accent-soft: #d4b06a;
+  /* The only permitted amber wash: drag-over fills, active-tab underline. */
+  --joy-accent-dim: rgb(244 183 47 / 22%);
+  /* Text/glyphs printed on top of an accent fill. */
+  --joy-on-accent: #1a1408;
   --joy-danger: #ef6a6a;
   --joy-ok: #6fcf97;
   --joy-success: #6fcf97;
@@ -117,7 +120,15 @@ input[type='checkbox']:focus-visible {
   outline-offset: 1px;
 }
 
-/* —— Panel root / scroll primitives —— */
+/* ————————————————————————————————————————————————————————————————
+   The panel shell — DESIGN.md §3a.
+
+   Every panel is header → (search) → tabs → body, in that order, built
+   from these classes. Panels used to each ship their own copy of this
+   layout under a private name (.effects-panel-header, .motion-panel-header,
+   .effects-categories, .motion-subtabs …) which were byte-identical and
+   drifted apart on every edit. There is one set now.
+   ———————————————————————————————————————————————————————————————— */
 .joy-panel-root {
   min-width: 0;
   min-height: 0;
@@ -125,8 +136,125 @@ input[type='checkbox']:focus-visible {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  box-sizing: border-box;
+  background: var(--joy-bg-panel);
+  font-size: 0.78rem;
   container-type: inline-size;
 }
+
+/* Header: 1fr | title | 1fr. Column 1 stays empty on purpose — it is the
+   counterweight that keeps the title optically centred against the actions. */
+.joy-panel-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: var(--control-sm);
+  flex-shrink: 0;
+}
+.joy-panel-title {
+  grid-column: 2;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  min-width: 0;
+  color: var(--joy-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.joy-panel-title-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  object-fit: contain;
+  display: block;
+}
+.joy-panel-title-icon-mask {
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+.joy-panel-actions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+/* An engaged toggle (favourites-on, solo, record) is one of the six places
+   amber is allowed to appear. */
+.joy-panel-actions .icon-button[aria-pressed='true'] {
+  color: var(--joy-accent);
+}
+
+/* Search stays collapsed until the ⌕ toggle asks for it. */
+.joy-panel-search {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+.joy-panel-search input {
+  flex: 1;
+  min-width: 0;
+  height: 1.7rem;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: 0.72rem;
+}
+
+/* Tabs: text only. No pills, no boxes — the underline carries the state. */
+.joy-panel-tabs {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+.joy-panel-tab {
+  padding: 0.2rem 0.55rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--joy-text-muted);
+  font: inherit;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.joy-panel-tab:hover:not(:disabled) {
+  color: var(--joy-text);
+}
+.joy-panel-tab[aria-selected='true'] {
+  color: var(--joy-text);
+  border-bottom-color: var(--joy-accent-dim);
+  font-weight: 600;
+}
+
+/* One short line under the tabs saying why the body is idle (§3c). */
+.joy-panel-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.15rem 0;
+  color: var(--joy-text-faint);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+/* The body is the only thing that scrolls. */
+.joy-panel-body,
 .joy-panel-scroll {
   min-width: 0;
   min-height: 0;
@@ -136,6 +264,22 @@ input[type='checkbox']:focus-visible {
   scrollbar-gutter: stable;
   flex: 1 1 0;
 }
+.joy-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+/* §3c — nothing selected. The panel keeps its shape and its previews; only
+   the body goes quiet, and every control inside also carries `disabled`. */
+.joy-panel-body.is-inactive {
+  opacity: 0.4;
+  pointer-events: none;
+  color: var(--joy-text-disabled);
+  user-select: none;
+}
+
+/* Legacy aliases: panels still mid-migration to §3a. Delete on sight. */
 .panel-section-title:has(.panel-section-title-icon) {
   display: flex;
   align-items: center;
@@ -349,7 +493,7 @@ main {
   background:
     radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.28), transparent 50%),
     linear-gradient(180deg, color-mix(in srgb, var(--joy-accent) 92%, #fff), var(--joy-accent));
-  color: #1a1408;
+  color: var(--joy-on-accent);
   cursor: pointer;
   box-sizing: border-box;
   box-shadow:
@@ -480,7 +624,7 @@ main {
   background: #64c48c;
 }
 .session-no-access {
-  background: #e9b949;
+  background: var(--joy-accent);
 }
 .session-signed-out {
   background: #d37a7a;
@@ -515,7 +659,7 @@ main {
   background: #d37a7a;
 }
 .process-running .process-dot {
-  background: #e9b949;
+  background: var(--joy-accent);
   animation: process-pulse 1.2s ease-in-out infinite;
 }
 @keyframes process-pulse {
@@ -550,14 +694,75 @@ input:not([type='range']):not([type='file']):not([type='checkbox']),
 select,
 textarea {
   padding: 0.3rem 0.45rem;
-  border: 1px solid #3a3a3e;
+  border: 1px solid var(--joy-border-strong);
   border-radius: 0.3rem;
-  background: #0e0e10;
-  color: #e4e4e6;
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
 }
 input::placeholder,
 textarea::placeholder {
-  color: #8c8c90;
+  color: var(--joy-text-faint);
+}
+
+/* —— Sliders ————————————————————————————————————————————————————————
+   Range inputs were never themed, so every grade/gain/pan control rendered
+   in the UA's blue — the most conspicuous blue left in the editor (§1). The
+   track is neutral; only the thumb, the one thing you grab, carries amber. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.1rem;
+  margin: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--joy-bg-control);
+  border: 1px solid var(--joy-border);
+}
+input[type='range']::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--joy-bg-control);
+  border: 1px solid var(--joy-border);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--joy-accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 55%);
+}
+input[type='range']::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--joy-accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 55%);
+}
+input[type='range']:hover:not(:disabled)::-webkit-slider-thumb {
+  background: var(--joy-accent-hover);
+}
+input[type='range']:hover:not(:disabled)::-moz-range-thumb {
+  background: var(--joy-accent-hover);
+}
+input[type='range']:disabled {
+  cursor: not-allowed;
+}
+input[type='range']:disabled::-webkit-slider-thumb {
+  background: var(--joy-text-faint);
+}
+input[type='range']:disabled::-moz-range-thumb {
+  background: var(--joy-text-faint);
 }
 /* Mixed Persian/English content: let each field follow its own text. */
 input:not([type]),
@@ -567,7 +772,7 @@ textarea {
   unicode-bidi: plaintext;
 }
 :focus-visible {
-  outline: 2px solid #e9b949;
+  outline: 2px solid var(--joy-accent);
   outline-offset: 1px;
 }
 * {
@@ -653,7 +858,7 @@ a.icon-button {
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: var(--joy-accent, #e9b949);
+  color: var(--joy-accent, var(--joy-accent));
 }
 .icon-button svg {
   flex: none;
@@ -710,7 +915,7 @@ a.icon-button {
 .icon-tool[aria-pressed='true'] {
   border-color: #5a5a60;
   background: #252528;
-  color: #e9b949;
+  color: var(--joy-accent);
 }
 .control-row {
   display: grid;
@@ -853,7 +1058,7 @@ h2 {
   background-color: #121214;
 }
 .monitor-canvas-wrap.drag-over {
-  outline: 3px dashed #e9b949;
+  outline: 3px dashed var(--joy-accent);
   outline-offset: -3px;
   background-color: rgba(233, 185, 73, 0.08);
 }
@@ -1431,7 +1636,7 @@ label {
   font-variant-numeric: tabular-nums;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--joy-accent-soft, #c8c8cc);
+  color: var(--joy-accent);
   direction: ltr;
   line-height: 1.2;
 }
@@ -1574,24 +1779,25 @@ label {
   z-index: 2;
   display: block;
   padding: 0;
-  border: 1px solid rgba(255, 210, 120, 0.28);
-  border-top-color: rgba(255, 230, 170, 0.42);
-  border-bottom-color: rgba(0, 0, 0, 0.55);
+  /* Neutral at rest (DESIGN.md §1a). Every clip used to carry an amber tint,
+     which left no ink to mark the selected one. Warmth now lives only in the
+     3px rail and in the selection outline. */
+  border: 1px solid var(--joy-border-strong);
+  border-top-color: rgb(255 255 255 / 12%);
+  border-bottom-color: rgb(0 0 0 / 55%);
   border-radius: var(--radius-sm);
   background:
-    linear-gradient(180deg, rgba(255, 230, 170, 0.16), transparent 40%, rgba(0, 0, 0, 0.28)),
-    #2a2414;
-  color: #f5e6c0;
+    linear-gradient(180deg, rgb(255 255 255 / 6%), transparent 40%, rgb(0 0 0 / 28%)),
+    var(--joy-bg-control);
+  color: var(--joy-text);
   cursor: grab;
   overflow: visible;
   isolation: isolate;
   box-shadow:
-    inset 0 1px 0 rgba(255, 235, 190, 0.28),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
-    inset 1px 0 0 rgba(255, 230, 170, 0.1),
-    inset -1px 0 0 rgba(0, 0, 0, 0.28),
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 4px 10px rgba(0, 0, 0, 0.32);
+    inset 0 1px 0 rgb(255 255 255 / 10%),
+    inset 0 -1px 0 rgb(0 0 0 / 50%),
+    0 1px 2px rgb(0 0 0 / 35%),
+    0 4px 10px rgb(0 0 0 / 32%);
   --clip-rail: var(--joy-accent);
 }
 .timeline-clip--lane-0,
@@ -1602,18 +1808,19 @@ label {
   --clip-rail: var(--joy-accent);
 }
 .timeline-clip--voice {
+  /* Audio sits one surface step apart from video — by value, never by hue. */
   background:
-    linear-gradient(180deg, rgba(255, 230, 170, 0.12), transparent 42%, rgba(0, 0, 0, 0.3)),
-    #241e10;
-  border-color: rgba(255, 210, 120, 0.26);
-  border-top-color: rgba(255, 230, 170, 0.38);
-  border-bottom-color: rgba(0, 0, 0, 0.55);
+    linear-gradient(180deg, rgb(255 255 255 / 5%), transparent 42%, rgb(0 0 0 / 30%)),
+    var(--joy-bg-raised);
+  border-color: var(--joy-border);
+  border-top-color: rgb(255 255 255 / 10%);
+  border-bottom-color: rgb(0 0 0 / 55%);
 }
 .timeline-clip--comp {
   background:
-    linear-gradient(180deg, rgba(255, 230, 170, 0.14), transparent 40%, rgba(0, 0, 0, 0.28)),
-    #2e2612;
-  --clip-rail: var(--joy-accent-soft);
+    linear-gradient(180deg, rgb(255 255 255 / 7%), transparent 40%, rgb(0 0 0 / 28%)),
+    var(--joy-bg-active);
+  --clip-rail: var(--joy-accent);
 }
 .timeline-clip::before {
   content: '';
@@ -1627,23 +1834,21 @@ label {
   pointer-events: none;
 }
 .timeline-clip:hover {
-  border-color: color-mix(in srgb, var(--joy-accent-soft) 70%, rgba(255, 230, 170, 0.35));
-  border-top-color: rgba(255, 235, 190, 0.55);
+  border-color: var(--joy-border-hover);
+  border-top-color: rgb(255 255 255 / 20%);
   background:
-    linear-gradient(180deg, rgba(255, 230, 170, 0.22), transparent 40%, rgba(0, 0, 0, 0.22)),
-    #332b18;
+    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 40%, rgb(0 0 0 / 22%)),
+    var(--joy-bg-active);
   box-shadow:
-    inset 0 1px 0 rgba(255, 235, 190, 0.34),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.48),
-    inset 1px 0 0 rgba(255, 230, 170, 0.12),
-    inset -1px 0 0 rgba(0, 0, 0, 0.26),
-    0 2px 4px rgba(0, 0, 0, 0.38),
-    0 6px 14px rgba(0, 0, 0, 0.34);
+    inset 0 1px 0 rgb(255 255 255 / 14%),
+    inset 0 -1px 0 rgb(0 0 0 / 48%),
+    0 2px 4px rgb(0 0 0 / 38%),
+    0 6px 14px rgb(0 0 0 / 34%);
 }
 .timeline-clip--voice:hover {
   background:
-    linear-gradient(180deg, rgba(255, 230, 170, 0.18), transparent 42%, rgba(0, 0, 0, 0.26)),
-    #2c2414;
+    linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 42%, rgb(0 0 0 / 26%)),
+    var(--joy-bg-active);
 }
 .timeline-clip[aria-pressed='true'] {
   outline: 2px solid var(--joy-accent);
@@ -1651,10 +1856,10 @@ label {
   border-color: var(--joy-accent);
   z-index: 3;
   box-shadow:
-    inset 0 1px 0 rgba(255, 235, 190, 0.36),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.45),
-    0 2px 4px rgba(0, 0, 0, 0.4),
-    0 6px 14px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgb(255 255 255 / 14%),
+    inset 0 -1px 0 rgb(0 0 0 / 45%),
+    0 2px 4px rgb(0 0 0 / 40%),
+    0 6px 14px rgb(0 0 0 / 36%),
     0 0 0 1px color-mix(in srgb, var(--joy-accent) 45%, transparent);
 }
 .timeline-clip-filmstrip {
@@ -1669,7 +1874,7 @@ label {
 .timeline-clip-cell {
   flex: 1 1 0;
   min-width: 0;
-  border-inline-end: 1px solid #8a6a2844;
+  border-inline-end: 1px solid rgb(0 0 0 / 35%);
 }
 .timeline-clip-waveform {
   position: absolute;
@@ -1684,21 +1889,23 @@ label {
   border-radius: inherit;
   overflow: hidden;
 }
+/* A waveform is a whole clip's worth of pixels — far past the accent's size
+   budget (§1a). Bars are neutral; only the peaks earn amber. */
 .timeline-clip-wave-bar {
   flex: 1 1 0;
   min-width: 1px;
   max-width: 4px;
   border-radius: 1px;
-  background: var(--joy-accent);
-  opacity: 0.75;
+  background: var(--joy-text-muted);
+  opacity: 0.55;
 }
 .timeline-clip-wave-bar.is-mid {
-  opacity: 0.55;
-  background: var(--joy-accent-soft);
+  opacity: 0.4;
+  background: var(--joy-text-muted);
 }
 .timeline-clip-wave-bar.is-peak {
-  opacity: 0.95;
-  background: #f0c96a;
+  opacity: 0.9;
+  background: var(--joy-accent);
 }
 .timeline-clip-chrome {
   position: absolute;
@@ -1709,7 +1916,7 @@ label {
   gap: 0.35rem;
   padding: 0 0.45rem 0 0.55rem;
   pointer-events: none;
-  background: linear-gradient(180deg, rgb(26 20 8 / 42%), rgb(26 20 8 / 58%));
+  background: linear-gradient(180deg, rgb(0 0 0 / 30%), rgb(0 0 0 / 48%));
   border-radius: inherit;
   overflow: hidden;
 }
@@ -1723,7 +1930,7 @@ label {
   margin-inline-start: auto;
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
   direction: ltr;
 }
 .timeline-clip-label {
@@ -1740,7 +1947,7 @@ label {
   flex: none;
   padding: 0.05rem 0.28rem;
   border-radius: 0.15rem;
-  background: #1a1408cc;
+  background: color-mix(in srgb, var(--joy-on-accent) 80%, transparent);
   color: var(--joy-accent);
   font-size: 0.65rem;
   font-weight: 600;
@@ -1751,7 +1958,7 @@ label {
   opacity: 0.9;
   cursor: grabbing;
   box-shadow:
-    inset 0 1px 0 rgba(255, 235, 190, 0.3),
+    inset 0 1px 0 rgb(255 255 255 / 12%),
     inset 0 -1px 0 rgba(0, 0, 0, 0.45),
     0 4px 8px rgba(0, 0, 0, 0.42),
     0 12px 22px rgba(0, 0, 0, 0.38);
@@ -1807,7 +2014,7 @@ label {
 .timeline-track-label .track-code {
   font-size: 0.68rem;
   font-weight: 700;
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
   direction: ltr;
 }
 .timeline-track-label .track-name {
@@ -1989,8 +2196,8 @@ label {
   cursor: pointer;
 }
 .timeline-context-preset[aria-checked='true'] {
-  border-color: #e9b949;
-  color: #e9b949;
+  border-color: var(--joy-accent);
+  color: var(--joy-accent);
 }
 .captions-panel {
   display: grid;
@@ -2016,10 +2223,6 @@ label {
   gap: 0.15rem;
   align-items: center;
 }
-.captions-toolbar {
-  justify-content: center;
-  width: 100%;
-}
 .captions-slot-header > strong {
   flex: 1 1 8rem;
   min-width: 0;
@@ -2041,7 +2244,7 @@ label {
   gap: 0.4rem;
 }
 .caption-row.active {
-  outline: 2px solid #e9b949;
+  outline: 2px solid var(--joy-accent);
   border-radius: 0.15rem;
 }
 .caption-row input[type='number'] {
@@ -2052,7 +2255,7 @@ label {
   flex: 1;
 }
 .caption-warning {
-  color: #e9b949;
+  color: var(--joy-accent);
   white-space: nowrap;
 }
 .jobs-panel {
@@ -2066,35 +2269,11 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.jobs-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-shrink: 0;
-}
-.jobs-toolbar-copy {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
-.jobs-title {
-  font-size: 0.68rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #8a8a90;
-}
 .jobs-status {
   margin: 0;
   color: #8a8a90;
   font-size: 0.68rem;
   line-height: 1.35;
-}
-.jobs-toolbar-actions {
-  display: inline-flex;
-  gap: 0.2rem;
-  flex-shrink: 0;
 }
 .jobs-pair {
   display: grid;
@@ -2173,15 +2352,6 @@ label {
   opacity: 0.35;
   cursor: not-allowed;
 }
-.jobs-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding-inline-end: 0.1rem;
-}
 .jobs-section {
   display: grid;
   gap: 0.4rem;
@@ -2237,7 +2407,7 @@ label {
   border-left-color: #9d9da1;
 }
 .jobs-list li.job-leased {
-  border-left-color: #e9b949;
+  border-left-color: var(--joy-accent);
 }
 .jobs-list li.job-completed {
   border-left-color: #64c48c;
@@ -2407,7 +2577,7 @@ label {
   margin-bottom: 0.3rem;
 }
 .inspector-row.animated .inspector-label {
-  color: #e9b949;
+  color: var(--joy-accent);
 }
 .inspector-label {
   flex: 1;
@@ -2514,22 +2684,6 @@ label {
   color: var(--joy-bg-app);
 }
 
-.motion-search-input {
-  flex: 1;
-  height: 1.7rem;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--joy-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--joy-bg-input);
-  color: var(--joy-text);
-  font-size: 0.72rem;
-  outline: none;
-  min-width: 0;
-}
-.motion-search-input:focus {
-  border-color: var(--joy-accent);
-}
-
 .motion-filter-btn {
   flex-shrink: 0;
 }
@@ -2597,10 +2751,12 @@ label {
   gap: 0.25rem;
 }
 
+/* Matches the Effects grid — DESIGN.md §3a wants one card size across every
+   browser panel, not a different one per panel. */
 .motion-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 0.4rem;
+  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+  gap: 0.3rem;
 }
 
 .motion-library-empty {
@@ -2635,9 +2791,11 @@ label {
   border-color: var(--joy-border-hover);
 }
 
+/* Square preview well (§3a). Was 9/16, which made each card ~220px tall for a
+   36px logo — four cards filled the panel and the rest needed scrolling. */
 .motion-card-preview {
-  aspect-ratio: 9 / 16;
-  background: var(--joy-bg-inset);
+  aspect-ratio: 1 / 1;
+  background: var(--joy-bg-deep);
   position: relative;
   overflow: hidden;
 }
@@ -3212,33 +3370,14 @@ label {
   border: none;
   cursor: pointer;
 }
-
-.motion-panel-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  flex-shrink: 0;
-}
 .motion-panel-header .panel-section-title {
   grid-column: 2;
   justify-self: center;
   margin: 0;
   min-width: 0;
 }
-.motion-panel-header-btns {
-  grid-column: 3;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 0.1rem;
-}
 .motion-fav-active {
   color: var(--joy-accent);
-}
-.motion-search-toolbar {
-  display: flex;
-  gap: 0.3rem;
-  flex-shrink: 0;
 }
 
 .motion-panel {
@@ -3252,29 +3391,11 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.motion-subtabs {
-  display: flex;
-  gap: 0.15rem;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  margin-bottom: 5px;
-  justify-content: center;
-}
-.motion-subtab {
-  padding: 0.2rem 0.55rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--joy-text-muted);
-  font-size: 0.66rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
 .motion-subtab[aria-selected='true'],
 .motion-subtab.active {
   background: transparent;
   border-color: transparent;
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
   font-weight: 600;
 }
 .motion-subtab-body {
@@ -3328,7 +3449,7 @@ label {
   padding: 0;
 }
 .motion-lane-label.active {
-  color: #e9b949;
+  color: var(--joy-accent);
 }
 .motion-lane-track {
   background: #0a0a0b;
@@ -3433,77 +3554,6 @@ label {
   font-size: 0.72rem;
   line-height: 1.35;
 }
-.asset-library {
-  display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr);
-  min-height: 100%;
-  background: var(--joy-bg-panel);
-}
-.asset-categories {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem 0.5rem;
-  border-right: 0;
-  background: transparent;
-}
-.asset-categories h2 {
-  padding: 0 0.25rem;
-}
-.asset-category-tab {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem;
-  padding: 0.4rem 0.45rem;
-  border: 1px solid transparent;
-  border-radius: 0.25rem;
-  background: transparent;
-  color: #bcbcc0;
-  text-align: left;
-  cursor: pointer;
-}
-.asset-category-tab:hover,
-.asset-category-tab.active {
-  background: #252528;
-  border-color: #3a3a3e;
-  color: #e4e4e6;
-}
-.asset-category-tab.active {
-  box-shadow: inset 2px 0 #d4b06a;
-}
-.asset-category-tab small {
-  color: #8c8c90;
-}
-.asset-library-content {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  gap: 0.65rem;
-  min-width: 0;
-  padding: 0.75rem;
-}
-.asset-library-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 0.45rem;
-}
-.asset-library-toolbar label {
-  margin: 0;
-}
-.asset-search {
-  flex: 1 1 12rem;
-}
-.asset-search input {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid #3a3a3e;
-  border-radius: 0.25rem;
-  background: #0e0e10;
-  color: #e4e4e6;
-}
 .asset-filter {
   min-width: 7.4rem;
   color: #9d9da1;
@@ -3564,9 +3614,6 @@ label {
   color: var(--joy-text-muted);
   font-size: 0.72rem;
   line-height: 1.35;
-}
-.asset-library-status {
-  text-align: center;
 }
 .asset-preview {
   display: grid;
@@ -3671,7 +3718,7 @@ label {
   width: 0.9rem;
   height: 0.9rem;
   margin: 0;
-  accent-color: var(--joy-accent, #e9b949);
+  accent-color: var(--joy-accent, var(--joy-accent));
 }
 .asset-grid--list .asset-card {
   display: grid;
@@ -3683,7 +3730,7 @@ label {
   overflow: visible;
 }
 .asset-grid--list .asset-card.is-selected {
-  border-color: color-mix(in srgb, var(--joy-accent, #e9b949) 55%, #2e2e32);
+  border-color: color-mix(in srgb, var(--joy-accent, var(--joy-accent)) 55%, #2e2e32);
 }
 .asset-grid--list .asset-card-media-wrap {
   width: 2.5rem;
@@ -3749,7 +3796,7 @@ label {
 }
 .asset-tags {
   margin: 0;
-  color: var(--joy-accent-soft, #c8b06a);
+  color: var(--joy-accent);
   font-size: 0.68rem;
   line-height: 1.3;
   overflow: hidden;
@@ -4146,36 +4193,30 @@ label {
   font-size: 0.78rem;
   font-weight: 560;
 }
-.agent-policy {
+/* The whole panel body is the asset drop target; the shell owns the chrome. */
+.agent-drop-target {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.agent-policy-label {
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--joy-text-muted);
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 100%;
 }
 .agent-policy-seg {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--joy-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--joy-bg-inset);
 }
 .agent-policy-btn {
-  height: var(--control-sm);
+  height: 1.5rem;
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--joy-text-muted);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   cursor: pointer;
 }
 .agent-policy-btn[aria-pressed='true'] {
@@ -4257,7 +4298,7 @@ label {
 }
 .agent-intent-icon {
   display: inline-flex;
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
 }
 .agent-intent-card-danger .agent-intent-icon {
   color: var(--joy-danger);
@@ -4427,23 +4468,6 @@ label {
   padding: 0;
   list-style: none;
 }
-.workflows-header,
-.plugins-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem;
-  min-height: 1.55rem;
-}
-.workflows-header h3,
-.plugins-header h3 {
-  margin: 0;
-  font-size: 0.68rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #8a8a90;
-}
 .workflow-run-modal {
   display: grid;
   gap: 0.35rem;
@@ -4501,8 +4525,8 @@ label {
   --dv-separator-border: #0a0a0a;
   --dv-tab-divider-color: transparent;
   --dv-drag-over-background-color: rgb(233 185 73 / 18%);
-  --dv-drag-over-border-color: #e9b949;
-  --dv-paneview-active-outline-color: #e9b949;
+  --dv-drag-over-border-color: var(--joy-accent);
+  --dv-paneview-active-outline-color: var(--joy-accent);
 }
 #root .workspace .dv-tabs-and-actions-container,
 #root .workspace .dv-void-container {
@@ -4576,7 +4600,7 @@ label {
   color: var(--joy-text-muted);
 }
 #root .workspace .dv-active-tab {
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
 }
 #root .workspace .dv-active-tab .panel-tab,
 #root .workspace .dv-inactive-tab .panel-tab,
@@ -4590,7 +4614,7 @@ label {
   color: var(--joy-text-muted);
 }
 #root .workspace .dv-active-tab .panel-tab {
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
 }
 #root .workspace .dv-tab:hover .panel-tab {
   color: var(--joy-text);
@@ -4848,7 +4872,7 @@ label {
   overflow: hidden;
 }
 .project-library-card:hover {
-  border-color: #e9b949;
+  border-color: var(--joy-accent);
 }
 .project-library-card-thumb {
   display: block;
@@ -4882,7 +4906,6 @@ label {
   opacity: 1;
 }
 
-
 .timeline-marker-rail {
   position: relative;
   height: 0.9rem;
@@ -4895,7 +4918,7 @@ label {
   border: 0;
   padding: 0;
   background: transparent;
-  color: #e9b949;
+  color: var(--joy-accent);
   cursor: pointer;
   font-size: 0.65rem;
   line-height: 1;
@@ -5008,7 +5031,7 @@ label {
   color: var(--joy-accent);
 }
 .transition-card:hover {
-  border-color: var(--joy-accent-soft);
+  border-color: var(--joy-accent);
 }
 .transition-card:hover .transition-card-label {
   color: var(--joy-text);
@@ -5075,7 +5098,7 @@ label {
 }
 .duration-value {
   font-size: 0.7rem;
-  color: #e9b949;
+  color: var(--joy-accent);
   font-variant-numeric: tabular-nums;
 }
 .audio-clip-id {
@@ -5107,12 +5130,6 @@ label {
   flex-wrap: wrap;
   gap: 0.35rem;
 }
-.effects-panel-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  flex-shrink: 0;
-}
 .effects-panel-header .panel-section-title {
   grid-column: 2;
   justify-self: center;
@@ -5122,46 +5139,6 @@ label {
 .effects-panel-header > .icon-button {
   grid-column: 3;
   justify-self: end;
-}
-.effects-toolbar {
-  display: flex;
-  gap: 0.35rem;
-  flex-shrink: 0;
-  margin-bottom: 0.25rem;
-}
-.effects-search {
-  flex: 1;
-  height: 1.7rem;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--joy-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--joy-bg-input);
-  color: var(--joy-text);
-  font-size: 0.72rem;
-}
-.effects-categories {
-  display: flex;
-  gap: 0.15rem;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  margin-bottom: 5px;
-  justify-content: center;
-}
-.effects-category-tab {
-  padding: 0.2rem 0.55rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--joy-text-muted);
-  font-size: 0.66rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.effects-category-tab[aria-selected='true'] {
-  background: transparent;
-  border-color: transparent;
-  color: var(--joy-accent-soft);
-  font-weight: 600;
 }
 .effects-grid {
   display: grid;
@@ -5201,7 +5178,7 @@ label {
   background: var(--joy-bg-inset);
 }
 .effect-card:hover {
-  border-color: var(--joy-accent-soft);
+  border-color: var(--joy-accent);
 }
 .effect-card:active {
   cursor: grabbing;
@@ -5294,13 +5271,6 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
-.inspector-empty {
-  margin: var(--space-5) var(--space-3);
-  color: var(--joy-text-muted);
-  text-align: center;
-  line-height: 1.35;
-  font-size: 0.72rem;
-}
 .inspector-selected-name {
   margin: 0;
   font-size: 0.78rem;
@@ -5346,7 +5316,7 @@ label {
   font-variant-numeric: tabular-nums;
 }
 .inspector-prop.modified label {
-  color: var(--joy-accent-soft);
+  color: var(--joy-accent);
 }
 .inspector-prop-row {
   display: flex;
@@ -5413,83 +5383,12 @@ label {
 }
 
 /* —— Assets cleanup —— */
-.asset-library {
-  display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-  gap: 0;
-  padding: 0;
-  box-sizing: border-box;
-  background: var(--joy-bg-panel);
-}
-.asset-categories {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-1);
-  border-inline-end: 0;
-  background: transparent;
-  overflow: auto;
-}
-.asset-categories h2 {
-  display: none;
-}
 .asset-library-content {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
   min-height: 0;
-  padding: var(--space-3);
-  overflow: auto;
-}
-.asset-library-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  align-items: stretch;
-  position: relative;
-  order: 0;
-  flex: none;
-}
-.asset-toolbar-icons {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.15rem;
-}
-.asset-search-expanded {
-  display: flex;
-  flex: 1 1 12rem;
-  align-items: center;
-  gap: 0.35rem;
-  min-width: 0;
-  height: var(--control-md);
-  padding: 0 0.35rem 0 0.55rem;
-  border: 1px solid var(--joy-border-strong);
-  border-radius: var(--radius-md);
-  background: var(--joy-bg-inset);
-  color: var(--joy-text-muted);
-}
-.asset-search-expanded input {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--joy-text);
-  outline: none;
-  font: inherit;
-}
-.asset-search-expanded .asset-search-close {
-  flex: none;
-  width: var(--control-sm);
-  height: var(--control-sm);
-  min-width: var(--control-sm);
-  min-height: var(--control-sm);
 }
 .asset-filter-drawer {
   display: flex;
@@ -5594,7 +5493,7 @@ label {
   border: 0;
   border-radius: var(--radius-md);
   background: var(--joy-accent);
-  color: #1a1408;
+  color: var(--joy-on-accent);
   font-weight: 650;
   font-size: 0.8rem;
   cursor: pointer;
@@ -5604,37 +5503,11 @@ label {
   flex-wrap: wrap;
   gap: var(--space-1);
 }
-.asset-category-tab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 2.25rem;
-  min-height: 2.5rem;
-  padding: var(--space-1) 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--joy-text-muted);
-  cursor: pointer;
-}
-.asset-category-tab:hover {
-  color: var(--joy-text);
-  background: var(--joy-bg-control);
-}
 .asset-category-tab.active {
   border-color: var(--joy-accent);
   color: var(--joy-accent);
   background: #e9b94914;
   box-shadow: none;
-}
-.asset-category-tab small {
-  font-size: 0.58rem;
-  font-variant-numeric: tabular-nums;
-  color: inherit;
-  opacity: 0.75;
-  line-height: 1;
 }
 .asset-library-empty {
   margin: var(--space-5) auto;

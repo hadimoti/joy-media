@@ -31,6 +31,7 @@
     { "path": "packages/test-fixtures" },
     { "path": "packages/visual-object-renderer" },
     { "path": "packages/transition-shaders" },
+    { "path": "packages/visual-effects" },
     { "path": "tooling/golden-render" },
     { "path": "tooling/benchmark" }
   ]

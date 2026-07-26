@@ -7,6 +7,21 @@
 
 import type { EffectInstanceV1 } from './types.js';
 
+/**
+ * Params are a union (number | string | boolean | tuples), so every numeric
+ * read has to narrow. Previously these were used in arithmetic directly, which
+ * both failed to typecheck and would have emitted `NaN` into a filtergraph had
+ * a non-numeric value ever reached here.
+ */
+function numParam(
+  params: EffectInstanceV1['params'],
+  key: string,
+  fallback: number,
+): number {
+  const raw = params[key];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback;
+}
+
 /** ffmpeg filterchain string for one effect instance, or undefined if unsupported. */
 export function effectToFfmpegFilter(
   effect: EffectInstanceV1,
@@ -17,15 +32,15 @@ export function effectToFfmpegFilter(
 
   switch (effect.effectId) {
     case 'brightness-contrast': {
-      const brightness = effect.params.brightness ?? 0;
-      const contrast = effect.params.contrast ?? 0;
+      const brightness = numParam(effect.params, 'brightness', 0);
+      const contrast = numParam(effect.params, 'contrast', 0);
       const b = (brightness * 255).toFixed(2);
       const c = (contrast + 1).toFixed(2);
       return `[${inputLabel}]eq=brightness=${b}:contrast=${c}[${outputLabel}]`;
     }
 
     case 'sepia': {
-      const amount = effect.params.amount ?? 0.5;
+      const amount = numParam(effect.params, 'amount', 0.5);
       const r = (1 - 0.607 * amount).toFixed(4);
       const g = (1 - 0.314 * amount).toFixed(4);
       const b = (1 - 0.869 * amount).toFixed(4);
@@ -39,13 +54,13 @@ export function effectToFfmpegFilter(
 
     case 'gaussian-blur':
     case 'blur': {
-      const radius = Math.max(1, Math.round(effect.params.amount ?? 4));
+      const radius = Math.max(1, Math.round(numParam(effect.params, 'amount', 4)));
       return `[${inputLabel}]gblur=sigma=${radius.toFixed(1)}[${outputLabel}]`;
     }
 
     case 'hue-saturation': {
-      const hue = (effect.params.hue ?? 0) * 180;
-      const sat = ((effect.params.saturation ?? 0) + 1).toFixed(2);
+      const hue = numParam(effect.params, 'hue', 0) * 180;
+      const sat = (numParam(effect.params, 'saturation', 0) + 1).toFixed(2);
       return `[${inputLabel}]hue=h=${hue.toFixed(1)}:s=${sat}[${outputLabel}]`;
     }
 

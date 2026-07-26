@@ -12,7 +12,14 @@ import { useState } from 'react';
 import type { CompositionV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { parentChain } from '@joy-media/motion-core';
-import { CameraUiIcon } from './icons.js';
+import { CameraUiIcon, PlusIcon } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'rig', label: 'Rig' },
+  { id: 'transform', label: 'Transform' },
+];
 
 interface CameraPanelProps {
   readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
@@ -45,6 +52,7 @@ function nextCameraId(allObjects: Readonly<Record<string, VisualObjectV1>>): str
 
 export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanelProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [tab, setTab] = useState('rig');
   const cameraList = listCameras(allObjects);
   const selected = selectedId !== undefined ? allObjects[selectedId] : undefined;
   const camera = selected?.kind === 'camera' ? selected : undefined;
@@ -133,61 +141,79 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
             !parentChain(candidate.id, allObjects).some((ancestor) => ancestor.id === camera.id),
         );
 
+  // §3c: the Transform tab keeps its fields on screen with no camera selected;
+  // they render disabled rather than collapsing to "create or select a camera".
+  const noCamera = camera === undefined;
+  const transformInactive = tab === 'transform' && noCamera;
+
   return (
-    <article className="camera-panel">
-      <div className="camera-controls">
-        <label className="camera-field">
-          Camera
-          <select
-            value={selectedId ?? ''}
-            onChange={(event) =>
-              setSelectedId(event.target.value === '' ? undefined : event.target.value)
-            }
-          >
-            <option value="">(select a camera)</option>
-            {cameraList.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field-action">
-          <span className="field-action-label" aria-hidden>
-            &nbsp;
-          </span>
-          <div className="field-action-row">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Create camera"
-              data-guide="Create camera"
-              onClick={createCamera}
-            >
-              <CameraUiIcon />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <label className="camera-field">
-        Active camera on {composition.name}
-        <select
-          value={composition.activeCameraId ?? ''}
-          onChange={(event) => setActiveCamera(event.target.value)}
+    <PanelShell
+      title="Camera"
+      iconUrl={panelTabIconUrl('camera')}
+      className="camera-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      inactive={transformInactive}
+      {...(transformInactive ? { note: 'Create or select a camera to edit it.' } : {})}
+      actions={
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Create camera"
+          title="Create camera"
+          data-guide="Create camera"
+          onClick={createCamera}
         >
-          <option value="">(none — no camera, plain 2D)</option>
-          {cameraList.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.id}
-            </option>
-          ))}
-        </select>
-      </label>
+          <PlusIcon />
+        </button>
+      }
+    >
+      {tab === 'rig' && (
+        <>
+          <label className="camera-field">
+            Camera
+            <select
+              value={selectedId ?? ''}
+              onChange={(event) =>
+                setSelectedId(event.target.value === '' ? undefined : event.target.value)
+              }
+            >
+              <option value="">(select a camera)</option>
+              {cameraList.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.id}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      {camera === undefined ? (
-        <p className="camera-empty">Create or select a camera to edit it.</p>
-      ) : (
+          <label className="camera-field">
+            Active camera on {composition.name}
+            <select
+              value={composition.activeCameraId ?? ''}
+              onChange={(event) => setActiveCamera(event.target.value)}
+            >
+              <option value="">(none — no camera, plain 2D)</option>
+              {cameraList.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {cameraList.length === 0 && (
+            <p className="empty-hint">
+              <CameraUiIcon />
+              <br />
+              No cameras yet. Add one to move the composition in 2.5D.
+            </p>
+          )}
+        </>
+      )}
+
+      {tab === 'transform' && (
         <>
           <div className="camera-controls">
             {TRANSFORM_FIELDS.map((field) => (
@@ -195,7 +221,8 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
                 {field.label}
                 <input
                   type="number"
-                  value={camera.transform[field.key] ?? 0}
+                  value={camera?.transform[field.key] ?? 0}
+                  disabled={noCamera}
                   onChange={(event) =>
                     setTransformField(field.key, event.currentTarget.valueAsNumber)
                   }
@@ -208,14 +235,16 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
                 type="number"
                 min={1}
                 max={170}
-                value={camera.camera?.fieldOfViewDeg ?? 54}
+                value={camera?.camera?.fieldOfViewDeg ?? 54}
+                disabled={noCamera}
                 onChange={(event) => setFieldOfView(event.currentTarget.valueAsNumber)}
               />
             </label>
             <label className="camera-field">
               Parent
               <select
-                value={camera.parentId ?? ''}
+                value={camera?.parentId ?? ''}
+                disabled={noCamera}
                 onChange={(event) => setParent(event.target.value)}
               >
                 <option value="">(none)</option>
@@ -236,6 +265,6 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
           </p>
         </>
       )}
-    </article>
+    </PanelShell>
   );
 }

@@ -1,6 +1,9 @@
 /**
  * Inspector — labeled property rows (transform + crop + selected-clip audio).
- * CapCut/Figma-style: name beside value, collapse Transform, empty state when idle.
+ *
+ * DESIGN.md §3c: this panel is always mounted. With nothing selected it binds
+ * its rows to IDLE_OBJECT and renders them disabled, so the user can see every
+ * property the Inspector offers instead of a bare "Select a clip" sentence.
  */
 
 import { useState } from 'react';
@@ -29,6 +32,33 @@ import {
   KeyframeBetweenIcon,
 } from './icons.js';
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'transform', label: 'Transform' },
+  { id: 'effects', label: 'Effects' },
+  { id: 'audio', label: 'Audio' },
+];
+
+/**
+ * Stand-in the rows bind to when nothing is selected (§3c). Values are the
+ * schema defaults, so the disabled panel shows a truthful neutral transform
+ * rather than stale numbers from a previous selection.
+ */
+const IDLE_OBJECT: VisualObjectV1 = {
+  id: '',
+  kind: 'null',
+  transform: {
+    x: 0,
+    y: 0,
+    scaleX: 1,
+    scaleY: 1,
+    rotationDeg: 0,
+    opacity: 1,
+    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+  },
+};
 
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -82,22 +112,20 @@ export function InspectorPanel({
   const [transformOpen, setTransformOpen] = useState(true);
   const [effectsOpen, setEffectsOpen] = useState(true);
   const [audioOpen, setAudioOpen] = useState(true);
+  const [tab, setTab] = useState('transform');
 
-  if (object === undefined && selectedClipId === undefined) {
-    return (
-      <article className="inspector-panel">
-        <p className="inspector-empty">Select a clip to edit its properties.</p>
-      </article>
-    );
-  }
+  // §3c — no early returns. `target` is the real selection or a neutral
+  // stand-in; `idle` drives the disabled state, not the presence of markup.
+  const target = object ?? IDLE_OBJECT;
+  const idle = object === undefined;
 
   const timeUs = Math.max(0, Math.round(playheadUs));
   const title =
     object !== undefined
-      ? object.id
+      ? target.id
       : selectedClipId !== undefined
         ? selectedClipId
-        : 'Selection';
+        : 'Nothing selected';
 
   const clipAudio =
     selectedClipId !== undefined && audioState !== undefined
@@ -119,29 +147,15 @@ export function InspectorPanel({
     }
   };
 
-  if (object === undefined) {
-    return (
-      <article className="inspector-panel">
-        <h2 className="inspector-selected-name">{title}</h2>
-        {clipAudio !== undefined && selectedClipId !== undefined && (
-          <AudioSection
-            open={audioOpen}
-            onToggle={() => setAudioOpen((v) => !v)}
-            clipId={selectedClipId}
-            clip={clipAudio}
-            dispatch={dispatchAudio}
-          />
-        )}
-        <p className="empty-hint">No linked visual overlay for this clip.</p>
-      </article>
-    );
-  }
+  // A clip can be selected without a linked visual overlay; the transform rows
+  // then have nothing to drive, so they read as idle too.
+  const noOverlay = object === undefined && selectedClipId !== undefined;
 
-  const { transform: resolved, diagnostics } = resolveObjectTransformWithExpressions(
-    object.id,
-    allObjects,
-    timeUs,
-  );
+  const { transform: resolved, diagnostics } = idle
+    ? { transform: target.transform, diagnostics: [] as ReturnType<
+        typeof resolveObjectTransformWithExpressions
+      >['diagnostics'] }
+    : resolveObjectTransformWithExpressions(target.id, allObjects, timeUs);
 
   const replaceChannel = (
     property: AnimatablePropertyV1,
@@ -154,8 +168,8 @@ export function InspectorPanel({
           type: 'object.replaceAnimation',
           payload:
             curve === undefined
-              ? { objectId: object.id, property }
-              : { objectId: object.id, property, curve },
+              ? { objectId: target.id, property }
+              : { objectId: target.id, property, curve },
         },
       ],
     });
@@ -175,7 +189,7 @@ export function InspectorPanel({
   };
 
   const toggleKeyframe = (property: AnimatablePropertyV1, value: number) => {
-    const curve = object.animations?.[property];
+    const curve = target.animations?.[property];
     if (curve !== undefined && hasKeyframeAt(curve, timeUs)) {
       replaceChannel(property, removeKeyframe(curve, timeUs));
       return;
@@ -193,8 +207,8 @@ export function InspectorPanel({
             type: 'object.setExpression',
             payload:
               trimmed === ''
-                ? { objectId: object.id, property }
-                : { objectId: object.id, property, source: trimmed },
+                ? { objectId: target.id, property }
+                : { objectId: target.id, property, source: trimmed },
           },
         ],
       });
@@ -205,13 +219,31 @@ export function InspectorPanel({
     }
   };
 
+  const note = idle
+    ? noOverlay
+      ? 'This clip has no linked visual overlay.'
+      : 'Select a clip to edit its properties.'
+    : undefined;
+
   return (
-    <article className="inspector-panel">
-      <h2 className="inspector-selected-name">{title}</h2>
+    <PanelShell
+      title="Inspector"
+      iconUrl={panelTabIconUrl('inspector')}
+      className="inspector-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      inactive={idle}
+      {...(note !== undefined ? { note } : {})}
+    >
+      <h2 className="inspector-selected-name" dir="ltr">
+        {title}
+      </h2>
       <p className="monitor-meta" dir="ltr">
         Playhead {(timeUs / 1_000_000).toFixed(2)}s
       </p>
 
+      {tab === 'transform' && (
       <section className="inspector-section">
         <button
           type="button"
@@ -248,10 +280,10 @@ export function InspectorPanel({
             </div>
             {NUMERIC_PROPERTIES.map((property) => {
               const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
-              const curve = object.animations?.[key];
+              const curve = target.animations?.[key];
               const animated = curve !== undefined;
               const keyed = animated && hasKeyframeAt(curve, timeUs);
-              const expressionSource = object.expressions?.[key];
+              const expressionSource = target.expressions?.[key];
               const hasExpression = expressionSource !== undefined;
               const channelDiagnostic = diagnostics.find((d) => d.property === key);
               const value = hasExpression
@@ -269,7 +301,7 @@ export function InspectorPanel({
                       className={keyed ? 'kf kf-active' : animated ? 'kf kf-on' : 'kf'}
                       aria-label={`${keyed ? 'Remove' : 'Add'} ${property.label} keyframe`}
                       aria-pressed={keyed}
-                      disabled={hasExpression}
+                      disabled={idle || hasExpression}
                       title={keyed ? 'Remove keyframe (playhead)' : 'Add keyframe'}
                       onClick={() => toggleKeyframe(key, value)}
                     >
@@ -282,22 +314,23 @@ export function InspectorPanel({
                       max={property.max}
                       step={key === 'opacity' ? 0.01 : 1}
                       value={round(value)}
-                      disabled={hasExpression}
+                      disabled={idle || hasExpression}
                       onChange={(event) => {
                         const next = event.currentTarget.valueAsNumber;
                         if (!Number.isFinite(next)) return;
                         if (animated) replaceChannel(key, setKeyframe(curve, keyframePayload(next)));
-                        else onSetStatic(object.id, key, next);
+                        else onSetStatic(target.id, key, next);
                       }}
                     />
                     {key === 'opacity' && <span className="monitor-meta">{formatPercent(value)}</span>}
                     <button
                       type="button"
                       className={hasExpression ? 'fx fx-on' : 'fx'}
+                      disabled={idle}
                       aria-label={`${hasExpression ? 'Edit' : 'Add'} ${property.label} expression`}
                       title="Expression"
                       onClick={() => {
-                        setDraftSource(object.expressions?.[key] ?? '');
+                        setDraftSource(target.expressions?.[key] ?? '');
                         setCommitError(undefined);
                         setEditingExpression(editingExpression === key ? undefined : key);
                       }}
@@ -339,15 +372,9 @@ export function InspectorPanel({
           </>
         )}
       </section>
+      )}
 
-      <EffectsSection
-        object={object}
-        open={effectsOpen}
-        onToggle={() => setEffectsOpen((v) => !v)}
-        onDispatch={onDispatch}
-      />
-
-      {object.kind === 'image' && (
+      {tab === 'transform' && target.kind === 'image' && (
         <section className="inspector-section" aria-label="Crop">
           <h3>Crop</h3>
           {(['left', 'top', 'right', 'bottom'] as const).map((edge) => (
@@ -359,7 +386,8 @@ export function InspectorPanel({
                 min={0}
                 max={0.49}
                 step={0.01}
-                value={round(object.transform.crop[edge])}
+                value={round(target.transform.crop[edge])}
+                disabled={idle}
                 onChange={(event) => {
                   const next = event.currentTarget.valueAsNumber;
                   if (!Number.isFinite(next)) return;
@@ -369,9 +397,9 @@ export function InspectorPanel({
                       {
                         type: 'object.setCrop',
                         payload: {
-                          objectId: object.id,
+                          objectId: target.id,
                           crop: {
-                            ...object.transform.crop,
+                            ...target.transform.crop,
                             [edge]: Math.min(0.49, Math.max(0, next)),
                           },
                         },
@@ -385,16 +413,28 @@ export function InspectorPanel({
         </section>
       )}
 
-      {clipAudio !== undefined && selectedClipId !== undefined && (
-        <AudioSection
-          open={audioOpen}
-          onToggle={() => setAudioOpen((v) => !v)}
-          clipId={selectedClipId}
-          clip={clipAudio}
-          dispatch={dispatchAudio}
+      {tab === 'effects' && (
+        <EffectsSection
+          object={target}
+          open={effectsOpen}
+          onToggle={() => setEffectsOpen((v) => !v)}
+          onDispatch={onDispatch}
         />
       )}
-    </article>
+
+      {tab === 'audio' &&
+        (clipAudio !== undefined && selectedClipId !== undefined ? (
+          <AudioSection
+            open={audioOpen}
+            onToggle={() => setAudioOpen((v) => !v)}
+            clipId={selectedClipId}
+            clip={clipAudio}
+            dispatch={dispatchAudio}
+          />
+        ) : (
+          <p className="empty-hint">Select a clip to mix its audio.</p>
+        ))}
+    </PanelShell>
   );
 }
 

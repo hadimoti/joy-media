@@ -4,6 +4,8 @@
  */
 
 import type { HistoryEntry } from './editor-session.js';
+import { PanelShell } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 
 interface HistoryPanelProps {
   readonly entries: readonly HistoryEntry[];
@@ -11,19 +13,22 @@ interface HistoryPanelProps {
 }
 
 export function HistoryPanel({ entries, onJumpTo }: HistoryPanelProps) {
+  const isFresh =
+    entries.length <= 1 && entries[0]?.sequence === 0 && entries[0]?.direction === 'current';
+
   return (
-    <article className="history-panel">
-      <h3>History</h3>
-      {entries.length <= 1 && entries[0]?.sequence === 0 && entries[0]?.direction === 'current' ? (
-        <p className="history-empty">No edits yet — restore points appear here</p>
-      ) : (
-        <ol className="history-list" aria-label="History restore points">
-          {entries.map((entry) => (
-            <HistoryEntryRow key={entry.id} entry={entry} onJumpTo={onJumpTo} />
-          ))}
-        </ol>
-      )}
-    </article>
+    <PanelShell
+      title="History"
+      iconUrl={panelTabIconUrl('history')}
+      className="history-panel"
+      {...(isFresh ? { note: 'No edits yet — restore points appear here.' } : {})}
+    >
+      <ol className="history-list" aria-label="History restore points">
+        {entries.map((entry) => (
+          <HistoryEntryRow key={entry.id} entry={entry} onJumpTo={onJumpTo} />
+        ))}
+      </ol>
+    </PanelShell>
   );
 }
 

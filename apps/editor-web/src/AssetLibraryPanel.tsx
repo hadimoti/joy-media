@@ -28,7 +28,6 @@ import {
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
-  SearchIcon,
   FilterIcon,
   UploadIcon,
   CheckIcon,
@@ -38,6 +37,8 @@ import {
   VideoIcon,
   SpeakerOnIcon,
 } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
 const VIEW_CYCLE: readonly AssetViewMode[] = ['large', 'medium', 'list'];
@@ -112,11 +113,9 @@ export function AssetLibraryPanel({
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [syncEnabled, setSyncEnabled] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
@@ -185,27 +184,17 @@ export function AssetLibraryPanel({
   }, [refresh]);
 
   useEffect(() => {
-    if (!searchOpen) return;
-    searchInputRef.current?.focus();
-  }, [searchOpen]);
-
-  useEffect(() => {
-    if (!filterOpen && !searchOpen && !importOpen) return;
+    if (!filterOpen && !importOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const root = toolbarRef.current;
       if (root === null || root.contains(event.target as Node)) return;
       setFilterOpen(false);
-      if (query.trim().length === 0) setSearchOpen(false);
       if (selectedFile === undefined && assetId.trim().length === 0) setImportOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setFilterOpen(false);
       setImportOpen(false);
-      if (query.trim().length === 0) {
-        setSearchOpen(false);
-        searchInputRef.current?.blur();
-      }
     };
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -213,7 +202,7 @@ export function AssetLibraryPanel({
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [filterOpen, searchOpen, importOpen, query, selectedFile, assetId]);
+  }, [filterOpen, importOpen, selectedFile, assetId]);
 
   const editWithAi = useCallback(
     (asset: BrowserAsset) => {
@@ -518,92 +507,29 @@ export function AssetLibraryPanel({
     visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.has(id));
   const selectedCount = selectedAssetIds.size;
 
+  // Categories are the panel's tabs now (DESIGN.md §3a) — they were a left
+  // icon rail, the only panel in the app with chrome on that edge.
+  const categoryTabs: readonly PanelTabSpec[] = categories.map((entry) => {
+    const count =
+      entry.id === 'all'
+        ? items.length
+        : items.filter(({ asset }) => asset.kind === entry.id).length;
+    return { id: entry.id, label: `${entry.label} ${count}` };
+  });
+
   return (
-    <section className="asset-library" aria-label="Asset library">
-      <nav className="asset-categories" aria-label="Asset categories">
-        {categories.map((entry) => {
-          const count =
-            entry.id === 'all'
-              ? items.length
-              : items.filter(({ asset }) => asset.kind === entry.id).length;
-          const Icon = entry.Icon;
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              className={category === entry.id ? 'asset-category-tab active' : 'asset-category-tab'}
-              aria-pressed={category === entry.id}
-              aria-label={`${entry.label} (${count})`}
-              title={`${entry.label} (${count})`}
-              onClick={() => setCategory(entry.id)}
-            >
-              <Icon />
-              <small>{count}</small>
-            </button>
-          );
-        })}
-      </nav>
-      <div className="asset-library-content">
-        <div className="asset-library-toolbar" ref={toolbarRef}>
-          {importProgress !== undefined && (
-            <div
-              className="asset-upload-progress"
-              role="progressbar"
-              aria-label="Asset upload progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(importProgress * 100)}
-            >
-              <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
-            </div>
-          )}
-          <div className="asset-toolbar-icons" role="toolbar" aria-label="Asset tools">
-            {searchOpen ? (
-              <label className="asset-search asset-search-expanded">
-                <span className="sr-only">Search assets</span>
-                <SearchIcon />
-                <input
-                  ref={searchInputRef}
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onBlur={() => {
-                    if (query.trim().length === 0) setSearchOpen(false);
-                  }}
-                  placeholder="Search assets"
-                  aria-label="Search assets"
-                />
-                <button
-                  type="button"
-                  className="icon-button asset-search-close"
-                  aria-label="Close search"
-                  title="Close search"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    setQuery('');
-                    setSearchOpen(false);
-                  }}
-                >
-                  <CloseIcon />
-                </button>
-              </label>
-            ) : (
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Search assets"
-                title="Search assets"
-                aria-expanded={false}
-                onClick={() => {
-                  setFilterOpen(false);
-                  setImportOpen(false);
-                  setSearchOpen(true);
-                }}
-              >
-                <SearchIcon />
-              </button>
-            )}
-            <button
+    <PanelShell
+      title="Assets"
+      iconUrl={panelTabIconUrl('media')}
+      className="asset-library"
+      tabs={categoryTabs}
+      activeTab={category}
+      onTabChange={(id) => setCategory(id as typeof category)}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search assets…' }}
+      note={status}
+      actions={
+        <>
+          <button
               type="button"
               className="icon-button"
               aria-label="Import media"
@@ -613,7 +539,6 @@ export function AssetLibraryPanel({
               data-active={importOpen ? 'true' : undefined}
               onClick={() => {
                 setFilterOpen(false);
-                setSearchOpen(false);
                 setImportOpen((open) => !open);
               }}
             >
@@ -675,8 +600,23 @@ export function AssetLibraryPanel({
               ) : (
                 <ListIcon />
               )}
-            </button>
-          </div>
+          </button>
+        </>
+      }
+    >
+      <div className="asset-library-content" ref={toolbarRef}>
+          {importProgress !== undefined && (
+            <div
+              className="asset-upload-progress"
+              role="progressbar"
+              aria-label="Asset upload progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(importProgress * 100)}
+            >
+              <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
+            </div>
+          )}
           {importOpen && (
             <div className="asset-import-drawer" role="dialog" aria-label="Import media">
               <div className="asset-filter-drawer-head">
@@ -809,10 +749,6 @@ export function AssetLibraryPanel({
               )}
             </div>
           )}
-        </div>
-        <p className="asset-library-status" aria-live="polite">
-          {status}
-        </p>
         {preview !== undefined && (
           <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
             <div>
@@ -888,10 +824,8 @@ export function AssetLibraryPanel({
         {visible.length === 0 ? (
           <div className="asset-library-empty">
             {status.includes('Could not load') ? (
-              <>
-                <p>Could not load the asset catalog.</p>
-                <p>{status}</p>
-              </>
+              // The status line is the shell's note now — do not print it twice.
+              <p>Could not load the asset catalog.</p>
             ) : (
               <>
                 <p>No assets match the current filters.</p>
@@ -1030,7 +964,7 @@ export function AssetLibraryPanel({
           </>
         )}
       </div>
-    </section>
+    </PanelShell>
   );
 }
 

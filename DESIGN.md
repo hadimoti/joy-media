@@ -4,33 +4,53 @@ Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-
 
 ## 1. Color tokens
 
-Neutral grays only. **No blue anywhere.** Amber is the single accent. Semantic green/red are reserved for status. Gray ramp is intentionally dark (deeper than early editor drafts) so panels read as Adobe-class chrome, not washed mid-gray.
+Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. Gray ramp is intentionally dark (deeper than early editor drafts) so panels read as Adobe-class chrome, not washed mid-gray.
 
-| Token          | Hex       | Use                                                            |
-| -------------- | --------- | -------------------------------------------------------------- |
-| `bg-app`       | `#121212` | Root/page background                                            |
-| `bg-panel`     | `#141416` | Panel/article surfaces, dockview group + content background     |
-| `bg-chrome`    | `#1c1c1e` | Header, tab strips                                              |
-| `bg-raised`    | `#1f1f21` | Cards, list rows (history entries, workflow rows, asset cards)  |
-| `bg-inset`     | `#161618` | Sunken sections (register form, category rail)                  |
-| `bg-control`   | `#252528` | Buttons, lanes, interactive fills                               |
-| `bg-hover`     | `#323236` | Hovered controls                                                |
-| `bg-input`     | `#0e0e10` | Text inputs, selects                                            |
-| `bg-deep`      | `#0a0a0b` | Canvases, code/expression fields, preview wells                 |
-| `border`       | `#2e2e32` | Default borders/dividers                                        |
-| `border-strong`| `#3a3a3e` | Control borders                                                 |
-| `border-hover` | `#55555c` | Hovered control borders, clip borders                           |
-| `gap`          | `#0a0a0a` | Dockview separators, workspace gaps                             |
-| `text`         | `#e4e4e6` | Primary text                                                    |
-| `text-soft`    | `#dcdcde` | Icon/button glyphs                                              |
-| `text-muted`   | `#9d9da1` | Secondary text, inactive tabs                                   |
-| `text-faint`   | `#8c8c90` | Hints, timestamps, metadata                                     |
-| `accent`       | `#e9b949` | Selection outlines, playhead, active keyframe, warnings, drag-over |
-| `accent-soft`  | `#d4b06a` | Secondary accent (expression/fx active states)                  |
-| `ok`           | `#64c48c` | Success/connected status only                                   |
-| `danger`       | `#d37a7a` / `#ff8080` | Failure/revoked status and error text only          |
+**The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
 
-Timeline clips: `#4b4b50` fill, `#58585e` hover, `border-hover` border, `accent` outline when selected.
+| Token                   | Hex       | Use                                                              |
+| ----------------------- | --------- | ---------------------------------------------------------------- |
+| `--joy-bg-app`          | `#0d0e10` | Root/page background                                              |
+| `--joy-bg-panel`        | `#111216` | Panel/article surfaces, dockview group + content background       |
+| `--joy-bg-chrome`       | `#16171b` | Header, menubar, tab strips                                       |
+| `--joy-bg-elevated`     | `#17181d` | Dropdowns, popovers, context menus                                |
+| `--joy-bg-raised`       | `#222226` | Cards, list rows (history entries, workflow rows, asset cards)    |
+| `--joy-bg-inset`        | `#101012` | Sunken sections (register form, category rail)                    |
+| `--joy-bg-control`      | `#2a2a2e` | Buttons, lanes, interactive fills                                 |
+| `--joy-bg-hover`        | `#1d1f25` | Hovered controls                                                  |
+| `--joy-bg-active`       | `#24262d` | Pressed / selected control fill                                   |
+| `--joy-bg-input`        | `#0e0e10` | Text inputs, selects                                              |
+| `--joy-bg-deep`         | `#080809` | Canvases, code/expression fields, preview wells                   |
+| `--joy-border-subtle`   | `rgb(255 255 255 / 7%)` | Hairlines inside a surface                          |
+| `--joy-border`          | `#2a2a2e` | Default borders/dividers                                          |
+| `--joy-border-strong`   | `#3c3c42` | Control borders                                                   |
+| `--joy-border-hover`    | `#5a5a62` | Hovered control borders, clip borders                             |
+| `--joy-gap`             | `#080809` | Dockview separators, workspace gaps                               |
+| `--joy-text`            | `#ececef` | Primary text                                                      |
+| `--joy-text-secondary`  | `rgb(255 255 255 / 64%)` | Supporting text inside a row                       |
+| `--joy-text-muted`      | `#a8a8b0` | Secondary text, inactive tabs                                     |
+| `--joy-text-faint`      | `#7e7e86` | Hints, timestamps, metadata                                       |
+| `--joy-text-disabled`   | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)           |
+| `--joy-accent`          | `#f4b72f` | **The** accent — see the scarcity list below                      |
+| `--joy-accent-hover`    | `#ffc94f` | Accent under hover only                                           |
+| `--joy-accent-dim`      | `rgb(244 183 47 / 22%)` | Accent washes: drag-over fill, active-tab underline |
+| `--joy-ok`              | `#6fcf97` | Success/connected status only                                     |
+| `--joy-danger`          | `#ef6a6a` | Failure/revoked status and error text only                        |
+
+**Retired.** `--joy-accent-soft` (`#d4b06a`) and the hardcoded `#e9b949` are removed. Three yellows within one surface is why the editor reads mustard rather than Adobe-amber. Anything that used `accent-soft` for a "secondary active" state now uses `--joy-text` (active but not special) or `--joy-accent` (genuinely the current thing).
+
+### 1a. Accent scarcity (binding)
+
+Amber is the rarest ink in the app. It is permitted **only** on:
+
+1. the selection outline of the selected clip / keyframe / card,
+2. the playhead,
+3. the label of the active tab (text color, plus a 2px underline in `--joy-accent-dim`),
+4. the primary **Export** button,
+5. an engaged toggle (favorites-on, solo, record),
+6. drag-over drop targets, and warning/`in-progress` status dots.
+
+It is forbidden on: resting clip fills, resting borders, card frames, panel headers, section rules, scrollbars, icon glyphs at rest, and any surface larger than roughly a 40px square. **Timeline clips are neutral** — `--joy-bg-control` fill, `--joy-border-hover` border, warm tint only via the 3px left rail and only on the outline when selected. A timeline where every clip is amber has no way left to show which clip is selected.
 
 ## 2. Buttons & iconography
 
@@ -49,22 +69,110 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 - Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label + tab icon in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) — a panel that isn't registered does not exist.
 - **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` (and in App's `labels` / panel `title` for overflow menus). Never put the panel name as visible tab text. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
 - Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly — tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes.
-- Panel root: `<article className="<name>-panel">`, `display: grid; gap: 0.4–0.5rem; align-content: start`. Section headings are centered `<h3>` (0.8rem, `text-muted`).
+- Panel root: `<article className="joy-panel-root <name>-panel">` built from the shell in §3a. The `<name>-panel` class carries only what is genuinely unique to that panel — never its header, tabs or scroll behaviour.
 - Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
 - **History panel** is Photoshop-style: one linear list of restore points (Document → edits). Click a row to jump; future states after the cursor are dimmed. Undo/redo buttons live in the header/menubar only — not inside the History panel.
 
-## 3a. Panel header minimalism convention
+## 3a. The panel shell contract (binding — every panel, no exceptions)
 
-Every browser/library panel (Effects, Transitions, Motion Library, Audio, Plugins) follows the same compact header pattern. The goal: the content grid owns the space; chrome stays minimal until the user asks for it.
+Owner direction, 2026-07-26: **every** panel is built from one shell, so that moving between Effects, Motion, Inspector and Assets feels like moving between tabs of one Adobe application rather than between five apps. This section is a contract, not a suggestion. A panel that does not use these classes is not finished.
 
-| Element | Rule |
+### Vertical order — fixed
+
+```
+┌──────────────────────────────────────────────┐
+│            ⬦ Title            ☆  ⌕  +        │  .joy-panel-header   (fixed)
+├──────────────────────────────────────────────┤
+│  ⌕ search…                                   │  .joy-panel-search   (collapsed by default)
+├──────────────────────────────────────────────┤
+│         Library   Scenes   Motion            │  .joy-panel-tabs     (fixed, centered)
+├──────────────────────────────────────────────┤
+│   ┌────┐ ┌────┐ ┌────┐ ┌────┐                │  .joy-panel-body     (scrolls)
+│   │ ▣  │ │ ▣  │ │ ▣  │ │ ▣  │   ← previews   │
+│   └────┘ └────┘ └────┘ └────┘                │
+└──────────────────────────────────────────────┘
+```
+
+Nothing may be inserted above the header or between the header and the tabs except the collapsed search bar. No panel gets its own toolbar row.
+
+### The five parts
+
+| Class | Rule |
 | --- | --- |
-| **Header** | 3-column CSS Grid: `grid-template-columns: 1fr auto 1fr`. Left column is gutter; center column holds the title; right column holds one or two icon buttons. Never a full toolbar row by default. |
-| **Title** | `<h3>` in grid column 2, `justify-self: center`. Centered text, compact (0.72rem, `--joy-text`). May carry a small 16×16 leading icon. |
-| **Search** | Hidden by default. A single magnifier `icon-button` in grid column 3 (`justify-self: end`) toggles `aria-expanded` and reveals a search bar *below* the header. The bar auto-focuses on expand; Escape closes it and clears the query. Never show an always-visible search box eating panel space. |
-| **Filter** | Same pattern as search: a filter `icon-button` placed inside the search bar (visible only when search is open), or inside the header. `aria-expanded` driven. Filter chips render below the bar when active. |
-| **Create** | A compact `icon-button` or accent-bordered `+` button in the header grid column 3 (before the magnifier). Labeled only when the icon alone is not obvious. |
-| **Implementation** | Copy the `.effects-panel-header` CSS grid pattern and the `searchOpen`/`searchInputRef`/`closeSearch` hook pattern from [EffectsPanel.tsx](apps/editor-web/src/EffectsPanel.tsx). Every new browser panel must use this exact structure — no one-off header layouts.
+| `.joy-panel-root` | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Padding lives here, once. |
+| `.joy-panel-header` | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. Column 1 is an empty gutter and stays empty — it exists so the title is optically centered against the actions. Height is one control (`--control-sm`). |
+| `.joy-panel-title` | `<h3>` in column 2, `justify-self:center`. 0.72rem, `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel. |
+| `.joy-panel-actions` | Column 3, `justify-self:end`, `gap:0.1rem`. Ordered inline-end-ward: **create (+) · favorites (☆) · filter · search (⌕)**. Only `icon-button`s. Two to four buttons; more than four means the panel needs tabs, not more chrome. |
+| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (0.66rem) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders. |
+| `.joy-panel-body` | The only scrolling element: `flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain`. Holds the item grid or the settings stack. |
+
+A panel with a single view still renders `.joy-panel-tabs` — with one tab, or omitted entirely if the panel genuinely has one view (Monitor, Timeline). It never renders a *different* structure.
+
+### Item cards inside `.joy-panel-body`
+
+Small, uniform, preview-first — the Motion library card is the reference. Grid of `repeat(auto-fill, minmax(6rem, 1fr))`; each card is a preview well (`--joy-bg-deep`, 1:1) with a one-line name under it and its per-item actions revealed on hover/focus. Cards carry no amber at rest (§1a).
+
+### Forbidden
+
+- A left-aligned panel title, or a title in the same row as a text toolbar.
+- An always-visible search box. Search is a `⌕` toggle that reveals `.joy-panel-search` beneath the header and auto-focuses; Escape closes and clears.
+- Per-panel header CSS. `.effects-panel-header`, `.motion-panel-header` and friends are **deleted**, not aliased — they were byte-identical duplicates.
+- Text buttons for repeated actions (§2), and emoji as icons anywhere.
+
+## 3c. Panels are always mounted (binding)
+
+Owner direction, 2026-07-26: **a panel must never swap its structure for a sentence.** Today Inspector, Motion → Presets, Motion → Spatial and Audio early-return `Select a clip…` and the user loses the header, the tabs and every control — so the app looks broken rather than idle, and there is nothing to learn from while nothing is selected.
+
+The rule:
+
+1. Header, tabs and body render **at every point in the lifecycle**, selection or not.
+2. When the panel's inputs need a selection it does not have, mark the body `.joy-panel-body is-inactive` and set `aria-disabled="true"` on it. Every control inside takes the real `disabled` attribute — dimming alone is not enough, a disabled-looking control must also be unclickable.
+3. `.is-inactive` renders at `opacity: 0.4` with `pointer-events: none` and text at `--joy-text-disabled`. Previews stay visible at that opacity; they are the affordance that tells the user what the panel will do.
+4. The reason goes in **one** `.joy-panel-note` strip directly under the tabs — one short line ("Select a clip to edit its properties"), `aria-live="polite"`, never a centered paragraph occupying the panel.
+5. Tabs stay live even when the body is inactive. A user must be able to browse Motion → Spatial to see what it offers before committing to a selection.
+
+Panels whose content is genuinely independent of selection (Effects, Transitions, Motion → Library, Assets, History, Jobs, Workflows, Plugins, Diagnostics) never go inactive — their catalog is always browsable, and applying an item is what surfaces the "select a clip first" toast.
+
+## 3d. Compliance matrix
+
+Every panel, and what it owes. `✔` = already conforms.
+
+| Panel | Root | Centered title | Actions (inline end) | Tabs | Inactive state |
+| --- | --- | --- | --- | --- | --- |
+| Effects | ✔ | ✔ | ⌕ | ✔ categories | never |
+| Motion | ✔ | ✔ | + ☆ ⌕ | ✔ Library/Scenes/Presets/Spatial | ✔ on Presets + Spatial |
+| Transitions | ✔ | ✔ | ☆ ⌕ | ✔ Browse/Applied | never |
+| Assets (`media`) | ✔ | ✔ | ⬆ filter ↻ ☁ view ⌕ | ✔ All/Video/Audio/Images | never |
+| Captions | ✔ | ✔ | burn-in ⌕ | ✔ Transcript/Preview | ✔ when no caption track |
+| Inspector | ✔ | ✔ | — | ✔ Transform/Effects/Audio | ✔ |
+| Camera | ✔ | ✔ | + | ✔ Rig/Transform | ✔ |
+| Audio | ✔ | ✔ | — | ✔ Master/Clips | ✔ |
+| Color | ✔ | ✔ | ↻ reset | ✔ Grade/LUT/Scopes | never |
+| History | ✔ | ✔ | — | none | never |
+| Diagnostics | ✔ | ✔ | — | none | never |
+| Jobs | ✔ | ✔ | + thumb ↻ | ✔ Workers/Queue/Pair | never |
+| Agent | ✔ | ✔ | policy segment | ✔ Compose/Activity | never |
+| Workflows | ✔ | ✔ | ↻ | ✔ Saved/System | never |
+| Plugins | ✔ | ✔ | safe-mode lock | none | never |
+| Monitor | **exempt** | — | its own transport bar | — | — |
+| Timeline | **exempt** | — | NLE tool row (§4b) | — | — |
+
+**The two exemptions are deliberate.** Monitor and Timeline are viewports, not
+browsers: they have no item grid, their entire job is pixels and time, and a
+title row would cost preview height that the picture needs. Their dockview tab
+already names them, and both carry purpose-built chrome (transport + zoom,
+tool row + ruler) that the shell would only get in the way of. Every other
+panel uses the shell — these two are the only permitted exceptions, and adding
+a third needs an owner decision recorded here.
+
+## 3e. Order of work
+
+1. `:root` accent ramp — drop `accent-soft`, add `accent-dim`, retire `#e9b949` (§1).
+2. Shell primitives into app.css; delete the duplicated `.effects-panel-header` / `.motion-panel-header` blocks (§3a).
+3. Neutralise timeline clip fills (§1a).
+4. Panels, in the matrix order above, one commit per group.
+5. Sweep the remaining literal hexes in app.css onto tokens (§1).
+6. Browser verification before any claim of done (§6.6).
 
 ## 4. Interaction standards
 
@@ -132,7 +240,8 @@ Icon-only buttons always have `aria-label` + `title`. Toggles always have `aria-
 
 1. Register id in `workspace.ts` (`PANEL_IDS` + `DEFAULT_WORKSPACE`) and `PANEL_LABELS` / `PANEL_TAB_ICONS` in `panel-tab-icons.ts`.
 2. Add a black-on-transparent panel-tab PNG under `public/assets/icons/` and map it in `panel-tab-icons.ts` (§3).
-3. Root `<article className="…-panel">`, tokens from §1 only — no new hex values without adding them to this file.
-4. Common actions as `icon-button`s (§2); new toolbar icons into `icons.tsx`.
+3. Root `<article className="joy-panel-root …-panel">` built from the §3a shell — header, tabs, body, in that order. Tokens from §1 only; a literal hex outside `:root` fails review.
+4. Common actions as `icon-button`s (§2) in `.joy-panel-actions`; new toolbar icons into `icons.tsx`.
 5. Shortcuts through the resolver (§4).
-6. Verify in the browser (light smoke: mount, console clean, icon tab reachable via tooltip label) before claiming done.
+6. If the panel needs a selection, implement the inactive state from §3c — never an early return.
+7. Verify in the browser (light smoke: mount, console clean, icon tab reachable via tooltip label, panel renders its full shell with nothing selected) before claiming done.

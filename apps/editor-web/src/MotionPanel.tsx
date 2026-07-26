@@ -28,7 +28,6 @@ import {
   MotionRegistry,
   registerBuiltinMotions,
   type MotionDescriptor,
-  type MotionCategory,
 } from '@joy-media/motion-core';
 import type { SetSpatialPathCommand } from '@joy-media/motion-core';
 import {
@@ -48,8 +47,6 @@ import {
   InfoIcon,
   PlusIcon,
   SaveIcon,
-  SearchIcon,
-  FilterIcon,
   DuplicateIcon,
   StarIcon,
   StarFilledIcon,
@@ -57,6 +54,9 @@ import {
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
 import { EditorPanelContext } from './App.js';
+import { JOY_COLORS } from './theme.js';
+import { PanelShell } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -105,29 +105,29 @@ function saveFavorites(favorites: Set<string>): void {
 
 /* ─── Categories ─── */
 
-const ALL_CATEGORIES: readonly { readonly id: MotionCategory | 'all'; readonly label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'fade', label: 'Fade' },
-  { id: 'slide', label: 'Slide' },
-  { id: 'scale', label: 'Scale' },
-  { id: 'text', label: 'Text' },
-  { id: 'title', label: 'Title' },
-  { id: 'lower-third', label: 'Lower Third' },
-  { id: 'logo', label: 'Logo' },
-  { id: 'overlay', label: 'Overlay' },
-  { id: 'bounce', label: 'Bounce' },
-  { id: 'blur', label: 'Blur' },
-  { id: 'custom', label: 'Custom' },
-];
-
 /* ─── Subtab model ─── */
 
 type LibrarySubtab = 'library' | 'presets' | 'spatial' | 'html-scenes';
 
+/** Stand-in bound by the Motion/Spatial tabs when nothing is selected (§3c). */
+const IDLE_OBJECT: VisualObjectV1 = {
+  id: '',
+  kind: 'null',
+  transform: {
+    x: 0,
+    y: 0,
+    scaleX: 1,
+    scaleY: 1,
+    rotationDeg: 0,
+    opacity: 1,
+    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+  },
+};
+
 const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string }[] = [
   { id: 'library', label: 'Library' },
   { id: 'html-scenes', label: 'Scenes' },
-  { id: 'presets', label: 'Motion' },
+  { id: 'presets', label: 'Presets' },
   { id: 'spatial', label: 'Spatial' },
 ];
 
@@ -274,6 +274,7 @@ function LibraryTab({
   onOpenMotion,
   onDuplicate,
   favoritesOnly,
+  query,
 }: {
   readonly registry: MotionRegistry;
   readonly favorites: Set<string>;
@@ -281,27 +282,42 @@ function LibraryTab({
   readonly onOpenMotion: (id: string) => void;
   readonly onDuplicate: (id: string) => void;
   readonly favoritesOnly: boolean;
+  readonly query: string;
 }) {
+  // Was `findBySource('built-in')` only, with `findBySource('user')` computed
+  // and then discarded — so motions saved out of Motion Studio never appeared
+  // in their own library. The listing is the whole registry now.
   const allMotions = useMemo(() => registry.getAll(), [registry]);
-  const builtin = useMemo(() => registry.findBySource('built-in'), [registry]);
-  const userMotions = useMemo(() => registry.findBySource('user'), [registry]);
 
-  const filtered = useMemo(() => {
-    let result = favoritesOnly
-      ? allMotions.filter((m) => favorites.has(m.id))
-      : builtin.filter((m) => favorites.has(m.id));
-    return result;
-  }, [allMotions, builtin, favorites, favoritesOnly]);
+  const matching = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q === '') return allMotions;
+    return allMotions.filter(
+      (motion) =>
+        motion.name.toLowerCase().includes(q) || motion.id.toLowerCase().includes(q),
+    );
+  }, [allMotions, query]);
+
+  const filtered = useMemo(
+    () => matching.filter((motion) => favorites.has(motion.id)),
+    [matching, favorites],
+  );
 
   const rest = useMemo(() => {
     if (favoritesOnly) return [];
-    return builtin.filter((m) => !favorites.has(m.id));
-  }, [builtin, favorites, favoritesOnly]);
+    return matching.filter((motion) => !favorites.has(motion.id));
+  }, [matching, favorites, favoritesOnly]);
+
+  const builtinRest = useMemo(
+    () => rest.filter((motion) => motion.source === 'built-in'),
+    [rest],
+  );
+  const userRest = useMemo(() => rest.filter((motion) => motion.source !== 'built-in'), [rest]);
 
   return (
     <div className="motion-library">
       <div className="motion-library-scroll">
-        {(filtered.length === 0 && rest.length === 0 && !favoritesOnly) ? (
+        {(filtered.length === 0 && rest.length === 0) ? (
           <p className="motion-library-empty">No motions available.</p>
         ) : (
           <>
@@ -316,9 +332,9 @@ function LibraryTab({
                 onDuplicate={onDuplicate}
               />
             )}
-            {!favoritesOnly && rest.length > 0 && (
+            {builtinRest.length > 0 && (
               <MotionLibrarySection
-                motions={rest}
+                motions={builtinRest}
                 label="Built-in"
                 emptyMessage=""
                 favorites={favorites}
@@ -327,11 +343,11 @@ function LibraryTab({
                 onDuplicate={onDuplicate}
               />
             )}
-            {!favoritesOnly && userMotions.length > 0 && (
+            {userRest.length > 0 && (
               <MotionLibrarySection
-                motions={userMotions}
+                motions={userRest}
                 label="User-created"
-                emptyMessage="No user motions yet."
+                emptyMessage=""
                 favorites={favorites}
                 onToggleFavorite={onToggleFavorite}
                 onOpenMotion={onOpenMotion}
@@ -792,8 +808,8 @@ function SpatialPathPreview({
   return (
     <section className="motion-spatial">
       <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} role="img" aria-label="XY motion path">
-        <path d={d} fill="none" stroke="#7cc4ff" strokeWidth={1.5} />
-        <circle cx={px(now.x)} cy={py(now.y)} r={4} fill="#e9b949" />
+        <path d={d} fill="none" stroke={JOY_COLORS.textMuted} strokeWidth={1.5} />
+        <circle cx={px(now.x)} cy={py(now.y)} r={4} fill={JOY_COLORS.accent} />
       </svg>
     </section>
   );
@@ -816,16 +832,10 @@ export function MotionPanel({
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
   const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
-
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false);
-  }, []);
+  // Was `searchOpen` plus a ref, driving an input with no value/onChange — the
+  // box rendered and filtered nothing. PanelShell owns the toggle now and this
+  // is the query it feeds.
+  const [query, setQuery] = useState('');
 
   const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio ?? (() => {});
@@ -909,21 +919,25 @@ export function MotionPanel({
   );
   const canSaveSpatial = object !== undefined && object.animations?.x !== undefined && object.animations?.y !== undefined;
 
+  // 3c: Motion and Spatial need a selected visual clip. They keep their
+  // controls on screen and disable them rather than swapping in a sentence.
+  const needsSelection = subtab === 'presets' || subtab === 'spatial';
+  const inactive = needsSelection && object === undefined;
+  const target = object ?? IDLE_OBJECT;
+
   return (
-    <article className="motion-panel">
-      <div className="motion-panel-header">
-        <h3 className="panel-section-title">
-          <img
-            className="panel-section-title-icon"
-            src="/assets/icons/ui/motion_24x24.png"
-            alt=""
-            width={16}
-            height={16}
-            aria-hidden="true"
-          />
-          Motion
-        </h3>
-        <div className="motion-panel-header-btns">
+    <PanelShell
+      title="Motion"
+      iconUrl={panelTabIconUrl('motion')}
+      className="motion-panel"
+      search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}
+      tabs={LIBRARY_SUBTABS}
+      activeTab={subtab}
+      onTabChange={(id) => setSubtab(id as LibrarySubtab)}
+      inactive={inactive}
+      {...(inactive ? { note: 'Select a visual clip to edit its motion.' } : {})}
+      actions={
+        <>
           <button
             type="button"
             className="motion-create-btn"
@@ -935,7 +949,7 @@ export function MotionPanel({
           </button>
           <button
             type="button"
-            className={`icon-button${favoritesOnly ? ' motion-fav-active' : ''}`}
+            className="icon-button"
             aria-label={favoritesOnly ? 'Show all motions' : 'Show favorites only'}
             title={favoritesOnly ? 'Show all motions' : 'Show favorites only'}
             aria-pressed={favoritesOnly}
@@ -943,53 +957,10 @@ export function MotionPanel({
           >
             {favoritesOnly ? <StarFilledIcon /> : <StarIcon />}
           </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={searchOpen ? 'Close search' : 'Search motions'}
-            title={searchOpen ? 'Close search' : 'Search motions'}
-            aria-expanded={searchOpen}
-            aria-controls="motion-search-field"
-            onClick={() => {
-              if (searchOpen) closeSearch();
-              else setSearchOpen(true);
-            }}
-          >
-            <SearchIcon />
-          </button>
-        </div>
-      </div>
-      {searchOpen && (
-        <div className="motion-search-toolbar">
-          <input
-            id="motion-search-field"
-            ref={searchInputRef}
-            type="search"
-            placeholder="Search motions..."
-            className="motion-search-input"
-            aria-label="Search motions"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') closeSearch();
-            }}
-          />
-        </div>
-      )}
-      <div className="motion-subtabs" role="tablist" aria-label="Motion sections">
-        {LIBRARY_SUBTABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={subtab === tab.id}
-            className={`motion-subtab${subtab === tab.id ? ' active' : ''}`}
-            onClick={() => setSubtab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="motion-subtab-body">
+        </>
+      }
+    >
+      <>
         {subtab === 'library' && (
           <LibraryTab
             registry={motionRegistry}
@@ -998,19 +969,19 @@ export function MotionPanel({
             onOpenMotion={openMotion}
             onDuplicate={duplicateMotion}
             favoritesOnly={favoritesOnly}
+            query={query}
           />
         )}
 
         {subtab === 'presets' && (
-          object === undefined ? (
-            <p className="empty-hint">Select a visual clip to edit its motion.</p>
-          ) : (
             <>
-              <p className="motion-object-id" title={object.id}>{object.id}</p>
+              <p className="motion-object-id" title={target.id}>
+                {inactive ? '(no clip selected)' : target.id}
+              </p>
               <div className="motion-controls">
                 <label className="motion-field">
                   Parent
-                  <select value={object.parentId ?? ''} onChange={(event) => setParent(event.target.value)}>
+                  <select value={target.parentId ?? ''} disabled={inactive} onChange={(event) => setParent(event.target.value)}>
                     <option value="">(none)</option>
                     {parentCandidates.map((candidate) => (
                       <option key={candidate.id} value={candidate.id}>
@@ -1021,7 +992,7 @@ export function MotionPanel({
                 </label>
                 <label className="motion-field">
                   Preset
-                  <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+                  <select value={presetId} disabled={inactive} onChange={(event) => setPresetId(event.target.value)}>
                     {JOY_MOTION_PRESETS.map((preset) => (
                       <option key={preset.id} value={preset.id}>{preset.name}</option>
                     ))}
@@ -1041,7 +1012,7 @@ export function MotionPanel({
               ) : (
                 <div className="motion-lanes">
                   {channels.map((channel) => {
-                    const curve = object.animations![channel]!;
+                    const curve = target.animations![channel]!;
                     return (
                       <div key={channel} className="motion-lane">
                         <button
@@ -1058,15 +1029,15 @@ export function MotionPanel({
                           role="img"
                           aria-label={`${channel} keyframes`}
                         >
-                          <line x1={0} y1={8} x2={LANE_WIDTH} y2={8} stroke="#303a56" strokeWidth={1} />
-                          <line x1={timeToX(playheadUs)} y1={0} x2={timeToX(playheadUs)} y2={16} stroke="#e9b949" strokeWidth={1} />
+                          <line x1={0} y1={8} x2={LANE_WIDTH} y2={8} stroke={JOY_COLORS.border} strokeWidth={1} />
+                          <line x1={timeToX(playheadUs)} y1={0} x2={timeToX(playheadUs)} y2={16} stroke={JOY_COLORS.accent} strokeWidth={1} />
                           {curve.keyframes.map((kf) => (
                             <rect
                               key={kf.timeUs}
                               x={timeToX(kf.timeUs) - 4} y={4}
                               width={8} height={8}
                               transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
-                              fill="#7cc4ff"
+                              fill={JOY_COLORS.textMuted}
                               style={{ cursor: 'pointer' }}
                               onClick={() => onSeek(kf.timeUs)}
                             >
@@ -1080,25 +1051,20 @@ export function MotionPanel({
                 </div>
               )}
               {activeGraph !== undefined && (
-                <GraphEditor object={object} channel={activeGraph} duration={duration} playheadUs={playheadUs} onSeek={onSeek} onDispatch={onDispatch} />
+                <GraphEditor object={target} channel={activeGraph} duration={duration} playheadUs={playheadUs} onSeek={onSeek} onDispatch={onDispatch} />
               )}
             </>
-          )
         )}
 
         {subtab === 'spatial' && (
-          object === undefined ? (
-            <p className="empty-hint">Select a visual clip to preview its spatial path.</p>
-          ) : (
-            <>
-              <div className="motion-spatial-actions">
-                <button type="button" className="icon-button" data-guide="Save spatial path" aria-label="Save spatial path" title="Save spatial path" disabled={!canSaveSpatial} onClick={saveSpatialPath}>
-                  <SaveIcon />
-                </button>
-              </div>
-              <SpatialPathPreview object={object} duration={duration} playheadUs={playheadUs} />
-            </>
-          )
+          <>
+            <div className="motion-spatial-actions">
+              <button type="button" className="icon-button" data-guide="Save spatial path" aria-label="Save spatial path" title="Save spatial path" disabled={inactive || !canSaveSpatial} onClick={saveSpatialPath}>
+                <SaveIcon />
+              </button>
+            </div>
+            <SpatialPathPreview object={target} duration={duration} playheadUs={playheadUs} />
+          </>
         )}
 
         {subtab === 'html-scenes' && (
@@ -1109,7 +1075,7 @@ export function MotionPanel({
             onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
           />
         )}
-      </div>
-    </article>
+      </>
+    </PanelShell>
   );
 }

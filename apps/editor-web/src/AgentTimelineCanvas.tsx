@@ -1,16 +1,20 @@
 import { useEffect, useRef } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type { AgentPendingChange } from './agent-plan-visualizer.js';
+import { JOY_COLORS } from './theme.js';
 
+// Was a navy/cyan palette of its own — the last blue surface in the editor
+// (DESIGN.md §1: no blue anywhere). Now the neutral ramp, with add/remove
+// keeping the semantic green/red they are entitled to.
 const COLORS = {
-  background: '#05070f',
-  trackLane: '#273452',
-  clipDefault: '#7cc4ff',
-  clipAdd: '#64c48c',
-  clipRemove: '#d37a7a',
-  clipMove: '#7cc4ff',
-  playhead: '#e9b949',
-  border: '#303a56',
+  background: JOY_COLORS.bgDeep,
+  trackLane: JOY_COLORS.bgControl,
+  clipDefault: JOY_COLORS.borderHover,
+  clipAdd: JOY_COLORS.ok,
+  clipRemove: JOY_COLORS.danger,
+  clipMove: JOY_COLORS.borderHover,
+  playhead: JOY_COLORS.accent,
+  border: JOY_COLORS.border,
 };
 
 const TRACK_HEIGHT = 40;

@@ -24,6 +24,13 @@ import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'compose', label: 'Compose' },
+  { id: 'activity', label: 'Activity' },
+];
 import {
   CheckIcon,
   CloseIcon,
@@ -117,6 +124,7 @@ export function AgentPanel({
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [, forceRender] = useState(0);
+  const [tab, setTab] = useState('compose');
 
   const approvalEngine = useMemo(
     () =>
@@ -229,8 +237,38 @@ export function AgentPanel({
   }, [pending, project]);
 
   return (
-    <article
+    <PanelShell
+      title="Agent"
+      iconUrl={panelTabIconUrl('agent')}
       className="agent-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      actions={
+        <div className="agent-policy-seg" role="group" aria-label="Approval policy">
+          <button
+            type="button"
+            className="agent-policy-btn"
+            aria-pressed={policyName === 'default'}
+            title="Default — blocks destructive edits"
+            onClick={() => setPolicyName('default')}
+          >
+            Default
+          </button>
+          <button
+            type="button"
+            className="agent-policy-btn"
+            aria-pressed={policyName === 'permissive'}
+            title="Permissive — asks before destructive edits"
+            onClick={() => setPolicyName('permissive')}
+          >
+            Permissive
+          </button>
+        </div>
+      }
+    >
+    <div
+      className="agent-drop-target"
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
         event.preventDefault();
@@ -258,30 +296,8 @@ export function AgentPanel({
         }
       }}
     >
-      <div className="agent-policy" role="group" aria-label="Approval policy">
-        <span className="agent-policy-label">Approval</span>
-        <div className="agent-policy-seg">
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={policyName === 'default'}
-            title="Default — blocks destructive edits"
-            onClick={() => setPolicyName('default')}
-          >
-            Default
-          </button>
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={policyName === 'permissive'}
-            title="Permissive — asks before destructive edits"
-            onClick={() => setPolicyName('permissive')}
-          >
-            Permissive
-          </button>
-        </div>
-      </div>
-
+      {tab === 'compose' && (
+      <>
       <section className="agent-attachments" aria-label="Hermes media attachments">
         <h3>Attached for AI</h3>
         {attachedAssets.length === 0 ? (
@@ -462,9 +478,11 @@ export function AgentPanel({
           {lastRun.reverted && <p className="agent-pending-reason">Reverted.</p>}
         </section>
       )}
+      </>
+      )}
 
+      {tab === 'activity' && (
       <section className="agent-activity">
-        <h3>Activity</h3>
         {entries.length === 0 ? (
           <p className="agent-activity-empty">No agent activity yet</p>
         ) : (
@@ -483,6 +501,8 @@ export function AgentPanel({
           </ul>
         )}
       </section>
-    </article>
+      )}
+    </div>
+    </PanelShell>
   );
 }

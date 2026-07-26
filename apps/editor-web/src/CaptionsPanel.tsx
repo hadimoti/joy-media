@@ -35,6 +35,13 @@ import {
   UndoIcon,
   UploadIcon,
 } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'transcript', label: 'Transcript' },
+  { id: 'preview', label: 'Preview' },
+];
 import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 
 const TEMPLATE_ICONS: Readonly<
@@ -70,56 +77,59 @@ export function CaptionsPanel({
   readonly onProjectChange: (next: JoyProjectV1) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [tab, setTab] = useState('transcript');
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('captions root composition is unavailable');
   const slots = captionSlots(composition, project.captionDocuments);
   const burnIn = readCaptionBurnIn(project);
-  if (slots.length === 0) {
-    return (
-      <article className="captions-panel">
-        <p>No caption tracks yet. Add a caption track to start a transcript.</p>
-      </article>
-    );
-  }
+  // §3c: no caption tracks is an idle body, not a different panel.
+  const idle = slots.length === 0;
+
   return (
-    <article className="captions-panel">
-      <div className="captions-toolbar">
+    <PanelShell
+      title="Captions"
+      iconUrl={panelTabIconUrl('captions')}
+      className="captions-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search transcript…' }}
+      inactive={idle}
+      {...(idle
+        ? { note: 'Add a caption track to start a transcript.' }
+        : transcriptionError !== undefined
+          ? { note: `${transcriptionError} You can continue editing captions manually.` }
+          : {})}
+      actions={
         <button
           type="button"
           className="icon-button"
           aria-pressed={burnIn}
           aria-label={burnIn ? 'Disable caption burn-in' : 'Enable caption burn-in'}
+          title={burnIn ? 'Burn-in on' : 'Burn-in off'}
           data-guide={burnIn ? 'Burn-in on' : 'Burn-in off'}
+          disabled={idle}
           onClick={() => onProjectChange(withCaptionBurnIn(project, !burnIn))}
         >
           <BurnInIcon />
         </button>
-      </div>
-      <CaptionPreview project={project} playheadUs={playheadUs} />
-      {transcriptionError !== undefined && (
-        <p className="caption-warning" role="status">
-          {transcriptionError} You can continue editing captions manually.
-        </p>
-      )}
-      <input
-        aria-label="Search transcript"
-        type="search"
-        placeholder="Search transcript"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
-      {slots.map((slot) => (
-        <CaptionSlotEditor
-          key={`${slot.trackId}:${slot.clip.id}`}
-          slot={slot}
-          query={query}
-          playheadUs={playheadUs}
-          onSeek={onSeek}
-          onDispatch={onDispatch}
-          onTranscribe={onTranscribe}
-        />
-      ))}
-    </article>
+      }
+    >
+      {tab === 'preview' && <CaptionPreview project={project} playheadUs={playheadUs} />}
+
+      {tab === 'transcript' &&
+        slots.map((slot) => (
+          <CaptionSlotEditor
+            key={`${slot.trackId}:${slot.clip.id}`}
+            slot={slot}
+            query={query}
+            playheadUs={playheadUs}
+            onSeek={onSeek}
+            onDispatch={onDispatch}
+            onTranscribe={onTranscribe}
+          />
+        ))}
+    </PanelShell>
   );
 }
 

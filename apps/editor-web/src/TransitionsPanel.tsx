@@ -3,7 +3,14 @@ import type { JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
 import { listTransitionShaders } from '@joy-media/transition-shaders';
 import type { TransitionDragPayload } from '@joy-media/visual-effects';
 import { TransitionPreviewCard } from './TransitionPreviewCard.js';
-import { TrashIcon } from './icons.js';
+import { TrashIcon, StarFilledIcon } from './icons.js';
+import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
+
+const TABS: readonly PanelTabSpec[] = [
+  { id: 'browse', label: 'Browse' },
+  { id: 'applied', label: 'Applied' },
+];
 
 const SHADER_CATALOG = listTransitionShaders();
 
@@ -90,23 +97,6 @@ function TransitionCard({
   );
 }
 
-function FavStar({ filled }: { readonly filled: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      focusable="false"
-      width="11"
-      height="11"
-      viewBox="0 0 16 16"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth="1.5"
-      style={{ opacity: filled ? 1 : 0.45 }}
-    >
-      <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
-    </svg>
-  );
-}
 
 export function TransitionsPanel({
   project,
@@ -119,8 +109,11 @@ export function TransitionsPanel({
   const rootComp = project.compositions[project.rootCompositionId];
   const transitions = project.transitions ?? [];
   const [pendingType, setPendingType] = useState('dissolve');
-  const [selectedTransition, setSelectedTransition] = useState<string | null>(null);
+  const [selectedTransition] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState('browse');
+  const [query, setQuery] = useState('');
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites((prev) => {
@@ -237,20 +230,43 @@ export function TransitionsPanel({
     ? SHADER_CATALOG.filter((e) => favorites.has(e.id))
     : [];
 
-  return (
-    <article className="joy-panel-root transitions-panel">
-      <h3 className="panel-section-title">Transitions</h3>
-      <div className="joy-panel-scroll">
-        {selectedJunction && (
-          <div className="junction-info">
-            <span className="junction-label">
-              {selectedJunction.trackName}: {selectedJunction.leftClipId} →{' '}
-              {selectedJunction.rightClipId}
-            </span>
-          </div>
-        )}
+  const q = query.trim().toLowerCase();
+  const catalog = SHADER_CATALOG.filter(
+    (entry) =>
+      (!favoritesOnly || favorites.has(entry.id)) &&
+      (q === '' || entry.label.toLowerCase().includes(q) || entry.id.toLowerCase().includes(q)),
+  );
 
-        {hasFavorites && (
+  return (
+    <PanelShell
+      title="Transitions"
+      iconUrl={panelTabIconUrl('transitions')}
+      className="transitions-panel"
+      tabs={TABS}
+      activeTab={tab}
+      onTabChange={setTab}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search transitions…' }}
+      {...(selectedJunction
+        ? {
+            note: `${selectedJunction.trackName}: ${selectedJunction.leftClipId} → ${selectedJunction.rightClipId}`,
+          }
+        : {})}
+      actions={
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
+          title={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
+          aria-pressed={favoritesOnly}
+          onClick={() => setFavoritesOnly((v) => !v)}
+        >
+          <StarFilledIcon />
+        </button>
+      }
+    >
+      {tab === 'browse' && (
+        <>
+        {hasFavorites && !favoritesOnly && (
           <div className="transitions-subsection">
             <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
               Favorites
@@ -273,10 +289,10 @@ export function TransitionsPanel({
 
         <div className="transitions-subsection">
           <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-            {hasFavorites ? 'All' : 'All Transitions'}
+            {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
           </h4>
           <div className="transition-type-picker" role="group" aria-label="Transition type">
-            {SHADER_CATALOG.map((entry) => (
+            {catalog.map((entry) => (
               <TransitionCard
                 key={entry.id}
                 entry={entry}
@@ -315,12 +331,14 @@ export function TransitionsPanel({
             </button>
           </label>
         </div>
+        </>
+      )}
 
-        {relevantTransitions.length > 0 && (
+        {tab === 'applied' && (
           <section className="transitions-subsection" aria-label="Existing transitions">
-            <h3 className="panel-section-title">
-              Applied ({relevantTransitions.length})
-            </h3>
+            {relevantTransitions.length === 0 && (
+              <p className="empty-hint">No transitions applied yet.</p>
+            )}
             <ul className="transition-list" role="list">
               {relevantTransitions.map((t) => {
                 const entry = SHADER_CATALOG.find((item) => item.id === t.type);
@@ -399,7 +417,6 @@ export function TransitionsPanel({
             </ul>
           </section>
         )}
-      </div>
-    </article>
+    </PanelShell>
   );
 }

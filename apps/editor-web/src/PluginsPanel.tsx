@@ -3,6 +3,8 @@ import {
   DEMO_PANEL_PLUGIN_ID,
   type EditorPluginHost,
 } from './plugin-host.js';
+import { PanelShell } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 
 export function PluginsPanel({
   pluginHost,
@@ -17,10 +19,18 @@ export function PluginsPanel({
   const projectData = pluginHost.getProjectData(DEMO_PANEL_PLUGIN_ID);
 
   return (
-    <article className="plugins-panel">
-      <div className="plugins-header">
-        <h3>Plugins</h3>
+    <PanelShell
+      title="Plugins"
+      iconUrl={panelTabIconUrl('plugins')}
+      className="plugins-panel"
+      note={
+        safeMode
+          ? 'Safe mode is on — UI entrypoints stay disabled.'
+          : 'Safe mode is off. Enable a plugin to mount its contribution.'
+      }
+      actions={
         <button
+          type="button"
           className="icon-button"
           aria-label={safeMode ? 'Disable safe mode' : 'Enable safe mode'}
           title={safeMode ? 'Safe mode on — click to allow enabling plugins' : 'Safe mode off'}
@@ -32,14 +42,8 @@ export function PluginsPanel({
         >
           <LockIcon />
         </button>
-      </div>
-
-      <p className="empty-hint" aria-live="polite">
-        {safeMode
-          ? 'Safe mode is on. Third-party and first-party UI entrypoints stay disabled.'
-          : 'Safe mode is off. Enable a first-party plugin to mount its contribution.'}
-      </p>
-
+      }
+    >
       <ul className="plugin-list">
         {plugins.map((plugin) => {
           const enabled = plugin.state === 'enabled';
@@ -109,6 +113,6 @@ export function PluginsPanel({
           <p className="empty-hint">Enable Demo Panel (with safe mode off) to mount this contribution.</p>
         )}
       </section>
-    </article>
+    </PanelShell>
   );
 }
