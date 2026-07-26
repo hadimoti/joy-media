@@ -121,10 +121,11 @@ const ALL_CATEGORIES: readonly { readonly id: MotionCategory | 'all'; readonly l
 
 /* ─── Subtab model ─── */
 
-type LibrarySubtab = 'library' | 'presets' | 'spatial';
+type LibrarySubtab = 'library' | 'presets' | 'spatial' | 'html-scenes';
 
 const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string }[] = [
   { id: 'library', label: 'Library' },
+  { id: 'html-scenes', label: 'Scenes' },
   { id: 'presets', label: 'Motion' },
   { id: 'spatial', label: 'Spatial' },
 ];
@@ -1115,6 +1116,15 @@ export function MotionPanel({
               <SpatialPathPreview object={object} duration={duration} playheadUs={playheadUs} />
             </>
           )
+        )}
+
+        {subtab === 'html-scenes' && (
+          <HtmlScenesSection
+            allObjects={allObjects}
+            onDispatch={onDispatch}
+            {...(selectedClipId !== undefined ? { selectedClipId } : {})}
+            onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
+          />
         )}
       </div>
     </article>
