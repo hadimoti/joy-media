@@ -3755,21 +3755,34 @@ label {
 }
 #root .workspace .dv-active-tab,
 #root .workspace .dv-inactive-tab {
-  color: var(--joy-text-muted);
   background: transparent !important;
   background-color: transparent !important;
+}
+#root .workspace .dv-inactive-tab {
+  color: var(--joy-text-muted);
+}
+#root .workspace .dv-active-tab {
+  color: var(--joy-accent-soft);
 }
 #root .workspace .dv-active-tab .panel-tab,
 #root .workspace .dv-inactive-tab .panel-tab,
 #root .workspace .dv-tab:hover .panel-tab {
-  color: var(--joy-text-muted);
   background: transparent !important;
   background-color: transparent !important;
   border: 0;
   box-shadow: none;
 }
+#root .workspace .dv-inactive-tab .panel-tab {
+  color: var(--joy-text-muted);
+}
+#root .workspace .dv-active-tab .panel-tab {
+  color: var(--joy-accent-soft);
+}
 #root .workspace .dv-tab:hover .panel-tab {
   color: var(--joy-text);
+}
+#root .workspace .dv-active-tab:hover .panel-tab {
+  color: var(--joy-accent);
 }
 .panel-tab-icon {
   display: block;
