@@ -38,6 +38,21 @@ function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?:
   );
 }
 
+/** Preserve authored multicolor artwork for icons whose internal detail is not an alpha mask. */
+function PngColorIcon({ src, size = 16 }: { readonly src: string; readonly size?: number }) {
+  return (
+    <img
+      className="png-color-icon"
+      src={src}
+      width={size}
+      height={size}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+    />
+  );
+}
+
 export function PlayIcon() {
   return (
     <Svg>
@@ -439,12 +454,11 @@ export function ProjectsIcon() {
 }
 
 export function MarkerIcon() {
-  return (
-    <Svg>
-      <path d="M8 13.5 4 8.5a4 4 0 1 1 8 0Z" />
-      <circle cx="8" cy="6.5" r="1.2" fill="currentColor" stroke="none" />
-    </Svg>
-  );
+  return <PngColorIcon src={UI_ICONS.marker} />;
+}
+
+export function TimelineMarkerIcon() {
+  return <PngMaskIcon src={UI_ICONS.markerTimeline} size={16} />;
 }
 
 export function CopyIcon() {

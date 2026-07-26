@@ -44,6 +44,8 @@ export const UI_ICONS = {
   saturation: iconUrl('ui/saturation_24x24.png'),
   timeline: iconUrl('ui/time-line_24x24.png'),
   timelineAlt: iconUrl('ui/time-line2_24x24.png'),
+  marker: iconUrl('ui/marker_24x24.png'),
+  markerTimeline: iconUrl('ui/marker-timeline_24x24.png'),
 } as const;
 
 export type UiIconId = keyof typeof UI_ICONS;

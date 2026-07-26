@@ -893,6 +893,11 @@ a.icon-button {
   -webkit-mask-position: center;
   vertical-align: middle;
 }
+.png-color-icon {
+  display: block;
+  flex: none;
+  object-fit: contain;
+}
 /* Hover guide: visual tip via data-guide (below control). Prefer aria-label over title. */
 .icon-button[data-guide]:hover:not(:disabled)::after,
 .icon-tool[data-guide]:hover::after {
@@ -5196,14 +5201,17 @@ label {
 .timeline-marker {
   position: absolute;
   top: 0;
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
   transform: translateX(-50%);
   border: 0;
   padding: 0;
   background: transparent;
   color: var(--joy-accent);
   cursor: pointer;
-  font-size: 0.65rem;
-  line-height: 1;
+  line-height: 0;
 }
 .graph-editor-toolbar {
   display: flex;

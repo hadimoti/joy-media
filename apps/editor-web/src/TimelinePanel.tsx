@@ -36,6 +36,7 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   MarkerIcon,
+  TimelineMarkerIcon,
   SelectIcon,
   TrackAddIcon,
 } from './icons.js';
@@ -1083,7 +1084,7 @@ export function TimelinePanel({
                     onRemoveMarker?.(marker.id);
                   }}
                 >
-                  ▼
+                  <TimelineMarkerIcon />
                 </button>
               ))}
             </div>
