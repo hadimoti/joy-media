@@ -30,9 +30,9 @@ import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
-import { panelTabIconUrl } from './panel-tab-icons.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
+import { JoyCodeLogo } from './JoyCodeLogo.js';
 import {
   addJoyCodeMessage,
   createJoyCodeThread,
@@ -46,6 +46,7 @@ import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './
 
 /** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
+const THINKING_REVEAL_MS = 320;
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
@@ -187,9 +188,11 @@ export function AgentPanel({
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
   const handledCommandRef = useRef<number | undefined>(undefined);
+  const thinkingTimerRef = useRef<number | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
+  const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState('composer');
   const [draft, setDraft] = useState('');
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
@@ -212,7 +215,16 @@ export function AgentPanel({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [activeThread?.messages.length, pending, lastRun, tab]);
+  }, [activeThread?.messages.length, pending, lastRun, tab, thinkingThreadId]);
+
+  useEffect(
+    () => () => {
+      if (thinkingTimerRef.current !== undefined) {
+        window.clearTimeout(thinkingTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
@@ -236,6 +248,10 @@ export function AgentPanel({
   }, [command, pending]);
 
   function startNewTask() {
+    if (thinkingTimerRef.current !== undefined) {
+      window.clearTimeout(thinkingTimerRef.current);
+      thinkingTimerRef.current = undefined;
+    }
     const now = new Date().toISOString();
     const thread = createJoyCodeThread(makeJoyCodeId('task'), now);
     setJoyCode((current) => ({
@@ -244,6 +260,7 @@ export function AgentPanel({
     }));
     setPending(undefined);
     setLastRun(undefined);
+    setThinkingThreadId(undefined);
     setDraft('');
     setTab('composer');
   }
@@ -338,7 +355,7 @@ export function AgentPanel({
 
   function submitPrompt(prompt: string) {
     const body = prompt.trim();
-    if (body.length === 0 || activeThread === undefined) return;
+    if (body.length === 0 || activeThread === undefined || thinkingThreadId !== undefined) return;
     const threadId = activeThread.id;
     setDraft('');
     setTab('composer');
@@ -361,7 +378,15 @@ export function AgentPanel({
       );
       return;
     }
-    plan(intent, threadId);
+    setThinkingThreadId(threadId);
+    thinkingTimerRef.current = window.setTimeout(() => {
+      thinkingTimerRef.current = undefined;
+      try {
+        plan(intent, threadId);
+      } finally {
+        setThinkingThreadId((current) => (current === threadId ? undefined : current));
+      }
+    }, THINKING_REVEAL_MS);
   }
 
   function reject() {
@@ -502,11 +527,12 @@ export function AgentPanel({
     if (pending === undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
+  const isThinking = thinkingThreadId === activeThread?.id;
 
   return (
     <PanelShell
       title="Joy Code"
-      iconUrl={panelTabIconUrl('agent')}
+      icon={<JoyCodeLogo variant="mark" />}
       className="joy-code-panel"
       actions={
         <button
@@ -597,9 +623,7 @@ export function AgentPanel({
             <div className="joy-code-messages" aria-live="polite">
               {activeThread?.messages.length === 0 && (
                 <div className="joy-code-welcome">
-                  <span className="joy-code-mark" aria-hidden="true">
-                    JC
-                  </span>
+                  <JoyCodeLogo variant="horizontal" label="Joy Code" />
                   <h3>What should we edit?</h3>
                   <p>
                     Joy Code uses KiloCode to prepare guarded timeline plans. Nothing changes until
@@ -616,7 +640,7 @@ export function AgentPanel({
                 >
                   {message.role === 'assistant' && (
                     <span className="joy-code-avatar" aria-hidden="true">
-                      JC
+                      <JoyCodeLogo variant="mark" />
                     </span>
                   )}
                   <div>
@@ -625,6 +649,22 @@ export function AgentPanel({
                   </div>
                 </article>
               ))}
+
+              {isThinking && (
+                <article
+                  className="joy-code-message is-assistant is-thinking"
+                  aria-label="Joy Code is thinking"
+                  role="status"
+                >
+                  <span className="joy-code-avatar" aria-hidden="true">
+                    <JoyCodeLogo variant="mark" thinking />
+                  </span>
+                  <div>
+                    <strong>Joy Code</strong>
+                    <p>Thinking…</p>
+                  </div>
+                </article>
+              )}
 
               {pending !== undefined && pending.threadId === activeThread?.id && (
                 <section className="joy-code-plan-card" aria-label="Proposed timeline plan">
@@ -764,9 +804,15 @@ export function AgentPanel({
                 <button
                   type="button"
                   className="joy-code-send"
-                  aria-label={pending === undefined ? 'Send message' : 'Stop current plan'}
-                  title={pending === undefined ? 'Send' : 'Stop'}
-                  disabled={pending === undefined && draft.trim().length === 0}
+                  aria-label={
+                    isThinking
+                      ? 'Joy Code is thinking'
+                      : pending === undefined
+                        ? 'Send message'
+                        : 'Stop current plan'
+                  }
+                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
+                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
                   onClick={() => {
                     if (pending !== undefined) reject();
                     else submitPrompt(draft);

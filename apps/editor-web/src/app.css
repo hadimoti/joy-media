@@ -4864,23 +4864,49 @@ label {
   padding: 1.1rem 0.65rem;
   text-align: center;
 }
-.joy-code-mark,
 .joy-code-avatar {
   display: inline-grid;
   place-items: center;
   flex: none;
-  border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
-  background: color-mix(in srgb, var(--joy-accent) 12%, var(--joy-bg-inset));
-  color: var(--joy-accent);
-  font-weight: 800;
-  letter-spacing: -0.04em;
 }
-.joy-code-mark {
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 0.55rem;
-  font-size: 0.72rem;
-  box-shadow: 0 0 24px color-mix(in srgb, var(--joy-accent) 14%, transparent);
+.joy-code-logo {
+  display: block;
+  max-width: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+.joy-code-logo.is-mark {
+  width: 100%;
+  height: 100%;
+}
+.joy-code-logo.is-horizontal {
+  width: min(11rem, 78%);
+  height: auto;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--joy-accent) 10%, transparent));
+}
+.joy-code-panel .joy-panel-title-icon {
+  width: 1.3rem;
+  height: 1rem;
+}
+@keyframes joy-code-thinking-wiggle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  22% {
+    transform: translateY(-1px) rotate(-5deg);
+  }
+  48% {
+    transform: translateY(0) rotate(4deg);
+  }
+  72% {
+    transform: translateY(-1px) rotate(-3deg);
+  }
+}
+.joy-code-logo.is-thinking {
+  transform-origin: 50% 82%;
+  animation: joy-code-thinking-wiggle 420ms ease-in-out infinite;
 }
 .joy-code-welcome h3 {
   margin: 0;
@@ -4910,10 +4936,13 @@ label {
   align-self: stretch;
 }
 .joy-code-avatar {
-  width: 1.45rem;
-  height: 1.45rem;
-  border-radius: 0.35rem;
-  font-size: 0.48rem;
+  width: 1.65rem;
+  height: 1.2rem;
+  margin-top: 0.12rem;
+}
+.joy-code-message.is-thinking p {
+  color: var(--joy-text-faint);
+  font-style: italic;
 }
 .joy-code-message > div {
   min-width: 0;
@@ -5132,6 +5161,11 @@ label {
   .joy-code-compose-footer .joy-code-privacy,
   .joy-code-thread time {
     display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .joy-code-logo.is-thinking {
+    animation: none;
   }
 }
 .asset-library-empty {

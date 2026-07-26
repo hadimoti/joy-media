@@ -1,0 +1,29 @@
+import { readFileSync } from 'node:fs';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import { JoyCodeLogo } from './JoyCodeLogo.js';
+
+describe('JoyCodeLogo', () => {
+  it('uses the compact mark without motion while idle', () => {
+    const markup = renderToStaticMarkup(<JoyCodeLogo variant="mark" />);
+
+    expect(markup).toContain('joy-code-logo is-mark');
+    expect(markup).not.toContain('is-thinking');
+  });
+
+  it('adds the thinking animation hook only when requested', () => {
+    const markup = renderToStaticMarkup(<JoyCodeLogo variant="mark" thinking />);
+
+    expect(markup).toContain('joy-code-logo is-mark is-thinking');
+  });
+
+  it('keeps both optimized UI assets below 64 KB', () => {
+    const mark = readFileSync(new URL('./brand-assets/joy-code-mark.webp', import.meta.url));
+    const horizontal = readFileSync(
+      new URL('./brand-assets/joy-code-horizontal.webp', import.meta.url),
+    );
+
+    expect(mark.byteLength).toBeLessThan(64 * 1024);
+    expect(horizontal.byteLength).toBeLessThan(64 * 1024);
+  });
+});
