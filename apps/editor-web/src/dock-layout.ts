@@ -12,7 +12,7 @@
  *   │ Color    │ Workflows│          │  height)│
  *   │ Plugins  │ Camera   │          │         │
  *   ├──────────┴──────────┴──────────┤         │
- *   │ Timeline                       │         │
+ *   │ Timeline · Dual Lens           │         │
  *   └────────────────────────────────┴─────────┘
  *
  * Monitor is a full-height right column because the default composition is
@@ -115,7 +115,7 @@ export function defaultDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 476,
-                data: { views: ['timeline'], activeView: 'timeline', id: 'timeline-row' },
+                data: { views: ['timeline', 'flow'], activeView: 'timeline', id: 'timeline-row' },
               },
             ],
           },

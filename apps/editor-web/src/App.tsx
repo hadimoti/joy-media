@@ -56,6 +56,7 @@ import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { DualLensPanel } from './DualLensPanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import {
   clearActiveProjectId,
@@ -1879,12 +1880,22 @@ function EditorWorkspace({
         console.warn('default dock layout rejected, falling back to a stack', error);
       }
       for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, { inactive: true });
+        addPanel(panel, {
+          inactive: true,
+          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
+            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
+            : {}),
+        });
       }
       event.api.getPanel('monitor')?.api.setActive();
     } else {
       for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, { inactive: true });
+        addPanel(panel, {
+          inactive: true,
+          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
+            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
+            : {}),
+        });
       }
       const restoreId =
         previouslyActive !== undefined && event.api.getPanel(previouslyActive) !== undefined
@@ -2089,6 +2100,16 @@ function EditorWorkspace({
             });
           }}
           showToast={showToast}
+        />
+      );
+    if (api.id === 'flow')
+      return (
+        <DualLensPanel
+          timeline={context.timelineProject}
+          creative={visualProject}
+          playheadUs={state.playheadUs}
+          historyEntries={context.historyEntries}
+          onSeek={context.seek}
         />
       );
     if (api.id === 'jobs')

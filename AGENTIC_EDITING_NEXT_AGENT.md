@@ -4,7 +4,7 @@ Date: 2026-07-26
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
-Required starting commit: `bc771e4` or newer on the tracked branch
+Required starting commit: `006026e` or newer on the tracked branch
 
 ## Read this first
 
@@ -54,11 +54,11 @@ has confirmed the rebuild or key rotation.
 ## Current production state
 
 - Public editor: `https://media.joyteam.ir`
-- Live commit: `342868fd5c27f216a2a392fc76d63f25ea7ed222`
+- Live commit: `622ac0c` (Milestone B; final all-milestone deploy is pending)
 - Live web symlink:
-  `/opt/joy-media/web -> /opt/joy-media/web-releases/342868f-agent-envelope`
+  `/opt/joy-media/web -> /opt/joy-media/web-releases/622ac0c-agent-policy`
 - Rollback release retained:
-  `/opt/joy-media/web-releases/b735a90-icon-hash`
+  `/opt/joy-media/web-releases/342868f-agent-envelope`
 - VPS working checkout: `/opt/joy-media/repo`
 - Bare Git remote: `/opt/joy-media.git`
 - Local Git remote: `vps`, URL `sweden:/opt/joy-media.git`
@@ -68,9 +68,9 @@ has confirmed the rebuild or key rotation.
 
 Production was verified after deployment:
 
-1. Public HTML loads `assets/index-Dg7cpXSn.js`.
-2. The public JS SHA-256 equals the local build:
-   `bd77b016edf2a69d023395116de8a363b3fdd42012d38a843ba75c9cf61bd86d`.
+1. Public HTML loads the Milestone B content-hashed editor assets.
+2. The public JS SHA-256 was verified against the exact local Milestone B build
+   at deployment.
 3. `joy-media@api` and `nginx` are active.
 4. Chrome showed no console errors.
 5. The live Agent action produced:
@@ -81,12 +81,15 @@ Production was verified after deployment:
    positions.
 
 An already-open browser tab may retain the prior `index.html`. Reload normally,
-or use `https://media.joyteam.ir/?deploy=342868f` once to force a fresh HTML
+or use `https://media.joyteam.ir/?deploy=622ac0c` once to force a fresh HTML
 request. The asset name is content-hashed.
 
 ## What is complete
 
-Commit `342868f` proves the “shorten the intro” vertical slice end-to-end:
+Commits `342868f` through `006026e` complete the agent transaction foundation
+and KiloCode editor surface through Milestone E. The current working tree adds
+Milestone F. The original “shorten the intro” vertical slice remains the live
+end-to-end proof:
 
 ```text
 query
@@ -110,7 +113,15 @@ Implemented:
 - One history/undo entry for a multi-step run.
 - The real ripple-edit recipe, “Shorten the intro by 2s”.
 - Agent Panel integration through the atomic runner.
-- ADR-0019 with the decisions and deliberately deferred gaps.
+- Durable composite project revisions and project-scoped idempotency receipts.
+- Twelve explicit capabilities and all four execution modes.
+- KiloCode as the sole editing-agent host, with protected server secret
+  references and a separate model/provider/local-executor taxonomy.
+- Real asynchronous job lifecycle and durable generation provenance.
+- Agent menu and settings surface, with policy changes applied to execution.
+- Dual Lens Time/Flow/Split projections with Frame-to-Flow Trace and advanced
+  data lanes collapsed by default.
+- ADR-0019 through ADR-0022.
 
 Two live bugs were fixed by this slice:
 
@@ -253,7 +264,7 @@ The live localhost UI was checked in all three relevant states (manual,
 non-executable suggestion, and low-risk auto approval). Production is not
 updated.
 
-### Milestone C — KiloCode/model/provider taxonomy — next
+### Milestone C — KiloCode/model/provider taxonomy — complete
 
 Model these as distinct concepts:
 
@@ -273,7 +284,17 @@ credential is a live server secret: do not read, print, copy, commit, or send
 its raw value. Resolve it only through a protected server-side secret reference
 when deployment of the adapter is explicitly authorized.
 
-### Milestone D — Async jobs and generation provenance
+Implemented in `5127ae7`:
+
+- Added distinct agent-host, reasoning-model, media-provider, and local-executor
+  contracts.
+- Declared one KiloCode host manifest with tools, models, health, cancellation,
+  cost reporting, and settings capabilities.
+- Added a safe `ServerSecretReference`; validation rejects embedded secret
+  fields.
+- Kept Hermes outside the editing host taxonomy.
+
+### Milestone D — Async jobs and generation provenance — complete
 
 Connect `AgentEditPlan` job steps to the existing `job-protocol` and Worker
 path:
@@ -302,7 +323,18 @@ Command execution must be deterministic and replayable. Generation may be
 nondeterministic; provenance is the reproducibility contract. Undo may remove
 the generated asset from the project but cannot refund spent credits.
 
-### Milestone E — Agent menu and settings UI
+Implemented in `5968632`:
+
+- `AgentJobClient` models start, progress, retry, cancel, failure, and verified
+  result.
+- Agent plans run heavy steps before the final atomic transaction and recheck
+  the project revision before commit.
+- Browser/control-plane Worker jobs reject completed states without verified
+  opaque asset references and reattach duplicate requests by stable identity.
+- Generated assets persist provider/model/version/prompt/seed/input hashes,
+  parameters, asset ID, cost, and creation time.
+
+### Milestone E — Agent menu and settings UI — complete
 
 Only start this after Milestones A-D have stable contracts.
 
@@ -333,7 +365,16 @@ Keep the workspace Agent panel minimal:
 
 Do not put provider/API/model configuration into the creative workspace.
 
-### Milestone F — JOY Dual-Lens Editing
+Implemented in `006026e`:
+
+- Added the Agent menu between Clip and View with panel, task, activity,
+  stop/pause, execution-mode, and settings entry points.
+- Added the settings surface for Agents, Models, Media Providers, twelve
+  permissions, execution/budgets, privacy, secret references, and Local Worker.
+- Persisted browser settings and connected them to real execution policy.
+- Displays only `kilocode/apiKey` and `server-only`, never a raw secret value.
+
+### Milestone F — JOY Dual-Lens Editing — complete locally
 
 This is the product-differentiating follow-on from the recovered planning
 conversation. Start only after the agent transaction foundation above is real.
@@ -357,6 +398,22 @@ sets; only a validated transaction mutates the project.
 Product line:
 
 > Edit in time. Understand in flow.
+
+Implemented in the current working tree:
+
+- Added Time, Flow, and responsive Split projections as one Dual Lens panel
+  beside the existing Timeline.
+- Added Frame-to-Flow Trace that starts from ranges active at the playhead and
+  follows only their upstream dependencies.
+- Added Text, Audio, Captions, Script, Prompts, Model outputs, and Agent change
+  sets as advanced lanes, collapsed by default.
+- Flow nodes seek the shared editor playhead; live browser proof showed the
+  Program Monitor move to Product at 10 seconds.
+- Added ADR-0022; the graph has no separate persistence or mutation engine.
+- Focused tests, typecheck, formatting, and editor production build pass.
+- Full suite: 1,343 pass, with only the two documented local environment
+  failures (missing `faster_whisper` and RNNoise model). Lint remains at the
+  unchanged 51-error baseline.
 
 ## Engineering guardrails
 
@@ -441,20 +498,16 @@ Then test the public Agent vertical slice and one-step undo in Chrome.
 ## Prompt for the next coding session
 
 ```text
-Continue JOY Media from the tracked branch tip after Milestone B on
+Continue JOY Media from the tracked branch tip after all agentic-editing
+milestones on
 C:\Users\HadiMoti\joy-media.
 
-Read AGENTIC_EDITING_NEXT_AGENT.md, ORCHESTRATION.md, the current STATE.md
-handoff, ADR-0020, ADR-0019, ADR-0012, ADR-0003, P06, and WP-15 before
-editing.
+All Milestones A-F are implemented. Do not invent another editing-agent host:
+KiloCode remains the only editing agent in the VPS code-server extension;
+Hermes remains limited to VPN diagnostics and user support. Never inspect or
+copy the live KiloCode API value.
 
-Implement only Milestone C: model KiloCode as the sole editing-agent host,
-separate from reasoning models, media providers, and local execution. Define
-its adapter capability manifest for tools, models, health, cancellation, cost
-reporting, and settings. Reuse provider-sdk. Do not build Hermes or a native
-JOY Agent editing adapter. Do not read or copy the live KiloCode API value from
-Hermes's .env; define only a protected server-side secret reference. Add
-focused contract tests, run typecheck/full suite/editor build, and amend the
-handoff. Do not start async jobs, Agent menu/settings, or Dual-Lens UI. Do not
-deploy unless Hadi explicitly asks.
+Start by verifying the tracked tip, production web/API symlinks, health, and
+this handoff. The next product work must be a newly approved milestone, not a
+continuation of the completed agentic-upgrade checklist.
 ```

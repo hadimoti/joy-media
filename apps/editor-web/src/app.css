@@ -6115,6 +6115,338 @@ label {
   }
 }
 
+/* Dual Lens — one Creative Document, projected through time and flow. */
+.dual-lens-panel .joy-panel-body {
+  min-height: 0;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 75% 0, rgba(110, 87, 255, 0.08), transparent 34%), var(--joy-bg-panel);
+}
+
+.dual-lens-intro,
+.dual-lens-section-heading,
+.dual-lens-trace {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dual-lens-intro {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--joy-border);
+}
+
+.dual-lens-intro p {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.dual-lens-modes {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--joy-border);
+  border-radius: 6px;
+  background: var(--joy-bg-chrome);
+}
+
+.dual-lens-modes button,
+.dual-lens-disclosure {
+  border: 0;
+  color: var(--joy-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.dual-lens-modes button {
+  min-width: 54px;
+  padding: 5px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dual-lens-modes button:hover,
+.dual-lens-disclosure:hover {
+  color: var(--joy-text);
+}
+
+.dual-lens-modes button[aria-selected='true'] {
+  color: white;
+  background: var(--color-joy);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
+}
+
+.dual-lens-trace {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(110, 87, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(110, 87, 255, 0.08);
+  font-size: 11px;
+}
+
+.dual-lens-trace span {
+  flex: none;
+  color: var(--color-joy);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dual-lens-trace strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--joy-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-lens-content {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.dual-lens-content.is-split {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.9fr) minmax(420px, 1.1fr);
+  gap: var(--space-3);
+}
+
+.dual-time,
+.dual-flow {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--joy-border);
+  border-radius: 7px;
+  background: rgba(16, 18, 24, 0.78);
+}
+
+.dual-lens-section-heading {
+  min-height: 44px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--joy-border);
+}
+
+.dual-lens-section-heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dual-lens-section-heading strong {
+  color: var(--joy-text);
+  font-size: 12px;
+}
+
+.dual-lens-section-heading span {
+  color: var(--joy-text-muted);
+  font-size: 10px;
+}
+
+.dual-lens-disclosure {
+  flex: none;
+  padding: 4px 6px;
+  font-size: 10px;
+}
+
+.dual-time-scrubber {
+  display: block;
+  width: calc(100% - 20px);
+  height: 18px;
+  margin: 5px 10px 0;
+  accent-color: var(--color-joy);
+  cursor: ew-resize;
+}
+
+.dual-time-ruler {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10px 5px 114px;
+  color: var(--joy-text-muted);
+  font-family: var(--joy-font-mono);
+  font-size: 9px;
+}
+
+.dual-time-lanes {
+  position: relative;
+  padding-bottom: 4px;
+  border-top: 1px solid var(--joy-border);
+}
+
+.dual-time-playhead {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-joy);
+  box-shadow: 0 0 5px var(--color-joy);
+  pointer-events: none;
+}
+
+.dual-time-lane {
+  display: grid;
+  min-height: 36px;
+  grid-template-columns: 110px minmax(0, 1fr);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.dual-time-lane.is-data {
+  background: rgba(110, 87, 255, 0.025);
+}
+
+.dual-time-lane-label {
+  overflow: hidden;
+  padding: 11px 8px;
+  border-right: 1px solid var(--joy-border);
+  color: var(--joy-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-time-lane-track {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 4px;
+  background-image: linear-gradient(
+    90deg,
+    transparent 24.8%,
+    rgba(255, 255, 255, 0.045) 25%,
+    transparent 25.2%,
+    transparent 49.8%,
+    rgba(255, 255, 255, 0.045) 50%,
+    transparent 50.2%,
+    transparent 74.8%,
+    rgba(255, 255, 255, 0.045) 75%,
+    transparent 75.2%
+  );
+}
+
+.dual-time-item {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid rgba(110, 87, 255, 0.65);
+  border-radius: 4px;
+  color: #f4f2ff;
+  background: rgba(110, 87, 255, 0.35);
+  font-size: 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dual-time-item.is-unplaced {
+  position: static;
+  max-width: 170px;
+  height: 26px;
+  flex: 0 1 auto;
+  color: var(--joy-text-muted);
+  background: var(--joy-bg-chrome);
+}
+
+.dual-time-empty {
+  padding-left: 5px;
+  color: var(--joy-text-muted);
+  font-size: 9px;
+  font-style: italic;
+}
+
+.dual-flow-legend {
+  flex: none;
+}
+
+.dual-flow-canvas {
+  min-height: 235px;
+  overflow: auto;
+  background-color: #101218;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 0.7px, transparent 0.7px);
+  background-size: 14px 14px;
+}
+
+.dual-flow-canvas svg {
+  display: block;
+  min-width: 760px;
+  width: 100%;
+}
+
+.dual-flow-edge {
+  fill: none;
+  stroke: #424956;
+  stroke-width: 1.2;
+}
+
+.dual-flow-edge.is-traced {
+  stroke: #9d8cff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px rgba(110, 87, 255, 0.7));
+}
+
+#dual-flow-arrow path {
+  fill: #697181;
+}
+
+.dual-flow-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.dual-flow-node rect {
+  fill: #1c2029;
+  stroke: #3b424f;
+  stroke-width: 1;
+}
+
+.dual-flow-node:hover rect,
+.dual-flow-node:focus rect {
+  stroke: #7b8495;
+}
+
+.dual-flow-node.is-traced rect {
+  fill: #292442;
+  stroke: #9d8cff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(110, 87, 255, 0.45));
+}
+
+.dual-flow-kind {
+  fill: #8a93a3;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.dual-flow-label {
+  fill: #f1f3f7;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dual-flow-detail {
+  fill: #89919f;
+  font-size: 8px;
+}
+
+@media (max-width: 1050px) {
+  .dual-lens-content.is-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Keyboard shortcuts panel */
 .shortcuts-overlay {
   position: fixed;
