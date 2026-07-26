@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  APP_MENU_GROUPS,
-  panelIdFromMenuAction,
-  isPanelMenuAction,
-} from './app-menu.js';
+import { APP_MENU_GROUPS, panelIdFromMenuAction, isPanelMenuAction } from './app-menu.js';
 
 describe('app-menu catalog', () => {
   it('exposes Adobe-style top-level menus', () => {
@@ -11,6 +7,7 @@ describe('app-menu catalog', () => {
       'file',
       'edit',
       'clip',
+      'agent',
       'view',
       'window',
     ]);
@@ -19,6 +16,19 @@ describe('app-menu catalog', () => {
   it('includes Projects Library under File', () => {
     const file = APP_MENU_GROUPS.find((group) => group.id === 'file');
     expect(file?.items.some((item) => item.id === 'file.projects')).toBe(true);
+  });
+
+  it('keeps the Agent menu focused on task entry points and settings', () => {
+    const agent = APP_MENU_GROUPS.find((group) => group.id === 'agent');
+    expect(agent?.items.map((item) => item.label)).toEqual([
+      'Open Agent Panel',
+      'New Task',
+      'Active Agent: KiloCode',
+      'Execution Mode…',
+      'Pause / Stop Task',
+      'Agent Activity',
+      'Agent Settings…',
+    ]);
   });
 
   it('parses panel focus actions', () => {

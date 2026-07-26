@@ -4321,6 +4321,190 @@ label {
   background: var(--joy-bg-control);
   color: var(--joy-accent);
 }
+.agent-runtime-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.75rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  color: var(--joy-text-muted);
+  font-size: 0.67rem;
+  text-transform: capitalize;
+}
+.agent-runtime-summary strong {
+  color: var(--joy-text);
+  font-size: 0.72rem;
+}
+.agent-runtime-summary span + span {
+  margin-left: auto;
+  color: var(--joy-text-faint);
+}
+.agent-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 68%);
+  backdrop-filter: blur(3px);
+}
+.agent-settings-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, calc(100vw - 48px));
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--joy-bg-elevated);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 52%);
+}
+.agent-settings-dialog > header,
+.agent-settings-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--joy-border);
+  background: var(--joy-bg-chrome);
+}
+.agent-settings-dialog > footer {
+  border-top: 1px solid var(--joy-border);
+  border-bottom: 0;
+  color: var(--joy-text-faint);
+  font-size: 0.72rem;
+}
+.agent-settings-dialog h2,
+.agent-settings-dialog h3,
+.agent-settings-dialog p {
+  margin: 0;
+}
+.agent-settings-dialog h2 {
+  font-size: 1rem;
+}
+.agent-settings-eyebrow {
+  margin-bottom: 3px !important;
+  color: var(--joy-accent);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.agent-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  overflow: auto;
+  padding: 14px;
+}
+.agent-settings-grid > section {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-panel);
+}
+.agent-settings-grid h3 {
+  color: var(--joy-text);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+}
+.agent-settings-grid p {
+  color: var(--joy-text-faint);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+.agent-settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--joy-text-muted);
+  font-size: 0.7rem;
+}
+.agent-settings-grid input:not([type='checkbox']),
+.agent-settings-grid select {
+  min-height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  padding: 0 9px;
+}
+.agent-settings-host,
+.agent-secret-reference {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+.agent-settings-host strong {
+  color: var(--joy-accent);
+}
+.agent-settings-host span,
+.agent-secret-reference {
+  color: var(--joy-text-muted);
+  font-size: 0.7rem;
+}
+.agent-secret-reference strong {
+  color: var(--joy-ok);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agent-settings-permissions {
+  grid-column: 1 / -1;
+}
+.agent-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.agent-capability-grid label {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+  color: var(--joy-text-secondary);
+  font-family: var(--joy-font-mono);
+  font-size: 0.64rem;
+}
+.agent-settings-done {
+  min-width: 74px;
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  .agent-settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .agent-settings-permissions {
+    grid-column: auto;
+  }
+  .agent-capability-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .agent-attachments h3,
 .agent-intents h3,
 .agent-pending-plan h3,

@@ -1,9 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
   ApprovalDecision,
-  AgentExecutionMode,
   AuditEntry,
   DryRunResult,
   EditorContext,
@@ -12,11 +11,7 @@ import type {
 import {
   ApprovalEngine,
   createAuditTrail,
-  createAutoApplyLowRiskPolicy,
-  createFullAutoWithinLimitsPolicy,
   createPlan,
-  createPreviewAndApprovePolicy,
-  createSuggestOnlyApprovalPolicy,
   createToolRegistry,
   dryRunPlan,
   buildEditorContext,
@@ -37,6 +32,8 @@ import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import type { AgentSettings } from './agent-settings.js';
+import { approvalPolicyForAgentSettings } from './agent-settings.js';
 
 /** Every edit this panel commits is attributed to the local agent adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
@@ -143,17 +140,10 @@ function shortIntentLabel(label: string): string {
   return label;
 }
 
-function policyForMode(mode: AgentExecutionMode) {
-  switch (mode) {
-    case 'suggest-only':
-      return createSuggestOnlyApprovalPolicy();
-    case 'preview-and-approve':
-      return createPreviewAndApprovePolicy();
-    case 'auto-apply-low-risk':
-      return createAutoApplyLowRiskPolicy();
-    case 'full-auto-limited':
-      return createFullAutoWithinLimitsPolicy();
-  }
+export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop';
+export interface AgentPanelCommand {
+  readonly serial: number;
+  readonly type: AgentPanelCommandType;
 }
 
 /**
@@ -169,6 +159,8 @@ export function AgentPanel({
   attachedAssets = [],
   onDetachAsset,
   onAttachAsset,
+  settings,
+  command,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -179,19 +171,41 @@ export function AgentPanel({
   readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
+  readonly settings: AgentSettings;
+  readonly command?: AgentPanelCommand;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
-  const [executionMode, setExecutionMode] = useState<AgentExecutionMode>('preview-and-approve');
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [, forceRender] = useState(0);
   const [tab, setTab] = useState('compose');
 
   const approvalEngine = useMemo(
-    () => new ApprovalEngine(policyForMode(executionMode)),
-    [executionMode],
+    () => new ApprovalEngine(approvalPolicyForAgentSettings(settings)),
+    [settings],
   );
+
+  useEffect(() => {
+    if (command === undefined) return;
+    if (command.type === 'activity') {
+      setTab('activity');
+      return;
+    }
+    if (command.type === 'stop' && pending !== undefined) {
+      auditRef.current.record({
+        planId: pending.plan.planId,
+        action: 'plan-rejected',
+        userId: 'local-owner',
+        metadata: { source: 'agent-menu-stop' },
+      });
+    }
+    setPending(undefined);
+    if (command.type === 'new-task') {
+      setLastRun(undefined);
+      setTab('compose');
+    }
+  }, [command, pending]);
 
   const plan = (intent: AgentIntent) => {
     const baseRevision = session.projectRevisionId;
@@ -380,58 +394,6 @@ export function AgentPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      actions={
-        <div className="agent-policy-seg" role="group" aria-label="Agent execution mode">
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={executionMode === 'suggest-only'}
-            title="Suggest Only — never executes tools"
-            onClick={() => {
-              setExecutionMode('suggest-only');
-              setPending(undefined);
-            }}
-          >
-            Suggest
-          </button>
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={executionMode === 'preview-and-approve'}
-            title="Preview and Approve — default; every project change needs approval"
-            onClick={() => {
-              setExecutionMode('preview-and-approve');
-              setPending(undefined);
-            }}
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={executionMode === 'auto-apply-low-risk'}
-            title="Auto-apply Low-Risk Changes — local reversible timeline edits only"
-            onClick={() => {
-              setExecutionMode('auto-apply-low-risk');
-              setPending(undefined);
-            }}
-          >
-            Low risk
-          </button>
-          <button
-            type="button"
-            className="agent-policy-btn"
-            aria-pressed={executionMode === 'full-auto-limited'}
-            title="Full Auto Within Explicit Limits — risky boundaries still need approval"
-            onClick={() => {
-              setExecutionMode('full-auto-limited');
-              setPending(undefined);
-            }}
-          >
-            Full auto
-          </button>
-        </div>
-      }
     >
       <div
         className="agent-drop-target"
@@ -464,6 +426,13 @@ export function AgentPanel({
       >
         {tab === 'compose' && (
           <>
+            <section className="agent-runtime-summary" aria-label="Active agent policy">
+              <strong>KiloCode</strong>
+              <span>{settings.executionMode.replaceAll('-', ' ')}</span>
+              <span>
+                {settings.privacyMode === 'local-only' ? 'local only' : 'remote actions ask first'}
+              </span>
+            </section>
             <section className="agent-attachments" aria-label="KiloCode media attachments">
               <h3>Attached for AI</h3>
               {attachedAssets.length === 0 ? (

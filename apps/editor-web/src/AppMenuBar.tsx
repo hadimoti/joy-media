@@ -1,9 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import {
-  APP_MENU_GROUPS,
-  type AppMenuActionId,
-  type AppMenuItem,
-} from './app-menu.js';
+import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -16,11 +12,9 @@ export interface AppMenuBarProps {
 
 function itemDisabled(
   item: AppMenuItem,
-  props: Pick<
-    AppMenuBarProps,
-    'canUndo' | 'canRedo' | 'hasSelection' | 'exporting' | 'signedIn'
-  >,
+  props: Pick<AppMenuBarProps, 'canUndo' | 'canRedo' | 'hasSelection' | 'exporting' | 'signedIn'>,
 ): boolean {
+  if (item.disabled === true) return true;
   switch (item.id) {
     case 'edit.undo':
       return !props.canUndo;
@@ -68,9 +62,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
       {APP_MENU_GROUPS.map((group) => {
         const menuId = `${baseId}-${group.id}`;
         const isOpen = openMenu === group.id;
-        const items = group.items.filter(
-          (item) => !(item.requiresSignedIn === true && !signedIn),
-        );
+        const items = group.items.filter((item) => !(item.requiresSignedIn === true && !signedIn));
         return (
           <div key={group.id} className="app-menu">
             <button
@@ -90,8 +82,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
               <ul className="app-menu-dropdown" role="menu" id={menuId}>
                 {items.map((item, index) => {
                   const disabled = itemDisabled(item, props);
-                  const showSeparator =
-                    item.separatorAfter === true && index < items.length - 1;
+                  const showSeparator = item.separatorAfter === true && index < items.length - 1;
                   return (
                     <li key={item.id} role="none">
                       <button
@@ -110,9 +101,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
                           <kbd className="app-menu-item-shortcut">{item.shortcut}</kbd>
                         )}
                       </button>
-                      {showSeparator && (
-                        <hr className="app-menu-separator" aria-hidden="true" />
-                      )}
+                      {showSeparator && <hr className="app-menu-separator" aria-hidden="true" />}
                     </li>
                   );
                 })}

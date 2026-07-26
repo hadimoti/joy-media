@@ -734,14 +734,6 @@ function requiredString(body: Record<string, unknown>, field: string): string {
   return value;
 }
 
-function optionalString(body: Record<string, unknown>, field: string): string | undefined {
-  const value = body[field];
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length === 0)
-    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
-  return value;
-}
-
 function optionalPositiveInteger(body: Record<string, unknown>, field: string): number | undefined {
   const value = body[field];
   if (value === undefined) return undefined;

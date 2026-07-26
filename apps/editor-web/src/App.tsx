@@ -94,7 +94,18 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { buildMixerBuffer } from './mixer-buffer.js';
 import type { ExportPresetId } from '@joy-media/project-schema';
-import { AgentPanel, type KiloCodeAttachedAsset } from './AgentPanel.js';
+import {
+  AgentPanel,
+  type AgentPanelCommand,
+  type AgentPanelCommandType,
+  type KiloCodeAttachedAsset,
+} from './AgentPanel.js';
+import { AgentSettingsDialog } from './AgentSettingsDialog.js';
+import {
+  loadAgentSettings,
+  saveAgentSettings,
+  type AgentSettings,
+} from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -401,6 +412,8 @@ interface EditorPanelContextValue {
   readonly redo: () => void;
   readonly jumpToHistory: (sequence: number) => void;
   readonly agentContext: EditorContext;
+  readonly agentSettings: AgentSettings;
+  readonly agentPanelCommand: AgentPanelCommand | undefined;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
   readonly motionStudioOpen: boolean;
   readonly openMotionStudio: () => void;
@@ -501,6 +514,11 @@ function EditorWorkspace({
   const [kiloCodeAttachedAssets, setKiloCodeAttachedAssets] = useState<
     readonly KiloCodeAttachedAsset[]
   >([]);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>(() =>
+    loadAgentSettings(window.localStorage),
+  );
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const [toasts, setToasts] = useState<readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]>([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
@@ -512,6 +530,9 @@ function EditorWorkspace({
       window.clearTimeout(exportToastTimerRef.current);
     };
   }, []);
+  useEffect(() => {
+    saveAgentSettings(window.localStorage, agentSettings);
+  }, [agentSettings]);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
@@ -1731,6 +1752,12 @@ function EditorWorkspace({
       setExporting(false);
     }
   }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
+  const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
+    setAgentPanelCommand((current) => ({
+      serial: (current?.serial ?? 0) + 1,
+      type,
+    }));
+  }, []);
   const runMenuAction = useCallback(
     (id: AppMenuActionId) => {
       const panelId = panelIdFromMenuAction(id);
@@ -1767,6 +1794,27 @@ function EditorWorkspace({
         case 'clip.split':
           runSelectedClipAction('split');
           break;
+        case 'agent.open':
+          activatePanel('agent');
+          break;
+        case 'agent.newTask':
+          activatePanel('agent');
+          issueAgentPanelCommand('new-task');
+          break;
+        case 'agent.executionMode':
+        case 'agent.settings':
+          setAgentSettingsOpen(true);
+          break;
+        case 'agent.stop':
+          activatePanel('agent');
+          issueAgentPanelCommand('stop');
+          break;
+        case 'agent.activity':
+          activatePanel('agent');
+          issueAgentPanelCommand('activity');
+          break;
+        case 'agent.active':
+          break;
         default:
           break;
       }
@@ -1774,6 +1822,7 @@ function EditorWorkspace({
     [
       activatePanel,
       handleExport,
+      issueAgentPanelCommand,
       onBackToLibrary,
       redo,
       runSelectedClipAction,
@@ -2073,6 +2122,10 @@ function EditorWorkspace({
           agentContext={context.agentContext}
           onUndo={context.undo}
           session={session}
+          settings={context.agentSettings}
+          {...(context.agentPanelCommand === undefined
+            ? {}
+            : { command: context.agentPanelCommand })}
           attachedAssets={kiloCodeAttachedAssets}
           onDetachAsset={(assetId) =>
             setKiloCodeAttachedAssets((current) =>
@@ -2490,6 +2543,8 @@ function EditorWorkspace({
           redo,
           jumpToHistory,
           agentContext,
+          agentSettings,
+          agentPanelCommand,
           showToast,
           motionStudioOpen,
           openMotionStudio: () => setMotionStudioOpen(true),
@@ -2507,6 +2562,13 @@ function EditorWorkspace({
         <MotionStudioShell
           motionName="Untitled Motion"
           onClose={() => setMotionStudioOpen(false)}
+        />
+      )}
+      {agentSettingsOpen && (
+        <AgentSettingsDialog
+          settings={agentSettings}
+          onChange={setAgentSettings}
+          onClose={() => setAgentSettingsOpen(false)}
         />
       )}
       {toasts.length > 0 && (

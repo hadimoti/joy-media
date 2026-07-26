@@ -11,6 +11,13 @@ export type AppMenuActionId =
   | 'edit.duplicate'
   | 'edit.commandPalette'
   | 'clip.split'
+  | 'agent.open'
+  | 'agent.newTask'
+  | 'agent.active'
+  | 'agent.executionMode'
+  | 'agent.stop'
+  | 'agent.activity'
+  | 'agent.settings'
   | 'view.commandPalette'
   | `view.panel.${PanelId}`
   | `window.panel.${PanelId}`;
@@ -20,17 +27,23 @@ export interface AppMenuItem {
   readonly label: string;
   readonly shortcut?: string;
   readonly separatorAfter?: boolean;
+  readonly disabled?: boolean;
   /** Hide when signed out / no session logout available. */
   readonly requiresSignedIn?: boolean;
 }
 
 export interface AppMenuGroup {
-  readonly id: 'file' | 'edit' | 'clip' | 'view' | 'window';
+  readonly id: 'file' | 'edit' | 'clip' | 'agent' | 'view' | 'window';
   readonly label: string;
   readonly items: readonly AppMenuItem[];
 }
 
-const WINDOW_PANELS = ['media', 'monitor', 'timeline', 'inspector'] as const satisfies readonly PanelId[];
+const WINDOW_PANELS = [
+  'media',
+  'monitor',
+  'timeline',
+  'inspector',
+] as const satisfies readonly PanelId[];
 
 function panelViewItems(): readonly AppMenuItem[] {
   return PANEL_IDS.map((panelId) => ({
@@ -74,10 +87,28 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     items: [{ id: 'clip.split', label: 'Split at Playhead', shortcut: 'S' }],
   },
   {
+    id: 'agent',
+    label: 'Agent',
+    items: [
+      { id: 'agent.open', label: 'Open Agent Panel' },
+      { id: 'agent.newTask', label: 'New Task', separatorAfter: true },
+      { id: 'agent.active', label: 'Active Agent: KiloCode', disabled: true },
+      { id: 'agent.executionMode', label: 'Execution Mode…', separatorAfter: true },
+      { id: 'agent.stop', label: 'Pause / Stop Task' },
+      { id: 'agent.activity', label: 'Agent Activity', separatorAfter: true },
+      { id: 'agent.settings', label: 'Agent Settings…' },
+    ],
+  },
+  {
     id: 'view',
     label: 'View',
     items: [
-      { id: 'view.commandPalette', label: 'Command Palette…', shortcut: 'Ctrl+K', separatorAfter: true },
+      {
+        id: 'view.commandPalette',
+        label: 'Command Palette…',
+        shortcut: 'Ctrl+K',
+        separatorAfter: true,
+      },
       ...panelViewItems(),
     ],
   },

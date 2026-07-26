@@ -1,0 +1,211 @@
+import { ALL_TOOL_CAPABILITIES, createKiloCodeAgentHostManifest } from '@joy-media/agent-tools';
+import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
+import { useEffect } from 'react';
+import type { AgentSettings } from './agent-settings.js';
+import { CloseIcon } from './icons.js';
+
+const MODE_LABELS: Readonly<Record<AgentExecutionMode, string>> = {
+  'suggest-only': 'Suggest Only',
+  'preview-and-approve': 'Preview and Approve',
+  'auto-apply-low-risk': 'Auto-apply Low-Risk',
+  'full-auto-limited': 'Full Auto Within Limits',
+};
+
+export function AgentSettingsDialog({
+  settings,
+  onChange,
+  onClose,
+}: {
+  readonly settings: AgentSettings;
+  readonly onChange: (settings: AgentSettings) => void;
+  readonly onClose: () => void;
+}) {
+  const manifest = createKiloCodeAgentHostManifest();
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+  const update = <K extends keyof AgentSettings>(key: K, value: AgentSettings[K]) => {
+    onChange({ ...settings, [key]: value });
+  };
+  const toggleCapability = (capability: ToolCapability) => {
+    const selected = settings.allowedCapabilities.includes(capability);
+    update(
+      'allowedCapabilities',
+      selected
+        ? settings.allowedCapabilities.filter((item) => item !== capability)
+        : [...settings.allowedCapabilities, capability],
+    );
+  };
+
+  return (
+    <div className="agent-settings-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="agent-settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agent-settings-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="agent-settings-eyebrow">Editing intelligence</p>
+            <h2 id="agent-settings-title">Agent Settings</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Close settings"
+            onClick={onClose}
+          >
+            <CloseIcon />
+          </button>
+        </header>
+
+        <div className="agent-settings-grid">
+          <section>
+            <h3>Agents</h3>
+            <div className="agent-settings-host">
+              <strong>{manifest.displayName}</strong>
+              <span>Active · {manifest.transport}</span>
+            </div>
+            <p>KiloCode is the sole editing host. Hermes is not connected to editor tools.</p>
+          </section>
+
+          <section>
+            <h3>Models</h3>
+            <label>
+              Reasoning model
+              <input
+                value={settings.reasoningModel}
+                onChange={(event) => update('reasoningModel', event.target.value)}
+              />
+            </label>
+            <p>Selected by the KiloCode server adapter; model credentials stay server-side.</p>
+          </section>
+
+          <section>
+            <h3>Media Providers</h3>
+            <label>
+              Preferred provider
+              <input
+                value={settings.mediaProvider}
+                onChange={(event) => update('mediaProvider', event.target.value)}
+              />
+            </label>
+            <p>Image, video, speech, audio, and transcription providers remain separate.</p>
+          </section>
+
+          <section className="agent-settings-permissions">
+            <h3>Permissions</h3>
+            <div className="agent-capability-grid">
+              {ALL_TOOL_CAPABILITIES.map((capability) => (
+                <label key={capability}>
+                  <input
+                    type="checkbox"
+                    checked={settings.allowedCapabilities.includes(capability)}
+                    onChange={() => toggleCapability(capability)}
+                  />
+                  {capability}
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3>Execution & Budgets</h3>
+            <label>
+              Execution mode
+              <select
+                value={settings.executionMode}
+                onChange={(event) =>
+                  update('executionMode', event.target.value as AgentExecutionMode)
+                }
+              >
+                {Object.entries(MODE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Maximum provider cost per run (USD)
+              <input
+                type="number"
+                min={0}
+                step={0.25}
+                value={settings.maxCostPerRunUsd}
+                onChange={(event) =>
+                  update('maxCostPerRunUsd', Math.max(0, Number(event.target.value) || 0))
+                }
+              />
+            </label>
+          </section>
+
+          <section>
+            <h3>Privacy</h3>
+            <label>
+              Remote data policy
+              <select
+                value={settings.privacyMode}
+                onChange={(event) =>
+                  update('privacyMode', event.target.value as AgentSettings['privacyMode'])
+                }
+              >
+                <option value="ask-before-remote">Ask before remote processing</option>
+                <option value="local-only">Local only</option>
+              </select>
+            </label>
+          </section>
+
+          <section>
+            <h3>Secret References</h3>
+            {manifest.settings.secretReferences.map((reference) => (
+              <div
+                className="agent-secret-reference"
+                key={`${reference.providerId}:${reference.fieldName}`}
+              >
+                <span>
+                  {reference.providerId} / {reference.fieldName}
+                </span>
+                <strong>{reference.scope}</strong>
+              </div>
+            ))}
+            <p>Raw values never enter the browser, project, prompt, plugin, or logs.</p>
+          </section>
+
+          <section>
+            <h3>Local Worker</h3>
+            <label>
+              Routing preference
+              <select
+                value={settings.workerPreference}
+                onChange={(event) =>
+                  update(
+                    'workerPreference',
+                    event.target.value as AgentSettings['workerPreference'],
+                  )
+                }
+              >
+                <option value="prefer-local">Prefer JOY Windows Worker</option>
+                <option value="any-approved">Any approved executor</option>
+              </select>
+            </label>
+            <p>Pairing, health, progress, cancellation, and retries remain visible in Jobs.</p>
+          </section>
+        </div>
+
+        <footer>
+          <span>Changes are saved for this browser.</span>
+          <button type="button" className="agent-settings-done" onClick={onClose}>
+            Done
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}

@@ -1,6 +1,5 @@
 import type { AgentJobClient, AgentJobRequest, AgentJobSnapshot } from '@joy-media/job-protocol';
-import type { BrowserJob } from './control-plane-client.js';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
+import type { BrowserControlPlaneClient, BrowserJob } from './control-plane-client.js';
 
 type WorkerGenerationType = 'image.comfy' | 'audio.ml-denoise';
 
