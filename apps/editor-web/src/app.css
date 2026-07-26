@@ -4301,6 +4301,7 @@ label {
   flex-shrink: 0;
   flex-wrap: wrap;
   margin-bottom: 5px;
+  justify-content: center;
 }
 .effects-category-tab {
   padding: 0.2rem 0.55rem;
