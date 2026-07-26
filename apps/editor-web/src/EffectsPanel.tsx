@@ -124,7 +124,16 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 
       <div className="joy-panel-scroll">
       <div className="effects-subsection">
-        <h4 className="effects-subsection-title">Favorites</h4>
+        <h4 className="effects-subsection-title">
+          {favorites.size === 0 && (
+            <span className="panel-empty-icon" aria-label="No favorites yet">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
+              </svg>
+            </span>
+          )}
+          Favorites
+        </h4>
         <div className="effects-grid">
           {(favorites.size === 0
             ? []
@@ -139,13 +148,6 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
               onDragStart={(e) => handleDragStart(desc.id, e)}
             />
           ))}
-          {favorites.size === 0 && (
-            <span className="panel-empty-icon" aria-label="No favorites yet">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
-                <path d="M8 2.5l1.5 4.5h4.5l-3.5 2.5 1.3 4.2-3.8-2.8-3.8 2.8 1.3-4.2-3.5-2.5h4.5z" />
-              </svg>
-            </span>
-          )}
         </div>
       </div>
 
