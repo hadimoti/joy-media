@@ -16,9 +16,17 @@ import {
   createPlan,
   createToolRegistry,
   dryRunPlan,
-  PlanExecutor,
+  buildEditorContext,
+  runPlanAtomically,
+  RevisionConflictError,
 } from '@joy-media/agent-tools';
-import { AGENT_INTENTS, buildSplitTrimRecipe, type AgentIntent } from './agent-panel-intents.js';
+import type { AgentActor, AtomicRunResult } from '@joy-media/agent-tools';
+import {
+  AGENT_INTENTS,
+  buildShortenIntroRecipe,
+  buildSplitTrimRecipe,
+  type AgentIntent,
+} from './agent-panel-intents.js';
 import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
@@ -26,6 +34,42 @@ import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+
+/** Every edit this panel commits is attributed to the local agent adapter. */
+const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
+
+/**
+ * The last-run UI is shaped around `ExecutionResult`; the atomic runner reports
+ * an `AtomicRunResult`. Only the fields the panel actually reads are mapped.
+ */
+function toExecutionResult(run: AtomicRunResult): ExecutionResult {
+  return {
+    planId: run.planId,
+    success: run.committed,
+    transactionLabel: run.transactionLabel,
+    stepResults: run.steps.map((step) => ({
+      stepId: step.stepId,
+      status: step.status === 'staged' ? ('success' as const) : ('failed' as const),
+      ...(step.error !== undefined ? { error: step.error } : {}),
+      durationMs: 0,
+    })),
+    aggregateDiff: {
+      clipsCreated: 0,
+      clipsModified: run.commands.length,
+      clipsDeleted: 0,
+      tracksAffected: [],
+      timeRangesAffected: [],
+      effectsAdded: 0,
+      captionsAdded: 0,
+      jobsRequired: 0,
+      summary: `${run.commands.length} command(s) in one transaction`,
+    },
+    durationMs: 0,
+    errors: run.errors,
+    warnings: [],
+    rollbackAvailable: run.committed,
+  };
+}
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'compose', label: 'Compose' },
@@ -144,6 +188,12 @@ export function AgentPanel({
             if (!recipe.ok) return recipe;
             return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
           })()
+        : intent.id === 'shorten-intro'
+        ? (() => {
+            const recipe = buildShortenIntroRecipe(project);
+            if (!recipe.ok) return recipe;
+            return { ok: true as const, steps: recipe.steps, goal: recipe.goal };
+          })()
         : (() => {
             const single = intent.buildStep(project, selectedClipIds, playheadUs);
             if (!single.ok) return single;
@@ -192,8 +242,64 @@ export function AgentPanel({
       action: 'execution-started',
       userId: 'local-owner',
     });
-    const executor = new PlanExecutor(registry, approvalEngine);
-    const executionResult = await executor.execute(agentPlan, agentContext, {});
+    // Atomic path: stage every step, then commit once. The previous
+    // per-step executor produced one undo entry per step, so `undoLastRun`'s
+    // single onUndo() only reverted the final step of a multi-step recipe.
+    let atomic: AtomicRunResult;
+    try {
+      atomic = runPlanAtomically(agentPlan, {
+        registry,
+        approvalEngine,
+        actor: AGENT_ACTOR,
+        projectId: project.id,
+        baseRevision: session.historyCursorSequence,
+        baseProject: project,
+        contextFor: (staged) => buildEditorContext(staged),
+        currentRevision: () => session.historyCursorSequence,
+        commit: (transaction) =>
+          agentContext.dispatch?.dispatchTimeline(transaction.commands, transaction.label) ?? {
+            success: false,
+            error: 'no command bus bound to this panel',
+          },
+      });
+    } catch (error) {
+      if (!(error instanceof RevisionConflictError)) throw error;
+      auditRef.current.record({
+        planId: agentPlan.planId,
+        action: 'execution-failed',
+        userId: 'local-owner',
+        error: error.message,
+      });
+      setPending(undefined);
+      setLastRun({
+        intent,
+        plan: agentPlan,
+        executionResult: {
+          planId: agentPlan.planId,
+          success: false,
+          transactionLabel: '',
+          stepResults: [],
+          aggregateDiff: {
+            clipsCreated: 0,
+            clipsModified: 0,
+            clipsDeleted: 0,
+            tracksAffected: [],
+            timeRangesAffected: [],
+            effectsAdded: 0,
+            captionsAdded: 0,
+            jobsRequired: 0,
+            summary: 'not applied',
+          },
+          durationMs: 0,
+          errors: [error.message],
+          warnings: [],
+          rollbackAvailable: false,
+        },
+        reverted: false,
+      });
+      return;
+    }
+    const executionResult = toExecutionResult(atomic);
     auditRef.current.record({
       planId: agentPlan.planId,
       action: executionResult.success ? 'execution-completed' : 'execution-failed',

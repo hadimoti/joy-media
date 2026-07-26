@@ -1,5 +1,6 @@
 import type { Clip, SpikeProject } from '@joy-media/project-schema';
 import type { AgentPlanStep } from '@joy-media/agent-tools';
+import { analyseShortenIntro } from '@joy-media/agent-tools';
 
 /**
  * WP-15.2: a structured, templated intent surface (per the WP-15 plan's scope
@@ -93,6 +94,20 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
       const recipe = buildSplitTrimRecipe(project, selectedClipIds, playheadUs);
       if (!recipe.ok) return recipe;
       return { ok: true, step: recipe.steps[0]! };
+    },
+  },
+  {
+    id: 'shorten-intro',
+    label: 'Shorten the intro by 2s',
+    description:
+      'Trims the first clip on the timeline and ripples every later clip on that track back by the same amount. Runs as one transaction, so one undo reverts all of it.',
+    destructive: false,
+    buildStep: (project) => {
+      const recipe = buildShortenIntroRecipe(project);
+      if (!recipe.ok) return recipe;
+      const first = recipe.steps[0];
+      if (first === undefined) return { ok: false, reason: 'Planner produced no steps.' };
+      return { ok: true, step: first };
     },
   },
   {
@@ -222,6 +237,25 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     },
   },
 ];
+
+/** Default nudge for the demo intent; the planner accepts any positive amount. */
+export const SHORTEN_INTRO_DEFAULT_US = 2_000_000;
+
+/**
+ * P16 vertical slice. Unlike the other intents this one is a *ripple* edit —
+ * trimming the opening clip alone would leave a hole, so every later clip on
+ * the track moves back with it. Its steps are only correct together, which is
+ * why it runs through `runPlanAtomically` (one transaction, one undo) rather
+ * than the per-step executor.
+ */
+export function buildShortenIntroRecipe(
+  project: SpikeProject,
+  byUs: number = SHORTEN_INTRO_DEFAULT_US,
+): RecipeBuildResult {
+  const analysed = analyseShortenIntro(project, { byUs });
+  if (!analysed.ok) return { ok: false, reason: analysed.reason };
+  return { ok: true, steps: analysed.plan.steps, goal: analysed.plan.goal };
+}
 
 export type RecipeBuildResult =
   | { readonly ok: true; readonly steps: readonly AgentPlanStep[]; readonly goal: string }

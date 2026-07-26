@@ -123,6 +123,30 @@ export {
   verifyUserIntentChecks,
 } from './verification.js';
 
+export type {
+  AgentActor,
+  AgentCommandEnvelope,
+  EnvelopeOptions,
+  EnvelopeValidation,
+} from './envelope.js';
+export {
+  AGENT_COMMAND_SCHEMA_VERSION,
+  createEnvelope,
+  validateEnvelope,
+  checkBaseRevision,
+  RevisionConflictError,
+} from './envelope.js';
+
+export type {
+  ShortenIntroRequest,
+  ShortenIntroResult,
+  ShortenIntroAnalysis,
+} from './shorten-intro.js';
+export { analyseShortenIntro } from './shorten-intro.js';
+
+export type { AtomicRunOptions, AtomicRunResult, AtomicStepOutcome } from './atomic.js';
+export { runPlanAtomically } from './atomic.js';
+
 export type { AgentBranch, BranchComparison } from './branch.js';
 export { BranchManager, createBranchManager } from './branch.js';
 

@@ -11,4 +11,4 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0018** (local GPU Worker for Comfy / ML denoise on owner PC).
+Accepted through **ADR-0019** (agent command envelope + atomic plan execution; the "shorten the intro" vertical slice).
