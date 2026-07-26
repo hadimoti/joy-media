@@ -5,7 +5,15 @@ import {
   createRectangleLayer,
   createEllipseLayer,
 } from './state/layerFactory.js';
-import { EyeIcon, EyeOffIcon, LockIcon, UnlockIcon, PlusIcon, CloseIcon } from '../icons.js';
+import {
+  EyeIcon,
+  EyeOffIcon,
+  LockIcon,
+  UnlockIcon,
+  CloseIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+} from '../icons.js';
 
 interface LayersPanelProps {
   readonly document: MotionSceneDocument;
@@ -15,6 +23,7 @@ interface LayersPanelProps {
   readonly onRemoveLayer: (layerId: MotionLayerId) => void;
   readonly onToggleVisibility: (layerId: MotionLayerId) => void;
   readonly onToggleLocked: (layerId: MotionLayerId) => void;
+  readonly onMoveLayer: (layerId: MotionLayerId, direction: 'up' | 'down') => void;
 }
 
 function layerIcon(type: MotionLayer['type']): string {
@@ -39,6 +48,7 @@ export function MotionStudioLayersPanel({
   onRemoveLayer,
   onToggleVisibility,
   onToggleLocked,
+  onMoveLayer,
 }: LayersPanelProps) {
   const handleAddText = useCallback(() => {
     onAddLayer(createTextLayer('Hello'));
@@ -74,14 +84,35 @@ export function MotionStudioLayersPanel({
         {reversedLayers.length === 0 ? (
           <div className="ms-empty-state">No layers yet. Add shapes, text, or images.</div>
         ) : (
-          reversedLayers.map((layer) => {
+          reversedLayers.map((layer, idx) => {
             const selected = selectedLayerIds.includes(layer.id);
+            const origIdx = document.layers.length - 1 - idx;
             return (
               <div
                 key={layer.id}
                 className={`ms-layer-row${selected ? ' ms-layer-row-selected' : ''}`}
                 onClick={() => onSelectLayer(layer.id)}
               >
+                <button
+                  type="button"
+                  className="ms-layer-toggle"
+                  aria-label="Move layer up"
+                  title="Move up"
+                  disabled={origIdx >= document.layers.length - 1}
+                  onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }}
+                >
+                  <ChevronUpIcon />
+                </button>
+                <button
+                  type="button"
+                  className="ms-layer-toggle"
+                  aria-label="Move layer down"
+                  title="Move down"
+                  disabled={origIdx <= 0}
+                  onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }}
+                >
+                  <ChevronDownIcon />
+                </button>
                 <span className="ms-layer-icon">{layerIcon(layer.type)}</span>
                 <span className="ms-layer-name">{layer.name}</span>
                 <button

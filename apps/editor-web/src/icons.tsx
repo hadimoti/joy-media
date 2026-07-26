@@ -905,3 +905,19 @@ export function CodeIcon() {
     </Svg>
   );
 }
+
+export function ChevronUpIcon() {
+  return (
+    <Svg size={12}>
+      <path d="M3.5 10.5 8 6l4.5 4.5" />
+    </Svg>
+  );
+}
+
+export function ChevronDownIcon() {
+  return (
+    <Svg size={12}>
+      <path d="M3.5 5.5 8 10l4.5-4.5" />
+    </Svg>
+  );
+}

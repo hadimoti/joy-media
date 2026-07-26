@@ -1,10 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { MotionStudioTopBar, type MotionStudioMode } from './MotionStudioTopBar.js';
 import { MotionStudioCanvas } from './MotionStudioCanvas.js';
 import { MotionStudioLayersPanel } from './MotionStudioLayersPanel.js';
 import { MotionStudioInspector } from './MotionStudioInspector.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
-import type { SceneCommand } from './state/sceneCommands.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
 
 export interface MotionStudioShellProps {
@@ -28,6 +27,46 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
   const [layersOpen, setLayersOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  const [playing, setPlaying] = useState(false);
+  const [playheadMs, setPlayheadMs] = useState(0);
+  const rafRef = useRef<number | undefined>(undefined);
+  const lastTickRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!playing) return;
+    lastTickRef.current = performance.now();
+    const tick = () => {
+      const now = performance.now();
+      const dt = now - lastTickRef.current;
+      lastTickRef.current = now;
+      setPlayheadMs((prev) => {
+        const next = prev + dt;
+        if (next >= document.durationMs) {
+          setPlaying(false);
+          return 0;
+        }
+        return next;
+      });
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
+    };
+  }, [playing, document.durationMs]);
+
+  const togglePlayback = useCallback(() => {
+    setPlaying((p) => {
+      if (!p && playheadMs >= document.durationMs) {
+        setPlayheadMs(0);
+      }
+      return !p;
+    });
+  }, [playheadMs, document.durationMs]);
+
+  const seek = useCallback((timeMs: number) => {
+    setPlayheadMs(Math.max(0, Math.min(document.durationMs, timeMs)));
+  }, [document.durationMs]);
 
   const toggleMode = useCallback(() => {
     setMode((current) => (current === 'visual-edit' ? 'code' : 'visual-edit'));
@@ -83,6 +122,20 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
     [dispatch],
   );
 
+  const handleMoveLayer = useCallback(
+    (layerId: MotionLayerId, direction: 'up' | 'down') => {
+      const idx = document.layers.findIndex((l) => l.id === layerId);
+      if (idx === -1) return;
+      const newIndex = direction === 'up' ? idx + 1 : idx - 1;
+      if (newIndex < 0 || newIndex >= document.layers.length) return;
+      dispatch('Reorder layer', {
+        type: 'scene.moveLayer',
+        payload: { layerId, newIndex },
+      });
+    },
+    [dispatch, document.layers],
+  );
+
   const selectedLayer = selectedLayerIds.length === 1
     ? document.layers.find((l) => l.id === selectedLayerIds[0])
     : undefined;
@@ -102,7 +155,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
         onUndo={undo}
         onRedo={redo}
         onToggleMode={toggleMode}
-        onPreview={() => {}}
+        onPreview={togglePlayback}
         onPublish={() => {}}
         layersOpen={layersOpen}
         onToggleLayers={() => setLayersOpen((v) => !v)}
@@ -124,6 +177,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
             onRemoveLayer={handleRemoveLayer}
             onToggleVisibility={handleToggleVisibility}
             onToggleLocked={handleToggleLocked}
+            onMoveLayer={handleMoveLayer}
           />
         )}
 
@@ -135,6 +189,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
               onSelectLayer={selectLayer}
               onLayerTransform={handleLayerTransform}
               canvasScale={0.5}
+              playheadMs={playheadMs}
             />
           ) : (
             <div className="ms-code" aria-label="Code editor">
@@ -152,9 +207,35 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
             <footer className="ms-panel ms-bottom" aria-label="Timeline">
               <div className="ms-panel-header">
                 <h3 className="ms-panel-title">Timeline</h3>
+                <div className="ms-timeline-controls">
+                  <button
+                    type="button"
+                    className="ms-timeline-btn"
+                    aria-label={playing ? 'Pause' : 'Play'}
+                    onClick={togglePlayback}
+                  >
+                    {playing ? '\u23F8' : '\u25B6'}
+                  </button>
+                  <span className="ms-timeline-time" dir="ltr">
+                    {(playheadMs / 1000).toFixed(1)}s / {(document.durationMs / 1000).toFixed(1)}s
+                  </span>
+                </div>
               </div>
               <div className="ms-panel-body">
-                <div className="ms-empty-state">Timeline — keyframes and animation tracks.</div>
+                <div className="ms-timeline-scrubber">
+                  <input
+                    type="range"
+                    className="ms-timeline-range"
+                    min={0}
+                    max={document.durationMs}
+                    value={playheadMs}
+                    onChange={(e) => seek(Number(e.target.value))}
+                    aria-label="Playhead position"
+                  />
+                </div>
+                <div className="ms-empty-state">
+                  Keyframes and animation tracks will appear here.
+                </div>
               </div>
             </footer>
           )}
@@ -163,7 +244,7 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
         {hasRightPanel && (
           <MotionStudioInspector
             layer={selectedLayer}
-            documentId={document.id}
+            document={document}
             dispatch={dispatch}
           />
         )}

@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
-import type { MotionLayer, MotionTransform, MotionTypography, MotionFill } from '@joy-media/motion-core';
+import { useCallback } from 'react';
+import type { MotionLayer, MotionTransform, MotionTypography, MotionFill, MotionSceneDocument, SceneBackground } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 
 interface InspectorProps {
   readonly layer: MotionLayer | undefined;
-  readonly documentId: string;
+  readonly document: MotionSceneDocument;
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
 }
 
@@ -35,15 +35,88 @@ function numberInput(
   );
 }
 
-export function MotionStudioInspector({ layer, dispatch }: InspectorProps) {
+function selectInput(label: string, value: string, options: readonly string[], onChange: (v: string) => void) {
+  return (
+    <div className="ms-inspector-row" key={label}>
+      <label className="ms-inspector-label">{label}</label>
+      <select
+        className="ms-inspector-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%' }}
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+export function MotionStudioInspector({ layer, document, dispatch }: InspectorProps) {
   if (!layer) {
+    const bg = document.background;
+    const setBg = useCallback(
+      (background: SceneBackground) => {
+        dispatch('Set background', { type: 'scene.setSceneBackground', payload: { background } });
+      },
+      [dispatch],
+    );
+
     return (
       <aside className="ms-panel ms-right" aria-label="Inspector">
         <div className="ms-panel-header">
-          <h3 className="ms-panel-title">Properties</h3>
+          <h3 className="ms-panel-title">Scene</h3>
         </div>
         <div className="ms-panel-body">
-          <div className="ms-empty-state">Select a layer to edit its properties.</div>
+          <div className="ms-inspector-section">
+            <h4 className="ms-inspector-section-title">Document</h4>
+            <div className="ms-inspector-row">
+              <label className="ms-inspector-label">Name</label>
+              <span style={{ fontSize: '12px', color: 'var(--joy-text)' }}>{document.name}</span>
+            </div>
+            <div className="ms-inspector-row">
+              <label className="ms-inspector-label">Size</label>
+              <span style={{ fontSize: '12px', color: 'var(--joy-text-muted)' }}>
+                {document.width}x{document.height}
+              </span>
+            </div>
+            <div className="ms-inspector-row">
+              <label className="ms-inspector-label">Duration</label>
+              <span style={{ fontSize: '12px', color: 'var(--joy-text-muted)' }}>
+                {(document.durationMs / 1000).toFixed(1)}s
+              </span>
+            </div>
+          </div>
+
+          <div className="ms-inspector-section">
+            <h4 className="ms-inspector-section-title">Background</h4>
+            {selectInput(
+              'Kind',
+              bg.kind,
+              ['transparent', 'solid', 'gradient', 'image', 'video', 'animated-gradient', 'noise', 'particles'],
+              (kind) => setBg({ kind: kind as SceneBackground['kind'] }),
+            )}
+            {bg.kind === 'solid' && (
+              <div className="ms-inspector-row">
+                <label className="ms-inspector-label">Color</label>
+                <input
+                  type="color"
+                  className="ms-inspector-color"
+                  value={bg.color ?? '#000000'}
+                  onChange={(e) => setBg({ ...bg, color: e.target.value })}
+                />
+              </div>
+            )}
+            {numberInput('Opacity', bg.opacity ?? 1, 0.05, (v) => setBg({ ...bg, opacity: Math.min(1, Math.max(0, v)) }), 0, 1)}
+          </div>
+
+          <div className="ms-inspector-section">
+            <h4 className="ms-inspector-section-title">Layers</h4>
+            <p style={{ fontSize: '11px', color: 'var(--joy-text-muted)', margin: 0 }}>
+              {document.layers.length} layer{document.layers.length !== 1 ? 's' : ''}
+            </p>
+          </div>
         </div>
       </aside>
     );

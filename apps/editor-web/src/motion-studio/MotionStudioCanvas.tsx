@@ -128,6 +128,7 @@ interface MotionStudioCanvasProps {
   readonly onSelectLayer: (layerId: string | null) => void;
   readonly onLayerTransform: (layerId: string, transform: { x: number; y: number }) => void;
   readonly canvasScale?: number;
+  readonly playheadMs?: number;
 }
 
 export function MotionStudioCanvas({
@@ -136,7 +137,9 @@ export function MotionStudioCanvas({
   onSelectLayer,
   onLayerTransform,
   canvasScale = 1,
+  playheadMs,
 }: MotionStudioCanvasProps) {
+  void playheadMs; // animation evaluation hook — expanded in Phase 6
   return (
     <div className="ms-canvas">
       <div className="ms-canvas-viewport">
