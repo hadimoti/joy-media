@@ -174,6 +174,19 @@ export function DualLensPanel({
   );
 }
 
+function hashUnit(seed: string, salt: number): number {
+  let h = (salt + 1) * 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) % 1000) / 1000;
+}
+
+function dualFilmstripCellCount(widthPercent: number): number {
+  return Math.max(2, Math.min(24, Math.floor(widthPercent / 4)));
+}
+
 function TimeProjection({
   lanes,
   durationUs,
@@ -247,13 +260,24 @@ function TimeProjection({
                 lane.items.map((item) => {
                   const timed = item.startUs !== undefined && item.endUs !== undefined;
                   const left = timed ? (item.startUs! / safeDurationUs) * 100 : 0;
-                  const width = timed
+                  const widthPct = timed
                     ? Math.max(1, ((item.endUs! - item.startUs!) / safeDurationUs) * 100)
                     : undefined;
                   const selected = item.clipId !== undefined && selectedClipIds.has(item.clipId);
-                  const classes = ['dual-time-item'];
+                  const durationUs =
+                    timed && item.endUs !== undefined && item.startUs !== undefined
+                      ? item.endUs - item.startUs
+                      : undefined;
+                  const showChrome = !timed || (widthPct ?? 0) >= 8;
+                  const showDuration = timed && (widthPct ?? 0) >= 18;
+                  const cellCount = dualFilmstripCellCount(widthPct ?? 10);
+                  const classes = [
+                    'timeline-clip',
+                    'timeline-clip--video',
+                    'timeline-clip--lane-0',
+                    'dual-time-item',
+                  ];
                   if (!timed) classes.push('is-unplaced');
-                  if (selected) classes.push('is-selected');
                   return (
                     <button
                       key={item.id}
@@ -264,7 +288,7 @@ function TimeProjection({
                         timed
                           ? {
                               left: `${Math.max(0, left)}%`,
-                              width: `${Math.min(100 - Math.max(0, left), width ?? 1)}%`,
+                              width: `${Math.min(100 - Math.max(0, left), widthPct ?? 1)}%`,
                             }
                           : undefined
                       }
@@ -283,7 +307,31 @@ function TimeProjection({
                         if (item.startUs !== undefined) onSeek(item.startUs);
                       }}
                     >
-                      {item.label}
+                      {timed && (
+                        <span className="timeline-clip-filmstrip" aria-hidden="true">
+                          {Array.from({ length: cellCount }, (_, index) => {
+                            const t = hashUnit(item.id, index);
+                            const light = 14 + Math.round(t * 18);
+                            return (
+                              <span
+                                key={index}
+                                className="timeline-clip-cell"
+                                style={{ backgroundColor: `hsl(42 42% ${light}%)` }}
+                              />
+                            );
+                          })}
+                        </span>
+                      )}
+                      {showChrome && (
+                        <span className="timeline-clip-chrome">
+                          <span className="timeline-clip-label">{item.label}</span>
+                          {showDuration && durationUs !== undefined && (
+                            <span className="timeline-clip-duration">
+                              {(durationUs / 1_000_000).toFixed(1)}s
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </button>
                   );
                 })
