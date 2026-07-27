@@ -6649,30 +6649,16 @@ label {
     radial-gradient(circle at 75% 0, rgba(110, 87, 255, 0.08), transparent 34%), var(--joy-bg-panel);
 }
 
-.dual-lens-intro,
-.dual-lens-section-heading,
-.dual-lens-trace {
+.dual-lens-section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
 }
 
-.dual-lens-intro {
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--joy-border);
-}
-
-.dual-lens-intro p {
-  margin: 0;
-  color: var(--joy-text);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
 .dual-lens-modes {
   display: inline-flex;
+  flex: none;
   padding: 2px;
   border: 1px solid var(--joy-border);
   border-radius: 6px;
@@ -6708,6 +6694,10 @@ label {
 }
 
 .dual-lens-trace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
   margin: var(--space-3) var(--space-4) 0;
   padding: 8px 10px;
   border: 1px solid rgba(110, 87, 255, 0.35);
@@ -6717,19 +6707,29 @@ label {
 }
 
 .dual-lens-trace span {
-  flex: none;
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-joy);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-lens-trace .dual-lens-modes {
+  justify-self: center;
 }
 
 .dual-lens-trace strong {
+  justify-self: end;
   min-width: 0;
   overflow: hidden;
   color: var(--joy-text);
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: end;
 }
 
 .dual-lens-content {

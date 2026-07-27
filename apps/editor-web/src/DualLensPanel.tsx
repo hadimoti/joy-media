@@ -110,8 +110,8 @@ export function DualLensPanel({
 
   return (
     <PanelShell title="Dual Lens" iconUrl={panelTabIconUrl('flow')} className="dual-lens-panel">
-      <div className="dual-lens-intro">
-        <p lang="fa">در زمان ویرایش کنید؛ جریان را درک کنید.</p>
+      <div className="dual-lens-trace" aria-live="polite">
+        <span>Frame-to-Flow Trace</span>
         <div className="dual-lens-modes" role="tablist" aria-label="Dual Lens mode">
           {(['time', 'flow', 'split'] as const).map((candidate) => (
             <button
@@ -126,10 +126,6 @@ export function DualLensPanel({
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="dual-lens-trace" aria-live="polite">
-        <span>Frame-to-Flow Trace</span>
         <strong>{projection.traceSummary}</strong>
       </div>
 
