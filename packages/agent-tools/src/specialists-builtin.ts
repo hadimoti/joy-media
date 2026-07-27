@@ -220,10 +220,87 @@ export const COLOR_REVIEW_AGENT: SpecialistDefinition = {
   },
 };
 
+/**
+ * A hole this long between two shots reads as dead air rather than a beat.
+ * Below it, a gap is usually deliberate pacing and closing it would be wrong.
+ */
+const MIN_REPORTABLE_GAP_US = 500_000;
+
+/**
+ * The first specialist that proposes in the `timeline` domain.
+ *
+ * Where a clip sits is a timeline command, not a document parameter, so this
+ * proposal reaches the project through the timeline bus while the other three
+ * go through the document — one approval, one transaction, one undo.
+ *
+ * It only closes gaps *between* clips. A hole before the first shot is usually
+ * a deliberate beat at the top of the sequence, and proposing to delete it
+ * would be a guess about intent rather than a finding.
+ */
+export const PACING_AGENT: SpecialistDefinition = {
+  roleId: 'pacing-agent',
+  capability: 'timeline.pacing.review',
+  label: 'Pacing review',
+  requiredCapabilities: ['timeline.read'],
+  analyse(context): ChangeSetProposal {
+    const composition = context.timeline.compositions[context.scope.compositionId];
+    const findings: string[] = [];
+    const edits: ProposedEdit[] = [];
+    const warnings: string[] = [];
+    let checked = 0;
+
+    for (const track of composition?.tracks ?? []) {
+      const sorted = [...track.clips].sort((left, right) => left.startUs - right.startUs);
+      checked += sorted.length;
+      const first = sorted[0];
+      if (first === undefined) continue;
+      // The cursor is where the previous clip ends *after* any move proposed for
+      // it, so a run of gaps closes up rather than each proposal contradicting
+      // the one before it.
+      let cursorUs = first.startUs + first.durationUs;
+      for (const clip of sorted.slice(1)) {
+        const gapUs = clip.startUs - cursorUs;
+        if (gapUs < MIN_REPORTABLE_GAP_US) {
+          cursorUs = clip.startUs + clip.durationUs;
+          continue;
+        }
+        if (!inScope(context, clip.id)) {
+          warnings.push(`"${clip.id}" opens a ${formatUs(gapUs)} gap but is outside the scope.`);
+          cursorUs = clip.startUs + clip.durationUs;
+          continue;
+        }
+        findings.push(`${formatUs(gapUs)} of dead air before "${clip.id}".`);
+        edits.push({
+          targetId: clip.id,
+          summary: `Pull "${clip.id}" ${formatUs(gapUs)} earlier to close the gap`,
+          domain: 'timeline',
+          parameters: { startUs: cursorUs },
+        });
+        cursorUs += clip.durationUs;
+      }
+    }
+
+    if (findings.length === 0) {
+      findings.push(`${checked} clip(s) checked; no gap over ${formatUs(MIN_REPORTABLE_GAP_US)}.`);
+    }
+
+    return {
+      roleId: PACING_AGENT.roleId,
+      capability: PACING_AGENT.capability,
+      title: 'Pacing review',
+      findings,
+      edits,
+      estimatedCost: LOCAL_ONLY,
+      warnings,
+    };
+  },
+};
+
 export const BUILT_IN_SPECIALISTS: readonly SpecialistDefinition[] = [
   CAPTION_AGENT,
   AUDIO_CLEANUP_AGENT,
   COLOR_REVIEW_AGENT,
+  PACING_AGENT,
 ];
 
 function formatUs(valueUs: number): string {

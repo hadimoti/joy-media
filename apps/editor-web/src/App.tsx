@@ -2255,8 +2255,14 @@ function EditorWorkspace({
                     selectedClipIds={state.selectedIds}
                     projectId={context.timelineProject.id}
                     revisionId={() => session.projectRevisionId}
-                    onApplyChangeSet={(label, document, artifacts) => {
-                      session.dispatchCompound(label, { document, artifacts });
+                    onApplyChangeSet={(label, document, artifacts, timelineTransaction) => {
+                      session.dispatchCompound(label, {
+                        document,
+                        artifacts,
+                        ...(timelineTransaction === undefined
+                          ? {}
+                          : { timeline: timelineTransaction }),
+                      });
                       setRevision((current) => current + 1);
                     }}
                   />

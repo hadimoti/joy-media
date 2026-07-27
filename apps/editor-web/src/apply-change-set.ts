@@ -15,15 +15,36 @@
  * have been applied and was not is worse than one that admits it could not be.
  */
 
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
+import { applyTransaction } from '@joy-media/commands';
+import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
 import type { ChangeSetProposal, ProposedEdit } from '@joy-media/agent-tools';
+
+export interface UnappliedEdit {
+  readonly targetId: string;
+  readonly reason: string;
+}
 
 export interface ApplyChangeSetResult {
   readonly document: JoyProjectV1;
   readonly applied: readonly string[];
   /** Edits that named something this editor cannot resolve. */
-  readonly unapplied: readonly { readonly targetId: string; readonly reason: string }[];
+  readonly unapplied: readonly UnappliedEdit[];
+}
+
+export interface TimelineChangeSetResult {
+  /** Absent when nothing in the change set reached the timeline. */
+  readonly transaction?: CommandTransaction;
+  readonly applied: readonly string[];
+  readonly unapplied: readonly UnappliedEdit[];
+}
+
+export interface ChangeSetPlan {
+  readonly document: JoyProjectV1;
+  readonly timeline?: CommandTransaction;
+  readonly applied: readonly string[];
+  readonly unapplied: readonly UnappliedEdit[];
 }
 
 function numberParam(edit: ProposedEdit, key: string): number | undefined {
@@ -49,7 +70,7 @@ export function applyChangeSet(
 ): ApplyChangeSetResult {
   let next = document;
   const applied: string[] = [];
-  const unapplied: { targetId: string; reason: string }[] = [];
+  const unapplied: UnappliedEdit[] = [];
 
   for (const proposal of proposals) {
     for (const edit of proposal.edits) {
@@ -116,6 +137,146 @@ export function applyChangeSet(
   }
 
   return { document: next, applied, unapplied };
+}
+
+/**
+ * Turns `timeline`-domain edits into one command transaction.
+ *
+ * These do not belong on the document path: where a clip sits is a timeline
+ * command with a real inverse, so routing it through the command bus keeps
+ * undo, replay, and validation exactly as they are for a hand edit. Building
+ * commands here rather than mutating the project is what makes that possible.
+ */
+export function buildTimelineChangeSet(
+  timeline: SpikeProject,
+  proposals: readonly ChangeSetProposal[],
+): TimelineChangeSetResult {
+  const commands: SpikeCommand[] = [];
+  const applied: string[] = [];
+  const unapplied: UnappliedEdit[] = [];
+
+  for (const proposal of proposals) {
+    for (const edit of proposal.edits) {
+      if (edit.domain !== 'timeline') continue;
+
+      const location = findClip(timeline, edit.targetId);
+      if (location === undefined) {
+        unapplied.push({ targetId: edit.targetId, reason: 'no timeline clip with that id' });
+        continue;
+      }
+
+      const startUs = numberParam(edit, 'startUs');
+      const endUs = numberParam(edit, 'endUs');
+      if (startUs === undefined && endUs === undefined) {
+        unapplied.push({
+          targetId: edit.targetId,
+          reason: 'timeline edits must propose startUs or endUs',
+        });
+        continue;
+      }
+
+      if (startUs !== undefined) {
+        commands.push({
+          type: 'timeline.moveClip',
+          payload: {
+            compositionId: location.compositionId,
+            trackId: location.trackId,
+            clipId: edit.targetId,
+            newStartUs: startUs,
+          },
+        });
+      }
+      if (endUs !== undefined) {
+        commands.push({
+          type: 'timeline.trimClipEnd',
+          payload: {
+            compositionId: location.compositionId,
+            trackId: location.trackId,
+            clipId: edit.targetId,
+            newEndUs: endUs,
+          },
+        });
+      }
+      applied.push(edit.targetId);
+    }
+  }
+
+  if (commands.length === 0) return { applied, unapplied };
+
+  const transaction: CommandTransaction = {
+    label: `Apply ${applied.length} timeline edit(s)`,
+    commands,
+  };
+  try {
+    // Dry run against a copy. The command bus refuses overlaps and out-of-range
+    // trims, and a change set that would be refused halfway through must not
+    // reach the real project as a partial edit.
+    applyTransaction(timeline, transaction);
+  } catch (error) {
+    return {
+      applied: [],
+      unapplied: [
+        ...unapplied,
+        { targetId: '(timeline)', reason: (error as Error).message },
+      ],
+    };
+  }
+  return { transaction, applied, unapplied };
+}
+
+function findClip(
+  timeline: SpikeProject,
+  clipId: string,
+): { readonly compositionId: string; readonly trackId: string } | undefined {
+  for (const [compositionId, composition] of Object.entries(timeline.compositions)) {
+    for (const track of composition.tracks) {
+      if (track.clips.some((clip) => clip.id === clipId)) {
+        return { compositionId, trackId: track.id };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Splits an approved change set across the two buses it can reach.
+ *
+ * Each half is built independently and validated on its own terms — the
+ * document against the v1 validator, the timeline against the command bus —
+ * and the caller commits both in one compound transaction so the whole
+ * approval is one undo.
+ */
+export function planChangeSet(
+  document: JoyProjectV1,
+  timeline: SpikeProject,
+  proposals: readonly ChangeSetProposal[],
+): ChangeSetPlan {
+  // Each half only sees the edits it can act on, so neither reports the other's
+  // work as something it failed to apply.
+  const parameterProposals = proposals
+    .map((proposal) => ({
+      ...proposal,
+      edits: proposal.edits.filter((edit) => edit.domain === 'parameters'),
+    }))
+    .filter((proposal) => proposal.edits.length > 0);
+
+  const knownClipIds = new Set(
+    Object.values(timeline.compositions).flatMap((composition) =>
+      composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
+    ),
+  );
+
+  const documentResult = applyChangeSet(document, parameterProposals, knownClipIds);
+  const timelineResult = buildTimelineChangeSet(timeline, proposals);
+
+  return {
+    document: documentResult.document,
+    ...(timelineResult.transaction === undefined
+      ? {}
+      : { timeline: timelineResult.transaction }),
+    applied: [...documentResult.applied, ...timelineResult.applied],
+    unapplied: [...documentResult.unapplied, ...timelineResult.unapplied],
+  };
 }
 
 function applyCaptionTiming(

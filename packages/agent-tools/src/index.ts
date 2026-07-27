@@ -180,6 +180,7 @@ export {
   CAPTION_AGENT,
   AUDIO_CLEANUP_AGENT,
   COLOR_REVIEW_AGENT,
+  PACING_AGENT,
 } from './specialists-builtin.js';
 
 export type {

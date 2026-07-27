@@ -8,8 +8,8 @@ import {
 } from '@joy-media/agent-tools';
 import type { ChangeSetProposal, CombinedChangeSet } from '@joy-media/agent-tools';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
-import type { ArtifactTransaction } from '@joy-media/commands';
-import { applyChangeSet } from './apply-change-set.js';
+import type { ArtifactTransaction, CommandTransaction } from '@joy-media/commands';
+import { planChangeSet } from './apply-change-set.js';
 
 export interface SpecialistReviewPanelProps {
   readonly timeline: SpikeProject;
@@ -18,11 +18,15 @@ export interface SpecialistReviewPanelProps {
   readonly selectedClipIds: readonly string[];
   readonly projectId: string;
   readonly revisionId: () => string;
-  /** Applies the document change and the change-set record as one undo step. */
+  /**
+   * Applies the document change, any timeline commands, and the change-set
+   * record as one undo step.
+   */
   readonly onApplyChangeSet: (
     label: string,
     document: JoyProjectV1,
     artifacts: ArtifactTransaction,
+    timeline: CommandTransaction | undefined,
   ) => void;
 }
 
@@ -147,18 +151,13 @@ export function SpecialistReviewPanel({
           const contributing = state.combined.proposals.filter(
             (proposal) => proposal.edits.length > 0 && approved.includes(proposal.roleId),
           );
-          const knownClipIds = new Set(
-            Object.values(timeline.compositions).flatMap((composition) =>
-              composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
-            ),
-          );
-          const outcome = applyChangeSet(creative, contributing, knownClipIds);
+          const outcome = planChangeSet(creative, timeline, contributing);
           if (outcome.applied.length === 0 && outcome.unapplied.length > 0) {
             return { success: false, error: outcome.unapplied[0]!.reason };
           }
-          // The document change and its record land as one history step, so
-          // undoing cannot leave a change set describing a change that is gone.
-          onApplyChangeSet(transaction.label, outcome.document, transaction);
+          // Document, timeline, and record land as one history step, so undoing
+          // cannot leave a change set describing a change that is gone.
+          onApplyChangeSet(transaction.label, outcome.document, transaction, outcome.timeline);
           setUnapplied(outcome.unapplied);
           return { success: true };
         },
@@ -215,8 +214,8 @@ export function SpecialistReviewPanel({
 
       {state === undefined ? (
         <p className="specialist-empty">
-          Caption, audio, and colour specialists analyse in parallel and propose changes. Nothing is
-          applied until you approve it.
+          Caption, audio, colour, and pacing specialists analyse in parallel and propose changes.
+          Nothing is applied until you approve it.
         </p>
       ) : (
         <>

@@ -194,6 +194,7 @@ export async function runSpecialists(
 
 export interface ProposalConflict {
   readonly targetId: string;
+  readonly domain: ProposalDomain;
   readonly roleIds: readonly string[];
   readonly summaries: readonly string[];
 }
@@ -214,25 +215,41 @@ export interface CombinedChangeSet {
  * of specialists analysing in parallel is that the human sees a combined result
  * they can trust, and silently discarding one specialist's edit produces a
  * result nobody proposed.
+ *
+ * A conflict is a target *and a domain*. Where a clip sits in the timeline and
+ * how loud it plays are different properties on different buses — two
+ * specialists proposing one each cannot overwrite one another, and treating
+ * that as a conflict would make every run with a pacing specialist unresolvable
+ * on every clip the audio specialist also touched.
  */
 export function combineProposals(
   proposals: readonly ChangeSetProposal[],
 ): CombinedChangeSet {
-  const byTarget = new Map<string, { roles: Set<string>; summaries: string[] }>();
+  const byTarget = new Map<
+    string,
+    { targetId: string; domain: ProposalDomain; roles: Set<string>; summaries: string[] }
+  >();
   for (const proposal of proposals) {
     for (const edit of proposal.edits) {
-      const entry = byTarget.get(edit.targetId) ?? { roles: new Set<string>(), summaries: [] };
+      const key = `${edit.domain}:${edit.targetId}`;
+      const entry = byTarget.get(key) ?? {
+        targetId: edit.targetId,
+        domain: edit.domain,
+        roles: new Set<string>(),
+        summaries: [],
+      };
       entry.roles.add(proposal.roleId);
       entry.summaries.push(`${proposal.roleId}: ${edit.summary}`);
-      byTarget.set(edit.targetId, entry);
+      byTarget.set(key, entry);
     }
   }
 
   const conflicts: ProposalConflict[] = [];
-  for (const [targetId, entry] of byTarget) {
+  for (const entry of byTarget.values()) {
     if (entry.roles.size > 1) {
       conflicts.push({
-        targetId,
+        targetId: entry.targetId,
+        domain: entry.domain,
         roleIds: [...entry.roles],
         summaries: entry.summaries,
       });

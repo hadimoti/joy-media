@@ -4,7 +4,7 @@ import { DUAL_LENS_FLAG_KEY } from '@joy-media/project-schema';
 import type { ChangeSetProposal } from '@joy-media/agent-tools';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
-import { applyChangeSet } from './apply-change-set.js';
+import { applyChangeSet, buildTimelineChangeSet, planChangeSet } from './apply-change-set.js';
 
 /** Clip ids present in the reference timeline fixture. */
 const CLIPS = new Set(['intro', 'product', 'outro', 'b-roll-a', 'b-roll-b']);
@@ -181,6 +181,185 @@ describe('applying specialist change sets', () => {
       expect(result.document).toEqual(INITIAL_EDITOR_PROJECT);
       expect(result.applied).toEqual([]);
       expect(result.unapplied.some((entry) => entry.targetId === '(document)')).toBe(true);
+    });
+  });
+
+  describe('timeline-domain edits reach the timeline bus', () => {
+    /** The reference fixture is gapless; push the tail right to open a hole. */
+    function gapped() {
+      const project = buildReferenceSpikeProject();
+      const root = project.compositions['root']!;
+      return {
+        ...project,
+        compositions: {
+          ...project.compositions,
+          root: {
+            ...root,
+            tracks: root.tracks.map((track) =>
+              track.id !== 'track-0'
+                ? track
+                : {
+                    ...track,
+                    clips: track.clips.map((clip) =>
+                      clip.id === 'intro' ? clip : { ...clip, startUs: clip.startUs + 2_000_000 },
+                    ),
+                  },
+            ),
+          },
+        },
+      };
+    }
+
+    it('builds a move command for a proposed start time', () => {
+      const result = buildTimelineChangeSet(gapped(), [
+        proposal(
+          [
+            {
+              targetId: 'product',
+              summary: 'close the gap',
+              domain: 'timeline',
+              parameters: { startUs: 10_000_000 },
+            },
+          ],
+          'pacing-agent',
+        ),
+      ]);
+
+      expect(result.transaction?.commands).toEqual([
+        {
+          type: 'timeline.moveClip',
+          payload: {
+            compositionId: 'root',
+            trackId: 'track-0',
+            clipId: 'product',
+            newStartUs: 10_000_000,
+          },
+        },
+      ]);
+      expect(result.applied).toEqual(['product']);
+    });
+
+    it('reports a clip that is not in the timeline', () => {
+      const result = buildTimelineChangeSet(buildReferenceSpikeProject(), [
+        proposal(
+          [
+            {
+              targetId: 'ghost',
+              summary: 'move',
+              domain: 'timeline',
+              parameters: { startUs: 0 },
+            },
+          ],
+          'pacing-agent',
+        ),
+      ]);
+
+      expect(result.transaction).toBeUndefined();
+      expect(result.unapplied[0]?.reason).toMatch(/no timeline clip/);
+    });
+
+    it('discards the whole transaction when one command would be refused', () => {
+      // Moving "product" onto "intro" overlaps; a change set that fails halfway
+      // must not reach the project as a partial edit.
+      const result = buildTimelineChangeSet(buildReferenceSpikeProject(), [
+        proposal(
+          [
+            {
+              targetId: 'product',
+              summary: 'overlap intro',
+              domain: 'timeline',
+              parameters: { startUs: 0 },
+            },
+            {
+              targetId: 'outro',
+              summary: 'fine on its own',
+              domain: 'timeline',
+              parameters: { startUs: 21_000_000 },
+            },
+          ],
+          'pacing-agent',
+        ),
+      ]);
+
+      expect(result.transaction).toBeUndefined();
+      expect(result.applied).toEqual([]);
+      expect(result.unapplied.some((entry) => entry.targetId === '(timeline)')).toBe(true);
+    });
+
+    it('splits a mixed change set across both buses without either reporting the other', () => {
+      const plan = planChangeSet(INITIAL_EDITOR_PROJECT, gapped(), [
+        proposal([
+          {
+            targetId: 'colorGrade',
+            summary: 'grade',
+            domain: 'parameters',
+            parameters: { saturation: 1.05 },
+          },
+        ]),
+        proposal(
+          [
+            {
+              targetId: 'product',
+              summary: 'close the gap',
+              domain: 'timeline',
+              parameters: { startUs: 10_000_000 },
+            },
+          ],
+          'pacing-agent',
+        ),
+      ]);
+
+      expect(plan.document.colorGrade?.saturation).toBe(1.05);
+      expect(plan.timeline?.commands).toHaveLength(1);
+      expect(plan.applied).toEqual(['colorGrade', 'product']);
+      expect(plan.unapplied).toEqual([]);
+    });
+
+    it('moves the clip and reverts it in one undo alongside the document change', () => {
+      const editor = new EditorSession(
+        storage({ [DUAL_LENS_FLAG_KEY]: 'on' }),
+        gapped(),
+        INITIAL_EDITOR_PROJECT,
+      );
+      const plan = planChangeSet(editor.visualProject, editor.timelineProject, [
+        proposal([
+          {
+            targetId: 'colorGrade',
+            summary: 'grade',
+            domain: 'parameters',
+            parameters: { saturation: 1.05 },
+          },
+        ]),
+        proposal(
+          [
+            {
+              targetId: 'product',
+              summary: 'close the gap',
+              domain: 'timeline',
+              parameters: { startUs: 10_000_000 },
+            },
+          ],
+          'pacing-agent',
+        ),
+      ]);
+
+      editor.dispatchCompound('Apply review', {
+        document: plan.document,
+        ...(plan.timeline === undefined ? {} : { timeline: plan.timeline }),
+      });
+
+      const clip = () =>
+        editor.timelineProject.compositions['root']?.tracks
+          .flatMap((track) => track.clips)
+          .find((candidate) => candidate.id === 'product');
+      expect(clip()?.startUs).toBe(10_000_000);
+      expect(editor.visualProject.colorGrade?.saturation).toBe(1.05);
+
+      editor.undo();
+
+      // Both buses move together or the picture and the document disagree.
+      expect(clip()?.startUs).toBe(12_000_000);
+      expect(editor.visualProject.colorGrade?.saturation).not.toBe(1.05);
     });
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { AuditTrail } from './audit.js';
 import { RevisionConflictError } from './envelope.js';
 import {
@@ -18,7 +18,33 @@ import {
   BUILT_IN_SPECIALISTS,
   CAPTION_AGENT,
   COLOR_REVIEW_AGENT,
+  PACING_AGENT,
 } from './specialists-builtin.js';
+
+/** A copy of the reference timeline with a hole punched between two clips. */
+function timelineWithGap(gapUs: number): SpikeProject {
+  const project = buildReferenceSpikeProject();
+  const root = project.compositions['root']!;
+  return {
+    ...project,
+    compositions: {
+      ...project.compositions,
+      root: {
+        ...root,
+        tracks: root.tracks.map((track) =>
+          track.id !== 'track-0'
+            ? track
+            : {
+                ...track,
+                clips: track.clips.map((clip) =>
+                  clip.id === 'intro' ? clip : { ...clip, startUs: clip.startUs + gapUs },
+                ),
+              },
+        ),
+      },
+    },
+  };
+}
 
 const CREATIVE: JoyProjectV1 = {
   schemaVersion: 1,
@@ -196,7 +222,7 @@ describe('specialist agents', () => {
       });
 
       expect(result.proposals).toHaveLength(1);
-      expect(result.denied).toHaveLength(2);
+      expect(result.denied).toHaveLength(BUILT_IN_SPECIALISTS.length - 1);
     });
 
     it('rejects a proposal that exceeds the edit budget', async () => {
@@ -393,7 +419,7 @@ describe('specialist agents', () => {
     });
   });
 
-  describe('the three built-in specialists', () => {
+  describe('the built-in specialists', () => {
     it('finds caption overlap and overrun', async () => {
       const result = await runSpecialists([CAPTION_AGENT], context(), READ_ONLY);
       const proposal = result.proposals[0]!;
@@ -441,10 +467,86 @@ describe('specialist agents', () => {
       expect(result.proposals[0]?.edits.every((e) => e.targetId !== 'cap-1')).toBe(true);
     });
 
-    it('produces no conflicts between the three, since they own different targets', async () => {
+    it('produces no conflicts between them, since they own different targets', async () => {
       const result = await runSpecialists(BUILT_IN_SPECIALISTS, context(), READ_ONLY);
 
       expect(combineProposals(result.proposals).conflicts).toEqual([]);
+    });
+
+    it('proposes closing dead air between two shots', async () => {
+      const gapped = context({ timeline: timelineWithGap(2_000_000) });
+
+      const result = await runSpecialists([PACING_AGENT], gapped, READ_ONLY);
+      const proposal = result.proposals[0]!;
+
+      expect(proposal.findings.join(' ')).toMatch(/dead air before "product"/);
+      const edit = proposal.edits.find((candidate) => candidate.targetId === 'product');
+      expect(edit?.domain).toBe('timeline');
+      expect(edit?.parameters).toEqual({ startUs: 10_000_000 });
+    });
+
+    it('closes a run of gaps cumulatively rather than one proposal per hole', async () => {
+      // "outro" is shifted by the same gap, so closing "product" already frees
+      // the space; the second proposal has to account for the first.
+      const gapped = context({ timeline: timelineWithGap(2_000_000) });
+
+      const result = await runSpecialists([PACING_AGENT], gapped, READ_ONLY);
+      const outro = result.proposals[0]?.edits.find((edit) => edit.targetId === 'outro');
+
+      expect(outro?.parameters).toEqual({ startUs: 20_000_000 });
+    });
+
+    it('leaves a gap shorter than half a second alone', async () => {
+      const gapped = context({ timeline: timelineWithGap(200_000) });
+
+      const result = await runSpecialists([PACING_AGENT], gapped, READ_ONLY);
+
+      expect(result.proposals[0]?.edits).toEqual([]);
+      expect(result.proposals[0]?.findings.join(' ')).toMatch(/no gap over/);
+    });
+
+    it('reports an out-of-scope gap instead of silently proposing for it', async () => {
+      const gapped = context({
+        timeline: timelineWithGap(2_000_000),
+        scope: { compositionId: 'root', clipIds: ['outro'] },
+      });
+
+      const result = await runSpecialists([PACING_AGENT], gapped, READ_ONLY);
+
+      // "product" holds its place, so "outro" is already flush against it and
+      // there is nothing to propose — only the gap it may not touch to report.
+      expect(result.proposals[0]?.edits).toEqual([]);
+      expect(result.proposals[0]?.warnings.join(' ')).toMatch(/"product".*outside the scope/);
+    });
+  });
+
+  describe('conflicts are per domain, not per target', () => {
+    it('does not flag two specialists touching one clip in different domains', () => {
+      const combined = combineProposals([
+        {
+          ...proposal('audio-cleanup-agent', [
+            { targetId: 'intro', summary: 'gain', domain: 'parameters', parameters: { gain: 1 } },
+          ]),
+        },
+        {
+          ...proposal('pacing-agent', [
+            { targetId: 'intro', summary: 'move', domain: 'timeline', parameters: { startUs: 0 } },
+          ]),
+        },
+      ]);
+
+      expect(combined.conflicts).toEqual([]);
+      expect(combined.ok).toBe(true);
+    });
+
+    it('still flags two specialists touching one target in the same domain', () => {
+      const combined = combineProposals([
+        proposal('a', [{ targetId: 'intro', summary: 'x', domain: 'timeline' }]),
+        proposal('b', [{ targetId: 'intro', summary: 'y', domain: 'timeline' }]),
+      ]);
+
+      expect(combined.conflicts).toHaveLength(1);
+      expect(combined.conflicts[0]).toMatchObject({ targetId: 'intro', domain: 'timeline' });
     });
   });
 });
