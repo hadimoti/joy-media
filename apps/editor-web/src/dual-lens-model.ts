@@ -2,6 +2,11 @@ import type { Clip, JoyProjectV1, SpikeProject } from '@joy-media/project-schema
 import type { HistoryEntry } from './editor-session.js';
 import { polishMediaLabel } from './media-label.js';
 import { readClipObjectMap } from './sticker-bindings.js';
+import {
+  timelineTrackCode,
+  timelineTrackDisplayName,
+  timelineTrackKind,
+} from './timeline-track-kind.js';
 
 export type DualLensNodeKind =
   'provider' | 'asset' | 'clip' | 'visual' | 'data' | 'agent' | 'output';
@@ -56,6 +61,12 @@ export interface DualLensLane {
   readonly label: string;
   readonly advanced: boolean;
   readonly items: readonly DualLensLaneItem[];
+  /** Polished gutter chrome (kind icon + V1 / Main Video). Falls back to `label`. */
+  readonly header?: {
+    readonly kind: DualLensItemIcon;
+    readonly code: string;
+    readonly name: string;
+  };
 }
 
 export interface DualLensProjection {
@@ -288,11 +299,18 @@ function buildLanes(
       ? {}
       : { startUs: found.startUs, endUs: found.startUs + found.durationUs };
   };
-  const core: DualLensLane[] =
-    composition?.tracks.map((track) => ({
+  const tracks = composition?.tracks ?? [];
+  const core: DualLensLane[] = tracks.map((track, index) => {
+    const kind = timelineTrackKind(track);
+    const kindIndex = tracks.slice(0, index + 1).filter((row) => timelineTrackKind(row) === kind)
+      .length;
+    const code = timelineTrackCode(kind, kindIndex);
+    const name = timelineTrackDisplayName(kind, kindIndex);
+    return {
       id: `track:${track.id}`,
-      label: `V${track.order + 1} · ${track.id}`,
+      label: `${code} ${name}`,
       advanced: false,
+      header: { kind, code, name },
       items: track.clips.map((clip) => ({
         id: clip.id,
         label: polishMediaLabel(clip.id),
@@ -301,7 +319,8 @@ function buildLanes(
         startUs: clip.startUs,
         endUs: clip.startUs + clip.durationUs,
       })),
-    })) ?? [];
+    };
+  });
   const textItems: DualLensLaneItem[] = Object.entries(objectBindings).flatMap(
     ([clipId, objectId]) => {
       const object = creative.visualObjects[objectId];
@@ -377,14 +396,39 @@ function buildLanes(
 
   return [
     ...core,
-    { id: 'data:text', label: 'Text', advanced: true, items: textItems },
-    { id: 'data:audio', label: 'Audio', advanced: true, items: audioItems },
-    { id: 'data:captions', label: 'Captions', advanced: true, items: captionItems },
-    { id: 'data:script', label: 'Script', advanced: true, items: scriptItems },
+    {
+      id: 'data:text',
+      label: 'Text',
+      advanced: true,
+      header: { kind: 'text', code: 'T1', name: 'Text' },
+      items: textItems,
+    },
+    {
+      id: 'data:audio',
+      label: 'Audio',
+      advanced: true,
+      header: { kind: 'audio', code: 'A1', name: 'Audio' },
+      items: audioItems,
+    },
+    {
+      id: 'data:captions',
+      label: 'Captions',
+      advanced: true,
+      header: { kind: 'caption', code: 'C1', name: 'Captions' },
+      items: captionItems,
+    },
+    {
+      id: 'data:script',
+      label: 'Script',
+      advanced: true,
+      header: { kind: 'script', code: 'S1', name: 'Script' },
+      items: scriptItems,
+    },
     {
       id: 'data:prompts',
       label: 'Prompts',
       advanced: true,
+      header: { kind: 'prompt', code: 'P1', name: 'Prompts' },
       items: generationAssets.map((asset) => ({
         id: `prompt:${asset.id}`,
         label: polishMediaLabel(asset.generationProvenance?.prompt ?? asset.displayName),
@@ -396,6 +440,7 @@ function buildLanes(
       id: 'data:model-outputs',
       label: 'Model outputs',
       advanced: true,
+      header: { kind: 'generation', code: 'G1', name: 'Model outputs' },
       items: generationAssets.map((asset) => ({
         id: asset.id,
         label: polishMediaLabel(asset.displayName),
@@ -403,7 +448,13 @@ function buildLanes(
         ...rangeForAsset(asset.id),
       })),
     },
-    { id: 'data:agent-changes', label: 'Agent change sets', advanced: true, items: agentItems },
+    {
+      id: 'data:agent-changes',
+      label: 'Agent change sets',
+      advanced: true,
+      header: { kind: 'agent', code: 'N1', name: 'Agent changes' },
+      items: agentItems,
+    },
   ];
 }
 

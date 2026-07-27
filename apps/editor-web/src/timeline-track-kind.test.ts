@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, Track } from '@joy-media/project-schema';
-import { timelineTrackKind } from './timeline-track-kind.js';
+import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName } from './timeline-track-kind.js';
 
 function videoClip(id: string, assetId: string): Clip {
   return {
@@ -56,5 +56,20 @@ describe('timelineTrackKind', () => {
         ]),
       ),
     ).toBe('video');
+  });
+});
+
+describe('timelineTrack chrome labels', () => {
+  it('names the first video row Main Video', () => {
+    expect(timelineTrackCode('video', 1)).toBe('V1');
+    expect(timelineTrackDisplayName('video', 1)).toBe('Main Video');
+    expect(timelineTrackDisplayName('video', 2)).toBe('B-roll');
+  });
+
+  it('names audio and script rows with kind prefixes', () => {
+    expect(timelineTrackCode('audio', 1)).toBe('A1');
+    expect(timelineTrackDisplayName('audio', 1)).toBe('Voice');
+    expect(timelineTrackCode('script', 2)).toBe('S2');
+    expect(timelineTrackDisplayName('script', 2)).toBe('Script 2');
   });
 });

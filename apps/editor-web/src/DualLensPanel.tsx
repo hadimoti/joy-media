@@ -194,6 +194,7 @@ function lanesToCanvasTracks(
       id: lane.id,
       label: lane.label,
       advanced: lane.advanced,
+      ...(lane.header === undefined ? {} : { header: lane.header }),
       items: lane.items.map((item) => {
         const timed = item.startUs !== undefined && item.endUs !== undefined;
         return {

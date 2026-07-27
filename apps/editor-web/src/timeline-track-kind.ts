@@ -27,3 +27,19 @@ export function timelineTrackKind(track: Pick<Track, 'id' | 'clips'>): TimelineT
   if (identities.every((identity) => AUDIO_TOKEN.test(identity))) return 'audio';
   return 'video';
 }
+
+/** Compact lane code shown above the human track name (V1 / A2 / S1). */
+export function timelineTrackCode(kind: TimelineTrackKind, kindIndex: number): string {
+  if (kind === 'audio') return `A${kindIndex}`;
+  if (kind === 'script') return `S${kindIndex}`;
+  return `V${kindIndex}`;
+}
+
+/** Human track name paired with {@link timelineTrackCode}. */
+export function timelineTrackDisplayName(kind: TimelineTrackKind, kindIndex: number): string {
+  if (kind === 'audio') return kindIndex === 1 ? 'Voice' : `Audio ${kindIndex}`;
+  if (kind === 'script') return kindIndex === 1 ? 'Script' : `Script ${kindIndex}`;
+  if (kindIndex === 1) return 'Main Video';
+  if (kindIndex === 2) return 'B-roll';
+  return `Video ${kindIndex}`;
+}

@@ -54,7 +54,7 @@ import {
 import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
-import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
+import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName, type TimelineTrackKind } from './timeline-track-kind.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
 import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
@@ -1252,26 +1252,10 @@ export function TimelinePanel({
                   </span>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
-                      {kind === 'audio'
-                        ? `A${kindIndex}`
-                        : kind === 'script'
-                          ? `S${kindIndex}`
-                          : `V${kindIndex}`}
+                      {timelineTrackCode(kind, kindIndex)}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {kind === 'audio'
-                        ? kindIndex === 1
-                          ? 'Voice'
-                          : `Audio ${kindIndex}`
-                        : kind === 'script'
-                          ? kindIndex === 1
-                            ? 'Script'
-                            : `Script ${kindIndex}`
-                          : kindIndex === 1
-                            ? 'Main Video'
-                            : kindIndex === 2
-                              ? 'B-roll'
-                              : `Video ${kindIndex}`}
+                      {timelineTrackDisplayName(kind, kindIndex)}
                     </span>
                   </div>
                   <button

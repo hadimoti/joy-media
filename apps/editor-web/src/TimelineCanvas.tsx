@@ -50,6 +50,12 @@ export interface TimelineCanvasTrack {
   readonly label: string;
   readonly items: readonly TimelineCanvasItem[];
   readonly advanced?: boolean;
+  /** When set, gutter uses the same kind-icon + code + name chrome as Timeline. */
+  readonly header?: {
+    readonly kind: TimelineCanvasIcon;
+    readonly code: string;
+    readonly name: string;
+  };
 }
 
 export interface TimelineCanvasProps {
@@ -103,6 +109,40 @@ function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) 
     default:
       return <TimelineVideoTrackIcon />;
   }
+}
+
+function TrackHeaderChrome({
+  header,
+  fallbackLabel,
+}: {
+  readonly header:
+    | {
+        readonly kind: TimelineCanvasIcon;
+        readonly code: string;
+        readonly name: string;
+      }
+    | undefined;
+  readonly fallbackLabel: string;
+}) {
+  if (header === undefined) {
+    return <strong title={fallbackLabel}>{fallbackLabel}</strong>;
+  }
+  const kindTitle = `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)} track`;
+  return (
+    <>
+      <span className="timeline-track-kind-icon" title={kindTitle}>
+        <ItemGlyph icon={header.kind} />
+      </span>
+      <div className="timeline-track-label">
+        <span className="track-code" dir="ltr">
+          {header.code}
+        </span>
+        <span className="track-name" dir="ltr" title={header.name}>
+          {header.name}
+        </span>
+      </div>
+    </>
+  );
 }
 
 function InspectClip({
@@ -269,7 +309,7 @@ export function TimelineCanvas({
             style={{ height: 44 }}
           >
             <div className="timeline-track-header">
-              <strong title={track.label}>{track.label}</strong>
+              <TrackHeaderChrome header={track.header} fallbackLabel={track.label} />
             </div>
             <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
               {track.items.length === 0 ? (
