@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { GraphTransaction } from '@joy-media/commands';
 import { PanelShell } from './PanelShell.js';
@@ -34,6 +34,8 @@ export interface DualLensPanelProps {
   readonly onSelectClips: (clipIds: readonly string[]) => void;
   readonly onRevealOnTimeline: (clipIds: readonly string[]) => void;
   readonly onDispatchGraph?: (transaction: GraphTransaction) => void;
+  /** Rendered by the editor so this panel stays free of agent wiring. */
+  readonly specialistReview?: ReactNode;
 }
 
 export function DualLensPanel({
@@ -46,6 +48,7 @@ export function DualLensPanel({
   onSelectClips,
   onRevealOnTimeline,
   onDispatchGraph,
+  specialistReview,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -141,6 +144,10 @@ export function DualLensPanel({
         <div className="dual-lens-content">
           <WorkflowGraphEditor graph={workflowGraph} onDispatch={onDispatchGraph} />
         </div>
+      )}
+
+      {specialistReview !== undefined && (mode === 'flow' || mode === 'split') && (
+        <div className="dual-lens-content">{specialistReview}</div>
       )}
     </PanelShell>
   );

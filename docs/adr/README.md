@@ -11,4 +11,4 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0025** (unified data lanes — durable creative data authored through the command bus and laid against timeline time).
+Accepted through **ADR-0026** (specialist agents that propose but cannot apply — parallel scoped analysis, one transaction authority).

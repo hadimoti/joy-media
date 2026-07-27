@@ -77,6 +77,7 @@ import {
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
 import { buildDataLanes, type DataLane } from './data-lanes.js';
+import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import {
   clearActiveProjectId,
@@ -2243,7 +2244,21 @@ function EditorWorkspace({
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
           {...(context.workflowGraph === undefined
             ? {}
-            : { workflowGraph: context.workflowGraph, onDispatchGraph: context.dispatchGraph })}
+            : {
+                workflowGraph: context.workflowGraph,
+                onDispatchGraph: context.dispatchGraph,
+                specialistReview: (
+                  <SpecialistReviewPanel
+                    timeline={context.timelineProject}
+                    creative={visualProject}
+                    compositionId={context.timelineProject.rootCompositionId}
+                    selectedClipIds={state.selectedIds}
+                    projectId={context.timelineProject.id}
+                    revisionId={() => session.projectRevisionId}
+                    onDispatchArtifacts={context.dispatchArtifacts}
+                  />
+                ),
+              })}
           onSeek={context.seek}
           onSelectClips={context.selectClips}
           onRevealOnTimeline={context.revealOnTimeline}

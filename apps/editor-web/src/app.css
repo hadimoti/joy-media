@@ -7302,6 +7302,114 @@ label {
   color: #fff;
 }
 
+/* Specialist review (ADR-0026). */
+.specialist-review {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--joy-border);
+  border-radius: 7px;
+  background: rgba(16, 18, 24, 0.78);
+}
+
+.specialist-empty,
+.specialist-status,
+.specialist-denied {
+  margin: 0;
+  padding: 10px;
+  color: var(--joy-text-muted);
+  font-size: 10px;
+}
+
+.specialist-status {
+  color: var(--joy-text);
+}
+
+.specialist-conflict {
+  margin: 8px 10px 0;
+  padding: 6px 9px;
+  border: 1px solid rgba(220, 96, 96, 0.5);
+  border-radius: 5px;
+  color: #ffb4b4;
+  background: rgba(220, 96, 96, 0.12);
+  font-size: 10px;
+}
+
+.specialist-list {
+  display: flex;
+  margin: 0;
+  padding: 8px 10px;
+  flex-direction: column;
+  gap: 7px;
+  list-style: none;
+}
+
+.specialist-card {
+  padding: 7px 9px;
+  border: 1px solid var(--joy-border);
+  border-radius: 5px;
+  background: #1c2029;
+}
+
+.specialist-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.specialist-card-head span {
+  margin-left: auto;
+  color: var(--joy-text-muted);
+  font-size: 9px;
+}
+
+.specialist-findings,
+.specialist-edits {
+  display: flex;
+  margin: 6px 0 0;
+  padding-left: 16px;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--joy-text-muted);
+  font-size: 10px;
+}
+
+.specialist-findings .is-warning {
+  color: #f6d38a;
+}
+
+.specialist-edits {
+  color: #cfd6e4;
+}
+
+.specialist-edits code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(110, 87, 255, 0.22);
+  font-size: 9px;
+}
+
+.specialist-apply {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 0 10px 10px;
+  padding: 7px;
+  border: 1px solid var(--color-joy);
+  border-radius: 5px;
+  color: #fff;
+  background: rgba(110, 87, 255, 0.3);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.specialist-apply:disabled {
+  border-color: var(--joy-border);
+  color: var(--joy-text-muted);
+  background: transparent;
+  cursor: not-allowed;
+}
+
 /* Workflow authoring surface (ADR-0024). */
 .workflow-editor {
   min-width: 0;

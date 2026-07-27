@@ -152,6 +152,37 @@ export type {
 export { analyseShortenIntro } from './shorten-intro.js';
 
 export type {
+  SpecialistScope,
+  SpecialistContext,
+  SpecialistDefinition,
+  SpecialistBudget,
+  SpecialistRunOptions,
+  SpecialistRunResult,
+  ChangeSetProposal,
+  ProposedEdit,
+  ProposalDomain,
+  ProposalConflict,
+  CombinedChangeSet,
+  CombinedApprovalGrant,
+  CommitCombinedOptions,
+  CommitCombinedResult,
+  DeniedSpecialist,
+  FailedSpecialist,
+} from './specialists.js';
+export {
+  runSpecialists,
+  combineProposals,
+  commitCombinedChangeSet,
+  DEFAULT_SPECIALIST_BUDGET,
+} from './specialists.js';
+export {
+  BUILT_IN_SPECIALISTS,
+  CAPTION_AGENT,
+  AUDIO_CLEANUP_AGENT,
+  COLOR_REVIEW_AGENT,
+} from './specialists-builtin.js';
+
+export type {
   AtomicApprovalGrant,
   AtomicRunOptions,
   AtomicRunResult,
