@@ -95,18 +95,47 @@ reported truthfully instead of as the single change the user asked for.
   is O(nodes + edges) per command. Irrelevant at authoring scale; it would need
   batching if a transaction ever carried thousands of commands.
 
+## Amendment — wired into the editor, 2026-07-27
+
+`EditorSession` now holds the graph, behind `DUAL_LENS_FLAG_KEY`.
+
+- `dispatchGraph` records on the same history stack as timeline and document
+  edits, so undo follows what the user did rather than which lens they were
+  looking through. Per-family record stacks say *how* to reverse an entry the
+  one stack has already ordered — the same split `EditorCommandController` and
+  `VisualObjectProjectHistory` already use.
+- Graph edits advance `projectRevisionId`. The graph is part of the creative
+  document, so a plan built before a node changed must not still look current.
+- **When the flag is off, no graph log is opened at all.** Off means nothing is
+  stored, not merely nothing drawn — otherwise disabling the feature would
+  leave a document behind that the old path does not understand.
+- `WorkflowGraphEditor` authors nodes and edges. It sits below the Flow
+  projection rather than on the same canvas: that graph is *derived* from the
+  document, this one is *authored*, and drawing them together would imply an
+  equivalence that does not exist yet.
+- The panel dry-runs before dispatching, so a rejected edit reports why instead
+  of throwing past the click handler.
+
+Verified in the browser: connecting an audio source straight to a caption track
+is refused with "cannot connect AudioArtifact to CaptionDocument"; a legal
+connection lands; and four Undo presses walk back the connect and all three node
+additions one at a time, with Redo restoring them.
+
 ## Gaps deliberately left open
 
-- **No editor UI.** Nothing in `editor-web` dispatches a graph command; Flow
-  remains the read-only projection from ADR-0022. Wiring these commands into a
-  panel, behind `DUAL_LENS_FLAG_KEY`, is the remaining Phase 3 work.
 - **No grouping or subgraphs.** Listed in Phase 3 deliverables, not built. The
   node schema has no group or parent reference, so this will need a schema
   addition rather than only commands.
-- **Graph state is not yet in `EditorSession`.** The commands operate on a
-  `WorkflowGraphV2` value; nothing persists one in a project yet, so the "one
-  unified history" property is a property of the design here, not yet an
-  observed behaviour of the running editor.
+- **The graph is not part of `JoyProjectV2` on disk.** It persists in its own
+  log next to the timeline and document logs, because timeline state has not
+  graduated into the v1 document either. Consolidating all three remains a
+  migration, not a reason to change this design.
+- **The authored graph and the derived projection are separate surfaces.**
+  Reconciling them into one canvas needs a design decision about what an
+  authored node bound to derived content actually means.
+- **Nodes are authored from a UI-side catalog.** Persisted nodes carry their own
+  ports so old projects stay valid, but there is no node-type registry that
+  `workflow-engine` and the editor share.
 - **`workflow-engine` still has its own node definitions.** Reconciling its
   runtime nodes with these persisted contracts is not done.
 - **Cache keys are not persisted.** `reportStaleness` compares against a
@@ -127,8 +156,16 @@ to config and upstream changes while ignoring canvas position and key order,
 invalidation as commands with pinned-node protection, and UI state separable
 from the domain graph.
 
-Rollback is contained: `graph-commands.ts`, `graph-history.ts`, and
-`graph-cache.ts` are additive and referenced by nothing outside their tests.
+`apps/editor-web/src/editor-session-graph.test.ts` adds 12: the flag refusing
+edits and opening no log when off, interleaved timeline/graph undo and redo in
+the order the edits were made, a multi-command graph transaction reverting in
+one undo, graph entries appearing in the history strip, `jumpToHistory` crossing
+both lenses, the revision advancing, recovery after reopen, and a rejected
+transaction leaving neither state nor history behind.
+
+Rollback is contained: the command modules are additive, and the editor path is
+inert unless `DUAL_LENS_FLAG_KEY` is `'on'` — which also means production
+behaviour is unchanged by this work.
 
 ## Related contracts/tests
 

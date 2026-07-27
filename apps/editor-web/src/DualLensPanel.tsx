@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { WorkflowGraphV2 } from '@joy-media/project-schema';
+import type { GraphTransaction } from '@joy-media/commands';
 import { PanelShell } from './PanelShell.js';
+import { WorkflowGraphEditor } from './WorkflowGraphEditor.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
   formatTime,
@@ -25,9 +28,12 @@ export interface DualLensPanelProps {
   readonly selectedClipIds: readonly string[];
   /** A `Reveal in Flow` issued from another panel. */
   readonly reveal?: LensRevealRequest;
+  /** The authored workflow graph. Editing appears only when it is present. */
+  readonly workflowGraph?: WorkflowGraphV2;
   readonly onSeek: (timeUs: number) => void;
   readonly onSelectClips: (clipIds: readonly string[]) => void;
   readonly onRevealOnTimeline: (clipIds: readonly string[]) => void;
+  readonly onDispatchGraph?: (transaction: GraphTransaction) => void;
 }
 
 export function DualLensPanel({
@@ -35,9 +41,11 @@ export function DualLensPanel({
   playheadUs,
   selectedClipIds,
   reveal,
+  workflowGraph,
   onSeek,
   onSelectClips,
   onRevealOnTimeline,
+  onDispatchGraph,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -128,6 +136,12 @@ export function DualLensPanel({
           />
         )}
       </div>
+
+      {workflowGraph !== undefined && onDispatchGraph !== undefined && (mode === 'flow' || mode === 'split') && (
+        <div className="dual-lens-content">
+          <WorkflowGraphEditor graph={workflowGraph} onDispatch={onDispatchGraph} />
+        </div>
+      )}
     </PanelShell>
   );
 }

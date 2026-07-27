@@ -25,7 +25,7 @@ import {
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
-import type { CommandTransaction } from '@joy-media/commands';
+import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
@@ -108,7 +108,7 @@ import {
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
 import { buildMixerBuffer } from './mixer-buffer.js';
-import type { ExportPresetId } from '@joy-media/project-schema';
+import type { ExportPresetId, WorkflowGraphV2 } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -403,6 +403,9 @@ interface EditorPanelContextValue {
   readonly revealInFlow: (clipId: string) => void;
   readonly revealNodeInFlow: (nodeId: string) => void;
   readonly revealOnTimeline: (clipIds: readonly string[]) => void;
+  /** The authored workflow graph — undefined unless the Dual Lens flag is on. */
+  readonly workflowGraph: WorkflowGraphV2 | undefined;
+  readonly dispatchGraph: (transaction: GraphTransaction) => void;
   readonly togglePlayback: () => void;
   readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
@@ -937,6 +940,13 @@ function EditorWorkspace({
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       session.dispatchTimeline(transaction);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
+  const dispatchGraph = useCallback(
+    (transaction: GraphTransaction) => {
+      session.dispatchGraph(transaction);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2197,6 +2207,9 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           selectedClipIds={state.selectedIds}
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
+          {...(context.workflowGraph === undefined
+            ? {}
+            : { workflowGraph: context.workflowGraph, onDispatchGraph: context.dispatchGraph })}
           onSeek={context.seek}
           onSelectClips={context.selectClips}
           onRevealOnTimeline={context.revealOnTimeline}
@@ -2653,6 +2666,8 @@ function EditorWorkspace({
           revealInFlow,
           revealNodeInFlow,
           revealOnTimeline,
+          workflowGraph: session.graphEnabled ? session.workflowGraph : undefined,
+          dispatchGraph,
           togglePlayback,
           seek,
           toggleSelection: (id) =>

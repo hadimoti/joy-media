@@ -1,5 +1,9 @@
-import { applyTransaction } from '@joy-media/commands';
-import type { CommandTransaction } from '@joy-media/commands';
+import { applyTransaction, applyGraphTransaction, revertGraphTransaction } from '@joy-media/commands';
+import type {
+  CommandTransaction,
+  GraphTransaction,
+  GraphTransactionRecord,
+} from '@joy-media/commands';
 import {
   applyVisualObjectProjectTransaction,
   VisualObjectProjectHistory,
@@ -11,8 +15,14 @@ import {
   PersistenceError,
 } from '@joy-media/project-persistence';
 import type { BrowserKeyValueStore, PersistenceAdapter } from '@joy-media/project-persistence';
-import { validateJoyProjectV1, validateSpikeProject } from '@joy-media/project-schema';
-import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import {
+  validateJoyProjectV1,
+  validateSpikeProject,
+  validateWorkflowGraph,
+  readDualLensFlags,
+  EMPTY_WORKFLOW_GRAPH,
+} from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject, WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { ProjectRevisionId } from '@joy-media/agent-tools';
 import { EditorCommandController } from './command-controller.js';
 import { withDefaultPortraitComposition } from './editor-project.js';
@@ -20,7 +30,7 @@ import { BrowserAgentIdempotencyStore } from './agent-idempotency-store.js';
 
 export interface HistoryEntry {
   readonly id: string;
-  readonly source: 'timeline' | 'visual-object' | 'document';
+  readonly source: 'timeline' | 'visual-object' | 'graph' | 'document';
   readonly label: string;
   /** Present when this entry is past (`undo`) or future (`redo`) relative to the cursor. */
   readonly direction: 'undo' | 'redo' | 'current';
@@ -28,7 +38,17 @@ export interface HistoryEntry {
   readonly sequence: number;
 }
 
-type EditorOperation = 'timeline' | 'visual-object';
+type EditorOperation = 'timeline' | 'visual-object' | 'graph';
+
+/**
+ * The graph needs an id to share the persistence adapter shape, and the adapter
+ * needs a schema version; wrapping it keeps both without inventing an id field
+ * on `WorkflowGraphV2`, which is a value, not a document.
+ */
+interface PersistedGraphDocument {
+  readonly id: string;
+  readonly graph: WorkflowGraphV2;
+}
 
 interface HistoryStackEntry {
   readonly operation: EditorOperation;
@@ -51,6 +71,16 @@ const visualObjectAdapter: PersistenceAdapter<JoyProjectV1, VisualObjectTransact
   apply: applyVisualObjectProjectTransaction,
 };
 
+const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction> = {
+  projectId: (document) => document.id,
+  schemaVersion: (document) => document.graph.schemaVersion,
+  validate: (document) => validateWorkflowGraph(document.graph, 'workflow'),
+  apply: (document, transaction) => ({
+    ...document,
+    graph: applyGraphTransaction(document.graph, transaction).graph,
+  }),
+};
+
 /**
  * Keeps the creative documents out of React state while still notifying the UI
  * after every durable local transaction. The two current schema slices retain
@@ -64,8 +94,20 @@ export class EditorSession {
   readonly #undo: HistoryStackEntry[] = [];
   readonly #redo: HistoryStackEntry[] = [];
   readonly agentIdempotency: BrowserAgentIdempotencyStore;
+  /** Dual Lens graph editing (ADR-0023). Off unless the flag says otherwise. */
+  readonly graphEnabled: boolean;
+  readonly #graphPersistence?: LocalProjectPersistence<PersistedGraphDocument, GraphTransaction>;
+  /**
+   * Per-family record stacks, like `EditorCommandController` and
+   * `VisualObjectProjectHistory` keep. The user-visible stack is still the one
+   * below; these only say *how* to reverse an entry it has already ordered.
+   */
+  readonly #graphUndo: GraphTransactionRecord[] = [];
+  readonly #graphRedo: GraphTransactionRecord[] = [];
+  #graphDocument: PersistedGraphDocument;
   #timelineRevision: number;
   #visualObjectRevision: number;
+  #graphRevision: number;
   #sequence = 0;
 
   constructor(
@@ -94,6 +136,27 @@ export class EditorSession {
       withDefaultPortraitComposition(visualObjects.project),
     );
     this.agentIdempotency = new BrowserAgentIdempotencyStore(storage, initialTimeline.id);
+
+    this.graphEnabled = readDualLensFlags(storage).graphEnabled;
+    const emptyGraphDocument: PersistedGraphDocument = {
+      id: initialTimeline.id,
+      graph: EMPTY_WORKFLOW_GRAPH,
+    };
+    if (this.graphEnabled) {
+      this.#graphPersistence = new LocalProjectPersistence(
+        new BrowserProjectStore(storage, 'joy-media.workflow-graph-log.v1'),
+        graphAdapter,
+      );
+      const recovered = recoverOrInitialize(this.#graphPersistence, emptyGraphDocument);
+      this.#graphDocument = recovered.project;
+      this.#graphRevision = recovered.revision;
+    } else {
+      // No log is opened when the feature is off, so a disabled Dual Lens adds
+      // no storage key and no recovery path — the flag's off state stays a
+      // property of what is stored, not only of what is drawn.
+      this.#graphDocument = emptyGraphDocument;
+      this.#graphRevision = 0;
+    }
   }
 
   get timelineProject(): SpikeProject {
@@ -116,7 +179,12 @@ export class EditorSession {
       this.timelineProject.id,
       this.#timelineRevision,
       this.#visualObjectRevision,
+      this.#graphRevision,
     );
+  }
+
+  get workflowGraph(): WorkflowGraphV2 {
+    return this.#graphDocument.graph;
   }
 
   get canUndo(): boolean {
@@ -210,6 +278,26 @@ export class EditorSession {
     return project;
   }
 
+  /**
+   * Applies a graph transaction and records it on the same history as timeline
+   * and document edits, so one Undo steps back through interleaved work in the
+   * order it was done rather than per-lens.
+   */
+  dispatchGraph(transaction: GraphTransaction): WorkflowGraphV2 {
+    if (!this.graphEnabled) {
+      throw new Error('workflow graph editing is disabled; enable the Dual Lens graph flag');
+    }
+    const before = this.#graphDocument;
+    const result = applyGraphTransaction(before.graph, transaction);
+    this.#graphDocument = { ...before, graph: result.graph };
+    this.#graphPersistence?.saveTransaction(before, transaction, false);
+    this.#graphRevision += 1;
+    this.#graphUndo.push(result.record);
+    this.#graphRedo.length = 0;
+    this.#record('graph', transaction.label, transaction.commands.length);
+    return result.graph;
+  }
+
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
     const before = this.#visualObjects.present;
     const project = this.#visualObjects.replacePresent(next);
@@ -235,6 +323,19 @@ export class EditorSession {
         false,
       );
       this.#timelineRevision += 1;
+    } else if (entry.operation === 'graph') {
+      const record = this.#graphUndo.pop();
+      if (record !== undefined) {
+        const before = this.#graphDocument;
+        this.#graphDocument = { ...before, graph: revertGraphTransaction(before.graph, record) };
+        this.#graphPersistence?.saveTransaction(
+          before,
+          { label: `Undo ${record.label}`, commands: record.inverses },
+          false,
+        );
+        this.#graphRevision += 1;
+        this.#graphRedo.push(record);
+      }
     } else {
       const before = this.#visualObjects.present;
       const mutation = this.#visualObjects.undo();
@@ -256,6 +357,25 @@ export class EditorSession {
         false,
       );
       this.#timelineRevision += 1;
+    } else if (entry.operation === 'graph') {
+      const record = this.#graphRedo.pop();
+      if (record !== undefined) {
+        const before = this.#graphDocument;
+        this.#graphDocument = {
+          ...before,
+          graph: applyGraphTransaction(before.graph, {
+            label: record.label,
+            commands: record.commands,
+          }).graph,
+        };
+        this.#graphPersistence?.saveTransaction(
+          before,
+          { label: `Redo ${record.label}`, commands: record.commands },
+          false,
+        );
+        this.#graphRevision += 1;
+        this.#graphUndo.push(record);
+      }
     } else {
       const before = this.#visualObjects.present;
       const mutation = this.#visualObjects.redo();
@@ -289,8 +409,12 @@ function encodeProjectRevision(
   projectId: string,
   timelineRevision: number,
   visualObjectRevision: number,
+  graphRevision: number,
 ): ProjectRevisionId {
-  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}`;
+  // The graph is part of the creative document, so a graph edit has to move the
+  // revision an agent plan was built against — otherwise a plan made before a
+  // node changed would still look current and commit against stale structure.
+  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}:graph=${graphRevision}`;
 }
 
 function persistenceProjectId(project: unknown): string {
