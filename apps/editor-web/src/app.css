@@ -6830,22 +6830,22 @@ label {
 
 /* Dual Lens clips reuse .timeline-clip structure; only placement + hue differ. */
 .dual-time-item.timeline-clip {
-  --dual-orange: #f4b72f;
+  --dual-orange: var(--joy-accent);
   --dual-purple: #8b6cff;
   --dual-purple-deep: #5b3fd4;
   top: 0.2rem;
   bottom: 0.2rem;
   cursor: pointer;
-  border-color: color-mix(in srgb, var(--dual-purple) 35%, var(--joy-border-strong));
-  border-top-color: color-mix(in srgb, var(--dual-orange) 28%, rgb(255 255 255 / 14%));
+  border-color: color-mix(in srgb, var(--dual-purple) 28%, var(--joy-border-strong));
+  border-top-color: color-mix(in srgb, var(--dual-orange) 22%, rgb(255 255 255 / 14%));
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 7%), transparent 38%, rgb(0 0 0 / 34%)),
+    linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 42%, rgb(0 0 0 / 22%)),
     linear-gradient(
       118deg,
-      color-mix(in srgb, var(--dual-orange) 42%, transparent) 0%,
-      color-mix(in srgb, var(--dual-orange) 12%, transparent) 38%,
-      color-mix(in srgb, var(--dual-purple) 34%, transparent) 72%,
-      color-mix(in srgb, var(--dual-purple-deep) 28%, transparent) 100%
+      color-mix(in srgb, var(--dual-orange) 26%, transparent) 0%,
+      color-mix(in srgb, var(--dual-orange) 8%, transparent) 40%,
+      color-mix(in srgb, var(--dual-purple) 28%, transparent) 74%,
+      color-mix(in srgb, var(--dual-purple-deep) 20%, transparent) 100%
     ),
     var(--joy-bg-control);
   --clip-rail: var(--dual-orange);
@@ -6853,28 +6853,28 @@ label {
 .dual-time-item.timeline-clip::before {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--dual-orange) 90%, white),
-    var(--dual-orange) 42%,
-    var(--dual-purple) 78%,
+    color-mix(in srgb, var(--dual-orange) 82%, white),
+    var(--dual-orange) 46%,
+    var(--dual-purple) 82%,
     var(--dual-purple-deep)
   );
 }
 .dual-time-item.timeline-clip:hover {
-  border-color: color-mix(in srgb, var(--dual-purple) 48%, var(--joy-border-hover));
-  border-top-color: color-mix(in srgb, var(--dual-orange) 40%, rgb(255 255 255 / 20%));
+  border-color: color-mix(in srgb, var(--dual-purple) 40%, var(--joy-border-hover));
+  border-top-color: color-mix(in srgb, var(--dual-orange) 32%, rgb(255 255 255 / 20%));
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 11%), transparent 38%, rgb(0 0 0 / 26%)),
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
     linear-gradient(
       118deg,
-      color-mix(in srgb, var(--dual-orange) 52%, transparent) 0%,
-      color-mix(in srgb, var(--dual-orange) 16%, transparent) 36%,
-      color-mix(in srgb, var(--dual-purple) 44%, transparent) 70%,
-      color-mix(in srgb, var(--dual-purple-deep) 36%, transparent) 100%
+      color-mix(in srgb, var(--dual-orange) 34%, transparent) 0%,
+      color-mix(in srgb, var(--dual-orange) 12%, transparent) 38%,
+      color-mix(in srgb, var(--dual-purple) 36%, transparent) 72%,
+      color-mix(in srgb, var(--dual-purple-deep) 26%, transparent) 100%
     ),
     var(--joy-bg-active);
 }
 .dual-time-item.timeline-clip .timeline-clip-label {
-  color: #f7e7c4;
+  color: #f5e6c0;
 }
 .dual-time-item.timeline-clip .timeline-clip-duration {
   color: #c9b6ff;

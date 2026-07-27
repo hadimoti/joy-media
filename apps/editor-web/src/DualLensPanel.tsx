@@ -311,15 +311,19 @@ function TimeProjection({
                         <span className="timeline-clip-filmstrip" aria-hidden="true">
                           {Array.from({ length: cellCount }, (_, index) => {
                             const t = hashUnit(item.id, index);
-                            // Orange (36°) → purple (268°) via red/magenta only — never green/cyan/blue.
-                            const hue = (36 - Math.round(t * 128) + 360) % 360;
-                            const sat = 42 + Math.round(t * 12);
-                            const light = 16 + Math.round(t * 14);
+                            const u = hashUnit(item.id, index + 17);
+                            // Exact JOY accent #f4b72f → #8b6cff (RGB lerp, no brown crush).
+                            const r = 244 + t * (139 - 244);
+                            const g = 183 + t * (108 - 183);
+                            const b = 47 + t * (255 - 47);
+                            const lift = 0.22 + u * 0.28;
                             return (
                               <span
                                 key={index}
                                 className="timeline-clip-cell"
-                                style={{ backgroundColor: `hsl(${hue} ${sat}% ${light}%)` }}
+                                style={{
+                                  backgroundColor: `rgb(${Math.round(r + (255 - r) * lift)} ${Math.round(g + (255 - g) * lift)} ${Math.round(b + (255 - b) * lift)})`,
+                                }}
                               />
                             );
                           })}
