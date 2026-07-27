@@ -109,7 +109,12 @@ export function DualLensPanel({
   };
 
   return (
-    <PanelShell title="Dual Lens" iconUrl={panelTabIconUrl('flow')} className="dual-lens-panel">
+    <PanelShell
+      title="Dual Lens"
+      iconUrl={panelTabIconUrl('flow')}
+      className="dual-lens-panel"
+      hideHeader
+    >
       <div className="dual-lens-trace" aria-live="polite">
         <span>Frame-to-Flow Trace</span>
         <div className="dual-lens-modes" role="tablist" aria-label="Dual Lens mode">

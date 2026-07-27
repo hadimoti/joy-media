@@ -49,6 +49,8 @@ export interface PanelShellProps {
   readonly inactive?: boolean | undefined;
   /** One short line under the tabs saying why (§3c.4). Usually paired with `inactive`. */
   readonly note?: string | undefined;
+  /** Skip the centered title row (dock tab already names the panel). */
+  readonly hideHeader?: boolean | undefined;
   readonly children: ReactNode;
 }
 
@@ -65,6 +67,7 @@ export function PanelShell({
   onTabChange,
   inactive = false,
   note,
+  hideHeader = false,
   children,
 }: PanelShellProps) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -83,47 +86,52 @@ export function PanelShell({
   const searchFieldId = `${title.toLowerCase().replace(/\s+/g, '-')}-panel-search`;
 
   return (
-    <article className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}>
-      <div className="joy-panel-header">
-        {leadingActions !== undefined && (
-          <div className="joy-panel-leading-actions">{leadingActions}</div>
-        )}
-        <h3 className="joy-panel-title">
-          {icon !== undefined ? (
-            <span className="joy-panel-title-icon" aria-hidden="true">
-              {icon}
-            </span>
-          ) : (
-            iconUrl !== undefined && (
-              // The panel-tab PNGs are black-on-transparent and are meant to be
-              // masked with currentColor (DESIGN.md §3) — as a plain <img> they
-              // render black on a black panel and vanish.
-              <span
-                className="joy-panel-title-icon joy-panel-title-icon-mask"
-                style={{ maskImage: `url(${iconUrl})`, WebkitMaskImage: `url(${iconUrl})` }}
-                aria-hidden="true"
-              />
-            )
+    <article
+      className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}
+      aria-label={hideHeader ? title : undefined}
+    >
+      {!hideHeader && (
+        <div className="joy-panel-header">
+          {leadingActions !== undefined && (
+            <div className="joy-panel-leading-actions">{leadingActions}</div>
           )}
-          {title}
-        </h3>
-        <div className="joy-panel-actions">
-          {actions}
-          {search !== undefined && (
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={searchOpen ? `Close ${title} search` : `Search ${title}`}
-              title={searchOpen ? 'Close search' : 'Search'}
-              aria-expanded={searchOpen}
-              aria-controls={searchFieldId}
-              onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-            >
-              <SearchIcon />
-            </button>
-          )}
+          <h3 className="joy-panel-title">
+            {icon !== undefined ? (
+              <span className="joy-panel-title-icon" aria-hidden="true">
+                {icon}
+              </span>
+            ) : (
+              iconUrl !== undefined && (
+                // The panel-tab PNGs are black-on-transparent and are meant to be
+                // masked with currentColor (DESIGN.md §3) — as a plain <img> they
+                // render black on a black panel and vanish.
+                <span
+                  className="joy-panel-title-icon joy-panel-title-icon-mask"
+                  style={{ maskImage: `url(${iconUrl})`, WebkitMaskImage: `url(${iconUrl})` }}
+                  aria-hidden="true"
+                />
+              )
+            )}
+            {title}
+          </h3>
+          <div className="joy-panel-actions">
+            {actions}
+            {search !== undefined && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={searchOpen ? `Close ${title} search` : `Search ${title}`}
+                title={searchOpen ? 'Close search' : 'Search'}
+                aria-expanded={searchOpen}
+                aria-controls={searchFieldId}
+                onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+              >
+                <SearchIcon />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {search !== undefined && searchOpen && (
         <div className="joy-panel-search">
