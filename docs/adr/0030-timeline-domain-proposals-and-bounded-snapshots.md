@@ -143,9 +143,26 @@ restores silent data loss. Retention can be disabled by passing a large
 without touching the apply path, and the whole review surface renders only when
 `DUAL_LENS_FLAG_KEY` is `'on'`, which it is not in production.
 
-**Not yet verified in a browser.** The pacing round trip — open a gap, run
-review, approve, confirm the clip moves and one Undo restores it — has not been
-exercised in a running editor.
+**Verified in the browser**, 2026-07-27, against a running editor with a
+2-second gap opened between `intro` and `product` (`product` and `outro`
+shifted 2s later): `Run review` correctly reported "2.00s of dead air before
+'product'" **and** "2.00s of dead air before 'outro'" — the second finding
+demonstrates the accumulating cursor exactly as designed, since it is computed
+against product's *proposed* corrected position, not its actual (already
+adjacent) neighbor.
+
+Approving only the pacing proposal and clicking apply correctly did **nothing**
+— `commitCombinedChangeSet` (`packages/agent-tools/src/specialists.ts:318-325`)
+requires every specialist that contributed an edit to be approved, or none of
+them commit; the panel reported `not approved: audio-cleanup-agent,
+color-review-agent` exactly as coded. This is the intended all-or-nothing
+approval gate, not a defect — a partial commit would apply a change the
+reviewer never actually saw approved for that specialist. Approving all three
+specialists with edits (audio, colour, pacing) applied cleanly: the persisted
+transaction recorded `Apply 2 timeline edit(s)` with both `timeline.moveClip`
+commands in one entry, the Timeline panel showed `product` and `outro` both
+pulled back to close the gap, one Undo reverted both together, and Redo
+reapplied both. No React key or ref warnings were observed.
 
 ## Related contracts/tests
 

@@ -124,9 +124,23 @@ dropping the UI leaves existing projects valid; the commands are additive to
 `GRAPH_COMMAND_REGISTRY`; and the whole surface renders only when
 `DUAL_LENS_FLAG_KEY` is `'on'`, which it is not in production.
 
-**Not yet verified in a browser.** The tests above are unit-level. Drill-in,
-inline rename, ungroup-then-undo, and arrow traversal have not been exercised in
-a running editor.
+**Verified in the browser**, 2026-07-27, against a running editor with the
+`DUAL_LENS_FLAG_KEY` flag on:
+
+- Grouping: checked two nodes from an inserted Auto Captions template, grouped
+  them, renamed the group inline (committed on blur), opened it (breadcrumb
+  read `Workflow / Captions`), confirmed the view filtered to the two members
+  while the edge crossing the boundary (`Transcribe → Caption style`) stayed
+  listed, returned to the top level, ungrouped, and confirmed one Undo restored
+  the group with its label intact.
+- Traversal: focused a clip node in the Flow graph and drove every key —
+  Left/Right followed the edge to the node's source asset and back, Down/Up
+  moved within the column to the sibling clip and back, Home/End jumped to the
+  first/last node in layout order, and Left from the first node moved nothing
+  and left `defaultPrevented: false`, confirmed via an instrumented capture-phase
+  listener — matching the no-wrap design exactly.
+
+No React key or ref warnings were observed in the console during any of this.
 
 ## Related contracts/tests
 
