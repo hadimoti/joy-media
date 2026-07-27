@@ -308,7 +308,12 @@ export function InspectorPanel({
                 const modified = Math.abs(value - (DEFAULTS[key] ?? 0)) > 0.0005;
                 return (
                   <div key={key} className={`inspector-prop${modified ? ' modified' : ''}`}>
-                    <label htmlFor={`insp-${key}`}>{property.label}</label>
+                    <div className="inspector-prop-label">
+                      <label htmlFor={`insp-${key}`}>{property.label}</label>
+                      {key === 'opacity' && (
+                        <span className="monitor-meta">{formatPercent(value)}</span>
+                      )}
+                    </div>
                     <div className="inspector-prop-row">
                       <button
                         type="button"
@@ -343,9 +348,6 @@ export function InspectorPanel({
                           else onSetStatic(target.id, key, next);
                         }}
                       />
-                      {key === 'opacity' && (
-                        <span className="monitor-meta">{formatPercent(value)}</span>
-                      )}
                       <button
                         type="button"
                         className={hasExpression ? 'fx fx-on' : 'fx'}

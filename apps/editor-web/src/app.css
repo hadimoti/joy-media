@@ -6084,6 +6084,15 @@ label {
   align-items: center;
   gap: var(--space-2);
 }
+.inspector-prop-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.inspector-prop-label .monitor-meta {
+  flex: none;
+}
 .inspector-prop label {
   font-size: 0.72rem;
   color: var(--joy-text-muted);
