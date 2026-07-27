@@ -13,6 +13,12 @@ export interface DualLensNode {
   readonly column: number;
   readonly startUs?: number;
   readonly endUs?: number;
+  /**
+   * Timeline clips this node stands for. Reveal and selection sync read this
+   * rather than parsing node ids, so the `kind:value` id format stays a display
+   * detail instead of becoming a contract two more modules depend on.
+   */
+  readonly clipIds: readonly string[];
 }
 
 export interface DualLensEdge {
@@ -27,6 +33,8 @@ export interface DualLensLaneItem {
   readonly label: string;
   readonly startUs?: number;
   readonly endUs?: number;
+  /** Set on track lanes, so clicking the item can select rather than seek. */
+  readonly clipId?: string;
 }
 
 export interface DualLensLane {
@@ -72,11 +80,19 @@ export function buildDualLensProjection(
   const nodes: DualLensNode[] = [];
   const edges: DualLensEdge[] = [];
   const nodeIds = new Set<string>();
+  // An asset or provider is reached once per clip that uses it, so bindings
+  // accumulate across visits while the node itself is only added on the first.
+  const clipBindings = new Map<string, Set<string>>();
 
-  const addNode = (node: DualLensNode) => {
+  const addNode = (node: Omit<DualLensNode, 'clipIds'>, boundClipId?: string) => {
+    if (boundClipId !== undefined) {
+      const bound = clipBindings.get(node.id) ?? new Set<string>();
+      bound.add(boundClipId);
+      clipBindings.set(node.id, bound);
+    }
     if (nodeIds.has(node.id)) return;
     nodeIds.add(node.id);
-    nodes.push(node);
+    nodes.push({ ...node, clipIds: [] });
   };
   const addEdge = (from: string, to: string, label?: string) => {
     const id = `${from}->${to}`;
@@ -96,36 +112,45 @@ export function buildDualLensProjection(
   for (const { trackName, clip } of clips) {
     const clipId = `clip:${clip.id}`;
     const endUs = clip.startUs + clip.durationUs;
-    addNode({
-      id: clipId,
-      kind: 'clip',
-      label: clip.id,
-      detail: `${trackName} · ${formatSeconds(clip.durationUs)}`,
-      column: 1,
-      startUs: clip.startUs,
-      endUs,
-    });
+    addNode(
+      {
+        id: clipId,
+        kind: 'clip',
+        label: clip.id,
+        detail: `${trackName} · ${formatSeconds(clip.durationUs)}`,
+        column: 1,
+        startUs: clip.startUs,
+        endUs,
+      },
+      clip.id,
+    );
     if (clip.kind === 'video') {
       const assetId = `asset:${clip.assetId}`;
       const asset = creative.assets[clip.assetId];
-      addNode({
-        id: assetId,
-        kind: 'asset',
-        label: asset?.displayName ?? clip.assetId,
-        detail: asset?.kind ?? 'video source',
-        column: 0,
-      });
+      addNode(
+        {
+          id: assetId,
+          kind: 'asset',
+          label: asset?.displayName ?? clip.assetId,
+          detail: asset?.kind ?? 'video source',
+          column: 0,
+        },
+        clip.id,
+      );
       addEdge(assetId, clipId, 'source');
       const provenance = asset?.generationProvenance;
       if (provenance !== undefined) {
         const providerId = `provider:${provenance.providerId}:${provenance.modelId}`;
-        addNode({
-          id: providerId,
-          kind: 'provider',
-          label: provenance.modelId,
-          detail: `${provenance.providerId} · ${provenance.modelVersion}`,
-          column: 0,
-        });
+        addNode(
+          {
+            id: providerId,
+            kind: 'provider',
+            label: provenance.modelId,
+            detail: `${provenance.providerId} · ${provenance.modelVersion}`,
+            column: 0,
+          },
+          clip.id,
+        );
         addEdge(providerId, assetId, 'generated');
       }
     }
@@ -133,15 +158,18 @@ export function buildDualLensProjection(
     const object = objectId === undefined ? undefined : creative.visualObjects[objectId];
     if (object !== undefined) {
       const visualId = `visual:${object.id}`;
-      addNode({
-        id: visualId,
-        kind: 'visual',
-        label: object.kind === 'text' ? (object.text ?? object.id) : object.id,
-        detail: `${object.kind} layer`,
-        column: 2,
-        startUs: clip.startUs,
-        endUs,
-      });
+      addNode(
+        {
+          id: visualId,
+          kind: 'visual',
+          label: object.kind === 'text' ? (object.text ?? object.id) : object.id,
+          detail: `${object.kind} layer`,
+          column: 2,
+          startUs: clip.startUs,
+          endUs,
+        },
+        clip.id,
+      );
       addEdge(clipId, visualId, 'drives');
       addEdge(visualId, outputId, 'composite');
     } else {
@@ -177,9 +205,14 @@ export function buildDualLensProjection(
     addEdge(agentId, outputId, 'change sets');
   }
 
+  const resolvedNodes: readonly DualLensNode[] = nodes.map((node) => ({
+    ...node,
+    clipIds: [...(clipBindings.get(node.id) ?? [])],
+  }));
+
   const lanes = buildLanes(timeline, creative, history, clips);
   const traceNodeIds = new Set<string>();
-  for (const node of nodes) {
+  for (const node of resolvedNodes) {
     if (
       node.startUs !== undefined &&
       node.endUs !== undefined &&
@@ -208,7 +241,7 @@ export function buildDualLensProjection(
       .filter((edge) => traceNodeIds.has(edge.from) && traceNodeIds.has(edge.to))
       .map((edge) => edge.id),
   );
-  const activeClipLabels = nodes
+  const activeClipLabels = resolvedNodes
     .filter((node) => node.kind === 'clip' && traceNodeIds.has(node.id))
     .map((node) => node.label);
   const traceSummary =
@@ -218,7 +251,7 @@ export function buildDualLensProjection(
 
   return {
     durationUs,
-    nodes,
+    nodes: resolvedNodes,
     edges,
     lanes,
     traceNodeIds,
@@ -249,6 +282,7 @@ function buildLanes(
       items: track.clips.map((clip) => ({
         id: clip.id,
         label: clip.id,
+        clipId: clip.id,
         startUs: clip.startUs,
         endUs: clip.startUs + clip.durationUs,
       })),

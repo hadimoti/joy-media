@@ -6922,6 +6922,134 @@ label {
   font-size: 8px;
 }
 
+/* Selection is the editor's, mirrored here; focus is this panel's own cursor. */
+.dual-flow-node.is-selected rect {
+  stroke: var(--color-joy);
+  stroke-width: 2;
+}
+
+.dual-flow-node.is-focused rect {
+  stroke: #f1f3f7;
+  stroke-width: 2.5;
+}
+
+.dual-time-item.is-selected {
+  border-color: #f1f3f7;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.dual-flow-minimap {
+  height: 54px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--joy-border);
+  background: rgba(12, 14, 19, 0.9);
+}
+
+.dual-flow-minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dual-flow-minimap-node {
+  fill: #39404d;
+}
+
+.dual-flow-minimap-node.is-traced {
+  fill: #9d8cff;
+}
+
+.dual-flow-minimap-node.is-focused {
+  fill: #f1f3f7;
+}
+
+.dual-flow-minimap-viewport {
+  fill: rgba(255, 255, 255, 0.07);
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 4;
+}
+
+/* Provenance ribbon: one line of causality above the real timeline. */
+.timeline-provenance {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-3);
+  border-bottom: 1px solid var(--joy-border);
+  background: rgba(110, 87, 255, 0.07);
+}
+
+.timeline-provenance-label {
+  flex: none;
+  color: var(--color-joy);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.timeline-provenance-chain {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  gap: 4px;
+  list-style: none;
+}
+
+.timeline-provenance-chain li {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-provenance-chain li + li::before {
+  color: var(--joy-text-muted);
+  content: '→';
+  font-size: 10px;
+}
+
+.timeline-provenance-step {
+  max-width: 160px;
+  padding: 2px 7px;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  overflow: hidden;
+  color: var(--joy-text);
+  background: var(--joy-bg-chrome);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.timeline-provenance-step:hover {
+  border-color: var(--color-joy);
+  color: #fff;
+}
+
+/* Semantic accents (plan §3.5) so kind is not carried by position alone. */
+.timeline-provenance-step[data-kind='provider'] {
+  border-color: rgba(214, 108, 214, 0.6);
+}
+
+.timeline-provenance-step[data-kind='agent'] {
+  border-color: rgba(94, 200, 214, 0.6);
+}
+
+.timeline-provenance-step[data-kind='data'] {
+  border-color: rgba(150, 130, 255, 0.6);
+}
+
+.timeline-provenance-step[data-kind='output'] {
+  border-color: rgba(241, 243, 247, 0.55);
+  font-weight: 600;
+}
+
 @media (max-width: 1050px) {
   .dual-lens-content.is-split {
     grid-template-columns: 1fr;

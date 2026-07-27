@@ -55,6 +55,7 @@ import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
+import type { ProvenanceStep } from './dual-lens-reveal.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -378,6 +379,9 @@ export function TimelinePanel({
   onRemoveMarker,
   onEffectDrop,
   onTransitionDrop,
+  provenance,
+  onRevealInFlow,
+  onRevealNode,
   showToast,
 }: {
   readonly project: SpikeProject;
@@ -403,6 +407,14 @@ export function TimelinePanel({
     rightClipId: string,
     trackId: string,
   ) => void;
+  /**
+   * Causal chain through the selected item, source first. Supplied by the
+   * editor from the shared Dual Lens projection so the ribbon and the Flow
+   * panel can never disagree about what produced the selection.
+   */
+  readonly provenance?: readonly ProvenanceStep[];
+  readonly onRevealInFlow?: (clipId: string) => void;
+  readonly onRevealNode?: (nodeId: string) => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
@@ -758,7 +770,18 @@ export function TimelinePanel({
       }
     });
 
-    setMenu({ x: clientX, y: clientY, items, trackId, clipId: clip.id });
+    // A `dividerBefore` entry is itself the separator here — it is not rendered
+    // as an item — so the rule goes in as its own entry ahead of the action.
+    const withReveal =
+      onRevealInFlow === undefined
+        ? items
+        : [
+            ...items,
+            { label: '', action: () => {}, dividerBefore: true },
+            { label: 'Reveal in Flow', action: () => onRevealInFlow(clip.id) },
+          ];
+
+    setMenu({ x: clientX, y: clientY, items: withReveal, trackId, clipId: clip.id });
   };
 
   const handleImportClick = useCallback(() => {
@@ -1016,6 +1039,27 @@ export function TimelinePanel({
           </button>
         </div>
       </div>
+
+      {provenance !== undefined && provenance.length > 0 && (
+        <div className="timeline-provenance" aria-live="polite">
+          <span className="timeline-provenance-label">Flow</span>
+          <ol className="timeline-provenance-chain">
+            {provenance.map((step) => (
+              <li key={step.nodeId}>
+                <button
+                  type="button"
+                  className="timeline-provenance-step"
+                  data-kind={step.kind}
+                  title={`Reveal ${step.label} in Flow`}
+                  onClick={() => onRevealNode?.(step.nodeId)}
+                >
+                  {step.label}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       <TimelineEmptyState
         project={project}

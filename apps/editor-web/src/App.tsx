@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
@@ -57,6 +65,12 @@ import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { DualLensPanel } from './DualLensPanel.js';
+import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
+import {
+  primaryNodeIdForClip,
+  provenanceRibbon,
+  type LensRevealRequest,
+} from './dual-lens-reveal.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import {
   clearActiveProjectId,
@@ -379,9 +393,20 @@ interface EditorPanelContextValue {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly historyEntries: readonly HistoryEntry[];
+  /**
+   * ADR-0022: Time and Flow are two lenses on one document, so they read one
+   * projection built here rather than each deriving its own.
+   */
+  readonly dualLensProjection: DualLensProjection;
+  /** A pending `Reveal in Flow`, consumed by the Dual Lens panel. */
+  readonly lensReveal: LensRevealRequest | undefined;
+  readonly revealInFlow: (clipId: string) => void;
+  readonly revealNodeInFlow: (nodeId: string) => void;
+  readonly revealOnTimeline: (clipIds: readonly string[]) => void;
   readonly togglePlayback: () => void;
   readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
+  readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
   readonly updateVisualProperty: (
@@ -1216,6 +1241,55 @@ function EditorWorkspace({
   const activatePanel = useCallback((panelId: string) => {
     dockviewApiRef.current?.getPanel(panelId)?.api.setActive();
   }, []);
+
+  const dualLensProjection = useMemo(
+    () =>
+      buildDualLensProjection(
+        session.timelineProject,
+        session.visualProject,
+        state.playheadUs,
+        session.historyEntries,
+      ),
+    [session.timelineProject, session.visualProject, session.historyEntries, state.playheadUs],
+  );
+  // The projection changes on every playhead tick, so reveal callbacks read it
+  // through a ref instead of a dependency — otherwise every panel that takes
+  // one would re-render at playback rate.
+  const dualLensProjectionRef = useRef(dualLensProjection);
+  dualLensProjectionRef.current = dualLensProjection;
+
+  const [lensReveal, setLensReveal] = useState<LensRevealRequest | undefined>(undefined);
+  const selectClips = useCallback((clipIds: readonly string[]) => {
+    setState((current) => ({ ...current, selectedIds: [...clipIds] }));
+  }, []);
+  const revealNodeInFlow = useCallback(
+    (nodeId: string) => {
+      setLensReveal({ mode: 'flow', nodeId, token: Date.now() });
+      activatePanel('flow');
+    },
+    [activatePanel],
+  );
+  const revealInFlow = useCallback(
+    (clipId: string) => {
+      selectClips([clipId]);
+      const nodeId = primaryNodeIdForClip(dualLensProjectionRef.current, clipId);
+      setLensReveal({
+        mode: 'flow',
+        token: Date.now(),
+        ...(nodeId === undefined ? {} : { nodeId }),
+      });
+      activatePanel('flow');
+    },
+    [activatePanel, selectClips],
+  );
+  const revealOnTimeline = useCallback(
+    (clipIds: readonly string[]) => {
+      if (clipIds.length === 0) return;
+      selectClips(clipIds);
+      activatePanel('timeline');
+    },
+    [activatePanel, selectClips],
+  );
   const refreshJoySession = useCallback(() => {
     void probeJoySession().then(setJoySession);
   }, []);
@@ -2043,6 +2117,13 @@ function EditorWorkspace({
           playing={state.playing}
           selectedIds={state.selectedIds}
           markers={visualProject.markers}
+          provenance={
+            state.selectedIds[0] === undefined
+              ? []
+              : provenanceRibbon(context.dualLensProjection, state.selectedIds[0])
+          }
+          onRevealInFlow={context.revealInFlow}
+          onRevealNode={context.revealNodeInFlow}
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
@@ -2112,11 +2193,13 @@ function EditorWorkspace({
     if (api.id === 'flow')
       return (
         <DualLensPanel
-          timeline={context.timelineProject}
-          creative={visualProject}
+          projection={context.dualLensProjection}
           playheadUs={state.playheadUs}
-          historyEntries={context.historyEntries}
+          selectedClipIds={state.selectedIds}
+          {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
           onSeek={context.seek}
+          onSelectClips={context.selectClips}
+          onRevealOnTimeline={context.revealOnTimeline}
         />
       );
     if (api.id === 'jobs')
@@ -2565,6 +2648,11 @@ function EditorWorkspace({
           canUndo: session.canUndo,
           canRedo: session.canRedo,
           historyEntries: session.historyEntries,
+          dualLensProjection,
+          lensReveal,
+          revealInFlow,
+          revealNodeInFlow,
+          revealOnTimeline,
           togglePlayback,
           seek,
           toggleSelection: (id) =>
@@ -2572,6 +2660,7 @@ function EditorWorkspace({
               ...current,
               selectedIds: toggleSelection({ clipIds: current.selectedIds }, id).clipIds,
             })),
+          selectClips,
           clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
           dispatchTimeline,
           updateVisualProperty,
