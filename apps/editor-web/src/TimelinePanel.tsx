@@ -203,8 +203,9 @@ function TimelineClip({
         : trimPreview.timeUs - clip.startUs;
 
   const widthPx = Math.max(8, displayDurationUs * pxPerUs);
+  /** Half-gap between adjacent clips; start edge stays flush with timeToPixel. */
   const gapPx = 1;
-  const layoutWidthPx = Math.max(6, widthPx - gapPx * 2);
+  const layoutWidthPx = Math.max(6, widthPx - gapPx);
   const cellCount = filmstripCellCount(layoutWidthPx);
   const waveCount = waveformBarCount(layoutWidthPx, viewport.pixelsPerSecond);
   const label = clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
@@ -225,7 +226,7 @@ function TimelineClip({
       aria-pressed={selected}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
-        left: `${timeToPixel(displayStartUs, viewport) + gapPx}px`,
+        left: `${timeToPixel(displayStartUs, viewport)}px`,
         width: `${layoutWidthPx}px`,
       }}
       onClick={(event) => {

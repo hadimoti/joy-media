@@ -122,7 +122,7 @@ function InspectClip({
   const leftPx = timeToPixel(item.startUs, { ...viewport, originUs: 0 });
   const widthPx = Math.max(8, durationUs * (viewport.pixelsPerSecond / 1_000_000));
   const gapPx = 1;
-  const layoutWidthPx = Math.max(6, widthPx - gapPx * 2);
+  const layoutWidthPx = Math.max(6, widthPx - gapPx);
   const showChrome = layoutWidthPx >= 48;
   const showDuration = layoutWidthPx >= 100;
   const cellCount = filmstripCellCount(layoutWidthPx);
@@ -139,7 +139,7 @@ function InspectClip({
           : `${item.label} — click to select, double-click to go to it`
       }
       style={{
-        left: `${leftPx + gapPx}px`,
+        left: `${leftPx}px`,
         width: `${layoutWidthPx}px`,
       }}
       onClick={() => {

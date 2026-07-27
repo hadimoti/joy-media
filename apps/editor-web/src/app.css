@@ -1575,7 +1575,14 @@ label {
 .timeline-track {
   display: flex;
   align-items: center;
+}
+.timeline-toolbar {
   gap: 0.4rem;
+}
+.timeline-track {
+  /* Must be 0: playhead/grid/ruler origin is exactly 9.5rem (header width).
+     A flex gap here shifts the lane and leaves an empty strip at t=0. */
+  gap: 0;
 }
 .timeline-panel {
   display: flex;
