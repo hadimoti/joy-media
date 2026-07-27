@@ -17,6 +17,7 @@ import {
   type LensMode,
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
+import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 
 export interface DualLensPanelProps {
   /**
@@ -358,6 +359,27 @@ function FlowProjection({
     });
   }, [focusedNodeId]);
 
+  // Arrow keys follow edges and columns, so the connections are reachable
+  // without a mouse (§12.5). Focus only — Enter still does the selecting.
+  const nodeElements = useRef(new Map<string, SVGGElement>());
+  const moveFocus = (fromId: string, key: TraversalKey) => {
+    const nextId = traverseGraph({ nodes, edges, positions: graph.positions }, fromId, key);
+    if (nextId === undefined) return false;
+    const element = nodeElements.current.get(nextId);
+    if (element === undefined) return false;
+    element.focus();
+    const canvas = canvasRef.current;
+    const position = graph.positions.get(nextId);
+    if (canvas !== null && position !== undefined) {
+      canvas.scrollTo({
+        left: Math.max(0, position.x - canvas.clientWidth / 2 + NODE_WIDTH / 2),
+        top: Math.max(0, position.y - canvas.clientHeight / 2),
+        behavior: 'smooth',
+      });
+    }
+    return true;
+  };
+
   const activeCount = nodes.filter((node) => traceNodeIds.has(node.id)).length;
 
   return (
@@ -378,8 +400,17 @@ function FlowProjection({
           Reveal on Timeline
         </button>
       </div>
+      <p className="sr-only" id="dual-flow-keys">
+        Use the left and right arrow keys to follow a connection, up and down to move within a
+        column, Home and End for the first and last node, and Enter to select.
+      </p>
       <div className="dual-flow-canvas" ref={canvasRef} onScroll={readViewport}>
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Media and data flow graph">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="Media and data flow graph"
+          aria-describedby="dual-flow-keys"
+        >
           <defs>
             <marker
               id="dual-flow-arrow"
@@ -416,6 +447,10 @@ function FlowProjection({
             return (
               <g
                 key={node.id}
+                ref={(element) => {
+                  if (element === null) nodeElements.current.delete(node.id);
+                  else nodeElements.current.set(node.id, element);
+                }}
                 className={classes.join(' ')}
                 role="button"
                 tabIndex={0}
@@ -430,7 +465,12 @@ function FlowProjection({
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     onSelectNode(node);
+                    return;
                   }
+                  if (!isTraversalKey(event.key)) return;
+                  // Only swallow the key when it actually moved somewhere, so a
+                  // leaf still lets the canvas scroll rather than trapping it.
+                  if (moveFocus(node.id, event.key)) event.preventDefault();
                 }}
               >
                 <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" />
