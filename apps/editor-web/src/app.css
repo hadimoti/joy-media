@@ -1975,6 +1975,20 @@ label {
   border-radius: inherit;
   overflow: hidden;
 }
+.timeline-clip-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: color-mix(in srgb, var(--joy-accent) 85%, #fff);
+  opacity: 0.92;
+}
+.timeline-clip-icon .png-mask-icon,
+.timeline-clip-icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
 .timeline-clip--voice .timeline-clip-chrome {
   align-items: flex-start;
   padding-top: 0.15rem;

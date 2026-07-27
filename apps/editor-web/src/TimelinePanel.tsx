@@ -60,6 +60,7 @@ import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
 import { DataLaneDrawer } from './DataLaneDrawer.js';
+import { polishMediaLabel } from './media-label.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -86,10 +87,7 @@ function snapSplitUs(
 }
 
 function clipDisplayName(id: string): string {
-  return id
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b([a-z])/g, (ch) => ch.toUpperCase())
-    .trim();
+  return polishMediaLabel(id);
 }
 
 function hashUnit(seed: string, salt: number): number {
@@ -357,6 +355,9 @@ function TimelineClip({
       )}
       {showChrome && (
         <span className="timeline-clip-chrome">
+          <span className="timeline-clip-icon" aria-hidden="true">
+            {voice ? <TimelineAudioTrackIcon /> : <TimelineVideoTrackIcon />}
+          </span>
           <span className="timeline-clip-label">{label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
           {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}

@@ -1,5 +1,6 @@
 import type { Clip, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { HistoryEntry } from './editor-session.js';
+import { polishMediaLabel } from './media-label.js';
 import { readClipObjectMap } from './sticker-bindings.js';
 
 export type DualLensNodeKind =
@@ -35,7 +36,20 @@ export interface DualLensLaneItem {
   readonly endUs?: number;
   /** Set on track lanes, so clicking the item can select rather than seek. */
   readonly clipId?: string;
+  /** Glyph shown left of the polished label in Time View. */
+  readonly icon?: DualLensItemIcon;
 }
+
+export type DualLensItemIcon =
+  | 'video'
+  | 'audio'
+  | 'text'
+  | 'caption'
+  | 'script'
+  | 'prompt'
+  | 'generation'
+  | 'agent'
+  | 'generic';
 
 export interface DualLensLane {
   readonly id: string;
@@ -116,7 +130,7 @@ export function buildDualLensProjection(
       {
         id: clipId,
         kind: 'clip',
-        label: clip.id,
+        label: polishMediaLabel(clip.id),
         detail: `${trackName} · ${formatSeconds(clip.durationUs)}`,
         column: 1,
         startUs: clip.startUs,
@@ -131,7 +145,7 @@ export function buildDualLensProjection(
         {
           id: assetId,
           kind: 'asset',
-          label: asset?.displayName ?? clip.assetId,
+          label: polishMediaLabel(asset?.displayName ?? clip.assetId),
           detail: asset?.kind ?? 'video source',
           column: 0,
         },
@@ -145,7 +159,7 @@ export function buildDualLensProjection(
           {
             id: providerId,
             kind: 'provider',
-            label: provenance.modelId,
+            label: polishMediaLabel(provenance.modelId),
             detail: `${provenance.providerId} · ${provenance.modelVersion}`,
             column: 0,
           },
@@ -162,7 +176,7 @@ export function buildDualLensProjection(
         {
           id: visualId,
           kind: 'visual',
-          label: object.kind === 'text' ? (object.text ?? object.id) : object.id,
+          label: polishMediaLabel(object.kind === 'text' ? (object.text ?? object.id) : object.id),
           detail: `${object.kind} layer`,
           column: 2,
           startUs: clip.startUs,
@@ -184,7 +198,7 @@ export function buildDualLensProjection(
     addNode({
       id: nodeId,
       kind: 'data',
-      label: `${document.language} captions`,
+      label: polishMediaLabel(`${document.language} captions`),
       detail: `${Object.keys(document.words).length} words`,
       column: 2,
       ...(placement === undefined ? {} : { startUs: placement.startUs, endUs: placement.endUs }),
@@ -281,8 +295,9 @@ function buildLanes(
       advanced: false,
       items: track.clips.map((clip) => ({
         id: clip.id,
-        label: clip.id,
+        label: polishMediaLabel(clip.id),
         clipId: clip.id,
+        icon: 'video' as const,
         startUs: clip.startUs,
         endUs: clip.startUs + clip.durationUs,
       })),
@@ -291,12 +306,20 @@ function buildLanes(
     ([clipId, objectId]) => {
       const object = creative.visualObjects[objectId];
       if (object?.kind !== 'text') return [];
-      return [{ id: objectId, label: object.text ?? object.id, ...rangeForClip(clipId) }];
+      return [
+        {
+          id: objectId,
+          label: polishMediaLabel(object.text ?? object.id),
+          icon: 'text' as const,
+          ...rangeForClip(clipId),
+        },
+      ];
     },
   );
   const audioItems: DualLensLaneItem[] = Object.keys(creative.audio?.clips ?? {}).map((clipId) => ({
     id: clipId,
-    label: clipId,
+    label: polishMediaLabel(clipId),
+    icon: 'audio' as const,
     ...rangeForClip(clipId),
   }));
   const creativeComposition = creative.compositions[creative.rootCompositionId];
@@ -310,9 +333,11 @@ function buildLanes(
               : [
                   {
                     id: `caption:${clip.id}`,
-                    label:
+                    label: polishMediaLabel(
                       creative.captionDocuments[clip.captionDocumentId]?.language ??
-                      clip.captionDocumentId,
+                        clip.captionDocumentId,
+                    ),
+                    icon: 'caption' as const,
                     startUs: clip.startUs,
                     endUs: clip.startUs + clip.durationUs,
                   },
@@ -333,12 +358,22 @@ function buildLanes(
   const scriptValue = creative.variables['script'];
   const scriptItems: readonly DualLensLaneItem[] =
     typeof scriptValue === 'string' && scriptValue.length > 0
-      ? [{ id: 'script', label: scriptValue.slice(0, 48) }]
+      ? [
+          {
+            id: 'script',
+            label: polishMediaLabel(scriptValue.slice(0, 48)),
+            icon: 'script',
+          },
+        ]
       : [];
   const agentItems: readonly DualLensLaneItem[] = history
     .filter((entry) => /agent/i.test(entry.label))
     .slice(-8)
-    .map((entry) => ({ id: entry.id, label: entry.label }));
+    .map((entry) => ({
+      id: entry.id,
+      label: polishMediaLabel(entry.label),
+      icon: 'agent' as const,
+    }));
 
   return [
     ...core,
@@ -352,7 +387,8 @@ function buildLanes(
       advanced: true,
       items: generationAssets.map((asset) => ({
         id: `prompt:${asset.id}`,
-        label: asset.generationProvenance?.prompt ?? asset.displayName,
+        label: polishMediaLabel(asset.generationProvenance?.prompt ?? asset.displayName),
+        icon: 'prompt' as const,
         ...rangeForAsset(asset.id),
       })),
     },
@@ -362,7 +398,8 @@ function buildLanes(
       advanced: true,
       items: generationAssets.map((asset) => ({
         id: asset.id,
-        label: asset.displayName,
+        label: polishMediaLabel(asset.displayName),
+        icon: 'generation' as const,
         ...rangeForAsset(asset.id),
       })),
     },

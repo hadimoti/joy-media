@@ -7,6 +7,7 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
   formatTime,
   type DualLensEdge,
+  type DualLensItemIcon,
   type DualLensLane,
   type DualLensNode,
   type DualLensProjection,
@@ -18,6 +19,17 @@ import {
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
+import {
+  AiEffectIcon,
+  AutoCaptionIcon,
+  CommandIcon,
+  ImageIcon,
+  ListIcon,
+  SearchIcon,
+  TimelineAudioTrackIcon,
+  TimelineScriptTrackIcon,
+  TimelineVideoTrackIcon,
+} from './icons.js';
 
 export interface DualLensPanelProps {
   /**
@@ -187,6 +199,31 @@ function dualFilmstripCellCount(widthPercent: number): number {
   return Math.max(2, Math.min(24, Math.floor(widthPercent / 4)));
 }
 
+function DualLensItemGlyph({ icon }: { readonly icon: DualLensItemIcon | undefined }) {
+  switch (icon) {
+    case 'audio':
+      return <TimelineAudioTrackIcon />;
+    case 'text':
+      return <ListIcon />;
+    case 'caption':
+      return <AutoCaptionIcon />;
+    case 'script':
+      return <TimelineScriptTrackIcon />;
+    case 'prompt':
+      return <SearchIcon />;
+    case 'generation':
+      return <ImageIcon />;
+    case 'agent':
+      return <AiEffectIcon />;
+    case 'generic':
+      return <CommandIcon />;
+    case 'video':
+    case undefined:
+    default:
+      return <TimelineVideoTrackIcon />;
+  }
+}
+
 function TimeProjection({
   lanes,
   durationUs,
@@ -331,6 +368,9 @@ function TimeProjection({
                       )}
                       {showChrome && (
                         <span className="timeline-clip-chrome">
+                          <span className="timeline-clip-icon" aria-hidden="true">
+                            <DualLensItemGlyph icon={item.icon} />
+                          </span>
                           <span className="timeline-clip-label">{item.label}</span>
                           {showDuration && durationUs !== undefined && (
                             <span className="timeline-clip-duration">

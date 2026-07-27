@@ -112,7 +112,9 @@ describe('Dual Lens reveal bridge', () => {
         'visual:intro-title',
         'output:program',
       ]);
-      expect(formatProvenanceRibbon(steps)).toBe('asset-intro → intro → JOY → Program Output');
+      expect(formatProvenanceRibbon(steps)).toBe(
+        'Asset-intro → Intro → JOY → Program Output',
+      );
     });
 
     it('places a generative provider before the asset it produced, not beside it', () => {
@@ -128,7 +130,7 @@ describe('Dual Lens reveal bridge', () => {
         'output:program',
       ]);
       expect(formatProvenanceRibbon(steps)).toBe(
-        'flux-dev → Generated intro → intro → JOY → Program Output',
+        'Flux-dev → Generated Intro → Intro → JOY → Program Output',
       );
     });
 
