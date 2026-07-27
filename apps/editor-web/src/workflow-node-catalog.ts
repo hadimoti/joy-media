@@ -83,7 +83,15 @@ export const WORKFLOW_NODE_TEMPLATES: readonly WorkflowNodeTemplate[] = [
     'agent.colorReview',
     'Color review',
     'Specialist proposes a grade change set.',
-    [{ id: 'in', label: 'Sequence', dataType: 'VideoArtifact', required: true }],
+    [
+      {
+        id: 'in',
+        label: 'Sequence',
+        dataType: 'VideoArtifact',
+        required: true,
+        accepts: ['Sequence'],
+      },
+    ],
     [{ id: 'out', label: 'Change set', dataType: 'ChangeSet', required: true }],
     ['timeline.read', 'provider.generate'],
     true,
@@ -93,6 +101,122 @@ export const WORKFLOW_NODE_TEMPLATES: readonly WorkflowNodeTemplate[] = [
     'Caption track',
     'Writes captions back to the timeline.',
     [{ id: 'in', label: 'Captions', dataType: 'CaptionDocument', required: true }],
+    [],
+    ['timeline.write'],
+    true,
+  ),
+
+  // Added for the Phase 6 templates. Port types are what make a template a
+  // real graph rather than a picture: Auto Captions only connects because
+  // transcript → caption style → caption track is type-compatible end to end.
+  template(
+    'source.sequence',
+    'Sequence',
+    'The current sequence as a whole.',
+    [],
+    [{ id: 'out', label: 'Sequence', dataType: 'Sequence', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'source.script',
+    'Script',
+    'A script or a range of one.',
+    [],
+    [{ id: 'out', label: 'Script', dataType: 'Script', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'analysis.silence',
+    'Silence detection',
+    'Finds gaps and filler to review.',
+    [{ id: 'in', label: 'Audio', dataType: 'AudioArtifact', required: true }],
+    [{ id: 'out', label: 'Analysis', dataType: 'Analysis', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'agent.audioCleanup',
+    'Audio cleanup',
+    'Specialist proposes level and noise fixes.',
+    [
+      {
+        id: 'in',
+        label: 'Source',
+        dataType: 'Analysis',
+        required: true,
+        accepts: ['AudioArtifact', 'Sequence'],
+      },
+    ],
+    [{ id: 'out', label: 'Change set', dataType: 'ChangeSet', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'review.gate',
+    'Review gate',
+    'Holds change sets until a human approves.',
+    [
+      {
+        id: 'in',
+        label: 'Change sets',
+        dataType: 'ChangeSet',
+        required: true,
+        // Several specialists feed one gate; that is the combining step §11.2
+        // describes, and it is the only input here that takes more than one.
+        multiple: true,
+      },
+    ],
+    [{ id: 'out', label: 'Approved', dataType: 'ChangeSet', required: true }],
+    [],
+    true,
+  ),
+  template(
+    'output.sequenceUpdate',
+    'Update sequence',
+    'Applies an approved change set to the sequence.',
+    [{ id: 'in', label: 'Approved', dataType: 'ChangeSet', required: true }],
+    [],
+    ['timeline.write'],
+    true,
+  ),
+  template(
+    'transform.shotBrief',
+    'Shot brief',
+    'Turns a script range into a generation prompt.',
+    [{ id: 'in', label: 'Script', dataType: 'Script', required: true }],
+    [{ id: 'out', label: 'Prompt', dataType: 'Prompt', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'generative.video',
+    'Generate video',
+    'Provider generates shots from a prompt.',
+    [{ id: 'in', label: 'Prompt', dataType: 'Prompt', required: true }],
+    [{ id: 'out', label: 'Versions', dataType: 'GeneratedVideo', required: true }],
+    // Spending is declared up front so the policy engine can gate it before
+    // anything runs, and undo cannot refund it (ADR-0019).
+    ['provider.generate', 'provider.spend'],
+    true,
+  ),
+  template(
+    'composition.versionSelector',
+    'Version selector',
+    'Keeps generated versions until one is chosen.',
+    [
+      {
+        id: 'in',
+        label: 'Versions',
+        dataType: 'GeneratedVideo',
+        required: true,
+        multiple: true,
+      },
+    ],
+    [{ id: 'out', label: 'Chosen', dataType: 'VideoArtifact', required: true }],
+    ['timeline.read'],
+  ),
+  template(
+    'output.insertAtPlayhead',
+    'Insert at playhead',
+    'Places the chosen version on the timeline.',
+    [{ id: 'in', label: 'Clip', dataType: 'VideoArtifact', required: true }],
     [],
     ['timeline.write'],
     true,

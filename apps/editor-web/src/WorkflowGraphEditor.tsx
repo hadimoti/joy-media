@@ -3,6 +3,26 @@ import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { GraphTransaction } from '@joy-media/commands';
 import { computeNodeCacheKey, dryRunGraphTransaction } from '@joy-media/commands';
 import { WORKFLOW_NODE_TEMPLATES, templateFor } from './workflow-node-catalog.js';
+import { WORKFLOW_TEMPLATES, buildTemplateTransaction } from './workflow-templates.js';
+
+/** Cleared the first time a workflow is created, so the hint stops appearing. */
+const HINT_KEY = 'joy-media.workflow-hint-seen';
+
+function hintSeen(): boolean {
+  try {
+    return window.localStorage.getItem(HINT_KEY) === 'yes';
+  } catch {
+    return true;
+  }
+}
+
+function markHintSeen(): void {
+  try {
+    window.localStorage.setItem(HINT_KEY, 'yes');
+  } catch {
+    // A hint is not worth failing over when storage is unavailable.
+  }
+}
 
 export interface WorkflowGraphEditorProps {
   readonly graph: WorkflowGraphV2;
@@ -25,6 +45,7 @@ export function WorkflowGraphEditor({ graph, onDispatch }: WorkflowGraphEditorPr
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [connectFromId, setConnectFromId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [showHint, setShowHint] = useState(() => !hintSeen());
 
   const selected = graph.nodes.find((node) => node.id === selectedId);
   const connectFrom = graph.nodes.find((node) => node.id === connectFromId);
@@ -44,6 +65,17 @@ export function WorkflowGraphEditor({ graph, onDispatch }: WorkflowGraphEditorPr
     }
     setError(undefined);
     onDispatch(transaction);
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const template = WORKFLOW_TEMPLATES.find((candidate) => candidate.id === templateId);
+    if (template === undefined) return;
+    dispatch(
+      buildTemplateTransaction(template, { seed: Date.now().toString(36).slice(-5) }),
+    );
+    // The hint has done its job the moment a workflow exists.
+    markHintSeen();
+    setShowHint(false);
   };
 
   const addNode = (type: string) => {
@@ -123,6 +155,27 @@ export function WorkflowGraphEditor({ graph, onDispatch }: WorkflowGraphEditorPr
           Delete node
         </button>
       </div>
+
+      <div className="workflow-templates" role="group" aria-label="Create a workflow from a template">
+        <span className="workflow-templates-label">Templates</span>
+        {WORKFLOW_TEMPLATES.map((template) => (
+          <button
+            key={template.id}
+            type="button"
+            className="workflow-template-button"
+            title={template.description}
+            onClick={() => applyTemplate(template.id)}
+          >
+            {template.label}
+          </button>
+        ))}
+      </div>
+
+      {showHint && graph.nodes.length === 0 && (
+        <p className="workflow-hint">
+          Start from a template — it builds the whole chain in one step, and one Undo removes it.
+        </p>
+      )}
 
       <div className="workflow-palette" role="group" aria-label="Add a node">
         {WORKFLOW_NODE_TEMPLATES.map((template) => (

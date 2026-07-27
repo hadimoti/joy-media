@@ -7419,6 +7419,70 @@ label {
   background: rgba(16, 18, 24, 0.78);
 }
 
+.workflow-templates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--joy-border);
+  background: rgba(110, 87, 255, 0.06);
+}
+
+.workflow-templates-label {
+  color: var(--color-joy);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workflow-template-button {
+  padding: 4px 10px;
+  border: 1px solid rgba(150, 130, 255, 0.5);
+  border-radius: 999px;
+  color: #ece9ff;
+  background: rgba(110, 87, 255, 0.18);
+  font-size: 10px;
+  cursor: pointer;
+  /* Continuity cue when a template lands; see the reduced-motion block below. */
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.workflow-template-button:hover {
+  border-color: var(--color-joy);
+  transform: translateY(-1px);
+}
+
+/*
+ * §3.4 allows a short continuity cue between lenses, and requires none when the
+ * viewer has asked for reduced motion. Covers the Dual Lens surfaces added in
+ * ADR-0022 through ADR-0026, not only the one animation that predates them.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .workflow-template-button,
+  .dual-flow-node,
+  .dual-flow-edge,
+  .data-lane-item,
+  .dual-lens-content {
+    transition: none !important;
+  }
+
+  .workflow-template-button:hover {
+    transform: none;
+  }
+}
+
+.workflow-hint {
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border: 1px dashed rgba(150, 130, 255, 0.45);
+  border-radius: 5px;
+  color: var(--joy-text-muted);
+  background: rgba(110, 87, 255, 0.07);
+  font-size: 10px;
+}
+
 .workflow-palette {
   display: flex;
   flex-wrap: wrap;
