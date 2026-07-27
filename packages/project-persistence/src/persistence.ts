@@ -44,12 +44,38 @@ export class PersistenceError extends Error {
 }
 
 export interface ProjectStore<P, T> {
-  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>): void;
+  /**
+   * `retainSnapshots`, when given, caps how many snapshots survive the append.
+   *
+   * Retention is part of the write rather than a separate prune call because
+   * the browser and desktop stores serialize the whole database per write; a
+   * prune pass would double the cost of exactly the path it exists to bound.
+   */
+  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>, retainSnapshots?: number): void;
   writeTransaction(projectId: string, transaction: StoredTransaction<T>): void;
   snapshots(projectId: string): readonly StoredSnapshot<P>[];
   transactions(projectId: string): readonly StoredTransaction<T>[];
   /** Stable project ids that currently have at least one snapshot or transaction. */
   listProjectIds(): readonly string[];
+}
+
+/**
+ * Appends `snapshot` and keeps only the newest `retain` entries.
+ *
+ * Sorting by revision keeps the newest regardless of write order, and the sort
+ * is stable, so snapshots that share a revision — legacy logs written before
+ * `latestRevision` counted snapshots — keep their insertion order and the last
+ * one written wins. At least one snapshot always survives: a project with no
+ * snapshot cannot be recovered at all.
+ */
+export function retainNewestSnapshots<P>(
+  existing: readonly StoredSnapshot<P>[],
+  snapshot: StoredSnapshot<P>,
+  retain: number | undefined,
+): readonly StoredSnapshot<P>[] {
+  const appended = [...existing, snapshot];
+  if (retain === undefined || appended.length <= retain) return appended;
+  return [...appended].sort((a, b) => a.revision - b.revision).slice(-Math.max(1, retain));
 }
 
 /** Testable local store; a browser/desktop adapter implements the same snapshot/log semantics. */
@@ -58,10 +84,10 @@ export class InMemoryProjectStore<P, T> implements ProjectStore<P, T> {
   readonly #transactions = new Map<string, StoredTransaction<T>[]>();
   failNextWrite = false;
 
-  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>): void {
+  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>, retainSnapshots?: number): void {
     this.maybeFail();
     const list = this.#snapshots.get(projectId) ?? [];
-    this.#snapshots.set(projectId, [...list, snapshot]);
+    this.#snapshots.set(projectId, [...retainNewestSnapshots(list, snapshot, retainSnapshots)]);
   }
 
   writeTransaction(projectId: string, transaction: StoredTransaction<T>): void {
@@ -106,6 +132,13 @@ export class LocalProjectPersistence<P, T> {
     private readonly store: ProjectStore<P, T>,
     private readonly adapter: PersistenceAdapter<P, T>,
     private readonly snapshotEvery = 20,
+    /**
+     * How many snapshots the log keeps. Bounded because a document replacement
+     * writes a whole snapshot and panels replace per interaction — a colour
+     * slider drag would otherwise grow local storage without limit. Five keeps
+     * real fallback depth for `recover` when the newest snapshot is corrupt.
+     */
+    private readonly snapshotRetention = 5,
   ) {}
 
   get autosaveState(): AutosaveState {
@@ -133,7 +166,11 @@ export class LocalProjectPersistence<P, T> {
         `project "${projectId}" already exists`,
       );
     }
-    this.store.writeSnapshot(projectId, snapshot(project, 0, this.adapter.schemaVersion(project)));
+    this.store.writeSnapshot(
+      projectId,
+      snapshot(project, 0, this.adapter.schemaVersion(project)),
+      this.snapshotRetention,
+    );
     this.#recoveryCopy.set(projectId, project);
     this.#autosaveState = 'saved-locally';
   }
@@ -154,6 +191,7 @@ export class LocalProjectPersistence<P, T> {
     this.store.writeSnapshot(
       projectId,
       snapshot(project, revision, this.adapter.schemaVersion(project)),
+      this.snapshotRetention,
     );
     this.#recoveryCopy.set(projectId, project);
     this.#autosaveState = serverAvailable ? 'saved-locally' : 'saved-locally-server-unavailable';
@@ -178,6 +216,7 @@ export class LocalProjectPersistence<P, T> {
         this.store.writeSnapshot(
           projectId,
           snapshot(next, revision, this.adapter.schemaVersion(next)),
+          this.snapshotRetention,
         );
       }
       this.#recoveryCopy.set(projectId, next);
@@ -244,8 +283,21 @@ export class LocalProjectPersistence<P, T> {
     return this.#recoveryCopy.get(projectId);
   }
 
+  /**
+   * Snapshots count here, not only transactions.
+   *
+   * `saveSnapshot` writes no transaction, so counting transactions alone gave
+   * two consecutive replacements the same revision — and `recover` picks the
+   * first of a tie, so the second replacement was lost on reload. A following
+   * `saveTransaction` collided with the snapshot the same way and was skipped
+   * during replay.
+   */
   private latestRevision(projectId: string): number {
-    return Math.max(0, ...this.store.transactions(projectId).map((entry) => entry.revision));
+    return Math.max(
+      0,
+      ...this.store.transactions(projectId).map((entry) => entry.revision),
+      ...this.store.snapshots(projectId).map((entry) => entry.revision),
+    );
   }
 
   private assertValid(project: P): void {

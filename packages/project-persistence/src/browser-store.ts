@@ -1,5 +1,6 @@
 /** Browser-local JSON store for snapshot/log persistence; no DOM globals required. */
 
+import { retainNewestSnapshots } from './persistence.js';
 import type { ProjectStore, StoredSnapshot, StoredTransaction } from './persistence.js';
 
 export interface BrowserKeyValueStore {
@@ -24,13 +25,16 @@ export class BrowserProjectStore<P, T> implements ProjectStore<P, T> {
     private readonly storageKey: string,
   ) {}
 
-  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>): void {
+  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>, retainSnapshots?: number): void {
     const database = this.read();
     const project = database.projects[projectId] ?? { snapshots: [], transactions: [] };
     this.write({
       projects: {
         ...database.projects,
-        [projectId]: { ...project, snapshots: [...project.snapshots, snapshot] },
+        [projectId]: {
+          ...project,
+          snapshots: retainNewestSnapshots(project.snapshots, snapshot, retainSnapshots),
+        },
       },
     });
   }

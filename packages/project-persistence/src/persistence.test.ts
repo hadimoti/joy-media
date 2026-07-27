@@ -40,6 +40,23 @@ function insert(id: string): CommandTransaction {
   };
 }
 
+/** Distinct start times so a run of inserts does not overlap itself. */
+function insertAt(id: string, startUs: number): CommandTransaction {
+  return {
+    label: `Insert ${id}`,
+    commands: [
+      {
+        type: 'timeline.insertClip',
+        payload: {
+          compositionId: 'root',
+          trackId: 'track-0',
+          clip: makeVideoClip(id, startUs, 1_000_000),
+        },
+      },
+    ],
+  };
+}
+
 describe('local project persistence', () => {
   it('reopens a verified snapshot plus command log', () => {
     const store = new InMemoryProjectStore<SpikeProject, CommandTransaction>();
@@ -142,6 +159,49 @@ describe('local project persistence', () => {
     );
     locks.release('project-1', 'tab-a');
     expect(() => locks.acquire('project-1', 'tab-b')).not.toThrow();
+  });
+
+  it('reloads the second of two consecutive replacements', () => {
+    // Snapshot revisions used to be derived from the transaction log alone, so
+    // two replacements shared a revision and recovery picked the first.
+    const store = new InMemoryProjectStore<SpikeProject, CommandTransaction>();
+    const persistence = new LocalProjectPersistence(store, adapter);
+    const initial = emptySpikeProject();
+    persistence.initialize(initial);
+    const once = applyTransaction(initial, insertAt('clip-1', 0)).project;
+    const twice = applyTransaction(once, insertAt('clip-2', 1_000_000)).project;
+    persistence.saveSnapshot(once, false);
+    persistence.saveSnapshot(twice, false);
+    expect(persistence.recover(initial.id).project).toEqual(twice);
+  });
+
+  it('replays a transaction written after a replacement', () => {
+    const store = new InMemoryProjectStore<SpikeProject, CommandTransaction>();
+    const persistence = new LocalProjectPersistence(store, adapter);
+    const initial = emptySpikeProject();
+    persistence.initialize(initial);
+    const replaced = persistence.saveSnapshot(
+      applyTransaction(initial, insertAt('clip-1', 0)).project,
+      false,
+    );
+    const expected = persistence.saveTransaction(replaced, insertAt('clip-2', 1_000_000), false);
+    expect(persistence.recover(initial.id).project).toEqual(expected);
+  });
+
+  it('keeps the snapshot log bounded and still recovers the newest', () => {
+    const store = new InMemoryProjectStore<SpikeProject, CommandTransaction>();
+    const persistence = new LocalProjectPersistence(store, adapter, 20, 3);
+    const initial = emptySpikeProject();
+    persistence.initialize(initial);
+    let project = initial;
+    for (let index = 0; index < 10; index++) {
+      project = persistence.saveSnapshot(
+        applyTransaction(project, insertAt(`clip-${index}`, index * 1_000_000)).project,
+        false,
+      );
+    }
+    expect(store.snapshots(initial.id)).toHaveLength(3);
+    expect(persistence.recover(initial.id).project).toEqual(project);
   });
 
   it('lists project ids that have snapshots or transactions', () => {

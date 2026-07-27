@@ -2,6 +2,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { retainNewestSnapshots } from './persistence.js';
 import type { ProjectStore, StoredSnapshot, StoredTransaction } from './persistence.js';
 
 interface FileDatabase<P, T> {
@@ -18,13 +19,16 @@ interface FileDatabase<P, T> {
 export class JsonFileProjectStore<P, T> implements ProjectStore<P, T> {
   constructor(private readonly filePath: string) {}
 
-  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>): void {
+  writeSnapshot(projectId: string, snapshot: StoredSnapshot<P>, retainSnapshots?: number): void {
     const database = this.read();
     const project = database.projects[projectId] ?? { snapshots: [], transactions: [] };
     this.write({
       projects: {
         ...database.projects,
-        [projectId]: { ...project, snapshots: [...project.snapshots, snapshot] },
+        [projectId]: {
+          ...project,
+          snapshots: retainNewestSnapshots(project.snapshots, snapshot, retainSnapshots),
+        },
       },
     });
   }
