@@ -1,3 +1,5 @@
+import type { CreativeCapability } from '@joy-media/project-schema';
+
 export interface ToolDefinition {
   readonly name: string;
   readonly description: string;
@@ -12,19 +14,16 @@ export interface ToolDefinition {
   readonly returnsStableIds: boolean;
 }
 
-export type ToolCapability =
-  | 'timeline.read'
-  | 'timeline.write'
-  | 'assets.read'
-  | 'assets.import'
-  | 'filesystem.read'
-  | 'filesystem.write'
-  | 'provider.generate'
-  | 'provider.spend'
-  | 'render.preview'
-  | 'export.write'
-  | 'project.overwrite'
-  | 'plugin.invoke';
+/**
+ * Alias, not a copy. The capability vocabulary is durable — a workflow node
+ * persists the capabilities it needs — so it belongs in the project schema, and
+ * the dependency runs agent-tools → project-schema.
+ *
+ * Two lists would drift, and a capability the policy engine does not recognise
+ * grants nothing while still looking declared, which fails silently in the
+ * direction of "the gate did not fire".
+ */
+export type ToolCapability = CreativeCapability;
 
 export interface ToolScope {
   /** Explicit authority requested by this tool. Empty means no project access. */

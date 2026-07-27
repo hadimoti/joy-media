@@ -1,8 +1,10 @@
-/** Pure v0 -> v1 migration harness. */
+/** Pure v0 -> v1 -> v2 migration harness. */
 
 import type { Clip, SpikeProject } from './model.js';
 import type { JoyProjectV1, AssetRecordV1, ClipV1 } from './v1.js';
 import { validateJoyProjectV1 } from './v1.js';
+import type { AnyJoyProject, JoyProjectV2 } from './v2.js';
+import { validateJoyProjectV2 } from './v2.js';
 
 export interface MigrationReport {
   readonly fromVersion: 0;
@@ -13,6 +15,17 @@ export interface MigrationReport {
 export interface MigrationResult {
   readonly project: JoyProjectV1;
   readonly report: MigrationReport;
+}
+
+export interface V2MigrationReport {
+  readonly fromVersion: 1;
+  readonly toVersion: 2;
+  readonly defaultsApplied: readonly string[];
+}
+
+export interface V2MigrationResult {
+  readonly project: JoyProjectV2;
+  readonly report: V2MigrationReport;
 }
 
 /** Converts an immutable P00 spike project into the v1 document shape without I/O. */
@@ -77,6 +90,46 @@ export function migrateV0ToV1(project: SpikeProject): MigrationResult {
       ],
     },
   };
+}
+
+/**
+ * v1 -> v2. Adds the Dual Lens containers and nothing else.
+ *
+ * Deliberately does *not* synthesise artifacts from existing assets, caption
+ * documents, or visual objects. The Flow projection already derives a graph
+ * from those, and inventing durable artifact records for them here would create
+ * two identities for one thing — the derived node and the stored artifact —
+ * with no rule for which wins. Artifacts get created when something actually
+ * authors one.
+ *
+ * The consequence is the property Phase 1 has to hold: a migrated project
+ * renders and edits exactly as it did before.
+ */
+export function migrateV1ToV2(project: JoyProjectV1): V2MigrationResult {
+  const migrated: JoyProjectV2 = {
+    ...project,
+    schemaVersion: 2,
+    artifacts: {},
+    artifactVersions: {},
+  };
+  const diagnostics = validateJoyProjectV2(migrated);
+  if (diagnostics.length > 0)
+    throw new Error(`v1 migration produced invalid v2: ${diagnostics[0]!.message}`);
+  return {
+    project: migrated,
+    report: {
+      fromVersion: 1,
+      toVersion: 2,
+      // `workflow` is left absent rather than empty: "no graph" and "an empty
+      // graph someone made" should not be indistinguishable in the document.
+      defaultsApplied: ['artifacts', 'artifactVersions'],
+    },
+  };
+}
+
+/** Brings any known project version up to the latest schema. */
+export function migrateToLatest(project: AnyJoyProject): JoyProjectV2 {
+  return project.schemaVersion === 2 ? project : migrateV1ToV2(project).project;
 }
 
 function migrateClip(clip: Clip, assets: Record<string, AssetRecordV1>): ClipV1 {

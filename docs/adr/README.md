@@ -11,4 +11,4 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0019** (agent command envelope + atomic plan execution; the "shorten the intro" vertical slice).
+Accepted through **ADR-0023** (creative artifact, provenance, temporal binding, and persisted workflow schema — the durable half of Dual Lens).

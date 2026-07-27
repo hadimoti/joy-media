@@ -80,8 +80,59 @@ export type {
   EffectInstanceV1,
 } from './v1.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
-export type { MigrationReport, MigrationResult } from './migration.js';
-export { migrateV0ToV1 } from './migration.js';
+export type {
+  CreativeCapability,
+  CreativeArtifactKind,
+  CreativeArtifactV2,
+  ArtifactVersionV2,
+  ArtifactContentRef,
+  ArtifactProvenance,
+  CreativeActorRef,
+  TemporalBinding,
+  WorkflowNodeStatus,
+  WorkflowPortV2,
+  WorkflowNodeV2,
+  WorkflowEdgeV2,
+  WorkflowGraphV2,
+  AgentAssignmentV2,
+  NodeExecutionPolicyV2,
+} from './creative.js';
+export {
+  CREATIVE_CAPABILITIES,
+  ESCALATED_CAPABILITIES,
+  CREATIVE_ARTIFACT_KINDS,
+  RENDERABLE_ARTIFACT_KINDS,
+  WORKFLOW_NODE_STATUSES,
+  CREATIVE_ARTIFACT_SCHEMA_VERSION,
+  WORKFLOW_GRAPH_SCHEMA_VERSION,
+  EMPTY_WORKFLOW_GRAPH,
+  isRenderableArtifactKind,
+  validateTemporalBinding,
+  validateArtifactContentRef,
+  validateArtifactProvenance,
+  validateCreativeArtifact,
+  validateWorkflowGraph,
+} from './creative.js';
+
+export type { JoyProjectV2, AnyJoyProject } from './v2.js';
+export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV2, validateJoyProjectV2 } from './v2.js';
+
+export type { DualLensFlags, FlagSource } from './dual-lens-flag.js';
+export {
+  DUAL_LENS_FLAG_KEY,
+  DUAL_LENS_FLAGS_OFF,
+  readDualLensFlags,
+  projectWithoutDualLens,
+  applyDualLensFlags,
+} from './dual-lens-flag.js';
+
+export type {
+  MigrationReport,
+  MigrationResult,
+  V2MigrationReport,
+  V2MigrationResult,
+} from './migration.js';
+export { migrateV0ToV1, migrateV1ToV2, migrateToLatest } from './migration.js';
 
 export type {
   VoiceIdentity,

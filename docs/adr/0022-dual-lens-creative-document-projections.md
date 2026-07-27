@@ -80,19 +80,20 @@ create graph-specific project state.
 
 Recorded so they are chosen, not forgotten:
 
-- **No artifact or provenance schema.** Nodes are derived from the timeline,
-  visual objects, caption documents, and asset generation records that already
-  exist. `CreativeArtifact`, `TemporalBinding`, `ArtifactProvenance`, versions,
-  and their migrations are not modelled, so a script, prompt, or analysis result
-  has no durable identity of its own.
-- **No persisted workflow graph.** Nodes and edges are recomputed per render.
-  Typed ports, DAG validation, caching, and staleness are `workflow-engine`
+- ~~**No artifact or provenance schema.**~~ Closed by ADR-0023: artifacts,
+  provenance, temporal bindings, versions, and the v1→v2 migration now exist in
+  `project-schema`. The projection here still derives its nodes from timeline
+  and document state; nothing reads the durable artifacts yet.
+- ~~**No persisted workflow graph.**~~ Closed by ADR-0023 for *storage* —
+  nodes, typed ports, execution policy, and document-level DAG validation.
+  Caching, staleness, and port-type compatibility remain `workflow-engine`
   concerns not yet joined to this projection.
 - **The graph is read-only.** No graph action dispatches a command, which is why
   a graph command family, its inversions, and grouping/subgraphs are absent.
 - **Dual Lens is not behind a feature flag,** unlike what the phase plan asks
-  for. It ships as an ordinary panel because it cannot mutate the project; a
-  flag becomes necessary at the first editable graph command.
+  for. It ships as an ordinary panel because it cannot mutate the project. The
+  flag itself now exists (ADR-0023, `DUAL_LENS_FLAG_KEY`, default off) and gates
+  the durable graph slices; wiring it into the editor is Phase 3.
 - **`Follow Selection` is not configurable.** Reveal always activates the other
   panel. A preference belongs with the settings surface that does not exist yet.
 
