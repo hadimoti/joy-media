@@ -151,10 +151,6 @@ export function InspectorPanel({
     }
   };
 
-  // A clip can be selected without a linked visual overlay; the transform rows
-  // then have nothing to drive, so they read as idle too.
-  const noOverlay = object === undefined && selectedClipId !== undefined;
-
   const { transform: resolved, diagnostics } = idle
     ? {
         transform: target.transform,
@@ -224,12 +220,6 @@ export function InspectorPanel({
     }
   };
 
-  const note = idle
-    ? noOverlay
-      ? 'این کلیپ لایهٔ تصویری پیوندخورده‌ای ندارد.'
-      : 'برای ویرایش ویژگی‌ها، یک کلیپ را انتخاب کنید.'
-    : undefined;
-
   return (
     <PanelShell
       title="Inspector"
@@ -239,7 +229,6 @@ export function InspectorPanel({
       activeTab={tab}
       onTabChange={setTab}
       inactive={idle}
-      {...(note !== undefined ? { note } : {})}
     >
       <h2 className="inspector-selected-name" dir="ltr">
         {title}
