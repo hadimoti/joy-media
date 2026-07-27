@@ -55,9 +55,34 @@ export function WorkflowGraphEditor({
   const [connectFromId, setConnectFromId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [showHint, setShowHint] = useState(() => !hintSeen());
+  const [checkedIds, setCheckedIds] = useState<readonly string[]>([]);
+  const [openGroupId, setOpenGroupId] = useState<string | undefined>(undefined);
+  /** Which group's name is being edited, kept apart from which group is open. */
+  const [rename, setRename] = useState<{ groupId: string; value: string } | undefined>(undefined);
 
   const selected = graph.nodes.find((node) => node.id === selectedId);
   const connectFrom = graph.nodes.find((node) => node.id === connectFromId);
+
+  const groups = graph.groups ?? [];
+  // Derived, not stored: an undo that removes the open group drops the user
+  // back to the whole workflow without needing an effect to notice.
+  const openGroup = groups.find((group) => group.id === openGroupId);
+  const groupOf = (nodeId: string) => groups.find((group) => group.nodeIds.includes(nodeId));
+  const visibleNodes =
+    openGroup === undefined
+      ? graph.nodes
+      : graph.nodes.filter((node) => openGroup.nodeIds.includes(node.id));
+  // Edges crossing the boundary stay listed. Hiding them would make a group
+  // look self-contained when it is not, which is exactly the wrong impression
+  // for a view whose purpose is understanding how a section connects.
+  const visibleEdges =
+    openGroup === undefined
+      ? graph.edges
+      : graph.edges.filter(
+          (edge) =>
+            openGroup.nodeIds.includes(edge.fromNodeId) ||
+            openGroup.nodeIds.includes(edge.toNodeId),
+        );
 
   const cacheKeys = useMemo(
     () => new Map(graph.nodes.map((node) => [node.id, computeNodeCacheKey(graph, node.id)])),
@@ -156,6 +181,60 @@ export function WorkflowGraphEditor({
     });
   };
 
+  const toggleChecked = (nodeId: string) => {
+    setCheckedIds((current) =>
+      current.includes(nodeId)
+        ? current.filter((candidate) => candidate !== nodeId)
+        : [...current, nodeId],
+    );
+  };
+
+  const groupChecked = () => {
+    // Ordered by the node list rather than by click order, so the group reads
+    // the same way the graph does.
+    const nodeIds = graph.nodes
+      .map((node) => node.id)
+      .filter((nodeId) => checkedIds.includes(nodeId));
+    if (nodeIds.length < 2) return;
+    const ordinal = groups.length + 1;
+    dispatch({
+      label: `Group ${nodeIds.length} nodes`,
+      commands: [
+        {
+          type: 'graph.group.create',
+          payload: {
+            group: {
+              id: `group-${ordinal}-${Date.now().toString(36).slice(-4)}`,
+              label: `Group ${ordinal}`,
+              nodeIds,
+            },
+          },
+        },
+      ],
+    });
+    setCheckedIds([]);
+  };
+
+  const ungroup = (groupId: string, label: string) => {
+    dispatch({
+      label: `Ungroup ${label}`,
+      commands: [{ type: 'graph.group.delete', payload: { groupId } }],
+    });
+    if (openGroupId === groupId) setOpenGroupId(undefined);
+  };
+
+  const commitRename = (groupId: string, previousLabel: string) => {
+    const next = rename?.groupId === groupId ? rename.value.trim() : undefined;
+    setRename(undefined);
+    // An empty name is refused rather than stored: the validator rejects it, and
+    // a group with no name cannot be a breadcrumb.
+    if (next === undefined || next === '' || next === previousLabel) return;
+    dispatch({
+      label: `Rename ${previousLabel} to ${next}`,
+      commands: [{ type: 'graph.group.setLabel', payload: { groupId, label: next } }],
+    });
+  };
+
   return (
     <section className="workflow-editor" aria-label="Workflow graph editor">
       <div className="dual-lens-section-heading">
@@ -166,15 +245,75 @@ export function WorkflowGraphEditor({
             edge{graph.edges.length === 1 ? '' : 's'}
           </span>
         </div>
-        <button
-          type="button"
-          className="dual-lens-disclosure"
-          disabled={selected === undefined}
-          onClick={deleteSelected}
-        >
-          Delete node
-        </button>
+        <div className="workflow-heading-actions">
+          <button
+            type="button"
+            className="dual-lens-disclosure"
+            disabled={checkedIds.length < 2}
+            onClick={groupChecked}
+          >
+            Group {checkedIds.length === 0 ? '' : checkedIds.length}
+          </button>
+          <button
+            type="button"
+            className="dual-lens-disclosure"
+            disabled={selected === undefined}
+            onClick={deleteSelected}
+          >
+            Delete node
+          </button>
+        </div>
       </div>
+
+      {groups.length > 0 && (
+        <nav className="workflow-breadcrumb" aria-label="Workflow location">
+          <button
+            type="button"
+            className="workflow-crumb"
+            aria-current={openGroup === undefined ? 'page' : undefined}
+            onClick={() => setOpenGroupId(undefined)}
+          >
+            Workflow
+          </button>
+          {openGroup !== undefined && (
+            <>
+              <span aria-hidden="true">/</span>
+              <span className="workflow-crumb is-current" aria-current="page">
+                {openGroup.label}
+              </span>
+            </>
+          )}
+        </nav>
+      )}
+
+      {groups.length > 0 && openGroup === undefined && (
+        <ul className="workflow-group-list" aria-label="Groups">
+          {groups.map((group) => (
+            <li key={group.id} className="workflow-group">
+              <input
+                className="workflow-group-name"
+                aria-label={`Rename ${group.label}`}
+                value={rename?.groupId === group.id ? rename.value : group.label}
+                onFocus={() => setRename({ groupId: group.id, value: group.label })}
+                onChange={(event) => setRename({ groupId: group.id, value: event.target.value })}
+                onBlur={() => commitRename(group.id, group.label)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+              />
+              <span className="workflow-group-count">
+                {group.nodeIds.length} node{group.nodeIds.length === 1 ? '' : 's'}
+              </span>
+              <button type="button" onClick={() => setOpenGroupId(group.id)}>
+                Open
+              </button>
+              <button type="button" onClick={() => ungroup(group.id, group.label)}>
+                Ungroup
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="workflow-templates" role="group" aria-label="Create a workflow from a template">
         <span className="workflow-templates-label">Templates</span>
@@ -217,15 +356,18 @@ export function WorkflowGraphEditor({
         </p>
       )}
 
-      {graph.nodes.length === 0 ? (
+      {visibleNodes.length === 0 ? (
         <p className="workflow-empty">
-          No workflow yet. Add a node to start one — every change is a single Undo.
+          {openGroup === undefined
+            ? 'No workflow yet. Add a node to start one — every change is a single Undo.'
+            : `${openGroup.label} has no nodes left. Ungroup it, or go back to the whole workflow.`}
         </p>
       ) : (
         <ul className="workflow-node-list">
-          {graph.nodes.map((node) => {
+          {visibleNodes.map((node) => {
             const isSelected = node.id === selectedId;
             const isConnectSource = node.id === connectFromId;
+            const owner = groupOf(node.id);
             const classes = ['workflow-node'];
             if (isSelected) classes.push('is-selected');
             if (isConnectSource) classes.push('is-connect-source');
@@ -233,6 +375,13 @@ export function WorkflowGraphEditor({
             return (
               <li key={node.id}>
                 <div className={classes.join(' ')}>
+                  <input
+                    type="checkbox"
+                    className="workflow-node-check"
+                    aria-label={`Include ${node.label} in a group`}
+                    checked={checkedIds.includes(node.id)}
+                    onChange={() => toggleChecked(node.id)}
+                  />
                   <button
                     type="button"
                     className="workflow-node-body"
@@ -247,6 +396,9 @@ export function WorkflowGraphEditor({
                     {node.status === 'stale' && <span className="workflow-badge">stale</span>}
                     {node.executionPolicy.requiresApproval && (
                       <span className="workflow-badge is-gate">approval</span>
+                    )}
+                    {owner !== undefined && openGroup === undefined && (
+                      <span className="workflow-badge is-group">{owner.label}</span>
                     )}
                   </button>
                   {connectFromId === undefined ? (
@@ -283,9 +435,9 @@ export function WorkflowGraphEditor({
         </ul>
       )}
 
-      {graph.edges.length > 0 && (
+      {visibleEdges.length > 0 && (
         <ul className="workflow-edge-list" aria-label="Connections">
-          {graph.edges.map((edge) => {
+          {visibleEdges.map((edge) => {
             const from = graph.nodes.find((node) => node.id === edge.fromNodeId);
             const to = graph.nodes.find((node) => node.id === edge.toNodeId);
             return (

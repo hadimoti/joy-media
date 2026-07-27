@@ -480,4 +480,116 @@ describe('graph commands', () => {
       expect(record.coalesceKey).toBe('drag:a');
     });
   });
+
+  describe('groups name a set of nodes without changing what the graph means', () => {
+    const three = () =>
+      graphOf([node('a'), node('b'), node('c')], [edge('e1', 'a', 'b'), edge('e2', 'b', 'c')]);
+
+    const grouped = (nodeIds: string[] = ['a', 'b']) =>
+      applyGraphCommand(three(), {
+        type: 'graph.group.create',
+        payload: { group: { id: 'g1', label: 'Cleanup', nodeIds } },
+      }).graph;
+
+    it('creates a group and inverts to ungrouping it', () => {
+      const applied = applyGraphCommand(three(), {
+        type: 'graph.group.create',
+        payload: { group: { id: 'g1', label: 'Cleanup', nodeIds: ['a', 'b'] } },
+      });
+      const reverted = applyGraphCommand(applied.graph, applied.inverse);
+
+      expect(applied.graph.groups).toEqual([{ id: 'g1', label: 'Cleanup', nodeIds: ['a', 'b'] }]);
+      // Ungrouping keeps every node: a group names a set, it does not own it.
+      expect(reverted.graph.nodes.map((n) => n.id)).toEqual(['a', 'b', 'c']);
+      expect(reverted.graph.edges).toHaveLength(2);
+    });
+
+    it('leaves the cache key untouched, so grouping never invalidates a result', () => {
+      expect(computeNodeCacheKey(grouped(), 'c')).toBe(computeNodeCacheKey(three(), 'c'));
+    });
+
+    it('refuses a group naming a node the graph does not have', () => {
+      expect(() =>
+        applyGraphCommand(three(), {
+          type: 'graph.group.create',
+          payload: { group: { id: 'g1', label: 'Cleanup', nodeIds: ['ghost'] } },
+        }),
+      ).toThrow(GraphCommandError);
+    });
+
+    it('refuses to put one node in two groups', () => {
+      // Two owners makes "which group is this in" — the breadcrumb — unanswerable.
+      expect(() =>
+        applyGraphCommand(grouped(), {
+          type: 'graph.group.create',
+          payload: { group: { id: 'g2', label: 'Other', nodeIds: ['b'] } },
+        }),
+      ).toThrow(/already in group/);
+    });
+
+    it('moves a node between groups as one transaction', () => {
+      const start = applyGraphCommand(grouped(['a']), {
+        type: 'graph.group.create',
+        payload: { group: { id: 'g2', label: 'Finish', nodeIds: ['c'] } },
+      }).graph;
+
+      const { graph } = applyGraphTransaction(start, {
+        label: 'Move a to Finish',
+        commands: [
+          { type: 'graph.group.setNodes', payload: { groupId: 'g1', nodeIds: [] } },
+          { type: 'graph.group.setNodes', payload: { groupId: 'g2', nodeIds: ['c', 'a'] } },
+        ],
+      });
+
+      expect(graph.groups?.map((group) => group.nodeIds)).toEqual([[], ['c', 'a']]);
+    });
+
+    it('renames a group and inverts to the previous name', () => {
+      const applied = applyGraphCommand(grouped(), {
+        type: 'graph.group.setLabel',
+        payload: { groupId: 'g1', label: 'Podcast cleanup' },
+      });
+
+      expect(applied.graph.groups?.[0]?.label).toBe('Podcast cleanup');
+      expect(applyGraphCommand(applied.graph, applied.inverse).graph.groups?.[0]?.label).toBe(
+        'Cleanup',
+      );
+    });
+
+    it('drops a deleted node from its group and puts it back on undo', () => {
+      // A group naming a node that no longer exists is rejected by the
+      // validator, so deletion has to take membership with it — and the inverse
+      // has to restore it, or undo quietly ungroups the node.
+      const applied = applyGraphCommand(grouped(), {
+        type: 'graph.node.delete',
+        payload: { nodeId: 'b' },
+      });
+
+      expect(applied.graph.groups?.[0]?.nodeIds).toEqual(['a']);
+
+      const reverted = applyGraphCommand(applied.graph, applied.inverse);
+
+      expect(reverted.graph.groups?.[0]?.nodeIds).toEqual(['a', 'b']);
+    });
+
+    it('reverts a whole grouping transaction in one step', () => {
+      const before = three();
+      const { graph, record } = applyGraphTransaction(before, {
+        label: 'Group two nodes',
+        commands: [
+          {
+            type: 'graph.group.create',
+            payload: { group: { id: 'g1', label: 'Cleanup', nodeIds: ['a', 'b'] } },
+          },
+          { type: 'graph.group.setLabel', payload: { groupId: 'g1', label: 'Renamed' } },
+        ],
+      });
+
+      expect(revertGraphTransaction(graph, record).groups).toEqual([]);
+    });
+
+    it('validates a graph whose groups key is simply absent', () => {
+      expect(validateWorkflowGraph(three(), 'workflow')).toEqual([]);
+    });
+  });
 });

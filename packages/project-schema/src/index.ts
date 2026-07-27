@@ -93,6 +93,7 @@ export type {
   WorkflowPortV2,
   WorkflowNodeV2,
   WorkflowEdgeV2,
+  WorkflowGroupV2,
   WorkflowGraphV2,
   AgentAssignmentV2,
   NodeExecutionPolicyV2,

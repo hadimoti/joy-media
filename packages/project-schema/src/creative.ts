@@ -351,10 +351,30 @@ export interface WorkflowEdgeV2 {
   readonly toPortId: string;
 }
 
+/**
+ * A named set of nodes (§12.5 "breadcrumb for groups/subgraphs").
+ *
+ * Grouping is organisation, not nesting: the node list stays flat and edges are
+ * untouched, so a group can never change what the graph means or how it
+ * executes. Nesting graphs inside nodes would need port proxying across the
+ * boundary and a recursive validator, and neither the engine nor the cache key
+ * is built for that.
+ *
+ * A node belongs to at most one group, which is what makes "where am I" — the
+ * breadcrumb — answerable at all.
+ */
+export interface WorkflowGroupV2 {
+  readonly id: string;
+  readonly label: string;
+  readonly nodeIds: readonly string[];
+}
+
 export interface WorkflowGraphV2 {
   readonly schemaVersion: number;
   readonly nodes: readonly WorkflowNodeV2[];
   readonly edges: readonly WorkflowEdgeV2[];
+  /** Absent on every graph authored before grouping existed. */
+  readonly groups?: readonly WorkflowGroupV2[];
 }
 
 export const CREATIVE_ARTIFACT_SCHEMA_VERSION = 1;
@@ -645,11 +665,90 @@ export function validateWorkflowGraph(value: unknown, path: string): ProjectDiag
     }
   });
 
+  diagnostics.push(...validateGroups(value.groups, nodeIds, path));
+
   if (nodeIds.size > 0 && findCycle(nodes as readonly WorkflowNodeV2[], edges as readonly WorkflowEdgeV2[])) {
     diagnostics.push(
       diagnostic('GRAPH_CYCLE', 'workflow graph must be acyclic; iteration needs an explicit bounded node', `${path}.edges`),
     );
   }
+  return diagnostics;
+}
+
+/**
+ * Groups are optional, so an absent `groups` key is not a defect — but a
+ * present one that names a node twice, or a node the graph does not have, is:
+ * both make "which group is this node in" unanswerable, and the breadcrumb is
+ * exactly that question.
+ */
+function validateGroups(
+  value: unknown,
+  nodeIds: ReadonlySet<string>,
+  path: string,
+): ProjectDiagnostic[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    return [diagnostic('GRAPH_GROUPS', 'groups must be an array', `${path}.groups`)];
+  }
+  const diagnostics: ProjectDiagnostic[] = [];
+  const groupIds = new Set<string>();
+  const claimed = new Map<string, string>();
+  value.forEach((group, index) => {
+    const groupPath = `${path}.groups[${index}]`;
+    if (!isRecord(group)) {
+      diagnostics.push(diagnostic('GRAPH_GROUP_NOT_OBJECT', 'group must be an object', groupPath));
+      return;
+    }
+    if (!isNonEmptyString(group.id)) {
+      diagnostics.push(
+        diagnostic('GRAPH_GROUP_ID', 'group id must be a non-empty string', `${groupPath}.id`),
+      );
+      return;
+    }
+    if (groupIds.has(group.id)) {
+      diagnostics.push(
+        diagnostic('GRAPH_GROUP_DUPLICATE', `duplicate group id "${group.id}"`, `${groupPath}.id`),
+      );
+      return;
+    }
+    groupIds.add(group.id);
+    if (!isNonEmptyString(group.label)) {
+      diagnostics.push(
+        diagnostic('GRAPH_GROUP_LABEL', 'group label must be a non-empty string', `${groupPath}.label`),
+      );
+    }
+    if (!Array.isArray(group.nodeIds)) {
+      diagnostics.push(
+        diagnostic('GRAPH_GROUP_NODES', 'group nodeIds must be an array', `${groupPath}.nodeIds`),
+      );
+      return;
+    }
+    group.nodeIds.forEach((nodeId, nodeIndex) => {
+      const nodePath = `${groupPath}.nodeIds[${nodeIndex}]`;
+      if (!isNonEmptyString(nodeId) || !nodeIds.has(nodeId)) {
+        diagnostics.push(
+          diagnostic(
+            'GRAPH_GROUP_NODE_MISSING',
+            `group "${String(group.id)}" names node "${String(nodeId)}", which is not in the graph`,
+            nodePath,
+          ),
+        );
+        return;
+      }
+      const owner = claimed.get(nodeId);
+      if (owner !== undefined) {
+        diagnostics.push(
+          diagnostic(
+            'GRAPH_GROUP_NODE_SHARED',
+            `node "${nodeId}" is already in group "${owner}"`,
+            nodePath,
+          ),
+        );
+        return;
+      }
+      claimed.set(nodeId, group.id as string);
+    });
+  });
   return diagnostics;
 }
 

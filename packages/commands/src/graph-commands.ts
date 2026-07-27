@@ -22,6 +22,7 @@ import type {
   TemporalBinding,
   WorkflowEdgeV2,
   WorkflowGraphV2,
+  WorkflowGroupV2,
   WorkflowNodeV2,
   WorkflowNodeStatus,
 } from '@joy-media/project-schema';
@@ -82,7 +83,19 @@ export type WorkflowGraphCommand =
       readonly payload: {
         readonly node: WorkflowNodeV2;
         readonly edges: readonly WorkflowEdgeV2[];
+        /** The group the node was in, so undo puts it back where it was. */
+        readonly groupId?: string;
       };
+    }
+  | { readonly type: 'graph.group.create'; readonly payload: { readonly group: WorkflowGroupV2 } }
+  | { readonly type: 'graph.group.delete'; readonly payload: { readonly groupId: string } }
+  | {
+      readonly type: 'graph.group.setNodes';
+      readonly payload: { readonly groupId: string; readonly nodeIds: readonly string[] };
+    }
+  | {
+      readonly type: 'graph.group.setLabel';
+      readonly payload: { readonly groupId: string; readonly label: string };
     };
 
 export type WorkflowGraphCommandType = WorkflowGraphCommand['type'];
@@ -100,6 +113,10 @@ export const GRAPH_COMMAND_REGISTRY: Readonly<
   'graph.edge.connect': { description: 'Connect two type-compatible ports.' },
   'graph.edge.disconnect': { description: 'Remove an edge.' },
   'graph.restoreNode': { description: 'Restore a deleted node with its edges (undo).' },
+  'graph.group.create': { description: 'Name a set of nodes as a group.' },
+  'graph.group.delete': { description: 'Ungroup, leaving the nodes in place.' },
+  'graph.group.setNodes': { description: 'Change which nodes a group contains.' },
+  'graph.group.setLabel': { description: 'Rename a group.' },
 };
 
 export interface GraphApplyResult {
@@ -140,7 +157,36 @@ function applyGraphCommandUnchecked(
     case 'graph.node.delete':
       return applyDeleteNode(graph, command.payload.nodeId);
     case 'graph.restoreNode':
-      return applyRestoreNode(graph, command.payload.node, command.payload.edges);
+      return applyRestoreNode(
+        graph,
+        command.payload.node,
+        command.payload.edges,
+        command.payload.groupId,
+      );
+    case 'graph.group.create':
+      return applyCreateGroup(graph, command.payload.group);
+    case 'graph.group.delete':
+      return applyDeleteGroup(graph, command.payload.groupId);
+    case 'graph.group.setNodes':
+      return applyGroupPatch(
+        graph,
+        command.payload.groupId,
+        (group) => ({ ...group, nodeIds: command.payload.nodeIds }),
+        (previous) => ({
+          type: 'graph.group.setNodes',
+          payload: { groupId: previous.id, nodeIds: previous.nodeIds },
+        }),
+      );
+    case 'graph.group.setLabel':
+      return applyGroupPatch(
+        graph,
+        command.payload.groupId,
+        (group) => ({ ...group, label: command.payload.label }),
+        (previous) => ({
+          type: 'graph.group.setLabel',
+          payload: { groupId: previous.id, label: previous.label },
+        }),
+      );
     case 'graph.node.update':
       return applyUpdateNode(graph, command.payload);
     case 'graph.node.setStatus':
@@ -210,13 +256,31 @@ function applyDeleteNode(graph: WorkflowGraphV2, nodeId: string): GraphApplyResu
   const detached = graph.edges.filter(
     (edge) => edge.fromNodeId === nodeId || edge.toNodeId === nodeId,
   );
+  // Group membership goes the same way for the same reason: a group naming a
+  // node that no longer exists is rejected by the validator.
+  const owner = groupOf(graph, nodeId);
   return {
     graph: {
       ...graph,
       nodes: graph.nodes.filter((candidate) => candidate.id !== nodeId),
       edges: graph.edges.filter((edge) => !detached.includes(edge)),
+      ...(graph.groups === undefined
+        ? {}
+        : {
+            groups: graph.groups.map((group) => ({
+              ...group,
+              nodeIds: group.nodeIds.filter((candidate) => candidate !== nodeId),
+            })),
+          }),
     },
-    inverse: { type: 'graph.restoreNode', payload: { node, edges: detached } },
+    inverse: {
+      type: 'graph.restoreNode',
+      payload: {
+        node,
+        edges: detached,
+        ...(owner === undefined ? {} : { groupId: owner.id }),
+      },
+    },
   };
 }
 
@@ -224,14 +288,81 @@ function applyRestoreNode(
   graph: WorkflowGraphV2,
   node: WorkflowNodeV2,
   edges: readonly WorkflowEdgeV2[],
+  groupId: string | undefined,
 ): GraphApplyResult {
   if (findNode(graph, node.id) !== undefined) {
     throw new GraphCommandError('GRAPH_NODE_EXISTS', `node "${node.id}" already exists`);
   }
+  // A group that has itself been removed since is simply not restored into;
+  // undo is last-in-first-out, so in practice it is still there.
+  const groups =
+    groupId === undefined || graph.groups === undefined
+      ? graph.groups
+      : graph.groups.map((group) =>
+          group.id === groupId ? { ...group, nodeIds: [...group.nodeIds, node.id] } : group,
+        );
   return {
-    graph: { ...graph, nodes: [...graph.nodes, node], edges: [...graph.edges, ...edges] },
+    graph: {
+      ...graph,
+      nodes: [...graph.nodes, node],
+      edges: [...graph.edges, ...edges],
+      ...(groups === undefined ? {} : { groups }),
+    },
     inverse: { type: 'graph.node.delete', payload: { nodeId: node.id } },
   };
+}
+
+function applyCreateGroup(graph: WorkflowGraphV2, group: WorkflowGroupV2): GraphApplyResult {
+  if ((graph.groups ?? []).some((candidate) => candidate.id === group.id)) {
+    throw new GraphCommandError('GRAPH_GROUP_EXISTS', `group "${group.id}" already exists`);
+  }
+  return {
+    graph: { ...graph, groups: [...(graph.groups ?? []), group] },
+    inverse: { type: 'graph.group.delete', payload: { groupId: group.id } },
+  };
+}
+
+function applyDeleteGroup(graph: WorkflowGraphV2, groupId: string): GraphApplyResult {
+  const group = requireGroup(graph, groupId);
+  return {
+    graph: {
+      ...graph,
+      // Ungrouping keeps every node; a group is a name for a set, not a
+      // container that owns what is inside it.
+      groups: (graph.groups ?? []).filter((candidate) => candidate.id !== groupId),
+    },
+    inverse: { type: 'graph.group.create', payload: { group } },
+  };
+}
+
+function applyGroupPatch(
+  graph: WorkflowGraphV2,
+  groupId: string,
+  patch: (group: WorkflowGroupV2) => WorkflowGroupV2,
+  invert: (previous: WorkflowGroupV2) => WorkflowGraphCommand,
+): GraphApplyResult {
+  const previous = requireGroup(graph, groupId);
+  return {
+    graph: {
+      ...graph,
+      groups: (graph.groups ?? []).map((candidate) =>
+        candidate.id === groupId ? patch(previous) : candidate,
+      ),
+    },
+    inverse: invert(previous),
+  };
+}
+
+function groupOf(graph: WorkflowGraphV2, nodeId: string): WorkflowGroupV2 | undefined {
+  return (graph.groups ?? []).find((group) => group.nodeIds.includes(nodeId));
+}
+
+function requireGroup(graph: WorkflowGraphV2, groupId: string): WorkflowGroupV2 {
+  const group = (graph.groups ?? []).find((candidate) => candidate.id === groupId);
+  if (group === undefined) {
+    throw new GraphCommandError('GRAPH_GROUP_MISSING', `group "${groupId}" does not exist`);
+  }
+  return group;
 }
 
 function applyUpdateNode(

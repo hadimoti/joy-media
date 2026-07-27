@@ -402,4 +402,88 @@ describe('workflow graph contracts', () => {
       [],
     );
   });
+
+  it('accepts a graph whose groups name nodes it actually has', () => {
+    const graph: WorkflowGraphV2 = {
+      schemaVersion: 1,
+      nodes: [node('a'), node('b'), node('c')],
+      edges: [edge('e1', 'a', 'b')],
+      groups: [{ id: 'g1', label: 'Ingest', nodeIds: ['a', 'b'] }],
+    };
+
+    expect(validateWorkflowGraph(graph, 'workflow')).toEqual([]);
+  });
+
+  it('accepts a graph with no groups key at all', () => {
+    // Every graph authored before grouping existed is in this shape, so an
+    // absent key has to stay clean rather than merely tolerated.
+    const graph: WorkflowGraphV2 = {
+      schemaVersion: 1,
+      nodes: [node('a')],
+      edges: [],
+    };
+
+    expect('groups' in graph).toBe(false);
+    expect(validateWorkflowGraph(graph, 'workflow')).toEqual([]);
+  });
+
+  it('rejects a group naming a node that is not in the graph', () => {
+    const graph = {
+      schemaVersion: 1,
+      nodes: [node('a')],
+      edges: [],
+      groups: [{ id: 'g1', label: 'Ingest', nodeIds: ['a', 'ghost'] }],
+    };
+
+    expect(validateWorkflowGraph(graph, 'workflow').map((d) => d.code)).toContain(
+      'GRAPH_GROUP_NODE_MISSING',
+    );
+  });
+
+  it('rejects the same node claimed by two groups', () => {
+    // Two owners makes "which group am I in" unanswerable, and the breadcrumb
+    // is exactly that question.
+    const graph = {
+      schemaVersion: 1,
+      nodes: [node('a'), node('b')],
+      edges: [],
+      groups: [
+        { id: 'g1', label: 'Ingest', nodeIds: ['a', 'b'] },
+        { id: 'g2', label: 'Grade', nodeIds: ['b'] },
+      ],
+    };
+
+    expect(validateWorkflowGraph(graph, 'workflow').map((d) => d.code)).toContain(
+      'GRAPH_GROUP_NODE_SHARED',
+    );
+  });
+
+  it('rejects duplicate group ids', () => {
+    const graph = {
+      schemaVersion: 1,
+      nodes: [node('a'), node('b')],
+      edges: [],
+      groups: [
+        { id: 'g1', label: 'Ingest', nodeIds: ['a'] },
+        { id: 'g1', label: 'Grade', nodeIds: ['b'] },
+      ],
+    };
+
+    expect(validateWorkflowGraph(graph, 'workflow').map((d) => d.code)).toContain(
+      'GRAPH_GROUP_DUPLICATE',
+    );
+  });
+
+  it('rejects an empty group label', () => {
+    const graph = {
+      schemaVersion: 1,
+      nodes: [node('a')],
+      edges: [],
+      groups: [{ id: 'g1', label: '', nodeIds: ['a'] }],
+    };
+
+    expect(validateWorkflowGraph(graph, 'workflow').map((d) => d.code)).toContain(
+      'GRAPH_GROUP_LABEL',
+    );
+  });
 });
