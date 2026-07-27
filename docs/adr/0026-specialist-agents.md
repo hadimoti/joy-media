@@ -83,7 +83,8 @@ traces** (§8.4).
 - ~~**Change sets are recorded, not applied.**~~ Closed by ADR-0028: an
   approved parameter change set now changes the creative document, in the same
   compound transaction that records it, undoable in one step. Timeline-domain
-  proposals remain unapplied.
+  proposals closed by ADR-0030: `PACING_AGENT` emits them and `planChangeSet`
+  applies them, in the same single undo as the document half.
 - **No budget in money.** `SpecialistBudget` caps specialists and edits per run;
   `provider.spend` is gated by capability, but no currency limit is enforced
   because no specialist spends yet.

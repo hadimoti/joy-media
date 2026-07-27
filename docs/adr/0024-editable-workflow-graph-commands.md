@@ -123,9 +123,12 @@ additions one at a time, with Redo restoring them.
 
 ## Gaps deliberately left open
 
-- **No grouping or subgraphs.** Listed in Phase 3 deliverables, not built. The
-  node schema has no group or parent reference, so this will need a schema
-  addition rather than only commands.
+- ~~**No grouping or subgraphs.**~~ Grouping closed by ADR-0029: `WorkflowGroupV2`
+  names a set of nodes, with four commands and their inverses. Cache keys are
+  unaffected — `computeNodeCacheKey` reads only node fields and upstream edges,
+  so grouping never invalidates a cached result, and a test asserts it.
+  Subgraphs remain open: ADR-0029's grouping is flat organisation, and real
+  nesting needs port proxying across the boundary and a recursive validator.
 - **The graph is not part of `JoyProjectV2` on disk.** It persists in its own
   log next to the timeline and document logs, because timeline state has not
   graduated into the v1 document either. Consolidating all three remains a

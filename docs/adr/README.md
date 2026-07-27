@@ -11,4 +11,6 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0028** (applying change sets — compound transactions so one Undo reverts a document change and its record together).
+Accepted through **ADR-0030** (timeline-domain proposals applied through the same single undo, and a snapshot log bounded as part of the write — which also fixes a revision collision introduced by ADR-0028's `saveSnapshot` that silently lost the second of two consecutive document replacements).
+
+Most recent: **ADR-0029** navigating a workflow graph (flat node groups with a breadcrumb, and keyboard traversal that follows edges and stops rather than wrapping) · **ADR-0030** as above.

@@ -85,9 +85,10 @@ that predated them.
   which needs change-set application (ADR-0026's open gap). The demo can show
   reveal, trace, templates, and undo today; it cannot yet show an approved
   change reaching the picture.
-- **Accessibility is partial.** The graph and lane surfaces are buttons and
-  lists, so they are keyboard reachable and screen-reader legible, but there is
-  no keyboard traversal between connected nodes (§12.5).
+- ~~**Accessibility is partial** — no keyboard traversal between connected nodes
+  (§12.5).~~ Closed by ADR-0029: arrows follow edges and move within a column,
+  Home/End jump to the ends, and focus stops rather than wrapping so the
+  keyboard user is never told about a connection the graph does not have.
 
 ## Validation and rollback
 

@@ -95,15 +95,34 @@ own mechanism, both now fixed and covered:
 applying the colour specialist put saturation `1.05` into the Color panel, and
 one Undo returned it to `1.00`.
 
+## Amendment — `saveSnapshot` collided revisions, 2026-07-27
+
+The move to `saveSnapshot` above fixed one durability bug and introduced
+another, which is worth recording rather than quietly fixing in ADR-0030.
+
+`LocalProjectPersistence.latestRevision()` counted **transaction** revisions
+only. A snapshot writes no transaction, so two consecutive document
+replacements were assigned the *same* revision — and `recover()` picks the
+first of a tie, so the second replacement was silently lost on reload. A
+`saveTransaction` written after a `saveSnapshot` collided the same way and was
+skipped during replay. Nothing surfaced this: the write succeeded, the in-memory
+document was correct, and only a reload showed the loss.
+
+Fixed in ADR-0030: `latestRevision` takes the max over transactions **and**
+snapshots. The general lesson is that revision assignment has to consider every
+writer to the log, not the one the author is thinking about at the time.
+
 ## Gaps deliberately left open
 
-- **Timeline-domain proposals are still not applied.** No specialist emits one
-  today; the path reports them as unapplied rather than silently skipping.
+- ~~**Timeline-domain proposals are still not applied.**~~ Closed by ADR-0030:
+  `PACING_AGENT` emits them, and `planChangeSet` splits an approved change set
+  across the document and timeline buses into one `dispatchCompound` — so the
+  mechanism this ADR built now carries a second domain, as intended.
 - **No conflict re-check at apply time.** Conflicts are caught when combining;
   a project that changed between combine and apply is caught by the revision
   check instead, which is coarser.
-- **Snapshot growth is unbounded.** Every replacement writes a snapshot, and
-  nothing prunes them.
+- ~~**Snapshot growth is unbounded.**~~ Closed by ADR-0030: snapshots are
+  retained newest-5 as part of the write.
 - **Pixel output is not asserted.** The grade reaches the document the renderer
   builds from, and a consumer panel reflects it, but no test reads the canvas —
   the WebGL context has no `preserveDrawingBuffer`, so pixel comparison would
