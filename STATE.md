@@ -42,9 +42,24 @@ the sole editing-agent host through the VPS code-server extension; Hermes is
 limited to VPN diagnostics and user support.
 
 **Live deploy:** `/opt/joy-media/web` →
-`web-releases/a326ba4-marker-icons`; API `current-api` →
+`web-releases/1f189ec-graph-nav-pacing`; API `current-api` →
 `releases/bd842d8-agentic-api`. Both are healthy. API binds only
 `127.0.0.1:8790`.
+
+**2026-07-27 (later session):** Deployed the graph-navigation + pacing-agent
+batch (ADR-0029, ADR-0030) — snapshot revision-collision fix, bounded snapshot
+retention, `PACING_AGENT` timeline-domain proposals applied through
+`dispatchCompound`, keyboard traversal in the Flow graph, and flat node
+grouping with a breadcrumb. `fix/final-ui-polish` fast-forwarded `46fc8f1` →
+`1f189ec` (7 commits) and deployed as `1f189ec-graph-nav-pacing`; public bundle
+hash (`index-DpRQm1Nb.js`,
+`4f60ef63e6851fd3adf53da326b61f8995eb3059813f048f2bfb5455764d428f`) matches the
+local build, `transitions/` copied from the previous release, API health 200.
+Browser-verified: grouping create/rename/drill-in/ungroup/undo, keyboard
+traversal in every direction including the no-wrap case, and the pacing agent's
+full round trip (gap detected, all-or-nothing approval gate, applied as one
+transaction, undo/redo). The Dual Lens flag remains **off** in production —
+none of this is visible to users yet; that switch is the owner's call.
 
 **Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15** stickers: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md). **P16** gl-transitions + HTML scene pack: [`plan/P16-oss-transitions-html-scenes.md`](plan/P16-oss-transitions-html-scenes.md).
 
