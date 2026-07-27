@@ -25,6 +25,7 @@ import {
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
+import type { TimelineViewport } from '@joy-media/timeline-engine';
 import type {
   CommandTransaction,
   GraphTransaction,
@@ -527,6 +528,12 @@ function EditorWorkspace({
   readonly onBackToLibrary: () => void;
 }) {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
+  /** Shared by Timeline + Dual Lens Time View so clip widths stay one layout. */
+  const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({
+    originUs: 0,
+    pixelsPerSecond: 20,
+  });
+  const [timelineAutoFit, setTimelineAutoFit] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [transcriptionError, setTranscriptionError] = useState<string>();
@@ -2154,6 +2161,10 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedIds={state.selectedIds}
+          viewport={timelineViewport}
+          onViewportChange={setTimelineViewport}
+          autoFit={timelineAutoFit}
+          onAutoFitChange={setTimelineAutoFit}
           markers={visualProject.markers}
           provenance={
             state.selectedIds[0] === undefined
@@ -2241,6 +2252,8 @@ function EditorWorkspace({
           projection={context.dualLensProjection}
           playheadUs={state.playheadUs}
           selectedClipIds={state.selectedIds}
+          timelineViewport={timelineViewport}
+          onTimelineViewportChange={setTimelineViewport}
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
           {...(context.workflowGraph === undefined
             ? {}

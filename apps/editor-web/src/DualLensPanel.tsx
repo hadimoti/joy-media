@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { GraphTransaction } from '@joy-media/commands';
+import type { TimelineViewport } from '@joy-media/timeline-engine';
 import { PanelShell } from './PanelShell.js';
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
   formatTime,
   type DualLensEdge,
-  type DualLensItemIcon,
   type DualLensLane,
   type DualLensNode,
   type DualLensProjection,
@@ -19,17 +19,7 @@ import {
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
-import {
-  AiEffectIcon,
-  AutoCaptionIcon,
-  CommandIcon,
-  ImageIcon,
-  ListIcon,
-  SearchIcon,
-  TimelineAudioTrackIcon,
-  TimelineScriptTrackIcon,
-  TimelineVideoTrackIcon,
-} from './icons.js';
+import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
 
 export interface DualLensPanelProps {
   /**
@@ -47,6 +37,9 @@ export interface DualLensPanelProps {
   readonly onSelectClips: (clipIds: readonly string[]) => void;
   readonly onRevealOnTimeline: (clipIds: readonly string[]) => void;
   readonly onDispatchGraph?: (transaction: GraphTransaction) => void;
+  /** Shared with TimelinePanel so Time View clip widths match the main NLE. */
+  readonly timelineViewport: TimelineViewport;
+  readonly onTimelineViewportChange: (next: TimelineViewport) => void;
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
 }
@@ -61,6 +54,8 @@ export function DualLensPanel({
   onSelectClips,
   onRevealOnTimeline,
   onDispatchGraph,
+  timelineViewport,
+  onTimelineViewportChange,
   specialistReview,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
@@ -147,6 +142,8 @@ export function DualLensPanel({
             advancedOpen={advancedOpen}
             advancedCount={advancedCount}
             selectedClipIds={selectedClipSet}
+            viewport={timelineViewport}
+            onViewportChange={onTimelineViewportChange}
             onAdvancedToggle={() => setAdvancedOpen((open) => !open)}
             onSeek={onSeek}
             onSelectClips={onSelectClips}
@@ -186,42 +183,29 @@ export function DualLensPanel({
   );
 }
 
-function hashUnit(seed: string, salt: number): number {
-  let h = (salt + 1) * 0x9e3779b9;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return ((h >>> 0) % 1000) / 1000;
-}
-
-function dualFilmstripCellCount(widthPercent: number): number {
-  return Math.max(2, Math.min(24, Math.floor(widthPercent / 4)));
-}
-
-function DualLensItemGlyph({ icon }: { readonly icon: DualLensItemIcon | undefined }) {
-  switch (icon) {
-    case 'audio':
-      return <TimelineAudioTrackIcon />;
-    case 'text':
-      return <ListIcon />;
-    case 'caption':
-      return <AutoCaptionIcon />;
-    case 'script':
-      return <TimelineScriptTrackIcon />;
-    case 'prompt':
-      return <SearchIcon />;
-    case 'generation':
-      return <ImageIcon />;
-    case 'agent':
-      return <AiEffectIcon />;
-    case 'generic':
-      return <CommandIcon />;
-    case 'video':
-    case undefined:
-    default:
-      return <TimelineVideoTrackIcon />;
-  }
+function lanesToCanvasTracks(
+  lanes: readonly DualLensLane[],
+  advancedOpen: boolean,
+): readonly TimelineCanvasTrack[] {
+  return lanes
+    .filter((lane) => !lane.advanced || advancedOpen)
+    .map((lane) => ({
+      id: lane.id,
+      label: lane.label,
+      advanced: lane.advanced,
+      items: lane.items.map((item) => {
+        const timed = item.startUs !== undefined && item.endUs !== undefined;
+        return {
+          id: item.id,
+          label: item.label,
+          startUs: item.startUs ?? 0,
+          endUs: item.endUs ?? item.startUs ?? 0,
+          ...(item.clipId === undefined ? {} : { clipId: item.clipId }),
+          ...(item.icon === undefined ? {} : { icon: item.icon }),
+          ...(timed ? {} : { unplaced: true as const }),
+        };
+      }),
+    }));
 }
 
 function TimeProjection({
@@ -231,6 +215,8 @@ function TimeProjection({
   advancedOpen,
   advancedCount,
   selectedClipIds,
+  viewport,
+  onViewportChange,
   onAdvancedToggle,
   onSeek,
   onSelectClips,
@@ -241,13 +227,16 @@ function TimeProjection({
   readonly advancedOpen: boolean;
   readonly advancedCount: number;
   readonly selectedClipIds: ReadonlySet<string>;
+  readonly viewport: TimelineViewport;
+  readonly onViewportChange: (next: TimelineViewport) => void;
   readonly onAdvancedToggle: () => void;
   readonly onSeek: (timeUs: number) => void;
   readonly onSelectClips: (clipIds: readonly string[]) => void;
 }) {
-  const shownLanes = lanes.filter((lane) => !lane.advanced || advancedOpen);
-  const safeDurationUs = Math.max(1, durationUs);
-  const playheadPercent = Math.min(100, Math.max(0, (playheadUs / safeDurationUs) * 100));
+  const tracks = useMemo(
+    () => lanesToCanvasTracks(lanes, advancedOpen),
+    [lanes, advancedOpen],
+  );
 
   return (
     <section className="dual-time" aria-label="Time View">
@@ -265,128 +254,18 @@ function TimeProjection({
           {advancedOpen ? 'Hide' : 'Show'} data lanes ({advancedCount})
         </button>
       </div>
-      <input
-        className="dual-time-scrubber"
-        type="range"
-        min={0}
-        max={safeDurationUs}
-        step={1_000}
-        value={Math.min(safeDurationUs, Math.max(0, playheadUs))}
-        aria-label="Dual Lens playhead"
-        onChange={(event) => onSeek(Number(event.currentTarget.value))}
+      <TimelineCanvas
+        className="dual-time-canvas"
+        durationUs={durationUs}
+        playheadUs={playheadUs}
+        viewport={viewport}
+        onViewportChange={onViewportChange}
+        autoFit={false}
+        tracks={tracks}
+        selectedClipIds={selectedClipIds}
+        onSeek={onSeek}
+        onSelectClips={onSelectClips}
       />
-      <div className="dual-time-ruler" aria-hidden="true">
-        <span>0:00</span>
-        <span>{formatTime(safeDurationUs / 2)}</span>
-        <span>{formatTime(safeDurationUs)}</span>
-      </div>
-      <div className="dual-time-lanes">
-        <div
-          className="dual-time-playhead"
-          style={{ left: `calc(${playheadPercent}% + ${110 - playheadPercent * 1.1}px)` }}
-        />
-        {shownLanes.map((lane) => (
-          <div key={lane.id} className={lane.advanced ? 'dual-time-lane is-data' : 'dual-time-lane'}>
-            <span className="dual-time-lane-label">{lane.label}</span>
-            <div className="dual-time-lane-track">
-              {lane.items.length === 0 ? (
-                <span className="dual-time-empty" lang="fa">
-                  داده‌ای وجود ندارد
-                </span>
-              ) : (
-                lane.items.map((item) => {
-                  const timed = item.startUs !== undefined && item.endUs !== undefined;
-                  const left = timed ? (item.startUs! / safeDurationUs) * 100 : 0;
-                  const widthPct = timed
-                    ? Math.max(1, ((item.endUs! - item.startUs!) / safeDurationUs) * 100)
-                    : undefined;
-                  const selected = item.clipId !== undefined && selectedClipIds.has(item.clipId);
-                  const durationUs =
-                    timed && item.endUs !== undefined && item.startUs !== undefined
-                      ? item.endUs - item.startUs
-                      : undefined;
-                  const showChrome = !timed || (widthPct ?? 0) >= 8;
-                  const showDuration = timed && (widthPct ?? 0) >= 18;
-                  const cellCount = dualFilmstripCellCount(widthPct ?? 10);
-                  const classes = [
-                    'timeline-clip',
-                    'timeline-clip--video',
-                    'timeline-clip--lane-0',
-                    'dual-time-item',
-                  ];
-                  if (!timed) classes.push('is-unplaced');
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={classes.join(' ')}
-                      aria-pressed={item.clipId === undefined ? undefined : selected}
-                      style={
-                        timed
-                          ? {
-                              left: `${Math.max(0, left)}%`,
-                              width: `${Math.min(100 - Math.max(0, left), widthPct ?? 1)}%`,
-                            }
-                          : undefined
-                      }
-                      title={
-                        item.clipId === undefined
-                          ? item.label
-                          : `${item.label} — click to select, double-click to go to it`
-                      }
-                      onClick={() => {
-                        // A placed clip selects; unbound data has nothing to
-                        // select, so it stays a navigation affordance.
-                        if (item.clipId !== undefined) onSelectClips([item.clipId]);
-                        else if (item.startUs !== undefined) onSeek(item.startUs);
-                      }}
-                      onDoubleClick={() => {
-                        if (item.startUs !== undefined) onSeek(item.startUs);
-                      }}
-                    >
-                      {timed && (
-                        <span className="timeline-clip-filmstrip" aria-hidden="true">
-                          {Array.from({ length: cellCount }, (_, index) => {
-                            const t = hashUnit(item.id, index);
-                            const u = hashUnit(item.id, index + 17);
-                            // Exact JOY accent #f4b72f → #8b6cff (RGB lerp, no brown crush).
-                            const r = 244 + t * (139 - 244);
-                            const g = 183 + t * (108 - 183);
-                            const b = 47 + t * (255 - 47);
-                            const lift = 0.22 + u * 0.28;
-                            return (
-                              <span
-                                key={index}
-                                className="timeline-clip-cell"
-                                style={{
-                                  backgroundColor: `rgb(${Math.round(r + (255 - r) * lift)} ${Math.round(g + (255 - g) * lift)} ${Math.round(b + (255 - b) * lift)})`,
-                                }}
-                              />
-                            );
-                          })}
-                        </span>
-                      )}
-                      {showChrome && (
-                        <span className="timeline-clip-chrome">
-                          <span className="timeline-clip-icon" aria-hidden="true">
-                            <DualLensItemGlyph icon={item.icon} />
-                          </span>
-                          <span className="timeline-clip-label">{item.label}</span>
-                          {showDuration && durationUs !== undefined && (
-                            <span className="timeline-clip-duration">
-                              {(durationUs / 1_000_000).toFixed(1)}s
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

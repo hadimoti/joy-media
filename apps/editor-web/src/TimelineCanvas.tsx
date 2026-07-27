@@ -1,0 +1,323 @@
+/**
+ * Shared px-based timeline surface (ruler + grid + lanes + clips).
+ * TimelinePanel (edit) and Dual Lens Time View (inspect) both render this
+ * geometry so zoom/fit and clip widths stay one source of truth.
+ */
+
+import { useEffect, useMemo, useRef } from 'react';
+import {
+  buildRulerTicks,
+  fitPixelsPerSecond,
+  timeToPixel,
+  type TimelineViewport,
+} from '@joy-media/timeline-engine';
+import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
+import {
+  AiEffectIcon,
+  AutoCaptionIcon,
+  CommandIcon,
+  ImageIcon,
+  ListIcon,
+  SearchIcon,
+  TimelineAudioTrackIcon,
+  TimelineScriptTrackIcon,
+  TimelineVideoTrackIcon,
+} from './icons.js';
+
+export type TimelineCanvasIcon =
+  | 'video'
+  | 'audio'
+  | 'text'
+  | 'caption'
+  | 'script'
+  | 'prompt'
+  | 'generation'
+  | 'agent'
+  | 'generic';
+
+export interface TimelineCanvasItem {
+  readonly id: string;
+  readonly label: string;
+  readonly startUs: number;
+  readonly endUs: number;
+  readonly clipId?: string;
+  readonly icon?: TimelineCanvasIcon;
+  readonly unplaced?: boolean;
+}
+
+export interface TimelineCanvasTrack {
+  readonly id: string;
+  readonly label: string;
+  readonly items: readonly TimelineCanvasItem[];
+  readonly advanced?: boolean;
+}
+
+export interface TimelineCanvasProps {
+  readonly durationUs: number;
+  readonly playheadUs: number;
+  readonly viewport: TimelineViewport;
+  readonly onViewportChange: (next: TimelineViewport) => void;
+  readonly autoFit?: boolean;
+  readonly tracks: readonly TimelineCanvasTrack[];
+  readonly selectedClipIds: ReadonlySet<string>;
+  readonly onSeek: (timeUs: number) => void;
+  readonly onSelectClips: (clipIds: readonly string[]) => void;
+  /** Extra class on the scroll root (e.g. dual-time shell keeps section chrome). */
+  readonly className?: string;
+  readonly gutterLabel?: string;
+}
+
+function hashUnit(seed: string, salt: number): number {
+  let h = (salt + 1) * 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) % 1000) / 1000;
+}
+
+function filmstripCellCount(widthPx: number): number {
+  return Math.max(2, Math.min(24, Math.floor(widthPx / 28)));
+}
+
+function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) {
+  switch (icon) {
+    case 'audio':
+      return <TimelineAudioTrackIcon />;
+    case 'text':
+      return <ListIcon />;
+    case 'caption':
+      return <AutoCaptionIcon />;
+    case 'script':
+      return <TimelineScriptTrackIcon />;
+    case 'prompt':
+      return <SearchIcon />;
+    case 'generation':
+      return <ImageIcon />;
+    case 'agent':
+      return <AiEffectIcon />;
+    case 'generic':
+      return <CommandIcon />;
+    case 'video':
+    case undefined:
+    default:
+      return <TimelineVideoTrackIcon />;
+  }
+}
+
+function InspectClip({
+  item,
+  viewport,
+  selected,
+  onSelect,
+  onSeek,
+}: {
+  readonly item: TimelineCanvasItem;
+  readonly viewport: TimelineViewport;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+  readonly onSeek: (timeUs: number) => void;
+}) {
+  const durationUs = Math.max(1, item.endUs - item.startUs);
+  const leftPx = timeToPixel(item.startUs, { ...viewport, originUs: 0 });
+  const widthPx = Math.max(8, durationUs * (viewport.pixelsPerSecond / 1_000_000));
+  const gapPx = 1;
+  const layoutWidthPx = Math.max(6, widthPx - gapPx * 2);
+  const showChrome = layoutWidthPx >= 48;
+  const showDuration = layoutWidthPx >= 100;
+  const cellCount = filmstripCellCount(layoutWidthPx);
+  const durationLabel = `${(durationUs / 1_000_000).toFixed(1)}s`;
+
+  return (
+    <button
+      type="button"
+      className="timeline-clip timeline-clip--video timeline-clip--lane-0"
+      aria-pressed={item.clipId === undefined ? undefined : selected}
+      title={
+        item.clipId === undefined
+          ? item.label
+          : `${item.label} — click to select, double-click to go to it`
+      }
+      style={{
+        left: `${leftPx + gapPx}px`,
+        width: `${layoutWidthPx}px`,
+      }}
+      onClick={() => {
+        if (item.clipId !== undefined) onSelect();
+        else onSeek(item.startUs);
+      }}
+      onDoubleClick={() => onSeek(item.startUs)}
+    >
+      <span className="timeline-clip-filmstrip" aria-hidden="true">
+        {Array.from({ length: cellCount }, (_, index) => {
+          const t = hashUnit(item.id, index);
+          const u = hashUnit(item.id, index + 17);
+          const r = 244 + t * (139 - 244);
+          const g = 183 + t * (108 - 183);
+          const b = 47 + t * (255 - 47);
+          const lift = 0.22 + u * 0.28;
+          return (
+            <span
+              key={index}
+              className="timeline-clip-cell"
+              style={{
+                backgroundColor: `rgb(${Math.round(r + (255 - r) * lift)} ${Math.round(g + (255 - g) * lift)} ${Math.round(b + (255 - b) * lift)})`,
+              }}
+            />
+          );
+        })}
+      </span>
+      {showChrome && (
+        <span className="timeline-clip-chrome">
+          <span className="timeline-clip-icon" aria-hidden="true">
+            <ItemGlyph icon={item.icon} />
+          </span>
+          <span className="timeline-clip-label">{item.label}</span>
+          {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
+        </span>
+      )}
+    </button>
+  );
+}
+
+export function TimelineCanvas({
+  durationUs,
+  playheadUs,
+  viewport,
+  onViewportChange,
+  autoFit = true,
+  tracks,
+  selectedClipIds,
+  onSeek,
+  onSelectClips,
+  className,
+  gutterLabel,
+}: TimelineCanvasProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const laneMeasureRef = useRef<HTMLDivElement | null>(null);
+  const safeDurationUs = Math.max(1, durationUs);
+
+  const laneWidthPx = Math.max(
+    64,
+    timeToPixel(safeDurationUs, { ...viewport, originUs: 0 }),
+  );
+  const rulerTicks = useMemo(
+    () =>
+      buildRulerTicks({
+        durationUs: safeDurationUs,
+        pixelsPerSecond: viewport.pixelsPerSecond,
+        originUs: 0,
+      }),
+    [safeDurationUs, viewport.pixelsPerSecond],
+  );
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (root === null || !autoFit) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry === undefined) return;
+      const lane = laneMeasureRef.current;
+      const width = lane?.clientWidth ?? Math.max(0, entry.contentRect.width - 152);
+      if (width > 0) {
+        onViewportChange({
+          ...viewport,
+          pixelsPerSecond: fitPixelsPerSecond(safeDurationUs, width),
+        });
+      }
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+    // Intentionally depend on duration/autoFit; viewport is written, not read for equality.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
+  }, [autoFit, safeDurationUs, onViewportChange]);
+
+  const playheadLeft = `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`;
+
+  return (
+    <div
+      className={['timeline-tracks', className].filter(Boolean).join(' ')}
+      ref={scrollRef}
+    >
+      <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
+        <div className="timeline-scrub-gutter">
+          <output className="timeline-timecode" aria-live="polite">
+            {gutterLabel ?? `${(playheadUs / 1_000_000).toFixed(2)} s`}
+          </output>
+        </div>
+        <TimelineRuler
+          durationUs={safeDurationUs}
+          playheadUs={playheadUs}
+          viewport={{ ...viewport, originUs: 0 }}
+          widthPx={laneWidthPx}
+          ticks={rulerTicks}
+          onSeek={onSeek}
+        />
+        <span
+          className="timeline-playhead timeline-playhead--scrub"
+          style={{ left: playheadLeft }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="timeline-tracks-inner" ref={laneMeasureRef}>
+        <TimelineTracksGrid ticks={rulerTicks} widthPx={laneWidthPx} />
+        <span className="timeline-playhead" style={{ left: playheadLeft }} aria-hidden="true" />
+        {tracks.map((track) => (
+          <div
+            className={`timeline-track${track.advanced === true ? ' is-data' : ''}`}
+            key={track.id}
+            style={{ height: 44 }}
+          >
+            <div className="timeline-track-header">
+              <strong title={track.label}>{track.label}</strong>
+            </div>
+            <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
+              {track.items.length === 0 ? (
+                <span className="timeline-lane-empty" lang="fa">
+                  داده‌ای وجود ندارد
+                </span>
+              ) : (
+                track.items.map((item) => {
+                  if (item.unplaced === true) {
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="timeline-clip timeline-clip--video timeline-clip--lane-0 is-unplaced"
+                        title={item.label}
+                        onClick={() => {
+                          if (item.startUs !== undefined) onSeek(item.startUs);
+                        }}
+                      >
+                        <span className="timeline-clip-chrome">
+                          <span className="timeline-clip-icon" aria-hidden="true">
+                            <ItemGlyph icon={item.icon} />
+                          </span>
+                          <span className="timeline-clip-label">{item.label}</span>
+                        </span>
+                      </button>
+                    );
+                  }
+                  const selected =
+                    item.clipId !== undefined && selectedClipIds.has(item.clipId);
+                  return (
+                    <InspectClip
+                      key={item.id}
+                      item={item}
+                      viewport={viewport}
+                      selected={selected}
+                      onSelect={() => {
+                        if (item.clipId !== undefined) onSelectClips([item.clipId]);
+                      }}
+                      onSeek={onSeek}
+                    />
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

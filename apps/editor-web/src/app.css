@@ -6774,81 +6774,28 @@ label {
   font-size: 10px;
 }
 
-.dual-time-scrubber {
-  display: block;
-  width: calc(100% - 20px);
-  height: 18px;
-  margin: 5px 10px 0;
-  accent-color: var(--color-joy);
-  cursor: ew-resize;
-}
-
-.dual-time-ruler {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 10px 5px 114px;
-  color: var(--joy-text-muted);
-  font-family: var(--joy-font-mono);
-  font-size: 9px;
-}
-
-.dual-time-lanes {
-  position: relative;
-  padding-bottom: 4px;
+/* Dual Lens Time View hosts TimelineCanvas — same ruler/grid/lanes/clips.
+   Only clip hue differs from the main NLE. */
+.dual-time-canvas.timeline-tracks {
+  max-height: min(42vh, 320px);
   border-top: 1px solid var(--joy-border);
 }
-
-.dual-time-playhead {
-  position: absolute;
-  z-index: 4;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--color-joy);
-  box-shadow: 0 0 5px var(--color-joy);
-  pointer-events: none;
-}
-
-.dual-time-lane {
-  display: grid;
-  min-height: 2.35rem;
-  grid-template-columns: 110px minmax(0, 1fr);
-  border-bottom: 1px solid #2e2e32;
-}
-
-.dual-time-lane.is-data {
+.dual-time .timeline-track.is-data {
   background: color-mix(in srgb, #8b6cff 5%, transparent);
 }
-
-.dual-time-lane-label {
-  overflow: hidden;
-  padding: 0 8px;
+.timeline-lane-empty {
   display: flex;
   align-items: center;
-  border-right: 1px solid var(--joy-border);
-  color: #9d9da1;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  height: 100%;
+  padding-inline-start: 0.45rem;
+  color: var(--joy-text-muted);
+  font-size: 0.72rem;
+  font-style: italic;
 }
-
-.dual-time-lane-track {
-  position: relative;
-  min-width: 0;
-  min-height: 2.35rem;
-  overflow: hidden;
-  background: transparent;
-  border-radius: var(--radius-sm);
-}
-
-/* Dual Lens clips reuse .timeline-clip structure; only placement + hue differ. */
-.dual-time-item.timeline-clip {
+.dual-time .timeline-clip {
   --dual-orange: var(--joy-accent);
   --dual-purple: #8b6cff;
   --dual-purple-deep: #5b3fd4;
-  top: 0.2rem;
-  bottom: 0.2rem;
   cursor: pointer;
   border-color: color-mix(in srgb, var(--dual-purple) 28%, var(--joy-border-strong));
   border-top-color: color-mix(in srgb, var(--dual-orange) 22%, rgb(255 255 255 / 14%));
@@ -6862,9 +6809,8 @@ label {
       color-mix(in srgb, var(--dual-purple-deep) 20%, transparent) 100%
     ),
     var(--joy-bg-control);
-  --clip-rail: var(--dual-orange);
 }
-.dual-time-item.timeline-clip::before {
+.dual-time .timeline-clip::before {
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--dual-orange) 82%, white),
@@ -6873,7 +6819,7 @@ label {
     var(--dual-purple-deep)
   );
 }
-.dual-time-item.timeline-clip:hover {
+.dual-time .timeline-clip:hover {
   border-color: color-mix(in srgb, var(--dual-purple) 40%, var(--joy-border-hover));
   border-top-color: color-mix(in srgb, var(--dual-orange) 32%, rgb(255 255 255 / 20%));
   background:
@@ -6887,13 +6833,10 @@ label {
     ),
     var(--joy-bg-active);
 }
-.dual-time-item.timeline-clip .timeline-clip-label {
-  color: #f5e6c0;
-}
-.dual-time-item.timeline-clip .timeline-clip-duration {
+.dual-time .timeline-clip .timeline-clip-duration {
   color: #c9b6ff;
 }
-.dual-time-item.timeline-clip[aria-pressed='true'] {
+.dual-time .timeline-clip[aria-pressed='true'] {
   outline-color: color-mix(in srgb, var(--dual-orange) 55%, var(--dual-purple));
   border-color: color-mix(in srgb, var(--dual-orange) 55%, var(--dual-purple));
   box-shadow:
@@ -6903,8 +6846,7 @@ label {
     0 6px 14px rgb(0 0 0 / 36%),
     0 0 0 1px color-mix(in srgb, var(--dual-purple) 40%, transparent);
 }
-
-.dual-time-item.timeline-clip.is-unplaced {
+.dual-time .timeline-clip.is-unplaced {
   position: static;
   max-width: 170px;
   height: 1.85rem;
@@ -6914,22 +6856,12 @@ label {
     linear-gradient(180deg, rgb(255 255 255 / 5%), transparent 40%, rgb(0 0 0 / 28%)),
     var(--joy-bg-raised);
 }
-.dual-time-item.timeline-clip.is-unplaced::before {
+.dual-time .timeline-clip.is-unplaced::before {
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--joy-border-strong) 88%, white),
     var(--joy-border-strong)
   );
-}
-
-.dual-time-empty {
-  display: flex;
-  align-items: center;
-  height: 100%;
-  padding-left: 5px;
-  color: var(--joy-text-muted);
-  font-size: 0.72rem;
-  font-style: italic;
 }
 
 .dual-flow-legend {

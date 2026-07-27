@@ -375,6 +375,10 @@ export function TimelinePanel({
   playing,
   selectedIds,
   markers = [],
+  viewport,
+  onViewportChange,
+  autoFit,
+  onAutoFitChange,
   onTogglePlayback,
   onSeek,
   onToggleSelection,
@@ -396,6 +400,10 @@ export function TimelinePanel({
   readonly playheadUs: number;
   readonly playing: boolean;
   readonly selectedIds: readonly string[];
+  readonly viewport: TimelineViewport;
+  readonly onViewportChange: (next: TimelineViewport) => void;
+  readonly autoFit: boolean;
+  readonly onAutoFitChange: (next: boolean) => void;
   readonly markers?: readonly {
     readonly id: string;
     readonly timeUs: number;
@@ -433,11 +441,6 @@ export function TimelinePanel({
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
-  const [viewport, setViewport] = useState<TimelineViewport>({
-    originUs: 0,
-    pixelsPerSecond: DEFAULT_PPS,
-  });
-  const [autoFit, setAutoFit] = useState(true);
   const [selectToolActive, setSelectToolActive] = useState(true);
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
@@ -483,25 +486,27 @@ export function TimelinePanel({
       const lane = laneMeasureRef.current;
       const width = lane?.clientWidth ?? entry.contentRect.width;
       if (autoFit && width > 0) {
-        setViewport((prev) => ({
-          ...prev,
+        onViewportChange({
+          ...viewport,
           pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
-        }));
+        });
       }
     });
     observer.observe(root);
     return () => observer.disconnect();
-  }, [autoFit, composition.durationUs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer; viewport is output
+  }, [autoFit, composition.durationUs, onViewportChange]);
 
   useEffect(() => {
     if (!autoFit) return;
     const width = laneMeasureRef.current?.clientWidth ?? scrollRef.current?.clientWidth ?? 0;
     if (width <= 0) return;
-    setViewport((prev) => ({
-      ...prev,
+    onViewportChange({
+      ...viewport,
       pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
-    }));
-  }, [autoFit, composition.durationUs]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
+  }, [autoFit, composition.durationUs, onViewportChange]);
 
   const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') =>
     setTrackFlags(() => {
@@ -724,7 +729,7 @@ export function TimelinePanel({
   };
 
   const applyZoom = (nextPps: number, anchorClientX?: number) => {
-    setAutoFit(false);
+    onAutoFitChange(false);
     const clamped = clampPixelsPerSecond(nextPps);
     const lane = laneMeasureRef.current;
     if (lane !== null && anchorClientX !== undefined) {
@@ -740,17 +745,17 @@ export function TimelinePanel({
         if (scrollRef.current) scrollRef.current.scrollLeft = scrollLeft;
       });
     }
-    setViewport((prev) => ({ ...prev, pixelsPerSecond: clamped }));
+    onViewportChange({ ...viewport, pixelsPerSecond: clamped });
   };
 
   const fitToWidth = () => {
-    setAutoFit(true);
+    onAutoFitChange(true);
     const width = laneMeasureRef.current?.clientWidth ?? scrollRef.current?.clientWidth ?? 0;
     if (width > 0) {
-      setViewport((prev) => ({
-        ...prev,
+      onViewportChange({
+        ...viewport,
         pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
-      }));
+      });
     }
   };
 
