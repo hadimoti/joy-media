@@ -7,6 +7,9 @@ import {
   timelineTrackDisplayName,
   timelineTrackKind,
 } from './timeline-track-kind.js';
+import { formatTime } from './format-time.js';
+
+export { formatTime } from './format-time.js';
 
 export type DualLensNodeKind =
   'provider' | 'asset' | 'clip' | 'visual' | 'data' | 'agent' | 'output';
@@ -484,10 +487,4 @@ function findCaptionPlacements(
 
 function formatSeconds(durationUs: number): string {
   return `${(durationUs / 1_000_000).toFixed(1)}s`;
-}
-
-export function formatTime(timeUs: number): string {
-  const seconds = Math.max(0, timeUs) / 1_000_000;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
 }

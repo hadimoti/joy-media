@@ -55,6 +55,7 @@ import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName, type TimelineTrackKind } from './timeline-track-kind.js';
+import { formatTime } from './format-time.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
 import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
@@ -1140,7 +1141,7 @@ export function TimelinePanel({
         <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
           <div className="timeline-scrub-gutter">
             <output className="timeline-timecode" aria-live="polite">
-              {(playheadUs / 1_000_000).toFixed(2)} s
+              {formatTime(playheadUs)}
             </output>
           </div>
           <TimelineRuler

@@ -12,6 +12,7 @@ import {
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
+import { formatTime } from './format-time.js';
 import {
   AiEffectIcon,
   AutoCaptionIcon,
@@ -344,7 +345,7 @@ export function TimelineCanvas({
       <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
         <div className="timeline-scrub-gutter">
           <output className="timeline-timecode" aria-live="polite">
-            {gutterLabel ?? `${(playheadUs / 1_000_000).toFixed(2)} s`}
+            {gutterLabel ?? formatTime(playheadUs)}
           </output>
         </div>
         <TimelineRuler
