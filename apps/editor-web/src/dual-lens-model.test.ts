@@ -99,7 +99,8 @@ describe('Dual Lens Creative Document projections', () => {
     expect(projection.traceNodeIds.has('provider:local-worker:flux-dev')).toBe(true);
     expect(projection.lanes.find((lane) => lane.label === 'Prompts')?.items[0]).toEqual(
       expect.objectContaining({
-        label: 'Soft purple product reveal',
+        label: 'Soft Purple Product Reveal',
+        icon: 'prompt',
         startUs: 0,
         endUs: 10_000_000,
       }),
