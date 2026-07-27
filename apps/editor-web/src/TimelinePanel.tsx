@@ -396,6 +396,8 @@ export function TimelinePanel({
   artifacts,
   onDispatchArtifacts,
   showToast,
+  trackFlags: trackFlagsProp,
+  onTrackFlagsChange,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -440,8 +442,13 @@ export function TimelinePanel({
   readonly artifacts?: ArtifactStore;
   readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
+  /** Shared with Dual Lens so lock/mute/solo stay one source of truth. */
+  readonly trackFlags?: readonly TimelineTrackView[];
+  readonly onTrackFlagsChange?: (next: readonly TimelineTrackView[]) => void;
 }) {
-  const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
+  const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
+  const trackFlags = trackFlagsProp ?? localTrackFlags;
+  const setTrackFlags = onTrackFlagsChange ?? setLocalTrackFlags;
   const [selectToolActive, setSelectToolActive] = useState(true);
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
@@ -509,17 +516,18 @@ export function TimelinePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
   }, [autoFit, composition.durationUs, onViewportChange]);
 
-  const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') =>
-    setTrackFlags(() => {
-      const next = tracks.map((track) => (track.id === id ? toggleTrackFlag(track, flag) : track));
-      return next.map(({ id: trackId, heightPx, locked, muted, solo }) => ({
+  const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
+    const next = tracks
+      .map((track) => (track.id === id ? toggleTrackFlag(track, flag) : track))
+      .map(({ id: trackId, heightPx, locked, muted, solo }) => ({
         id: trackId,
         heightPx,
         locked,
         muted,
         solo,
       }));
-    });
+    setTrackFlags(next);
+  };
 
   const selected = selectedIds
     .map((id) =>

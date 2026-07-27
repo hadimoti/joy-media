@@ -67,6 +67,10 @@ export interface DualLensLane {
     readonly code: string;
     readonly name: string;
   };
+  /** Composition track id for lock/mute/solo — only on core timeline lanes. */
+  readonly sourceTrackId?: string;
+  /** Seed for mute when track flags have not been toggled yet. */
+  readonly trackEnabled?: boolean;
 }
 
 export interface DualLensProjection {
@@ -311,6 +315,8 @@ function buildLanes(
       label: `${code} ${name}`,
       advanced: false,
       header: { kind, code, name },
+      sourceTrackId: track.id,
+      trackEnabled: track.enabled ?? true,
       items: track.clips.map((clip) => ({
         id: clip.id,
         label: polishMediaLabel(clip.id),

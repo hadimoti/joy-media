@@ -6783,6 +6783,25 @@ label {
 
 /* Dual Lens Time View hosts TimelineCanvas — same ruler/grid/lanes/clips.
    Only clip hue differs from the main NLE. */
+.dual-time .timeline-track-header {
+  /* 5px inset; shrink width so the lane still starts at the 9.5rem playhead origin. */
+  margin-left: 5px;
+  width: calc(9.5rem - 5px);
+  min-width: calc(9.5rem - 5px);
+}
+
+.dual-time .timeline-track-header .icon-button {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+}
+
+.dual-time .timeline-track-header .icon-button svg {
+  width: 0.78rem;
+  height: 0.78rem;
+}
+
 .dual-time-canvas.timeline-tracks {
   max-height: min(42vh, 320px);
   border-top: 1px solid var(--joy-border);

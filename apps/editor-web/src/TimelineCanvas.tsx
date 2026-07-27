@@ -18,7 +18,11 @@ import {
   CommandIcon,
   ImageIcon,
   ListIcon,
+  LockIcon,
+  MuteIcon,
   SearchIcon,
+  SoloIcon,
+  SpeakerOnIcon,
   TimelineAudioTrackIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
@@ -55,6 +59,14 @@ export interface TimelineCanvasTrack {
     readonly kind: TimelineCanvasIcon;
     readonly code: string;
     readonly name: string;
+  };
+  /** Lock / mute / solo — same controls as the main Timeline gutter. */
+  readonly controls?: {
+    readonly trackId: string;
+    readonly locked: boolean;
+    readonly muted: boolean;
+    readonly solo: boolean;
+    readonly onToggle: (flag: 'locked' | 'muted' | 'solo') => void;
   };
 }
 
@@ -114,6 +126,7 @@ function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) 
 function TrackHeaderChrome({
   header,
   fallbackLabel,
+  controls,
 }: {
   readonly header:
     | {
@@ -123,24 +136,73 @@ function TrackHeaderChrome({
       }
     | undefined;
   readonly fallbackLabel: string;
+  readonly controls:
+    | {
+        readonly trackId: string;
+        readonly locked: boolean;
+        readonly muted: boolean;
+        readonly solo: boolean;
+        readonly onToggle: (flag: 'locked' | 'muted' | 'solo') => void;
+      }
+    | undefined;
 }) {
-  if (header === undefined) {
-    return <strong title={fallbackLabel}>{fallbackLabel}</strong>;
-  }
-  const kindTitle = `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)} track`;
+  const label =
+    header === undefined ? (
+      <strong title={fallbackLabel}>{fallbackLabel}</strong>
+    ) : (
+      <>
+        <span
+          className="timeline-track-kind-icon"
+          title={`${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)} track`}
+        >
+          <ItemGlyph icon={header.kind} />
+        </span>
+        <div className="timeline-track-label">
+          <span className="track-code" dir="ltr">
+            {header.code}
+          </span>
+          <span className="track-name" dir="ltr" title={header.name}>
+            {header.name}
+          </span>
+        </div>
+      </>
+    );
+
+  if (controls === undefined) return label;
+
   return (
     <>
-      <span className="timeline-track-kind-icon" title={kindTitle}>
-        <ItemGlyph icon={header.kind} />
-      </span>
-      <div className="timeline-track-label">
-        <span className="track-code" dir="ltr">
-          {header.code}
-        </span>
-        <span className="track-name" dir="ltr" title={header.name}>
-          {header.name}
-        </span>
-      </div>
+      {label}
+      <button
+        type="button"
+        className="icon-button"
+        aria-pressed={controls.locked}
+        aria-label={`Lock ${controls.trackId}`}
+        title={controls.locked ? 'Unlock track' : 'Lock track'}
+        onClick={() => controls.onToggle('locked')}
+      >
+        <LockIcon />
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        aria-pressed={controls.muted}
+        aria-label={`Mute ${controls.trackId}`}
+        title={controls.muted ? 'Unmute track' : 'Mute track'}
+        onClick={() => controls.onToggle('muted')}
+      >
+        {controls.muted ? <MuteIcon /> : <SpeakerOnIcon />}
+      </button>
+      <button
+        type="button"
+        className="icon-button"
+        aria-pressed={controls.solo}
+        aria-label={`Solo ${controls.trackId}`}
+        title={controls.solo ? 'Unsolo track' : 'Solo track'}
+        onClick={() => controls.onToggle('solo')}
+      >
+        <SoloIcon />
+      </button>
     </>
   );
 }
@@ -309,7 +371,11 @@ export function TimelineCanvas({
             style={{ height: 44 }}
           >
             <div className="timeline-track-header">
-              <TrackHeaderChrome header={track.header} fallbackLabel={track.label} />
+              <TrackHeaderChrome
+                header={track.header}
+                fallbackLabel={track.label}
+                controls={track.controls}
+              />
             </div>
             <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
               {track.items.length === 0 ? (

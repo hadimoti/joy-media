@@ -25,7 +25,7 @@ import {
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
-import type { TimelineViewport } from '@joy-media/timeline-engine';
+import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
   CommandTransaction,
   GraphTransaction,
@@ -533,6 +533,7 @@ function EditorWorkspace({
     originUs: 0,
     pixelsPerSecond: 20,
   });
+  const [timelineTrackFlags, setTimelineTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [timelineAutoFit, setTimelineAutoFit] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -2163,6 +2164,8 @@ function EditorWorkspace({
           selectedIds={state.selectedIds}
           viewport={timelineViewport}
           onViewportChange={setTimelineViewport}
+          trackFlags={timelineTrackFlags}
+          onTrackFlagsChange={setTimelineTrackFlags}
           autoFit={timelineAutoFit}
           onAutoFitChange={setTimelineAutoFit}
           markers={visualProject.markers}
@@ -2254,6 +2257,10 @@ function EditorWorkspace({
           selectedClipIds={state.selectedIds}
           timelineViewport={timelineViewport}
           onTimelineViewportChange={setTimelineViewport}
+          trackFlags={timelineTrackFlags}
+          onTrackFlagsChange={setTimelineTrackFlags}
+          compositionId={context.timelineProject.rootCompositionId}
+          onDispatch={context.dispatchTimeline}
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
           {...(context.workflowGraph === undefined
             ? {}

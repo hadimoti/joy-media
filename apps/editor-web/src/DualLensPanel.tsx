@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
-import type { GraphTransaction } from '@joy-media/commands';
-import type { TimelineViewport } from '@joy-media/timeline-engine';
+import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
+import {
+  toggleTrackFlag,
+  type TimelineTrackView,
+  type TimelineViewport,
+} from '@joy-media/timeline-engine';
 import { PanelShell } from './PanelShell.js';
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -40,6 +44,11 @@ export interface DualLensPanelProps {
   /** Shared with TimelinePanel so Time View clip widths match the main NLE. */
   readonly timelineViewport: TimelineViewport;
   readonly onTimelineViewportChange: (next: TimelineViewport) => void;
+  /** Shared lock/mute/solo flags with the main Timeline gutter. */
+  readonly trackFlags: readonly TimelineTrackView[];
+  readonly onTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
+  readonly compositionId: string;
+  readonly onDispatch: (transaction: CommandTransaction) => void;
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
 }
@@ -56,6 +65,10 @@ export function DualLensPanel({
   onDispatchGraph,
   timelineViewport,
   onTimelineViewportChange,
+  trackFlags,
+  onTrackFlagsChange,
+  compositionId,
+  onDispatch,
   specialistReview,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
@@ -148,6 +161,10 @@ export function DualLensPanel({
             onAdvancedToggle={() => setAdvancedOpen((open) => !open)}
             onSeek={onSeek}
             onSelectClips={onSelectClips}
+            trackFlags={trackFlags}
+            onTrackFlagsChange={onTrackFlagsChange}
+            compositionId={compositionId}
+            onDispatch={onDispatch}
           />
         )}
         {(mode === 'flow' || mode === 'split') && (
@@ -187,27 +204,49 @@ export function DualLensPanel({
 function lanesToCanvasTracks(
   lanes: readonly DualLensLane[],
   advancedOpen: boolean,
+  trackFlags: readonly TimelineTrackView[],
+  onToggleTrackFlag: (
+    trackId: string,
+    flag: 'locked' | 'muted' | 'solo',
+    enabledSeed: boolean,
+  ) => void,
 ): readonly TimelineCanvasTrack[] {
   return lanes
     .filter((lane) => !lane.advanced || advancedOpen)
-    .map((lane) => ({
-      id: lane.id,
-      label: lane.label,
-      advanced: lane.advanced,
-      ...(lane.header === undefined ? {} : { header: lane.header }),
-      items: lane.items.map((item) => {
-        const timed = item.startUs !== undefined && item.endUs !== undefined;
-        return {
-          id: item.id,
-          label: item.label,
-          startUs: item.startUs ?? 0,
-          endUs: item.endUs ?? item.startUs ?? 0,
-          ...(item.clipId === undefined ? {} : { clipId: item.clipId }),
-          ...(item.icon === undefined ? {} : { icon: item.icon }),
-          ...(timed ? {} : { unplaced: true as const }),
+    .map((lane) => {
+      const sourceTrackId = lane.sourceTrackId;
+      let controls: TimelineCanvasTrack['controls'];
+      if (sourceTrackId !== undefined) {
+        const enabled = lane.trackEnabled ?? true;
+        const saved = trackFlags.find((item) => item.id === sourceTrackId);
+        controls = {
+          trackId: sourceTrackId,
+          locked: saved?.locked ?? false,
+          muted: saved?.muted ?? !enabled,
+          solo: saved?.solo ?? false,
+          onToggle: (flag) => onToggleTrackFlag(sourceTrackId, flag, enabled),
         };
-      }),
-    }));
+      }
+      return {
+        id: lane.id,
+        label: lane.label,
+        advanced: lane.advanced,
+        ...(lane.header === undefined ? {} : { header: lane.header }),
+        ...(controls === undefined ? {} : { controls }),
+        items: lane.items.map((item) => {
+          const timed = item.startUs !== undefined && item.endUs !== undefined;
+          return {
+            id: item.id,
+            label: item.label,
+            startUs: item.startUs ?? 0,
+            endUs: item.endUs ?? item.startUs ?? 0,
+            ...(item.clipId === undefined ? {} : { clipId: item.clipId }),
+            ...(item.icon === undefined ? {} : { icon: item.icon }),
+            ...(timed ? {} : { unplaced: true as const }),
+          };
+        }),
+      };
+    });
 }
 
 function TimeProjection({
@@ -222,6 +261,10 @@ function TimeProjection({
   onAdvancedToggle,
   onSeek,
   onSelectClips,
+  trackFlags,
+  onTrackFlagsChange,
+  compositionId,
+  onDispatch,
 }: {
   readonly lanes: readonly DualLensLane[];
   readonly durationUs: number;
@@ -234,11 +277,48 @@ function TimeProjection({
   readonly onAdvancedToggle: () => void;
   readonly onSeek: (timeUs: number) => void;
   readonly onSelectClips: (clipIds: readonly string[]) => void;
+  readonly trackFlags: readonly TimelineTrackView[];
+  readonly onTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
+  readonly compositionId: string;
+  readonly onDispatch: (transaction: CommandTransaction) => void;
 }) {
-  const tracks = useMemo(
-    () => lanesToCanvasTracks(lanes, advancedOpen),
-    [lanes, advancedOpen],
-  );
+  const tracks = useMemo(() => {
+    const onToggleTrackFlag = (
+      trackId: string,
+      flag: 'locked' | 'muted' | 'solo',
+      enabledSeed: boolean,
+    ) => {
+      const current =
+        trackFlags.find((item) => item.id === trackId) ??
+        ({
+          id: trackId,
+          heightPx: 44,
+          locked: false,
+          muted: !enabledSeed,
+          solo: false,
+        } satisfies TimelineTrackView);
+      if (flag === 'muted') {
+        onDispatch({
+          label: current.muted ? `Enable ${trackId}` : `Mute ${trackId}`,
+          commands: [
+            {
+              type: 'property.setTrackEnabled',
+              payload: {
+                compositionId,
+                trackId,
+                enabled: current.muted,
+              },
+            },
+          ],
+        });
+      }
+      onTrackFlagsChange([
+        ...trackFlags.filter((item) => item.id !== trackId),
+        toggleTrackFlag(current, flag),
+      ]);
+    };
+    return lanesToCanvasTracks(lanes, advancedOpen, trackFlags, onToggleTrackFlag);
+  }, [lanes, advancedOpen, trackFlags, compositionId, onDispatch, onTrackFlagsChange]);
 
   return (
     <section className="dual-time" aria-label="Time View">
