@@ -109,6 +109,7 @@ export {
   WORKFLOW_GRAPH_SCHEMA_VERSION,
   EMPTY_WORKFLOW_GRAPH,
   isRenderableArtifactKind,
+  selectRenderableArtifacts,
   validateTemporalBinding,
   validateArtifactContentRef,
   validateArtifactProvenance,

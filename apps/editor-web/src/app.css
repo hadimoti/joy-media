@@ -7050,6 +7050,258 @@ label {
   font-weight: 600;
 }
 
+/* Data Lanes drawer (ADR-0025). Collapsed by default; see §6.2. */
+.timeline-data-lanes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  color: var(--joy-text-muted);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.timeline-data-lanes-toggle:hover,
+.timeline-data-lanes-toggle[aria-expanded='true'] {
+  border-color: var(--color-joy);
+  color: var(--joy-text);
+}
+
+.timeline-data-lanes-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--color-joy);
+  font-size: 9px;
+}
+
+.data-lanes {
+  border-top: 1px solid var(--joy-border);
+  background: rgba(12, 14, 19, 0.6);
+}
+
+.data-lane-actions {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.data-lane-action-group {
+  display: flex;
+  gap: 5px;
+}
+
+.data-lane-add {
+  padding: 2px 9px;
+  border: 1px dashed var(--joy-border);
+  border-radius: 999px;
+  color: var(--joy-text-muted);
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.data-lane-add:hover {
+  border-style: solid;
+  border-color: var(--color-joy);
+  color: #fff;
+}
+
+.data-lane {
+  display: flex;
+  min-height: 26px;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.data-lane-label {
+  display: flex;
+  width: 9.5rem;
+  flex: none;
+  align-items: center;
+  padding-left: 10px;
+  color: var(--joy-text-muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-lane-track {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+}
+
+.data-lane-item {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid rgba(150, 130, 255, 0.5);
+  border-radius: 4px;
+  color: #ece9ff;
+  background: rgba(110, 87, 255, 0.26);
+  font-size: 9px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Semantic accents per plan §3.5; never colour alone — each carries a label. */
+.data-lane-item.is-script,
+.data-lane-item.is-transcript,
+.data-lane-item.is-captions {
+  border-color: rgba(168, 140, 255, 0.6);
+  background: rgba(140, 110, 255, 0.24);
+}
+
+.data-lane-item.is-analysis {
+  border-color: rgba(214, 160, 60, 0.6);
+  background: rgba(214, 160, 60, 0.18);
+}
+
+.data-lane-item.is-generation,
+.data-lane-item.is-prompt {
+  border-color: rgba(214, 108, 214, 0.55);
+  background: rgba(200, 100, 200, 0.18);
+}
+
+.data-lane-item.is-changeSet {
+  border-color: rgba(94, 200, 214, 0.55);
+  background: rgba(94, 200, 214, 0.15);
+  border-style: dashed;
+}
+
+.data-lane-item.is-reviewGate {
+  border-color: rgba(224, 190, 90, 0.65);
+  background: rgba(224, 190, 90, 0.16);
+}
+
+.data-lane-item.is-unplaced {
+  position: static;
+  max-width: 190px;
+  height: 20px;
+  flex: 0 1 auto;
+  border-style: dotted;
+  color: var(--joy-text-muted);
+  background: var(--joy-bg-chrome);
+}
+
+.data-lane-item.is-stale {
+  box-shadow: inset 0 0 0 1px rgba(214, 160, 60, 0.8);
+}
+
+.data-lane-item.is-pinned {
+  border-width: 2px;
+}
+
+.data-lane-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-lane-badge {
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.data-lane-badge.is-pin {
+  color: #f6d38a;
+}
+
+.version-tray {
+  padding: 8px 10px;
+  border-top: 1px solid var(--joy-border);
+  background: rgba(20, 22, 29, 0.96);
+}
+
+.version-tray-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 10px;
+}
+
+.version-tray-head span {
+  flex: 1;
+  color: var(--joy-text-muted);
+}
+
+.version-tray-empty {
+  margin: 6px 0 0;
+  color: var(--joy-text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.version-list {
+  display: flex;
+  margin: 6px 0 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+}
+
+.version-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--joy-border);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.version-revision {
+  flex: none;
+  color: var(--joy-text-muted);
+  font-family: ui-monospace, monospace;
+}
+
+.version-summary {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-pin {
+  flex: none;
+  color: #f6d38a;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.version-tray button,
+.version-list button {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--joy-border);
+  border-radius: 4px;
+  color: var(--joy-text-muted);
+  background: var(--joy-bg-chrome);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.version-tray button:hover,
+.version-list button:hover {
+  border-color: var(--color-joy);
+  color: #fff;
+}
+
 /* Workflow authoring surface (ADR-0024). */
 .workflow-editor {
   min-width: 0;

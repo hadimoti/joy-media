@@ -1,8 +1,18 @@
-import { applyTransaction, applyGraphTransaction, revertGraphTransaction } from '@joy-media/commands';
+import {
+  applyTransaction,
+  applyGraphTransaction,
+  revertGraphTransaction,
+  applyArtifactTransaction,
+  revertArtifactTransaction,
+  EMPTY_ARTIFACT_STORE,
+} from '@joy-media/commands';
 import type {
   CommandTransaction,
   GraphTransaction,
   GraphTransactionRecord,
+  ArtifactStore,
+  ArtifactTransaction,
+  ArtifactTransactionRecord,
 } from '@joy-media/commands';
 import {
   applyVisualObjectProjectTransaction,
@@ -30,7 +40,7 @@ import { BrowserAgentIdempotencyStore } from './agent-idempotency-store.js';
 
 export interface HistoryEntry {
   readonly id: string;
-  readonly source: 'timeline' | 'visual-object' | 'graph' | 'document';
+  readonly source: 'timeline' | 'visual-object' | 'graph' | 'artifact' | 'document';
   readonly label: string;
   /** Present when this entry is past (`undo`) or future (`redo`) relative to the cursor. */
   readonly direction: 'undo' | 'redo' | 'current';
@@ -38,7 +48,7 @@ export interface HistoryEntry {
   readonly sequence: number;
 }
 
-type EditorOperation = 'timeline' | 'visual-object' | 'graph';
+type EditorOperation = 'timeline' | 'visual-object' | 'graph' | 'artifact';
 
 /**
  * The graph needs an id to share the persistence adapter shape, and the adapter
@@ -48,6 +58,12 @@ type EditorOperation = 'timeline' | 'visual-object' | 'graph';
 interface PersistedGraphDocument {
   readonly id: string;
   readonly graph: WorkflowGraphV2;
+}
+
+interface PersistedArtifactDocument {
+  readonly id: string;
+  readonly schemaVersion: 1;
+  readonly store: ArtifactStore;
 }
 
 interface HistoryStackEntry {
@@ -69,6 +85,18 @@ const visualObjectAdapter: PersistenceAdapter<JoyProjectV1, VisualObjectTransact
   schemaVersion: (project) => project.schemaVersion,
   validate: validateJoyProjectV1,
   apply: applyVisualObjectProjectTransaction,
+};
+
+const artifactAdapter: PersistenceAdapter<PersistedArtifactDocument, ArtifactTransaction> = {
+  projectId: (document) => document.id,
+  schemaVersion: (document) => document.schemaVersion,
+  // Commands already validate each artifact as they apply; the store as a whole
+  // has no extra invariant, so re-walking it here would only duplicate work.
+  validate: () => [],
+  apply: (document, transaction) => ({
+    ...document,
+    store: applyArtifactTransaction(document.store, transaction).store,
+  }),
 };
 
 const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction> = {
@@ -104,6 +132,14 @@ export class EditorSession {
    */
   readonly #graphUndo: GraphTransactionRecord[] = [];
   readonly #graphRedo: GraphTransactionRecord[] = [];
+  readonly #artifactPersistence?: LocalProjectPersistence<
+    PersistedArtifactDocument,
+    ArtifactTransaction
+  >;
+  readonly #artifactUndo: ArtifactTransactionRecord[] = [];
+  readonly #artifactRedo: ArtifactTransactionRecord[] = [];
+  #artifactDocument: PersistedArtifactDocument;
+  #artifactRevision: number;
   #graphDocument: PersistedGraphDocument;
   #timelineRevision: number;
   #visualObjectRevision: number;
@@ -157,6 +193,24 @@ export class EditorSession {
       this.#graphDocument = emptyGraphDocument;
       this.#graphRevision = 0;
     }
+
+    const emptyArtifactDocument: PersistedArtifactDocument = {
+      id: initialTimeline.id,
+      schemaVersion: 1,
+      store: EMPTY_ARTIFACT_STORE,
+    };
+    if (this.graphEnabled) {
+      this.#artifactPersistence = new LocalProjectPersistence(
+        new BrowserProjectStore(storage, 'joy-media.creative-artifact-log.v1'),
+        artifactAdapter,
+      );
+      const recovered = recoverOrInitialize(this.#artifactPersistence, emptyArtifactDocument);
+      this.#artifactDocument = recovered.project;
+      this.#artifactRevision = recovered.revision;
+    } else {
+      this.#artifactDocument = emptyArtifactDocument;
+      this.#artifactRevision = 0;
+    }
   }
 
   get timelineProject(): SpikeProject {
@@ -180,11 +234,16 @@ export class EditorSession {
       this.#timelineRevision,
       this.#visualObjectRevision,
       this.#graphRevision,
+      this.#artifactRevision,
     );
   }
 
   get workflowGraph(): WorkflowGraphV2 {
     return this.#graphDocument.graph;
+  }
+
+  get artifacts(): ArtifactStore {
+    return this.#artifactDocument.store;
   }
 
   get canUndo(): boolean {
@@ -298,6 +357,22 @@ export class EditorSession {
     return result.graph;
   }
 
+  /** Same history as every other family, so data-lane edits are one Undo too. */
+  dispatchArtifacts(transaction: ArtifactTransaction): ArtifactStore {
+    if (!this.graphEnabled) {
+      throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
+    }
+    const before = this.#artifactDocument;
+    const result = applyArtifactTransaction(before.store, transaction);
+    this.#artifactDocument = { ...before, store: result.store };
+    this.#artifactPersistence?.saveTransaction(before, transaction, false);
+    this.#artifactRevision += 1;
+    this.#artifactUndo.push(result.record);
+    this.#artifactRedo.length = 0;
+    this.#record('artifact', transaction.label, transaction.commands.length);
+    return result.store;
+  }
+
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
     const before = this.#visualObjects.present;
     const project = this.#visualObjects.replacePresent(next);
@@ -335,6 +410,22 @@ export class EditorSession {
         );
         this.#graphRevision += 1;
         this.#graphRedo.push(record);
+      }
+    } else if (entry.operation === 'artifact') {
+      const record = this.#artifactUndo.pop();
+      if (record !== undefined) {
+        const before = this.#artifactDocument;
+        this.#artifactDocument = {
+          ...before,
+          store: revertArtifactTransaction(before.store, record),
+        };
+        this.#artifactPersistence?.saveTransaction(
+          before,
+          { label: `Undo ${record.label}`, commands: record.inverses },
+          false,
+        );
+        this.#artifactRevision += 1;
+        this.#artifactRedo.push(record);
       }
     } else {
       const before = this.#visualObjects.present;
@@ -376,6 +467,25 @@ export class EditorSession {
         this.#graphRevision += 1;
         this.#graphUndo.push(record);
       }
+    } else if (entry.operation === 'artifact') {
+      const record = this.#artifactRedo.pop();
+      if (record !== undefined) {
+        const before = this.#artifactDocument;
+        this.#artifactDocument = {
+          ...before,
+          store: applyArtifactTransaction(before.store, {
+            label: record.label,
+            commands: record.commands,
+          }).store,
+        };
+        this.#artifactPersistence?.saveTransaction(
+          before,
+          { label: `Redo ${record.label}`, commands: record.commands },
+          false,
+        );
+        this.#artifactRevision += 1;
+        this.#artifactUndo.push(record);
+      }
     } else {
       const before = this.#visualObjects.present;
       const mutation = this.#visualObjects.redo();
@@ -410,11 +520,13 @@ function encodeProjectRevision(
   timelineRevision: number,
   visualObjectRevision: number,
   graphRevision: number,
+  artifactRevision: number,
 ): ProjectRevisionId {
-  // The graph is part of the creative document, so a graph edit has to move the
-  // revision an agent plan was built against — otherwise a plan made before a
-  // node changed would still look current and commit against stale structure.
-  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}:graph=${graphRevision}`;
+  // Graph and artifacts are part of the creative document, so editing either has
+  // to move the revision an agent plan was built against — otherwise a plan made
+  // before a node or a script changed would still look current and commit
+  // against stale structure.
+  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}:graph=${graphRevision}:artifacts=${artifactRevision}`;
 }
 
 function persistenceProjectId(project: unknown): string {

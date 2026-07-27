@@ -56,6 +56,10 @@ import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
+import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
+import type { DataLane } from './data-lanes.js';
+import { countLaneItems } from './data-lanes.js';
+import { DataLaneDrawer } from './DataLaneDrawer.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -382,6 +386,9 @@ export function TimelinePanel({
   provenance,
   onRevealInFlow,
   onRevealNode,
+  dataLanes,
+  artifacts,
+  onDispatchArtifacts,
   showToast,
 }: {
   readonly project: SpikeProject;
@@ -415,6 +422,13 @@ export function TimelinePanel({
   readonly provenance?: readonly ProvenanceStep[];
   readonly onRevealInFlow?: (clipId: string) => void;
   readonly onRevealNode?: (nodeId: string) => void;
+  /**
+   * Durable creative data laid against time. Absent unless the Dual Lens flag
+   * is on, which is what keeps the default timeline unchanged.
+   */
+  readonly dataLanes?: readonly DataLane[];
+  readonly artifacts?: ArtifactStore;
+  readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
 }) {
   const [trackFlags, setTrackFlags] = useState<readonly TimelineTrackView[]>([]);
@@ -427,6 +441,8 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
+  // §6.2: collapsed by default, so standard editing is visually unchanged.
+  const [dataLanesOpen, setDataLanesOpen] = useState(false);
   const [menu, setMenu] = useState<
     | { x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string }
     | undefined
@@ -1038,6 +1054,26 @@ export function TimelinePanel({
             <FitWidthIcon />
           </button>
         </div>
+
+        {dataLanes !== undefined && (
+          <>
+            <span className="timeline-toolbar-sep" aria-hidden="true" />
+            <div className="timeline-toolbar-group">
+              <button
+                type="button"
+                className="timeline-data-lanes-toggle"
+                aria-expanded={dataLanesOpen}
+                title="Script, transcript, prompts, analysis, generated output, and agent changes"
+                onClick={() => setDataLanesOpen((open) => !open)}
+              >
+                Data Lanes
+                {countLaneItems(dataLanes) > 0 && (
+                  <span className="timeline-data-lanes-count">{countLaneItems(dataLanes)}</span>
+                )}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {provenance !== undefined && provenance.length > 0 && (
@@ -1482,6 +1518,21 @@ export function TimelinePanel({
               </div>
             );
           })}
+
+          {dataLanesOpen &&
+            dataLanes !== undefined &&
+            artifacts !== undefined &&
+            onDispatchArtifacts !== undefined && (
+              <DataLaneDrawer
+                lanes={dataLanes}
+                artifacts={artifacts}
+                laneWidthPx={laneWidthPx}
+                playheadUs={playheadUs}
+                timeToPixel={(timeUs) => timeToPixel(timeUs, { ...viewport, originUs: 0 })}
+                onDispatchArtifacts={onDispatchArtifacts}
+                onSeek={onSeek}
+              />
+            )}
         </div>
       </div>
 

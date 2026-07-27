@@ -25,7 +25,12 @@ import {
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
-import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
+import type {
+  CommandTransaction,
+  GraphTransaction,
+  ArtifactStore,
+  ArtifactTransaction,
+} from '@joy-media/commands';
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
@@ -71,6 +76,7 @@ import {
   provenanceRibbon,
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
+import { buildDataLanes, type DataLane } from './data-lanes.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import {
   clearActiveProjectId,
@@ -406,6 +412,10 @@ interface EditorPanelContextValue {
   /** The authored workflow graph — undefined unless the Dual Lens flag is on. */
   readonly workflowGraph: WorkflowGraphV2 | undefined;
   readonly dispatchGraph: (transaction: GraphTransaction) => void;
+  /** Data lanes and their artifacts — undefined unless the flag is on. */
+  readonly dataLanes: readonly DataLane[] | undefined;
+  readonly artifacts: ArtifactStore | undefined;
+  readonly dispatchArtifacts: (transaction: ArtifactTransaction) => void;
   readonly togglePlayback: () => void;
   readonly seek: (timeUs: number) => void;
   readonly toggleSelection: (id: string) => void;
@@ -951,6 +961,23 @@ function EditorWorkspace({
     },
     [session],
   );
+  const dispatchArtifacts = useCallback(
+    (transaction: ArtifactTransaction) => {
+      session.dispatchArtifacts(transaction);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
+  // Recomputed per render rather than memoized: the session exposes stable
+  // references and signals change through `setRevision`, so a memo keyed on
+  // those references would go stale. It walks artifacts and nodes once.
+  const dataLanes = session.graphEnabled
+    ? buildDataLanes({
+        artifacts: session.artifacts,
+        graph: session.workflowGraph,
+        creative: session.visualProject,
+      })
+    : undefined;
   const updateVisualProperty = useCallback(
     (
       objectId: string,
@@ -2134,6 +2161,13 @@ function EditorWorkspace({
           }
           onRevealInFlow={context.revealInFlow}
           onRevealNode={context.revealNodeInFlow}
+          {...(context.dataLanes === undefined || context.artifacts === undefined
+            ? {}
+            : {
+                dataLanes: context.dataLanes,
+                artifacts: context.artifacts,
+                onDispatchArtifacts: context.dispatchArtifacts,
+              })}
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
@@ -2668,6 +2702,9 @@ function EditorWorkspace({
           revealOnTimeline,
           workflowGraph: session.graphEnabled ? session.workflowGraph : undefined,
           dispatchGraph,
+          dataLanes,
+          artifacts: session.graphEnabled ? session.artifacts : undefined,
+          dispatchArtifacts,
           togglePlayback,
           seek,
           toggleSelection: (id) =>

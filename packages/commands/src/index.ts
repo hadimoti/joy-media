@@ -67,6 +67,24 @@ export {
   diffGraphs,
 } from './graph-history.js';
 
+export type {
+  ArtifactStore,
+  ArtifactCommand,
+  ArtifactCommandType,
+  ArtifactApplyResult,
+  ArtifactTransaction,
+  ArtifactTransactionRecord,
+  ArtifactTransactionResult,
+} from './artifact-commands.js';
+export {
+  EMPTY_ARTIFACT_STORE,
+  applyArtifactCommand,
+  applyArtifactTransaction,
+  revertArtifactTransaction,
+  ArtifactCommandError,
+  ARTIFACT_COMMAND_REGISTRY,
+} from './artifact-commands.js';
+
 export type { InvalidationOptions, StalenessReport } from './graph-cache.js';
 export {
   computeNodeCacheKey,

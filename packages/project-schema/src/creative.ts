@@ -126,6 +126,22 @@ export function isRenderableArtifactKind(kind: CreativeArtifactKind): boolean {
 }
 
 /**
+ * The only sanctioned way to hand artifacts to anything that renders.
+ *
+ * Plan §5.4 and acceptance criterion 7 require that non-renderable data never
+ * becomes a fake render layer. Stating that as a rule in prose is not
+ * enforceable; making it the single filter every render path calls is, because
+ * a caller that wants a script in the picture has to visibly bypass this to get
+ * one. Scripts, prompts, analyses, and change sets influence the picture by
+ * producing commands — never by being handed to the renderer.
+ */
+export function selectRenderableArtifacts(
+  artifacts: Iterable<CreativeArtifactV2>,
+): readonly CreativeArtifactV2[] {
+  return [...artifacts].filter((artifact) => isRenderableArtifactKind(artifact.kind));
+}
+
+/**
  * Where an artifact's bytes or structure actually live.
  *
  * `inline` is for small structured data that belongs in the document (a prompt,
