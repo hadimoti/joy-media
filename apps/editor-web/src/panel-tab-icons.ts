@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { SpeakerOnIcon } from './icons.js';
+import { SpeakerOnIcon, TimelineClassicIcon } from './icons.js';
 import type { PanelId } from './workspace.js';
 import { iconUrl } from './icon-assets.js';
 
@@ -34,7 +34,8 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
 export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   media: iconUrl('assets.png'),
   monitor: iconUrl('monitor.png'),
-  timeline: iconUrl('timeline.png'),
+  // Timeline draws from the shared SVG set below; Flow keeps the node-graph
+  // mask. The two lenses sit in one dock group and must not share a glyph.
   flow: iconUrl('timeline.png'),
   captions: iconUrl('captions.png'),
   inspector: iconUrl('ui/inspect_24x24.png'),
@@ -54,6 +55,7 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
 /** Inline SVG tab icons (preferred over PNG masks when present). */
 export const PANEL_TAB_SVG_ICONS: Readonly<Partial<Record<PanelId, ComponentType>>> = {
   audio: SpeakerOnIcon,
+  timeline: TimelineClassicIcon,
 };
 
 export function panelLabel(panelId: string): string {

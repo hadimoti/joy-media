@@ -166,6 +166,25 @@ export function SpeakerOnIcon() {
   );
 }
 
+/**
+ * Classic timeline mark: staggered clips with the playhead scrubbing over them.
+ *
+ * Distinct from `TimelineIcon`, which is the ruler glyph Motion Studio's top
+ * bar uses. Drawn on the 16px grid rather than downsampled from raster art —
+ * at tab size a resampled bitmap turns 1px strokes to mush, which is why the
+ * tab strip prefers inline SVG over the PNG masks.
+ */
+export function TimelineClassicIcon() {
+  return (
+    <Svg>
+      <rect x="1.6" y="2.6" width="7.6" height="3" rx="0.9" />
+      <rect x="5" y="6.5" width="9.4" height="3" rx="0.9" />
+      <rect x="2.6" y="10.4" width="7.8" height="3" rx="0.9" />
+      <path d="M8 1.2v13.6" />
+    </Svg>
+  );
+}
+
 export function SoloIcon() {
   return (
     <Svg>
