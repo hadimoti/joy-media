@@ -120,6 +120,12 @@ export interface TemplateSeed {
   readonly seed: string;
   /** Appears in node labels so a template instance names its scope. */
   readonly scopeLabel?: string;
+  /**
+   * Time the workflow was created for. Bound to the source nodes only — the
+   * nodes downstream derive their time from what they receive, so binding them
+   * too would assert a range the workflow has not established yet.
+   */
+  readonly range?: { readonly startUs: number; readonly durationUs: number };
 }
 
 /**
@@ -143,10 +149,21 @@ export function buildTemplateTransaction(
       return;
     }
     const node = definition.build(`${template.id}-${index}-${seed.seed}`);
-    const labelled: WorkflowNodeV2 =
-      seed.scopeLabel === undefined
-        ? node
-        : { ...node, label: `${node.label} · ${seed.scopeLabel}` };
+    const labelled: WorkflowNodeV2 = {
+      ...node,
+      ...(seed.scopeLabel === undefined ? {} : { label: `${node.label} · ${seed.scopeLabel}` }),
+      // Sources are the nodes that read the project directly, so they are the
+      // ones a selection actually scopes.
+      ...(seed.range !== undefined && type.startsWith('source.')
+        ? {
+            binding: {
+              type: 'range' as const,
+              startUs: seed.range.startUs,
+              durationUs: seed.range.durationUs,
+            },
+          }
+        : {}),
+    };
     nodes.push(labelled);
     commands.push({ type: 'graph.node.create', payload: { node: labelled } });
   });

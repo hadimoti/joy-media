@@ -63,6 +63,21 @@ export function DualLensPanel({
   );
   const selectedClipSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
 
+  /** The span the selection covers, read off the projection's own clip nodes. */
+  const selectionRange = useMemo(() => {
+    const spans = projection.nodes.filter(
+      (node) =>
+        node.kind === 'clip' &&
+        node.startUs !== undefined &&
+        node.endUs !== undefined &&
+        node.clipIds.some((clipId) => selectedClipSet.has(clipId)),
+    );
+    if (spans.length === 0) return undefined;
+    const startUs = Math.min(...spans.map((node) => node.startUs ?? 0));
+    const endUs = Math.max(...spans.map((node) => node.endUs ?? 0));
+    return { startUs, durationUs: Math.max(1, endUs - startUs) };
+  }, [projection, selectedClipSet]);
+
   // Keyed on `token` alone: revealing the same clip twice must re-fire, and
   // re-running whenever the request object is merely re-created would fight the
   // user's own mode switches.
@@ -142,7 +157,12 @@ export function DualLensPanel({
 
       {workflowGraph !== undefined && onDispatchGraph !== undefined && (mode === 'flow' || mode === 'split') && (
         <div className="dual-lens-content">
-          <WorkflowGraphEditor graph={workflowGraph} onDispatch={onDispatchGraph} />
+          <WorkflowGraphEditor
+            graph={workflowGraph}
+            onDispatch={onDispatchGraph}
+            selectedClipIds={selectedClipIds}
+            {...(selectionRange === undefined ? {} : { selectionRange })}
+          />
         </div>
       )}
 

@@ -28,6 +28,10 @@ export interface WorkflowGraphEditorProps {
   readonly graph: WorkflowGraphV2;
   /** Applies a transaction through the editor's one history. */
   readonly onDispatch: (transaction: GraphTransaction) => void;
+  /** Clips the workflow is being created for, if any. */
+  readonly selectedClipIds?: readonly string[];
+  /** Range covered by the selection, used to bind the template's source node. */
+  readonly selectionRange?: { readonly startUs: number; readonly durationUs: number };
 }
 
 /**
@@ -41,7 +45,12 @@ export interface WorkflowGraphEditorProps {
  * Every mutation here goes out as a transaction. Nothing edits the graph value
  * directly, so everything on this surface undoes with one Undo.
  */
-export function WorkflowGraphEditor({ graph, onDispatch }: WorkflowGraphEditorProps) {
+export function WorkflowGraphEditor({
+  graph,
+  onDispatch,
+  selectedClipIds,
+  selectionRange,
+}: WorkflowGraphEditorProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [connectFromId, setConnectFromId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -67,11 +76,22 @@ export function WorkflowGraphEditor({ graph, onDispatch }: WorkflowGraphEditorPr
     onDispatch(transaction);
   };
 
+  const selectionCount = selectedClipIds?.length ?? 0;
+
   const applyTemplate = (templateId: string) => {
     const template = WORKFLOW_TEMPLATES.find((candidate) => candidate.id === templateId);
     if (template === undefined) return;
     dispatch(
-      buildTemplateTransaction(template, { seed: Date.now().toString(36).slice(-5) }),
+      buildTemplateTransaction(template, {
+        seed: Date.now().toString(36).slice(-5),
+        // A workflow created from a selection says so on its nodes and binds
+        // its source to that range, so the graph records what it was made for
+        // rather than floating free of the edit that prompted it.
+        ...(selectionCount === 0
+          ? {}
+          : { scopeLabel: `${selectionCount} clip${selectionCount === 1 ? '' : 's'}` }),
+        ...(selectionRange === undefined ? {} : { range: selectionRange }),
+      }),
     );
     // The hint has done its job the moment a workflow exists.
     markHintSeen();

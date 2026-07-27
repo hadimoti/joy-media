@@ -11,4 +11,4 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0027** (workflow templates — transactions that build validated, type-checked graphs in one undo).
+Accepted through **ADR-0028** (applying change sets — compound transactions so one Undo reverts a document change and its record together).

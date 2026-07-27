@@ -40,7 +40,7 @@ import { BrowserAgentIdempotencyStore } from './agent-idempotency-store.js';
 
 export interface HistoryEntry {
   readonly id: string;
-  readonly source: 'timeline' | 'visual-object' | 'graph' | 'artifact' | 'document';
+  readonly source: 'timeline' | 'visual-object' | 'graph' | 'artifact' | 'compound' | 'document';
   readonly label: string;
   /** Present when this entry is past (`undo`) or future (`redo`) relative to the cursor. */
   readonly direction: 'undo' | 'redo' | 'current';
@@ -48,7 +48,17 @@ export interface HistoryEntry {
   readonly sequence: number;
 }
 
-type EditorOperation = 'timeline' | 'visual-object' | 'graph' | 'artifact';
+/**
+ * `document-snapshot` exists because a whole-document replacement has no
+ * command form and therefore no inverse the object history can compute. The
+ * session keeps the before/after pair itself so it can still be undone.
+ */
+type EditorOperation =
+  | 'timeline'
+  | 'visual-object'
+  | 'document-snapshot'
+  | 'graph'
+  | 'artifact';
 
 /**
  * The graph needs an id to share the persistence adapter shape, and the adapter
@@ -66,8 +76,16 @@ interface PersistedArtifactDocument {
   readonly store: ArtifactStore;
 }
 
+/**
+ * One user-visible history step.
+ *
+ * `operations` is a list because an approved specialist change set touches more
+ * than one bus at once — it changes the creative document *and* records the
+ * change set as an artifact. Those have to undo together or the project is left
+ * holding a record of a change that is no longer applied.
+ */
 interface HistoryStackEntry {
-  readonly operation: EditorOperation;
+  readonly operations: readonly EditorOperation[];
   readonly label: string;
   readonly commandCount: number;
   readonly sequence: number;
@@ -138,6 +156,8 @@ export class EditorSession {
   >;
   readonly #artifactUndo: ArtifactTransactionRecord[] = [];
   readonly #artifactRedo: ArtifactTransactionRecord[] = [];
+  readonly #snapshotUndo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
+  readonly #snapshotRedo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
   #artifactDocument: PersistedArtifactDocument;
   #artifactRevision: number;
   #graphDocument: PersistedGraphDocument;
@@ -311,7 +331,12 @@ export class EditorSession {
   ): HistoryEntry {
     return {
       id: `history-${entry.sequence}`,
-      source: entry.operation,
+      source:
+        entry.operations.length > 1
+          ? 'compound'
+          : entry.operations[0] === 'document-snapshot'
+            ? 'visual-object'
+            : (entry.operations[0] ?? 'timeline'),
       label: entry.label,
       direction,
       commandCount: entry.commandCount,
@@ -373,14 +398,75 @@ export class EditorSession {
     return result.store;
   }
 
+  /**
+   * Applies changes across buses as one history step.
+   *
+   * An approved specialist change set both alters the creative document and
+   * records itself as an artifact. Dispatching those separately would put two
+   * entries on the stack, so undoing once would leave the project holding a
+   * record of a change that is no longer applied — the halves must move
+   * together or not at all.
+   *
+   * Each bus keeps its own inverse record, exactly as it does for a single
+   * dispatch; the only thing that changes is that one history entry now names
+   * several of them.
+   */
+  dispatchCompound(
+    label: string,
+    parts: {
+      readonly document?: JoyProjectV1;
+      readonly artifacts?: ArtifactTransaction;
+      readonly timeline?: CommandTransaction;
+    },
+  ): void {
+    const operations: EditorOperation[] = [];
+    let commandCount = 0;
+
+    if (parts.timeline !== undefined) {
+      const before = this.#timeline.project;
+      this.#timeline.dispatch(parts.timeline);
+      this.#timelinePersistence.saveTransaction(before, parts.timeline, false);
+      this.#timelineRevision += 1;
+      operations.push('timeline');
+      commandCount += parts.timeline.commands.length;
+    }
+
+    if (parts.document !== undefined) {
+      const before = this.#visualObjects.present;
+      this.#visualObjects.replacePresent(parts.document);
+      // A replacement has no command form, so it persists as a snapshot; an
+      // empty transaction would replay to the old document on reload.
+      this.#visualObjectPersistence.saveSnapshot(parts.document, false);
+      this.#visualObjectRevision += 1;
+      this.#snapshotUndo.push({ before, after: parts.document });
+      this.#snapshotRedo.length = 0;
+      operations.push('document-snapshot');
+    }
+
+    if (parts.artifacts !== undefined) {
+      if (!this.graphEnabled) {
+        throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
+      }
+      const before = this.#artifactDocument;
+      const result = applyArtifactTransaction(before.store, parts.artifacts);
+      this.#artifactDocument = { ...before, store: result.store };
+      this.#artifactPersistence?.saveTransaction(before, parts.artifacts, false);
+      this.#artifactRevision += 1;
+      this.#artifactUndo.push(result.record);
+      this.#artifactRedo.length = 0;
+      operations.push('artifact');
+      commandCount += parts.artifacts.commands.length;
+    }
+
+    if (operations.length === 0) return;
+    this.#recordCompound(operations, label, commandCount);
+  }
+
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
-    const before = this.#visualObjects.present;
     const project = this.#visualObjects.replacePresent(next);
-    this.#visualObjectPersistence.saveTransaction(
-      before,
-      { label: 'Replace project document', commands: [] },
-      false,
-    );
+    // Was persisting an empty transaction, which the object adapter rejects and
+    // which would have replayed to the previous document even if it did not.
+    this.#visualObjectPersistence.saveSnapshot(project, false);
     this.#visualObjectRevision += 1;
     this.#record('visual-object', 'Replace project document', 0);
     return project;
@@ -389,7 +475,26 @@ export class EditorSession {
   undo(): void {
     const entry = this.#undo.pop();
     if (entry === undefined) return;
-    if (entry.operation === 'timeline') {
+    // Reverse order: a compound applied document-then-artifact must undo
+    // artifact-then-document, or the halves come apart.
+    for (const operation of [...entry.operations].reverse()) {
+      this.#undoOne(operation);
+    }
+    this.#redo.push(entry);
+  }
+
+  #undoOne(operation: EditorOperation): void {
+    if (operation === 'document-snapshot') {
+      const record = this.#snapshotUndo.pop();
+      if (record !== undefined) {
+        this.#visualObjects.replacePresent(record.before);
+        this.#visualObjectPersistence.saveSnapshot(record.before, false);
+        this.#visualObjectRevision += 1;
+        this.#snapshotRedo.push(record);
+      }
+      return;
+    }
+    if (operation === 'timeline') {
       const before = this.#timeline.project;
       const mutation = this.#timeline.undoWithRecord();
       this.#timelinePersistence.saveTransaction(
@@ -398,7 +503,7 @@ export class EditorSession {
         false,
       );
       this.#timelineRevision += 1;
-    } else if (entry.operation === 'graph') {
+    } else if (operation === 'graph') {
       const record = this.#graphUndo.pop();
       if (record !== undefined) {
         const before = this.#graphDocument;
@@ -411,7 +516,7 @@ export class EditorSession {
         this.#graphRevision += 1;
         this.#graphRedo.push(record);
       }
-    } else if (entry.operation === 'artifact') {
+    } else if (operation === 'artifact') {
       const record = this.#artifactUndo.pop();
       if (record !== undefined) {
         const before = this.#artifactDocument;
@@ -433,13 +538,29 @@ export class EditorSession {
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
       this.#visualObjectRevision += 1;
     }
-    this.#redo.push(entry);
   }
 
   redo(): void {
     const entry = this.#redo.pop();
     if (entry === undefined) return;
-    if (entry.operation === 'timeline') {
+    for (const operation of entry.operations) {
+      this.#redoOne(operation);
+    }
+    this.#undo.push(entry);
+  }
+
+  #redoOne(operation: EditorOperation): void {
+    if (operation === 'document-snapshot') {
+      const record = this.#snapshotRedo.pop();
+      if (record !== undefined) {
+        this.#visualObjects.replacePresent(record.after);
+        this.#visualObjectPersistence.saveSnapshot(record.after, false);
+        this.#visualObjectRevision += 1;
+        this.#snapshotUndo.push(record);
+      }
+      return;
+    }
+    if (operation === 'timeline') {
       const before = this.#timeline.project;
       const mutation = this.#timeline.redoWithRecord();
       this.#timelinePersistence.saveTransaction(
@@ -448,7 +569,7 @@ export class EditorSession {
         false,
       );
       this.#timelineRevision += 1;
-    } else if (entry.operation === 'graph') {
+    } else if (operation === 'graph') {
       const record = this.#graphRedo.pop();
       if (record !== undefined) {
         const before = this.#graphDocument;
@@ -467,7 +588,7 @@ export class EditorSession {
         this.#graphRevision += 1;
         this.#graphUndo.push(record);
       }
-    } else if (entry.operation === 'artifact') {
+    } else if (operation === 'artifact') {
       const record = this.#artifactRedo.pop();
       if (record !== undefined) {
         const before = this.#artifactDocument;
@@ -492,11 +613,18 @@ export class EditorSession {
       this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
       this.#visualObjectRevision += 1;
     }
-    this.#undo.push(entry);
   }
 
   #record(operation: EditorOperation, label: string, commandCount: number): void {
-    this.#undo.push({ operation, label, commandCount, sequence: ++this.#sequence });
+    this.#recordCompound([operation], label, commandCount);
+  }
+
+  #recordCompound(
+    operations: readonly EditorOperation[],
+    label: string,
+    commandCount: number,
+  ): void {
+    this.#undo.push({ operations, label, commandCount, sequence: ++this.#sequence });
     this.#redo.length = 0;
   }
 }

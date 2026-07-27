@@ -9,6 +9,7 @@ import {
 import type { ChangeSetProposal, CombinedChangeSet } from '@joy-media/agent-tools';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { ArtifactTransaction } from '@joy-media/commands';
+import { applyChangeSet } from './apply-change-set.js';
 
 export interface SpecialistReviewPanelProps {
   readonly timeline: SpikeProject;
@@ -17,7 +18,12 @@ export interface SpecialistReviewPanelProps {
   readonly selectedClipIds: readonly string[];
   readonly projectId: string;
   readonly revisionId: () => string;
-  readonly onDispatchArtifacts: (transaction: ArtifactTransaction) => void;
+  /** Applies the document change and the change-set record as one undo step. */
+  readonly onApplyChangeSet: (
+    label: string,
+    document: JoyProjectV1,
+    artifacts: ArtifactTransaction,
+  ) => void;
 }
 
 interface ReviewState {
@@ -44,12 +50,15 @@ export function SpecialistReviewPanel({
   selectedClipIds,
   projectId,
   revisionId,
-  onDispatchArtifacts,
+  onApplyChangeSet,
 }: SpecialistReviewPanelProps) {
   const [state, setState] = useState<ReviewState | undefined>(undefined);
   const [approved, setApproved] = useState<readonly string[]>([]);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
+  const [unapplied, setUnapplied] = useState<
+    readonly { readonly targetId: string; readonly reason: string }[]
+  >([]);
 
   const runReview = async () => {
     setRunning(true);
@@ -135,7 +144,22 @@ export function SpecialistReviewPanel({
           };
         },
         commit: (transaction) => {
-          onDispatchArtifacts(transaction);
+          const contributing = state.combined.proposals.filter(
+            (proposal) => proposal.edits.length > 0 && approved.includes(proposal.roleId),
+          );
+          const knownClipIds = new Set(
+            Object.values(timeline.compositions).flatMap((composition) =>
+              composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
+            ),
+          );
+          const outcome = applyChangeSet(creative, contributing, knownClipIds);
+          if (outcome.applied.length === 0 && outcome.unapplied.length > 0) {
+            return { success: false, error: outcome.unapplied[0]!.reason };
+          }
+          // The document change and its record land as one history step, so
+          // undoing cannot leave a change set describing a change that is gone.
+          onApplyChangeSet(transaction.label, outcome.document, transaction);
+          setUnapplied(outcome.unapplied);
           return { success: true };
         },
       });
@@ -182,6 +206,12 @@ export function SpecialistReviewPanel({
           {status}
         </p>
       )}
+
+      {unapplied.map((entry) => (
+        <p key={entry.targetId} className="specialist-denied">
+          {entry.targetId} not applied — {entry.reason}
+        </p>
+      ))}
 
       {state === undefined ? (
         <p className="specialist-empty">

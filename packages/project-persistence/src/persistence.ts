@@ -138,6 +138,28 @@ export class LocalProjectPersistence<P, T> {
     this.#autosaveState = 'saved-locally';
   }
 
+  /**
+   * Durable write for a whole-document replacement.
+   *
+   * Some changes have no command form — an approved agent change set rewrites
+   * parameters across the document rather than issuing object commands. Those
+   * cannot go through `saveTransaction`, whose adapter rejects an empty command
+   * list, and appending an empty transaction anyway would replay to the *old*
+   * document and silently lose the change on reload.
+   */
+  saveSnapshot(project: P, serverAvailable: boolean): P {
+    const projectId = this.adapter.projectId(project);
+    this.assertValid(project);
+    const revision = this.latestRevision(projectId) + 1;
+    this.store.writeSnapshot(
+      projectId,
+      snapshot(project, revision, this.adapter.schemaVersion(project)),
+    );
+    this.#recoveryCopy.set(projectId, project);
+    this.#autosaveState = serverAvailable ? 'saved-locally' : 'saved-locally-server-unavailable';
+    return project;
+  }
+
   /** Write-ahead recovery copy, validated log append, then periodic verified snapshot. */
   saveTransaction(project: P, transaction: T, serverAvailable: boolean): P {
     const projectId = this.adapter.projectId(project);
