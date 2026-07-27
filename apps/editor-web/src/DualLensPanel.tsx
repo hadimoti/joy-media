@@ -311,12 +311,15 @@ function TimeProjection({
                         <span className="timeline-clip-filmstrip" aria-hidden="true">
                           {Array.from({ length: cellCount }, (_, index) => {
                             const t = hashUnit(item.id, index);
-                            const light = 14 + Math.round(t * 18);
+                            // Orange → violet cells so Dual Lens reads as a mix, not amber-only.
+                            const hue = 36 + Math.round(t * 230);
+                            const sat = 34 + Math.round(t * 18);
+                            const light = 15 + Math.round(t * 16);
                             return (
                               <span
                                 key={index}
                                 className="timeline-clip-cell"
-                                style={{ backgroundColor: `hsl(42 42% ${light}%)` }}
+                                style={{ backgroundColor: `hsl(${hue} ${sat}% ${light}%)` }}
                               />
                             );
                           })}
