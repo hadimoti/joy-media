@@ -73,6 +73,28 @@ and binding them would assert a range the workflow has not established.
 - Compound entries appear in history as `compound`.
 - Cost: a document replacement writes a full snapshot rather than a delta.
 
+## Amendment — review pass, 2026-07-27
+
+A review of the whole Dual Lens body of work found two defects in this ADR's
+own mechanism, both now fixed and covered:
+
+- **A compound could apply partially.** `dispatchCompound` mutated each bus in
+  sequence, so an artifact transaction that threw — a duplicate id, or the flag
+  being off — left the document already replaced and persisted with no history
+  entry naming it. That is precisely the split this method exists to prevent,
+  reintroduced by its own failure path. Everything that can throw is now
+  evaluated before anything is written.
+- **Per-bus redo stacks were cleared unevenly.** A new dispatch cleared the
+  unified redo stack and only its own bus's, leaving the others holding records
+  no history entry referred to. Harmless while they sat below the top, but a
+  hazard the moment the stacks fell out of step. `#recordCompound` now clears
+  all of them.
+
+**The render link is verified.** `buildRenderFrameOptions` reads
+`project.colorGrade` from the same document the compound writes. Confirmed live:
+applying the colour specialist put saturation `1.05` into the Color panel, and
+one Undo returned it to `1.00`.
+
 ## Gaps deliberately left open
 
 - **Timeline-domain proposals are still not applied.** No specialist emits one
@@ -82,9 +104,10 @@ and binding them would assert a range the workflow has not established.
   check instead, which is coarser.
 - **Snapshot growth is unbounded.** Every replacement writes a snapshot, and
   nothing prunes them.
-- **The demo is closer but not proven end to end.** Approval now reaches the
-  document; whether the Program Monitor repaints from a grade change has not
-  been verified in this pass.
+- **Pixel output is not asserted.** The grade reaches the document the renderer
+  builds from, and a consumer panel reflects it, but no test reads the canvas —
+  the WebGL context has no `preserveDrawingBuffer`, so pixel comparison would
+  need a renderer-side harness.
 
 ## Validation and rollback
 

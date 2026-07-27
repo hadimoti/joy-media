@@ -422,6 +422,22 @@ export class EditorSession {
     const operations: EditorOperation[] = [];
     let commandCount = 0;
 
+    // Everything that can fail is checked before anything is written. Applying
+    // the document and then throwing on the artifacts would leave a change that
+    // is persisted, unrecorded, and therefore impossible to undo — the exact
+    // split this method exists to prevent.
+    if (parts.artifacts !== undefined && !this.graphEnabled) {
+      throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
+    }
+    const artifactResult =
+      parts.artifacts === undefined
+        ? undefined
+        : applyArtifactTransaction(this.#artifactDocument.store, parts.artifacts);
+    if (parts.timeline !== undefined) {
+      // Pure: throws on an invalid command without touching the live project.
+      applyTransaction(this.#timeline.project, parts.timeline);
+    }
+
     if (parts.timeline !== undefined) {
       const before = this.#timeline.project;
       this.#timeline.dispatch(parts.timeline);
@@ -443,16 +459,12 @@ export class EditorSession {
       operations.push('document-snapshot');
     }
 
-    if (parts.artifacts !== undefined) {
-      if (!this.graphEnabled) {
-        throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
-      }
+    if (parts.artifacts !== undefined && artifactResult !== undefined) {
       const before = this.#artifactDocument;
-      const result = applyArtifactTransaction(before.store, parts.artifacts);
-      this.#artifactDocument = { ...before, store: result.store };
+      this.#artifactDocument = { ...before, store: artifactResult.store };
       this.#artifactPersistence?.saveTransaction(before, parts.artifacts, false);
       this.#artifactRevision += 1;
-      this.#artifactUndo.push(result.record);
+      this.#artifactUndo.push(artifactResult.record);
       this.#artifactRedo.length = 0;
       operations.push('artifact');
       commandCount += parts.artifacts.commands.length;
@@ -625,7 +637,14 @@ export class EditorSession {
     commandCount: number,
   ): void {
     this.#undo.push({ operations, label, commandCount, sequence: ++this.#sequence });
+    // Every per-bus redo stack is cleared, not just the one that was dispatched.
+    // Clearing only the unified stack leaves the others holding records no
+    // history entry refers to any more — harmless today because they sit below
+    // the top, but they would surface the moment the stacks fall out of step.
     this.#redo.length = 0;
+    this.#graphRedo.length = 0;
+    this.#artifactRedo.length = 0;
+    this.#snapshotRedo.length = 0;
   }
 }
 

@@ -74,9 +74,9 @@ that predated them.
 
 - **Templates create graphs; they do not run them.** Execution is Phase 5's
   specialist path and the async job path, neither of which the graph triggers.
-- **`Create Workflow from Selection` is not wired.** Templates seed a
-  `scopeLabel` but ignore the actual selection, so a template is currently
-  project-wide.
+- ~~**`Create Workflow from Selection` is not wired.**~~ Closed by ADR-0028:
+  templates take the selection's label and bind their source nodes to its
+  range.
 - **No Time ↔ Flow continuity animation.** §3.4 allows a 160–220 ms anchored
   transition between lenses; only hover/transition polish landed, and the
   reduced-motion block is in place for when the real one arrives.

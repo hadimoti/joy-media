@@ -338,6 +338,71 @@ describe('applying specialist change sets', () => {
       expect(editor.projectRevisionId).not.toBe(before);
     });
 
+    it('writes nothing when a later part of the compound would fail', () => {
+      // Applying the document and then throwing on the artifacts would leave a
+      // persisted change with no history entry, which nothing could undo.
+      const editor = session();
+      const graded = {
+        ...editor.visualProject,
+        colorGrade: { lift: 0, gamma: 1, gain: 1, saturation: 1.9 },
+      };
+      const duplicate = {
+        label: 'Duplicate artifact',
+        commands: [
+          {
+            type: 'artifact.create' as const,
+            payload: {
+              artifact: {
+                id: 'dup',
+                kind: 'changeSet' as const,
+                schemaVersion: 1,
+                revision: 0,
+                label: 'Dup',
+                contentRef: { type: 'inline' as const, value: '{}' },
+                binding: { type: 'none' as const },
+                provenance: {
+                  sourceArtifactIds: [],
+                  inputHashes: [],
+                  createdBy: { type: 'agent' as const, id: 'x' },
+                },
+                createdAt: '2026-07-27T00:00:00.000Z',
+                updatedAt: '2026-07-27T00:00:00.000Z',
+              },
+            },
+          },
+        ],
+      };
+      editor.dispatchCompound('First', { artifacts: duplicate });
+      const historyBefore = editor.historyEntries.length;
+
+      expect(() =>
+        editor.dispatchCompound('Second', { document: graded, artifacts: duplicate }),
+      ).toThrow(/already exists/);
+
+      expect(editor.visualProject.colorGrade).toBeUndefined();
+      expect(editor.historyEntries).toHaveLength(historyBefore);
+    });
+
+    it('writes nothing when the artifact bus is disabled', () => {
+      const editor = new EditorSession(
+        storage(),
+        buildReferenceSpikeProject(),
+        INITIAL_EDITOR_PROJECT,
+      );
+      const graded = {
+        ...editor.visualProject,
+        colorGrade: { lift: 0, gamma: 1, gain: 1, saturation: 1.9 },
+      };
+
+      expect(() =>
+        editor.dispatchCompound('Blocked', {
+          document: graded,
+          artifacts: { label: 'x', commands: [] },
+        }),
+      ).toThrow(/disabled/);
+      expect(editor.visualProject.colorGrade).toBeUndefined();
+    });
+
     it('records nothing when there is nothing to apply', () => {
       const editor = session();
       const before = editor.historyEntries.length;

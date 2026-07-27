@@ -80,9 +80,10 @@ traces** (§8.4).
 
 ## Gaps deliberately left open
 
-- **Change sets are recorded, not applied.** Nothing yet turns an approved
-  parameter change set into timeline or document commands. This is the largest
-  gap and the natural next step.
+- ~~**Change sets are recorded, not applied.**~~ Closed by ADR-0028: an
+  approved parameter change set now changes the creative document, in the same
+  compound transaction that records it, undoable in one step. Timeline-domain
+  proposals remain unapplied.
 - **No budget in money.** `SpecialistBudget` caps specialists and edits per run;
   `provider.spend` is gated by capability, but no currency limit is enforced
   because no specialist spends yet.
