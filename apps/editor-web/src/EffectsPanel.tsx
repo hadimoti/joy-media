@@ -122,7 +122,7 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       activeTab={category}
       onTabChange={setCategory}
     >
-      <div className="effects-grid">
+      <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
         {filtered.length === 0 ? (
           <p className="empty-hint" lang="fa">
             {emptyHint}

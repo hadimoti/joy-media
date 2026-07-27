@@ -4938,6 +4938,10 @@ label {
   font-size: 0.7rem;
   line-height: 1.5;
 }
+.joy-code-welcome strong {
+  color: var(--joy-text);
+  font-weight: 700;
+}
 .joy-code-message {
   display: flex;
   align-items: flex-start;
@@ -5907,6 +5911,17 @@ label {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
   gap: 0.3rem;
+}
+.effects-grid.is-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  grid-template-columns: none;
+}
+.effects-grid.is-empty .empty-hint {
+  margin: 0;
+  max-width: 11rem;
 }
 .effect-card {
   display: flex;

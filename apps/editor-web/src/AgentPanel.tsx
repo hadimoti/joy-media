@@ -630,8 +630,8 @@ export function AgentPanel({
                   <JoyCodeLogo variant="horizontal" label="Joy Code" />
                   <h3>What should we edit?</h3>
                   <p lang="fa">
-                    Joy Code با استفاده از KiloCode برنامه‌های کنترل‌شدهٔ تایم‌لاین را آماده می‌کند.
-                    تا زمانی که برنامه از سیاست‌ها عبور نکند و حالت اجرا اجازه ندهد، چیزی تغییر
+                    <strong>جوی کد</strong> برنامه‌های کنترل‌شدهٔ تایم‌لاین را آماده می‌کند. تا
+                    زمانی که برنامه از سیاست‌ها عبور نکند و حالت اجرا اجازه ندهد، چیزی تغییر
                     نمی‌کند.
                   </p>
                 </div>
@@ -807,7 +807,7 @@ export function AgentPanel({
                   rows={3}
                   value={draft}
                   aria-label="Message Joy Code"
-                  placeholder="ویرایش موردنظر خود برای تایم‌لاین را بنویسید…"
+                  placeholder="Describe the timeline edit you want…"
                   onChange={(event) => setDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
