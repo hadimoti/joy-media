@@ -311,10 +311,10 @@ function TimeProjection({
                         <span className="timeline-clip-filmstrip" aria-hidden="true">
                           {Array.from({ length: cellCount }, (_, index) => {
                             const t = hashUnit(item.id, index);
-                            // Orange → violet cells so Dual Lens reads as a mix, not amber-only.
-                            const hue = 36 + Math.round(t * 230);
-                            const sat = 34 + Math.round(t * 18);
-                            const light = 15 + Math.round(t * 16);
+                            // Orange (36°) → purple (268°) via red/magenta only — never green/cyan/blue.
+                            const hue = (36 - Math.round(t * 128) + 360) % 360;
+                            const sat = 42 + Math.round(t * 12);
+                            const light = 16 + Math.round(t * 14);
                             return (
                               <span
                                 key={index}
