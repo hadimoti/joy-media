@@ -5,3 +5,6 @@ coverage/
 .env
 .env.*
 .vscode/
+
+# Captured worker stdout from local debugging runs, not source.
+worker_output.txt
