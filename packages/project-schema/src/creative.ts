@@ -256,6 +256,31 @@ export interface WorkflowPortV2 {
   readonly dataType: string;
   readonly required: boolean;
   readonly multiple?: boolean;
+  /**
+   * Extra upstream `dataType`s this input will take, beyond its own.
+   *
+   * Compatibility is declared by the port rather than looked up in a central
+   * type table, so introducing a node type never requires a schema migration —
+   * which is the reason ADR-0023 kept type compatibility out of the document
+   * format in the first place. `'any'` on an input accepts everything.
+   */
+  readonly accepts?: readonly string[];
+}
+
+/** An input port that takes anything. Kept as a constant so it is greppable. */
+export const ANY_PORT_TYPE = 'any';
+
+/**
+ * Whether an output may feed an input.
+ *
+ * Structural and data-driven: exact type match, an explicit `accepts` entry, or
+ * an `any` input. There is deliberately no subtype hierarchy — an inheritance
+ * tree in the document format would be a migration every time it changed.
+ */
+export function arePortsCompatible(from: WorkflowPortV2, to: WorkflowPortV2): boolean {
+  if (to.dataType === ANY_PORT_TYPE || from.dataType === ANY_PORT_TYPE) return true;
+  if (from.dataType === to.dataType) return true;
+  return to.accepts?.includes(from.dataType) === true;
 }
 
 /** Binds a node to a capability rather than a vendor (§8.3). */

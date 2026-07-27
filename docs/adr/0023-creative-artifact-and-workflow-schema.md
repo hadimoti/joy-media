@@ -111,9 +111,10 @@ a storage that throws fails closed.
 
 ## Gaps deliberately left open
 
-- **No commands write any of this.** `artifact.create`, `graph.node.create`,
-  and the rest of plan §9.3 are Phase 3. The schema can represent a graph that
-  nothing can yet author through the command bus.
+- ~~**No commands write any of this.**~~ Closed for the graph by ADR-0024:
+  `graph.node.*` and `graph.edge.*` exist with inverses, transactions, and
+  dry-run. `artifact.*` commands (plan §9.3) are still absent, so artifacts
+  remain unauthorable.
 - **No Creative API facade.** `CreativeEditingFacade` (§9.1) is not built;
   queries still go through existing per-package APIs.
 - **`workflow-engine` is not joined to these contracts.** It has its own node

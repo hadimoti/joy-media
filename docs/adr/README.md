@@ -11,4 +11,4 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0023** (creative artifact, provenance, temporal binding, and persisted workflow schema — the durable half of Dual Lens).
+Accepted through **ADR-0024** (editable workflow graph through the existing command bus — no second document, no second undo stack).

@@ -98,6 +98,8 @@ export type {
   NodeExecutionPolicyV2,
 } from './creative.js';
 export {
+  ANY_PORT_TYPE,
+  arePortsCompatible,
   CREATIVE_CAPABILITIES,
   ESCALATED_CAPABILITIES,
   CREATIVE_ARTIFACT_KINDS,

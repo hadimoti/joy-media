@@ -40,3 +40,37 @@ export { applyAudioCommand, AudioCommandError } from './audio-commands.js';
 
 export type { VoiceState, VoiceCommand, VoiceApplyResult } from './voice-commands.js';
 export { applyVoiceCommand, VoiceCommandError, createInitialVoiceState } from './voice-commands.js';
+
+export type {
+  WorkflowGraphCommand,
+  WorkflowGraphCommandType,
+  GraphApplyResult,
+  NodeUiStateV2,
+} from './graph-commands.js';
+export {
+  applyGraphCommand,
+  GraphCommandError,
+  GRAPH_COMMAND_REGISTRY,
+} from './graph-commands.js';
+
+export type {
+  GraphTransaction,
+  GraphTransactionRecord,
+  GraphTransactionResult,
+  GraphChangeSummary,
+  GraphDryRun,
+} from './graph-history.js';
+export {
+  applyGraphTransaction,
+  revertGraphTransaction,
+  dryRunGraphTransaction,
+  diffGraphs,
+} from './graph-history.js';
+
+export type { InvalidationOptions, StalenessReport } from './graph-cache.js';
+export {
+  computeNodeCacheKey,
+  downstreamNodeIds,
+  invalidateDownstream,
+  reportStaleness,
+} from './graph-cache.js';
