@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MotionSceneDocument, MotionLayerId } from '@joy-media/motion-core';
 import {
   clampPixelsPerSecond,
@@ -32,6 +32,15 @@ export interface MotionStudioTimelineProps {
   readonly onSelectLayer: (layerId: MotionLayerId | null) => void;
   readonly onToggleVisibility: (layerId: MotionLayerId) => void;
   readonly onToggleLocked: (layerId: MotionLayerId) => void;
+}
+
+/** Visible lane width = scrollport minus fixed 9.5rem track gutter. */
+function measureLaneWidthPx(root: HTMLElement | null): number {
+  if (root === null) return 0;
+  const scroll = root.querySelector('.timeline-tracks');
+  if (!(scroll instanceof HTMLElement)) return 0;
+  // Never use .timeline-lane clientWidth — that grows with zoomed content.
+  return Math.max(0, scroll.clientWidth - 152);
 }
 
 /**
@@ -78,20 +87,39 @@ export function MotionStudioTimeline({
     [document.markers],
   );
 
-  const applyZoom = (nextPps: number) => {
-    setViewport((prev) => ({ ...prev, pixelsPerSecond: clampPixelsPerSecond(nextPps) }));
+  const applyFitToWidth = () => {
+    const root = rootRef.current;
+    const width = measureLaneWidthPx(root);
+    if (width <= 0) return false;
+    setViewport({
+      originUs: 0,
+      pixelsPerSecond: fitPixelsPerSecond(durationUs, width),
+    });
+    const scroll = root?.querySelector('.timeline-tracks');
+    if (scroll instanceof HTMLElement) scroll.scrollLeft = 0;
+    return true;
   };
 
-  const fitToWidth = () => {
-    const scroll = rootRef.current?.querySelector('.timeline-tracks');
-    const lane = rootRef.current?.querySelector('.timeline-lane');
-    const scrollClientW = scroll instanceof HTMLElement ? scroll.clientWidth : 0;
-    const laneW = lane instanceof HTMLElement ? lane.clientWidth : 0;
-    const width = Math.max(0, scrollClientW - 152) || laneW;
-    if (width <= 0) return;
+  // Initial fit once layout is ready (Dual Lens leaves autoFit off; we still fit on open).
+  useEffect(() => {
+    let cancelled = false;
+    const tryFit = () => {
+      if (cancelled) return;
+      if (!applyFitToWidth()) {
+        requestAnimationFrame(tryFit);
+      }
+    };
+    requestAnimationFrame(tryFit);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot / duration change
+  }, [durationUs]);
+
+  const applyZoom = (nextPps: number) => {
     setViewport((prev) => ({
       ...prev,
-      pixelsPerSecond: fitPixelsPerSecond(durationUs, width),
+      pixelsPerSecond: clampPixelsPerSecond(nextPps),
     }));
   };
 
@@ -168,7 +196,9 @@ export function MotionStudioTimeline({
               className="icon-button"
               aria-label="Fit timeline to width"
               title="Fit to width"
-              onClick={fitToWidth}
+              onClick={() => {
+                applyFitToWidth();
+              }}
             >
               <FitWidthIcon />
             </button>
@@ -181,7 +211,7 @@ export function MotionStudioTimeline({
         playheadUs={playheadUs}
         viewport={viewport}
         onViewportChange={setViewport}
-        autoFit
+        autoFit={false}
         tracks={tracks}
         selectedClipIds={selectedClipIds}
         onSeek={(timeUs) => onSeek(timeUs / 1000)}
