@@ -6765,6 +6765,12 @@ label {
   gap: 2px;
 }
 
+.dual-time .dual-lens-section-heading > .dual-time-transport {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.15rem;
+}
+
 .dual-lens-section-heading strong {
   color: var(--joy-text);
   font-size: 12px;

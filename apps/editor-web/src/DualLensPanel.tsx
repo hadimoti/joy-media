@@ -10,7 +10,6 @@ import { PanelShell } from './PanelShell.js';
 import { WorkflowGraphEditor } from './WorkflowGraphEditor.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import {
-  formatTime,
   type DualLensEdge,
   type DualLensLane,
   type DualLensNode,
@@ -24,6 +23,13 @@ import {
 } from './dual-lens-reveal.js';
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
+import {
+  MarkerIcon,
+  PauseIcon,
+  PlayIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
+} from './icons.js';
 
 export interface DualLensPanelProps {
   /**
@@ -32,12 +38,14 @@ export interface DualLensPanelProps {
    */
   readonly projection: DualLensProjection;
   readonly playheadUs: number;
+  readonly playing: boolean;
   readonly selectedClipIds: readonly string[];
   /** A `Reveal in Flow` issued from another panel. */
   readonly reveal?: LensRevealRequest;
   /** The authored workflow graph. Editing appears only when it is present. */
   readonly workflowGraph?: WorkflowGraphV2;
   readonly onSeek: (timeUs: number) => void;
+  readonly onTogglePlayback: () => void;
   readonly onSelectClips: (clipIds: readonly string[]) => void;
   readonly onRevealOnTimeline: (clipIds: readonly string[]) => void;
   readonly onDispatchGraph?: (transaction: GraphTransaction) => void;
@@ -49,6 +57,8 @@ export interface DualLensPanelProps {
   readonly onTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
   readonly compositionId: string;
   readonly onDispatch: (transaction: CommandTransaction) => void;
+  readonly onAddMarker?: (timeUs: number, label: string) => void;
+  readonly markerCount?: number;
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
 }
@@ -56,10 +66,12 @@ export interface DualLensPanelProps {
 export function DualLensPanel({
   projection,
   playheadUs,
+  playing,
   selectedClipIds,
   reveal,
   workflowGraph,
   onSeek,
+  onTogglePlayback,
   onSelectClips,
   onRevealOnTimeline,
   onDispatchGraph,
@@ -69,6 +81,8 @@ export function DualLensPanel({
   onTrackFlagsChange,
   compositionId,
   onDispatch,
+  onAddMarker,
+  markerCount = 0,
   specialistReview,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
@@ -153,6 +167,7 @@ export function DualLensPanel({
             lanes={projection.lanes}
             durationUs={projection.durationUs}
             playheadUs={playheadUs}
+            playing={playing}
             advancedOpen={advancedOpen}
             advancedCount={advancedCount}
             selectedClipIds={selectedClipSet}
@@ -160,11 +175,14 @@ export function DualLensPanel({
             onViewportChange={onTimelineViewportChange}
             onAdvancedToggle={() => setAdvancedOpen((open) => !open)}
             onSeek={onSeek}
+            onTogglePlayback={onTogglePlayback}
             onSelectClips={onSelectClips}
             trackFlags={trackFlags}
             onTrackFlagsChange={onTrackFlagsChange}
             compositionId={compositionId}
             onDispatch={onDispatch}
+            {...(onAddMarker === undefined ? {} : { onAddMarker })}
+            markerCount={markerCount}
           />
         )}
         {(mode === 'flow' || mode === 'split') && (
@@ -253,6 +271,7 @@ function TimeProjection({
   lanes,
   durationUs,
   playheadUs,
+  playing,
   advancedOpen,
   advancedCount,
   selectedClipIds,
@@ -260,15 +279,19 @@ function TimeProjection({
   onViewportChange,
   onAdvancedToggle,
   onSeek,
+  onTogglePlayback,
   onSelectClips,
   trackFlags,
   onTrackFlagsChange,
   compositionId,
   onDispatch,
+  onAddMarker,
+  markerCount,
 }: {
   readonly lanes: readonly DualLensLane[];
   readonly durationUs: number;
   readonly playheadUs: number;
+  readonly playing: boolean;
   readonly advancedOpen: boolean;
   readonly advancedCount: number;
   readonly selectedClipIds: ReadonlySet<string>;
@@ -276,11 +299,14 @@ function TimeProjection({
   readonly onViewportChange: (next: TimelineViewport) => void;
   readonly onAdvancedToggle: () => void;
   readonly onSeek: (timeUs: number) => void;
+  readonly onTogglePlayback: () => void;
   readonly onSelectClips: (clipIds: readonly string[]) => void;
   readonly trackFlags: readonly TimelineTrackView[];
   readonly onTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
   readonly compositionId: string;
   readonly onDispatch: (transaction: CommandTransaction) => void;
+  readonly onAddMarker?: (timeUs: number, label: string) => void;
+  readonly markerCount: number;
 }) {
   const tracks = useMemo(() => {
     const onToggleTrackFlag = (
@@ -323,9 +349,53 @@ function TimeProjection({
   return (
     <section className="dual-time" aria-label="Time View">
       <div className="dual-lens-section-heading">
-        <div>
-          <strong>Time View</strong>
-          <span>{formatTime(playheadUs)}</span>
+        <div className="dual-time-transport" role="toolbar" aria-label="Time View transport">
+          <div className="timeline-toolbar-group">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onTogglePlayback}
+              aria-label={playing ? 'Pause' : 'Play proxy'}
+              title={playing ? 'Pause (Space)' : 'Play proxy (Space)'}
+            >
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => onSeek(Math.max(0, playheadUs - 1_000_000))}
+              aria-label="Back one second"
+              title="Back 1s (←)"
+            >
+              <SkipBackIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => onSeek(Math.min(durationUs, playheadUs + 1_000_000))}
+              aria-label="Forward one second"
+              title="Forward 1s (→)"
+            >
+              <SkipForwardIcon />
+            </button>
+          </div>
+          {onAddMarker !== undefined && (
+            <>
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <div className="timeline-toolbar-group">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Add marker at playhead"
+                  title="Add marker at playhead"
+                  data-guide="Add marker"
+                  onClick={() => onAddMarker(playheadUs, `Marker ${markerCount + 1}`)}
+                >
+                  <MarkerIcon />
+                </button>
+              </div>
+            </>
+          )}
         </div>
         <button
           type="button"

@@ -2254,6 +2254,7 @@ function EditorWorkspace({
         <DualLensPanel
           projection={context.dualLensProjection}
           playheadUs={state.playheadUs}
+          playing={state.playing}
           selectedClipIds={state.selectedIds}
           timelineViewport={timelineViewport}
           onTimelineViewportChange={setTimelineViewport}
@@ -2261,6 +2262,30 @@ function EditorWorkspace({
           onTrackFlagsChange={setTimelineTrackFlags}
           compositionId={context.timelineProject.rootCompositionId}
           onDispatch={context.dispatchTimeline}
+          onTogglePlayback={context.togglePlayback}
+          onSeek={context.seek}
+          onSelectClips={context.selectClips}
+          onRevealOnTimeline={context.revealOnTimeline}
+          markerCount={visualProject.markers.length}
+          onAddMarker={(timeUs, label) =>
+            context.dispatchProject({
+              label: `Add ${label}`,
+              commands: [
+                {
+                  type: 'marker.add',
+                  payload: {
+                    marker: {
+                      id: `marker-${timeUs}`,
+                      timeUs,
+                      label,
+                      kind: 'marker',
+                      color: JOY_COLORS.accent,
+                    },
+                  },
+                },
+              ],
+            })
+          }
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
           {...(context.workflowGraph === undefined
             ? {}
@@ -2288,9 +2313,6 @@ function EditorWorkspace({
                   />
                 ),
               })}
-          onSeek={context.seek}
-          onSelectClips={context.selectClips}
-          onRevealOnTimeline={context.revealOnTimeline}
         />
       );
     if (api.id === 'jobs')
