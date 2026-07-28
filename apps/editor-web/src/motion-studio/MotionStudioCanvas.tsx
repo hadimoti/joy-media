@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MotionFill, MotionLayer, MotionLayerId, MotionSceneDocument } from '@joy-media/motion-core';
-import { evaluateMotionScene, resolvedLayerOpacity, resolvedLayerTransform } from '@joy-media/motion-core';
+import { evaluateMotionScene, resolveLayerWorld, resolvedLayerOpacity, resolvedLayerTransform, type LayerWorldEvaluation } from '@joy-media/motion-core';
 import { JOY_COLORS } from '../theme.js';
 import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
@@ -8,6 +8,7 @@ import type { SceneCommand } from './state/sceneCommands.js';
 interface LayerElementProps {
   readonly layer: MotionLayer;
   readonly evaluation: import('@joy-media/motion-core').LayerEvaluation | undefined;
+  readonly world: import('@joy-media/motion-core').LayerWorldEvaluation | undefined;
   readonly isSelected: boolean;
   readonly editingText: boolean;
   readonly onPointerDown: (e: React.PointerEvent, layerId: MotionLayerId) => void;
@@ -15,6 +16,11 @@ interface LayerElementProps {
   readonly onContextMenu: (e: React.MouseEvent, layerId: MotionLayerId) => void;
   readonly onTextChange: (layerId: MotionLayerId, text: string) => void;
   readonly onTextEditEnd: (layerId: MotionLayerId) => void;
+}
+
+function assetUrl(assetId: string | undefined): string {
+  if (!assetId) return '';
+  return `/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`;
 }
 
 function bgToCSS(background: MotionSceneDocument['background']): string {
@@ -30,7 +36,7 @@ function bgToCSS(background: MotionSceneDocument['background']): string {
       return `linear-gradient(${g.angle ?? 90}deg, ${stops})`;
     }
     case 'image':
-      return `url(${background.assetId ? `/api/assets/${background.assetId}` : ''})`;
+      return assetUrl(background.assetId);
     default:
       return 'transparent';
   }
@@ -51,6 +57,7 @@ function fillToCSS(fill: MotionFill): string {
 function LayerElement({
   layer,
   evaluation,
+  world,
   isSelected,
   editingText,
   onPointerDown,
@@ -59,8 +66,9 @@ function LayerElement({
   onTextChange,
   onTextEditEnd,
 }: LayerElementProps) {
-  const t = resolvedLayerTransform(layer, evaluation);
+  const local = resolvedLayerTransform(layer, evaluation);
   const opacity = resolvedLayerOpacity(layer, evaluation);
+  const t = world?.worldTransform ?? local;
   const style: React.CSSProperties = {
     position: 'absolute',
     left: t.x,
@@ -187,7 +195,7 @@ function LayerElement({
       <div {...commonProps}>
         {layer.assetId ? (
           <img
-            src={`/api/assets/${layer.assetId}`}
+            src={assetUrl(layer.assetId)}
             alt={layer.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
             draggable={false}
@@ -228,6 +236,8 @@ export interface MotionStudioCanvasProps {
   readonly onAddTextLayer: () => void;
   readonly onAddRectangleLayer: () => void;
   readonly onAddEllipseLayer: () => void;
+  readonly onAddImageLayer: () => void;
+  readonly onAddVideoLayer: () => void;
   readonly canvasScale?: number;
   readonly playheadMs?: number;
 }
@@ -294,12 +304,26 @@ export function MotionStudioCanvas({
   onAddTextLayer,
   onAddRectangleLayer,
   onAddEllipseLayer,
+  onAddImageLayer,
+  onAddVideoLayer,
   canvasScale = 1,
   playheadMs = 0,
 }: MotionStudioCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [editingTextLayerId, setEditingTextLayerId] = useState<MotionLayerId | null>(null);
   const evaluated = useMemo(() => evaluateMotionScene(document, playheadMs), [document, playheadMs]);
+  const layersById = useMemo(() => {
+    const map: Record<string, MotionLayer> = {};
+    for (const layer of document.layers) map[layer.id] = layer;
+    return map;
+  }, [document.layers]);
+  const world = useMemo(() => {
+    const map = new Map<MotionLayerId, LayerWorldEvaluation>();
+    for (const layer of document.layers) {
+      map.set(layer.id, resolveLayerWorld(layer, evaluated.get(layer.id), layersById));
+    }
+    return map;
+  }, [document.layers, evaluated, layersById]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
   const [guides, setGuides] = useState<GuideLine[]>([]);
@@ -891,9 +915,15 @@ export function MotionStudioCanvas({
         case 'add-ellipse':
           onAddEllipseLayer();
           break;
+        case 'add-image':
+          onAddImageLayer();
+          break;
+        case 'add-video':
+          onAddVideoLayer();
+          break;
       }
     },
-    [document.layers, onAddEllipseLayer, onAddRectangleLayer, onAddTextLayer, onBringToFront, onDeleteSelected, onDuplicateSelected, onGroupSelected, onSelectLayers, onSendToBack, onUngroupSelected],
+    [document.layers, onAddEllipseLayer, onAddRectangleLayer, onAddTextLayer, onBringToFront, onDeleteSelected, onDuplicateSelected, onGroupSelected, onSelectLayers, onSendToBack, onUngroupSelected, onAddImageLayer, onAddVideoLayer],
   );
 
   useEffect(() => {
@@ -949,6 +979,7 @@ export function MotionStudioCanvas({
               key={layer.id}
               layer={layer}
               evaluation={evaluated.get(layer.id)}
+              world={world.get(layer.id)}
               isSelected={selectedLayerIds.includes(layer.id)}
               editingText={editingTextLayerId === layer.id}
               onPointerDown={handleLayerPointerDown}
@@ -1219,6 +1250,12 @@ function ContextMenu({
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-ellipse')}>
             <span className="ms-shape-icon-ellipse" /> Add ellipse
+          </button>
+          <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-image')}>
+            <span className="ms-image-icon" aria-hidden="true">🖼</span> Add image
+          </button>
+          <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-video')}>
+            <span className="ms-video-icon" aria-hidden="true">🎬</span> Add video
           </button>
           <div className="ms-context-separator" />
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('select-all')}>

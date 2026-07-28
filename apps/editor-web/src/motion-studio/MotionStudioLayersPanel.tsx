@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { MotionSceneDocument, MotionLayer, MotionLayerId } from '@joy-media/motion-core';
-import { createTextLayer, createRectangleLayer, createEllipseLayer } from './state/layerFactory.js';
+import { createTextLayer, createRectangleLayer, createEllipseLayer, createImageLayer, createVideoLayer } from './state/layerFactory.js';
 import {
   EyeIcon,
   EyeOffIcon,
@@ -75,6 +75,14 @@ export function MotionStudioLayersPanel({
     onAddLayer(createEllipseLayer());
   }, [onAddLayer]);
 
+  const handleAddImage = useCallback(() => {
+    onAddLayer(createImageLayer(''));
+  }, [onAddLayer]);
+
+  const handleAddVideo = useCallback(() => {
+    onAddLayer(createVideoLayer(''));
+  }, [onAddLayer]);
+
   const reversedLayers = [...document.layers].reverse();
 
   return (
@@ -112,6 +120,24 @@ export function MotionStudioLayersPanel({
             onClick={handleAddEllipse}
           >
             <span className="ms-shape-icon-ellipse" />
+          </button>
+          <button
+            type="button"
+            className="ms-icon-btn"
+            title="Add image"
+            aria-label="Add image"
+            onClick={handleAddImage}
+          >
+            <span className="ms-shape-icon-image" />
+          </button>
+          <button
+            type="button"
+            className="ms-icon-btn"
+            title="Add video"
+            aria-label="Add video"
+            onClick={handleAddVideo}
+          >
+            <span className="ms-shape-icon-video" />
           </button>
         </div>
       </div>

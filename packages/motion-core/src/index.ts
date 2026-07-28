@@ -158,6 +158,8 @@ export {
   setKeyframeAt,
   removeKeyframeAt,
   hasKeyframeAt,
+  resolveLayerWorld,
+  type LayerWorldEvaluation,
 } from './evaluator.js';
 export type {
   LayerEvaluation,

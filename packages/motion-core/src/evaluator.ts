@@ -26,6 +26,11 @@ export interface LayerEvaluation {
   readonly opacity?: number | undefined;
 }
 
+export interface LayerWorldEvaluation {
+  readonly worldTransform: MotionTransform;
+  readonly opacity: number;
+}
+
 export type SceneEvaluation = ReadonlyMap<MotionLayerId, LayerEvaluation>;
 
 type AnimatableTransformKey = keyof MotionTransform;
@@ -246,4 +251,58 @@ export function removeKeyframeAt(
 export function hasKeyframeAt(animation: MotionAnimation | undefined, timeMs: number): boolean {
   if (!animation) return false;
   return animation.curve.keyframes.some((k) => Math.abs(k.timeMs - timeMs) < 1);
+}
+
+/** Compose static/evaluated local transform with parent chain for a layer. */
+export function resolveLayerWorld(
+  layer: MotionLayer,
+  evaluation: LayerEvaluation | undefined,
+  layersById: Readonly<Record<string, MotionLayer>>,
+): LayerWorldEvaluation {
+  const local = resolvedLayerTransform(layer, evaluation);
+  const opacity = resolvedLayerOpacity(layer, evaluation);
+  const chain: MotionLayer[] = [];
+  const seen = new Set<string>([layer.id]);
+  let parentId = layer.parentId;
+  while (parentId !== undefined) {
+    if (seen.has(parentId)) break;
+    const parent = layersById[parentId];
+    if (parent === undefined) break;
+    chain.push(parent);
+    seen.add(parentId);
+    parentId = parent.parentId;
+  }
+  let world: MotionTransform = local;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const parent = chain[i]!;
+    const parentWorld = resolvedLayerTransform(parent, undefined);
+    world = composeParentWorld(parentWorld, world);
+  }
+  return { worldTransform: world, opacity };
+}
+
+function composeParentWorld(parentWorld: MotionTransform, local: MotionTransform): MotionTransform {
+  const radians = (parentWorld.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const scaledX = parentWorld.scaleX * local.x;
+  const scaledY = parentWorld.scaleY * local.y;
+  return {
+    x: parentWorld.x + scaledX * cos - scaledY * sin,
+    y: parentWorld.y + scaledX * sin + scaledY * cos,
+    z: local.z,
+    width: local.width,
+    height: local.height,
+    scaleX: parentWorld.scaleX * local.scaleX,
+    scaleY: parentWorld.scaleY * local.scaleY,
+    rotationDeg: parentWorld.rotationDeg + local.rotationDeg,
+    rotationXDeg: local.rotationXDeg,
+    rotationYDeg: local.rotationYDeg,
+    skewX: parentWorld.skewX + local.skewX,
+    skewY: parentWorld.skewY + local.skewY,
+    transformOriginX: local.transformOriginX,
+    transformOriginY: local.transformOriginY,
+    perspective: parentWorld.perspective + local.perspective,
+    opacity: parentWorld.opacity * local.opacity,
+  };
 }

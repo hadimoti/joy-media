@@ -53,6 +53,14 @@ export function createImageLayer(assetId: string, name = 'Image', x = 100, y = 1
   };
 }
 
+export function createVideoLayer(assetId: string, name = 'Video', x = 100, y = 100, w = 480, h = 270): MotionLayer {
+  return {
+    ...base('video', name),
+    assetId,
+    transform: { ...DEFAULT_TRANSFORM, x, y, width: w, height: h },
+  };
+}
+
 export function createContainerLayer(name = 'Container', x = 50, y = 50, w = 400, h = 300): MotionLayer {
   return {
     ...base('container', name),

@@ -7,7 +7,7 @@ import { MotionStudioTimeline } from './MotionStudioTimeline.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
 import { createBlankScene } from '@joy-media/motion-core';
-import { createTextLayer, createRectangleLayer, createEllipseLayer } from './state/layerFactory.js';
+import { createTextLayer, createRectangleLayer, createEllipseLayer, createImageLayer, createVideoLayer } from './state/layerFactory.js';
 import { loadMotionSceneDocument, saveMotionSceneDocument, publishMotionScene } from '../motion-scene-catalog.js';
 
 export interface MotionStudioShellProps {
@@ -226,6 +226,18 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
     selectLayer(ellipse.id);
   }, [dispatch, selectLayer]);
 
+  const handleAddImageLayer = useCallback(() => {
+    const image = createImageLayer('', 'Image');
+    dispatch('Add image layer', { type: 'scene.addLayer', payload: { layer: image } });
+    selectLayer(image.id);
+  }, [dispatch, selectLayer]);
+
+  const handleAddVideoLayer = useCallback(() => {
+    const video = createVideoLayer('', 'Video');
+    dispatch('Add video layer', { type: 'scene.addLayer', payload: { layer: video } });
+    selectLayer(video.id);
+  }, [dispatch, selectLayer]);
+
   const handleSetLayerTransform = useCallback(
     (layerId: MotionLayerId, transform: Partial<MotionLayer['transform']>) => {
       updateTransaction({ type: 'scene.setLayerTransform', payload: { layerId, transform } });
@@ -434,6 +446,8 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               onAddTextLayer={handleAddTextLayer}
               onAddRectangleLayer={handleAddRectangleLayer}
               onAddEllipseLayer={handleAddEllipseLayer}
+              onAddImageLayer={handleAddImageLayer}
+              onAddVideoLayer={handleAddVideoLayer}
               canvasScale={canvasScale}
               playheadMs={playheadMs}
             />
