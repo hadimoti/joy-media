@@ -170,10 +170,10 @@ export function SpeakerOnIcon() {
 /**
  * Classic timeline mark: staggered clips with the playhead scrubbing over them.
  *
- * Distinct from `TimelineIcon`, which is the ruler glyph Motion Studio's top
- * bar uses. Drawn on the 16px grid rather than downsampled from raster art —
- * at tab size a resampled bitmap turns 1px strokes to mush, which is why the
- * tab strip prefers inline SVG over the PNG masks.
+ * Used by the main Timeline dock tab and Motion Studio's timeline toggle.
+ * Drawn on the 16px grid rather than downsampled from raster art — at tab size
+ * a resampled bitmap turns 1px strokes to mush, which is why the tab strip
+ * prefers inline SVG over the PNG masks.
  */
 export function TimelineClassicIcon() {
   return (
@@ -948,33 +948,11 @@ export function UnlockIcon() {
 }
 
 export function LayersIcon() {
-  return (
-    <Svg size={14}>
-      <rect x="2.5" y="2.5" width="11" height="7" rx="0.5" />
-      <path d="m4 5 4-2 4 2" />
-      <rect
-        x="2.5"
-        y="9.5"
-        width="11"
-        height="4"
-        rx="0.5"
-        fill="currentColor"
-        fillOpacity="0.3"
-        stroke="currentColor"
-      />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.layers} size={16} />;
 }
 
 export function SlidersIcon() {
-  return (
-    <Svg size={14}>
-      <path d="M2.5 5.5h6" strokeWidth="2" />
-      <circle cx="8.5" cy="5.5" r="1.5" />
-      <path d="M7.5 10.5h4" strokeWidth="2" />
-      <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.inspect} size={16} />;
 }
 
 export function CanvasIcon() {
@@ -988,12 +966,8 @@ export function CanvasIcon() {
 }
 
 export function TimelineIcon() {
-  return (
-    <Svg size={14}>
-      <rect x="2.5" y="2.5" width="11" height="3" rx="1" />
-      <path d="M5 13.5V5.5m5 8V5.5" />
-    </Svg>
-  );
+  // Same glyph as the main editor Timeline dock tab.
+  return <TimelineClassicIcon />;
 }
 
 export function CodeIcon() {

@@ -51,6 +51,7 @@ export const UI_ICONS = {
   timelineScript: iconUrl('ui/timeline-script_24x24.png'),
   flow: iconUrl('ui/flow_24x24.png'),
   programOutput: iconUrl('ui/output_24x24.png'),
+  layers: iconUrl('24_layers.png'),
 } as const;
 
 export type UiIconId = keyof typeof UI_ICONS;

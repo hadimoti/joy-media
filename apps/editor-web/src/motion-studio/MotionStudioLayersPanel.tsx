@@ -76,12 +76,14 @@ export function MotionStudioLayersPanel({
         <div className="ms-panel-actions">
           <button
             type="button"
-            className="ms-icon-btn"
+            className="ms-icon-btn ms-icon-btn-text"
             title="Add text"
             aria-label="Add text layer"
             onClick={handleAddText}
           >
-            T
+            <span className="ms-add-text-glyph" aria-hidden="true">
+              T
+            </span>
           </button>
           <button
             type="button"

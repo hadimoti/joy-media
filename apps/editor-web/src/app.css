@@ -3820,6 +3820,20 @@ label {
   background: var(--joy-bg-hover);
   color: var(--joy-text);
 }
+.ms-icon-btn-text {
+  font-size: 0;
+}
+.ms-add-text-glyph {
+  display: block;
+  font-family: var(--joy-font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: currentColor;
+}
 
 .ms-shape-icon-rect {
   display: block;
