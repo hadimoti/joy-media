@@ -58,7 +58,8 @@ export interface DualLensPanelProps {
   readonly compositionId: string;
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
-  readonly markerCount?: number;
+  readonly onRemoveMarker?: (id: string) => void;
+  readonly markers?: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
 }
@@ -82,7 +83,8 @@ export function DualLensPanel({
   compositionId,
   onDispatch,
   onAddMarker,
-  markerCount = 0,
+  onRemoveMarker,
+  markers = [],
   specialistReview,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
@@ -182,7 +184,8 @@ export function DualLensPanel({
             compositionId={compositionId}
             onDispatch={onDispatch}
             {...(onAddMarker === undefined ? {} : { onAddMarker })}
-            markerCount={markerCount}
+            {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
+            markers={markers}
           />
         )}
         {(mode === 'flow' || mode === 'split') && (
@@ -286,7 +289,8 @@ function TimeProjection({
   compositionId,
   onDispatch,
   onAddMarker,
-  markerCount,
+  onRemoveMarker,
+  markers,
 }: {
   readonly lanes: readonly DualLensLane[];
   readonly durationUs: number;
@@ -306,7 +310,8 @@ function TimeProjection({
   readonly compositionId: string;
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
-  readonly markerCount: number;
+  readonly onRemoveMarker?: (id: string) => void;
+  readonly markers: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
 }) {
   const tracks = useMemo(() => {
     const onToggleTrackFlag = (
@@ -389,7 +394,7 @@ function TimeProjection({
                   aria-label="Add marker at playhead"
                   title="Add marker at playhead"
                   data-guide="Add marker"
-                  onClick={() => onAddMarker(playheadUs, `Marker ${markerCount + 1}`)}
+                  onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
                 >
                   <MarkerIcon />
                 </button>
@@ -417,6 +422,8 @@ function TimeProjection({
         selectedClipIds={selectedClipIds}
         onSeek={onSeek}
         onSelectClips={onSelectClips}
+        markers={markers}
+        {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
       />
     </section>
   );

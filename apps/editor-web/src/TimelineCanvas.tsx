@@ -25,6 +25,7 @@ import {
   SoloIcon,
   SpeakerOnIcon,
   TimelineAudioTrackIcon,
+  TimelineMarkerIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
 } from './icons.js';
@@ -71,6 +72,12 @@ export interface TimelineCanvasTrack {
   };
 }
 
+export interface TimelineCanvasMarker {
+  readonly id: string;
+  readonly timeUs: number;
+  readonly label: string;
+}
+
 export interface TimelineCanvasProps {
   readonly durationUs: number;
   readonly playheadUs: number;
@@ -84,6 +91,8 @@ export interface TimelineCanvasProps {
   /** Extra class on the scroll root (e.g. dual-time shell keeps section chrome). */
   readonly className?: string;
   readonly gutterLabel?: string;
+  readonly markers?: readonly TimelineCanvasMarker[];
+  readonly onRemoveMarker?: (id: string) => void;
 }
 
 function hashUnit(seed: string, salt: number): number {
@@ -295,6 +304,8 @@ export function TimelineCanvas({
   onSelectClips,
   className,
   gutterLabel,
+  markers = [],
+  onRemoveMarker,
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -365,7 +376,7 @@ export function TimelineCanvas({
       <div className="timeline-tracks-inner" ref={laneMeasureRef}>
         <TimelineTracksGrid ticks={rulerTicks} widthPx={laneWidthPx} />
         <span className="timeline-playhead" style={{ left: playheadLeft }} aria-hidden="true" />
-        {tracks.map((track) => (
+        {tracks.map((track, index) => (
           <div
             className={`timeline-track${track.advanced === true ? ' is-data' : ''}`}
             key={track.id}
@@ -379,6 +390,25 @@ export function TimelineCanvas({
               />
             </div>
             <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
+              {index === 0 &&
+                markers.map((marker) => (
+                  <button
+                    key={marker.id}
+                    type="button"
+                    className="timeline-marker"
+                    style={{
+                      left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                    }}
+                    title={marker.label}
+                    onClick={() => onSeek(marker.timeUs)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onRemoveMarker?.(marker.id);
+                    }}
+                  >
+                    <TimelineMarkerIcon />
+                  </button>
+                ))}
               {track.items.length === 0 ? (
                 <span className="timeline-lane-empty" lang="fa">
                   داده‌ای وجود ندارد

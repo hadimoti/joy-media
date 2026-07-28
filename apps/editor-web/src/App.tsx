@@ -2266,7 +2266,7 @@ function EditorWorkspace({
           onSeek={context.seek}
           onSelectClips={context.selectClips}
           onRevealOnTimeline={context.revealOnTimeline}
-          markerCount={visualProject.markers.length}
+          markers={visualProject.markers}
           onAddMarker={(timeUs, label) =>
             context.dispatchProject({
               label: `Add ${label}`,
@@ -2275,7 +2275,7 @@ function EditorWorkspace({
                   type: 'marker.add',
                   payload: {
                     marker: {
-                      id: `marker-${timeUs}`,
+                      id: `marker-${timeUs}-${Date.now()}`,
                       timeUs,
                       label,
                       kind: 'marker',
@@ -2284,6 +2284,12 @@ function EditorWorkspace({
                   },
                 },
               ],
+            })
+          }
+          onRemoveMarker={(id) =>
+            context.dispatchProject({
+              label: `Remove marker ${id}`,
+              commands: [{ type: 'marker.remove', payload: { markerId: id } }],
             })
           }
           {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
