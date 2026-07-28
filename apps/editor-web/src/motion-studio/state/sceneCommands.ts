@@ -8,6 +8,7 @@ import type {
   MotionShadow,
   MotionTypography,
   SceneBackground,
+  MotionAnimation,
 } from '@joy-media/motion-core';
 
 export interface AddLayerCommand {
@@ -90,13 +91,25 @@ export interface SetDocumentDurationCommand {
   readonly payload: { readonly durationMs: number };
 }
 
+export interface SetLayerAnimationsCommand {
+  readonly type: 'scene.setLayerAnimations';
+  readonly payload: { readonly layerId: MotionLayerId; readonly animations: readonly MotionAnimation[] };
+}
+
+export interface SetLayerAnimationsCommand {
+  readonly type: 'scene.setLayerAnimations';
+  readonly payload: { readonly layerId: MotionLayerId; readonly animations: readonly MotionAnimation[] };
+}
+
 export type SceneCommand =
   | AddLayerCommand | RemoveLayerCommand | MoveLayerCommand
   | SetLayerTransformCommand | SetLayerPropertyCommand
   | SetLayerTypographyCommand | SetLayerTextCommand
   | SetLayerFillsCommand | SetLayerStrokesCommand | SetLayerShadowsCommand
   | SetLayerBorderRadiusCommand | SetLayerVisibilityCommand | SetLayerLockedCommand
-  | SetSceneBackgroundCommand | SetDocumentDimensionsCommand | SetDocumentDurationCommand;
+  | SetSceneBackgroundCommand | SetDocumentDimensionsCommand | SetDocumentDurationCommand
+  | SetLayerAnimationsCommand;
+
 
 export interface SceneCommandResult {
   readonly document: MotionSceneDocument;
@@ -278,6 +291,19 @@ export function applySceneCommand(
       return {
         document: { ...document, durationMs: Math.max(100, durationMs) },
         inverse: { type: 'scene.setDocumentDuration', payload: { durationMs: oldDuration } },
+      };
+    }
+    case 'scene.setLayerAnimations': {
+      const { layerId, animations } = command.payload;
+      const oldAnimations = document.layers.find((l) => l.id === layerId)?.animations ?? [];
+      return {
+        document: {
+          ...document,
+          layers: document.layers.map((layer) =>
+            layer.id === layerId ? { ...layer, animations } : layer,
+          ),
+        },
+        inverse: { type: 'scene.setLayerAnimations', payload: { layerId, animations: oldAnimations } },
       };
     }
     default:

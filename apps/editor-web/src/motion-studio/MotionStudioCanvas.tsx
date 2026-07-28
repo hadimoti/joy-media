@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MotionFill, MotionLayer, MotionLayerId, MotionSceneDocument } from '@joy-media/motion-core';
+import { evaluateMotionScene, resolvedLayerOpacity, resolvedLayerTransform } from '@joy-media/motion-core';
 import { JOY_COLORS } from '../theme.js';
 import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
 
 interface LayerElementProps {
   readonly layer: MotionLayer;
+  readonly evaluation: import('@joy-media/motion-core').LayerEvaluation | undefined;
   readonly isSelected: boolean;
   readonly editingText: boolean;
   readonly onPointerDown: (e: React.PointerEvent, layerId: MotionLayerId) => void;
@@ -48,6 +50,7 @@ function fillToCSS(fill: MotionFill): string {
 
 function LayerElement({
   layer,
+  evaluation,
   isSelected,
   editingText,
   onPointerDown,
@@ -56,7 +59,8 @@ function LayerElement({
   onTextChange,
   onTextEditEnd,
 }: LayerElementProps) {
-  const { transform: t } = layer;
+  const t = resolvedLayerTransform(layer, evaluation);
+  const opacity = resolvedLayerOpacity(layer, evaluation);
   const style: React.CSSProperties = {
     position: 'absolute',
     left: t.x,
@@ -65,7 +69,7 @@ function LayerElement({
     height: t.height || undefined,
     transform: `rotate(${t.rotationDeg}deg) scale(${t.scaleX}, ${t.scaleY})`,
     transformOrigin: `${t.transformOriginX} ${t.transformOriginY}`,
-    opacity: layer.visible ? t.opacity : 0,
+    opacity: layer.visible ? opacity : 0,
     cursor: layer.locked ? 'default' : editingText ? 'text' : isSelected ? 'move' : 'pointer',
     overflow: layer.overflow,
     borderRadius: `${layer.borderRadius[0] ?? 0}px ${layer.borderRadius[1] ?? 0}px ${layer.borderRadius[2] ?? 0}px ${layer.borderRadius[3] ?? 0}px`,
@@ -291,10 +295,11 @@ export function MotionStudioCanvas({
   onAddRectangleLayer,
   onAddEllipseLayer,
   canvasScale = 1,
-  playheadMs,
+  playheadMs = 0,
 }: MotionStudioCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [editingTextLayerId, setEditingTextLayerId] = useState<MotionLayerId | null>(null);
+  const evaluated = useMemo(() => evaluateMotionScene(document, playheadMs), [document, playheadMs]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
   const [guides, setGuides] = useState<GuideLine[]>([]);
@@ -943,6 +948,7 @@ export function MotionStudioCanvas({
             <LayerElement
               key={layer.id}
               layer={layer}
+              evaluation={evaluated.get(layer.id)}
               isSelected={selectedLayerIds.includes(layer.id)}
               editingText={editingTextLayerId === layer.id}
               onPointerDown={handleLayerPointerDown}

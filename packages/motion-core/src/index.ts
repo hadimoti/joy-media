@@ -34,7 +34,6 @@ export {
 export type { KeyframeClipboard } from './curve.js';
 export {
   copyKeyframes,
-  hasKeyframeAt,
   pasteKeyframes,
   removeKeyframe,
   sampleCurve,
@@ -149,3 +148,19 @@ export type {
 export { MotionRegistry, convertPresetToScene } from './registry.js';
 export { validateMotionSceneDocument, migrateSceneDocument } from './schema.js';
 export { registerBuiltinMotions, BUILTIN_MOTIONS } from './builtins.js';
+
+/* ─── Motion Studio evaluator ─── */
+
+export {
+  evaluateMotionScene,
+  resolvedLayerOpacity,
+  resolvedLayerTransform,
+  setKeyframeAt,
+  removeKeyframeAt,
+  hasKeyframeAt,
+} from './evaluator.js';
+export type {
+  LayerEvaluation,
+  EvaluatedTransform,
+  SceneEvaluation,
+} from './evaluator.js';
