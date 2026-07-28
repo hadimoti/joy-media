@@ -5297,9 +5297,11 @@ label {
   margin-top: 0.1rem;
 }
 /* Dockview chrome — CapCut shell: black canvas, gray tiles, 2px gaps (DESIGN.md §3b).
-   dockview.css loads after this file, so the selector needs #root to win. */
+   dockview.css loads after this file, so the selector needs #root to win.
+   IMPORTANT: --dv-group-view-background-color also paints .dv-dockview (the
+   canvas behind rounded tiles). Keep it black; paint gray only on .dv-groupview. */
 #root .workspace {
-  --dv-group-view-background-color: var(--joy-bg-panel);
+  --dv-group-view-background-color: var(--joy-bg-app);
   --dv-tabs-and-actions-container-background-color: var(--joy-bg-chrome);
   --dv-tabs-and-actions-container-font-size: 0.78rem;
   --dv-activegroup-visiblepanel-tab-background-color: var(--joy-bg-elevated);
@@ -5320,6 +5322,10 @@ label {
   box-sizing: border-box;
   background: var(--joy-bg-app);
 }
+#root .workspace .dv-dockview,
+#root .workspace .dv-grid-view {
+  background-color: var(--joy-bg-app) !important;
+}
 #root .workspace .dv-resize-container:has(> .dv-groupview) {
   border-radius: var(--joy-radius-panel);
 }
@@ -5329,6 +5335,7 @@ label {
   border-radius: var(--joy-radius-panel);
   overflow: hidden;
   box-sizing: border-box;
+  background-color: var(--joy-bg-panel);
 }
 #root .workspace .dv-groupview .dv-tabs-and-actions-container {
   border-radius: var(--joy-radius-panel) var(--joy-radius-panel) 0 0;
