@@ -3,6 +3,7 @@ import { MotionStudioTopBar, type MotionStudioMode } from './MotionStudioTopBar.
 import { MotionStudioCanvas } from './MotionStudioCanvas.js';
 import { MotionStudioLayersPanel } from './MotionStudioLayersPanel.js';
 import { MotionStudioInspector } from './MotionStudioInspector.js';
+import { MotionStudioTimeline } from './MotionStudioTimeline.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
 
@@ -13,7 +14,7 @@ export interface MotionStudioShellProps {
 
 const LEFT_WIDTH_DEFAULT = 240;
 const RIGHT_WIDTH_DEFAULT = 260;
-const BOTTOM_HEIGHT_DEFAULT = 180;
+const BOTTOM_HEIGHT_DEFAULT = 240;
 const LEFT_WIDTH_MIN = 180;
 const LEFT_WIDTH_MAX = 480;
 const RIGHT_WIDTH_MIN = 200;
@@ -294,38 +295,17 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
                 onPointerDown={(e) => startPanelResize('bottom', e)}
               />
               <footer className="ms-panel ms-bottom" aria-label="Timeline">
-                <div className="ms-panel-header">
-                  <h3 className="ms-panel-title">Timeline</h3>
-                  <div className="ms-timeline-controls">
-                    <button
-                      type="button"
-                      className="ms-timeline-btn"
-                      aria-label={playing ? 'Pause' : 'Play'}
-                      onClick={togglePlayback}
-                    >
-                      {playing ? '\u23F8' : '\u25B6'}
-                    </button>
-                    <span className="ms-timeline-time" dir="ltr">
-                      {(playheadMs / 1000).toFixed(1)}s / {(document.durationMs / 1000).toFixed(1)}s
-                    </span>
-                  </div>
-                </div>
-                <div className="ms-panel-body">
-                  <div className="ms-timeline-scrubber">
-                    <input
-                      type="range"
-                      className="ms-timeline-range"
-                      min={0}
-                      max={document.durationMs}
-                      value={playheadMs}
-                      onChange={(e) => seek(Number(e.target.value))}
-                      aria-label="Playhead position"
-                    />
-                  </div>
-                  <div className="ms-empty-state" lang="fa">
-                    کی‌فریم‌ها و ترک‌های انیمیشن اینجا نمایش داده می‌شوند.
-                  </div>
-                </div>
+                <MotionStudioTimeline
+                  document={document}
+                  playheadMs={playheadMs}
+                  playing={playing}
+                  selectedLayerIds={selectedLayerIds}
+                  onSeek={seek}
+                  onTogglePlayback={togglePlayback}
+                  onSelectLayer={selectLayer}
+                  onToggleVisibility={handleToggleVisibility}
+                  onToggleLocked={handleToggleLocked}
+                />
               </footer>
             </div>
           )}
