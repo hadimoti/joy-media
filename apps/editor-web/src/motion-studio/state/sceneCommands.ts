@@ -80,13 +80,23 @@ export interface SetSceneBackgroundCommand {
   readonly payload: { readonly background: SceneBackground };
 }
 
+export interface SetDocumentDimensionsCommand {
+  readonly type: 'scene.setDocumentDimensions';
+  readonly payload: { readonly width: number; readonly height: number };
+}
+
+export interface SetDocumentDurationCommand {
+  readonly type: 'scene.setDocumentDuration';
+  readonly payload: { readonly durationMs: number };
+}
+
 export type SceneCommand =
   | AddLayerCommand | RemoveLayerCommand | MoveLayerCommand
   | SetLayerTransformCommand | SetLayerPropertyCommand
   | SetLayerTypographyCommand | SetLayerTextCommand
   | SetLayerFillsCommand | SetLayerStrokesCommand | SetLayerShadowsCommand
   | SetLayerBorderRadiusCommand | SetLayerVisibilityCommand | SetLayerLockedCommand
-  | SetSceneBackgroundCommand;
+  | SetSceneBackgroundCommand | SetDocumentDimensionsCommand | SetDocumentDurationCommand;
 
 export interface SceneCommandResult {
   readonly document: MotionSceneDocument;
@@ -251,6 +261,23 @@ export function applySceneCommand(
       return {
         document: { ...document, background: command.payload.background },
         inverse: { type: 'scene.setSceneBackground', payload: { background: oldBg } },
+      };
+    }
+    case 'scene.setDocumentDimensions': {
+      const { width, height } = command.payload;
+      const oldW = document.width;
+      const oldH = document.height;
+      return {
+        document: { ...document, width, height },
+        inverse: { type: 'scene.setDocumentDimensions', payload: { width: oldW, height: oldH } },
+      };
+    }
+    case 'scene.setDocumentDuration': {
+      const { durationMs } = command.payload;
+      const oldDuration = document.durationMs;
+      return {
+        document: { ...document, durationMs: Math.max(100, durationMs) },
+        inverse: { type: 'scene.setDocumentDuration', payload: { durationMs: oldDuration } },
       };
     }
     default:

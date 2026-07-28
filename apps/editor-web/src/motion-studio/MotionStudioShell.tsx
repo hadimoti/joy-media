@@ -303,11 +303,6 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
     [dispatch, document.layers],
   );
 
-  const selectedLayer =
-    selectedLayerIds.length === 1
-      ? document.layers.find((l) => l.id === selectedLayerIds[0])
-      : undefined;
-
   const hasLeftPanel = layersOpen;
   const hasRightPanel = inspectorOpen;
   const hasBottomPanel = timelineOpen;
@@ -495,7 +490,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               className="ms-sash ms-sash-west"
               onPointerDown={(e) => startPanelResize('right', e)}
             />
-            <MotionStudioInspector layer={selectedLayer} document={document} dispatch={dispatch} />
+            <MotionStudioInspector document={document} selectedLayerIds={selectedLayerIds} dispatch={dispatch} />
           </div>
         )}
       </div>
