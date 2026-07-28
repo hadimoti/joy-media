@@ -214,12 +214,13 @@ a third needs an owner decision recorded here.
 
 ## 4c. Header chrome
 
-- Brand lockup on the left (no Projects icon). Center edit cluster: Undo · Redo · Cut · Split · Duplicate · command palette (icon-only + shortcuts in tooltips).
-- Right deliver cluster: export-preset menu · primary **Export** text button (accent) · processes · account.
-- **Menubar** row under the header ([`AppMenuBar.tsx`](apps/editor-web/src/AppMenuBar.tsx) + [`app-menu.ts`](apps/editor-web/src/app-menu.ts)): **File · Edit · Clip · View · Window** — plain-text items with shortcuts. File → Projects Library… returns to the library; View lists every Dockview panel by name.
+- Brand lockup on the left (logo + **JOY Studio**). Immediately after the title: inline application menu ([`AppMenuBar.tsx`](apps/editor-web/src/AppMenuBar.tsx) + [`app-menu.ts`](apps/editor-web/src/app-menu.ts)) — **File · Edit · Clip · Joy Code · View · Window** as plain-text triggers with dropdowns. No separate menubar row under the header.
+- Center/right edit cluster: Undo · Redo · command palette · shortcuts (icon-only + shortcuts in tooltips).
+- Right deliver cluster: export-preset menu · primary **Export** accent button · processes · account.
 - Groups use `.header-group` spacing only — no separator hairlines. Accent is reserved for Export / selection / playhead — not every border.
-- `.app-header` and `.app-menubar` have no bottom border; they sit flush on the black canvas.
+- `.app-header` has no bottom border; it sits flush on the black canvas. `.app-menubar` is an inline flex child of the brand group (transparent, no full-width strip).
 - Primary Export (`.header-export-btn`) is an accent fill with `--joy-radius-inner` corners and no outline border.
+- File → Projects Library… returns to the library; View lists every Dockview panel by name.
 
 ## 3. Layout & panels (seed)
 

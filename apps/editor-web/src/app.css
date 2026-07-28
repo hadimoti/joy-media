@@ -388,33 +388,39 @@ main {
   border-color: transparent;
 }
 .app-menubar {
-  display: flex;
+  display: inline-flex;
   flex: none;
-  align-items: stretch;
-  gap: 0.1rem;
-  min-height: 1.75rem;
-  padding: 0 var(--space-3);
-  background: var(--joy-bg-app);
+  align-items: center;
+  gap: 0.05rem;
+  min-height: 0;
+  height: 100%;
+  margin-inline-start: var(--space-2);
+  padding: 0;
+  background: transparent;
   border-bottom: 0;
   z-index: 5;
 }
 .app-menu {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
 }
 .app-menu-trigger {
-  height: 1.75rem;
-  padding: 0 0.55rem;
+  height: 1.55rem;
+  padding: 0 0.45rem;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--joy-radius-inner);
   background: transparent;
-  color: var(--joy-text);
+  color: var(--joy-text-muted);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   cursor: pointer;
 }
 .app-menu-trigger:hover,
 .app-menu-trigger[aria-expanded='true'] {
   background: var(--joy-bg-control);
+  color: var(--joy-text);
 }
 .app-menu-dropdown {
   position: absolute;

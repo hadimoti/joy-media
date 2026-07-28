@@ -2476,6 +2476,14 @@ function EditorWorkspace({
             />
             <strong>JOY Studio</strong>
           </span>
+          <AppMenuBar
+            canUndo={session.canUndo}
+            canRedo={session.canRedo}
+            hasSelection={state.selectedIds.length > 0}
+            exporting={exporting}
+            signedIn={joySession.kind === 'ready'}
+            onAction={runMenuAction}
+          />
         </div>
         <div className="header-spacer" aria-hidden="true" />
         <div className="header-group" role="group" aria-label="Edit">
@@ -2728,14 +2736,6 @@ function EditorWorkspace({
           </div>
         </div>
       </header>
-      <AppMenuBar
-        canUndo={session.canUndo}
-        canRedo={session.canRedo}
-        hasSelection={state.selectedIds.length > 0}
-        exporting={exporting}
-        signedIn={joySession.kind === 'ready'}
-        onAction={runMenuAction}
-      />
 
       {paletteOpen && (
         <section className="palette" aria-label="Command palette">
