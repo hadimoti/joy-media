@@ -6853,6 +6853,20 @@ label {
   gap: 0.15rem;
 }
 
+.dual-time .dual-lens-section-heading > .dual-time-heading-end {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  margin-inline-start: auto;
+  flex: none;
+  min-width: 0;
+}
+
+.dual-time .dual-time-heading-end .timeline-toolbar-zoom {
+  flex: none;
+}
+
 .dual-lens-section-heading strong {
   color: var(--joy-text);
   font-size: 12px;

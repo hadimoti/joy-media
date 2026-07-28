@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import {
+  clampPixelsPerSecond,
+  fitPixelsPerSecond,
+  MIN_PIXELS_PER_SECOND,
+  MAX_PIXELS_PER_SECOND,
   toggleTrackFlag,
   type TimelineTrackView,
   type TimelineViewport,
@@ -24,11 +28,14 @@ import {
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
 import {
+  FitWidthIcon,
   MarkerIcon,
   PauseIcon,
   PlayIcon,
   SkipBackIcon,
   SkipForwardIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from './icons.js';
 
 export interface DualLensPanelProps {
@@ -313,6 +320,7 @@ function TimeProjection({
   readonly onRemoveMarker?: (id: string) => void;
   readonly markers: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
 }) {
+  const rootRef = useRef<HTMLElement | null>(null);
   const tracks = useMemo(() => {
     const onToggleTrackFlag = (
       trackId: string,
@@ -351,8 +359,22 @@ function TimeProjection({
     return lanesToCanvasTracks(lanes, advancedOpen, trackFlags, onToggleTrackFlag);
   }, [lanes, advancedOpen, trackFlags, compositionId, onDispatch, onTrackFlagsChange]);
 
+  const applyZoom = (nextPps: number) => {
+    onViewportChange({ ...viewport, pixelsPerSecond: clampPixelsPerSecond(nextPps) });
+  };
+
+  const fitToWidth = () => {
+    const lane = rootRef.current?.querySelector('.timeline-lane');
+    const width = lane instanceof HTMLElement ? lane.clientWidth : 0;
+    if (width <= 0) return;
+    onViewportChange({
+      ...viewport,
+      pixelsPerSecond: fitPixelsPerSecond(durationUs, width),
+    });
+  };
+
   return (
-    <section className="dual-time" aria-label="Time View">
+    <section className="dual-time" aria-label="Time View" ref={rootRef}>
       <div className="dual-lens-section-heading">
         <div className="dual-time-transport" role="toolbar" aria-label="Time View transport">
           <div className="timeline-toolbar-group">
@@ -402,14 +424,59 @@ function TimeProjection({
             </>
           )}
         </div>
-        <button
-          type="button"
-          className="dual-lens-disclosure"
-          aria-expanded={advancedOpen}
-          onClick={onAdvancedToggle}
-        >
-          {advancedOpen ? 'Hide' : 'Show'} data lanes ({advancedCount})
-        </button>
+        <div className="dual-time-heading-end">
+          <button
+            type="button"
+            className="dual-lens-disclosure"
+            aria-expanded={advancedOpen}
+            onClick={onAdvancedToggle}
+          >
+            {advancedOpen ? 'Hide' : 'Show'} data lanes ({advancedCount})
+          </button>
+          <div
+            className="timeline-toolbar-group timeline-toolbar-zoom"
+            role="group"
+            aria-label="Timeline zoom"
+          >
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Zoom out"
+              title="Zoom out"
+              onClick={() => applyZoom(viewport.pixelsPerSecond / 1.25)}
+            >
+              <ZoomOutIcon />
+            </button>
+            <input
+              aria-label="Timeline zoom"
+              className="timeline-zoom-slider"
+              type="range"
+              min={MIN_PIXELS_PER_SECOND}
+              max={MAX_PIXELS_PER_SECOND}
+              step={1}
+              value={Math.round(viewport.pixelsPerSecond)}
+              onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
+            />
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Zoom in"
+              title="Zoom in"
+              onClick={() => applyZoom(viewport.pixelsPerSecond * 1.25)}
+            >
+              <ZoomInIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Fit timeline to width"
+              title="Fit to width"
+              onClick={fitToWidth}
+            >
+              <FitWidthIcon />
+            </button>
+          </div>
+        </div>
       </div>
       <TimelineCanvas
         className="dual-time-canvas"

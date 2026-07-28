@@ -209,6 +209,7 @@ a third needs an owner decision recorded here.
 ## 4b. Timeline NLE strip
 
 - Timeline panel fills Dockview height (`.timeline-panel` flex column; tracks scroll; zoom bar pinned). Zoom uses `TimelineViewport.pixelsPerSecond` (5–200) with fit-to-width via `ResizeObserver` and Ctrl/Cmd+wheel.
+- Dual Lens Time View shares the same `TimelineViewport` and shows the same zoom controls (out / slider / in / fit) pinned to the right of the heading after the data-lanes disclosure.
 - Clip actions: icon row (split / duplicate / ripple delete) + **right-click context drawer** ([`TimelineContextMenu.tsx`](apps/editor-web/src/TimelineContextMenu.tsx)) for select, split, duplicate, delete, speed presets (`0.5×…2×`), freeze frame (1s hold). No second text-heavy toolbar.
 - Durable ops: `timeline.duplicateClip`, `timeline.setClipRate`, `timeline.freezeFrame` (+ `restoreTrackClips` undo). Video clips may carry `playbackRate` (`0` = freeze, else `0.1…8`; omit = 1×). Non-1× / freeze show a compact clip badge.
 
