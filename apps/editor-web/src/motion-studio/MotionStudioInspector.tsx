@@ -11,7 +11,10 @@ import type {
   MotionFilter,
   SceneBackground,
   BlendMode,
+  MotionAnimation,
+  MotionEasing,
 } from '@joy-media/motion-core';
+import { setKeyframeAt, hasKeyframeAt, type LayerEvaluation } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 import { UI_ICONS } from '../ui-icons.js';
 import { MsTitle } from './MsTitle.js';
@@ -58,10 +61,11 @@ const FILTER_KINDS: readonly string[] = [
   'opacity',
 ];
 
-interface InspectorProps {
+export interface InspectorProps {
   readonly document: MotionSceneDocument;
   readonly selectedLayerIds: readonly MotionLayerId[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
+  readonly playheadMs?: number;
 }
 
 function mixedPlaceholder(): string | number {
@@ -674,9 +678,11 @@ function SimpleFilterSection({
 function LayerInspector({
   selected,
   dispatch,
+  playheadMs = 0,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
+  readonly playheadMs?: number;
 }) {
   const isMulti = selected.length > 1;
   const types = selected.map((l) => l.type);
@@ -703,10 +709,10 @@ function LayerInspector({
   );
 }
 
-export function MotionStudioInspector({ document, selectedLayerIds, dispatch }: InspectorProps) {
+export function MotionStudioInspector({ document, selectedLayerIds, dispatch, playheadMs = 0 }: InspectorProps) {
   const selected = useSelectedLayers(document, selectedLayerIds);
   if (selected.length === 0) {
     return <SceneInspector document={document} dispatch={dispatch} />;
   }
-  return <LayerInspector selected={selected} dispatch={dispatch} />;
+  return <LayerInspector selected={selected} dispatch={dispatch} playheadMs={playheadMs} />;
 }
