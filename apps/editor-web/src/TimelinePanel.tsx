@@ -129,7 +129,7 @@ function ProvenanceStepIcon({
   readonly label: string;
 }) {
   if (kind === 'output') return <ProgramOutputIcon />;
-  if (kind === 'visual' || label === 'JOY') return <JoyBrandMarkIcon size={12} />;
+  if (kind === 'visual' || label === 'JOY') return <JoyBrandMarkIcon size={16} />;
   if (kind === 'asset' || kind === 'clip') return <TimelineVideoTrackIcon size={12} />;
   return null;
 }

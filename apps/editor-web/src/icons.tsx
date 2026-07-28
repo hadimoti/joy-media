@@ -483,7 +483,7 @@ export function ProgramOutputIcon() {
   return <PngMaskIcon src={UI_ICONS.programOutput} size={12} />;
 }
 
-export function JoyBrandMarkIcon({ size = 12 }: { readonly size?: number } = {}) {
+export function JoyBrandMarkIcon({ size = 16 }: { readonly size?: number } = {}) {
   return <PngMaskIcon src={joyCodeMarkUrl} size={size} />;
 }
 
