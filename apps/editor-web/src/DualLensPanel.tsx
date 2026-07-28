@@ -364,8 +364,11 @@ function TimeProjection({
   };
 
   const fitToWidth = () => {
+    const scroll = rootRef.current?.querySelector('.timeline-tracks');
     const lane = rootRef.current?.querySelector('.timeline-lane');
-    const width = lane instanceof HTMLElement ? lane.clientWidth : 0;
+    const scrollClientW = scroll instanceof HTMLElement ? scroll.clientWidth : 0;
+    const laneW = lane instanceof HTMLElement ? lane.clientWidth : 0;
+    const width = Math.max(0, scrollClientW - 152) || laneW;
     if (width <= 0) return;
     onViewportChange({
       ...viewport,

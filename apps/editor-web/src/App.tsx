@@ -452,6 +452,13 @@ interface EditorPanelContextValue {
   readonly motionStudioOpen: boolean;
   readonly openMotionStudio: () => void;
   readonly closeMotionStudio: () => void;
+  /** Shared Timeline + Dual Lens zoom/scroll viewport (must live in context — dockview caches Panel). */
+  readonly timelineViewport: TimelineViewport;
+  readonly onTimelineViewportChange: (next: TimelineViewport) => void;
+  readonly timelineTrackFlags: readonly TimelineTrackView[];
+  readonly onTimelineTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
+  readonly timelineAutoFit: boolean;
+  readonly onTimelineAutoFitChange: (next: boolean) => void;
 }
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
@@ -2162,12 +2169,12 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedIds={state.selectedIds}
-          viewport={timelineViewport}
-          onViewportChange={setTimelineViewport}
-          trackFlags={timelineTrackFlags}
-          onTrackFlagsChange={setTimelineTrackFlags}
-          autoFit={timelineAutoFit}
-          onAutoFitChange={setTimelineAutoFit}
+          viewport={context.timelineViewport}
+          onViewportChange={context.onTimelineViewportChange}
+          trackFlags={context.timelineTrackFlags}
+          onTrackFlagsChange={context.onTimelineTrackFlagsChange}
+          autoFit={context.timelineAutoFit}
+          onAutoFitChange={context.onTimelineAutoFitChange}
           markers={visualProject.markers}
           provenance={
             state.selectedIds[0] === undefined
@@ -2256,10 +2263,10 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedClipIds={state.selectedIds}
-          timelineViewport={timelineViewport}
-          onTimelineViewportChange={setTimelineViewport}
-          trackFlags={timelineTrackFlags}
-          onTrackFlagsChange={setTimelineTrackFlags}
+          timelineViewport={context.timelineViewport}
+          onTimelineViewportChange={context.onTimelineViewportChange}
+          trackFlags={context.timelineTrackFlags}
+          onTrackFlagsChange={context.onTimelineTrackFlagsChange}
           compositionId={context.timelineProject.rootCompositionId}
           onDispatch={context.dispatchTimeline}
           onTogglePlayback={context.togglePlayback}
@@ -2807,6 +2814,12 @@ function EditorWorkspace({
           motionStudioOpen,
           openMotionStudio: () => setMotionStudioOpen(true),
           closeMotionStudio: () => setMotionStudioOpen(false),
+          timelineViewport,
+          onTimelineViewportChange: setTimelineViewport,
+          timelineTrackFlags,
+          onTimelineTrackFlagsChange: setTimelineTrackFlags,
+          timelineAutoFit,
+          onTimelineAutoFitChange: setTimelineAutoFit,
         }}
       >
         <DockviewReact

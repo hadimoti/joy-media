@@ -492,8 +492,8 @@ export function TimelinePanel({
       const entry = entries[0];
       if (entry === undefined) return;
       setTracksHeightPx(entry.contentRect.height);
-      const lane = laneMeasureRef.current;
-      const width = lane?.clientWidth ?? entry.contentRect.width;
+      const scrollW = scrollRef.current?.clientWidth ?? entry.contentRect.width;
+      const width = Math.max(0, scrollW - 152);
       if (autoFit && width > 0) {
         onViewportChange({
           ...viewport,
@@ -508,7 +508,8 @@ export function TimelinePanel({
 
   useEffect(() => {
     if (!autoFit) return;
-    const width = laneMeasureRef.current?.clientWidth ?? scrollRef.current?.clientWidth ?? 0;
+    const scrollW = scrollRef.current?.clientWidth ?? 0;
+    const width = Math.max(0, scrollW - 152) || (laneMeasureRef.current?.clientWidth ?? 0);
     if (width <= 0) return;
     onViewportChange({
       ...viewport,
@@ -760,7 +761,9 @@ export function TimelinePanel({
 
   const fitToWidth = () => {
     onAutoFitChange(true);
-    const width = laneMeasureRef.current?.clientWidth ?? scrollRef.current?.clientWidth ?? 0;
+    const scrollClientW = scrollRef.current?.clientWidth ?? 0;
+    const laneW = laneMeasureRef.current?.clientWidth ?? 0;
+    const width = Math.max(0, scrollClientW - 152) || laneW || scrollClientW;
     if (width > 0) {
       onViewportChange({
         ...viewport,
