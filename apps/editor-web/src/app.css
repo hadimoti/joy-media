@@ -3403,15 +3403,15 @@ label {
   box-sizing: border-box;
 }
 
-/* Top bar */
+/* Top bar — CapCut shell: pure black, no hairline (§3b) */
 .ms-topbar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   height: 40px;
   padding: 0 var(--space-3);
-  background: var(--joy-bg-chrome);
-  border-bottom: 1px solid var(--joy-border-subtle);
+  background: var(--joy-bg-app);
+  border-bottom: 0;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -3493,14 +3493,18 @@ label {
   background: var(--joy-border);
 }
 
-/* Body grid */
+/* Body grid — 2px black gaps between tiles (§3b) */
 .ms-body {
   flex: 1;
   display: grid;
   grid-template-rows: 1fr;
   grid-template-columns: 1fr;
+  gap: var(--joy-shell-gap);
+  padding: var(--joy-shell-gap);
   overflow: hidden;
   min-height: 0;
+  background: var(--joy-bg-app);
+  box-sizing: border-box;
 }
 .ms-body-left {
   grid-template-columns: 240px 1fr;
@@ -3514,27 +3518,27 @@ label {
 .ms-body-bottom .ms-center {
   display: flex;
   flex-direction: column;
+  gap: var(--joy-shell-gap);
   overflow: hidden;
   min-height: 0;
+  background: transparent;
 }
 
-/* Panels */
+/* Panels — gray tiles, 16px radius, no hairline borders */
 .ms-panel {
   display: flex;
   flex-direction: column;
   background: var(--joy-bg-panel);
-  border-right: 1px solid var(--joy-border-subtle);
+  border: 0;
+  border-radius: var(--joy-radius-panel);
   overflow: hidden;
   min-height: 0;
 }
 .ms-right {
-  border-right: none;
-  border-left: 1px solid var(--joy-border-subtle);
+  border: 0;
 }
 .ms-bottom {
-  border-right: none;
-  border-left: none;
-  border-top: 1px solid var(--joy-border-subtle);
+  border: 0;
   height: 180px;
   min-height: 100px;
   flex-shrink: 0;
@@ -3545,7 +3549,8 @@ label {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--joy-border-subtle);
+  border-bottom: 1px solid color-mix(in srgb, var(--joy-border) 55%, transparent);
+  background: transparent;
   flex-shrink: 0;
 }
 .ms-panel-title {
@@ -3567,13 +3572,15 @@ label {
   flex-direction: column;
 }
 
-/* Center area */
+/* Center area — black canvas tile */
 .ms-center {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
   position: relative;
+  background: var(--joy-bg-app);
+  border-radius: var(--joy-radius-panel);
 }
 
 /* Canvas */
@@ -3582,11 +3589,10 @@ label {
   display: flex;
   align-items: center;
   justify-content: center;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 70%),
-    var(--joy-bg-deep);
+  background: var(--joy-bg-deep);
   overflow: hidden;
   min-height: 0;
+  border-radius: var(--joy-radius-panel);
 }
 
 .ms-canvas-viewport {
@@ -3651,9 +3657,7 @@ label {
 /* Canvas stage */
 .ms-canvas-stage {
   background-color: var(--joy-bg-deep);
-  box-shadow:
-    0 0 0 1px var(--joy-border),
-    0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-border) 40%, transparent);
 }
 
 .ms-layer-selected {
