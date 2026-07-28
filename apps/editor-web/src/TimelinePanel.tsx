@@ -41,6 +41,7 @@ import {
   CloseIcon,
   FlowProvenanceIcon,
   ProgramOutputIcon,
+  JoyBrandMarkIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
   SelectIcon,
@@ -118,6 +119,19 @@ function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
   if (kind === 'audio') return <TimelineAudioTrackIcon />;
   if (kind === 'script') return <TimelineScriptTrackIcon />;
   return <TimelineVideoTrackIcon />;
+}
+
+function ProvenanceStepIcon({
+  kind,
+  label,
+}: {
+  readonly kind: ProvenanceStep['kind'];
+  readonly label: string;
+}) {
+  if (kind === 'output') return <ProgramOutputIcon />;
+  if (kind === 'visual' || label === 'JOY') return <JoyBrandMarkIcon size={12} />;
+  if (kind === 'asset' || kind === 'clip') return <TimelineVideoTrackIcon size={12} />;
+  return null;
 }
 
 function isVoiceClip(clip: Clip): boolean {
@@ -1150,7 +1164,7 @@ export function TimelinePanel({
                   title={`Reveal ${step.label} in Flow`}
                   onClick={() => onRevealNode?.(step.nodeId)}
                 >
-                  {step.kind === 'output' && <ProgramOutputIcon />}
+                  <ProvenanceStepIcon kind={step.kind} label={step.label} />
                   {step.label}
                 </button>
               </li>
