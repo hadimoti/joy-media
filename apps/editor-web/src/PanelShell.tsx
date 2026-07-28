@@ -45,6 +45,11 @@ export interface PanelShellProps {
   readonly tabs?: readonly PanelTabSpec[] | undefined;
   readonly activeTab?: string | undefined;
   readonly onTabChange?: ((id: string) => void) | undefined;
+  /**
+   * Put section tabs in the header center (replacing the title + icon) instead
+   * of the usual row under the header. Title is still used for aria labels.
+   */
+  readonly tabsInHeader?: boolean | undefined;
   /** Dims and disables the body; the shell itself stays fully visible. */
   readonly inactive?: boolean | undefined;
   /** One short line under the tabs saying why (§3c.4). Usually paired with `inactive`. */
@@ -65,6 +70,7 @@ export function PanelShell({
   tabs,
   activeTab,
   onTabChange,
+  tabsInHeader = false,
   inactive = false,
   note,
   hideHeader = false,
@@ -84,36 +90,62 @@ export function PanelShell({
   }, [search]);
 
   const searchFieldId = `${title.toLowerCase().replace(/\s+/g, '-')}-panel-search`;
+  const tabButtons =
+    tabs !== undefined && tabs.length > 0
+      ? tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            className="joy-panel-tab"
+            aria-selected={activeTab === tab.id}
+            disabled={tab.disabled === true}
+            onClick={() => onTabChange?.(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))
+      : null;
 
   return (
     <article
       className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}
-      aria-label={hideHeader ? title : undefined}
+      aria-label={hideHeader || tabsInHeader ? title : undefined}
     >
       {!hideHeader && (
         <div className="joy-panel-header">
           {leadingActions !== undefined && (
             <div className="joy-panel-leading-actions">{leadingActions}</div>
           )}
-          <h3 className="joy-panel-title">
-            {icon !== undefined ? (
-              <span className="joy-panel-title-icon" aria-hidden="true">
-                {icon}
-              </span>
-            ) : (
-              iconUrl !== undefined && (
-                // The panel-tab PNGs are black-on-transparent and are meant to be
-                // masked with currentColor (DESIGN.md §3) — as a plain <img> they
-                // render black on a black panel and vanish.
-                <span
-                  className="joy-panel-title-icon joy-panel-title-icon-mask"
-                  style={{ maskImage: `url(${iconUrl})`, WebkitMaskImage: `url(${iconUrl})` }}
-                  aria-hidden="true"
-                />
-              )
-            )}
-            {title}
-          </h3>
+          {tabsInHeader && tabButtons !== null ? (
+            <div
+              className="joy-panel-tabs joy-panel-tabs-in-header"
+              role="tablist"
+              aria-label={`${title} sections`}
+            >
+              {tabButtons}
+            </div>
+          ) : (
+            <h3 className="joy-panel-title">
+              {icon !== undefined ? (
+                <span className="joy-panel-title-icon" aria-hidden="true">
+                  {icon}
+                </span>
+              ) : (
+                iconUrl !== undefined && (
+                  // The panel-tab PNGs are black-on-transparent and are meant to be
+                  // masked with currentColor (DESIGN.md §3) — as a plain <img> they
+                  // render black on a black panel and vanish.
+                  <span
+                    className="joy-panel-title-icon joy-panel-title-icon-mask"
+                    style={{ maskImage: `url(${iconUrl})`, WebkitMaskImage: `url(${iconUrl})` }}
+                    aria-hidden="true"
+                  />
+                )
+              )}
+              {title}
+            </h3>
+          )}
           <div className="joy-panel-actions">
             {actions}
             {search !== undefined && (
@@ -150,21 +182,9 @@ export function PanelShell({
         </div>
       )}
 
-      {tabs !== undefined && tabs.length > 0 && (
+      {!tabsInHeader && tabButtons !== null && (
         <div className="joy-panel-tabs" role="tablist" aria-label={`${title} sections`}>
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              className="joy-panel-tab"
-              aria-selected={activeTab === tab.id}
-              disabled={tab.disabled === true}
-              onClick={() => onTabChange?.(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabButtons}
         </div>
       )}
 
