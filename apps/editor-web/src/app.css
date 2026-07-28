@@ -12,25 +12,28 @@ textarea:focus:not(:focus-visible) {
 }
 
 :root {
-  /* Surfaces — four levels + accent scarcity (DESIGN.md) */
-  --joy-bg-app: #0d0e10;
-  --joy-bg-panel: #111216;
-  --joy-bg-chrome: #16171b;
-  --joy-bg-elevated: #17181d;
-  --joy-bg-raised: #222226;
-  --joy-bg-inset: #101012;
-  --joy-bg-control: #2a2a2e;
-  --joy-bg-hover: #1d1f25;
-  --joy-bg-active: #24262d;
-  --joy-bg-input: #0e0e10;
-  --joy-bg-deep: #080809;
+  /* Surfaces — CapCut shell: black canvas, gray panel tiles (DESIGN.md §1, §3b) */
+  --joy-bg-app: #000000;
+  --joy-bg-panel: #252525;
+  --joy-bg-chrome: #2d2d2d;
+  --joy-bg-elevated: #333333;
+  --joy-bg-raised: #383838;
+  --joy-bg-inset: #1e1e1e;
+  --joy-bg-control: #3a3a3a;
+  --joy-bg-hover: #323232;
+  --joy-bg-active: #404040;
+  --joy-bg-input: #1a1a1a;
+  --joy-bg-deep: #000000;
   --joy-border-subtle: rgba(255, 255, 255, 0.07);
-  --joy-border: #2a2a2e;
-  --joy-border-strong: #3c3c42;
+  --joy-border: #3a3a3a;
+  --joy-border-strong: #484848;
   --joy-border-hover: #5a5a62;
   --joy-border-soft: rgba(255, 255, 255, 0.08);
-  --joy-bg-surface: #18181a;
-  --joy-gap: #080809;
+  --joy-bg-surface: #252525;
+  --joy-gap: #000000;
+  --joy-shell-gap: 2px;
+  --joy-radius-panel: 8px;
+  --joy-radius-inner: 6px;
   --joy-text: #ececef;
   --joy-text-secondary: rgba(255, 255, 255, 0.64);
   --joy-text-muted: #a8a8b0;
@@ -147,7 +150,7 @@ input[type='checkbox']:focus-visible {
   gap: 0.45rem;
   padding: 0.55rem 0.65rem;
   box-sizing: border-box;
-  background: var(--joy-bg-panel);
+  background: transparent;
   font-size: 0.78rem;
   container-type: inline-size;
 }
@@ -1000,11 +1003,11 @@ a.icon-button {
   flex: 1;
   min-height: 0;
   height: auto;
-  background: #0a0a0a;
+  background: var(--joy-bg-app);
 }
 article {
-  background: #18181a;
-  padding: 0.75rem;
+  background: transparent;
+  padding: 0;
 }
 /* Panel body copy — same small size as asset-library-status */
 .dv-react-part p,
@@ -5293,30 +5296,56 @@ label {
   justify-content: flex-end;
   margin-top: 0.1rem;
 }
-/* Dockview chrome follows the neutral-gray theme via its CSS variables.
+/* Dockview chrome — CapCut shell: black canvas, gray tiles, 2px gaps (DESIGN.md §3b).
    dockview.css loads after this file, so the selector needs #root to win. */
 #root .workspace {
   --dv-group-view-background-color: var(--joy-bg-panel);
-  --dv-tabs-and-actions-container-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: var(--joy-bg-chrome);
   --dv-tabs-and-actions-container-font-size: 0.78rem;
-  --dv-activegroup-visiblepanel-tab-background-color: transparent;
-  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--joy-bg-elevated);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--joy-bg-inset);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--joy-bg-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--joy-bg-inset);
   --dv-activegroup-visiblepanel-tab-color: var(--joy-text-muted);
   --dv-activegroup-hiddenpanel-tab-color: var(--joy-text-muted);
   --dv-inactivegroup-visiblepanel-tab-color: var(--joy-text-muted);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--joy-text-muted);
-  --dv-separator-border: #0a0a0a;
+  --dv-separator-border: var(--joy-gap);
   --dv-tab-divider-color: transparent;
+  --dv-border-radius: var(--joy-radius-panel);
   --dv-drag-over-background-color: rgb(233 185 73 / 18%);
   --dv-drag-over-border-color: var(--joy-accent);
   --dv-paneview-active-outline-color: var(--joy-accent);
+  padding: var(--joy-shell-gap);
+  box-sizing: border-box;
+  background: var(--joy-bg-app);
+}
+#root .workspace .dv-resize-container:has(> .dv-groupview) {
+  border-radius: var(--joy-radius-panel);
+}
+#root .workspace .dv-resize-container .dv-groupview {
+  border: var(--joy-shell-gap) solid var(--joy-bg-app);
+  border-radius: var(--joy-radius-panel);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+#root .workspace .dv-groupview .dv-tabs-and-actions-container {
+  border-radius: var(--joy-radius-panel) var(--joy-radius-panel) 0 0;
+}
+#root .workspace .dv-split-view-container.dv-horizontal
+  > .dv-view-container
+  > .dv-view:not(:first-child)::before {
+  width: var(--joy-shell-gap);
+}
+#root .workspace .dv-split-view-container.dv-vertical
+  > .dv-view-container
+  > .dv-view:not(:first-child)::before {
+  height: var(--joy-shell-gap);
 }
 #root .workspace .dv-tabs-and-actions-container,
 #root .workspace .dv-void-container {
-  background: transparent !important;
-  background-color: transparent !important;
+  background: var(--joy-bg-chrome) !important;
+  background-color: var(--joy-bg-chrome) !important;
 }
 #root .workspace .dv-content-container,
 #root .workspace .dv-react-part {
@@ -5352,7 +5381,7 @@ label {
   overflow: hidden;
 }
 
-/* Icon-only panel tabs — icons only, no fill / select chrome. */
+/* Icon-only panel tabs — gray tile rail (CapCut shell §3b). */
 .panel-tab {
   display: inline-flex;
   align-items: center;
@@ -5363,7 +5392,7 @@ label {
   min-height: 2.25rem;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--joy-radius-inner);
   background: transparent;
   background-color: transparent;
   opacity: 1;
@@ -5371,21 +5400,25 @@ label {
   color: var(--joy-text-muted);
 }
 #root .workspace .dv-tab {
-  background: transparent !important;
-  background-color: transparent !important;
+  margin: 2px;
   padding: 0;
+  border: 0;
+  border-radius: var(--joy-radius-inner);
+  background: var(--joy-bg-inset) !important;
+  background-color: var(--joy-bg-inset) !important;
   color: var(--joy-text-muted);
-}
-#root .workspace .dv-active-tab,
-#root .workspace .dv-inactive-tab {
-  background: transparent !important;
-  background-color: transparent !important;
 }
 #root .workspace .dv-inactive-tab {
   color: var(--joy-text-muted);
 }
 #root .workspace .dv-active-tab {
+  background: var(--joy-bg-elevated) !important;
+  background-color: var(--joy-bg-elevated) !important;
   color: var(--joy-accent);
+}
+#root .workspace .dv-tab:hover:not(.dv-active-tab) {
+  background: var(--joy-bg-hover) !important;
+  background-color: var(--joy-bg-hover) !important;
 }
 #root .workspace .dv-active-tab .panel-tab,
 #root .workspace .dv-inactive-tab .panel-tab,

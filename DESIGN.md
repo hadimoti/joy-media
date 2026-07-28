@@ -4,28 +4,31 @@ Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-
 
 ## 1. Color tokens
 
-Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. Gray ramp is intentionally dark (deeper than early editor drafts) so panels read as Adobe-class chrome, not washed mid-gray.
+Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. The shell follows a **CapCut-like tile layout** (§3b): pure-black canvas (`#000`) with medium-gray panel surfaces (`#252525`) separated by 2px black gaps and 8px outer corner radius.
 
 **The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
 
 | Token                  | Hex                      | Use                                                            |
 | ---------------------- | ------------------------ | -------------------------------------------------------------- |
-| `--joy-bg-app`         | `#0d0e10`                | Root/page background                                           |
-| `--joy-bg-panel`       | `#111216`                | Panel/article surfaces, dockview group + content background    |
-| `--joy-bg-chrome`      | `#16171b`                | Header, menubar, tab strips                                    |
-| `--joy-bg-elevated`    | `#17181d`                | Dropdowns, popovers, context menus                             |
-| `--joy-bg-raised`      | `#222226`                | Cards, list rows (history entries, workflow rows, asset cards) |
-| `--joy-bg-inset`       | `#101012`                | Sunken sections (register form, category rail)                 |
-| `--joy-bg-control`     | `#2a2a2e`                | Buttons, lanes, interactive fills                              |
-| `--joy-bg-hover`       | `#1d1f25`                | Hovered controls                                               |
-| `--joy-bg-active`      | `#24262d`                | Pressed / selected control fill                                |
-| `--joy-bg-input`       | `#0e0e10`                | Text inputs, selects                                           |
-| `--joy-bg-deep`        | `#080809`                | Canvases, code/expression fields, preview wells                |
+| `--joy-bg-app`         | `#000000`                | Root/page background, dock canvas, gap bleed                   |
+| `--joy-bg-panel`       | `#252525`                | Dockview group + content background, panel tile fill           |
+| `--joy-bg-chrome`      | `#2d2d2d`                | Header, menubar, dock tab strips                               |
+| `--joy-bg-elevated`    | `#333333`                | Dropdowns, popovers, active dock tab tile                      |
+| `--joy-bg-raised`      | `#383838`                | Cards, list rows (history entries, workflow rows, asset cards) |
+| `--joy-bg-inset`       | `#1e1e1e`                | Sunken sections, inactive dock tab tile                        |
+| `--joy-bg-control`     | `#3a3a3a`                | Buttons, lanes, interactive fills                              |
+| `--joy-bg-hover`       | `#323232`                | Hovered controls, hovered dock tab                             |
+| `--joy-bg-active`      | `#404040`                | Pressed / selected control fill                                |
+| `--joy-bg-input`       | `#1a1a1a`                | Text inputs, selects                                           |
+| `--joy-bg-deep`        | `#000000`                | Canvases, code/expression fields, preview wells                |
 | `--joy-border-subtle`  | `rgb(255 255 255 / 7%)`  | Hairlines inside a surface                                     |
-| `--joy-border`         | `#2a2a2e`                | Default borders/dividers                                       |
-| `--joy-border-strong`  | `#3c3c42`                | Control borders                                                |
+| `--joy-border`         | `#3a3a3a`                | Default borders/dividers                                       |
+| `--joy-border-strong`  | `#484848`                | Control borders                                                |
 | `--joy-border-hover`   | `#5a5a62`                | Hovered control borders, clip borders                          |
-| `--joy-gap`            | `#080809`                | Dockview separators, workspace gaps                            |
+| `--joy-gap`            | `#000000`                | Dockview separators, workspace gaps (same as canvas)            |
+| `--joy-shell-gap`      | `2px`                    | Outer dock padding + split separator width + groupview border    |
+| `--joy-radius-panel`   | `8px`                    | Outer dock group / panel tile corners                          |
+| `--joy-radius-inner`   | `6px`                    | Inner wells, dock icon-tab corners, import zones               |
 | `--joy-text`           | `#ececef`                | Primary text                                                   |
 | `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                   |
 | `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                  |
@@ -68,10 +71,25 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 - Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label + tab icon in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) — a panel that isn't registered does not exist.
 - **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` (and in App's `labels` / panel `title` for overflow menus). Never put the panel name as visible tab text. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
-- Dockview chrome is themed only via the `--dv-*` variables in the `#root .workspace` block of app.css. Never restyle `.dv-*` internals directly — tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes.
-- Panel root: `<article className="joy-panel-root <name>-panel">` built from the shell in §3a. The `<name>-panel` class carries only what is genuinely unique to that panel — never its header, tabs or scroll behaviour.
-- Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with 0.25rem radius (see `.history-entry`, `.workflow-row`).
+- Dockview chrome is themed via the `--dv-*` variables in the `#root .workspace` block of app.css, plus the **CapCut shell tile rules** in §3b. Tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes — do not restyle other `.dv-*` internals ad hoc.
+- Panel root: `<article className="joy-panel-root <name>-panel">` built from the shell in §3a. The `<name>-panel` class carries only what is genuinely unique to that panel — never its header, tabs or scroll behaviour. `.joy-panel-root` is **background-transparent**; the gray tile comes from the dock group (§3b).
+- Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with `--joy-radius-inner` (see `.history-entry`, `.workflow-row`).
 - **History panel** is Photoshop-style: one linear list of restore points (Document → edits). Click a row to jump; future states after the cursor are dimmed. Undo/redo buttons live in the header/menubar only — not inside the History panel.
+
+## 3b. CapCut shell (binding — dock workspace)
+
+Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab — **black canvas**, **gray panel tiles**, **2px black gaps**, **8px rounded outer corners**. Gaps are not borders painted on panels; they are the canvas showing between separated tiles.
+
+| Rule | Implementation |
+| ---- | -------------- |
+| Canvas | `#root .workspace` and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). |
+| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (8px), `overflow: hidden`. |
+| Gap rhythm | `--dv-separator-border` and split `::before` separators use `--joy-gap` at `--joy-shell-gap` width. Each groupview also carries a `2px solid var(--joy-bg-app)` border so adjacent tiles never touch. |
+| Tab rail | `.dv-tabs-and-actions-container` uses `--joy-bg-chrome`. Icon tabs (`.dv-tab`) are inset tiles: `--joy-bg-inset` at rest, `--joy-bg-elevated` when active, `--joy-radius-inner` corners. Active tab icon tint stays amber (§1a). |
+| Panel content | `.dv-content-container` / `.dv-react-part` fill `--joy-bg-panel`. `.joy-panel-root` does not repaint its own background — content sits inside the dock tile. Timeline, Dual Lens, and Monitor stay flush (`padding: 0`) inside their tile. |
+| Inner wells | Import zones, category rails, nested lists use `--joy-bg-inset` / `--joy-bg-elevated` with `--joy-radius-inner`. |
+
+**Forbidden:** full-bleed dock groups with no outer gap, transparent tab rails that float on the canvas, card-style `article` padding around panel roots, or reintroducing charcoal `#0d0e10` / `#111216` shell fills.
 
 ## 3a. The panel shell contract (binding — every panel, no exceptions)
 
@@ -99,7 +117,7 @@ Nothing may be inserted above the header or between the header and the tabs exce
 
 | Class                                | Rule                                                                                                                                                                                                                                                                               |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Padding lives here, once.                                                                                                                         |
+| `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Background transparent (§3b); padding lives here, once. |
 | `.joy-panel-header`                  | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. The center column never moves; the two outer columns balance each other so the title stays optically centered. Height is one control (`--control-sm`).                                                                              |
 | `.joy-panel-leading-actions`         | Optional icon-button group in column 1, `justify-self:start`. Use only when a panel has a meaningful start-edge action group; Assets uses Import, Filter/Sort, and Refresh here. It must not become a second toolbar.                                                              |
 | `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. 0.72rem, `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.                       |
