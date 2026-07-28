@@ -103,11 +103,12 @@ export function MotionStudioTimeline({
   // Initial fit once layout is ready (Dual Lens leaves autoFit off; we still fit on open).
   useEffect(() => {
     let cancelled = false;
+    let attempts = 0;
     const tryFit = () => {
       if (cancelled) return;
-      if (!applyFitToWidth()) {
-        requestAnimationFrame(tryFit);
-      }
+      attempts += 1;
+      if (applyFitToWidth() || attempts > 60) return;
+      requestAnimationFrame(tryFit);
     };
     requestAnimationFrame(tryFit);
     return () => {
