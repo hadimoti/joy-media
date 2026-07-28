@@ -4,7 +4,7 @@
  * geometry so zoom/fit and clip widths stay one source of truth.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   buildRulerTicks,
   fitPixelsPerSecond,
@@ -13,7 +13,7 @@ import {
 } from '@joy-media/timeline-engine';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { formatTime } from './format-time.js';
-import { isEditableTarget } from './keyboard-shortcuts.js';
+import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
 import {
   AiEffectIcon,
   AutoCaptionIcon,
@@ -311,35 +311,11 @@ export function TimelineCanvas({
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
-  const [selectedMarkerId, setSelectedMarkerId] = useState<string | undefined>(undefined);
+  const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
+    clipSelected: selectedClipIds.length > 0,
+    ...(onRemoveMarker === undefined ? {} : { onRemoveMarker }),
+  });
   const safeDurationUs = Math.max(1, durationUs);
-
-  useEffect(() => {
-    if (selectedClipIds.length > 0) setSelectedMarkerId(undefined);
-  }, [selectedClipIds]);
-
-  useEffect(() => {
-    if (
-      selectedMarkerId !== undefined &&
-      !markers.some((marker) => marker.id === selectedMarkerId)
-    ) {
-      setSelectedMarkerId(undefined);
-    }
-  }, [markers, selectedMarkerId]);
-
-  useEffect(() => {
-    if (selectedMarkerId === undefined || onRemoveMarker === undefined) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) return;
-      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      event.preventDefault();
-      event.stopPropagation();
-      onRemoveMarker(selectedMarkerId);
-      setSelectedMarkerId(undefined);
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [selectedMarkerId, onRemoveMarker]);
 
   const laneWidthPx = Math.max(
     64,
@@ -439,13 +415,12 @@ export function TimelineCanvas({
                         aria-label={`${marker.label}. Delete to remove.`}
                         onClick={() => {
                           onSelectClips([]);
-                          setSelectedMarkerId(marker.id);
+                          selectMarker(marker.id);
                           onSeek(marker.timeUs);
                         }}
                         onContextMenu={(event) => {
                           event.preventDefault();
-                          onRemoveMarker?.(marker.id);
-                          setSelectedMarkerId(undefined);
+                          removeMarker(marker.id);
                         }}
                       >
                         <TimelineMarkerIcon />
@@ -458,8 +433,7 @@ export function TimelineCanvas({
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          onRemoveMarker?.(marker.id);
-                          setSelectedMarkerId(undefined);
+                          removeMarker(marker.id);
                         }}
                       >
                         <CloseIcon />

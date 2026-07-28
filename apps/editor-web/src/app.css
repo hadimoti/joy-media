@@ -6249,9 +6249,7 @@ label {
   cursor: pointer;
   line-height: 0;
 }
-.timeline-marker:hover,
-.timeline-marker:focus-within,
-.timeline-marker.is-selected {
+.timeline-marker:hover {
   color: var(--joy-text);
 }
 .timeline-marker.is-selected {
@@ -6280,8 +6278,6 @@ label {
   width: 0.65rem;
   height: 0.65rem;
 }
-.timeline-marker:hover .timeline-marker-remove,
-.timeline-marker:focus-within .timeline-marker-remove,
 .timeline-marker.is-selected .timeline-marker-remove {
   opacity: 1;
   pointer-events: auto;
