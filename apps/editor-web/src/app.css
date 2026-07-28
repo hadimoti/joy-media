@@ -5318,6 +5318,9 @@ label {
   height: auto;
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--joy-accent) 10%, transparent));
 }
+.joy-code-welcome .joy-code-logo.is-horizontal {
+  margin-bottom: 25px;
+}
 @keyframes joy-code-thinking-wiggle {
   0%,
   100% {
