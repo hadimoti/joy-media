@@ -123,6 +123,7 @@ import {
   type AgentPanelCommandType,
   type KiloCodeAttachedAsset,
 } from './AgentPanel.js';
+import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
@@ -2364,11 +2365,19 @@ function EditorWorkspace({
             ? {}
             : { command: context.agentPanelCommand })}
           attachedAssets={kiloCodeAttachedAssets}
-          onDetachAsset={(assetId) =>
+          onDetachAsset={(assetId) => {
+            const entry = kiloCodeAttachedAssets.find((item) => item.assetId === assetId);
             setKiloCodeAttachedAssets((current) =>
-              current.filter((entry) => entry.assetId !== assetId),
-            )
-          }
+              current.filter((item) => item.assetId !== assetId),
+            );
+            if (entry?.source === 'joycode-folder') {
+              void openJoyCodeOpfsAssetCache()
+                .then((cache) => cache.remove(assetId))
+                .catch(() => {
+                  /* OPFS cleanup is best-effort */
+                });
+            }
+          }}
           onAttachAsset={(asset) =>
             setKiloCodeAttachedAssets((current) => {
               if (current.some((entry) => entry.assetId === asset.assetId)) return current;

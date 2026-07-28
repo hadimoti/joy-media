@@ -5437,6 +5437,7 @@ label {
   margin: 0;
   color: var(--joy-text-muted);
   font-size: 0.7rem;
+  font-weight: 700;
   line-height: 1.5;
 }
 .joy-code-welcome strong {
@@ -5606,11 +5607,20 @@ label {
   color: var(--joy-text-faint);
   cursor: pointer;
 }
+.joy-code-attach-error {
+  margin: 0;
+  padding: 0 0.15rem;
+  color: var(--joy-danger);
+  font-size: 0.62rem;
+}
 .joy-code-input {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: 0.3rem;
+}
+.joy-code-attach {
+  margin-bottom: 0.1rem;
 }
 .joy-code-input textarea {
   width: 100%;

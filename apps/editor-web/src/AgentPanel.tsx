@@ -33,6 +33,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
+import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import {
   addJoyCodeMessage,
   createJoyCodeThread,
@@ -79,8 +80,10 @@ interface JoyCodeState {
 
 export interface KiloCodeAttachedAsset {
   readonly assetId: string;
-  readonly kind: 'image' | 'video';
+  readonly kind: 'image' | 'video' | 'markdown';
   readonly displayName: string;
+  /** Present when the file lives under OPFS joy-media-assets/joycode/. */
+  readonly source?: 'joycode-folder';
 }
 
 export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop';
@@ -190,11 +193,14 @@ export function AgentPanel({
   const handledCommandRef = useRef<number | undefined>(undefined);
   const thinkingTimerRef = useRef<number | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState('composer');
   const [draft, setDraft] = useState('');
+  const [attachError, setAttachError] = useState<string | undefined>(undefined);
+  const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
 
   const approvalEngine = useMemo(
@@ -533,6 +539,29 @@ export function AgentPanel({
   }, [pending, project]);
   const isThinking = thinkingThreadId === activeThread?.id;
 
+  const uploadJoyCodeFiles = async (fileList: FileList | null) => {
+    if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
+    setAttaching(true);
+    setAttachError(undefined);
+    try {
+      const cache = await openJoyCodeOpfsAssetCache();
+      for (const file of Array.from(fileList)) {
+        const meta = await cache.put(file);
+        onAttachAsset({
+          assetId: meta.assetId,
+          kind: meta.kind,
+          displayName: meta.displayName,
+          source: 'joycode-folder',
+        });
+      }
+    } catch (error) {
+      setAttachError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAttaching(false);
+      if (attachInputRef.current !== null) attachInputRef.current.value = '';
+    }
+  };
+
   return (
     <PanelShell
       title="Joy Code"
@@ -802,7 +831,34 @@ export function AgentPanel({
                   ))}
                 </ul>
               )}
+              {attachError !== undefined && (
+                <p className="joy-code-attach-error" role="alert">
+                  {attachError}
+                </p>
+              )}
+              <input
+                ref={attachInputRef}
+                type="file"
+                className="sr-only"
+                accept="image/*,.md,text/markdown,text/plain"
+                multiple
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  void uploadJoyCodeFiles(event.currentTarget.files);
+                }}
+              />
               <div className="joy-code-input">
+                <button
+                  type="button"
+                  className="icon-button joy-code-attach"
+                  aria-label="Attach image or Markdown"
+                  title="Attach image or Markdown"
+                  disabled={attaching || onAttachAsset === undefined}
+                  onClick={() => attachInputRef.current?.click()}
+                >
+                  <PlusIcon />
+                </button>
                 <textarea
                   rows={3}
                   value={draft}
