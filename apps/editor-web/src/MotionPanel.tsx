@@ -1017,7 +1017,6 @@ export function MotionPanel({
       activeTab={subtab}
       onTabChange={(id) => setSubtab(id as LibrarySubtab)}
       inactive={inactive}
-      {...(inactive ? { note: 'برای ویرایش موشن، یک کلیپ تصویری را انتخاب کنید.' } : {})}
       actions={
         <>
           <button
@@ -1056,11 +1055,14 @@ export function MotionPanel({
         )}
 
         {subtab === 'presets' && (
-          <>
-            <p className="motion-object-id" title={target.id}>
-              {inactive ? '(no clip selected)' : target.id}
-            </p>
-            <div className="motion-controls">
+          <div className="motion-presets">
+            <header className="motion-presets-target">
+              <span className="motion-presets-target-label">Target</span>
+              <p className="motion-object-id" title={target.id}>
+                {inactive ? 'Select a clip' : target.id}
+              </p>
+            </header>
+            <div className="motion-controls motion-presets-toolbar">
               <label className="motion-field">
                 Parent
                 <select
@@ -1077,7 +1079,7 @@ export function MotionPanel({
                   ))}
                 </select>
               </label>
-              <label className="motion-field">
+              <label className="motion-field motion-field-grow">
                 Preset
                 <select
                   value={presetId}
@@ -1092,15 +1094,14 @@ export function MotionPanel({
                 </select>
               </label>
               <div className="field-action">
-                <span className="field-action-label" aria-hidden>
-                  &nbsp;
-                </span>
+                <span className="field-action-label">Apply</span>
                 <div className="field-action-row">
                   <button
                     type="button"
-                    className="icon-button"
+                    className="icon-button motion-preset-apply"
                     data-guide="Apply preset"
                     aria-label="Apply motion preset"
+                    disabled={inactive}
                     onClick={applyPreset}
                   >
                     <CheckIcon />
@@ -1108,72 +1109,76 @@ export function MotionPanel({
                 </div>
               </div>
             </div>
-            {channels.length === 0 ? (
-              <p className="motion-empty" lang="fa">
-                هنوز کی‌فریمی وجود ندارد؛ آن را در Inspector اضافه کنید یا یکی از پریست‌های بالا را
-                اعمال کنید.
-              </p>
-            ) : (
-              <div className="motion-lanes">
-                {channels.map((channel) => {
-                  const curve = target.animations![channel]!;
-                  return (
-                    <div key={channel} className="motion-lane">
-                      <button
-                        type="button"
-                        className={
-                          activeGraph === channel ? 'motion-lane-label active' : 'motion-lane-label'
-                        }
-                        onClick={() => setGraphChannel(channel)}
-                        title="Show this channel in the graph"
-                      >
-                        {channel}
-                      </button>
-                      <svg
-                        className="motion-lane-track"
-                        viewBox={`0 0 ${LANE_WIDTH} 16`}
-                        width={LANE_WIDTH}
-                        height={16}
-                        role="img"
-                        aria-label={`${channel} keyframes`}
-                      >
-                        <line
-                          x1={0}
-                          y1={8}
-                          x2={LANE_WIDTH}
-                          y2={8}
-                          stroke={JOY_COLORS.border}
-                          strokeWidth={1}
-                        />
-                        <line
-                          x1={timeToX(playheadUs)}
-                          y1={0}
-                          x2={timeToX(playheadUs)}
-                          y2={16}
-                          stroke={JOY_COLORS.accent}
-                          strokeWidth={1}
-                        />
-                        {curve.keyframes.map((kf) => (
-                          <rect
-                            key={kf.timeUs}
-                            x={timeToX(kf.timeUs) - 4}
-                            y={4}
-                            width={8}
-                            height={8}
-                            transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
-                            fill={JOY_COLORS.textMuted}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => onSeek(kf.timeUs)}
-                          >
-                            <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
-                          </rect>
-                        ))}
-                      </svg>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <section className="motion-presets-channels" aria-label="Animation channels">
+              {channels.length === 0 ? (
+                <p className="motion-empty" lang="fa">
+                  هنوز کی‌فریمی وجود ندارد؛ آن را در Inspector اضافه کنید یا یکی از پریست‌های بالا را
+                  اعمال کنید.
+                </p>
+              ) : (
+                <div className="motion-lanes">
+                  {channels.map((channel) => {
+                    const curve = target.animations![channel]!;
+                    return (
+                      <div key={channel} className="motion-lane">
+                        <button
+                          type="button"
+                          className={
+                            activeGraph === channel
+                              ? 'motion-lane-label active'
+                              : 'motion-lane-label'
+                          }
+                          onClick={() => setGraphChannel(channel)}
+                          title="Show this channel in the graph"
+                        >
+                          {channel}
+                        </button>
+                        <svg
+                          className="motion-lane-track"
+                          viewBox={`0 0 ${LANE_WIDTH} 16`}
+                          width={LANE_WIDTH}
+                          height={16}
+                          role="img"
+                          aria-label={`${channel} keyframes`}
+                        >
+                          <line
+                            x1={0}
+                            y1={8}
+                            x2={LANE_WIDTH}
+                            y2={8}
+                            stroke={JOY_COLORS.border}
+                            strokeWidth={1}
+                          />
+                          <line
+                            x1={timeToX(playheadUs)}
+                            y1={0}
+                            x2={timeToX(playheadUs)}
+                            y2={16}
+                            stroke={JOY_COLORS.accent}
+                            strokeWidth={1}
+                          />
+                          {curve.keyframes.map((kf) => (
+                            <rect
+                              key={kf.timeUs}
+                              x={timeToX(kf.timeUs) - 4}
+                              y={4}
+                              width={8}
+                              height={8}
+                              transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
+                              fill={JOY_COLORS.textMuted}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => onSeek(kf.timeUs)}
+                            >
+                              <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
+                            </rect>
+                          ))}
+                        </svg>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
             {activeGraph !== undefined && (
               <GraphEditor
                 object={target}
@@ -1184,7 +1189,7 @@ export function MotionPanel({
                 onDispatch={onDispatch}
               />
             )}
-          </>
+          </div>
         )}
 
         {subtab === 'spatial' && (
