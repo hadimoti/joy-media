@@ -217,7 +217,9 @@ a third needs an owner decision recorded here.
 - Brand lockup on the left (no Projects icon). Center edit cluster: Undo · Redo · Cut · Split · Duplicate · command palette (icon-only + shortcuts in tooltips).
 - Right deliver cluster: export-preset menu · primary **Export** text button (accent) · processes · account.
 - **Menubar** row under the header ([`AppMenuBar.tsx`](apps/editor-web/src/AppMenuBar.tsx) + [`app-menu.ts`](apps/editor-web/src/app-menu.ts)): **File · Edit · Clip · View · Window** — plain-text items with shortcuts. File → Projects Library… returns to the library; View lists every Dockview panel by name.
-- Groups use `.header-group` separators. Accent is reserved for Export / selection / playhead — not every border.
+- Groups use `.header-group` spacing only — no separator hairlines. Accent is reserved for Export / selection / playhead — not every border.
+- `.app-header` and `.app-menubar` have no bottom border; they sit flush on the black canvas.
+- Primary Export (`.header-export-btn`) is an accent fill with `--joy-radius-inner` corners and no outline border.
 
 ## 3. Layout & panels (seed)
 
