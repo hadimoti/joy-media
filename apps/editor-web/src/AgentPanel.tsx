@@ -836,19 +836,6 @@ export function AgentPanel({
                   {pending === undefined ? <PlayIcon /> : <CloseIcon />}
                 </button>
               </div>
-              <footer className="joy-code-compose-footer">
-                <span>
-                  <i className="joy-code-online-dot" />
-                  KiloCode
-                </span>
-                <span>{settings.executionMode.replaceAll('-', ' ')}</span>
-                <span>{settings.reasoningModel}</span>
-                <span className="joy-code-privacy">
-                  {settings.privacyMode === 'local-only'
-                    ? 'Local only'
-                    : 'Remote actions ask first'}
-                </span>
-              </footer>
             </div>
           </section>
         )}

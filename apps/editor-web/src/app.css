@@ -5649,40 +5649,7 @@ label {
   color: var(--joy-text-disabled);
   cursor: default;
 }
-.joy-code-compose-footer {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-  color: var(--joy-text-faint);
-  font-size: 0.57rem;
-  text-transform: capitalize;
-}
-.joy-code-compose-footer > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  white-space: nowrap;
-}
-.joy-code-compose-footer > span + span {
-  padding-left: 0.45rem;
-  border-left: 1px solid var(--joy-border-subtle);
-}
-.joy-code-compose-footer .joy-code-privacy {
-  margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.joy-code-online-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: var(--joy-ok);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-ok) 12%, transparent);
-}
 @container (max-width: 300px) {
-  .joy-code-compose-footer > span:nth-child(3),
-  .joy-code-compose-footer .joy-code-privacy,
   .joy-code-thread time {
     display: none;
   }
