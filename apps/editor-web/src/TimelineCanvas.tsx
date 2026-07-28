@@ -93,6 +93,8 @@ export interface TimelineCanvasProps {
   /** Extra class on the scroll root (e.g. dual-time shell keeps section chrome). */
   readonly className?: string;
   readonly gutterLabel?: string;
+  /** Optional PNG mask URL shown before the gutter label (e.g. Layers stack). */
+  readonly gutterIconSrc?: string;
   readonly markers?: readonly TimelineCanvasMarker[];
   readonly onRemoveMarker?: (id: string) => void;
 }
@@ -306,6 +308,7 @@ export function TimelineCanvas({
   onSelectClips,
   className,
   gutterLabel,
+  gutterIconSrc,
   markers = [],
   onRemoveMarker,
 }: TimelineCanvasProps) {
@@ -362,7 +365,21 @@ export function TimelineCanvas({
       <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
         <div className="timeline-scrub-gutter">
           <output className="timeline-timecode" aria-live="polite">
-            {gutterLabel ?? formatTime(playheadUs)}
+            {gutterIconSrc !== undefined ? (
+              <span className="timeline-timecode-label">
+                <span
+                  className="png-mask-icon timeline-timecode-icon"
+                  style={{
+                    WebkitMaskImage: `url(${gutterIconSrc})`,
+                    maskImage: `url(${gutterIconSrc})`,
+                  }}
+                  aria-hidden="true"
+                />
+                <span>{gutterLabel ?? formatTime(playheadUs)}</span>
+              </span>
+            ) : (
+              (gutterLabel ?? formatTime(playheadUs))
+            )}
           </output>
         </div>
         <TimelineRuler

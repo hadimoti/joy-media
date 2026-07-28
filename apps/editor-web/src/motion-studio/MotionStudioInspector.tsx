@@ -8,6 +8,8 @@ import type {
   SceneBackground,
 } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
+import { UI_ICONS } from '../ui-icons.js';
+import { MsTitle } from './MsTitle.js';
 
 /**
  * Curated content-creation fonts (fontiran pack), registered as @font-face
@@ -148,7 +150,9 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
     return (
       <aside className="ms-panel ms-right" aria-label="Inspector">
         <div className="ms-panel-header">
-          <h3 className="ms-panel-title">Scene</h3>
+          <MsTitle iconSrc={UI_ICONS.crop} className="ms-panel-title">
+            Scene
+          </MsTitle>
         </div>
         <div className="ms-panel-body">
           <div className="ms-inspector-section">
@@ -172,7 +176,9 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
           </div>
 
           <div className="ms-inspector-section">
-            <h4 className="ms-inspector-section-title">Background</h4>
+            <MsTitle as="h4" iconSrc={UI_ICONS.colors} className="ms-inspector-section-title">
+              Background
+            </MsTitle>
             {selectInput(
               'Kind',
               bg.kind,
@@ -210,7 +216,9 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
           </div>
 
           <div className="ms-inspector-section">
-            <h4 className="ms-inspector-section-title">Layers</h4>
+            <MsTitle as="h4" iconSrc={UI_ICONS.layers} className="ms-inspector-section-title">
+              Layers
+            </MsTitle>
             <p lang="fa" style={{ fontSize: '11px', color: 'var(--joy-text-muted)', margin: 0 }}>
               {document.layers.length} لایه
             </p>

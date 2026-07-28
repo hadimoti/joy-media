@@ -21,6 +21,7 @@ import {
   motionSceneDurationUs,
   motionSceneToTimelineTracks,
 } from './motionSceneToTimelineTracks.js';
+import { UI_ICONS } from '../ui-icons.js';
 
 export interface MotionStudioTimelineProps {
   readonly document: MotionSceneDocument;
@@ -219,6 +220,7 @@ export function MotionStudioTimeline({
         onSelectClips={(clipIds) => onSelectLayer(clipIds[0] ?? null)}
         markers={markers}
         gutterLabel="Layers"
+        gutterIconSrc={UI_ICONS.layers}
       />
     </section>
   );

@@ -10,6 +10,8 @@ import {
   ChevronUpIcon,
   ChevronDownIcon,
 } from '../icons.js';
+import { UI_ICONS } from '../ui-icons.js';
+import { MsTitle } from './MsTitle.js';
 
 interface LayersPanelProps {
   readonly document: MotionSceneDocument;
@@ -72,7 +74,9 @@ export function MotionStudioLayersPanel({
   return (
     <aside className="ms-panel ms-left" aria-label="Layers">
       <div className="ms-panel-header">
-        <h3 className="ms-panel-title">Layers</h3>
+        <MsTitle iconSrc={UI_ICONS.layers} className="ms-panel-title">
+          Layers
+        </MsTitle>
         <div className="ms-panel-actions">
           <button
             type="button"

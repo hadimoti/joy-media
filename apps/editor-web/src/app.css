@@ -1715,6 +1715,17 @@ label {
   direction: ltr;
   line-height: 1.2;
 }
+.timeline-timecode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.timeline-timecode-icon {
+  width: 0.78rem;
+  height: 0.78rem;
+}
 .timeline-scrub-row {
   display: flex;
   flex: none;
@@ -3625,6 +3636,34 @@ label {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--joy-text-faint);
+}
+.ms-title-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ms-title-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+.ms-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-inspector-section-title.ms-title-with-icon {
+  margin: 0 0 var(--space-2);
 }
 
 .ms-panel-body {
