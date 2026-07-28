@@ -7664,12 +7664,20 @@ label {
 }
 
 .timeline-provenance-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   flex: none;
   color: var(--color-joy);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+
+.timeline-provenance-label .png-mask-icon {
+  color: inherit;
+  flex-shrink: 0;
 }
 
 .timeline-provenance-chain {
@@ -7697,6 +7705,9 @@ label {
 }
 
 .timeline-provenance-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   max-width: 160px;
   padding: 2px 7px;
   border: 1px solid var(--joy-border);
@@ -7708,6 +7719,11 @@ label {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.timeline-provenance-step .png-mask-icon {
+  flex-shrink: 0;
+  color: inherit;
 }
 
 .timeline-provenance-step:hover {

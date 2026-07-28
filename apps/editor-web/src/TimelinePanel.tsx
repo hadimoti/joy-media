@@ -39,6 +39,8 @@ import {
   TimelineMarkerIcon,
   TimelineAudioTrackIcon,
   CloseIcon,
+  FlowProvenanceIcon,
+  ProgramOutputIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
   SelectIcon,
@@ -1134,7 +1136,10 @@ export function TimelinePanel({
 
       {provenance !== undefined && provenance.length > 0 && (
         <div className="timeline-provenance" aria-live="polite">
-          <span className="timeline-provenance-label">Flow</span>
+          <span className="timeline-provenance-label">
+            <FlowProvenanceIcon />
+            Flow
+          </span>
           <ol className="timeline-provenance-chain">
             {provenance.map((step) => (
               <li key={step.nodeId}>
@@ -1145,6 +1150,7 @@ export function TimelinePanel({
                   title={`Reveal ${step.label} in Flow`}
                   onClick={() => onRevealNode?.(step.nodeId)}
                 >
+                  {step.kind === 'output' && <ProgramOutputIcon />}
                   {step.label}
                 </button>
               </li>

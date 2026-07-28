@@ -49,6 +49,8 @@ export const UI_ICONS = {
   timelineVideo: iconUrl('ui/timeline-video_24x24.png'),
   timelineAudio: iconUrl('ui/timeline-audio_24x24.png'),
   timelineScript: iconUrl('ui/timeline-script_24x24.png'),
+  flow: iconUrl('ui/flow_24x24.png'),
+  programOutput: iconUrl('ui/output_24x24.png'),
 } as const;
 
 export type UiIconId = keyof typeof UI_ICONS;

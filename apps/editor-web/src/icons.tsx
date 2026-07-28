@@ -474,6 +474,14 @@ export function TimelineMarkerIcon() {
   return <PngMaskIcon src={UI_ICONS.markerTimeline} size={16} />;
 }
 
+export function FlowProvenanceIcon() {
+  return <PngMaskIcon src={UI_ICONS.flow} size={12} />;
+}
+
+export function ProgramOutputIcon() {
+  return <PngMaskIcon src={UI_ICONS.programOutput} size={12} />;
+}
+
 export function TimelineVideoTrackIcon() {
   return <PngMaskIcon src={UI_ICONS.timelineVideo} size={14} />;
 }
