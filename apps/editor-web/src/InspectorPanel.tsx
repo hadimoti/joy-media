@@ -17,7 +17,8 @@ import { applyAudioCommand } from '@joy-media/commands';
 import type { NumericTransformProperty, VisualObjectTransaction } from '@joy-media/property-system';
 import { VISUAL_INSPECTOR } from '@joy-media/property-system';
 import {
-  hasKeyframeAt,
+  hasKeyframeAtCurve,
+  hasKeyframeAtMotion,
   removeKeyframe,
   resolveObjectTransformWithExpressions,
   sampleCurve,
@@ -191,7 +192,7 @@ export function InspectorPanel({
 
   const toggleKeyframe = (property: AnimatablePropertyV1, value: number) => {
     const curve = target.animations?.[property];
-    if (curve !== undefined && hasKeyframeAt(curve, timeUs)) {
+    if (curve !== undefined && hasKeyframeAtCurve(curve, timeUs)) {
       replaceChannel(property, removeKeyframe(curve, timeUs));
       return;
     }
@@ -287,7 +288,7 @@ export function InspectorPanel({
                 const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
                 const curve = target.animations?.[key];
                 const animated = curve !== undefined;
-                const keyed = animated && hasKeyframeAt(curve, timeUs);
+                const keyed = animated && hasKeyframeAtCurve(curve, timeUs);
                 const expressionSource = target.expressions?.[key];
                 const hasExpression = expressionSource !== undefined;
                 const channelDiagnostic = diagnostics.find((d) => d.property === key);

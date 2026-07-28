@@ -315,7 +315,7 @@ export function TimelineCanvas({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
-    clipSelected: selectedClipIds.length > 0,
+    clipSelected: selectedClipIds.size > 0,
     ...(onRemoveMarker === undefined ? {} : { onRemoveMarker }),
   });
   const safeDurationUs = Math.max(1, durationUs);

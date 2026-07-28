@@ -14,7 +14,7 @@ import type {
   MotionAnimation,
   MotionEasing,
 } from '@joy-media/motion-core';
-import { setKeyframeAt, hasKeyframeAt, type LayerEvaluation } from '@joy-media/motion-core';
+import { setKeyframeAt, hasKeyframeAtMotion, type LayerEvaluation } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 import { UI_ICONS } from '../ui-icons.js';
 import { MsTitle } from './MsTitle.js';

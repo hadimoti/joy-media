@@ -39,6 +39,7 @@ export {
   sampleCurve,
   scaleCurveValues,
   setKeyframe,
+  hasKeyframeAt as hasKeyframeAtCurve,
 } from './curve.js';
 
 export { sampleSpatialPath } from './spatial.js';
@@ -157,7 +158,7 @@ export {
   resolvedLayerTransform,
   setKeyframeAt,
   removeKeyframeAt,
-  hasKeyframeAt,
+  hasKeyframeAt as hasKeyframeAtMotion,
   resolveLayerWorld,
   type LayerWorldEvaluation,
 } from './evaluator.js';
