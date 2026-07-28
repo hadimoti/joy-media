@@ -3593,7 +3593,7 @@ label {
   overflow: hidden;
   min-height: 0;
   border-radius: var(--joy-radius-panel);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.12);
   box-sizing: border-box;
 }
 
