@@ -2883,7 +2883,7 @@ function EditorWorkspace({
                 { keys: '← / →', action: 'Step back / forward 1s' },
                 { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
                 { keys: 'Home / End', action: 'Go to start / end' },
-                { keys: 'Delete / Backspace', action: 'Delete selected' },
+                { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
                 { keys: 'S', action: 'Split clip at playhead' },
                 { keys: '?', action: 'Toggle this panel' },
               ].map(({ keys, action }) => (

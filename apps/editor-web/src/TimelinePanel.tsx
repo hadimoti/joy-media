@@ -38,6 +38,7 @@ import {
   MarkerIcon,
   TimelineMarkerIcon,
   TimelineAudioTrackIcon,
+  CloseIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
   SelectIcon,
@@ -56,6 +57,7 @@ import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName, type TimelineTrackKind } from './timeline-track-kind.js';
 import { formatTime } from './format-time.js';
+import { isEditableTarget } from './keyboard-shortcuts.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
 import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
@@ -456,12 +458,40 @@ export function TimelinePanel({
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
   // §6.2: collapsed by default, so standard editing is visually unchanged.
   const [dataLanesOpen, setDataLanesOpen] = useState(false);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | undefined>(undefined);
   const [menu, setMenu] = useState<
     | { x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string }
     | undefined
   >(undefined);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (selectedIds.length > 0) setSelectedMarkerId(undefined);
+  }, [selectedIds]);
+
+  useEffect(() => {
+    if (
+      selectedMarkerId !== undefined &&
+      !markers.some((marker) => marker.id === selectedMarkerId)
+    ) {
+      setSelectedMarkerId(undefined);
+    }
+  }, [markers, selectedMarkerId]);
+
+  useEffect(() => {
+    if (selectedMarkerId === undefined || onRemoveMarker === undefined) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onRemoveMarker(selectedMarkerId);
+      setSelectedMarkerId(undefined);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [selectedMarkerId, onRemoveMarker]);
 
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('timeline root composition is unavailable');
@@ -1019,10 +1049,17 @@ export function TimelinePanel({
           </button>
           <button
             className="icon-button"
-            disabled={!canDelete}
-            aria-label="Ripple delete"
-            title="Ripple delete (Del)"
+            disabled={!canDelete && selectedMarkerId === undefined}
+            aria-label={selectedMarkerId !== undefined ? 'Remove marker' : 'Ripple delete'}
+            title={
+              selectedMarkerId !== undefined ? 'Remove marker (Del)' : 'Ripple delete (Del)'
+            }
             onClick={() => {
+              if (selectedMarkerId !== undefined) {
+                onRemoveMarker?.(selectedMarkerId);
+                setSelectedMarkerId(undefined);
+                return;
+              }
               if (selected === undefined) return;
               dispatchDelete(selected.track.id, selected.clip.id);
             }}
@@ -1470,24 +1507,54 @@ export function TimelinePanel({
                   }}
                 >
                   {index === 0 &&
-                    markers.map((marker) => (
-                      <button
-                        key={marker.id}
-                        type="button"
-                        className="timeline-marker"
-                        style={{
-                          left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
-                        }}
-                        title={marker.label}
-                        onClick={() => onSeek(marker.timeUs)}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          onRemoveMarker?.(marker.id);
-                        }}
-                      >
-                        <TimelineMarkerIcon />
-                      </button>
-                    ))}
+                    markers.map((marker) => {
+                      const selected = selectedMarkerId === marker.id;
+                      return (
+                        <div
+                          key={marker.id}
+                          className={
+                            selected ? 'timeline-marker is-selected' : 'timeline-marker'
+                          }
+                          style={{
+                            left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="timeline-marker-hit"
+                            aria-pressed={selected}
+                            title={`${marker.label} — Delete to remove`}
+                            aria-label={`${marker.label}. Delete to remove.`}
+                            onClick={() => {
+                              onClearSelection();
+                              setSelectedMarkerId(marker.id);
+                              onSeek(marker.timeUs);
+                            }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              onRemoveMarker?.(marker.id);
+                              setSelectedMarkerId(undefined);
+                            }}
+                          >
+                            <TimelineMarkerIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="timeline-marker-remove"
+                            aria-label={`Remove ${marker.label}`}
+                            title="Remove marker"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onRemoveMarker?.(marker.id);
+                              setSelectedMarkerId(undefined);
+                            }}
+                          >
+                            <CloseIcon />
+                          </button>
+                        </div>
+                      );
+                    })}
                   {source.clips.map((clip) => (
                     <TimelineClip
                       key={clip.id}

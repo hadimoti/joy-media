@@ -6234,16 +6234,62 @@ label {
   height: 1rem;
   place-items: center;
   transform: translateX(-50%);
+  color: var(--joy-text-muted);
+  line-height: 0;
+}
+.timeline-marker-hit {
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--joy-text-muted);
+  color: inherit;
   cursor: pointer;
   line-height: 0;
 }
 .timeline-marker:hover,
-.timeline-marker:focus-visible {
+.timeline-marker:focus-within,
+.timeline-marker.is-selected {
   color: var(--joy-text);
+}
+.timeline-marker.is-selected {
+  color: var(--joy-accent);
+}
+.timeline-marker-remove {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.55rem;
+  z-index: 1;
+  display: grid;
+  width: 0.85rem;
+  height: 0.85rem;
+  place-items: center;
+  border: 1px solid var(--joy-border);
+  border-radius: 999px;
+  padding: 0;
+  background: var(--joy-bg-elevated);
+  color: var(--joy-text);
+  cursor: pointer;
+  line-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.timeline-marker-remove svg {
+  width: 0.65rem;
+  height: 0.65rem;
+}
+.timeline-marker:hover .timeline-marker-remove,
+.timeline-marker:focus-within .timeline-marker-remove,
+.timeline-marker.is-selected .timeline-marker-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+.timeline-marker-remove:hover,
+.timeline-marker-remove:focus-visible {
+  color: var(--joy-accent);
+  border-color: var(--joy-accent-dim);
 }
 .graph-editor-toolbar {
   display: flex;

@@ -4,7 +4,7 @@
  * geometry so zoom/fit and clip widths stay one source of truth.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
   fitPixelsPerSecond,
@@ -13,9 +13,11 @@ import {
 } from '@joy-media/timeline-engine';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { formatTime } from './format-time.js';
+import { isEditableTarget } from './keyboard-shortcuts.js';
 import {
   AiEffectIcon,
   AutoCaptionIcon,
+  CloseIcon,
   CommandIcon,
   ImageIcon,
   ListIcon,
@@ -309,7 +311,35 @@ export function TimelineCanvas({
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | undefined>(undefined);
   const safeDurationUs = Math.max(1, durationUs);
+
+  useEffect(() => {
+    if (selectedClipIds.length > 0) setSelectedMarkerId(undefined);
+  }, [selectedClipIds]);
+
+  useEffect(() => {
+    if (
+      selectedMarkerId !== undefined &&
+      !markers.some((marker) => marker.id === selectedMarkerId)
+    ) {
+      setSelectedMarkerId(undefined);
+    }
+  }, [markers, selectedMarkerId]);
+
+  useEffect(() => {
+    if (selectedMarkerId === undefined || onRemoveMarker === undefined) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onRemoveMarker(selectedMarkerId);
+      setSelectedMarkerId(undefined);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [selectedMarkerId, onRemoveMarker]);
 
   const laneWidthPx = Math.max(
     64,
@@ -391,24 +421,52 @@ export function TimelineCanvas({
             </div>
             <div className="timeline-lane" style={{ minWidth: laneWidthPx }}>
               {index === 0 &&
-                markers.map((marker) => (
-                  <button
-                    key={marker.id}
-                    type="button"
-                    className="timeline-marker"
-                    style={{
-                      left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
-                    }}
-                    title={marker.label}
-                    onClick={() => onSeek(marker.timeUs)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      onRemoveMarker?.(marker.id);
-                    }}
-                  >
-                    <TimelineMarkerIcon />
-                  </button>
-                ))}
+                markers.map((marker) => {
+                  const selected = selectedMarkerId === marker.id;
+                  return (
+                    <div
+                      key={marker.id}
+                      className={selected ? 'timeline-marker is-selected' : 'timeline-marker'}
+                      style={{
+                        left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="timeline-marker-hit"
+                        aria-pressed={selected}
+                        title={`${marker.label} — Delete to remove`}
+                        aria-label={`${marker.label}. Delete to remove.`}
+                        onClick={() => {
+                          onSelectClips([]);
+                          setSelectedMarkerId(marker.id);
+                          onSeek(marker.timeUs);
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          onRemoveMarker?.(marker.id);
+                          setSelectedMarkerId(undefined);
+                        }}
+                      >
+                        <TimelineMarkerIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="timeline-marker-remove"
+                        aria-label={`Remove ${marker.label}`}
+                        title="Remove marker"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onRemoveMarker?.(marker.id);
+                          setSelectedMarkerId(undefined);
+                        }}
+                      >
+                        <CloseIcon />
+                      </button>
+                    </div>
+                  );
+                })}
               {track.items.length === 0 ? (
                 <span className="timeline-lane-empty" lang="fa">
                   داده‌ای وجود ندارد
