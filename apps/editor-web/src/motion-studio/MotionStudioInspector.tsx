@@ -9,6 +9,33 @@ import type {
 } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 
+/**
+ * Curated content-creation fonts (fontiran pack), registered as @font-face
+ * in public/assets/fonts/content-fonts.css. 'system-ui' is the fallback
+ * used before the user picks anything.
+ */
+const CONTENT_FONT_FAMILIES: readonly string[] = [
+  'system-ui',
+  'YekanBakh',
+  'Vazin',
+  'Tajrid',
+  'Pulad',
+  'Damoon Pro',
+  'Bon',
+  'Bonyade Koodak',
+  'Shoor Pro',
+  'Aviny',
+  'Katibeh',
+  'Tahrir',
+  '898 Stencil',
+  'Radio',
+  'Falsafeh',
+  'Edameh Pro',
+  'Paradox',
+  'Gramophone',
+  'Emkan Inline',
+];
+
 interface InspectorProps {
   readonly layer: MotionLayer | undefined;
   readonly document: MotionSceneDocument;
@@ -239,6 +266,12 @@ export function MotionStudioInspector({ layer, document, dispatch }: InspectorPr
             </div>
             <div className="ms-inspector-section">
               <h4 className="ms-inspector-section-title">Typography</h4>
+              {selectInput(
+                'Font Family',
+                typo?.fontFamily ?? 'system-ui',
+                CONTENT_FONT_FAMILIES,
+                (v) => setTypography({ fontFamily: v }),
+              )}
               {numberInput(
                 'Font Size',
                 typo?.fontSize ?? 48,

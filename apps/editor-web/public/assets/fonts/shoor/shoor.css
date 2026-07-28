@@ -1,0 +1,19 @@
+/* Shoor Pro — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Shoor Pro';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('Shoor-Regular.woff2') format('woff2'),
+         url('Shoor-Regular.woff') format('woff');
+}
+
+@font-face {
+    font-family: 'Shoor Pro';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('Shoor-Bold.woff2') format('woff2'),
+         url('Shoor-Bold.woff') format('woff');
+}

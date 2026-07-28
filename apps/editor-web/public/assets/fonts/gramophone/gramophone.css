@@ -1,0 +1,28 @@
+/* Gramophone — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Gramophone';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('Gramophone-Clean.woff2') format('woff2'),
+         url('Gramophone-Clean.woff') format('woff');
+}
+
+@font-face {
+    font-family: 'Gramophone';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('Gramophone-Grunge.woff2') format('woff2'),
+         url('Gramophone-Grunge.woff') format('woff');
+}
+
+@font-face {
+    font-family: 'Gramophone';
+    font-style: normal;
+    font-weight: 900;
+    font-display: swap;
+    src: url('Gramophone-Stone.woff2') format('woff2'),
+         url('Gramophone-Stone.woff') format('woff');
+}

@@ -1,0 +1,19 @@
+/* Damoon Pro — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Damoon Pro';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('DAMOON-Regular.woff2') format('woff2'),
+         url('DAMOON-Regular.woff') format('woff');
+}
+
+@font-face {
+    font-family: 'Damoon Pro';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('DAMOON-Bold.woff2') format('woff2'),
+         url('DAMOON-Bold.woff') format('woff');
+}

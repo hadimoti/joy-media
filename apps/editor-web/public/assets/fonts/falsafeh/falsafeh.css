@@ -1,0 +1,19 @@
+/* Falsafeh — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Falsafeh';
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+    src: url('Falsafeh-Light.woff') format('woff'),
+         url('Falsafeh-Light.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'Falsafeh';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('Falsafeh-Bold.woff') format('woff'),
+         url('Falsafeh-Bold.otf') format('opentype');
+}

@@ -1,0 +1,19 @@
+/* Bon — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Bon';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('bon-Regular.woff2') format('woff2'),
+         url('bon-Regular.woff') format('woff');
+}
+
+@font-face {
+    font-family: 'Bon';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('bon-Bold.woff2') format('woff2'),
+         url('bon-Bold.woff') format('woff');
+}

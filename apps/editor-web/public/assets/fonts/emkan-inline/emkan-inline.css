@@ -1,0 +1,9 @@
+/* Emkan Inline — JOY Media content-creation font. Source: fontiran pack. */
+
+@font-face {
+    font-family: 'Emkan Inline';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('emkan-Inline-Style.ttf') format('truetype');
+}
