@@ -6641,12 +6641,18 @@ label {
   }
 }
 
-/* Dual Lens — one Creative Document, projected through time and flow. */
+/* Dual Lens — one Creative Document, projected through time and flow.
+   Flush into the dock like TimelinePanel (no joy-panel inset chrome). */
+.dual-lens-panel.joy-panel-root {
+  gap: 0;
+  padding: 0;
+}
+
 .dual-lens-panel .joy-panel-body {
   min-height: 0;
+  gap: 0;
   overflow: auto;
-  background:
-    radial-gradient(circle at 75% 0, rgba(110, 87, 255, 0.08), transparent 34%), var(--joy-bg-panel);
+  background: var(--joy-bg-panel);
 }
 
 .dual-lens-section-heading {
@@ -6698,11 +6704,13 @@ label {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-3);
-  margin: var(--space-3) var(--space-4) 0;
-  padding: 8px 10px;
-  border: 1px solid rgba(110, 87, 255, 0.35);
-  border-radius: 6px;
-  background: rgba(110, 87, 255, 0.08);
+  flex: none;
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-bottom: 1px solid var(--joy-border);
+  border-radius: 0;
+  background: var(--joy-bg-panel);
   font-size: 11px;
 }
 
@@ -6710,7 +6718,7 @@ label {
   justify-self: start;
   min-width: 0;
   overflow: hidden;
-  color: var(--color-joy);
+  color: var(--joy-accent);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -6733,28 +6741,42 @@ label {
 }
 
 .dual-lens-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  min-height: 0;
+  padding: 0;
 }
 
 .dual-lens-content.is-split {
   display: grid;
   grid-template-columns: minmax(330px, 0.9fr) minmax(420px, 1.1fr);
-  gap: var(--space-3);
+  gap: 0;
+  border-top: 0;
+}
+
+.dual-lens-content.is-split > .dual-flow {
+  border-inline-start: 1px solid var(--joy-border);
 }
 
 .dual-time,
 .dual-flow {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--joy-border);
-  border-radius: 7px;
-  background: rgba(16, 18, 24, 0.78);
+  border: 0;
+  border-radius: 0;
+  background: var(--joy-bg-panel);
 }
 
 .dual-lens-section-heading {
-  min-height: 44px;
-  padding: 7px 10px;
+  min-height: 1.75rem;
+  margin: 0;
+  padding: 0.3rem 0.55rem;
   border-bottom: 1px solid var(--joy-border);
 }
 
@@ -6812,8 +6834,10 @@ label {
 }
 
 .dual-time-canvas.timeline-tracks {
-  max-height: min(42vh, 320px);
-  border-top: 1px solid var(--joy-border);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  border-top: 0;
 }
 .dual-time .timeline-track.is-data {
   background: color-mix(in srgb, #8b6cff 5%, transparent);
