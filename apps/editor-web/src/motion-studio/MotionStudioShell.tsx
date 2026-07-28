@@ -7,6 +7,7 @@ import { MotionStudioTimeline } from './MotionStudioTimeline.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
 import { createBlankScene } from '@joy-media/motion-core';
+import { createTextLayer, createRectangleLayer, createEllipseLayer } from './state/layerFactory.js';
 import { loadMotionSceneDocument, saveMotionSceneDocument, publishMotionScene } from '../motion-scene-catalog.js';
 
 export interface MotionStudioShellProps {
@@ -47,9 +48,19 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
     undo,
     redo,
     selectLayer,
+    selectLayers,
+    clearSelection,
+    toggleLayerSelection,
+    duplicateSelected,
+    deleteSelected,
+    bringToFront,
+    sendToBack,
+    groupSelected,
+    ungroupSelected,
     beginTransaction,
     updateTransaction,
     commitTransaction,
+    cancelTransaction,
   } = useSceneEditor(initialDocument);
 
   const [saveState, setSaveState] = useState<MotionSaveState>('saved');
@@ -95,17 +106,6 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
     };
   }, [document, storage, persist]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        saveNow();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [saveNow]);
-
   const handleClose = useCallback(() => {
     saveNow();
     onClose();
@@ -119,6 +119,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
   const [rightWidth, setRightWidth] = useState(RIGHT_WIDTH_DEFAULT);
   const [bottomHeight, setBottomHeight] = useState(BOTTOM_HEIGHT_DEFAULT);
   const [resizing, setResizing] = useState<MsResizeEdge | null>(null);
+  const [canvasScale, setCanvasScale] = useState(0.5);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
   const rafRef = useRef<number | undefined>(undefined);
@@ -207,20 +208,86 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
     [dispatch, document.layers],
   );
 
-  const handleLayerDragStart = useCallback(() => {
-    beginTransaction();
-  }, [beginTransaction]);
+  const handleAddTextLayer = useCallback(() => {
+    const text = createTextLayer('Hello');
+    dispatch('Add text layer', { type: 'scene.addLayer', payload: { layer: text } });
+    selectLayer(text.id);
+  }, [dispatch, selectLayer]);
 
-  const handleLayerDragPreview = useCallback(
-    (layerId: MotionLayerId, transform: { x: number; y: number }) => {
+  const handleAddRectangleLayer = useCallback(() => {
+    const rect = createRectangleLayer();
+    dispatch('Add rectangle layer', { type: 'scene.addLayer', payload: { layer: rect } });
+    selectLayer(rect.id);
+  }, [dispatch, selectLayer]);
+
+  const handleAddEllipseLayer = useCallback(() => {
+    const ellipse = createEllipseLayer();
+    dispatch('Add ellipse layer', { type: 'scene.addLayer', payload: { layer: ellipse } });
+    selectLayer(ellipse.id);
+  }, [dispatch, selectLayer]);
+
+  const handleSetLayerTransform = useCallback(
+    (layerId: MotionLayerId, transform: Partial<MotionLayer['transform']>) => {
       updateTransaction({ type: 'scene.setLayerTransform', payload: { layerId, transform } });
     },
     [updateTransaction],
   );
 
-  const handleLayerDragCommit = useCallback(() => {
-    commitTransaction('Move layer');
-  }, [commitTransaction]);
+  const handleCommit = useCallback(
+    (label: string) => {
+      commitTransaction(label);
+    },
+    [commitTransaction],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editing = target?.isContentEditable || target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveNow();
+        return;
+      }
+      if (editing) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        selectLayers(document.layers.map((l) => l.id));
+        return;
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        deleteSelected();
+        return;
+      }
+      if (event.key === 'Escape') {
+        clearSelection();
+        return;
+      }
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1;
+        const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+        const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+        beginTransaction();
+        for (const id of selectedLayerIds) {
+          const layer = document.layers.find((l) => l.id === id);
+          if (!layer || layer.locked) continue;
+          updateTransaction({
+            type: 'scene.setLayerTransform',
+            payload: { layerId: id, transform: { x: layer.transform.x + dx, y: layer.transform.y + dy } },
+          });
+        }
+        commitTransaction('Nudge layers');
+      }
+    },
+    [beginTransaction, clearSelection, commitTransaction, deleteSelected, document.layers, saveNow, selectLayers, selectedLayerIds, updateTransaction],
+  );
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   const handleMoveLayer = useCallback(
     (layerId: MotionLayerId, direction: 'up' | 'down') => {
@@ -326,11 +393,14 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               document={document}
               selectedLayerIds={selectedLayerIds}
               onSelectLayer={selectLayer}
+              onToggleLayerSelection={toggleLayerSelection}
               onAddLayer={handleAddLayer}
               onRemoveLayer={handleRemoveLayer}
               onToggleVisibility={handleToggleVisibility}
               onToggleLocked={handleToggleLocked}
               onMoveLayer={handleMoveLayer}
+              onDuplicateSelected={duplicateSelected}
+              onDeleteSelected={deleteSelected}
             />
             <div
               role="separator"
@@ -351,10 +421,25 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               document={document}
               selectedLayerIds={selectedLayerIds}
               onSelectLayer={selectLayer}
-              onLayerDragStart={handleLayerDragStart}
-              onLayerDragPreview={handleLayerDragPreview}
-              onLayerDragCommit={handleLayerDragCommit}
-              canvasScale={0.5}
+              onSelectLayers={selectLayers}
+              onToggleLayerSelection={toggleLayerSelection}
+              onClearSelection={clearSelection}
+              onSetLayerTransform={handleSetLayerTransform}
+              onDispatch={dispatch}
+              onBeginTransaction={beginTransaction}
+              onUpdateTransaction={updateTransaction}
+              onCommitTransaction={handleCommit}
+              onCancelTransaction={cancelTransaction}
+              onDuplicateSelected={duplicateSelected}
+              onDeleteSelected={deleteSelected}
+              onBringToFront={bringToFront}
+              onSendToBack={sendToBack}
+              onGroupSelected={groupSelected}
+              onUngroupSelected={ungroupSelected}
+              onAddTextLayer={handleAddTextLayer}
+              onAddRectangleLayer={handleAddRectangleLayer}
+              onAddEllipseLayer={handleAddEllipseLayer}
+              canvasScale={canvasScale}
               playheadMs={playheadMs}
             />
           ) : (

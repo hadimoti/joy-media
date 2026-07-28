@@ -17,11 +17,14 @@ interface LayersPanelProps {
   readonly document: MotionSceneDocument;
   readonly selectedLayerIds: readonly MotionLayerId[];
   readonly onSelectLayer: (layerId: MotionLayerId | null) => void;
+  readonly onToggleLayerSelection: (layerId: MotionLayerId) => void;
   readonly onAddLayer: (layer: MotionLayer) => void;
   readonly onRemoveLayer: (layerId: MotionLayerId) => void;
   readonly onToggleVisibility: (layerId: MotionLayerId) => void;
   readonly onToggleLocked: (layerId: MotionLayerId) => void;
   readonly onMoveLayer: (layerId: MotionLayerId, direction: 'up' | 'down') => void;
+  readonly onDuplicateSelected?: () => void;
+  readonly onDeleteSelected?: () => void;
 }
 
 function layerIcon(type: MotionLayer['type']): string {
@@ -51,11 +54,14 @@ export function MotionStudioLayersPanel({
   document,
   selectedLayerIds,
   onSelectLayer,
+  onToggleLayerSelection,
   onAddLayer,
   onRemoveLayer,
   onToggleVisibility,
   onToggleLocked,
   onMoveLayer,
+  onDuplicateSelected,
+  onDeleteSelected,
 }: LayersPanelProps) {
   const handleAddText = useCallback(() => {
     onAddLayer(createTextLayer('Hello'));
@@ -122,7 +128,13 @@ export function MotionStudioLayersPanel({
               <div
                 key={layer.id}
                 className={`ms-layer-row${selected ? ' ms-layer-row-selected' : ''}`}
-                onClick={() => onSelectLayer(layer.id)}
+                onClick={(event) => {
+                  if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                    onToggleLayerSelection(layer.id);
+                  } else {
+                    onSelectLayer(layer.id);
+                  }
+                }}
               >
                 <button
                   type="button"
@@ -188,6 +200,20 @@ export function MotionStudioLayersPanel({
               </div>
             );
           })
+        )}
+        {selectedLayerIds.length > 0 && (
+          <div className="ms-layer-bulk-actions">
+            {onDuplicateSelected && (
+              <button type="button" className="ms-layer-bulk-btn" onClick={onDuplicateSelected}>
+                Duplicate
+              </button>
+            )}
+            {onDeleteSelected && (
+              <button type="button" className="ms-layer-bulk-btn ms-layer-bulk-btn-danger" onClick={onDeleteSelected}>
+                Delete
+              </button>
+            )}
+          </div>
         )}
       </div>
     </aside>
