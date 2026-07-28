@@ -32,8 +32,8 @@ textarea:focus:not(:focus-visible) {
   --joy-bg-surface: #252525;
   --joy-gap: #000000;
   --joy-shell-gap: 2px;
-  --joy-radius-panel: 8px;
-  --joy-radius-inner: 6px;
+  --joy-radius-panel: 16px;
+  --joy-radius-inner: 10px;
   --joy-text: #ececef;
   --joy-text-secondary: rgba(255, 255, 255, 0.64);
   --joy-text-muted: #a8a8b0;
@@ -355,8 +355,8 @@ main {
   min-height: 2.5rem;
   max-height: 2.5rem;
   padding: 0 var(--space-3);
-  background: var(--joy-bg-chrome);
-  border-bottom: 1px solid var(--joy-gap);
+  background: var(--joy-bg-app);
+  border-bottom: 1px solid var(--joy-border);
   box-sizing: border-box;
 }
 .app-header .icon-button {
@@ -394,7 +394,7 @@ main {
   gap: 0.1rem;
   min-height: 1.75rem;
   padding: 0 var(--space-3);
-  background: var(--joy-bg-chrome);
+  background: var(--joy-bg-app);
   border-bottom: 1px solid var(--joy-border);
   z-index: 5;
 }
@@ -5331,6 +5331,9 @@ label {
 }
 #root .workspace .dv-groupview .dv-tabs-and-actions-container {
   border-radius: var(--joy-radius-panel) var(--joy-radius-panel) 0 0;
+}
+#root .workspace .dv-groupview .dv-content-container {
+  border-radius: 0 0 var(--joy-radius-panel) var(--joy-radius-panel);
 }
 #root .workspace .dv-split-view-container.dv-horizontal
   > .dv-view-container

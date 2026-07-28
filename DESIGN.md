@@ -4,7 +4,7 @@ Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-
 
 ## 1. Color tokens
 
-Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. The shell follows a **CapCut-like tile layout** (§3b): pure-black canvas (`#000`) with medium-gray panel surfaces (`#252525`) separated by 2px black gaps and 8px outer corner radius.
+Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. The shell follows a **CapCut-like tile layout** (§3b): pure-black canvas (`#000`) with medium-gray panel surfaces (`#252525`) separated by 2px black gaps and 16px outer corner radius on dock tiles.
 
 **The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
 
@@ -12,7 +12,7 @@ Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red a
 | ---------------------- | ------------------------ | -------------------------------------------------------------- |
 | `--joy-bg-app`         | `#000000`                | Root/page background, dock canvas, gap bleed                   |
 | `--joy-bg-panel`       | `#252525`                | Dockview group + content background, panel tile fill           |
-| `--joy-bg-chrome`      | `#2d2d2d`                | Header, menubar, dock tab strips                               |
+| `--joy-bg-chrome`      | `#2d2d2d`                | Dock tab strips, nested toolbars (app header/menubar are `--joy-bg-app`) |
 | `--joy-bg-elevated`    | `#333333`                | Dropdowns, popovers, active dock tab tile                      |
 | `--joy-bg-raised`      | `#383838`                | Cards, list rows (history entries, workflow rows, asset cards) |
 | `--joy-bg-inset`       | `#1e1e1e`                | Sunken sections, inactive dock tab tile                        |
@@ -27,8 +27,8 @@ Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red a
 | `--joy-border-hover`   | `#5a5a62`                | Hovered control borders, clip borders                          |
 | `--joy-gap`            | `#000000`                | Dockview separators, workspace gaps (same as canvas)            |
 | `--joy-shell-gap`      | `2px`                    | Outer dock padding + split separator width + groupview border    |
-| `--joy-radius-panel`   | `8px`                    | Outer dock group / panel tile corners                          |
-| `--joy-radius-inner`   | `6px`                    | Inner wells, dock icon-tab corners, import zones               |
+| `--joy-radius-panel`   | `16px`                   | Outer dock group / panel tile corners (tab rail + body)        |
+| `--joy-radius-inner`   | `10px`                   | Inner wells, dock icon-tab corners, import zones               |
 | `--joy-text`           | `#ececef`                | Primary text                                                   |
 | `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                   |
 | `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                  |
@@ -78,12 +78,12 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 ## 3b. CapCut shell (binding — dock workspace)
 
-Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab — **black canvas**, **gray panel tiles**, **2px black gaps**, **8px rounded outer corners**. Gaps are not borders painted on panels; they are the canvas showing between separated tiles.
+Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab — **black canvas**, **gray panel tiles**, **2px black gaps**, **16px rounded outer corners** on each dock group (tab rail + panel body as one tile). The app header and menubar sit on the same pure-black canvas (`--joy-bg-app`), not gray chrome. Gaps are not borders painted on panels; they are the canvas showing between separated tiles.
 
 | Rule | Implementation |
 | ---- | -------------- |
-| Canvas | `#root .workspace` and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). |
-| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (8px), `overflow: hidden`. |
+| Canvas | `#root .workspace`, `.app-header`, `.app-menubar`, and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). |
+| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (16px), `overflow: hidden`. Tab rail (`.dv-tabs-container` + `.dv-void-container`) and `.dv-content-container` share the same outer radius as one tile. |
 | Gap rhythm | `--dv-separator-border` and split `::before` separators use `--joy-gap` at `--joy-shell-gap` width. Each groupview also carries a `2px solid var(--joy-bg-app)` border so adjacent tiles never touch. |
 | Tab rail | `.dv-tabs-and-actions-container` uses `--joy-bg-chrome`. Icon tabs (`.dv-tab`) are inset tiles: `--joy-bg-inset` at rest, `--joy-bg-elevated` when active, `--joy-radius-inner` corners. Active tab icon tint stays amber (§1a). |
 | Panel content | `.dv-content-container` / `.dv-react-part` fill `--joy-bg-panel`. `.joy-panel-root` does not repaint its own background — content sits inside the dock tile. Timeline, Dual Lens, and Monitor stay flush (`padding: 0`) inside their tile. |
