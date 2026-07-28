@@ -127,7 +127,9 @@ interface MotionStudioCanvasProps {
   readonly document: MotionSceneDocument;
   readonly selectedLayerIds: readonly string[];
   readonly onSelectLayer: (layerId: string | null) => void;
-  readonly onLayerTransform: (layerId: string, transform: { x: number; y: number }) => void;
+  readonly onLayerDragStart: () => void;
+  readonly onLayerDragPreview: (layerId: string, transform: { x: number; y: number }) => void;
+  readonly onLayerDragCommit: () => void;
   readonly canvasScale?: number;
   readonly playheadMs?: number;
 }
@@ -136,7 +138,9 @@ export function MotionStudioCanvas({
   document,
   selectedLayerIds,
   onSelectLayer,
-  onLayerTransform,
+  onLayerDragStart,
+  onLayerDragPreview,
+  onLayerDragCommit,
   canvasScale = 1,
   playheadMs,
 }: MotionStudioCanvasProps) {
@@ -174,9 +178,11 @@ export function MotionStudioCanvas({
               <SelectionOverlay
                 key={`sel-${id}`}
                 layer={layer}
+                onDragStart={onLayerDragStart}
                 onDragMove={(x, y) => {
-                  onLayerTransform(id, { x: Math.round(x), y: Math.round(y) });
+                  onLayerDragPreview(id, { x: Math.round(x), y: Math.round(y) });
                 }}
+                onDragEnd={onLayerDragCommit}
               />
             );
           })}
@@ -188,10 +194,12 @@ export function MotionStudioCanvas({
 
 interface SelectionOverlayProps {
   readonly layer: MotionLayer;
+  readonly onDragStart: () => void;
   readonly onDragMove: (x: number, y: number) => void;
+  readonly onDragEnd: () => void;
 }
 
-function SelectionOverlay({ layer, onDragMove }: SelectionOverlayProps) {
+function SelectionOverlay({ layer, onDragStart, onDragMove, onDragEnd }: SelectionOverlayProps) {
   const { transform: t } = layer;
   const handleSize = 8;
 
@@ -204,22 +212,23 @@ function SelectionOverlay({ layer, onDragMove }: SelectionOverlayProps) {
       const startY = e.clientY;
       const baseX = t.x;
       const baseY = t.y;
-      let moved = false;
+
+      onDragStart();
 
       const onMove = (ev: PointerEvent) => {
-        moved = true;
         onDragMove(baseX + (ev.clientX - startX), baseY + (ev.clientY - startY));
       };
 
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        onDragEnd();
       };
 
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [layer.locked, onDragMove],
+    [layer.locked, onDragStart, onDragMove, onDragEnd, t.x, t.y],
   );
 
   const style: React.CSSProperties = {

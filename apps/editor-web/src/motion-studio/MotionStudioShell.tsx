@@ -29,8 +29,19 @@ function clamp(value: number, min: number, max: number): number {
 type MsResizeEdge = 'left' | 'right' | 'bottom';
 
 export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProps) {
-  const { document, selectedLayerIds, canUndo, canRedo, dispatch, undo, redo, selectLayer } =
-    useSceneEditor();
+  const {
+    document,
+    selectedLayerIds,
+    canUndo,
+    canRedo,
+    dispatch,
+    undo,
+    redo,
+    selectLayer,
+    beginTransaction,
+    updateTransaction,
+    commitTransaction,
+  } = useSceneEditor();
 
   const [mode, setMode] = useState<MotionStudioMode>('visual-edit');
   const [layersOpen, setLayersOpen] = useState(true);
@@ -128,15 +139,20 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
     [dispatch, document.layers],
   );
 
-  const handleLayerTransform = useCallback(
+  const handleLayerDragStart = useCallback(() => {
+    beginTransaction();
+  }, [beginTransaction]);
+
+  const handleLayerDragPreview = useCallback(
     (layerId: MotionLayerId, transform: { x: number; y: number }) => {
-      dispatch('Move layer', {
-        type: 'scene.setLayerTransform',
-        payload: { layerId, transform },
-      });
+      updateTransaction({ type: 'scene.setLayerTransform', payload: { layerId, transform } });
     },
-    [dispatch],
+    [updateTransaction],
   );
+
+  const handleLayerDragCommit = useCallback(() => {
+    commitTransaction('Move layer');
+  }, [commitTransaction]);
 
   const handleMoveLayer = useCallback(
     (layerId: MotionLayerId, direction: 'up' | 'down') => {
@@ -266,7 +282,9 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
               document={document}
               selectedLayerIds={selectedLayerIds}
               onSelectLayer={selectLayer}
-              onLayerTransform={handleLayerTransform}
+              onLayerDragStart={handleLayerDragStart}
+              onLayerDragPreview={handleLayerDragPreview}
+              onLayerDragCommit={handleLayerDragCommit}
               canvasScale={0.5}
               playheadMs={playheadMs}
             />

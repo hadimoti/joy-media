@@ -1,11 +1,8 @@
 import type { MotionLayer, MotionLayerType } from '@joy-media/motion-core';
 import { DEFAULT_TRANSFORM, DEFAULT_TYPOGRAPHY } from '@joy-media/motion-core';
 
-let counter = 0;
-
 function nextId(): string {
-  counter += 1;
-  return `layer-${Date.now()}-${counter}`;
+  return crypto.randomUUID();
 }
 
 function base(type: MotionLayerType, name: string): MotionLayer {
