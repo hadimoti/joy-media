@@ -1,16 +1,20 @@
 import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { MotionStudioTopBar, type MotionStudioMode } from './MotionStudioTopBar.js';
+import { MotionStudioTopBar, type MotionStudioMode, type MotionSaveState } from './MotionStudioTopBar.js';
 import { MotionStudioCanvas } from './MotionStudioCanvas.js';
 import { MotionStudioLayersPanel } from './MotionStudioLayersPanel.js';
 import { MotionStudioInspector } from './MotionStudioInspector.js';
 import { MotionStudioTimeline } from './MotionStudioTimeline.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
+import { createBlankScene } from '@joy-media/motion-core';
+import { loadMotionSceneDocument, saveMotionSceneDocument, publishMotionScene } from '../motion-scene-catalog.js';
 
 export interface MotionStudioShellProps {
-  readonly motionName: string;
+  readonly sceneId: string;
   readonly onClose: () => void;
 }
+
+const AUTOSAVE_DEBOUNCE_MS = 800;
 
 const LEFT_WIDTH_DEFAULT = 240;
 const RIGHT_WIDTH_DEFAULT = 260;
@@ -28,7 +32,12 @@ function clamp(value: number, min: number, max: number): number {
 
 type MsResizeEdge = 'left' | 'right' | 'bottom';
 
-export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProps) {
+export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) {
+  const storage = window.localStorage;
+  const [initialDocument] = useState(
+    () => loadMotionSceneDocument(storage, sceneId) ?? createBlankScene('Untitled Motion'),
+  );
+
   const {
     document,
     selectedLayerIds,
@@ -41,7 +50,66 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
     beginTransaction,
     updateTransaction,
     commitTransaction,
-  } = useSceneEditor();
+  } = useSceneEditor(initialDocument);
+
+  const [saveState, setSaveState] = useState<MotionSaveState>('saved');
+  const saveTimeoutRef = useRef<number | undefined>(undefined);
+  const skipNextAutosaveRef = useRef(true);
+
+  const persist = useCallback((run: () => void) => {
+    if (saveTimeoutRef.current !== undefined) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = undefined;
+    }
+    setSaveState('saving');
+    try {
+      run();
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }, []);
+
+  const saveNow = useCallback(() => {
+    persist(() => saveMotionSceneDocument(storage, document));
+  }, [persist, storage, document]);
+
+  const handlePublish = useCallback(() => {
+    persist(() => publishMotionScene(storage, document));
+  }, [persist, storage, document]);
+
+  // Every document change past the first render schedules a debounced
+  // autosave; Ctrl/Cmd+S and Publish flush it immediately instead of waiting.
+  useEffect(() => {
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
+    setSaveState('unsaved');
+    saveTimeoutRef.current = window.setTimeout(() => {
+      saveTimeoutRef.current = undefined;
+      persist(() => saveMotionSceneDocument(storage, document));
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (saveTimeoutRef.current !== undefined) window.clearTimeout(saveTimeoutRef.current);
+    };
+  }, [document, storage, persist]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveNow();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [saveNow]);
+
+  const handleClose = useCallback(() => {
+    saveNow();
+    onClose();
+  }, [saveNow, onClose]);
 
   const [mode, setMode] = useState<MotionStudioMode>('visual-edit');
   const [layersOpen, setLayersOpen] = useState(true);
@@ -229,16 +297,17 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
       className={`motion-studio-overlay${resizing ? ` ms-resizing ms-resizing-${resizing}` : ''}`}
     >
       <MotionStudioTopBar
-        motionName={motionName}
+        motionName={document.name}
+        saveState={saveState}
         canUndo={canUndo}
         canRedo={canRedo}
         mode={mode}
-        onBack={onClose}
+        onBack={handleClose}
         onUndo={undo}
         onRedo={redo}
         onToggleMode={toggleMode}
         onPreview={togglePlayback}
-        onPublish={() => {}}
+        onPublish={handlePublish}
         layersOpen={layersOpen}
         onToggleLayers={() => setLayersOpen((v) => !v)}
         inspectorOpen={inspectorOpen}

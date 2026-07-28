@@ -2944,6 +2944,17 @@ label {
   object-fit: contain;
 }
 
+/* Placeholder until Motion Studio renders real scene thumbnails. */
+.motion-scene-card-swatch {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--joy-accent) 18%, var(--joy-bg-deep)),
+    var(--joy-bg-deep)
+  );
+}
+
 @keyframes m-fade-in {
   0% {
     opacity: 0;
@@ -3502,6 +3513,28 @@ label {
   width: 1px;
   height: 20px;
   background: var(--joy-border);
+}
+
+.ms-topbar-save-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--joy-text-muted);
+  white-space: nowrap;
+}
+.ms-topbar-save-state svg {
+  width: 13px;
+  height: 13px;
+}
+.ms-topbar-save-state-unsaved {
+  color: var(--joy-text-muted);
+}
+.ms-topbar-save-state-saving {
+  color: var(--joy-accent);
+}
+.ms-topbar-save-state-error {
+  color: var(--joy-danger);
 }
 
 /* Body grid — 2px black gaps between tiles (§3b) */

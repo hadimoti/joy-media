@@ -8,12 +8,38 @@ import {
   LayersIcon,
   TimelineIcon,
   SlidersIcon,
+  CloudIcon,
+  SaveIcon,
+  RefreshIcon,
 } from '../icons.js';
 
 export type MotionStudioMode = 'visual-edit' | 'code';
+export type MotionSaveState = 'saved' | 'saving' | 'unsaved' | 'error';
+
+const SAVE_STATE_LABEL: Readonly<Record<MotionSaveState, string>> = {
+  saved: 'Saved',
+  saving: 'Saving…',
+  unsaved: 'Unsaved changes',
+  error: 'Save failed',
+};
+
+function SaveStateIndicator({ state }: { readonly state: MotionSaveState }) {
+  const Icon = state === 'saved' ? CloudIcon : state === 'saving' ? RefreshIcon : SaveIcon;
+  return (
+    <span
+      className={`ms-topbar-save-state ms-topbar-save-state-${state}`}
+      role="status"
+      title={SAVE_STATE_LABEL[state]}
+    >
+      <Icon />
+      <span className="ms-topbar-save-state-label">{SAVE_STATE_LABEL[state]}</span>
+    </span>
+  );
+}
 
 export interface MotionStudioTopBarProps {
   readonly motionName: string;
+  readonly saveState: MotionSaveState;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly mode: MotionStudioMode;
@@ -33,6 +59,7 @@ export interface MotionStudioTopBarProps {
 
 export function MotionStudioTopBar({
   motionName,
+  saveState,
   canUndo,
   canRedo,
   mode,
@@ -64,6 +91,7 @@ export function MotionStudioTopBar({
         <span className="ms-topbar-name" dir="ltr" title={motionName}>
           {motionName}
         </span>
+        <SaveStateIndicator state={saveState} />
       </div>
 
       <div className="ms-topbar-center">

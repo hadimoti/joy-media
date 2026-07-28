@@ -50,6 +50,8 @@ import {
   DuplicateIcon,
   StarIcon,
   StarFilledIcon,
+  TrashIcon,
+  EditIcon,
 } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
@@ -57,6 +59,14 @@ import { EditorPanelContext } from './App.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import {
+  createMotionScene,
+  duplicateMotionScene,
+  listCatalogScenes,
+  removeCatalogScene,
+  renameMotionScene,
+  type MotionSceneCatalogEntry,
+} from './motion-scene-catalog.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -104,7 +114,7 @@ function saveFavorites(favorites: Set<string>): void {
 
 /* ─── Subtab model ─── */
 
-type LibrarySubtab = 'library' | 'presets' | 'spatial' | 'html-scenes';
+type LibrarySubtab = 'my-motions' | 'library' | 'presets' | 'spatial' | 'html-scenes';
 
 /** Stand-in bound by the Motion/Spatial tabs when nothing is selected (§3c). */
 const IDLE_OBJECT: VisualObjectV1 = {
@@ -122,6 +132,7 @@ const IDLE_OBJECT: VisualObjectV1 = {
 };
 
 const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string }[] = [
+  { id: 'my-motions', label: 'My Motions' },
   { id: 'library', label: 'Library' },
   { id: 'html-scenes', label: 'Scenes' },
   { id: 'presets', label: 'Presets' },
@@ -375,6 +386,129 @@ function LibraryTab({
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── My Motions tab: the user's own MotionSceneDocuments (Motion Studio's library) ─── */
+
+function MotionSceneCard({
+  entry,
+  onOpen,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: {
+  readonly entry: MotionSceneCatalogEntry;
+  readonly onOpen: (id: string) => void;
+  readonly onRename: (id: string, title: string) => void;
+  readonly onDuplicate: (id: string) => void;
+  readonly onDelete: (id: string) => void;
+}) {
+  return (
+    <div className="motion-card" role="listitem">
+      <div className="motion-card-preview" aria-hidden="true">
+        <div className="motion-scene-card-swatch" />
+        <span className="motion-card-duration">{(entry.durationMs / 1000).toFixed(1)}s</span>
+      </div>
+      <div className="motion-card-body">
+        <span className="motion-card-name" title={entry.title}>
+          {entry.title}
+        </span>
+        <span className="motion-card-source">
+          {entry.width}×{entry.height}
+          {entry.publishedAt !== undefined ? ' · Published' : ''}
+        </span>
+      </div>
+      <div className="motion-card-actions">
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Open ${entry.title}`}
+          title={`Open · ${entry.title}`}
+          onClick={() => onOpen(entry.id)}
+        >
+          <InfoIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Rename ${entry.title}`}
+          title="Rename"
+          onClick={() => {
+            const next = window.prompt('Rename motion', entry.title);
+            if (next !== null && next.trim().length > 0) onRename(entry.id, next.trim());
+          }}
+        >
+          <EditIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Duplicate ${entry.title}`}
+          title={`Duplicate · ${entry.title}`}
+          onClick={() => onDuplicate(entry.id)}
+        >
+          <DuplicateIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Delete ${entry.title}`}
+          title="Delete"
+          onClick={() => {
+            if (window.confirm(`Remove “${entry.title}” from your motions? This can't be undone.`)) {
+              onDelete(entry.id);
+            }
+          }}
+        >
+          <TrashIcon />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MyMotionsTab({
+  entries,
+  onOpen,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: {
+  readonly entries: readonly MotionSceneCatalogEntry[];
+  readonly onOpen: (id: string) => void;
+  readonly onRename: (id: string, title: string) => void;
+  readonly onDuplicate: (id: string) => void;
+  readonly onDelete: (id: string) => void;
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="motion-library">
+        <p className="motion-library-empty" lang="fa">
+          هنوز موشنی نساخته‌اید. برای شروع روی + بزنید.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="motion-library">
+      <div className="motion-library-scroll">
+        <section className="motion-library-section">
+          <div className="motion-library-grid" role="list" aria-label="My Motions">
+            {entries.map((entry) => (
+              <MotionSceneCard
+                key={entry.id}
+                entry={entry}
+                onOpen={onOpen}
+                onRename={onRename}
+                onDuplicate={onDuplicate}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -891,7 +1025,7 @@ export function MotionPanel({
   selectedClipId,
   onAddHtmlSceneToSelection,
 }: MotionPanelProps) {
-  const [subtab, setSubtab] = useState<LibrarySubtab>('library');
+  const [subtab, setSubtab] = useState<LibrarySubtab>('my-motions');
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
   const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
@@ -900,9 +1034,52 @@ export function MotionPanel({
   // box rendered and filtered nothing. PanelShell owns the toggle now and this
   // is the query it feeds.
   const [query, setQuery] = useState('');
+  const [myMotionsTick, setMyMotionsTick] = useState(0);
 
   const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio ?? (() => {});
+  const motionStudioOpen = editorContext?.motionStudioOpen ?? false;
+
+  // The catalog lives in localStorage, written by Motion Studio's own
+  // autosave — this panel only re-reads it (Studio is a full-screen overlay,
+  // so there's no live subscription to keep in sync while it's open).
+  const wasMotionStudioOpenRef = useRef(false);
+  useEffect(() => {
+    if (wasMotionStudioOpenRef.current && !motionStudioOpen) {
+      setMyMotionsTick((tick) => tick + 1);
+    }
+    wasMotionStudioOpenRef.current = motionStudioOpen;
+  }, [motionStudioOpen]);
+
+  // myMotionsTick is the refresh signal; window.localStorage's identity never changes.
+  const myMotions = useMemo(() => listCatalogScenes(window.localStorage), [myMotionsTick]);
+
+  const createMotion = useCallback(() => {
+    const scene = createMotionScene(window.localStorage, `Untitled Motion ${myMotions.length + 1}`);
+    setMyMotionsTick((tick) => tick + 1);
+    openMotionStudio(scene.id);
+  }, [myMotions.length, openMotionStudio]);
+
+  const openMySceneMotion = useCallback((id: string) => openMotionStudio(id), [openMotionStudio]);
+
+  const renameMySceneMotion = useCallback((id: string, title: string) => {
+    renameMotionScene(window.localStorage, id, title);
+    setMyMotionsTick((tick) => tick + 1);
+  }, []);
+
+  const duplicateMySceneMotion = useCallback(
+    (id: string) => {
+      const source = myMotions.find((entry) => entry.id === id);
+      duplicateMotionScene(window.localStorage, id, `${source?.title ?? 'Motion'} (Copy)`);
+      setMyMotionsTick((tick) => tick + 1);
+    },
+    [myMotions],
+  );
+
+  const deleteMySceneMotion = useCallback((id: string) => {
+    removeCatalogScene(window.localStorage, id);
+    setMyMotionsTick((tick) => tick + 1);
+  }, []);
 
   const duration = Math.max(1, compositionDurationUs);
   const timeToX = (timeUs: number) =>
@@ -923,9 +1100,12 @@ export function MotionPanel({
     });
   }, []);
 
+  // Preset library cards ("Fade In", etc.) aren't MotionSceneDocuments, so
+  // there's nothing real to load here — this opens a fresh Untitled Motion,
+  // same as before. Motion Studio only ever edits its own scene documents.
   const openMotion = useCallback(
-    (_id: string) => {
-      openMotionStudio();
+    (id: string) => {
+      openMotionStudio(id);
     },
     [openMotionStudio],
   );
@@ -1024,7 +1204,7 @@ export function MotionPanel({
             className="motion-create-btn"
             aria-label="Create new motion"
             title="Create new motion"
-            onClick={openMotionStudio}
+            onClick={createMotion}
           >
             <PlusIcon />
           </button>
@@ -1042,6 +1222,16 @@ export function MotionPanel({
       }
     >
       <>
+        {subtab === 'my-motions' && (
+          <MyMotionsTab
+            entries={myMotions}
+            onOpen={openMySceneMotion}
+            onRename={renameMySceneMotion}
+            onDuplicate={duplicateMySceneMotion}
+            onDelete={deleteMySceneMotion}
+          />
+        )}
+
         {subtab === 'library' && (
           <LibraryTab
             registry={motionRegistry}

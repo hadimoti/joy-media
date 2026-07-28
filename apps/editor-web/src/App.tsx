@@ -451,7 +451,7 @@ interface EditorPanelContextValue {
   readonly agentPanelCommand: AgentPanelCommand | undefined;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
   readonly motionStudioOpen: boolean;
-  readonly openMotionStudio: () => void;
+  readonly openMotionStudio: (sceneId: string) => void;
   readonly closeMotionStudio: () => void;
   /** Shared Timeline + Dual Lens zoom/scroll viewport (must live in context — dockview caches Panel). */
   readonly timelineViewport: TimelineViewport;
@@ -571,7 +571,7 @@ function EditorWorkspace({
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
-  const [motionStudioOpen, setMotionStudioOpen] = useState(false);
+  const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -2820,9 +2820,9 @@ function EditorWorkspace({
           agentSettings,
           agentPanelCommand,
           showToast,
-          motionStudioOpen,
-          openMotionStudio: () => setMotionStudioOpen(true),
-          closeMotionStudio: () => setMotionStudioOpen(false),
+          motionStudioOpen: motionStudioSceneId !== undefined,
+          openMotionStudio: (sceneId: string) => setMotionStudioSceneId(sceneId),
+          closeMotionStudio: () => setMotionStudioSceneId(undefined),
           timelineViewport,
           onTimelineViewportChange: setTimelineViewport,
           timelineTrackFlags,
@@ -2838,10 +2838,11 @@ function EditorWorkspace({
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
-      {motionStudioOpen && (
+      {motionStudioSceneId !== undefined && (
         <MotionStudioShell
-          motionName="Untitled Motion"
-          onClose={() => setMotionStudioOpen(false)}
+          key={motionStudioSceneId}
+          sceneId={motionStudioSceneId}
+          onClose={() => setMotionStudioSceneId(undefined)}
         />
       )}
       {agentSettingsOpen && (

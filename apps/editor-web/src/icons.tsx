@@ -631,6 +631,10 @@ export function FullscreenIcon() {
   return <PngMaskIcon src={UI_ICONS.fullscreen} />;
 }
 
+export function EditIcon() {
+  return <PngMaskIcon src={UI_ICONS.edit} />;
+}
+
 export function PanIcon() {
   return (
     <Svg>
