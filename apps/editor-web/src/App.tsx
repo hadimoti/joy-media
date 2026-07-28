@@ -2475,7 +2475,7 @@ function EditorWorkspace({
           <span className="app-brand">
             <img
               className="app-brand-logo"
-              src="/assets/logo.png"
+              src="/assets/logo.png?v=joycode"
               alt=""
               width={16}
               height={16}

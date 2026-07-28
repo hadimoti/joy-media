@@ -1,5 +1,5 @@
-import joyCodeHorizontalUrl from './brand-assets/joy-code-horizontal.webp';
-import joyCodeMarkUrl from './brand-assets/joy-code-mark.webp';
+import joyCodeHorizontalUrl from './brand-assets/joy-code-horizontal.png';
+import joyCodeMarkUrl from './brand-assets/joy-code-mark.png';
 
 export function JoyCodeLogo({
   variant,

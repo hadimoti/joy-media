@@ -34,7 +34,7 @@ export function ProjectLibrary({
         <div className="project-library-brand app-brand">
           <img
             className="app-brand-logo"
-            src="/assets/logo.png"
+            src="/assets/logo.png?v=joycode"
             alt=""
             width={22}
             height={22}

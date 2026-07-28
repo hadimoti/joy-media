@@ -17,13 +17,15 @@ describe('JoyCodeLogo', () => {
     expect(markup).toContain('joy-code-logo is-mark is-thinking');
   });
 
-  it('keeps both optimized UI assets below 64 KB', () => {
-    const mark = readFileSync(new URL('./brand-assets/joy-code-mark.webp', import.meta.url));
+  it('ships the current mark and horizontal brand PNGs', () => {
+    const mark = readFileSync(new URL('./brand-assets/joy-code-mark.png', import.meta.url));
     const horizontal = readFileSync(
-      new URL('./brand-assets/joy-code-horizontal.webp', import.meta.url),
+      new URL('./brand-assets/joy-code-horizontal.png', import.meta.url),
     );
 
-    expect(mark.byteLength).toBeLessThan(64 * 1024);
-    expect(horizontal.byteLength).toBeLessThan(64 * 1024);
+    expect(mark.byteLength).toBeGreaterThan(10_000);
+    expect(horizontal.byteLength).toBeGreaterThan(10_000);
+    expect(mark.byteLength).toBeLessThan(256 * 1024);
+    expect(horizontal.byteLength).toBeLessThan(256 * 1024);
   });
 });
