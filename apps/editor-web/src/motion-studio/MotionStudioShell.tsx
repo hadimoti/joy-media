@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { MotionStudioTopBar, type MotionStudioMode } from './MotionStudioTopBar.js';
 import { MotionStudioCanvas } from './MotionStudioCanvas.js';
 import { MotionStudioLayersPanel } from './MotionStudioLayersPanel.js';
@@ -11,6 +11,22 @@ export interface MotionStudioShellProps {
   readonly onClose: () => void;
 }
 
+const LEFT_WIDTH_DEFAULT = 240;
+const RIGHT_WIDTH_DEFAULT = 260;
+const BOTTOM_HEIGHT_DEFAULT = 180;
+const LEFT_WIDTH_MIN = 180;
+const LEFT_WIDTH_MAX = 480;
+const RIGHT_WIDTH_MIN = 200;
+const RIGHT_WIDTH_MAX = 520;
+const BOTTOM_HEIGHT_MIN = 100;
+const BOTTOM_HEIGHT_MAX = 480;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+type MsResizeEdge = 'left' | 'right' | 'bottom';
+
 export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProps) {
   const { document, selectedLayerIds, canUndo, canRedo, dispatch, undo, redo, selectLayer } =
     useSceneEditor();
@@ -19,6 +35,10 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
   const [layersOpen, setLayersOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  const [leftWidth, setLeftWidth] = useState(LEFT_WIDTH_DEFAULT);
+  const [rightWidth, setRightWidth] = useState(RIGHT_WIDTH_DEFAULT);
+  const [bottomHeight, setBottomHeight] = useState(BOTTOM_HEIGHT_DEFAULT);
+  const [resizing, setResizing] = useState<MsResizeEdge | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
   const rafRef = useRef<number | undefined>(undefined);
@@ -140,8 +160,57 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
   const hasRightPanel = inspectorOpen;
   const hasBottomPanel = timelineOpen;
 
+  const startPanelResize = useCallback(
+    (edge: MsResizeEdge, event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startLeft = leftWidth;
+      const startRight = rightWidth;
+      const startBottom = bottomHeight;
+      const pointerId = event.pointerId;
+      const sash = event.currentTarget;
+      sash.setPointerCapture(pointerId);
+      setResizing(edge);
+
+      const onMove = (ev: PointerEvent) => {
+        if (edge === 'left') {
+          setLeftWidth(clamp(startLeft + (ev.clientX - startX), LEFT_WIDTH_MIN, LEFT_WIDTH_MAX));
+        } else if (edge === 'right') {
+          setRightWidth(clamp(startRight - (ev.clientX - startX), RIGHT_WIDTH_MIN, RIGHT_WIDTH_MAX));
+        } else {
+          setBottomHeight(
+            clamp(startBottom - (ev.clientY - startY), BOTTOM_HEIGHT_MIN, BOTTOM_HEIGHT_MAX),
+          );
+        }
+      };
+
+      const onUp = () => {
+        sash.releasePointerCapture(pointerId);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        setResizing(null);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    },
+    [leftWidth, rightWidth, bottomHeight],
+  );
+
+  const bodyStyle = {
+    '--ms-left-w': `${leftWidth}px`,
+    '--ms-right-w': `${rightWidth}px`,
+    '--ms-bottom-h': `${bottomHeight}px`,
+  } as CSSProperties;
+
   return (
-    <div className="motion-studio-overlay">
+    <div
+      className={`motion-studio-overlay${resizing ? ` ms-resizing ms-resizing-${resizing}` : ''}`}
+    >
       <MotionStudioTopBar
         motionName={motionName}
         canUndo={canUndo}
@@ -163,18 +232,31 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
 
       <div
         className={`ms-body${hasLeftPanel ? ' ms-body-left' : ''}${hasRightPanel ? ' ms-body-right' : ''}${hasBottomPanel ? ' ms-body-bottom' : ''}`}
+        style={bodyStyle}
       >
         {hasLeftPanel && (
-          <MotionStudioLayersPanel
-            document={document}
-            selectedLayerIds={selectedLayerIds}
-            onSelectLayer={selectLayer}
-            onAddLayer={handleAddLayer}
-            onRemoveLayer={handleRemoveLayer}
-            onToggleVisibility={handleToggleVisibility}
-            onToggleLocked={handleToggleLocked}
-            onMoveLayer={handleMoveLayer}
-          />
+          <div className="ms-panel-host">
+            <MotionStudioLayersPanel
+              document={document}
+              selectedLayerIds={selectedLayerIds}
+              onSelectLayer={selectLayer}
+              onAddLayer={handleAddLayer}
+              onRemoveLayer={handleRemoveLayer}
+              onToggleVisibility={handleToggleVisibility}
+              onToggleLocked={handleToggleLocked}
+              onMoveLayer={handleMoveLayer}
+            />
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize layers panel"
+              aria-valuenow={leftWidth}
+              aria-valuemin={LEFT_WIDTH_MIN}
+              aria-valuemax={LEFT_WIDTH_MAX}
+              className="ms-sash ms-sash-east"
+              onPointerDown={(e) => startPanelResize('left', e)}
+            />
+          </div>
         )}
 
         <section className="ms-center">
@@ -200,45 +282,69 @@ export function MotionStudioShell({ motionName, onClose }: MotionStudioShellProp
           )}
 
           {hasBottomPanel && (
-            <footer className="ms-panel ms-bottom" aria-label="Timeline">
-              <div className="ms-panel-header">
-                <h3 className="ms-panel-title">Timeline</h3>
-                <div className="ms-timeline-controls">
-                  <button
-                    type="button"
-                    className="ms-timeline-btn"
-                    aria-label={playing ? 'Pause' : 'Play'}
-                    onClick={togglePlayback}
-                  >
-                    {playing ? '\u23F8' : '\u25B6'}
-                  </button>
-                  <span className="ms-timeline-time" dir="ltr">
-                    {(playheadMs / 1000).toFixed(1)}s / {(document.durationMs / 1000).toFixed(1)}s
-                  </span>
+            <div className="ms-panel-host ms-bottom-host">
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize timeline panel"
+                aria-valuenow={bottomHeight}
+                aria-valuemin={BOTTOM_HEIGHT_MIN}
+                aria-valuemax={BOTTOM_HEIGHT_MAX}
+                className="ms-sash ms-sash-north"
+                onPointerDown={(e) => startPanelResize('bottom', e)}
+              />
+              <footer className="ms-panel ms-bottom" aria-label="Timeline">
+                <div className="ms-panel-header">
+                  <h3 className="ms-panel-title">Timeline</h3>
+                  <div className="ms-timeline-controls">
+                    <button
+                      type="button"
+                      className="ms-timeline-btn"
+                      aria-label={playing ? 'Pause' : 'Play'}
+                      onClick={togglePlayback}
+                    >
+                      {playing ? '\u23F8' : '\u25B6'}
+                    </button>
+                    <span className="ms-timeline-time" dir="ltr">
+                      {(playheadMs / 1000).toFixed(1)}s / {(document.durationMs / 1000).toFixed(1)}s
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="ms-panel-body">
-                <div className="ms-timeline-scrubber">
-                  <input
-                    type="range"
-                    className="ms-timeline-range"
-                    min={0}
-                    max={document.durationMs}
-                    value={playheadMs}
-                    onChange={(e) => seek(Number(e.target.value))}
-                    aria-label="Playhead position"
-                  />
+                <div className="ms-panel-body">
+                  <div className="ms-timeline-scrubber">
+                    <input
+                      type="range"
+                      className="ms-timeline-range"
+                      min={0}
+                      max={document.durationMs}
+                      value={playheadMs}
+                      onChange={(e) => seek(Number(e.target.value))}
+                      aria-label="Playhead position"
+                    />
+                  </div>
+                  <div className="ms-empty-state" lang="fa">
+                    کی‌فریم‌ها و ترک‌های انیمیشن اینجا نمایش داده می‌شوند.
+                  </div>
                 </div>
-                <div className="ms-empty-state" lang="fa">
-                  کی‌فریم‌ها و ترک‌های انیمیشن اینجا نمایش داده می‌شوند.
-                </div>
-              </div>
-            </footer>
+              </footer>
+            </div>
           )}
         </section>
 
         {hasRightPanel && (
-          <MotionStudioInspector layer={selectedLayer} document={document} dispatch={dispatch} />
+          <div className="ms-panel-host">
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize inspector panel"
+              aria-valuenow={rightWidth}
+              aria-valuemin={RIGHT_WIDTH_MIN}
+              aria-valuemax={RIGHT_WIDTH_MAX}
+              className="ms-sash ms-sash-west"
+              onPointerDown={(e) => startPanelResize('right', e)}
+            />
+            <MotionStudioInspector layer={selectedLayer} document={document} dispatch={dispatch} />
+          </div>
         )}
       </div>
     </div>
