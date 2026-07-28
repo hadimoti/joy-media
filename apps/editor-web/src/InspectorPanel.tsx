@@ -230,12 +230,14 @@ export function InspectorPanel({
       onTabChange={setTab}
       inactive={idle}
     >
-      <h2 className="inspector-selected-name" dir="ltr">
-        {title}
-      </h2>
-      <p className="monitor-meta" dir="ltr">
-        Playhead {(timeUs / 1_000_000).toFixed(2)}s
-      </p>
+      <div className="inspector-selection-row">
+        <h2 className="inspector-selected-name" dir="ltr">
+          {title}
+        </h2>
+        <p className="monitor-meta inspector-playhead-meta" dir="ltr">
+          Playhead {(timeUs / 1_000_000).toFixed(2)}s
+        </p>
+      </div>
 
       {tab === 'transform' && (
         <section className="inspector-section">

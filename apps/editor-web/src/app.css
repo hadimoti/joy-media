@@ -6136,11 +6136,29 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
+.inspector-selection-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
 .inspector-selected-name {
   margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-playhead-meta {
+  margin: 0;
+  flex: none;
+  text-align: end;
+  white-space: nowrap;
 }
 .inspector-section {
   display: grid;
