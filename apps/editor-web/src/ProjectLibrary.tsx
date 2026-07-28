@@ -36,8 +36,8 @@ export function ProjectLibrary({
             className="app-brand-logo"
             src="/assets/logo.png?v=joycode"
             alt=""
-            width={22}
-            height={22}
+            width={28}
+            height={28}
             decoding="async"
           />
           <strong>JOY Studio</strong>

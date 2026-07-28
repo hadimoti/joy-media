@@ -2477,8 +2477,8 @@ function EditorWorkspace({
               className="app-brand-logo"
               src="/assets/logo.png?v=joycode"
               alt=""
-              width={16}
-              height={16}
+              width={24}
+              height={24}
               decoding="async"
             />
             <strong>JOY Studio</strong>
