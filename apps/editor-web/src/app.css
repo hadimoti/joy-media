@@ -8906,3 +8906,63 @@ label {
 .ms-inspector-color {
   margin-right: 8px;
 }
+
+/* Motion Studio Phase 5 timeline property editor */
+.ms-timeline-keyframes {
+  border-top: 1px solid var(--joy-border-subtle);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.ms-timeline-kf-header,
+.ms-timeline-kf-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.ms-timeline-kf-header {
+  font-size: 10px;
+  color: var(--joy-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.ms-timeline-kf-prop {
+  font-size: 12px;
+  color: var(--joy-text);
+}
+.ms-timeline-kf-count {
+  font-size: 11px;
+  color: var(--joy-text-muted);
+  min-width: 24px;
+  text-align: center;
+}
+.ms-timeline-kf-add {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+.ms-timeline-trim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--joy-border-subtle);
+  background: rgba(0, 0, 0, 0.1);
+}
+.ms-timeline-trim-label {
+  font-size: 11px;
+  color: var(--joy-text-muted);
+}
+.ms-timeline-trim-input {
+  width: 80px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--joy-text);
+  font-size: 12px;
+}

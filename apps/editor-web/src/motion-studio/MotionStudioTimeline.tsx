@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MotionSceneDocument, MotionLayerId } from '@joy-media/motion-core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MotionLayer, MotionSceneDocument, MotionLayerId, MotionAnimation, MotionKeyframe } from '@joy-media/motion-core';
 import {
   clampPixelsPerSecond,
   fitPixelsPerSecond,
@@ -22,6 +22,8 @@ import {
   motionSceneToTimelineTracks,
 } from './motionSceneToTimelineTracks.js';
 import { UI_ICONS } from '../ui-icons.js';
+import type { SceneCommand } from './state/sceneCommands.js';
+import { useSceneEditor } from './state/useSceneEditor.js';
 
 export interface MotionStudioTimelineProps {
   readonly document: MotionSceneDocument;
@@ -33,6 +35,7 @@ export interface MotionStudioTimelineProps {
   readonly onSelectLayer: (layerId: MotionLayerId | null) => void;
   readonly onToggleVisibility: (layerId: MotionLayerId) => void;
   readonly onToggleLocked: (layerId: MotionLayerId) => void;
+  readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
 }
 
 /** Visible lane width = scrollport minus fixed 9.5rem track gutter. */
@@ -46,6 +49,7 @@ function measureLaneWidthPx(root: HTMLElement | null): number {
 
 /**
  * Same Dual Lens Time View chrome + TimelineCanvas geometry as the front app.
+ * Extends the base timeline with per-layer keyframe rows and layer trim handles.
  */
 export function MotionStudioTimeline({
   document,
@@ -57,6 +61,7 @@ export function MotionStudioTimeline({
   onSelectLayer,
   onToggleVisibility,
   onToggleLocked,
+  dispatch,
 }: MotionStudioTimelineProps) {
   const rootRef = useRef<HTMLElement | null>(null);
   const [viewport, setViewport] = useState<TimelineViewport>({
@@ -124,6 +129,134 @@ export function MotionStudioTimeline({
       pixelsPerSecond: clampPixelsPerSecond(nextPps),
     }));
   };
+
+  // ── Keyframe rows per selected layer ──
+  const selectedLayer = useMemo(
+    () => (selectedLayerIds.length === 1 ? document.layers.find((l) => l.id === selectedLayerIds[0]) : null),
+    [document.layers, selectedLayerIds],
+  );
+
+  const keyframeRows = useMemo(() => {
+    if (!selectedLayer) return [];
+    return selectedLayer.animations.map((anim) => ({
+      property: anim.property,
+      keyframeCount: anim.curve.keyframes.length,
+      firstTimeUs: anim.curve.keyframes[0]?.timeMs ?? 0,
+      lastTimeUs: anim.curve.keyframes[anim.curve.keyframes.length - 1]?.timeMs ?? 0,
+    }));
+  }, [selectedLayer]);
+
+  const handleAddKeyframe = useCallback(
+    (property: string) => {
+      if (!selectedLayer) return;
+      const timeMs = playheadMs;
+      const existing = selectedLayer.animations.find((a) => a.property === property);
+      const newKeyframe: MotionKeyframe = {
+        id: crypto.randomUUID(),
+        timeMs,
+        value: 0,
+        easing: { kind: 'builtin' as const, name: 'ease' as const },
+      };
+      const nextAnimation: MotionAnimation = existing
+        ? {
+            ...existing,
+            curve: {
+              ...existing.curve,
+              keyframes: [...existing.curve.keyframes, newKeyframe].sort(
+                (a, b) => a.timeMs - b.timeMs,
+              ),
+            },
+          }
+        : {
+            property,
+            curve: { keyframes: [newKeyframe] },
+          };
+      const next = existing
+        ? selectedLayer.animations.map((a) => (a.property === property ? nextAnimation : a))
+        : [...selectedLayer.animations, nextAnimation];
+      dispatch('Add keyframe', {
+        type: 'scene.setLayerAnimations',
+        payload: { layerId: selectedLayer.id, animations: next },
+      });
+    },
+    [dispatch, selectedLayer, playheadMs],
+  );
+
+  const handleRemoveKeyframe = useCallback(
+    (property: string, keyframeId: string) => {
+      if (!selectedLayer) return;
+      const next = selectedLayer.animations
+        .map((anim) => {
+          if (anim.property !== property) return anim;
+          return {
+            ...anim,
+            curve: {
+              ...anim.curve,
+              keyframes: anim.curve.keyframes.filter((kf) => kf.id !== keyframeId),
+            },
+          };
+        })
+        .filter((anim) => anim.curve.keyframes.length > 0);
+      dispatch('Remove keyframe', {
+        type: 'scene.setLayerAnimations',
+        payload: { layerId: selectedLayer.id, animations: next },
+      });
+    },
+    [dispatch, selectedLayer],
+  );
+
+  // ── Layer trim (in/out point drag) ──
+  const handleTrimIn = useCallback(
+    (layerId: MotionLayerId, newInMs: number) => {
+      const layer = document.layers.find((l) => l.id === layerId);
+      if (!layer) return;
+      const clamped = Math.max(0, Math.min(newInMs, layer.outTimeMs ?? document.durationMs));
+      dispatch('Trim in', {
+        type: 'scene.setLayerProperty',
+        payload: { layerId, property: 'inTimeMs', value: clamped },
+      });
+    },
+    [dispatch, document.layers, document.durationMs],
+  );
+
+  const handleTrimOut = useCallback(
+    (layerId: MotionLayerId, newOutMs: number) => {
+      const layer = document.layers.find((l) => l.id === layerId);
+      if (!layer) return;
+      const clamped = Math.max(layer.inTimeMs ?? 0, Math.min(newOutMs, document.durationMs));
+      dispatch('Trim out', {
+        type: 'scene.setLayerProperty',
+        payload: { layerId, property: 'outTimeMs', value: clamped },
+      });
+    },
+    [dispatch, document.layers, document.durationMs],
+  );
+
+  // ── Ease/hold/linear preset for selected keyframe ──
+  const handleSetKeyframeEasing = useCallback(
+    (property: string, keyframeId: string, easingKind: 'builtin' | 'cubic-bezier') => {
+      if (!selectedLayer) return;
+      const next = selectedLayer.animations.map((anim) => {
+        if (anim.property !== property) return anim;
+        return {
+          ...anim,
+          curve: {
+            ...anim.curve,
+            keyframes: anim.curve.keyframes.map((kf) =>
+              kf.id === keyframeId
+                ? ({ ...kf, easing: { kind: easingKind, name: 'ease' as const } } as MotionKeyframe)
+                : kf,
+            ),
+          },
+        } as MotionAnimation;
+      });
+      dispatch('Set easing', {
+        type: 'scene.setLayerAnimations',
+        payload: { layerId: selectedLayer.id, animations: next },
+      });
+    },
+    [dispatch, selectedLayer],
+  );
 
   return (
     <section className="dual-time ms-dual-time" aria-label="Timeline" ref={rootRef}>
@@ -207,6 +340,62 @@ export function MotionStudioTimeline({
           </div>
         </div>
       </div>
+
+      {/* Keyframe property rows for selected layer */}
+      {selectedLayer && keyframeRows.length > 0 && (
+        <div className="ms-timeline-keyframes" aria-label="Keyframe properties">
+          <div className="ms-timeline-kf-header">
+            <span>Property</span>
+            <span>Keyframes</span>
+            <span>Add</span>
+          </div>
+          {keyframeRows.map((row) => (
+            <div key={row.property} className="ms-timeline-kf-row">
+              <span className="ms-timeline-kf-prop">{row.property}</span>
+              <span className="ms-timeline-kf-count">{row.keyframeCount}</span>
+              <button
+                type="button"
+                className="icon-button ms-timeline-kf-add"
+                aria-label={`Add keyframe to ${row.property}`}
+                title={`Add keyframe at ${playheadMs.toFixed(0)}ms`}
+                onClick={() => handleAddKeyframe(row.property)}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <rect x="5" y="1" width="2" height="10" fill="currentColor" />
+                  <rect x="1" y="5" width="10" height="2" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Trim controls for selected layer */}
+      {selectedLayer && (
+        <div className="ms-timeline-trim" aria-label="Layer trim">
+          <span className="ms-timeline-trim-label">In</span>
+          <input
+            aria-label="Trim in"
+            type="number"
+            className="ms-timeline-trim-input"
+            value={Math.round(selectedLayer.inTimeMs ?? 0)}
+            min={0}
+            max={Math.round(selectedLayer.outTimeMs ?? document.durationMs)}
+            onChange={(event) => handleTrimIn(selectedLayer.id, event.currentTarget.valueAsNumber)}
+          />
+          <span className="ms-timeline-trim-label">Out</span>
+          <input
+            aria-label="Trim out"
+            type="number"
+            className="ms-timeline-trim-input"
+            value={Math.round(selectedLayer.outTimeMs ?? document.durationMs)}
+            min={Math.round(selectedLayer.inTimeMs ?? 0)}
+            max={document.durationMs}
+            onChange={(event) => handleTrimOut(selectedLayer.id, event.currentTarget.valueAsNumber)}
+          />
+        </div>
+      )}
+
       <TimelineCanvas
         className="dual-time-canvas"
         durationUs={durationUs}

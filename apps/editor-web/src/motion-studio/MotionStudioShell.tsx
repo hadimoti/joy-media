@@ -472,6 +472,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
                   onSelectLayer={selectLayer}
                   onToggleVisibility={handleToggleVisibility}
                   onToggleLocked={handleToggleLocked}
+                  dispatch={dispatch}
                 />
               </footer>
             </div>
