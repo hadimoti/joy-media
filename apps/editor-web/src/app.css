@@ -5313,8 +5313,13 @@ label {
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--joy-accent) 10%, transparent));
 }
 .joy-code-panel .joy-panel-title-icon {
-  width: 1.3rem;
+  width: 1rem;
   height: 1rem;
+}
+.joy-code-panel .joy-panel-title-icon .app-brand-logo {
+  width: 1rem;
+  height: 1rem;
+  display: block;
 }
 @keyframes joy-code-thinking-wiggle {
   0%,

@@ -536,7 +536,17 @@ export function AgentPanel({
   return (
     <PanelShell
       title="Joy Code"
-      icon={<JoyCodeLogo variant="mark" />}
+      icon={
+        <img
+          className="app-brand-logo"
+          src="/assets/logo.png"
+          alt=""
+          width={16}
+          height={16}
+          decoding="async"
+          draggable={false}
+        />
+      }
       className="joy-code-panel"
       actions={
         <button
