@@ -130,27 +130,49 @@ const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: st
 
 /* ─── Motion Card ─── */
 
+/**
+ * Card preview per built-in motion: the `@keyframes` name in `app.css` plus its
+ * timing function. Every card runs the same logo PNG — the loop alternates, so
+ * an intro reads as enter-then-leave and an outro as leave-then-return.
+ */
+const MOTION_CARD_PREVIEWS: Readonly<Record<string, readonly [string, string]>> = {
+  'joy-fade-in': ['m-fade-in', 'ease-in'],
+  'joy-fade-out': ['m-fade-out', 'ease-out'],
+  'joy-pop-in': ['m-pop-in', 'ease-out'],
+  'joy-pop-out': ['m-pop-out', 'ease-in'],
+  'joy-zoom-in': ['m-zoom-in', 'ease-out'],
+  'joy-zoom-out': ['m-zoom-out', 'ease-in'],
+  'joy-punch-in': ['m-punch-in', 'cubic-bezier(0.2, 0.9, 0.25, 1)'],
+  'joy-slide-up': ['m-slide-up', 'ease-out'],
+  'joy-slide-down': ['m-slide-down', 'ease-out'],
+  'joy-slide-in-left': ['m-slide-in-left', 'ease-out'],
+  'joy-slide-in-right': ['m-slide-in-right', 'ease-out'],
+  'joy-slide-out-up': ['m-slide-out-up', 'ease-in'],
+  'joy-slide-out-left': ['m-slide-out-left', 'ease-in'],
+  'joy-slide-out-right': ['m-slide-out-right', 'ease-in'],
+  'joy-bounce-in': ['m-bounce-in', 'cubic-bezier(0.28, 0.84, 0.42, 1)'],
+  'joy-bounce-out': ['m-bounce-out', 'cubic-bezier(0.6, 0.04, 0.98, 0.34)'],
+  'joy-bounce-drop': ['m-bounce-drop', 'cubic-bezier(0.3, 0.8, 0.4, 1)'],
+  'joy-rubber-band': ['m-rubber-band', 'ease-in-out'],
+  'joy-spin-in': ['m-spin-in', 'ease-out'],
+  'joy-spin-out': ['m-spin-out', 'ease-in'],
+  'joy-swing-in': ['m-swing-in', 'ease-out'],
+  'joy-roll-in': ['m-roll-in', 'ease-out'],
+  'joy-roll-out': ['m-roll-out', 'ease-in'],
+  'joy-arc-in': ['m-arc-in', 'ease-out'],
+  'joy-flip-in-x': ['m-flip-in-x', 'ease-out'],
+  'joy-flip-in-y': ['m-flip-in-y', 'ease-out'],
+  'joy-flip-out-y': ['m-flip-out-y', 'ease-in'],
+  'joy-depth-push-in': ['m-depth-push-in', 'ease-out'],
+  'joy-depth-pull-out': ['m-depth-pull-out', 'ease-in'],
+  'joy-fly-through-out': ['m-fly-through-out', 'cubic-bezier(0.5, 0, 0.9, 0.4)'],
+};
+
 function animationForMotion(motion: MotionDescriptor): CSSProperties | undefined {
-  switch (motion.id) {
-    case 'joy-fade-in':
-      return {
-        animation: `m-fade-in ${motion.durationMs}ms ease-in infinite alternate`,
-      };
-    case 'joy-fade-out':
-      return {
-        animation: `m-fade-out ${motion.durationMs}ms ease-out infinite alternate`,
-      };
-    case 'joy-pop-in':
-      return {
-        animation: `m-pop-in ${motion.durationMs}ms ease-out infinite alternate`,
-      };
-    case 'joy-slide-up':
-      return {
-        animation: `m-slide-up ${motion.durationMs}ms ease-out infinite alternate`,
-      };
-    default:
-      return undefined;
-  }
+  const preview = MOTION_CARD_PREVIEWS[motion.id];
+  if (preview === undefined) return undefined;
+  const [keyframes, easing] = preview;
+  return { animation: `${keyframes} ${motion.durationMs}ms ${easing} infinite alternate` };
 }
 
 function MotionCard({
