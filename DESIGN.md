@@ -83,7 +83,7 @@ Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab 
 | Rule | Implementation |
 | ---- | -------------- |
 | Canvas | `#root .workspace`, `.app-header`, `.app-menubar`, and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). |
-| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (16px), `overflow: hidden`. Tab rail (`.dv-tabs-container` + `.dv-void-container`) and `.dv-content-container` share the same outer radius as one tile. |
+| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (16px), `overflow: hidden`. Apply radius on `.dv-groupview` itself (not only under `.dv-resize-container` — docked groups live in `.dv-view`). Tab rail + `.dv-content-container` share the same outer radius as one tile. |
 | Gap rhythm | `--dv-separator-border` and split `::before` separators use `--joy-gap` at `--joy-shell-gap` width. Each groupview also carries a `2px solid var(--joy-bg-app)` border so adjacent tiles never touch. |
 | Tab rail | `.dv-tabs-and-actions-container` uses `--joy-bg-chrome`. Icon tabs (`.dv-tab`) are inset tiles: `--joy-bg-inset` at rest, `--joy-bg-elevated` when active, `--joy-radius-inner` corners. Active tab icon tint stays amber (§1a). |
 | Panel content | `.dv-content-container` / `.dv-react-part` fill `--joy-bg-panel`. `.joy-panel-root` does not repaint its own background — content sits inside the dock tile. Timeline, Dual Lens, and Monitor stay flush (`padding: 0`) inside their tile. |

@@ -5323,7 +5323,8 @@ label {
 #root .workspace .dv-resize-container:has(> .dv-groupview) {
   border-radius: var(--joy-radius-panel);
 }
-#root .workspace .dv-resize-container .dv-groupview {
+#root .workspace .dv-resize-container .dv-groupview,
+#root .workspace .dv-groupview {
   border: var(--joy-shell-gap) solid var(--joy-bg-app);
   border-radius: var(--joy-radius-panel);
   overflow: hidden;
