@@ -8651,6 +8651,7 @@ label {
 .asset-grid {
   flex: 1 1 auto;
   min-height: 0;
+  grid-auto-rows: max-content;
   padding: 0.7rem 0.75rem 0.85rem;
   gap: 0.65rem;
 }
@@ -8705,6 +8706,16 @@ label {
 }
 .asset-grid--medium .asset-card-media {
   aspect-ratio: 5 / 4;
+}
+.asset-grid--large .asset-card-media-wrap {
+  aspect-ratio: 4 / 3;
+}
+.asset-grid--medium .asset-card-media-wrap {
+  aspect-ratio: 5 / 4;
+}
+.asset-grid--large .asset-card-media,
+.asset-grid--medium .asset-card-media {
+  height: 100%;
 }
 .asset-card-media img {
   box-sizing: border-box;

@@ -24,6 +24,7 @@ import {
   openOpfsOriginalAssetCache,
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
+import { CloudPreviewQueue } from './cloud-preview-queue.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
 import {
   CloseIcon,
@@ -98,6 +99,7 @@ export function AssetLibraryPanel({
     [client],
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
+  const cloudPreviewQueue = useMemo(() => new CloudPreviewQueue(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -371,8 +373,8 @@ export function AssetLibraryPanel({
     }
   }, [client, projectId]);
   const fetchCloudOriginal = useCallback(
-    (id: string) => client.sharedCloudOriginalBytes(id),
-    [client],
+    (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
+    [client, cloudPreviewQueue],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
