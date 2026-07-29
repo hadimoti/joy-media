@@ -64,7 +64,7 @@ export function EffectStudioPreview({
         <div>
           <span className="es-live-dot" />
           Live preview
-          <small>{previewReady ? 'Render-parity canvas' : 'Processing stack'}</small>
+          <small>{previewReady ? 'Animated render preview' : 'Processing stack'}</small>
         </div>
         <div className="es-preview-time">{formatTime(playheadMs)}</div>
       </div>
