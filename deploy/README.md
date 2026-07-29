@@ -4,6 +4,12 @@
 Node server's `/v1/*` route. `joy-media-api.override.conf` starts an immutable
 `pnpm deploy --prod` API release and reads only `/etc/joy-media/api.env`.
 
+**Domain (as of 2026-07-30):** `joyst.ir` is the canonical public domain,
+proxied through Cloudflare (SSL/TLS mode: Full, self-signed origin cert at
+`/etc/ssl/joyst/`). `media.joyteam.ir` is kept alive purely as a 301 redirect
+to `joyst.ir` so the joy-vps super-app launcher's `media.joyteam.ir` link
+never had to change. See `joy-media.nginx.conf` for both server blocks.
+
 The environment file is created on the VPS with mode `0600` and contains (see
 [ADR-0017](../docs/adr/0017-independent-media-login.md)):
 
