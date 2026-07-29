@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assetCollectionId,
+  assetCollectionsForCategory,
   filterAssetLibrary,
   preferredDerivative,
   type AssetLibraryItem,
@@ -15,6 +17,7 @@ const items: readonly AssetLibraryItem[] = [
       sha256: 'a'.repeat(64),
       bytes: 200,
       descriptor: { mimeType: 'video/mp4' },
+      tags: ['category-clips'],
       createdAt: 20,
     },
     derivatives: [
@@ -53,18 +56,49 @@ const items: readonly AssetLibraryItem[] = [
       sha256: 'd'.repeat(64),
       bytes: 50,
       descriptor: { mimeType: 'image/png' },
+      tags: ['category-logo', 'logo'],
       createdAt: 10,
+    },
+    derivatives: [],
+  },
+  {
+    asset: {
+      id: 'image-2',
+      projectId: 'project-1',
+      kind: 'image',
+      displayName: 'Imported alpha element',
+      sha256: 'e'.repeat(64),
+      bytes: 40,
+      descriptor: { mimeType: 'image/png' },
+      tags: ['joy-media-library', 'category-unknown', 'transparent'],
+      createdAt: 9,
     },
     derivatives: [],
   },
 ];
 
 describe('asset library state', () => {
-  it('combines category, search, availability, and sort without changing catalog records', () => {
-    expect(filterAssetLibrary(items, 'video', 'launch', 'available-cloud', 'recent')).toEqual([
-      items[0],
+  it('combines media type, collection, search, availability, and sort without changing catalog records', () => {
+    expect(
+      filterAssetLibrary(items, 'video', 'category:clips', 'launch', 'available-cloud', 'recent'),
+    ).toEqual([items[0]]);
+    expect(filterAssetLibrary(items, 'image', 'category:logo', '', 'none', 'name')).toEqual([
+      items[1],
     ]);
-    expect(filterAssetLibrary(items, 'all', '', 'none', 'name')).toEqual([items[1]]);
+  });
+
+  it('provides a browse collection plus semantic collections for current and future media', () => {
+    expect(assetCollectionId(items[1]!.asset)).toBe('category:logo');
+    expect(assetCollectionId(items[2]!.asset)).toBe('category:elements');
+    expect(assetCollectionsForCategory(items, 'image')).toEqual([
+      { id: 'browse', label: 'Browse', count: 2 },
+      { id: 'category:elements', label: 'Creative elements', count: 1 },
+      { id: 'category:logo', label: 'Brand marks', count: 1 },
+    ]);
+    expect(assetCollectionsForCategory(items, 'video')).toEqual([
+      { id: 'browse', label: 'Browse', count: 1 },
+      { id: 'category:clips', label: 'Clips', count: 1 },
+    ]);
   });
 
   it('prefers verified cloud playback over a newer local cache record', () => {

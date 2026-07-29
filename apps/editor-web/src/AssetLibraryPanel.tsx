@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-} from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
@@ -15,10 +7,14 @@ import {
   type BrowserDerivative,
 } from './control-plane-client.js';
 import {
+  assetCollectionId,
+  assetCollectionLabel,
+  assetCollectionsForCategory,
   filterAssetLibrary,
   preferredDerivative,
   type AssetAvailability,
   type AssetCategory,
+  type AssetCollectionId,
   type AssetLibraryItem,
   type AssetSort,
   type AssetViewMode,
@@ -32,7 +28,6 @@ import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.j
 import {
   CloseIcon,
   CloudIcon,
-  ImageIcon,
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
@@ -42,25 +37,20 @@ import {
   GridUiIcon,
   ListIcon,
   TrashIcon,
-  VideoIcon,
-  SpeakerOnIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
-const VIEW_CYCLE: readonly AssetViewMode[] = ['large', 'medium', 'list'];
 const ASSET_RENDER_PAGE_SIZE = 120;
 
 const categories: readonly {
   readonly id: AssetCategory;
   readonly label: string;
-  readonly Icon: ComponentType;
 }[] = [
-  { id: 'all', label: 'All assets', Icon: GridUiIcon },
-  { id: 'video', label: 'Video', Icon: VideoIcon },
-  { id: 'audio', label: 'Audio', Icon: SpeakerOnIcon },
-  { id: 'image', label: 'Images', Icon: ImageIcon },
+  { id: 'image', label: 'Images' },
+  { id: 'video', label: 'Video' },
+  { id: 'audio', label: 'Audio' },
 ];
 
 interface Preview {
@@ -112,14 +102,15 @@ export function AssetLibraryPanel({
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [category, setCategory] = useState<AssetCategory>('all');
+  const [category, setCategory] = useState<AssetCategory>('image');
+  const [collection, setCollection] = useState<AssetCollectionId>('browse');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [availability, setAvailability] = useState<AssetAvailability>('all');
   const [sort, setSort] = useState<AssetSort>('name');
   const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
-  const [status, setStatus] = useState('در حال بارگذاری کاتالوگ رسانه…');
+  const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
@@ -181,7 +172,7 @@ export function AssetLibraryPanel({
       setStatus(
         assets.length === 0
           ? 'هنوز رسانه‌ای وجود ندارد. برای همگام‌سازی با کتابخانهٔ ابری مشترک، تصویر وارد کنید.'
-          : `کاتالوگ آماده است · ${ownedAssets.length} متعلق به شما · ${sharedAssets.length} اشتراک‌گذاری‌شده در ابر`,
+          : undefined,
       );
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
@@ -237,13 +228,21 @@ export function AssetLibraryPanel({
     [onEditWithAi],
   );
 
+  const collections = useMemo(
+    () => assetCollectionsForCategory(items, category),
+    [items, category],
+  );
+  useEffect(() => {
+    if (collections.some((entry) => entry.id === collection)) return;
+    setCollection('browse');
+  }, [collection, collections]);
   const visible = useMemo(
-    () => filterAssetLibrary(items, category, deferredQuery, availability, sort),
-    [items, category, deferredQuery, availability, sort],
+    () => filterAssetLibrary(items, category, collection, deferredQuery, availability, sort),
+    [items, category, collection, deferredQuery, availability, sort],
   );
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
-  }, [items, category, deferredQuery, availability, sort]);
+  }, [items, category, collection, deferredQuery, availability, sort]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
   const openPreview = useCallback(
     async (asset: BrowserAsset, derivative: BrowserDerivative) => {
@@ -385,13 +384,6 @@ export function AssetLibraryPanel({
     });
   }, []);
 
-  const cycleViewMode = useCallback(() => {
-    const index = VIEW_CYCLE.indexOf(viewMode);
-    const next = VIEW_CYCLE[(index + 1) % VIEW_CYCLE.length] ?? 'medium';
-    setViewMode(next);
-    writeAssetViewMode(next);
-  }, [viewMode]);
-
   const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
       if (asset.kind !== 'image') {
@@ -513,13 +505,10 @@ export function AssetLibraryPanel({
     visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.has(id));
   const selectedCount = selectedAssetIds.size;
 
-  // Categories are the panel's tabs now (DESIGN.md §3a) — they were a left
-  // icon rail, the only panel in the app with chrome on that edge.
+  // The top level is intentionally media-specific. Collections below it are
+  // driven by category-* tags, so future videos and audio inherit the same UI.
   const categoryTabs: readonly PanelTabSpec[] = categories.map((entry) => {
-    const count =
-      entry.id === 'all'
-        ? items.length
-        : items.filter(({ asset }) => asset.kind === entry.id).length;
+    const count = items.filter(({ asset }) => asset.kind === entry.id).length;
     return { id: entry.id, label: `${entry.label} ${count}` };
   });
 
@@ -530,7 +519,10 @@ export function AssetLibraryPanel({
       className="asset-library"
       tabs={categoryTabs}
       activeTab={category}
-      onTabChange={(id) => setCategory(id as typeof category)}
+      onTabChange={(id) => {
+        setCategory(id as AssetCategory);
+        setCollection('browse');
+      }}
       search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی رسانه‌ها…' }}
       note={status}
       leadingActions={
@@ -593,28 +585,75 @@ export function AssetLibraryPanel({
           >
             <CloudIcon />
           </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`View: ${viewMode} — click for ${VIEW_CYCLE[(VIEW_CYCLE.indexOf(viewMode) + 1) % VIEW_CYCLE.length]}`}
-            title={`View: ${viewMode}`}
-            data-guide={`View: ${viewMode}`}
-            onClick={cycleViewMode}
-          >
-            {viewMode === 'large' ? (
+          <div className="asset-view-switch" role="group" aria-label="Asset view">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Large previews"
+              title="Large previews"
+              aria-pressed={viewMode === 'large'}
+              data-active={viewMode === 'large' ? 'true' : undefined}
+              onClick={() => {
+                setViewMode('large');
+                writeAssetViewMode('large');
+              }}
+            >
               <span className="asset-view-glyph asset-view-glyph--large" aria-hidden>
                 ▦
               </span>
-            ) : viewMode === 'medium' ? (
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Compact grid"
+              title="Compact grid"
+              aria-pressed={viewMode === 'medium'}
+              data-active={viewMode === 'medium' ? 'true' : undefined}
+              onClick={() => {
+                setViewMode('medium');
+                writeAssetViewMode('medium');
+              }}
+            >
               <GridUiIcon />
-            ) : (
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="List view"
+              title="List view"
+              aria-pressed={viewMode === 'list'}
+              data-active={viewMode === 'list' ? 'true' : undefined}
+              onClick={() => {
+                setViewMode('list');
+                writeAssetViewMode('list');
+              }}
+            >
               <ListIcon />
-            )}
-          </button>
+            </button>
+          </div>
         </>
       }
     >
       <div className="asset-library-content" ref={toolbarRef}>
+        <div
+          className="asset-library-collections"
+          role="tablist"
+          aria-label={`${category} collections`}
+        >
+          {collections.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="tab"
+              className="asset-library-collection-tab"
+              aria-selected={collection === entry.id}
+              onClick={() => setCollection(entry.id)}
+            >
+              <span>{entry.label}</span>
+              <small>{entry.count}</small>
+            </button>
+          ))}
+        </div>
         {importProgress !== undefined && (
           <div
             className="asset-upload-progress"
@@ -833,7 +872,7 @@ export function AssetLibraryPanel({
         )}
         {visible.length === 0 ? (
           <div className="asset-library-empty">
-            {status.includes('بارگذاری کاتالوگ') ? (
+            {status?.includes('بارگذاری کاتالوگ') ? (
               // The status line is the shell's note now — do not print it twice.
               <p lang="fa">بارگذاری کاتالوگ رسانه ناموفق بود.</p>
             ) : (
@@ -871,6 +910,7 @@ export function AssetLibraryPanel({
                 </label>
                 <span className="asset-list-header-thumb" />
                 <span className="asset-list-header-name">Name</span>
+                <span className="asset-list-header-collection">Collection</span>
                 <span className="asset-list-header-size">Size</span>
                 <span className="asset-list-header-actions">Actions</span>
               </div>
@@ -883,8 +923,10 @@ export function AssetLibraryPanel({
                   (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
                 const cloudBacked = cloudAssetIds.has(asset.id);
                 const selected = selectedAssetIds.has(asset.id);
+                const assetCollection = assetCollectionLabel(assetCollectionId(asset));
                 const detailHint = [
                   asset.kind,
+                  assetCollection,
                   asset.descriptor.mimeType,
                   formatBytes(asset.bytes),
                   cloudBacked ? 'Cloud original' : availabilityLabel(avail),
@@ -935,6 +977,9 @@ export function AssetLibraryPanel({
                     <strong className="asset-card-name" title={asset.displayName}>
                       {asset.displayName}
                     </strong>
+                    <span className="asset-card-collection" title={assetCollection}>
+                      {assetCollection}
+                    </span>
                     <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
                     <div className="asset-card-actions">
                       {(asset.kind === 'image' || asset.kind === 'video') && (
