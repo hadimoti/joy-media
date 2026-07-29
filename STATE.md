@@ -3,6 +3,17 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
+## VPS access
+
+JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.
+
+- **Host: `82.115.8.224`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`.** SSH alias `sweden`/`sweden-vps` is configured in `~/.ssh/config` (`ssh sweden` works directly). Without the alias: `ssh -i ~/.ssh/Joy-Vps-New.pem root@82.115.8.224`.
+- The box was compromised and rebuilt from scratch on 2026-07-26 — any reference to the old host `46.249.103.142` or old key `joy-vps.pem` anywhere is dead; don't use them.
+- **Public domain: `joyst.ir`** (canonical since 2026-07-30, Cloudflare-proxied, SSL/TLS mode Full, self-signed origin cert at `/etc/ssl/joyst/`). `media.joyteam.ir` still exists purely as a 301 redirect to `joyst.ir` (so joy-vps's super-app launcher link never had to change) — don't expect it to serve the app directly.
+- App layout on the VPS: `/opt/joy-media/repo` (git checkout, remote `origin` → bare repo `/opt/joy-media.git`), `/opt/joy-media/releases/<rev>[-slug]` (immutable API releases, `current-api` symlink), `/opt/joy-media/web-releases/<rev>[-slug]` (immutable static editor builds, `web` symlink), secrets in `/etc/joy-media/api.env` (mode 0600, never committed — see `deploy/README.md` for the env vars it holds).
+- `pnpm` isn't on `PATH` by default in a fresh non-interactive SSH session on this box (no `corepack` binary either) — a shim was installed at `/usr/local/bin/pnpm` on 2026-07-30 pointing at the cached corepack pnpm binary matching this repo's `packageManager` version; if it's ever missing again, check `~/.cache/node/corepack/v1/pnpm/*/bin/pnpm.cjs`.
+- joy-vps's admin panel reaches this app's Postgres directly (not through this app's API) via a separate, least-privileged role `joyvps_media_admin` scoped to the `media_allowed_users` table only — see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`.
+
 > **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-24)** below. Pro-tools roadmap Phases 0–6 landed 2026-07-24 (library/timeline ship, trim/DnD/audio preview, GraphEditor, Audio/Effects/Color panels, markers/tracks, export presets, honest agent audio).
 
 | Part                             | Status      | WPs done | Last session | Next action                                                                                                 |
@@ -49,9 +60,18 @@ completes OTP verification — no more linking out to joyteam.ir.
 joy-vps's admin panel keeps a "Joy Media" tab to manage the allow-list, now
 via a scoped direct-Postgres connection (see
 `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) rather than the old assertion issuer.
-**Still needed before this is live on the VPS:** provision
-`JOY_MEDIA_SMTP_*` and `JOY_MEDIA_BOT_TOKEN` in `/etc/joy-media/api.env`,
-and the `joyvps_media_admin` Postgres role for joy-vps's `.env`.
+
+**Update 2026-07-30 — deployed and live, plus domain move.** `JOY_MEDIA_SMTP_*`
+and `JOY_MEDIA_BOT_TOKEN` were provisioned by reusing joy-vps's existing
+Gmail account and Telegram bot token (not new dedicated credentials); the
+`joyvps_media_admin` Postgres role was created and wired into joy-vps's
+`.env`. Both services restarted and verified end-to-end (schema created,
+OTP request/verify round-trip, joy-vps ↔ Postgres direct read/write all
+confirmed working). Separately, **`joyst.ir` is now the canonical public
+domain** (Cloudflare-proxied, SSL/TLS mode Full, self-signed origin cert at
+`/etc/ssl/joyst/`) — `media.joyteam.ir` is kept alive only as a 301 redirect
+to `joyst.ir` so joy-vps's super-app launcher link never had to change. See
+`deploy/README.md` and the VPS Access section at the top of this file.
 
 ## Handoff for next agent (2026-07-26)
 
