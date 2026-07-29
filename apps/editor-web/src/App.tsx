@@ -107,6 +107,7 @@ import {
   readImageMatteMap,
   resolveObjectIdForSelection,
 } from './sticker-bindings.js';
+import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import {
@@ -2110,10 +2111,14 @@ function EditorWorkspace({
     }
     if (api.id === 'effects') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+      const canApplyEffects =
+        objectId !== undefined &&
+        isSingleVideoClipSelected(context.timelineProject, state.selectedIds);
       return (
         <EffectsPanel
           project={visualProject}
           objectId={objectId}
+          canApplyEffects={canApplyEffects}
           onDispatch={(command) => {
             context.dispatchProject({
               label: `Effect: ${(command.payload as { effectId: string }).effectId}`,
@@ -2992,6 +2997,7 @@ function MonitorPanel() {
     clipFrameCache,
     clipFrameTick,
     visualProject,
+    timelineProject,
     stickerTick,
     togglePlayback,
     seek,
@@ -3186,8 +3192,8 @@ function MonitorPanel() {
       try {
         const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
         const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
-        if (!objectId) {
-          showToast('یک کلیپ را انتخاب کنید یا افکت را مستقیماً روی تایم‌لاین رها کنید.', 'info');
+        if (!objectId || !isSingleVideoClipSelected(timelineProject, state.selectedIds)) {
+          showToast('Select one video clip before dropping an effect.', 'info');
           return;
         }
         const descriptor = effectRegistry.getEffect(payload.effectId);
@@ -3209,7 +3215,7 @@ function MonitorPanel() {
         /* ignore malformed */
       }
     },
-    [dispatchProject, visualProject, state.selectedIds, showToast],
+    [dispatchProject, timelineProject, visualProject, state.selectedIds, showToast],
   );
 
   return (

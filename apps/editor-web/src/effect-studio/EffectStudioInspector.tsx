@@ -4,7 +4,7 @@ import {
   type EffectParamValue,
 } from '@joy-media/visual-effects';
 import { KeyframeActiveIcon, KeyframeNoneIcon, RefreshIcon } from '../icons.js';
-import { effectPreviewUrl } from '../effect-preview-url.js';
+import { EffectPreviewMedia } from '../EffectPreviewMedia.js';
 
 interface EffectStudioInspectorProps {
   readonly effect: EffectInstanceV1 | undefined;
@@ -57,7 +57,7 @@ export function EffectStudioInspector({
         </button>
       </div>
       <div className="es-inspector-summary">
-        <img src={effectPreviewUrl(descriptor.id)} alt="" width="54" height="54" />
+        <EffectPreviewMedia effectId={descriptor.id} className="es-inspector-preview-media" />
         <p>{descriptor.description}</p>
       </div>
       <div className="es-backend-row">

@@ -16,7 +16,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 import { EditorPanelContext } from './App.js';
-import { effectPreviewUrl } from './effect-preview-url.js';
+import { EffectPreviewMedia } from './EffectPreviewMedia.js';
 import {
   createEffectRecipe,
   listEffectRecipes,
@@ -38,6 +38,8 @@ const CATEGORIES: readonly PanelTabSpec[] = [
 interface EffectsPanelProps {
   readonly project: JoyProjectV1;
   readonly objectId: string | undefined;
+  /** Catalog previews stay live even when this is false. */
+  readonly canApplyEffects: boolean;
   readonly onDispatch: (transaction: {
     readonly type: 'effect.add';
     readonly payload: {
@@ -50,9 +52,15 @@ interface EffectsPanelProps {
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 
-export function EffectsPanel({ project, objectId, onDispatch, showToast }: EffectsPanelProps) {
+export function EffectsPanel({
+  project,
+  objectId,
+  canApplyEffects,
+  onDispatch,
+  showToast,
+}: EffectsPanelProps) {
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('recipes');
+  const [category, setCategory] = useState('pixel-bw');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
     listEffectRecipes(window.localStorage),
@@ -115,11 +123,8 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 
   const handleAdd = useCallback(
     (effectId: string) => {
-      if (!objectId) {
-        showToast(
-          'برای اعمال افکت، یک کلیپ را انتخاب کنید یا افکت را روی تایم‌لاین بکشید.',
-          'info',
-        );
+      if (!canApplyEffects || !objectId) {
+        showToast('Select one video clip to apply effects.', 'info');
         return;
       }
       const descriptor = effectRegistry.getEffect(effectId);
@@ -133,18 +138,25 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
         payload: { objectId, effectId, params: defaults },
       });
     },
-    [objectId, onDispatch, showToast],
+    [canApplyEffects, objectId, onDispatch, showToast],
   );
 
-  const handleDragStart = useCallback((effectId: string, event: React.DragEvent) => {
-    const payload: EffectDragPayload = {
-      kind: 'joy/effect',
-      effectId,
-      source: 'effects-panel',
-    };
-    event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
-    event.dataTransfer.effectAllowed = 'copy';
-  }, []);
+  const handleDragStart = useCallback(
+    (effectId: string, event: React.DragEvent) => {
+      if (!canApplyEffects) {
+        event.preventDefault();
+        return;
+      }
+      const payload: EffectDragPayload = {
+        kind: 'joy/effect',
+        effectId,
+        source: 'effects-panel',
+      };
+      event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
+      event.dataTransfer.effectAllowed = 'copy';
+    },
+    [canApplyEffects],
+  );
 
   const handleCreateRecipe = useCallback(() => {
     const selectedEffects =
@@ -184,6 +196,11 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       tabs={CATEGORIES}
       activeTab={category}
       onTabChange={setCategory}
+      note={
+        canApplyEffects
+          ? undefined
+          : 'Select one video clip to enable applying effects. Animated previews stay live.'
+      }
     >
       {category === 'recipes' ? (
         <div className={`effect-recipes-list${recipes.length === 0 ? ' is-empty' : ''}`}>
@@ -227,6 +244,7 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
                 key={desc.id}
                 descriptor={desc}
                 isFavorite={favorites.has(desc.id)}
+                canApply={canApplyEffects}
                 onAdd={() => handleAdd(desc.id)}
                 onToggleFavorite={() => toggleFavorite(desc.id)}
                 onDragStart={(e) => handleDragStart(desc.id, e)}
@@ -242,39 +260,29 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
 function EffectCard({
   descriptor,
   isFavorite,
+  canApply,
   onAdd,
   onToggleFavorite,
   onDragStart,
 }: {
   readonly descriptor: EffectDescriptor;
   readonly isFavorite: boolean;
+  readonly canApply: boolean;
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
   readonly onDragStart: (event: React.DragEvent) => void;
 }) {
-  const [imgError, setImgError] = useState(false);
   return (
     <div
-      className="effect-card"
-      draggable
-      onDragStart={onDragStart}
-      onDoubleClick={onAdd}
-      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})`}
+      className={`effect-card${canApply ? '' : ' is-unavailable'}`}
+      draggable={canApply}
+      onDragStart={canApply ? onDragStart : undefined}
+      onDoubleClick={canApply ? onAdd : undefined}
+      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${canApply ? '' : ' Select a video clip to apply.'}`}
     >
       <div className="effect-card-thumb">
-        {!imgError ? (
-          <img
-            className="effect-card-img"
-            src={effectPreviewUrl(descriptor.id)}
-            alt=""
-            width={120}
-            height={120}
-            loading="lazy"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="effect-card-thumb-fallback" aria-hidden="true" />
-        )}
+        <EffectPreviewMedia effectId={descriptor.id} className="effect-card-preview-media" />
+        {!canApply && <span className="effect-card-preview-state">Preview only</span>}
       </div>
       <div className="effect-card-header">
         <div className="effect-card-icon">
@@ -302,6 +310,7 @@ function EffectCard({
             type="button"
             className="icon-button effect-add-btn"
             aria-label={`Add ${descriptor.label}`}
+            disabled={!canApply}
             onClick={(e) => {
               e.stopPropagation();
               onAdd();
