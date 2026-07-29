@@ -25,8 +25,10 @@ import {
 const CATEGORIES: readonly PanelTabSpec[] = [
   { id: 'recipes', label: 'Recipes' },
   { id: 'all', label: 'All' },
+  { id: 'pixel-bw', label: 'Pixel / B&W' },
   { id: 'color', label: 'Color' },
   { id: 'blur', label: 'Blur' },
+  { id: 'distort', label: 'Distort' },
   { id: 'stylize', label: 'Stylize' },
   { id: 'artistic', label: 'Artistic' },
   { id: 'depth', label: 'Depth' },
@@ -71,6 +73,23 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
     if (category === 'recipes') return [];
     if (category === 'all') return all;
     if (category === 'favorites') return all.filter((d) => favorites.has(d.id));
+    if (category === 'pixel-bw') {
+      const signals = [
+        'pixel',
+        'bw',
+        'black and white',
+        'halftone',
+        'dither',
+        'glyph',
+        'ascii',
+        'contour',
+        'mosaic',
+        'posterize',
+      ];
+      return all.filter((descriptor) =>
+        descriptor.tags.some((tag) => signals.some((signal) => tag.includes(signal))),
+      );
+    }
     return all.filter((d) => d.category === category);
   }, [category, favorites]);
 

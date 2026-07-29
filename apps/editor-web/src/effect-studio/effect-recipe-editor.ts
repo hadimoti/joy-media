@@ -25,6 +25,7 @@ export type EffectRecipeEditorAction =
         readonly effectId: string;
         readonly enabled: boolean;
         readonly params: Readonly<Record<string, EffectParamValue>>;
+        readonly animations?: EffectInstanceV1['animations'];
       }[];
     }
   | { readonly type: 'remove'; readonly effectInstanceId: string }
@@ -129,6 +130,7 @@ export function reduceEffectRecipeEditor(
         effectId: effect.effectId,
         enabled: effect.enabled,
         params: { ...effect.params },
+        ...(effect.animations === undefined ? {} : { animations: effect.animations }),
       }));
       if (additions.length === 0) return state;
       nextDocument = {

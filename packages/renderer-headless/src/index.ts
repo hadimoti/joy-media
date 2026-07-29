@@ -7,6 +7,7 @@
 
 import type { RenderFrameIR, Rgba, VisualRenderNode, EffectInstanceIR } from '@joy-media/render-ir';
 import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import { applyCreativeEffect } from './creative-effects.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
 
@@ -43,15 +44,26 @@ export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
   return { width, height, pixels };
 }
 
-function compositeNode(dest: Uint8Array, src: Uint8Array, width: number, height: number, opacity: number): void {
+function compositeNode(
+  dest: Uint8Array,
+  src: Uint8Array,
+  width: number,
+  height: number,
+  opacity: number,
+): void {
   for (let i = 0; i < width * height; i++) {
     const base = i * 4;
-    composite(dest, base, {
-      r: src[base]!,
-      g: src[base + 1]!,
-      b: src[base + 2]!,
-      a: src[base + 3]!,
-    }, opacity);
+    composite(
+      dest,
+      base,
+      {
+        r: src[base]!,
+        g: src[base + 1]!,
+        b: src[base + 2]!,
+        a: src[base + 3]!,
+      },
+      opacity,
+    );
   }
 }
 
@@ -65,32 +77,6 @@ function fillBackground(width: number, height: number, background: Rgba): Uint8A
     result[base + 3] = background.a;
   }
   return result;
-}
-
-function drawSurface(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  node: Exclude<VisualRenderNode, { kind: 'text' }>,
-): void {
-  rasterize(pixels, width, height, node, (u, v) =>
-    u >= 0 && u < node.width && v >= 0 && v < node.height ? node.color : undefined,
-  );
-}
-
-function drawText(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  node: Extract<VisualRenderNode, { kind: 'text' }>,
-): void {
-  rasterize(pixels, width, height, node, (u, v) => {
-    const glyphColumn = Math.floor(u) % 4;
-    const characterIndex = Math.floor(Math.floor(u) / 4);
-    return bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))
-      ? node.color
-      : undefined;
-  });
 }
 
 function drawSurfaceRaw(
@@ -117,23 +103,6 @@ function drawTextRaw(
       ? node.color
       : undefined;
   });
-}
-
-function rasterize(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  node: VisualRenderNode,
-  lookup: (u: number, v: number) => Rgba | undefined,
-): void {
-  for (let row = 0; row < height; row++) {
-    for (let column = 0; column < width; column++) {
-      const u = (column + 0.5 - node.transform.translateX) / node.transform.scaleX;
-      const v = (row + 0.5 - node.transform.translateY) / node.transform.scaleY;
-      const color = lookup(u, v);
-      if (color !== undefined) composite(pixels, (row * width + column) * 4, color, node.opacity);
-    }
-  }
 }
 
 function rasterizeRaw(
@@ -270,13 +239,22 @@ export function applyHeadlessEffects(
         break;
       }
       default:
-        diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'unsupported' });
+        diagnostics.push({
+          instanceId: effect.id,
+          effectId: effect.kind,
+          status: applyCreativeEffect(pixels, width, height, effect.kind, effect.params)
+            ? 'applied'
+            : 'unsupported',
+        });
     }
   }
   return diagnostics;
 }
 
-function pixelOp(pixels: Uint8Array, fn: (r: number, g: number, b: number) => [number, number, number]): void {
+function pixelOp(
+  pixels: Uint8Array,
+  fn: (r: number, g: number, b: number) => [number, number, number],
+): void {
   for (let i = 0; i < pixels.length; i += 4) {
     const [r, g, b] = fn(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
     pixels[i] = r;
@@ -287,15 +265,17 @@ function pixelOp(pixels: Uint8Array, fn: (r: number, g: number, b: number) => [n
 
 function boxBlur(pixels: Uint8Array, width: number, height: number, radius: number): void {
   const copy = new Uint8Array(pixels);
-  const side = radius * 2 + 1;
-  const area = side * side;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const base = (y * width + x) * 4;
-      let sumR = 0, sumG = 0, sumB = 0, count = 0;
+      let sumR = 0,
+        sumG = 0,
+        sumB = 0,
+        count = 0;
       for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
-          const ny = y + dy, nx = x + dx;
+          const ny = y + dy,
+            nx = x + dx;
           if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
             const pos = (ny * width + nx) * 4;
             sumR += copy[pos]!;
@@ -314,7 +294,13 @@ function boxBlur(pixels: Uint8Array, width: number, height: number, radius: numb
   }
 }
 
-function applyHueSaturation(r: number, g: number, b: number, hue: number, sat: number): [number, number, number] {
+function applyHueSaturation(
+  r: number,
+  g: number,
+  b: number,
+  hue: number,
+  sat: number,
+): [number, number, number] {
   const len = Math.sqrt(r * r + g * g + b * b);
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -327,18 +313,39 @@ function applyHueSaturation(r: number, g: number, b: number, hue: number, sat: n
   else h = (r - g) / chroma + 4;
   h = (h * 60 + hue * 180 + 360) % 360;
 
-  const s = sat !== 1 ? Math.min(1, chroma / max * sat + (1 - sat)) : chroma / max;
+  const s = sat !== 1 ? Math.min(1, (chroma / max) * sat + (1 - sat)) : chroma / max;
   const c = max * s;
-  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-  const m = len / 3 * 1.5 - c;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = (len / 3) * 1.5 - c;
 
-  let r2 = 0, g2 = 0, b2 = 0;
-  if (h < 60) { r2 = c; g2 = x; b2 = 0; }
-  else if (h < 120) { r2 = x; g2 = c; b2 = 0; }
-  else if (h < 180) { r2 = 0; g2 = c; b2 = x; }
-  else if (h < 240) { r2 = 0; g2 = x; b2 = c; }
-  else if (h < 300) { r2 = x; g2 = 0; b2 = c; }
-  else { r2 = c; g2 = 0; b2 = x; }
+  let r2 = 0,
+    g2 = 0,
+    b2 = 0;
+  if (h < 60) {
+    r2 = c;
+    g2 = x;
+    b2 = 0;
+  } else if (h < 120) {
+    r2 = x;
+    g2 = c;
+    b2 = 0;
+  } else if (h < 180) {
+    r2 = 0;
+    g2 = c;
+    b2 = x;
+  } else if (h < 240) {
+    r2 = 0;
+    g2 = x;
+    b2 = c;
+  } else if (h < 300) {
+    r2 = x;
+    g2 = 0;
+    b2 = c;
+  } else {
+    r2 = c;
+    g2 = 0;
+    b2 = x;
+  }
 
   return [clamp(r2 + m), clamp(g2 + m), clamp(b2 + m)];
 }

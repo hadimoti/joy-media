@@ -2,25 +2,16 @@
  * Browser-only Pixi filter construction for effects + master color grade.
  */
 
-import {
-  BlurFilter,
-  ColorMatrixFilter,
-  Filter,
-  GlProgram,
-  NoiseFilter,
-} from 'pixi.js';
+import { BlurFilter, ColorMatrixFilter, Filter, GlProgram, NoiseFilter } from 'pixi.js';
 import type { ColorGradeIR, EffectInstanceIR } from '@joy-media/render-ir';
 import { isIdentityColorGrade } from './effects-cpu.js';
 import {
   createBrightnessContrastFilter,
   normalizeBrightnessContrastParams,
 } from '@joy-media/visual-effects';
+import { createCreativeEffectFilter } from './creative-effects.js';
 
-export {
-  colorGradeSignature,
-  effectsSignature,
-  isIdentityColorGrade,
-} from './effects-cpu.js';
+export { colorGradeSignature, effectsSignature, isIdentityColorGrade } from './effects-cpu.js';
 
 const DEFAULT_FILTER_VERT = `
 in vec2 aPosition;
@@ -68,9 +59,7 @@ void main()
 `;
 
 /** Build Pixi filters for a node's effect stack (enabled only). */
-export function buildPixiEffectFilters(
-  effects: readonly EffectInstanceIR[] | undefined,
-): Filter[] {
+export function buildPixiEffectFilters(effects: readonly EffectInstanceIR[] | undefined): Filter[] {
   if (effects === undefined || effects.length === 0) return [];
   const filters: Filter[] = [];
   for (const effect of effects) {
@@ -82,7 +71,9 @@ export function buildPixiEffectFilters(
 }
 
 /** Master color grade as a ColorMatrixFilter (identity → undefined). */
-export function buildPixiColorGradeFilter(grade: ColorGradeIR | undefined): ColorMatrixFilter | undefined {
+export function buildPixiColorGradeFilter(
+  grade: ColorGradeIR | undefined,
+): ColorMatrixFilter | undefined {
   if (grade === undefined || isIdentityColorGrade(grade)) return undefined;
   const filter = new ColorMatrixFilter();
   applyColorGradeMatrix(filter, grade);
@@ -175,7 +166,6 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
     }
     case 'bloom': {
       const amount = effect.params.amount ?? 0.4;
-      const threshold = effect.params.threshold ?? 0.6;
       const blur = new BlurFilter({ strength: Math.max(4, amount * 20), quality: 3 });
       const tint = new ColorMatrixFilter();
       tint.brightness(1 + amount * 0.3, false);
@@ -183,19 +173,17 @@ function filterForEffect(effect: EffectInstanceIR): Filter[] | undefined {
       return [blur, tint];
     }
     case 'posterize': {
-      const levels = effect.params.levels ?? 8;
-      const matrix = new ColorMatrixFilter();
-      const step = 1 / Math.max(1, levels - 1);
-      matrix.brightness(-step * 0.5, false);
-      matrix.contrast(1 + levels * 0.1, false);
-      return [matrix];
+      const filter = createCreativeEffectFilter(effect);
+      return filter === undefined ? undefined : [filter];
     }
     case 'pixelate': {
-      const blockSize = effect.params.blockSize ?? 8;
-      return [new BlurFilter({ strength: blockSize / 4, quality: 1 })];
+      const filter = createCreativeEffectFilter(effect);
+      return filter === undefined ? undefined : [filter];
     }
-    default:
-      return undefined;
+    default: {
+      const filter = createCreativeEffectFilter(effect);
+      return filter === undefined ? undefined : [filter];
+    }
   }
 }
 

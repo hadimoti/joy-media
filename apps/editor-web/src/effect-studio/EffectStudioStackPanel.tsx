@@ -50,6 +50,18 @@ export function EffectStudioStackPanel({
         effect.tags.some((tag) => tag.includes(normalized)),
     );
   }, [query]);
+  const presets = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return listPresets().filter(
+      (preset) =>
+        normalized.length === 0 ||
+        preset.name.toLowerCase().includes(normalized) ||
+        preset.description?.toLowerCase().includes(normalized) ||
+        preset.effects.some((effect) => effect.effectId.includes(normalized)),
+    );
+  }, [query]);
+  const pixelPresets = presets.filter((preset) => preset.collection === 'pixel-bw');
+  const classicPresets = presets.filter((preset) => preset.collection !== 'pixel-bw');
 
   return (
     <aside className="es-panel es-stack-panel">
@@ -179,21 +191,53 @@ export function EffectStudioStackPanel({
             <SearchIcon />
             <input
               value={query}
-              placeholder="Search 25 effects"
+              placeholder={`Search ${listEffects().length} effects and ${listPresets().length} recipes`}
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
           </label>
-          <p className="es-library-label">Starter recipes</p>
-          <div className="es-preset-strip">
-            {listPresets()
-              .slice(0, 5)
-              .map((preset) => (
-                <button key={preset.id} type="button" onClick={() => onAddPreset(preset)}>
-                  <span>{preset.name}</span>
-                  <small>{preset.effects.length} effects</small>
-                </button>
-              ))}
-          </div>
+          {pixelPresets.length > 0 && (
+            <>
+              <p className="es-library-label es-library-label-featured">
+                Pixel + black &amp; white
+                <span>New</span>
+              </p>
+              <div className="es-preset-strip es-preset-strip-featured">
+                {pixelPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    title={preset.description}
+                    onClick={() => onAddPreset(preset)}
+                  >
+                    <span>{preset.name}</span>
+                    <small>
+                      {preset.effects.length} effect{preset.effects.length === 1 ? '' : 's'}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {classicPresets.length > 0 && (
+            <>
+              <p className="es-library-label">Classic recipes</p>
+              <div className="es-preset-strip">
+                {classicPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    title={preset.description}
+                    onClick={() => onAddPreset(preset)}
+                  >
+                    <span>{preset.name}</span>
+                    <small>
+                      {preset.effects.length} effect{preset.effects.length === 1 ? '' : 's'}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           <p className="es-library-label">All effects</p>
           <div className="es-library-grid">
             {descriptors.map((effect) => (
