@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
+import { DisabledMediaAuth } from './media-auth.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
 const servers: Server[] = [];
@@ -332,6 +333,7 @@ async function start(
   const server = createControlPlaneHttpServer({
     controlPlane: new LocalControlPlane(),
     authentication,
+    mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
   });
   servers.push(server);

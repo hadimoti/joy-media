@@ -38,4 +38,11 @@ CREATE INDEX IF NOT EXISTS media_derivatives_asset_idx ON media_derivatives (pro
 CREATE INDEX IF NOT EXISTS job_events_job_cursor_idx ON job_events (job_id, cursor);
 CREATE INDEX IF NOT EXISTS job_attempts_job_idx ON job_attempts (job_id, id DESC);
 CREATE INDEX IF NOT EXISTS workers_session_idx ON workers (session_token_hash) WHERE session_token_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
+CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_gmail_idx ON media_allowed_users (gmail) WHERE gmail IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_telegram_idx ON media_allowed_users (telegram_id) WHERE telegram_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+CREATE INDEX IF NOT EXISTS media_otp_codes_contact_idx ON media_otp_codes (contact, method, used, expires_at);
+CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+CREATE UNIQUE INDEX IF NOT EXISTS media_sessions_token_idx ON media_sessions (token_hash);
 `;

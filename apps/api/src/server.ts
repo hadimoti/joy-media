@@ -1,7 +1,9 @@
 import { Pool } from 'pg';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
-import { JoyIdentityVerifier } from './joy-identity.js';
+import { DisabledMediaAuth, MediaAuthService } from './media-auth.js';
+import { MediaMailer } from './media-mailer.js';
+import { MediaTelegramSender } from './media-telegram.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 import { RclonePrivateObjectStore } from './private-object-store.js';
 
@@ -11,22 +13,29 @@ async function start(): Promise<void> {
   const host = process.env.JOY_MEDIA_API_HOST ?? '127.0.0.1';
   const port = Number(process.env.JOY_MEDIA_API_PORT ?? 8790);
   const databaseUrl = process.env.JOY_MEDIA_DATABASE_URL;
-  const identity = createIdentityVerifier();
-  const durableControlPlane =
-    databaseUrl === undefined
-      ? undefined
-      : new PostgresControlPlane(new Pool({ connectionString: databaseUrl }));
+  const pool = databaseUrl === undefined ? undefined : new Pool({ connectionString: databaseUrl });
+  const durableControlPlane = pool === undefined ? undefined : new PostgresControlPlane(pool);
   if (durableControlPlane !== undefined) await durableControlPlane.initialize();
+  const mailer = createMailer();
+  const telegram = createTelegramSender();
+  const mediaAuth =
+    pool === undefined
+      ? new DisabledMediaAuth()
+      : new MediaAuthService({
+          pool,
+          ...(mailer === undefined ? {} : { mailer }),
+          ...(telegram === undefined ? {} : { telegram }),
+        });
   createControlPlaneHttpServer({
     controlPlane: durableControlPlane ?? new LocalControlPlane(),
+    // Public /v1 (project/job/asset routes) stays disabled unless durable state
+    // is configured; /v1/auth is served by mediaAuth regardless (it owns its
+    // own allow-list/session tables independently of the control plane).
     authentication: {
-      // Public /v1 stays disabled unless both the JOY verifier and durable
-      // state are configured. Health remains intentionally public.
       authenticate: (request) =>
-        identity === undefined || durableControlPlane === undefined
-          ? undefined
-          : identity.authenticate(request),
+        durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
     },
+    mediaAuth,
     ...(process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
       ? {}
       : {
@@ -41,10 +50,24 @@ async function start(): Promise<void> {
   console.log(`JOY Media API listening on ${host}:${port}`);
 }
 
-function createIdentityVerifier(): JoyIdentityVerifier | undefined {
-  const issuer = process.env.JOY_MEDIA_IDENTITY_ISSUER;
-  const audience = process.env.JOY_MEDIA_IDENTITY_AUDIENCE;
-  const jwksUrl = process.env.JOY_MEDIA_IDENTITY_JWKS_URL;
-  if (issuer === undefined || audience === undefined || jwksUrl === undefined) return undefined;
-  return new JoyIdentityVerifier({ issuer, audience, jwksUrl });
+function createMailer(): MediaMailer | undefined {
+  const host = process.env.JOY_MEDIA_SMTP_HOST;
+  const port = process.env.JOY_MEDIA_SMTP_PORT;
+  const user = process.env.JOY_MEDIA_SMTP_USER;
+  const pass = process.env.JOY_MEDIA_SMTP_PASS;
+  const from = process.env.JOY_MEDIA_SMTP_FROM;
+  if (
+    host === undefined ||
+    port === undefined ||
+    user === undefined ||
+    pass === undefined ||
+    from === undefined
+  )
+    return undefined;
+  return new MediaMailer({ host, port: Number(port), user, pass, from });
+}
+
+function createTelegramSender(): MediaTelegramSender | undefined {
+  const botToken = process.env.JOY_MEDIA_BOT_TOKEN;
+  return botToken === undefined ? undefined : new MediaTelegramSender({ botToken });
 }

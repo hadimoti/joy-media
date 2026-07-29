@@ -1,6 +1,6 @@
 # ADR-0016: Shared JOY identity through signed audience-scoped assertions
 
-Status: Accepted
+Status: Superseded by [ADR-0017](./0017-independent-media-login.md)
 Date: 2026-07-22
 
 ## Context

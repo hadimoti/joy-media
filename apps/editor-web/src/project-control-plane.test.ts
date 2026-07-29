@@ -77,8 +77,6 @@ describe('control-plane project binding', () => {
     globalThis.fetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       requests.push(url);
-      if (url === 'https://joyteam.ir/identity')
-        return json(200, { access_token: 'assertion', expires_in: 300 });
       return json(200, { data: [{ id: 'job-1', state: 'queued' }] });
     };
     const first = getOrCreateControlPlaneProjectBinding(
@@ -94,7 +92,7 @@ describe('control-plane project binding', () => {
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
-        'https://joyteam.ir/identity',
+        () => 'joy-session-token',
       );
       await expect(client.jobs(reopened.controlPlaneProjectId)).resolves.toMatchObject([
         { id: 'job-1', state: 'queued' },

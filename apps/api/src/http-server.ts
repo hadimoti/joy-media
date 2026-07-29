@@ -7,6 +7,7 @@ import {
   type ControlPlane,
   type LocalDerivativeRegistration,
 } from './control-plane.js';
+import { MediaAuthError, type MediaAuthApi, type MediaAuthMethod } from './media-auth.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 
 export interface ApiAuthentication {
@@ -16,6 +17,7 @@ export interface ApiAuthentication {
 export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
+  readonly mediaAuth: MediaAuthApi;
   readonly privateObjectStore?: PrivateObjectStore;
 }
 
@@ -216,8 +218,41 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/auth/request-otp') {
+    const body = await readJson(request);
+    const data = await options.mediaAuth.requestOtp(
+      requiredString(body, 'contact'),
+      requiredAuthMethod(body),
+    );
+    respondJson(response, 200, { data });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/auth/verify-otp') {
+    const body = await readJson(request);
+    const token = await options.mediaAuth.verifyOtp(
+      requiredString(body, 'contact'),
+      requiredAuthMethod(body),
+      requiredString(body, 'code'),
+    );
+    respondJson(response, 200, { data: { token } });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/auth/logout') {
+    const token = bearerToken(request);
+    if (token !== undefined) await options.mediaAuth.logout(token);
+    respondJson(response, 200, { data: { ok: true } });
+    return;
+  }
+
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
+    respondJson(response, 200, { data: { contact: actor.id } });
+    return;
+  }
 
   if (request.method === 'GET' && url.pathname === '/v1/workers') {
     respondJson(response, 200, { data: await options.controlPlane.workersForOwner(actor) });
@@ -727,6 +762,13 @@ async function readBytes(request: IncomingMessage, maximumBytes: number): Promis
   return new Uint8Array(Buffer.concat(chunks));
 }
 
+function requiredAuthMethod(body: Record<string, unknown>): MediaAuthMethod {
+  const value = body.method;
+  if (value !== 'gmail' && value !== 'telegram')
+    throw new ControlPlaneError('REQUEST_INVALID', 'method must be gmail or telegram');
+  return value;
+}
+
 function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || value.length === 0)
@@ -1019,6 +1061,11 @@ function respondJson(response: ServerResponse, status: number, payload: unknown)
 }
 
 function respondError(response: ServerResponse, error: unknown): void {
+  if (error instanceof MediaAuthError) {
+    const status = error.code === 'REQUEST_INVALID' ? 400 : 401;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
   if (error instanceof ControlPlaneError) {
     const status =
       error.code === 'AUTH_REQUIRED' || error.code === 'WORKER_SESSION_REQUIRED'

@@ -4,18 +4,30 @@
 Node server's `/v1/*` route. `joy-media-api.override.conf` starts an immutable
 `pnpm deploy --prod` API release and reads only `/etc/joy-media/api.env`.
 
-The environment file is created on the VPS with mode `0600` and contains the
-PostgreSQL URL plus issuer, audience, and JWKS URL. It is never committed.
-The JOY identity key is generated on the VPS at
-`/opt/joy-media/secrets/joy-media-identity.pem`, mode `0600`, and is exposed
-only to the root-run `joy-wg-bot` service by its systemd drop-in. JOY Media
-only receives the public JWKS URL.
+The environment file is created on the VPS with mode `0600` and contains (see
+[ADR-0017](../docs/adr/0017-independent-media-login.md)):
 
-Release order: backup `joymedia`; deploy the identity source and key; deploy
-the built API/static editor; install the systemd/nginx manifests; validate
-configuration; restart services; verify public health/JWKS and the signed
-assertion path. Preserve the prior `/opt/joy-media/app` and each immutable
-release for rollback.
+- `JOY_MEDIA_DATABASE_URL` — the shared Postgres instance
+- `JOY_MEDIA_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_FROM` — dedicated
+  SMTP account for OTP email, independent of joy-vps's mailer
+- `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot token for OTP delivery,
+  independent of the `joy-wg-bot` token
+
+It is never committed. There is no signing key or JWKS endpoint to provision
+any more — the JWT identity bridge from the now-superseded ADR-0016 is
+retired, along with `/opt/joy-media/secrets/joy-media-identity.pem` and its
+`joy-wg-bot` systemd drop-in.
+
+The joy-vps admin panel's "Joy Media" tab connects directly to this same
+Postgres instance to manage the `media_allowed_users` allow-list, using a
+separate, least-privileged database role scoped to that one table (see
+joy-vps's `bot/joy_media_db.py` and `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`).
+
+Release order: backup `joymedia`; deploy the built API/static editor; install
+the systemd/nginx manifests; validate configuration; restart services; verify
+public health and the OTP login path end to end (request + verify code by
+Gmail and by Telegram). Preserve the prior `/opt/joy-media/app` and each
+immutable release for rollback.
 
 On the VPS, use the lockfile to reconstruct the deployment dependency layout
 before building: `CI=true npm_config_confirm_modules_purge=false pnpm install

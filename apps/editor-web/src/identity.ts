@@ -1,20 +1,19 @@
 /**
- * JOY identity session for the editor header (shared JOY login, DECIDED Q10).
+ * JOY Media's own login session for the editor header (ADR-0017).
  *
- * The browser's `web_token` cookie lives on `.joyteam.ir`; the identity
- * issuer mints a five-minute JOY Media assertion for an entitled session.
- * This module only *probes* that state for display — API calls keep using
- * `BrowserControlPlaneClient`'s own assertion flow.
- *
- * Unsigned / headless browsers receive HTTP 401 from the identity issuer —
- * that is expected and maps to `signed-out`. There is no Media-side bypass
- * (ADR-0016). Entitlement (`joymedia_allowed`) is owned by the JOY identity
- * service, not this repository.
+ * Supersedes the retired shared-JOY-login bridge (see the superseded
+ * docs/adr/0016-shared-joy-identity-boundary.md): this module now probes and
+ * clears JOY Media's own session token (see media-session.ts for the token
+ * itself and the login/OTP calls), issued by this app's own allow-list, not
+ * by joyteam.ir. The header "JOY account" widget kept the same
+ * `JoySessionState` shape so the rest of App.tsx didn't need to change.
  */
 
-export const JOY_IDENTITY_URL = 'https://joyteam.ir/api/identity/joy-media';
-export const JOY_LOGIN_URL = 'https://joyteam.ir/';
-export const JOY_LOGOUT_URL = 'https://joyteam.ir/api/auth/logout';
+import { clearStoredMediaToken, getStoredMediaToken, type MediaSessionStorage } from './media-session.js';
+
+/** The header's "signed-out" sign-in link is unreachable once LoginGate covers
+ *  the app (blurred + pointer-events:none), so this target is never followed. */
+export const JOY_LOGIN_URL = '#';
 
 export type JoySessionState =
   | { readonly kind: 'unknown' }
@@ -23,62 +22,43 @@ export type JoySessionState =
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'ready'; readonly subject: string | undefined };
 
-/** Base64url-decode a JWT payload and return its `sub`, display-only. */
-export function decodeJwtSubject(token: string): string | undefined {
-  const payload = token.split('.')[1];
-  if (payload === undefined) return undefined;
-  try {
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const claims = JSON.parse(atob(normalized)) as Record<string, unknown>;
-    return typeof claims.sub === 'string' ? claims.sub : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function probeJoySession(
+  storage: MediaSessionStorage,
   fetchFn: typeof fetch = fetch,
-  identityUrl: string = JOY_IDENTITY_URL,
 ): Promise<JoySessionState> {
+  const token = getStoredMediaToken(storage);
+  if (token === undefined) return { kind: 'signed-out' };
   try {
-    const response = await fetchFn(identityUrl, { method: 'POST', credentials: 'include' });
-    const text = await response.text();
-    if (response.ok) {
-      const body = JSON.parse(text) as { access_token?: unknown };
-      if (typeof body.access_token === 'string')
-        return { kind: 'ready', subject: decodeJwtSubject(body.access_token) };
+    const response = await fetchFn('/api/v1/auth/session', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401) {
+      clearStoredMediaToken(storage);
       return { kind: 'signed-out' };
     }
-    if (response.status === 403) {
-      let message = 'JOY Media access is not enabled for this account.';
-      try {
-        const body = JSON.parse(text) as { error?: unknown };
-        if (typeof body.error === 'string') message = body.error;
-      } catch {
-        /* keep default message */
-      }
-      return { kind: 'no-access', message };
-    }
-    if (response.status === 401) return { kind: 'signed-out' };
-    return { kind: 'unavailable' };
+    if (!response.ok) return { kind: 'unavailable' };
+    const body = (await response.json()) as { data?: { contact?: unknown } };
+    const contact = body.data?.contact;
+    return { kind: 'ready', subject: typeof contact === 'string' ? contact : undefined };
   } catch {
-    // An issuer/network outage is not evidence that the JOY session ended.
+    // A network outage is not evidence that the session ended.
     return { kind: 'unavailable' };
   }
 }
 
-/**
- * Expire the shared JOY session cookie. The logout route sets cookies but
- * sends no CORS headers, so the request runs in no-cors mode: the response
- * is opaque, while the browser still applies its Set-Cookie expirations.
- */
 export async function logoutJoySession(
+  storage: MediaSessionStorage,
   fetchFn: typeof fetch = fetch,
-  logoutUrl: string = JOY_LOGOUT_URL,
 ): Promise<void> {
+  const token = getStoredMediaToken(storage);
+  clearStoredMediaToken(storage);
+  if (token === undefined) return;
   try {
-    await fetchFn(logoutUrl, { method: 'POST', mode: 'no-cors', credentials: 'include' });
+    await fetchFn('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    });
   } catch {
-    /* opaque/no-cors failures are not actionable here; the caller re-probes */
+    /* token is already cleared locally; a failed remote revoke is not actionable here */
   }
 }

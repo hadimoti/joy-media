@@ -1,64 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { decodeJwtSubject, logoutJoySession, probeJoySession } from './identity.js';
+import { logoutJoySession, probeJoySession } from './identity.js';
+import { setStoredMediaToken } from './media-session.js';
 
-const b64url = (value: unknown) =>
-  Buffer.from(JSON.stringify(value)).toString('base64url');
-
-const token = (claims: Record<string, unknown>) =>
-  `${b64url({ alg: 'RS256' })}.${b64url(claims)}.signature`;
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+}
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status });
 
-describe('decodeJwtSubject', () => {
-  it('extracts sub for display', () => {
-    expect(decodeJwtSubject(token({ sub: 'joy-user-7' }))).toBe('joy-user-7');
-  });
-  it('returns undefined for garbage', () => {
-    expect(decodeJwtSubject('not-a-jwt')).toBeUndefined();
-  });
-});
-
 describe('probeJoySession', () => {
-  it('reports ready with the subject for an entitled session', async () => {
-    const state = await probeJoySession(async () =>
-      jsonResponse(200, { access_token: token({ sub: '12345' }), expires_in: 300 }),
-    );
-    expect(state).toEqual({ kind: 'ready', subject: '12345' });
-  });
-
-  it('reports no-access with the server message on 403', async () => {
-    const state = await probeJoySession(async () =>
-      jsonResponse(403, { ok: false, error: 'JOY Media access is not enabled for this account.' }),
-    );
-    expect(state).toEqual({
-      kind: 'no-access',
-      message: 'JOY Media access is not enabled for this account.',
+  it('reports signed-out when no session token is stored (never calls the network)', async () => {
+    const state = await probeJoySession(memoryStorage(), async () => {
+      throw new Error('should not be called');
     });
-  });
-
-  it('reports signed-out on 401', async () => {
-    const state = await probeJoySession(async () => new Response('unauthorized', { status: 401 }));
     expect(state).toEqual({ kind: 'signed-out' });
   });
 
-  it('treats unsigned identity 401 as an expected signed-out probe (no bypass)', async () => {
-    // Headless Chromium without a .joyteam.ir web_token cookie always sees 401.
-    // Live gates must assert signed-out here — never invent a Media test token.
-    const state = await probeJoySession(async () => new Response('unauthorized', { status: 401 }));
-    expect(state.kind).toBe('signed-out');
-    expect(state).not.toMatchObject({ kind: 'ready' });
+  it('reports ready with the contact for a valid stored session', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    const state = await probeJoySession(storage, async () =>
+      jsonResponse(200, { data: { contact: 'user@example.com' } }),
+    );
+    expect(state).toEqual({ kind: 'ready', subject: 'user@example.com' });
   });
 
-  it('reports issuer unavailable on 503 instead of claiming signed-out', async () => {
-    const state = await probeJoySession(async () =>
-      jsonResponse(503, { ok: false, error: 'JOY Media identity issuer unavailable.' }),
+  it('reports signed-out and clears the token on 401 (expired/revoked session)', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    const state = await probeJoySession(
+      storage,
+      async () => new Response('unauthorized', { status: 401 }),
+    );
+    expect(state).toEqual({ kind: 'signed-out' });
+    expect(storage.getItem('joy-media-session-token')).toBeNull();
+  });
+
+  it('reports unavailable on a server error instead of guessing the login state', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    const state = await probeJoySession(storage, async () =>
+      jsonResponse(503, { error: 'unavailable' }),
     );
     expect(state).toEqual({ kind: 'unavailable' });
   });
 
   it('reports unavailable on network failure instead of guessing the login state', async () => {
-    const state = await probeJoySession(async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    const state = await probeJoySession(storage, async () => {
       throw new TypeError('network down');
     });
     expect(state).toEqual({ kind: 'unavailable' });
@@ -66,18 +62,38 @@ describe('probeJoySession', () => {
 });
 
 describe('logoutJoySession', () => {
-  it('POSTs the logout route with credentials and survives opaque failures', async () => {
+  it('clears the local token and posts a best-effort remote revoke', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
     const calls: { url: string; init: RequestInit | undefined }[] = [];
-    await logoutJoySession(async (url, init) => {
+    await logoutJoySession(storage, async (url, init) => {
       calls.push({ url: String(url), init });
-      throw new TypeError('opaque');
+      return new Response(JSON.stringify({ data: { ok: true } }));
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe('https://joyteam.ir/api/auth/logout');
+    expect(calls[0]?.url).toBe('/api/v1/auth/logout');
     expect(calls[0]?.init).toMatchObject({
       method: 'POST',
-      mode: 'no-cors',
-      credentials: 'include',
+      headers: { authorization: 'Bearer token-abc' },
     });
+    expect(storage.getItem('joy-media-session-token')).toBeNull();
+  });
+
+  it('still clears the local token when the remote revoke fails (opaque/network failure)', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    await logoutJoySession(storage, async () => {
+      throw new TypeError('network down');
+    });
+    expect(storage.getItem('joy-media-session-token')).toBeNull();
+  });
+
+  it('is a no-op when no session token is stored', async () => {
+    let called = false;
+    await logoutJoySession(memoryStorage(), async () => {
+      called = true;
+      return new Response();
+    });
+    expect(called).toBe(false);
   });
 });

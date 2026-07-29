@@ -1373,7 +1373,7 @@ function EditorWorkspace({
     [activatePanel, selectClips],
   );
   const refreshJoySession = useCallback(() => {
-    void probeJoySession().then(setJoySession);
+    void probeJoySession(window.localStorage).then(setJoySession);
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1415,7 +1415,7 @@ function EditorWorkspace({
     refreshJoySession();
   }, [refreshJoySession]);
   const signOut = useCallback(async () => {
-    await logoutJoySession();
+    await logoutJoySession(window.localStorage);
     refreshJoySession();
   }, [refreshJoySession]);
   const recordExportEntry = useCallback((entry: ExportProcessEntry) => {

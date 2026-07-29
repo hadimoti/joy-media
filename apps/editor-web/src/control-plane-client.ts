@@ -1,4 +1,5 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
+import { getStoredMediaToken } from './media-session.js';
 
 export interface BrowserWorker {
   readonly id: string;
@@ -72,12 +73,10 @@ export interface BrowserAssetRegistration {
 }
 
 export class BrowserControlPlaneClient {
-  #token: string | undefined;
-  #tokenExpiresAt = 0;
-
   constructor(
     private readonly apiUrl = '/api',
-    private readonly identityUrl = 'https://joyteam.ir/api/identity/joy-media',
+    private readonly tokenProvider: () => string | undefined = () =>
+      getStoredMediaToken(window.localStorage),
   ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
@@ -346,16 +345,10 @@ export class BrowserControlPlaneClient {
       throw new Error('JOY Media API returned an invalid response');
     return body.data as T;
   }
-  private async assertion(): Promise<string> {
-    if (this.#token !== undefined && Date.now() < this.#tokenExpiresAt) return this.#token;
-    const response = await fetch(this.identityUrl, { method: 'POST', credentials: 'include' });
-    const body = await responseBody(response);
-    if (!response.ok || !isRecord(body) || typeof body.access_token !== 'string')
-      throw new Error(errorMessage(body, response.status));
-    this.#token = body.access_token;
-    this.#tokenExpiresAt =
-      Date.now() + Math.max(30, Number(body.expires_in) || 60) * 1_000 - 15_000;
-    return this.#token;
+  private assertion(): string {
+    const token = this.tokenProvider();
+    if (token === undefined) throw new Error('JOY Media session required');
+    return token;
   }
 }
 

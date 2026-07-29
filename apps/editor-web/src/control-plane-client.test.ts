@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
-  it('gets a short-lived JOY assertion in memory and sends it only to the Media API', async () => {
+  it('sends the local session token only to the Media API', async () => {
     const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
     const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
@@ -12,8 +12,6 @@ describe('BrowserControlPlaneClient', () => {
           ? {}
           : { authorization: new Headers(init?.headers).get('authorization')! }),
       });
-      if (url === 'https://joyteam.ir/api/identity/joy-media')
-        return json(200, { access_token: 'joy-assertion', expires_in: 300 });
       return json(200, { data: [] });
     };
     const original = globalThis.fetch;
@@ -21,7 +19,7 @@ describe('BrowserControlPlaneClient', () => {
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
-        'https://joyteam.ir/api/identity/joy-media',
+        () => 'joy-session-token',
       );
       await client.workers();
       await client.jobs('project-1');
@@ -29,22 +27,37 @@ describe('BrowserControlPlaneClient', () => {
       globalThis.fetch = original;
     }
     expect(requests).toEqual([
-      { url: 'https://joyteam.ir/api/identity/joy-media' },
-      { url: 'https://media.joyteam.ir/api/v1/workers', authorization: 'Bearer joy-assertion' },
+      {
+        url: 'https://media.joyteam.ir/api/v1/workers',
+        authorization: 'Bearer joy-session-token',
+      },
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
-        authorization: 'Bearer joy-assertion',
+        authorization: 'Bearer joy-session-token',
       },
     ]);
   });
 
-  it('reports a plain-text identity denial without a JSON parsing failure', async () => {
+  it('rejects with no network call when there is no stored session', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error('should not be called');
+    };
+    try {
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => undefined);
+      await expect(client.workers()).rejects.toThrow('JOY Media session required');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('reports a plain-text API denial without a JSON parsing failure', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
-        'https://joyteam.ir/identity',
+        () => 'joy-session-token',
       );
       await expect(client.workers()).rejects.toThrow('unauthorized');
     } finally {
@@ -59,13 +72,12 @@ describe('BrowserControlPlaneClient', () => {
       const url = String(input);
       const authorization = new Headers(init?.headers).get('authorization');
       requests.push({ url, ...(authorization === null ? {} : { authorization }) });
-      if (url === 'https://joyteam.ir/identity') return json(200, { access_token: 'assertion' });
       return new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg' } });
     };
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
-        'https://joyteam.ir/identity',
+        () => 'joy-session-token',
       );
       await expect(
         client.derivativeBytes('project-1', 'asset-1', 'derivative-1'),
@@ -76,10 +88,9 @@ describe('BrowserControlPlaneClient', () => {
       globalThis.fetch = original;
     }
     expect(requests).toEqual([
-      { url: 'https://joyteam.ir/identity' },
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/assets/asset-1/derivatives/derivative-1/content',
-        authorization: 'Bearer assertion',
+        authorization: 'Bearer joy-session-token',
       },
     ]);
   });
@@ -90,13 +101,12 @@ describe('BrowserControlPlaneClient', () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
-      if (url === 'https://joyteam.ir/identity') return json(200, { access_token: 'assertion' });
       return json(201, { data: { id: 'asset-1', assetSyncEnabled: true } });
     };
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
-        'https://joyteam.ir/identity',
+        () => 'joy-session-token',
       );
       await client.registerAsset('project-1', {
         id: 'asset-1',
@@ -113,7 +123,6 @@ describe('BrowserControlPlaneClient', () => {
       globalThis.fetch = original;
     }
     expect(requests).toEqual([
-      { url: 'https://joyteam.ir/identity' },
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/assets',
         body: expect.stringContaining('"displayName":"clip.mp4"'),

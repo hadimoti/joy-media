@@ -17,11 +17,13 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.20.0",
     "pg-mem": "^3.0.14",
     "tsx": "^4.20.0"
   },
   "dependencies": {
+    "nodemailer": "^6.9.16",
     "pg": "^8.22.0"
   }
 }

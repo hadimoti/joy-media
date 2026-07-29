@@ -33,6 +33,26 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
+## Handoff for next agent (2026-07-29)
+
+**JOY Media login is now independent of joy-vps (ADR-0017, supersedes ADR-0016).**
+Media owns its own allow-list (`media_allowed_users`) and OTP login
+(`media_otp_codes` / `media_sessions`, `apps/api/src/media-auth.ts`), with a
+dedicated SMTP sender (`media-mailer.ts`) and Telegram bot sender
+(`media-telegram.ts`) — no runtime call to joy-vps's mailer/bot or its
+`/api/identity/joy-media` JWT bridge, which is deleted on both sides
+(`apps/api/src/joy-identity.ts` removed; joy-vps's
+`bot/joy_media_identity.py` and its routes removed). `apps/editor-web` gets
+its own login (`LoginGate.tsx`): the real editor is always mounted but
+blurred/non-interactive behind a login card until an allow-listed contact
+completes OTP verification — no more linking out to joyteam.ir.
+joy-vps's admin panel keeps a "Joy Media" tab to manage the allow-list, now
+via a scoped direct-Postgres connection (see
+`docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) rather than the old assertion issuer.
+**Still needed before this is live on the VPS:** provision
+`JOY_MEDIA_SMTP_*` and `JOY_MEDIA_BOT_TOKEN` in `/etc/joy-media/api.env`,
+and the `joyvps_media_admin` Postgres role for joy-vps's `.env`.
+
 ## Handoff for next agent (2026-07-26)
 
 **Agentic editing Milestones A-F are complete and deployed.** The authoritative

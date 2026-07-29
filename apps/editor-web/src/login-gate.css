@@ -1,0 +1,152 @@
+/* JOY Media's independent login (ADR-0017). Visual language matches joy-vps's
+   shared login card (bot/webapp/shared/core.css: #161415, blur(24px),
+   border-radius 28px), but the "background" here is the real editor itself,
+   blurred and dimmed behind the card instead of a synthetic dot-grid. */
+
+.login-gate-app {
+  height: 100%;
+  width: 100%;
+}
+
+.login-gate-app.login-gate-locked {
+  filter: blur(18px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.login-gate-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 9, 9, 0.58);
+}
+
+.login-gate-card {
+  background: #161415;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 28px;
+  padding: 36px 28px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow:
+    0 32px 64px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #f2f0ef;
+  text-align: center;
+}
+
+.login-gate-card h2 {
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+}
+
+.login-gate-card p.login-gate-hint {
+  margin: 0 0 20px;
+  color: rgba(242, 240, 239, 0.6);
+  font-size: 0.85rem;
+}
+
+.login-gate-methods {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.login-gate-method-btn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(242, 240, 239, 0.7);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.login-gate-method-btn.active {
+  background: #ff5a3c;
+  border-color: #ff5a3c;
+  color: #161415;
+  font-weight: 600;
+}
+
+.login-gate-card input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f2f0ef;
+  font-size: 0.95rem;
+  margin-bottom: 14px;
+}
+
+.login-gate-otp-boxes {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.login-gate-otp-boxes input {
+  width: 40px;
+  height: 48px;
+  padding: 0;
+  text-align: center;
+  font-size: 1.1rem;
+  margin-bottom: 0;
+}
+
+.login-gate-card button.login-gate-submit {
+  width: 100%;
+  padding: 12px 0;
+  border-radius: 14px;
+  border: none;
+  background: #ff5a3c;
+  color: #161415;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.login-gate-card button.login-gate-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.login-gate-card button.login-gate-link {
+  margin-top: 12px;
+  background: none;
+  border: none;
+  color: rgba(242, 240, 239, 0.55);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.login-gate-error {
+  color: #ff8088;
+  font-size: 0.82rem;
+  margin: -4px 0 14px;
+}
+
+:root[data-theme='light'] .login-gate-card {
+  background: rgba(255, 255, 255, 0.96);
+  color: #1b1b1b;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme='light'] .login-gate-card p.login-gate-hint,
+:root[data-theme='light'] .login-gate-method-btn {
+  color: rgba(27, 27, 27, 0.6);
+}
+
+:root[data-theme='light'] .login-gate-card input {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1b1b1b;
+}
