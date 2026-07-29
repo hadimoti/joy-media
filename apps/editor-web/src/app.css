@@ -4429,6 +4429,23 @@ label {
   font-size: 0.72rem;
   line-height: 1.35;
 }
+.asset-library-load-more {
+  justify-self: center;
+  margin: 0.3rem 0 0.65rem;
+  padding: 0.38rem 0.72rem;
+  border: 1px solid #456a5c;
+  border-radius: 999px;
+  background: #183128;
+  color: #c7e4d4;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.asset-library-load-more:hover,
+.asset-library-load-more:focus-visible {
+  border-color: #79c4a2;
+  background: #214535;
+}
 .asset-preview {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alpha Asset Library Builder"
+  short_description: "Extract alpha assets into a library"
+  default_prompt: "Use $alpha-asset-library-builder to split this transparent PNG archive into reviewed asset-library files."

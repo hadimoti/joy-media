@@ -1,0 +1,10 @@
+Pillow>=10.0
+numpy>=1.26
+opencv-python-headless>=4.10
+pydantic>=2.7
+typer>=0.12
+rich>=13.7
+ImageHash>=4.3
+PyYAML>=6.0
+pytest>=8.0
+

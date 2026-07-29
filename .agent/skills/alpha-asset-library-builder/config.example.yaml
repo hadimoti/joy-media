@@ -1,0 +1,49 @@
+alpha_threshold: 4
+core_alpha_threshold: 24
+padding:
+  mode: pixels
+  value: 8
+noise_filter:
+  minimum_area_px: 10
+  minimum_width_px: 2
+  minimum_height_px: 2
+  minimum_alpha_mass: 200
+grouping:
+  enabled: true
+  max_gap_px: 14
+  max_gap_ratio: 0.04
+  expanded_box_px: 8
+  shadow_gap_px: 24
+  attach_small_components: true
+  small_component_area_ratio: 0.08
+  particle_field_grouping: true
+  particle_minimum_components: 128
+  particle_max_median_area_px: 64
+  particle_max_component_area_px: 128
+  particle_minimum_small_component_ratio: 0.75
+  particle_max_coverage: 0.12
+  particle_cluster_gap_px: 24
+  particle_cluster_max_component_area_px: 4096
+  particle_cluster_max_median_area_px: 160
+  composition_cluster_grouping: true
+  composition_cluster_gap_px: 8
+  composition_cluster_minimum_components: 3
+  composition_cluster_max_coverage: 0.30
+  repeating_pattern_grouping: true
+  repeating_pattern_minimum_components: 64
+  repeating_pattern_minimum_median_area_px: 512
+  repeating_pattern_max_interquartile_area_ratio: 1.5
+  repeating_pattern_max_interquartile_dimension_ratio: 1.35
+  repeating_pattern_max_coverage: 0.45
+  uniform_dot_field_grouping: true
+  uniform_dot_field_minimum_components: 512
+  uniform_dot_field_max_component_area_px: 128
+  uniform_dot_field_max_component_dimension_px: 16
+  uniform_dot_field_max_median_area_px: 128
+  uniform_dot_field_max_interquartile_area_ratio: 1.5
+  uniform_dot_field_max_interquartile_dimension_ratio: 1.35
+  uniform_dot_field_max_coverage: 0.28
+semantic_confidence_threshold: 0.65
+visual_duplicate_threshold: 6
+contact_sheet_columns: 5
+contact_sheet_rows: 7
