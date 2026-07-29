@@ -455,9 +455,21 @@ interface EditorPanelContextValue {
   readonly undo: () => void;
   readonly redo: () => void;
   readonly jumpToHistory: (sequence: number) => void;
+  /**
+   * Dockview keeps panel component instances alive, so panel-only runtime
+   * bindings live in context rather than in a renderer closure.
+   */
+  readonly session: EditorSession;
+  readonly activatePanel: (panelId: string) => void;
   readonly agentContext: EditorContext;
   readonly agentSettings: AgentSettings;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
+  readonly kiloCodeAttachedAssets: readonly KiloCodeAttachedAsset[];
+  readonly attachKiloCodeAsset: (asset: KiloCodeAttachedAsset) => void;
+  readonly detachKiloCodeAsset: (assetId: string) => void;
+  readonly pluginHost: ReturnType<typeof createEditorPluginHost>;
+  readonly bumpProjectRevision: () => void;
+  readonly bumpPluginRevision: () => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
   readonly motionStudioOpen: boolean;
   readonly openMotionStudio: (sceneId: string) => void;
@@ -605,6 +617,7 @@ function EditorWorkspace({
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const dockviewApiRef = useRef<DockviewApi | null>(null);
+  const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
   const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1368,6 +1381,32 @@ function EditorWorkspace({
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
+  }, []);
+  const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
+    setKiloCodeAttachedAssets((current) => {
+      if (current.some((entry) => entry.assetId === asset.assetId)) return current;
+      return [...current, asset];
+    });
+  }, []);
+  const detachKiloCodeAsset = useCallback(
+    (assetId: string) => {
+      const entry = kiloCodeAttachedAssets.find((item) => item.assetId === assetId);
+      setKiloCodeAttachedAssets((current) => current.filter((item) => item.assetId !== assetId));
+      if (entry?.source === 'joycode-folder') {
+        void openJoyCodeOpfsAssetCache()
+          .then((cache) => cache.remove(assetId))
+          .catch(() => {
+            /* OPFS cleanup is best-effort */
+          });
+      }
+    },
+    [kiloCodeAttachedAssets],
+  );
+  const bumpProjectRevision = useCallback(() => {
+    setRevision((revision) => revision + 1);
+  }, []);
+  const bumpPluginRevision = useCallback(() => {
+    setPluginRevision((revision) => revision + 1);
   }, []);
   const toggleKeyboardShortcuts = useCallback(() => {
     setKeyboardShortcutsOpen((open) => !open);
@@ -2139,7 +2178,7 @@ function EditorWorkspace({
               commands: [command],
             } as unknown as VisualObjectTransaction);
           }}
-          showToast={showToast}
+          showToast={context.showToast}
         />
       );
     }
@@ -2171,7 +2210,7 @@ function EditorWorkspace({
               ),
             })
           }
-          showToast={showToast}
+          showToast={context.showToast}
         />
       );
     }
@@ -2250,7 +2289,7 @@ function EditorWorkspace({
           onEffectDrop={(effectId, clipId, trackId) => {
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
-              showToast('هدف این کلیپ پیدا نشد.', 'error');
+              context.showToast('هدف این کلیپ پیدا نشد.', 'error');
               return;
             }
             const descriptor = effectRegistry.getEffect(effectId);
@@ -2280,7 +2319,7 @@ function EditorWorkspace({
               ],
             });
           }}
-          showToast={showToast}
+          showToast={context.showToast}
         />
       );
     if (api.id === 'flow')
@@ -2339,16 +2378,16 @@ function EditorWorkspace({
                     compositionId={context.timelineProject.rootCompositionId}
                     selectedClipIds={state.selectedIds}
                     projectId={context.timelineProject.id}
-                    revisionId={() => session.projectRevisionId}
+                    revisionId={() => context.session.projectRevisionId}
                     onApplyChangeSet={(label, document, artifacts, timelineTransaction) => {
-                      session.dispatchCompound(label, {
+                      context.session.dispatchCompound(label, {
                         document,
                         artifacts,
                         ...(timelineTransaction === undefined
                           ? {}
                           : { timeline: timelineTransaction }),
                       });
-                      setRevision((current) => current + 1);
+                      context.bumpProjectRevision();
                     }}
                   />
                 ),
@@ -2369,11 +2408,8 @@ function EditorWorkspace({
           projectTitle={controlPlaneProject.title}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onEditWithAi={(asset) => {
-            setKiloCodeAttachedAssets((current) => {
-              if (current.some((entry) => entry.assetId === asset.assetId)) return current;
-              return [...current, asset];
-            });
-            activatePanel('agent');
+            context.attachKiloCodeAsset(asset);
+            context.activatePanel('agent');
           }}
         />
       );
@@ -2385,31 +2421,14 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           agentContext={context.agentContext}
           onUndo={context.undo}
-          session={session}
+          session={context.session}
           settings={context.agentSettings}
           {...(context.agentPanelCommand === undefined
             ? {}
             : { command: context.agentPanelCommand })}
-          attachedAssets={kiloCodeAttachedAssets}
-          onDetachAsset={(assetId) => {
-            const entry = kiloCodeAttachedAssets.find((item) => item.assetId === assetId);
-            setKiloCodeAttachedAssets((current) =>
-              current.filter((item) => item.assetId !== assetId),
-            );
-            if (entry?.source === 'joycode-folder') {
-              void openJoyCodeOpfsAssetCache()
-                .then((cache) => cache.remove(assetId))
-                .catch(() => {
-                  /* OPFS cleanup is best-effort */
-                });
-            }
-          }}
-          onAttachAsset={(asset) =>
-            setKiloCodeAttachedAssets((current) => {
-              if (current.some((entry) => entry.assetId === asset.assetId)) return current;
-              return [...current, asset];
-            })
-          }
+          attachedAssets={context.kiloCodeAttachedAssets}
+          onDetachAsset={context.detachKiloCodeAsset}
+          onAttachAsset={context.attachKiloCodeAsset}
         />
       );
     }
@@ -2435,13 +2454,13 @@ function EditorWorkspace({
     if (api.id === 'workflows') {
       return (
         <WorkflowsPanel
-          session={session}
+          session={context.session}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
           onRun={async (workflowId, inputs) => {
             try {
-              const outcome = await runWorkflow(session, workflowId, inputs);
-              setRevision((revision) => revision + 1);
+              const outcome = await runWorkflow(context.session, workflowId, inputs);
+              context.bumpProjectRevision();
               return outcome;
             } catch (error) {
               console.error('Failed to run workflow:', error);
@@ -2455,8 +2474,8 @@ function EditorWorkspace({
           }}
           onResume={async (runId, humanInputs) => {
             try {
-              const outcome = await resumeWorkflow(session, runId, humanInputs);
-              setRevision((revision) => revision + 1);
+              const outcome = await resumeWorkflow(context.session, runId, humanInputs);
+              context.bumpProjectRevision();
               return outcome;
             } catch (error) {
               console.error('Failed to resume workflow:', error);
@@ -2472,12 +2491,7 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'plugins') {
-      return (
-        <PluginsPanel
-          pluginHost={pluginHost}
-          onChange={() => setPluginRevision((revision) => revision + 1)}
-        />
-      );
+      return <PluginsPanel pluginHost={context.pluginHost} onChange={context.bumpPluginRevision} />;
     }
     return (
       <article>
@@ -2485,6 +2499,14 @@ function EditorWorkspace({
       </article>
     );
   }
+
+  // Dockview forces a grid layout whenever this registry changes. Keeping it
+  // stable prevents responsive panel rerenders from restoring old proportions
+  // while a parent sash is being dragged.
+  if (dockviewComponentsRef.current === null) {
+    dockviewComponentsRef.current = { 'editor-panel': Panel };
+  }
+  const dockviewComponents = dockviewComponentsRef.current;
 
   return (
     <main>
@@ -2842,9 +2864,17 @@ function EditorWorkspace({
           undo,
           redo,
           jumpToHistory,
+          session,
+          activatePanel,
           agentContext,
           agentSettings,
           agentPanelCommand,
+          kiloCodeAttachedAssets,
+          attachKiloCodeAsset,
+          detachKiloCodeAsset,
+          pluginHost,
+          bumpProjectRevision,
+          bumpPluginRevision,
           showToast,
           motionStudioOpen: motionStudioSceneId !== undefined,
           openMotionStudio: (sceneId: string) => setMotionStudioSceneId(sceneId),
@@ -2866,7 +2896,7 @@ function EditorWorkspace({
       >
         <DockviewReact
           className="workspace"
-          components={{ 'editor-panel': Panel }}
+          components={dockviewComponents}
           defaultTabComponent={PanelTab}
           onReady={onReady}
         />
