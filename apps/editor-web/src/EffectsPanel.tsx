@@ -25,15 +25,14 @@ import {
 
 const CATEGORIES: readonly PanelTabSpec[] = [
   { id: 'recipes', label: 'Recipes' },
-  { id: 'all', label: 'All' },
+  { id: 'favorites', label: 'Favorites' },
   { id: 'pixel-bw', label: 'Pixel / B&W' },
   { id: 'color', label: 'Color' },
-  { id: 'blur', label: 'Blur' },
-  { id: 'distort', label: 'Distort' },
   { id: 'stylize', label: 'Stylize' },
   { id: 'artistic', label: 'Artistic' },
+  { id: 'blur', label: 'Blur' },
+  { id: 'distort', label: 'Distort' },
   { id: 'depth', label: 'Depth' },
-  { id: 'favorites', label: 'Favorites' },
 ];
 
 interface EffectsPanelProps {
@@ -53,7 +52,7 @@ interface EffectsPanelProps {
 
 export function EffectsPanel({ project, objectId, onDispatch, showToast }: EffectsPanelProps) {
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('all');
+  const [category, setCategory] = useState('recipes');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
     listEffectRecipes(window.localStorage),
@@ -72,7 +71,6 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
   const descriptors = useMemo(() => {
     const all = listEffects();
     if (category === 'recipes') return [];
-    if (category === 'all') return all;
     if (category === 'favorites') return all.filter((d) => favorites.has(d.id));
     if (category === 'pixel-bw') {
       const signals = [
