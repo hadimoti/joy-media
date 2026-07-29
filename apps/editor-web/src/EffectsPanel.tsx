@@ -4,7 +4,7 @@
  * EditorSession for undo/redo support.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useContext, useEffect, useRef } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   effectRegistry,
@@ -15,8 +15,15 @@ import {
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
+import { EditorPanelContext } from './App.js';
+import {
+  createEffectRecipe,
+  listEffectRecipes,
+  type EffectRecipeCatalogEntry,
+} from './effect-recipe-catalog.js';
 
 const CATEGORIES: readonly PanelTabSpec[] = [
+  { id: 'recipes', label: 'Recipes' },
   { id: 'all', label: 'All' },
   { id: 'color', label: 'Color' },
   { id: 'blur', label: 'Blur' },
@@ -45,9 +52,23 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
+    listEffectRecipes(window.localStorage),
+  );
+  const editorContext = useContext(EditorPanelContext);
+  const effectStudioOpen = editorContext?.effectStudioOpen ?? false;
+  const wasStudioOpen = useRef(effectStudioOpen);
+
+  useEffect(() => {
+    if (wasStudioOpen.current && !effectStudioOpen) {
+      setRecipes(listEffectRecipes(window.localStorage));
+    }
+    wasStudioOpen.current = effectStudioOpen;
+  }, [effectStudioOpen]);
 
   const descriptors = useMemo(() => {
     const all = listEffects();
+    if (category === 'recipes') return [];
     if (category === 'all') return all;
     if (category === 'favorites') return all.filter((d) => favorites.has(d.id));
     return all.filter((d) => d.category === category);
@@ -107,6 +128,19 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
     event.dataTransfer.effectAllowed = 'copy';
   }, []);
 
+  const handleCreateRecipe = useCallback(() => {
+    const selectedEffects =
+      objectId === undefined ? [] : (project.visualObjects[objectId]?.effects ?? []);
+    const recipe = createEffectRecipe(
+      window.localStorage,
+      selectedEffects.length > 0 ? 'Recipe from Selection' : 'Untitled Effect Recipe',
+      selectedEffects,
+      objectId,
+    );
+    setRecipes(listEffectRecipes(window.localStorage));
+    editorContext?.openEffectStudio(recipe.id, objectId);
+  }, [editorContext, objectId, project.visualObjects]);
+
   const emptyHint =
     category === 'favorites' && favorites.size === 0
       ? 'هنوز افکتی به علاقه‌مندی‌ها اضافه نشده است.'
@@ -117,29 +151,72 @@ export function EffectsPanel({ project, objectId, onDispatch, showToast }: Effec
       title="Effects"
       iconUrl={panelTabIconUrl('effects')}
       className="effects-panel"
+      actions={
+        <button
+          type="button"
+          className="icon-button effects-studio-launch"
+          aria-label="Create effect recipe"
+          title="New Effect Studio recipe"
+          onClick={handleCreateRecipe}
+        >
+          <PlusIcon />
+        </button>
+      }
       search={{ value: search, onChange: setSearch, placeholder: 'جست‌وجوی افکت‌ها…' }}
       tabs={CATEGORIES}
       activeTab={category}
       onTabChange={setCategory}
     >
-      <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
-        {filtered.length === 0 ? (
-          <p className="empty-hint" lang="fa">
-            {emptyHint}
-          </p>
-        ) : (
-          filtered.map((desc) => (
-            <EffectCard
-              key={desc.id}
-              descriptor={desc}
-              isFavorite={favorites.has(desc.id)}
-              onAdd={() => handleAdd(desc.id)}
-              onToggleFavorite={() => toggleFavorite(desc.id)}
-              onDragStart={(e) => handleDragStart(desc.id, e)}
-            />
-          ))
-        )}
-      </div>
+      {category === 'recipes' ? (
+        <div className={`effect-recipes-list${recipes.length === 0 ? ' is-empty' : ''}`}>
+          {recipes.length === 0 ? (
+            <div className="effect-recipes-empty">
+              <strong>No recipes yet</strong>
+              <span>Combine effects into a reusable visual pipeline.</span>
+              <button type="button" onClick={handleCreateRecipe}>
+                Open Effect Studio
+              </button>
+            </div>
+          ) : (
+            recipes.map((recipe) => (
+              <button
+                key={recipe.id}
+                type="button"
+                className="effect-recipe-card"
+                onClick={() => editorContext?.openEffectStudio(recipe.id, objectId)}
+              >
+                <span className="effect-recipe-monogram">FX</span>
+                <span className="effect-recipe-copy">
+                  <strong>{recipe.title}</strong>
+                  <small>
+                    {recipe.effectCount} {recipe.effectCount === 1 ? 'effect' : 'effects'}
+                  </small>
+                </span>
+                {recipe.publishedAt !== undefined && <i>Published</i>}
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
+          {filtered.length === 0 ? (
+            <p className="empty-hint" lang="fa">
+              {emptyHint}
+            </p>
+          ) : (
+            filtered.map((desc) => (
+              <EffectCard
+                key={desc.id}
+                descriptor={desc}
+                isFavorite={favorites.has(desc.id)}
+                onAdd={() => handleAdd(desc.id)}
+                onToggleFavorite={() => toggleFavorite(desc.id)}
+                onDragStart={(e) => handleDragStart(desc.id, e)}
+              />
+            ))
+          )}
+        </div>
+      )}
     </PanelShell>
   );
 }

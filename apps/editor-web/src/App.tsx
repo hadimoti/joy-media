@@ -94,6 +94,7 @@ import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { MotionStudioShell } from './motion-studio/index.js';
+import { EffectStudioShell } from './effect-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
@@ -453,6 +454,9 @@ interface EditorPanelContextValue {
   readonly motionStudioOpen: boolean;
   readonly openMotionStudio: (sceneId: string) => void;
   readonly closeMotionStudio: () => void;
+  readonly effectStudioOpen: boolean;
+  readonly openEffectStudio: (recipeId: string, objectId?: string) => void;
+  readonly closeEffectStudio: () => void;
   /** Shared Timeline + Dual Lens zoom/scroll viewport (must live in context — dockview caches Panel). */
   readonly timelineViewport: TimelineViewport;
   readonly onTimelineViewportChange: (next: TimelineViewport) => void;
@@ -572,6 +576,9 @@ function EditorWorkspace({
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
+  const [effectStudioSession, setEffectStudioSession] = useState<
+    { readonly recipeId: string; readonly objectId?: string } | undefined
+  >(undefined);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -2823,6 +2830,13 @@ function EditorWorkspace({
           motionStudioOpen: motionStudioSceneId !== undefined,
           openMotionStudio: (sceneId: string) => setMotionStudioSceneId(sceneId),
           closeMotionStudio: () => setMotionStudioSceneId(undefined),
+          effectStudioOpen: effectStudioSession !== undefined,
+          openEffectStudio: (recipeId: string, objectId?: string) =>
+            setEffectStudioSession({
+              recipeId,
+              ...(objectId !== undefined ? { objectId } : {}),
+            }),
+          closeEffectStudio: () => setEffectStudioSession(undefined),
           timelineViewport,
           onTimelineViewportChange: setTimelineViewport,
           timelineTrackFlags,
@@ -2843,6 +2857,53 @@ function EditorWorkspace({
           key={motionStudioSceneId}
           sceneId={motionStudioSceneId}
           onClose={() => setMotionStudioSceneId(undefined)}
+        />
+      )}
+      {effectStudioSession !== undefined && (
+        <EffectStudioShell
+          key={effectStudioSession.recipeId}
+          recipeId={effectStudioSession.recipeId}
+          canApply={
+            effectStudioSession.objectId !== undefined ||
+            resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
+          }
+          onApply={(effects) => {
+            const objectId =
+              effectStudioSession.objectId ??
+              resolveObjectIdForSelection(session.visualProject, state.selectedIds);
+            if (objectId === undefined) {
+              showToast('برای اعمال Recipe یک کلیپ را انتخاب کنید.', 'info');
+              return;
+            }
+            const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
+            const commands = [
+              ...existing.map((effect) => ({
+                type: 'effect.remove' as const,
+                payload: { objectId, effectInstanceId: effect.id },
+              })),
+              ...effects
+                .filter((effect) => effect.enabled)
+                .map((effect) => ({
+                  type: 'effect.add' as const,
+                  payload: {
+                    objectId,
+                    effectId: effect.effectId,
+                    params: effect.params,
+                  },
+                })),
+            ];
+            if (commands.length === 0) {
+              showToast('این Recipe افکت فعالی برای اعمال ندارد.', 'info');
+              return;
+            }
+            dispatchProject({
+              label: 'Apply Effect Recipe',
+              commands,
+            } as unknown as VisualObjectTransaction);
+            showToast('Effect Recipe روی کلیپ اعمال شد.', 'success');
+            setEffectStudioSession(undefined);
+          }}
+          onClose={() => setEffectStudioSession(undefined)}
         />
       )}
       {agentSettingsOpen && (
