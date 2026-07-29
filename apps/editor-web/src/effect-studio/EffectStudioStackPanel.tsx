@@ -15,6 +15,7 @@ import {
   SearchIcon,
   TrashIcon,
 } from '../icons.js';
+import { effectPreviewUrl } from '../effect-preview-url.js';
 
 interface EffectStudioStackPanelProps {
   readonly effects: readonly EffectInstanceV1[];
@@ -110,12 +111,7 @@ export function EffectStudioStackPanel({
                 onClick={() => onSelect(effect.id)}
               >
                 <div className="es-stack-order">{String(index + 1).padStart(2, '0')}</div>
-                <img
-                  src={`/effects/preview/${effect.effectId}.png`}
-                  alt=""
-                  width="40"
-                  height="40"
-                />
+                <img src={effectPreviewUrl(effect.effectId)} alt="" width="40" height="40" />
                 <div className="es-stack-card-copy">
                   <strong>{effect.label ?? descriptor?.label ?? effect.effectId}</strong>
                   <span>{descriptor?.category ?? 'effect'}</span>
@@ -243,7 +239,7 @@ export function EffectStudioStackPanel({
             {descriptors.map((effect) => (
               <button key={effect.id} type="button" onClick={() => onAdd(effect.id)}>
                 <img
-                  src={`/effects/preview/${effect.id}.png`}
+                  src={effectPreviewUrl(effect.id)}
                   alt=""
                   width="64"
                   height="48"

@@ -16,6 +16,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 import { EditorPanelContext } from './App.js';
+import { effectPreviewUrl } from './effect-preview-url.js';
 import {
   createEffectRecipe,
   listEffectRecipes,
@@ -266,7 +267,7 @@ function EffectCard({
         {!imgError ? (
           <img
             className="effect-card-img"
-            src={`/effects/preview/${descriptor.id}.png`}
+            src={effectPreviewUrl(descriptor.id)}
             alt=""
             width={120}
             height={120}
