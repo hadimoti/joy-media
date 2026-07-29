@@ -29,11 +29,11 @@ export function projectJobStatus(
   const gpu = hasLocalGpuWorker(workers, now);
   if (projectMissing)
     return connected
-      ? 'آمادهٔ راه‌اندازی · Worker متصل است'
-      : 'آمادهٔ راه‌اندازی · هیچ Worker متصلی وجود ندارد';
+      ? 'Ready to initialize · Worker connected'
+      : 'Ready to initialize · No worker connected';
   return connected
-    ? `راه‌اندازی‌شده · Worker متصل است${gpu ? ' · GPU آماده است' : ''}`
-    : 'راه‌اندازی‌شده · هیچ Worker متصلی وجود ندارد';
+    ? `Initialized · Worker connected${gpu ? ' · GPU ready' : ''}`
+    : 'Initialized · No worker connected';
 }
 
 export function jobStateLabel(job: Pick<BrowserJob, 'state' | 'cancelRequested'>): string {

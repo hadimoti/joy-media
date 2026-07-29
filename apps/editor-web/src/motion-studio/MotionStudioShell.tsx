@@ -456,7 +456,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               <div className="ms-code-placeholder">
                 <textarea
                   className="ms-code-textarea"
-                  placeholder="// HTML / CSS / JavaScript&#10;// ویرایشگر بصری اینجا کد تولید می‌کند.&#10;// برای استفاده از بوم به Visual Edit برگردید."
+                  placeholder="// HTML / CSS / JavaScript&#10;// The visual editor generates code here.&#10;// Switch back to Visual Edit to use the canvas."
                   readOnly
                 />
               </div>

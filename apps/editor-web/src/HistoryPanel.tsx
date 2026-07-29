@@ -22,7 +22,7 @@ export function HistoryPanel({ entries, onJumpTo }: HistoryPanelProps) {
       iconUrl={panelTabIconUrl('history')}
       className="history-panel"
       {...(isFresh
-        ? { note: 'هنوز ویرایشی انجام نشده است؛ نقاط بازیابی اینجا نمایش داده می‌شوند.' }
+        ? { note: 'No edits yet; restore points will appear here.' }
         : {})}
     >
       <ol className="history-list" aria-label="History restore points">

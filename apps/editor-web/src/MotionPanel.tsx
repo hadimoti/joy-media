@@ -346,8 +346,8 @@ function LibraryTab({
     <div className="motion-library">
       <div className="motion-library-scroll">
         {filtered.length === 0 && rest.length === 0 ? (
-          <p className="motion-library-empty" lang="fa">
-            موشنی در دسترس نیست.
+          <p className="motion-library-empty">
+            No motions available.
           </p>
         ) : (
           <>
@@ -486,8 +486,8 @@ function MyMotionsTab({
   if (entries.length === 0) {
     return (
       <div className="motion-library">
-        <p className="motion-library-empty" lang="fa">
-          هنوز موشنی نساخته‌اید. برای شروع روی + بزنید.
+        <p className="motion-library-empty">
+          You have not created a motion yet. Tap + to start.
         </p>
       </div>
     );
@@ -671,8 +671,8 @@ function HtmlSceneInfoPanel({ scene }: { readonly scene: FirstPartyScenePackage 
       </dl>
       <h4 className="html-scene-info-vars-title">Variables</h4>
       {Object.keys(scene.variableSchema).length === 0 ? (
-        <p className="html-scene-info-empty" lang="fa">
-          متغیری وجود ندارد.
+        <p className="html-scene-info-empty">
+          No variables.
         </p>
       ) : (
         <ul className="html-scene-info-vars">
@@ -975,8 +975,8 @@ function SpatialPathPreview({
   if (xCurve === undefined || yCurve === undefined) {
     return (
       <section className="motion-spatial">
-        <p className="empty-hint" lang="fa">
-          برای پیش‌نمایش مسیر حرکت دوبعدی، هر دو محور X و Y را متحرک کنید.
+        <p className="empty-hint">
+          Animate both X and Y to preview a 2D motion path.
         </p>
       </section>
     );
@@ -1192,7 +1192,7 @@ export function MotionPanel({
       title="Motion"
       iconUrl={panelTabIconUrl('motion')}
       className="motion-panel"
-      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی موشن‌ها…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}
       tabs={LIBRARY_SUBTABS}
       activeTab={subtab}
       onTabChange={(id) => setSubtab(id as LibrarySubtab)}
@@ -1301,9 +1301,8 @@ export function MotionPanel({
             </div>
             <section className="motion-presets-channels" aria-label="Animation channels">
               {channels.length === 0 ? (
-                <p className="motion-empty" lang="fa">
-                  هنوز کی‌فریمی وجود ندارد؛ آن را در Inspector اضافه کنید یا یکی از پریست‌های بالا را
-                  اعمال کنید.
+                <p className="motion-empty">
+                  No keyframes yet; add them in Inspector or apply a preset above.
                 </p>
               ) : (
                 <div className="motion-lanes">

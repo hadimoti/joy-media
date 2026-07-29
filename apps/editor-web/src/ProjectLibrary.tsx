@@ -56,8 +56,8 @@ export function ProjectLibrary({
       <main className="project-library-main">
         <div className="project-library-intro">
           <h1>Projects</h1>
-          <p lang="fa">
-            یک پروژهٔ اخیر را باز کنید یا برای ورود به ویرایشگر پروژهٔ تازه‌ای بسازید.
+          <p>
+            Open a recent project or create a new one to enter the editor.
           </p>
         </div>
 
@@ -74,7 +74,7 @@ export function ProjectLibrary({
               <input
                 autoFocus
                 value={draftTitle}
-                placeholder="نام پروژه"
+                placeholder="Project name"
                 onChange={(event) => setDraftTitle(event.currentTarget.value)}
               />
             </label>
@@ -108,8 +108,8 @@ export function ProjectLibrary({
                 <span className="project-library-card-thumb" aria-hidden="true" />
                 <span className="project-library-card-body">
                   <strong dir="auto">{entry.title}</strong>
-                  <span lang="fa">
-                    آخرین تغییر: <bdi>{formatUpdated(entry.updatedAt)}</bdi>
+                  <span>
+                    Last updated: <bdi>{formatUpdated(entry.updatedAt)}</bdi>
                   </span>
                 </span>
               </button>

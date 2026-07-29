@@ -175,7 +175,7 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
       id: 'captions-fa',
       language: 'fa-IR',
       direction: 'auto',
-      speakers: [{ id: 'narrator', name: 'راوی' }],
+      speakers: [{ id: 'narrator', name: 'Narrator' }],
       words: {
         w1: { id: 'w1', text: 'سلام', startUs: 0, endUs: 800_000, confidence: 0.95 },
         w2: { id: 'w2', text: 'به', startUs: 800_000, endUs: 1_200_000, confidence: 0.62 },

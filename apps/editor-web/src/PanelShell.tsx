@@ -17,6 +17,8 @@ import { SearchIcon } from './icons.js';
 export interface PanelTabSpec {
   readonly id: string;
   readonly label: string;
+  /** Optional 24×24 black-on-transparent mask, tinted with currentColor. */
+  readonly iconUrl?: string;
   /** Tabs stay clickable while the body is inactive (§3c.5). */
   readonly disabled?: boolean;
 }
@@ -102,6 +104,16 @@ export function PanelShell({
             disabled={tab.disabled === true}
             onClick={() => onTabChange?.(tab.id)}
           >
+            {tab.iconUrl !== undefined && (
+              <span
+                className="joy-panel-tab-icon"
+                style={{
+                  maskImage: `url(${tab.iconUrl})`,
+                  WebkitMaskImage: `url(${tab.iconUrl})`,
+                }}
+                aria-hidden="true"
+              />
+            )}
             {tab.label}
           </button>
         ))
@@ -171,7 +183,7 @@ export function PanelShell({
             id={searchFieldId}
             ref={searchInputRef}
             type="search"
-            placeholder={search.placeholder ?? 'جست‌وجو…'}
+            placeholder={search.placeholder ?? 'Search…'}
             aria-label={`Search ${title}`}
             value={search.value}
             onChange={(event) => search.onChange(event.currentTarget.value)}

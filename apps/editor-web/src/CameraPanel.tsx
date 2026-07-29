@@ -155,7 +155,7 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
       activeTab={tab}
       onTabChange={setTab}
       inactive={transformInactive}
-      {...(transformInactive ? { note: 'برای ویرایش، یک دوربین بسازید یا انتخاب کنید.' } : {})}
+      {...(transformInactive ? { note: 'Create or select a camera to edit.' } : {})}
       actions={
         <button
           type="button"
@@ -204,11 +204,10 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
           </label>
 
           {cameraList.length === 0 && (
-            <p className="empty-hint" lang="fa">
+            <p className="empty-hint">
               <CameraUiIcon />
               <br />
-              هنوز دوربینی وجود ندارد. برای حرکت دادن کامپوزیشن در فضای ۲٫۵ بعدی یک دوربین اضافه
-              کنید.
+              No cameras yet. Add a camera to move the composition in 2.5D space.
             </p>
           )}
         </>
@@ -258,11 +257,11 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
               </select>
             </label>
           </div>
-          <p className="camera-hint" lang="fa">
-            عمق <bdi>(Z)</bdi> دوربین را در امتداد محور دید جابه‌جا می‌کند؛ لایه‌هایی با{' '}
-            <code>positionZ</code> عمیق‌تر، به سمت افق کوچک‌تر می‌شوند و هنگام پن کمتر جابه‌جا
-            می‌شوند؛ همان افکت پارالاکس <bdi>(§20.3, ADR-0015)</bdi>. این دوربین فقط وقتی روی رندر
-            اثر می‌گذارد که در بالا به‌عنوان دوربین فعال انتخاب شده باشد.
+          <p className="camera-hint">
+            Depth <bdi>(Z)</bdi> moves the camera along the view axis; layers with{' '}
+            <code>positionZ</code> farther back shrink toward the horizon and move less when
+            panning — the parallax effect <bdi>(§20.3, ADR-0015)</bdi>. This camera only affects
+            render when selected as the active camera above.
           </p>
         </>
       )}

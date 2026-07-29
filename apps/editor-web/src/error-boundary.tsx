@@ -15,8 +15,8 @@ export class EditorErrorBoundary extends Component<{ readonly children: ReactNod
     ) : (
       <main role="alert">
         <h1>Editor recovered safely</h1>
-        <p lang="fa">
-          ویرایشگر با خطا روبه‌رو شد. جزئیات فنی: <bdi>{this.state.error.message}</bdi>
+        <p>
+          The editor hit an error. Technical details: <bdi>{this.state.error.message}</bdi>
         </p>
         <button onClick={() => this.setState({})}>Try again</button>
       </main>

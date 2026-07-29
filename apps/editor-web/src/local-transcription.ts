@@ -24,7 +24,7 @@ const FIXTURES: Readonly<Record<'fa-IR' | 'en-US', TranscriptionFixture>> = {
   'fa-IR': {
     language: 'fa-IR',
     modelId: 'fixture-whisper-fa-v1',
-    speakers: [{ id: 'speaker-1', name: 'گوینده محلی' }],
+    speakers: [{ id: 'speaker-1', name: 'Local speaker' }],
     words: [
       { text: 'سلام', startUs: 0, endUs: 400_000, confidence: 0.97, speakerId: 'speaker-1' },
       { text: 'به', startUs: 400_000, endUs: 650_000, confidence: 0.94, speakerId: 'speaker-1' },

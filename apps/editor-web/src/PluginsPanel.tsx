@@ -22,8 +22,8 @@ export function PluginsPanel({
       className="plugins-panel"
       note={
         safeMode
-          ? 'حالت امن روشن است؛ ورودی‌های رابط کاربری غیرفعال می‌مانند.'
-          : 'حالت امن خاموش است. برای نمایش رابط افزونه، آن را فعال کنید.'
+          ? 'Safe mode is on; UI plugin inputs stay disabled.'
+          : 'Safe mode is off. Enable it to show the plugin UI.'
       }
       actions={
         <button
@@ -88,8 +88,8 @@ export function PluginsPanel({
         <h4>Demo contribution</h4>
         {demoMounted ? (
           <div className="plugin-demo-surface">
-            <p lang="fa">
-              میزبان SDK فعال است · قابلیت <bdi>ui.panel</bdi> پشتیبانی می‌شود:
+            <p>
+              SDK host is active · <bdi>ui.panel</bdi> capability supported:
               <bdi>{String(pluginHost.sdk.supports('ui.panel'))}</bdi>
             </p>
             <p dir="ltr">
@@ -112,8 +112,8 @@ export function PluginsPanel({
             </button>
           </div>
         ) : (
-          <p className="empty-hint" lang="fa">
-            برای نمایش این بخش، حالت امن را خاموش و Demo Panel را فعال کنید.
+          <p className="empty-hint">
+            Turn safe mode off and enable Demo Panel to show this section.
           </p>
         )}
       </section>

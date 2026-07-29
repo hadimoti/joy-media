@@ -2140,7 +2140,7 @@ function EditorWorkspace({
     }
     if (api.id === 'camera') {
       const composition = visualProject.compositions[visualProject.rootCompositionId];
-      if (composition === undefined) return <p lang="fa">کامپوزیشن اصلی وجود ندارد.</p>;
+      if (composition === undefined) return <p>Main composition is missing.</p>;
       return (
         <CameraPanel
           allObjects={visualProject.visualObjects}
@@ -2289,7 +2289,7 @@ function EditorWorkspace({
           onEffectDrop={(effectId, clipId, trackId) => {
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
-              context.showToast('هدف این کلیپ پیدا نشد.', 'error');
+              context.showToast('Could not find this clip’s target.', 'error');
               return;
             }
             const descriptor = effectRegistry.getEffect(effectId);
@@ -2442,12 +2442,12 @@ function EditorWorkspace({
           iconUrl={panelTabIconUrl('diagnostics')}
           className="diagnostics-panel"
         >
-          <p lang="fa">پیش‌نمایش پراکسی با کیفیت {context.playback.quality}</p>
-          <p lang="fa">
-            {context.playback.decodedFrames} فریم رمزگشایی‌شده / {context.playback.droppedFrames}{' '}
-            فریم ازدست‌رفته
+          <p>Proxy preview at quality {context.playback.quality}</p>
+          <p>
+            {context.playback.decodedFrames} frames decoded / {context.playback.droppedFrames}{' '}
+            frames dropped
           </p>
-          <p lang="fa">بیشترین اختلاف زمانی رسانه: {context.playback.maxDriftUs} میکروثانیه</p>
+          <p>Max media drift: {context.playback.maxDriftUs} µs</p>
         </PanelShell>
       );
     if (api.id === 'monitor') return <MonitorPanel />;
@@ -2495,7 +2495,7 @@ function EditorWorkspace({
     }
     return (
       <article>
-        <p lang="fa">{`پنل ${panelLabel(api.id)}`}</p>
+        <p>{`Panel ${panelLabel(api.id)}`}</p>
       </article>
     );
   }
@@ -2675,8 +2675,8 @@ function EditorWorkspace({
               <section className="header-dropdown" aria-label="Recent processes">
                 <h3>Recent processes</h3>
                 {exportHistory.length === 0 ? (
-                  <p className="empty-hint" lang="fa">
-                    هنوز خروجی‌ای ساخته نشده است. برای ساخت فایل MP4 از Export استفاده کنید.
+                  <p className="empty-hint">
+                    No exports yet. Use Export to create an MP4.
                   </p>
                 ) : (
                   <ul className="process-list">
@@ -2742,12 +2742,12 @@ function EditorWorkspace({
                 <h3>JOY account</h3>
                 {joySession.kind === 'ready' && (
                   <>
-                    <p lang="fa">
-                      وارد حساب شده‌اید
+                    <p>
+                      Signed in
                       {joySession.subject !== undefined && (
                         <>
                           {' '}
-                          · حساب <bdi>{joySession.subject}</bdi>
+                          · account <bdi>{joySession.subject}</bdi>
                         </>
                       )}
                     </p>
@@ -2762,15 +2762,15 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'no-access' && (
-                  <p className="empty-hint" lang="fa">
-                    دسترسی JOY Media برای این حساب فعال نیست.
+                  <p className="empty-hint">
+                    JOY Media access is not enabled for this account.
                   </p>
                 )}
                 {joySession.kind === 'signed-out' && (
                   <>
-                    <p className="empty-hint" lang="fa">
-                      وارد حساب نشده‌اید. با حساب JOY وارد شوید؛ این ویرایشگر از نشست مشترک JOY
-                      استفاده می‌کند.
+                    <p className="empty-hint">
+                      Not signed in. Sign in with your JOY account; this editor uses the shared JOY
+                      session.
                     </p>
                     <a
                       className="icon-button icon-button-labeled"
@@ -2785,14 +2785,14 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'unknown' && (
-                  <p className="empty-hint" lang="fa">
-                    در حال بررسی نشست…
+                  <p className="empty-hint">
+                    Checking session…
                   </p>
                 )}
                 {joySession.kind === 'unavailable' && (
-                  <p className="empty-hint" lang="fa">
-                    سرویس هویت JOY در دسترس نیست. وضعیت ورود شما تغییر نکرده است؛ کمی بعد دوباره
-                    تلاش کنید.
+                  <p className="empty-hint">
+                    JOY identity service is unavailable. Your sign-in status is unchanged; try again
+                    shortly.
                   </p>
                 )}
               </section>
@@ -2807,7 +2807,7 @@ function EditorWorkspace({
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="جست‌وجوی فرمان‌ها"
+            placeholder="Search commands"
           />
           {searchActions(query).map((action) => (
             <button key={action.id} onClick={() => executeAction(action.id)}>
@@ -2921,7 +2921,7 @@ function EditorWorkspace({
               effectStudioSession.objectId ??
               resolveObjectIdForSelection(session.visualProject, state.selectedIds);
             if (objectId === undefined) {
-              showToast('برای اعمال Recipe یک کلیپ را انتخاب کنید.', 'info');
+              showToast('Select a clip to apply the recipe.', 'info');
               return;
             }
             const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
@@ -2942,14 +2942,14 @@ function EditorWorkspace({
                 })),
             ];
             if (commands.length === 0) {
-              showToast('این Recipe افکت فعالی برای اعمال ندارد.', 'info');
+              showToast('This recipe has no active effects to apply.', 'info');
               return;
             }
             dispatchProject({
               label: 'Apply Effect Recipe',
               commands,
             } as unknown as VisualObjectTransaction);
-            showToast('Effect Recipe روی کلیپ اعمال شد.', 'success');
+            showToast('Effect recipe applied to the clip.', 'success');
             setEffectStudioSession(undefined);
           }}
           onClose={() => setEffectStudioSession(undefined)}

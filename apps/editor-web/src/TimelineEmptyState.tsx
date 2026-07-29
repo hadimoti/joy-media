@@ -57,7 +57,7 @@ export function TimelineEmptyState({
         event.dataTransfer.types.includes('application/x-joy-effect') ||
         event.dataTransfer.types.includes('application/x-joy-transition')
       ) {
-        onToast?.('ابتدا رسانه را به تایم‌لاین اضافه کنید، سپس افکت را روی کلیپ بکشید.');
+        onToast?.('Add media to the timeline first, then drag the effect onto a clip.');
         return;
       }
       onImportClick();
@@ -111,8 +111,8 @@ export function TimelineEmptyState({
         <div className="timeline-empty-icon" aria-hidden="true">
           <UploadIcon />
         </div>
-        <p className="timeline-empty-text" lang="fa">
-          برای شروع ویرایش، رسانه را اینجا بکشید
+        <p className="timeline-empty-text">
+          Drag media here to start editing
         </p>
         <div className="timeline-empty-actions">
           <button
@@ -138,8 +138,8 @@ export function TimelineEmptyState({
             Add from Library
           </button>
         </div>
-        <p className="timeline-empty-hint" lang="fa">
-          از ویدئو، صدا، تصویر و زیرنویس پشتیبانی می‌شود
+        <p className="timeline-empty-hint">
+          Supports video, audio, images, and captions
         </p>
       </div>
     </div>

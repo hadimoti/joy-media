@@ -416,11 +416,7 @@ export function ZoomOutIcon() {
 }
 
 export function FitWidthIcon() {
-  return (
-    <Svg>
-      <path d="M2.5 3.5v9M13.5 3.5v9M5.5 8H10.5M5.5 8l2-2M5.5 8l2 2M10.5 8l-2-2M10.5 8l-2 2" />
-    </Svg>
-  );
+  return <PngMaskIcon src={UI_ICONS.timelineFitWidth} size={16} />;
 }
 
 export function DuplicateIcon() {

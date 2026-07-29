@@ -449,8 +449,8 @@ export function InspectorPanel({
             dispatch={dispatchAudio}
           />
         ) : (
-          <p className="empty-hint" lang="fa">
-            برای میکس صدای کلیپ، ابتدا آن را انتخاب کنید.
+          <p className="empty-hint">
+            Select a clip to mix its audio.
           </p>
         ))}
     </PanelShell>

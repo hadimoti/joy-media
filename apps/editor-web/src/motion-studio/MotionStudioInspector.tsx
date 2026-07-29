@@ -415,7 +415,7 @@ function TextSection({
           value={mixedString(texts)}
           onChange={(e) => !isMixed(texts) && updateText(e.target.value)}
           rows={3}
-          placeholder="متن را وارد کنید…"
+          placeholder="Enter text…"
         />
       </div>
       <div className="ms-inspector-section">

@@ -459,8 +459,8 @@ export function TimelineCanvas({
                   );
                 })}
               {track.items.length === 0 ? (
-                <span className="timeline-lane-empty" lang="fa">
-                  داده‌ای وجود ندارد
+                <span className="timeline-lane-empty">
+                  No data
                 </span>
               ) : (
                 track.items.map((item) => {

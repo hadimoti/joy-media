@@ -160,15 +160,15 @@ export function WorkflowsPanel({
           candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
         ),
       });
-      setStatusMessage(`در انتظار تأیید: ${outcome.request.kind}`);
+      setStatusMessage(`Awaiting approval: ${outcome.request.kind}`);
       return;
     }
     setApproval(undefined);
     if (outcome.status === 'succeeded') {
-      setStatusMessage(`گردش‌کار ${outcome.workflowId} پایان یافت.`);
+      setStatusMessage(`Workflow ${outcome.workflowId} finished.`);
       return;
     }
-    setStatusMessage(`اجرای گردش‌کار ناموفق بود: ${outcome.error}`);
+    setStatusMessage(`Workflow run failed: ${outcome.error}`);
   }
 
   function openRunModal(workflowId: string) {
@@ -340,7 +340,7 @@ export function WorkflowsPanel({
       {...(statusMessage !== undefined
         ? { note: statusMessage }
         : isEmpty
-          ? { note: 'برای ساخت نخستین گردش‌کار، یک عملیات Agent را اجرا و ذخیره کنید.' }
+          ? { note: 'Run and save an Agent action to create your first workflow.' }
           : {})}
       actions={
         <button
@@ -417,8 +417,8 @@ export function WorkflowsPanel({
               })}
             </ul>
           ) : (
-            <p className="empty-hint" lang="fa">
-              درخواست {approval.request.kind} را بررسی کنید و ادامه دهید.
+            <p className="empty-hint">
+              Review the {approval.request.kind} request and continue.
             </p>
           )}
           <div className="workflow-run-actions">

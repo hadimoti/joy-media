@@ -143,8 +143,8 @@ export function MotionStudioLayersPanel({
       </div>
       <div className="ms-panel-body ms-layer-list">
         {reversedLayers.length === 0 ? (
-          <div className="ms-empty-state" lang="fa">
-            هنوز لایه‌ای وجود ندارد. شکل، متن یا تصویر اضافه کنید.
+          <div className="ms-empty-state">
+            No layers yet. Add a shape, text, or image.
           </div>
         ) : (
           reversedLayers.map((layer, idx) => {

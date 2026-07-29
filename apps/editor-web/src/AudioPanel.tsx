@@ -59,7 +59,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
       activeTab={tab}
       onTabChange={setTab}
       inactive={clipsInactive}
-      {...(clipsInactive ? { note: 'برای میکس صدا، کلیپ‌ها را روی تایم‌لاین قرار دهید.' } : {})}
+      {...(clipsInactive ? { note: 'Place clips on the timeline to mix audio.' } : {})}
     >
       {tab === 'master' && master !== undefined && (
         <div className="audio-strip">

@@ -168,7 +168,7 @@ export function TransitionsPanel({
   const handleAddTransition = useCallback(
     (type: string) => {
       if (!selectedJunction) {
-        showToast('برای ساخت ترنزیشن، دو کلیپ هم‌پوشان روی یک ترک ویدئو قرار دهید.', 'info');
+        showToast('Place two overlapping clips on one video track to create a transition.', 'info');
         return;
       }
       const entry = SHADER_CATALOG.find((item) => item.id === type);
@@ -247,7 +247,7 @@ export function TransitionsPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      search={{ value: query, onChange: setQuery, placeholder: 'جست‌وجوی ترنزیشن‌ها…' }}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search transitions…' }}
       {...(selectedJunction
         ? {
             note: `${selectedJunction.trackName}: ${selectedJunction.leftClipId} → ${selectedJunction.rightClipId}`,
@@ -343,8 +343,8 @@ export function TransitionsPanel({
       {tab === 'applied' && (
         <section className="transitions-subsection" aria-label="Existing transitions">
           {relevantTransitions.length === 0 && (
-            <p className="empty-hint" lang="fa">
-              هنوز ترنزیشنی اعمال نشده است.
+            <p className="empty-hint">
+              No transitions applied yet.
             </p>
           )}
           <ul className="transition-list" role="list">
