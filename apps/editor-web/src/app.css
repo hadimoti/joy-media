@@ -8652,16 +8652,16 @@ label {
   flex: 1 1 auto;
   min-height: 0;
   grid-auto-rows: max-content;
-  padding: 0.7rem 0.75rem 0.85rem;
-  gap: 0.65rem;
+  padding: 0.58rem 0.62rem 0.75rem;
+  gap: 0.5rem;
 }
 .asset-grid--large {
-  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr));
+  gap: 0.6rem;
 }
 .asset-grid--medium {
-  grid-template-columns: repeat(auto-fill, minmax(8.35rem, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(6.35rem, 1fr));
+  gap: 0.45rem;
 }
 .asset-card {
   border-color: color-mix(in srgb, var(--joy-border) 88%, transparent);
@@ -8742,7 +8742,7 @@ label {
 }
 .asset-grid--large .asset-card-name,
 .asset-grid--medium .asset-card-name {
-  padding: 0.5rem 0.6rem 0;
+  padding: 0.42rem 0.5rem 0;
   color: var(--joy-text);
   font-weight: 620;
 }
@@ -8759,14 +8759,46 @@ label {
 .asset-grid--large .asset-card-collection,
 .asset-grid--medium .asset-card-collection {
   display: block;
-  padding: 0.16rem 0.6rem 0.58rem;
+  padding: 0.12rem 0.5rem 0.46rem;
 }
 .asset-grid--medium .asset-card-name {
-  padding: 0.42rem 0.48rem 0;
+  padding: 0.34rem 0.4rem 0;
 }
 .asset-grid--medium .asset-card-collection {
-  padding: 0.13rem 0.48rem 0.46rem;
-  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem 0.38rem;
+  font-size: 0.58rem;
+}
+
+/* Dense transition catalog: preserve a readable 4:3 preview while showing more choices. */
+.transitions-panel .transition-type-picker {
+  gap: 0.28rem;
+}
+.transitions-panel .transition-card {
+  gap: 0.14rem;
+  padding: 0.14rem;
+}
+.transitions-panel .transition-card-thumb {
+  width: min(100%, 6.25rem);
+  margin-inline: auto;
+}
+.transitions-panel .transition-preview-canvas {
+  height: 100%;
+}
+.transitions-panel .transition-card-footer {
+  min-height: 1rem;
+}
+.transitions-panel .transition-card-label {
+  font-size: 0.56rem;
+}
+@container (min-width: 360px) {
+  .transitions-panel .transition-type-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (min-width: 540px) {
+  .transitions-panel .transition-type-picker {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .asset-list-header,
 .asset-grid--list .asset-card {
