@@ -6016,6 +6016,12 @@ label {
   > .dv-view:not(:first-child)::before {
   height: var(--joy-shell-gap);
 }
+/* Keep the two-pixel visual gutter while making panel dividers easy to grab. */
+#root .workspace .dv-split-view-container > .dv-sash-container > .dv-sash::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
 #root .workspace .dv-tabs-and-actions-container,
 #root .workspace .dv-void-container {
   background: transparent !important;

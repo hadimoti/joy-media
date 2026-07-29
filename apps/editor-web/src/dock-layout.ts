@@ -26,7 +26,7 @@
  * container against `grid.width` / `grid.height`.
  */
 
-import { PANEL_IDS } from './workspace.js';
+import { PANEL_IDS, type PanelId } from './workspace.js';
 import { panelLabel } from './panel-tab-icons.js';
 
 /** Bump when the seed changes; older keys are purged in App's `onReady`. */
@@ -41,6 +41,13 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
   'joy-media.dockview.v6',
   'joy-media.dockview.v7',
 ];
+
+/**
+ * Panels use icon-only tabs, so the dock can stay operable in a narrow editor
+ * viewport without Dockview's default 100 px-per-group overflow.
+ */
+export const DOCK_PANEL_MINIMUM_WIDTH = 64;
+export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
 const BROWSER_GROUP = [
   'media',
@@ -71,9 +78,37 @@ function panelEntries(): Record<string, unknown> {
       contentComponent: 'editor-panel',
       tabComponent: 'props.defaultTabComponent',
       title: panelLabel(id),
+      minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+      minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
     };
   }
   return entries;
+}
+
+/**
+ * Saved Dockview JSON predates compact panel constraints. Add them while
+ * preserving the user's grid, tabs, and any unknown future panel state.
+ */
+export function normalizeDockLayoutConstraints(layout: unknown): unknown {
+  if (!isRecord(layout) || !isRecord(layout.panels)) return layout;
+
+  let changed = false;
+  const panels: Record<string, unknown> = {};
+  for (const [id, panel] of Object.entries(layout.panels)) {
+    if (!PANEL_IDS.includes(id as PanelId) || !isRecord(panel)) {
+      panels[id] = panel;
+      continue;
+    }
+
+    panels[id] = {
+      ...panel,
+      minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+      minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+    };
+    changed = true;
+  }
+
+  return changed ? { ...layout, panels } : layout;
 }
 
 export function defaultDockLayout(): unknown {
@@ -130,4 +165,8 @@ export function defaultDockLayout(): unknown {
     panels: panelEntries(),
     activeGroup: 'monitor-col',
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

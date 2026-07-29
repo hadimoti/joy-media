@@ -140,7 +140,14 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
-import { DOCK_LAYOUT_KEY, SUPERSEDED_DOCK_LAYOUT_KEYS, defaultDockLayout } from './dock-layout.js';
+import {
+  DOCK_LAYOUT_KEY,
+  DOCK_PANEL_MINIMUM_HEIGHT,
+  DOCK_PANEL_MINIMUM_WIDTH,
+  SUPERSEDED_DOCK_LAYOUT_KEYS,
+  defaultDockLayout,
+  normalizeDockLayoutConstraints,
+} from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
@@ -1981,7 +1988,9 @@ function EditorWorkspace({
     let restored = false;
     if (saved !== null) {
       try {
-        event.api.fromJSON(JSON.parse(saved), { reuseExistingPanels: false });
+        event.api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
+          reuseExistingPanels: false,
+        });
         restored = true;
       } catch {
         window.localStorage.removeItem(layoutKey);
@@ -2005,6 +2014,8 @@ function EditorWorkspace({
         component: 'editor-panel',
         title: panelLabel(id),
         inactive: options.inactive ?? true,
+        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
         ...(options.position !== undefined ? { position: options.position } : {}),
       });
     };
@@ -2042,9 +2053,12 @@ function EditorWorkspace({
       event.api.getPanel(restoreId)?.api.setActive();
     }
 
-    event.api.onDidLayoutChange(() => {
+    const persistDockLayout = () => {
       window.localStorage.setItem(layoutKey, JSON.stringify(event.api.toJSON()));
-    });
+    };
+    event.api.onDidLayoutChange(persistDockLayout);
+    // Save the constraint migration immediately instead of waiting for a drag.
+    persistDockLayout();
   }, []);
 
   function Panel({ api }: IDockviewPanelProps) {
