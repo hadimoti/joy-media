@@ -1,7 +1,61 @@
-/* JOY Media's independent login (ADR-0017). Visual language matches joy-vps's
-   shared login card (bot/webapp/shared/core.css: #161415, blur(24px),
-   border-radius 28px), but the "background" here is the real editor itself,
-   blurred and dimmed behind the card instead of a synthetic dot-grid. */
+/*
+ * JOY Media's independent login (ADR-0017). This is a faithful port of
+ * joy-vps's shared login card (bot/webapp/shared/login.js +
+ * shared/core.css) — same markup shape, same class names, same CSS
+ * values/animations. The only intentional difference is the logo image
+ * (this app's own /assets/logo.png instead of joyteam's dragon logo) and
+ * that the "background" behind the card is the real blurred editor instead
+ * of joyteam.ir's plain dot-grid screen.
+ */
+
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Inter-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Inter-500.ttf') format('truetype');
+}
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Inter-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Inter-700.ttf') format('truetype');
+}
+@font-face {
+  font-family: RooyinFree;
+  font-style: normal;
+  font-weight: 400;
+  src: url('/fonts/RooyinFree-Regular.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: RooyinFree;
+  font-style: normal;
+  font-weight: 700;
+  src: url('/fonts/RooyinFree-Bold.woff2') format('woff2');
+  font-display: swap;
+}
+
+@property --joy-ang {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
 
 .login-gate-app {
   height: 100%;
@@ -14,139 +68,413 @@
   user-select: none;
 }
 
-.login-gate-scrim {
+/* ── login-screen / login-card (joy-vps core.css, dark "shared" variant) ── */
+
+.login-screen {
+  --joy-grey-bg: #141414;
+  --text: #e5e5e5;
+  --muted: #777;
+  --danger: #f87171;
+  --border: rgba(255, 255, 255, 0.06);
+  --shadow: 3px 5px 14px rgba(0, 0, 0, 0.55), -1px -2px 5px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --glow: #f9731628;
+  --glow-strong: #f9731644;
+
   position: fixed;
   inset: 0;
   z-index: 900;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(10, 9, 9, 0.58);
+  box-sizing: border-box;
+  overflow: hidden;
+  background: rgba(20, 20, 20, 0.4);
+  direction: ltr;
+  text-align: left;
+  font-family: Rooyin, RooyinFree, Tahoma, system-ui, sans-serif;
 }
 
-.login-gate-card {
-  background: #161415;
+.login-screen::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+  animation: jm-grid-drift 20s linear infinite;
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes jm-grid-drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 28px 28px;
+  }
+}
+
+@keyframes jm-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.login-card {
+  animation: jm-fade-in 0.3s ease both;
+  background: #161415 !important;
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 28px;
-  padding: 36px 28px;
+  padding: 36px 24px;
   width: 100%;
-  max-width: 380px;
-  box-shadow:
-    0 32px 64px rgba(0, 0, 0, 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  color: #f2f0ef;
-  text-align: center;
+  max-width: 360px;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  text-align: left;
 }
 
-.login-gate-card h2 {
-  margin: 0 0 4px;
-  font-size: 1.25rem;
+/* ── rotating-glow border effect on success ── */
+
+.rotating-glow {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
 }
 
-.login-gate-card p.login-gate-hint {
-  margin: 0 0 20px;
-  color: rgba(242, 240, 239, 0.6);
-  font-size: 0.85rem;
+.login-card.rotating-glow > * {
+  position: relative;
+  z-index: 4;
 }
 
-.login-gate-methods {
+.rotating-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  pointer-events: none;
+  z-index: 3;
+  background: conic-gradient(
+    from var(--joy-ang),
+    rgba(255, 157, 77, 0) 0deg,
+    rgba(255, 255, 255, 0.92) 55deg,
+    rgba(255, 157, 77, 0.98) 95deg,
+    rgba(255, 157, 77, 0.75) 130deg,
+    rgba(255, 157, 77, 0) 180deg,
+    rgba(255, 157, 77, 0) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.rotating-glow.login-success-glow::after {
+  opacity: 0.9;
+  animation: jm-joy-rotate 1.6s linear infinite;
+}
+
+@keyframes jm-joy-rotate {
+  to {
+    --joy-ang: 360deg;
+  }
+}
+
+@keyframes jm-login-fail-buzz {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  10% {
+    transform: translate3d(-7px, 0, 0) rotate(-0.6deg);
+  }
+  20% {
+    transform: translate3d(7px, 0, 0) rotate(0.6deg);
+  }
+  30% {
+    transform: translate3d(-6px, 0, 0) rotate(-0.4deg);
+  }
+  40% {
+    transform: translate3d(6px, 0, 0) rotate(0.4deg);
+  }
+  50% {
+    transform: translate3d(-4px, 0, 0);
+  }
+  60% {
+    transform: translate3d(4px, 0, 0);
+  }
+  70% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  80% {
+    transform: translate3d(2px, 0, 0);
+  }
+}
+
+.login-fail-buzz {
+  animation: jm-login-fail-buzz 0.48s ease;
+}
+
+.otp-glow-wrap {
+  display: inline-flex;
+  border-radius: 12px;
+  vertical-align: top;
+  flex: 0 0 auto;
+}
+
+.otp-glow-wrap .otp-box {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── logo ── */
+
+.lcard-logo-wrap {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-logo {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  margin-bottom: 16px;
+  object-fit: contain;
+  box-shadow: 0 0 32px #f9731633;
+  animation: jm-logo-glow 3s ease-in-out infinite;
+}
+
+@keyframes jm-logo-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 12px #cc000044);
+  }
+  50% {
+    filter: drop-shadow(0 0 28px #cc000088);
+  }
+}
+
+/* ── title (BlockPro isn't bundled in this app; falls back to RooyinFree) ── */
+
+.login-title {
+  font-family: 'BlockPro', RooyinFree, Rooyin, Tahoma, sans-serif;
+  direction: rtl;
+  text-align: center;
+  font-size: 28px;
+  margin-bottom: 30px;
+  letter-spacing: 0;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* ── method switcher (Gmail / Telegram / Token) ── */
+
+.lmethods {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  width: 100%;
   margin-bottom: 18px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.login-gate-method-btn {
-  flex: 1;
-  padding: 8px 0;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+.lmethod-btn {
+  position: relative;
+  border: 0;
   background: transparent;
-  color: rgba(242, 240, 239, 0.7);
-  font-size: 0.85rem;
+  color: var(--muted);
+  border-radius: 14px;
+  padding: 10px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   cursor: pointer;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: -0.01em;
 }
 
-.login-gate-method-btn.active {
-  background: #ff5a3c;
-  border-color: #ff5a3c;
-  color: #161415;
-  font-weight: 600;
+.lmethod-btn.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.login-gate-card input {
+.lmethod-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: contain;
+  display: block;
+}
+
+.lmethod-key {
+  font-size: 1.5rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── input step / OTP step ── */
+
+.login-panels {
+  min-height: 148px;
+}
+
+.login-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 24px;
+  text-align: center;
+  width: 100%;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+}
+
+.auth-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 12px 14px;
+  padding: 16px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.04);
-  color: #f2f0ef;
-  font-size: 0.95rem;
-  margin-bottom: 14px;
-}
-
-.login-gate-otp-boxes {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 14px;
-}
-
-.login-gate-otp-boxes input {
-  width: 40px;
-  height: 48px;
-  padding: 0;
+  border: 1.5px solid #f97316;
+  outline: none;
+  background: rgba(209, 209, 209, 0.25);
+  color: #ffffff;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.14), inset -4px -4px 8px rgba(255, 255, 255, 0.18);
+  transition: all 0.3s ease;
   text-align: center;
-  font-size: 1.1rem;
-  margin-bottom: 0;
+  direction: ltr;
 }
 
-.login-gate-card button.login-gate-submit {
+.auth-input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.auth-input:focus {
+  border-color: #fb923c;
+  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.14), inset -4px -4px 8px rgba(255, 255, 255, 0.18),
+    0 0 0 3px rgba(249, 115, 22, 0.22);
+}
+
+.login-btn {
   width: 100%;
-  padding: 12px 0;
-  border-radius: 14px;
-  border: none;
-  background: #ff5a3c;
-  color: #161415;
-  font-weight: 600;
-  font-size: 0.95rem;
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1.5px solid #f97316;
+  background: linear-gradient(165deg, #1c1a1d 0%, #111012 100%);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38), inset 4px 4px 8px #080809,
+    inset -4px -4px 8px #252327;
+  transition: all 0.2s ease;
   cursor: pointer;
+  font-family: billjilly, PixelAdminTitle, sans-serif;
+  text-transform: uppercase;
+  font-weight: 600;
 }
 
-.login-gate-card button.login-gate-submit:disabled {
+.login-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42), inset 5px 5px 10px #060607, inset -3px -3px 7px #1c1a1e;
+}
+
+.login-btn:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
-.login-gate-card button.login-gate-link {
-  margin-top: 12px;
-  background: none;
-  border: none;
-  color: rgba(242, 240, 239, 0.55);
-  font-size: 0.8rem;
+.login-btn-gradient {
+  display: inline-block;
+  background: linear-gradient(92deg, #fed7aa 0%, #fb923c 48%, #ea580c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #f97316;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.otp-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  direction: ltr;
+  margin: 8px 0 14px;
+}
+
+.otp-box {
+  width: 44px;
+  height: 54px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 1.2rem;
+  color: #fff;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.otp-box:focus {
+  outline: none;
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px #f9731624;
+}
+
+.otp-box.filled {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.login-back {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 0.8rem;
+  display: block;
+  width: 100%;
+  text-align: center;
 }
 
-.login-gate-error {
-  color: #ff8088;
-  font-size: 0.82rem;
-  margin: -4px 0 14px;
+.login-back:active {
+  color: #fff;
 }
 
-:root[data-theme='light'] .login-gate-card {
-  background: rgba(255, 255, 255, 0.96);
-  color: #1b1b1b;
-  border-color: rgba(0, 0, 0, 0.08);
+.login-error {
+  color: var(--danger);
+  font-size: 0.78rem;
+  margin-top: 10px;
+  text-align: center;
+  width: 100%;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-:root[data-theme='light'] .login-gate-card p.login-gate-hint,
-:root[data-theme='light'] .login-gate-method-btn {
-  color: rgba(27, 27, 27, 0.6);
-}
-
-:root[data-theme='light'] .login-gate-card input {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #1b1b1b;
+.hidden {
+  display: none !important;
 }

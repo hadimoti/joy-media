@@ -1,24 +1,41 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { probeJoySession } from './identity.js';
-import { requestOtp, verifyOtp, type MediaAuthMethod } from './media-session.js';
+import { requestOtp, setStoredMediaToken, verifyOtp, type MediaAuthMethod } from './media-session.js';
 import './login-gate.css';
 
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
+type Method = MediaAuthMethod | 'token';
+
+const METHOD_CONFIG: Record<Method, { sub: string; placeholder: string; type: string; btn: string }> = {
+  gmail: { sub: 'Enter your Gmail address', placeholder: 'your@gmail.com', type: 'email', btn: 'Send Code →' },
+  telegram: {
+    sub: 'Enter your Telegram numeric ID',
+    placeholder: '123456789',
+    type: 'text',
+    btn: 'Send Code →',
+  },
+  token: { sub: 'Paste your access token', placeholder: 'paste token here...', type: 'text', btn: 'Login →' },
+};
 
 /**
- * Independent JOY Media login (ADR-0017): the editor is always mounted, but
- * blurred and non-interactive until this gate unlocks it. Visual language
- * matches joy-vps's login card; "blurred app in background" is literally the
- * real editor underneath, not a synthetic backdrop.
+ * Independent JOY Media login (ADR-0017) — a faithful port of joy-vps's
+ * shared login card (bot/webapp/shared/login.js), same markup/classes/
+ * animations, method switcher (Gmail / Telegram / Token), and OTP-box
+ * behavior. The editor is always mounted underneath, blurred and
+ * non-interactive until this gate unlocks it. Only intentional difference
+ * from joy-vps: this app's own logo instead of joyteam's.
  */
 export function LoginGate({ children }: { readonly children: ReactNode }): ReactNode {
   const [step, setStep] = useState<Step>('checking');
-  const [method, setMethod] = useState<MediaAuthMethod>('gmail');
+  const [method, setMethod] = useState<Method>('gmail');
   const [contact, setContact] = useState('');
-  const [code, setCode] = useState('');
   const [hint, setHint] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [successGlow, setSuccessGlow] = useState(false);
+  const [failBuzz, setFailBuzz] = useState(false);
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const otpSubmittingRef = useRef(false);
 
   useEffect(() => {
     void probeJoySession(window.localStorage).then((state) => {
@@ -26,37 +43,104 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     });
   }, []);
 
+  const buzz = (message: string): void => {
+    setError(message);
+    setFailBuzz(false);
+    requestAnimationFrame(() => setFailBuzz(true));
+  };
+
+  const unlockAfterSuccess = (): void => {
+    setSuccessGlow(true);
+    window.setTimeout(() => setStep('unlocked'), 520);
+  };
+
   const submitContact = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
-    if (contact.trim().length === 0 || busy) return;
+    const value = contact.trim();
+    if (value.length === 0 || busy) return;
     setBusy(true);
     setError(undefined);
+    if (method === 'token') {
+      try {
+        setStoredMediaToken(value, window.localStorage);
+        const state = await probeJoySession(window.localStorage);
+        if (state.kind === 'ready') {
+          unlockAfterSuccess();
+        } else {
+          buzz('That token is invalid or expired.');
+        }
+      } catch {
+        buzz('That token is invalid or expired.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
-      const message = await requestOtp(contact.trim(), method);
+      const message = await requestOtp(value, method);
       setHint(message);
       setStep('otp');
     } catch {
-      setError('Could not request a login code. Try again.');
+      buzz('Could not request a login code. Try again.');
     } finally {
       setBusy(false);
     }
   };
 
-  const submitCode = async (event: React.FormEvent): Promise<void> => {
-    event.preventDefault();
-    if (code.trim().length === 0 || busy) return;
-    setBusy(true);
+  const submitOtp = async (code: string): Promise<void> => {
+    if (otpSubmittingRef.current || method === 'token') return;
+    otpSubmittingRef.current = true;
     setError(undefined);
     try {
-      await verifyOtp(contact.trim(), method, code.trim(), window.localStorage);
-      setStep('unlocked');
+      await verifyOtp(contact.trim(), method, code, window.localStorage);
+      unlockAfterSuccess();
     } catch {
-      setError('That code is invalid or has expired.');
-    } finally {
-      setBusy(false);
+      buzz('That code is invalid or has expired.');
+      otpRefs.current.forEach((box) => {
+        if (box) box.value = '';
+      });
+      otpRefs.current[0]?.focus();
+      otpSubmittingRef.current = false;
     }
   };
 
+  const onOtpChange = (index: number, raw: string): void => {
+    const digits = raw.replace(/\D/g, '').slice(0, 6 - index).split('');
+    if (digits.length > 1) {
+      digits.forEach((digit, offset) => {
+        const target = otpRefs.current[index + offset];
+        if (target) target.value = digit;
+      });
+      const next = otpRefs.current.find((box) => box && box.value === '');
+      (next ?? otpRefs.current[5])?.focus();
+    } else {
+      const box = otpRefs.current[index];
+      if (box) box.value = digits[0] ?? '';
+      if (digits[0] && otpRefs.current[index + 1]) otpRefs.current[index + 1]?.focus();
+    }
+    const code = otpRefs.current.map((box) => box?.value ?? '').join('');
+    if (code.length === 6) void submitOtp(code);
+  };
+
+  const onOtpKeyDown = (index: number, event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Backspace' && !otpRefs.current[index]?.value && otpRefs.current[index - 1]) {
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const onOtpPaste = (event: React.ClipboardEvent<HTMLInputElement>): void => {
+    const text = event.clipboardData.getData('text');
+    const digits = text.replace(/\D/g, '').slice(0, 6).split('');
+    if (digits.length === 0) return;
+    event.preventDefault();
+    otpRefs.current.forEach((box, i) => {
+      if (box) box.value = digits[i] ?? '';
+    });
+    (otpRefs.current[Math.min(digits.length, 6) - 1] ?? otpRefs.current[0])?.focus();
+    if (digits.length === 6) void submitOtp(digits.join(''));
+  };
+
+  const cfg = METHOD_CONFIG[method];
   const locked = step !== 'unlocked';
 
   return (
@@ -65,74 +149,116 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
         {children}
       </div>
       {locked && step !== 'checking' && (
-        <div className="login-gate-scrim">
-          <div className="login-gate-card">
-            <h2>JOY Media</h2>
-            <p className="login-gate-hint" lang="fa">
-              برای ورود، ایمیل جیمیل یا آیدی عددی تلگرام مجاز خود را وارد کنید
-            </p>
-            <div className="login-gate-methods">
+        <div className="login-screen">
+          <div
+            className={`login-card rotating-glow${successGlow ? ' login-success-glow' : ''}${failBuzz ? ' login-fail-buzz' : ''}`}
+            onAnimationEnd={() => setFailBuzz(false)}
+          >
+            <div className="lcard-logo-wrap">
+              <img src="/assets/logo.png" className="login-logo" alt="JOY Media" />
+            </div>
+
+            <h1 className="login-title" lang="fa" dir="rtl">
+              &#1580;&#1600;&#1608;&#1740; &#1578;&#1740;&#1600;&#1605;
+            </h1>
+
+            <div className="lmethods" data-active={method}>
               <button
                 type="button"
-                className={`login-gate-method-btn${method === 'gmail' ? ' active' : ''}`}
-                onClick={() => setMethod('gmail')}
+                className={`lmethod-btn${method === 'gmail' ? ' active' : ''}`}
+                onClick={() => {
+                  setMethod('gmail');
+                  setError(undefined);
+                }}
                 disabled={step === 'otp'}
               >
-                Gmail
+                <img src="/assets/icons-login/gmail-64.png" className="lmethod-icon" alt="Gmail" />
+                <span>Gmail</span>
               </button>
               <button
                 type="button"
-                className={`login-gate-method-btn${method === 'telegram' ? ' active' : ''}`}
-                onClick={() => setMethod('telegram')}
+                className={`lmethod-btn${method === 'telegram' ? ' active' : ''}`}
+                onClick={() => {
+                  setMethod('telegram');
+                  setError(undefined);
+                }}
                 disabled={step === 'otp'}
               >
-                Telegram
+                <img src="/assets/icons-login/telegram-64.png" className="lmethod-icon" alt="Telegram" />
+                <span>Telegram</span>
+              </button>
+              <button
+                type="button"
+                className={`lmethod-btn${method === 'token' ? ' active' : ''}`}
+                onClick={() => {
+                  setMethod('token');
+                  setError(undefined);
+                }}
+                disabled={step === 'otp'}
+              >
+                <span className="lmethod-icon lmethod-key">🔑</span>
+                <span>Token</span>
               </button>
             </div>
-            {error !== undefined && <p className="login-gate-error">{error}</p>}
-            {step === 'contact' && (
-              <form onSubmit={(event) => void submitContact(event)}>
-                <input
-                  type={method === 'gmail' ? 'email' : 'text'}
-                  placeholder={method === 'gmail' ? 'you@gmail.com' : 'Telegram numeric ID'}
-                  value={contact}
-                  onChange={(event) => setContact(event.target.value)}
-                  autoFocus
-                />
-                <button type="submit" className="login-gate-submit" disabled={busy}>
-                  {busy ? 'Sending…' : 'Send code'}
-                </button>
-              </form>
-            )}
-            {step === 'otp' && (
-              <form onSubmit={(event) => void submitCode(event)}>
-                {hint !== undefined && <p className="login-gate-hint">{hint}</p>}
-                <div className="login-gate-otp-boxes">
+
+            <div className="login-panels">
+              {step === 'contact' && (
+                <form onSubmit={(event) => void submitContact(event)}>
+                  <p className="login-sub">{cfg.sub}</p>
                   <input
-                    inputMode="numeric"
-                    maxLength={6}
-                    placeholder="••••••"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+                    className="auth-input"
+                    type={cfg.type}
+                    placeholder={cfg.placeholder}
+                    value={contact}
+                    onChange={(event) => setContact(event.target.value)}
+                    autoCorrect="off"
+                    spellCheck={false}
                     autoFocus
                   />
+                  <button type="submit" className="login-btn" disabled={busy}>
+                    <span className="login-btn-gradient">{busy ? 'Sending…' : cfg.btn}</span>
+                  </button>
+                </form>
+              )}
+              {step === 'otp' && (
+                <div>
+                  <p className="login-sub">{hint ?? 'Enter the code we sent you'}</p>
+                  <div className="otp-row">
+                    {Array.from({ length: 6 }, (_, index) => (
+                      <span className="otp-glow-wrap" key={index}>
+                        <input
+                          ref={(el) => {
+                            otpRefs.current[index] = el;
+                          }}
+                          className="otp-box"
+                          maxLength={1}
+                          inputMode="numeric"
+                          pattern="[0-9]"
+                          autoComplete="one-time-code"
+                          onChange={(event) => onOtpChange(index, event.target.value)}
+                          onKeyDown={(event) => onOtpKeyDown(index, event)}
+                          onPaste={onOtpPaste}
+                          autoFocus={index === 0}
+                        />
+                      </span>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="login-back"
+                    onClick={() => {
+                      setError(undefined);
+                      otpSubmittingRef.current = false;
+                      setStep('contact');
+                    }}
+                  >
+                    ← back
+                  </button>
                 </div>
-                <button type="submit" className="login-gate-submit" disabled={busy}>
-                  {busy ? 'Verifying…' : 'Verify'}
-                </button>
-                <button
-                  type="button"
-                  className="login-gate-link"
-                  onClick={() => {
-                    setStep('contact');
-                    setCode('');
-                    setError(undefined);
-                  }}
-                >
-                  Use a different account
-                </button>
-              </form>
-            )}
+              )}
+            </div>
+
+            {error !== undefined && <p className="login-error">{error}</p>}
           </div>
         </div>
       )}
