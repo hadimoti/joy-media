@@ -637,402 +637,407 @@ export function AssetLibraryPanel({
       }
     >
       <div className="asset-library-content" ref={toolbarRef}>
-        <div
-          className="asset-library-collections"
-          role="tablist"
-          aria-label={`${category} collections`}
-        >
-          {collections.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              className="asset-library-collection-tab"
-              aria-selected={collection === entry.id}
-              onClick={() => setCollection(entry.id)}
-            >
-              <span>{entry.label}</span>
-              <small>{entry.count}</small>
-            </button>
-          ))}
-        </div>
-        {importProgress !== undefined && (
+        <aside className="asset-library-sidebar" aria-label={`${category} collections`}>
+          <span className="asset-library-sidebar-title">Collections</span>
           <div
-            className="asset-upload-progress"
-            role="progressbar"
-            aria-label="Asset upload progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(importProgress * 100)}
+            className="asset-library-collections"
+            role="tablist"
+            aria-label={`${category} collections`}
           >
-            <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
+            {collections.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                role="tab"
+                className="asset-library-collection-tab"
+                aria-selected={collection === entry.id}
+                onClick={() => setCollection(entry.id)}
+              >
+                <span>{entry.label}</span>
+                <small>{entry.count}</small>
+              </button>
+            ))}
           </div>
-        )}
-        {importOpen && (
-          <div className="asset-import-drawer" role="dialog" aria-label="Import media">
-            <div className="asset-filter-drawer-head">
-              <strong>Import media</strong>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Close import"
-                title="Close import"
-                onClick={() => setImportOpen(false)}
-              >
-                <CloseIcon />
-              </button>
+        </aside>
+        <div className="asset-library-main">
+          {importProgress !== undefined && (
+            <div
+              className="asset-upload-progress"
+              role="progressbar"
+              aria-label="Asset upload progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(importProgress * 100)}
+            >
+              <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
             </div>
-            <p className="asset-import-hint" lang="fa">
-              فایل در همین مرورگر هش و ذخیره می‌شود. از شناسهٔ مبهم Asset هماهنگ با Worker استفاده
-              کنید؛ مسیرها محلی می‌مانند.
-            </p>
-            <div className="asset-import-row">
-              <input
-                ref={fileInputRef}
-                className="sr-only"
-                type="file"
-                accept="video/*,audio/*,image/*"
-                disabled={importProgress !== undefined}
-                onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
-                aria-label="Media file"
-              />
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Choose media file"
-                title="Choose media file"
-                disabled={importProgress !== undefined}
-                data-active={selectedFile !== undefined ? 'true' : undefined}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <PlusIcon />
-              </button>
-              <span className="asset-import-file" title={selectedFile?.name}>
-                {selectedFile?.name ?? 'انتخاب فایل'}
-              </span>
-              <input
-                className="asset-import-id"
-                value={assetId}
-                onChange={(event) => setAssetId(event.target.value)}
-                placeholder="Asset ID"
-                aria-label="Asset ID"
-                disabled={importProgress !== undefined}
-              />
-              <button
-                type="button"
-                className="icon-button"
-                disabled={!canImport}
-                aria-label="Confirm import"
-                title="Import media"
-                onClick={() => void registerSelectedAsset()}
-              >
-                <CheckIcon />
-              </button>
-            </div>
-            {importProgress !== undefined && (
-              <div
-                className="asset-upload-progress asset-upload-progress--inline"
-                role="progressbar"
-                aria-label="Asset upload progress"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(importProgress * 100)}
-              >
-                <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
-              </div>
-            )}
-          </div>
-        )}
-        {filterOpen && (
-          <div className="asset-filter-drawer" role="dialog" aria-label="Asset filters">
-            <div className="asset-filter-drawer-head">
-              <strong>Filters</strong>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Close filters"
-                title="Close filters"
-                onClick={() => setFilterOpen(false)}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <label className="asset-filter-field">
-              <span>Availability</span>
-              <select
-                value={availability}
-                onChange={(event) => setAvailability(event.target.value as AssetAvailability)}
-                aria-label="Filter by availability"
-              >
-                <option value="all">Any status</option>
-                <option value="available-cloud">Ready in cloud</option>
-                <option value="available-local">Cached locally</option>
-                <option value="pending">Processing</option>
-                <option value="evicted">Cache evicted</option>
-                <option value="invalid">Needs repair</option>
-                <option value="none">No derivative</option>
-              </select>
-            </label>
-            <label className="asset-filter-field">
-              <span>Sort</span>
-              <select
-                value={sort}
-                onChange={(event) => setSort(event.target.value as AssetSort)}
-                aria-label="Sort assets"
-              >
-                <option value="recent">Newest</option>
-                <option value="name">Name</option>
-                <option value="tags">Tags</option>
-                <option value="size">Largest file</option>
-              </select>
-            </label>
-            {filterActive && (
-              <button
-                type="button"
-                className="asset-filter-reset"
-                onClick={() => {
-                  setAvailability('all');
-                  setSort('name');
-                }}
-              >
-                Reset filters
-              </button>
-            )}
-          </div>
-        )}
-        {preview !== undefined && (
-          <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
-            <div>
-              <strong>{preview.displayName}</strong>
-              <span lang="fa">نسخهٔ خصوصی تأییدشده</span>
-            </div>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Close preview"
-              title="Close preview"
-              onClick={clearPreview}
-            >
-              <CloseIcon />
-            </button>
-            {preview.mimeType.startsWith('video/') ? (
-              <video key={preview.derivativeId} src={preview.url} controls autoPlay />
-            ) : preview.mimeType.startsWith('audio/') ? (
-              <audio key={preview.derivativeId} src={preview.url} controls autoPlay />
-            ) : (
-              <img
-                src={preview.url}
-                alt={`Verified derivative preview for ${preview.displayName}`}
-              />
-            )}
-          </section>
-        )}
-        {selectedCount > 0 && (
-          <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
-            <span className="asset-bulk-count">{selectedCount}</span>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Share selected images to cloud"
-              title="Share to cloud"
-              data-guide="Share to cloud"
-              onClick={() => void bulkShare()}
-            >
-              <CloudIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Edit selected with AI"
-              title="Edit with AI"
-              data-guide="Edit with AI"
-              onClick={bulkEditWithAi}
-            >
-              <AiEffectIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Delete selected assets"
-              title="Delete"
-              data-guide="Delete"
-              onClick={() => void bulkDelete()}
-            >
-              <TrashIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Clear selection"
-              title="Clear selection"
-              data-guide="Clear"
-              onClick={() => setSelectedAssetIds(new Set())}
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        )}
-        {visible.length === 0 ? (
-          <div className="asset-library-empty">
-            {status?.includes('بارگذاری کاتالوگ') ? (
-              // The status line is the shell's note now — do not print it twice.
-              <p lang="fa">بارگذاری کاتالوگ رسانه ناموفق بود.</p>
-            ) : (
-              <>
-                <p lang="fa">هیچ رسانه‌ای با فیلترهای فعلی مطابقت ندارد.</p>
+          )}
+          {importOpen && (
+            <div className="asset-import-drawer" role="dialog" aria-label="Import media">
+              <div className="asset-filter-drawer-head">
+                <strong>Import media</strong>
                 <button
                   type="button"
-                  className="icon-button icon-button-labeled"
-                  onClick={() => setImportOpen(true)}
-                  aria-label="Import media"
-                  title="Import media"
+                  className="icon-button"
+                  aria-label="Close import"
+                  title="Close import"
+                  onClick={() => setImportOpen(false)}
                 >
-                  <UploadIcon />
-                  Import
+                  <CloseIcon />
                 </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <>
-            {viewMode === 'list' && (
-              <div className="asset-list-header" aria-hidden={false}>
-                <label className="asset-card-tick">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleSelected}
-                    aria-label={allVisibleSelected ? 'Clear selection' : 'Select all visible'}
-                    onChange={() => {
-                      setSelectedAssetIds(() => {
-                        if (allVisibleSelected) return new Set();
-                        return new Set(visibleIds);
-                      });
-                    }}
-                  />
-                </label>
-                <span className="asset-list-header-thumb" />
-                <span className="asset-list-header-name">Name</span>
-                <span className="asset-list-header-collection">Collection</span>
-                <span className="asset-list-header-size">Size</span>
-                <span className="asset-list-header-actions">Actions</span>
               </div>
-            )}
-            <ul className={`asset-grid asset-grid--${viewMode}`} aria-label="Assets">
-              {rendered.map(({ asset, derivatives }) => {
-                const derivative = preferredDerivative(derivatives);
-                const avail =
-                  derivative?.availability ??
-                  (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
-                const cloudBacked = cloudAssetIds.has(asset.id);
-                const selected = selectedAssetIds.has(asset.id);
-                const assetCollection = assetCollectionLabel(assetCollectionId(asset));
-                const detailHint = [
-                  asset.kind,
-                  assetCollection,
-                  asset.descriptor.mimeType,
-                  formatBytes(asset.bytes),
-                  cloudBacked ? 'Cloud original' : availabilityLabel(avail),
-                ].join(' · ');
-                return (
-                  <li
-                    key={asset.id}
-                    className={`asset-card${selected ? ' is-selected' : ''}`}
-                    draggable
-                    title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData(
-                        JOY_MEDIA_ASSET_DND,
-                        JSON.stringify({
-                          assetId: asset.id,
-                          kind: asset.kind,
-                          displayName: asset.displayName,
-                        }),
-                      );
-                      event.dataTransfer.effectAllowed = 'copy';
-                    }}
+              <p className="asset-import-hint" lang="fa">
+                فایل در همین مرورگر هش و ذخیره می‌شود. از شناسهٔ مبهم Asset هماهنگ با Worker استفاده
+                کنید؛ مسیرها محلی می‌مانند.
+              </p>
+              <div className="asset-import-row">
+                <input
+                  ref={fileInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept="video/*,audio/*,image/*"
+                  disabled={importProgress !== undefined}
+                  onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
+                  aria-label="Media file"
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Choose media file"
+                  title="Choose media file"
+                  disabled={importProgress !== undefined}
+                  data-active={selectedFile !== undefined ? 'true' : undefined}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <PlusIcon />
+                </button>
+                <span className="asset-import-file" title={selectedFile?.name}>
+                  {selectedFile?.name ?? 'انتخاب فایل'}
+                </span>
+                <input
+                  className="asset-import-id"
+                  value={assetId}
+                  onChange={(event) => setAssetId(event.target.value)}
+                  placeholder="Asset ID"
+                  aria-label="Asset ID"
+                  disabled={importProgress !== undefined}
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  disabled={!canImport}
+                  aria-label="Confirm import"
+                  title="Import media"
+                  onClick={() => void registerSelectedAsset()}
+                >
+                  <CheckIcon />
+                </button>
+              </div>
+              {importProgress !== undefined && (
+                <div
+                  className="asset-upload-progress asset-upload-progress--inline"
+                  role="progressbar"
+                  aria-label="Asset upload progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(importProgress * 100)}
+                >
+                  <span style={{ width: `${Math.min(100, importProgress * 100).toFixed(1)}%` }} />
+                </div>
+              )}
+            </div>
+          )}
+          {filterOpen && (
+            <div className="asset-filter-drawer" role="dialog" aria-label="Asset filters">
+              <div className="asset-filter-drawer-head">
+                <strong>Filters</strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close filters"
+                  title="Close filters"
+                  onClick={() => setFilterOpen(false)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <label className="asset-filter-field">
+                <span>Availability</span>
+                <select
+                  value={availability}
+                  onChange={(event) => setAvailability(event.target.value as AssetAvailability)}
+                  aria-label="Filter by availability"
+                >
+                  <option value="all">Any status</option>
+                  <option value="available-cloud">Ready in cloud</option>
+                  <option value="available-local">Cached locally</option>
+                  <option value="pending">Processing</option>
+                  <option value="evicted">Cache evicted</option>
+                  <option value="invalid">Needs repair</option>
+                  <option value="none">No derivative</option>
+                </select>
+              </label>
+              <label className="asset-filter-field">
+                <span>Sort</span>
+                <select
+                  value={sort}
+                  onChange={(event) => setSort(event.target.value as AssetSort)}
+                  aria-label="Sort assets"
+                >
+                  <option value="recent">Newest</option>
+                  <option value="name">Name</option>
+                  <option value="tags">Tags</option>
+                  <option value="size">Largest file</option>
+                </select>
+              </label>
+              {filterActive && (
+                <button
+                  type="button"
+                  className="asset-filter-reset"
+                  onClick={() => {
+                    setAvailability('all');
+                    setSort('name');
+                  }}
+                >
+                  Reset filters
+                </button>
+              )}
+            </div>
+          )}
+          {preview !== undefined && (
+            <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
+              <div>
+                <strong>{preview.displayName}</strong>
+                <span lang="fa">نسخهٔ خصوصی تأییدشده</span>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close preview"
+                title="Close preview"
+                onClick={clearPreview}
+              >
+                <CloseIcon />
+              </button>
+              {preview.mimeType.startsWith('video/') ? (
+                <video key={preview.derivativeId} src={preview.url} controls autoPlay />
+              ) : preview.mimeType.startsWith('audio/') ? (
+                <audio key={preview.derivativeId} src={preview.url} controls autoPlay />
+              ) : (
+                <img
+                  src={preview.url}
+                  alt={`Verified derivative preview for ${preview.displayName}`}
+                />
+              )}
+            </section>
+          )}
+          {selectedCount > 0 && (
+            <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
+              <span className="asset-bulk-count">{selectedCount}</span>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Share selected images to cloud"
+                title="Share to cloud"
+                data-guide="Share to cloud"
+                onClick={() => void bulkShare()}
+              >
+                <CloudIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Edit selected with AI"
+                title="Edit with AI"
+                data-guide="Edit with AI"
+                onClick={bulkEditWithAi}
+              >
+                <AiEffectIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Delete selected assets"
+                title="Delete"
+                data-guide="Delete"
+                onClick={() => void bulkDelete()}
+              >
+                <TrashIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Clear selection"
+                title="Clear selection"
+                data-guide="Clear"
+                onClick={() => setSelectedAssetIds(new Set())}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
+          {visible.length === 0 ? (
+            <div className="asset-library-empty">
+              {status?.includes('بارگذاری کاتالوگ') ? (
+                // The status line is the shell's note now — do not print it twice.
+                <p lang="fa">بارگذاری کاتالوگ رسانه ناموفق بود.</p>
+              ) : (
+                <>
+                  <p lang="fa">هیچ رسانه‌ای با فیلترهای فعلی مطابقت ندارد.</p>
+                  <button
+                    type="button"
+                    className="icon-button icon-button-labeled"
+                    onClick={() => setImportOpen(true)}
+                    aria-label="Import media"
+                    title="Import media"
                   >
-                    <label
-                      className="asset-card-tick"
-                      onClick={(event) => event.stopPropagation()}
-                      onPointerDown={(event) => event.stopPropagation()}
+                    <UploadIcon />
+                    Import
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              {viewMode === 'list' && (
+                <div className="asset-list-header" aria-hidden={false}>
+                  <label className="asset-card-tick">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      aria-label={allVisibleSelected ? 'Clear selection' : 'Select all visible'}
+                      onChange={() => {
+                        setSelectedAssetIds(() => {
+                          if (allVisibleSelected) return new Set();
+                          return new Set(visibleIds);
+                        });
+                      }}
+                    />
+                  </label>
+                  <span className="asset-list-header-thumb" />
+                  <span className="asset-list-header-name">Name</span>
+                  <span className="asset-list-header-collection">Collection</span>
+                  <span className="asset-list-header-size">Size</span>
+                  <span className="asset-list-header-actions">Actions</span>
+                </div>
+              )}
+              <ul className={`asset-grid asset-grid--${viewMode}`} aria-label="Assets">
+                {rendered.map(({ asset, derivatives }) => {
+                  const derivative = preferredDerivative(derivatives);
+                  const avail =
+                    derivative?.availability ??
+                    (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
+                  const cloudBacked = cloudAssetIds.has(asset.id);
+                  const selected = selectedAssetIds.has(asset.id);
+                  const assetCollection = assetCollectionLabel(assetCollectionId(asset));
+                  const detailHint = [
+                    asset.kind,
+                    assetCollection,
+                    asset.descriptor.mimeType,
+                    formatBytes(asset.bytes),
+                    cloudBacked ? 'Cloud original' : availabilityLabel(avail),
+                  ].join(' · ');
+                  return (
+                    <li
+                      key={asset.id}
+                      className={`asset-card${selected ? ' is-selected' : ''}`}
+                      draggable
+                      title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData(
+                          JOY_MEDIA_ASSET_DND,
+                          JSON.stringify({
+                            assetId: asset.id,
+                            kind: asset.kind,
+                            displayName: asset.displayName,
+                          }),
+                        );
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        aria-label={`Select ${asset.displayName}`}
-                        onChange={() => toggleSelected(asset.id)}
-                      />
-                    </label>
-                    <div className="asset-card-media-wrap">
-                      <AssetCardMedia
-                        asset={asset}
-                        derivatives={derivatives}
-                        projectId={projectId}
-                        resolverPromise={resolver}
-                        originalCachePromise={originalAssetCache}
-                        fetchCloudOriginal={fetchCloudOriginal}
-                        {...(derivative !== undefined
-                          ? { onOpenDerivative: () => void openPreview(asset, derivative) }
-                          : {})}
-                      />
-                    </div>
-                    <strong className="asset-card-name" title={asset.displayName}>
-                      {asset.displayName}
-                    </strong>
-                    <span className="asset-card-collection" title={assetCollection}>
-                      {assetCollection}
-                    </span>
-                    <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
-                    <div className="asset-card-actions">
-                      {(asset.kind === 'image' || asset.kind === 'video') && (
+                      <label
+                        className="asset-card-tick"
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          aria-label={`Select ${asset.displayName}`}
+                          onChange={() => toggleSelected(asset.id)}
+                        />
+                      </label>
+                      <div className="asset-card-media-wrap">
+                        <AssetCardMedia
+                          asset={asset}
+                          derivatives={derivatives}
+                          projectId={projectId}
+                          resolverPromise={resolver}
+                          originalCachePromise={originalAssetCache}
+                          fetchCloudOriginal={fetchCloudOriginal}
+                          {...(derivative !== undefined
+                            ? { onOpenDerivative: () => void openPreview(asset, derivative) }
+                            : {})}
+                        />
+                      </div>
+                      <strong className="asset-card-name" title={asset.displayName}>
+                        {asset.displayName}
+                      </strong>
+                      <span className="asset-card-collection" title={assetCollection}>
+                        {assetCollection}
+                      </span>
+                      <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
+                      <div className="asset-card-actions">
+                        {(asset.kind === 'image' || asset.kind === 'video') && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Edit ${asset.displayName} with AI`}
+                            title="Edit with AI"
+                            data-guide="Edit with AI"
+                            onClick={() => editWithAi(asset)}
+                          >
+                            <AiEffectIcon />
+                          </button>
+                        )}
+                        {asset.kind === 'image' && !cloudBacked && (
+                          <AssetShareCloudButton
+                            asset={asset}
+                            originalCachePromise={originalAssetCache}
+                            onShare={() => void shareToCloud(asset)}
+                          />
+                        )}
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Edit ${asset.displayName} with AI`}
-                          title="Edit with AI"
-                          data-guide="Edit with AI"
-                          onClick={() => editWithAi(asset)}
+                          aria-label={`Delete ${asset.displayName}`}
+                          title="Delete"
+                          data-guide="Delete"
+                          onClick={() => void deleteAsset(asset)}
                         >
-                          <AiEffectIcon />
+                          <TrashIcon />
                         </button>
-                      )}
-                      {asset.kind === 'image' && !cloudBacked && (
-                        <AssetShareCloudButton
-                          asset={asset}
-                          originalCachePromise={originalAssetCache}
-                          onShare={() => void shareToCloud(asset)}
-                        />
-                      )}
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={`Delete ${asset.displayName}`}
-                        title="Delete"
-                        data-guide="Delete"
-                        onClick={() => void deleteAsset(asset)}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            {rendered.length < visible.length && (
-              <button
-                type="button"
-                className="asset-library-load-more"
-                onClick={() =>
-                  setRenderLimit((current) =>
-                    Math.min(visible.length, current + ASSET_RENDER_PAGE_SIZE),
-                  )
-                }
-              >
-                Load {Math.min(ASSET_RENDER_PAGE_SIZE, visible.length - rendered.length)} more
-              </button>
-            )}
-          </>
-        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              {rendered.length < visible.length && (
+                <button
+                  type="button"
+                  className="asset-library-load-more"
+                  onClick={() =>
+                    setRenderLimit((current) =>
+                      Math.min(visible.length, current + ASSET_RENDER_PAGE_SIZE),
+                    )
+                  }
+                >
+                  Load {Math.min(ASSET_RENDER_PAGE_SIZE, visible.length - rendered.length)} more
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </PanelShell>
   );
