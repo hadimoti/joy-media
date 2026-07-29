@@ -22,6 +22,7 @@ const CATEGORY_PREFIX = 'category-';
 
 const COLLECTION_LABELS: Readonly<Record<string, string>> = {
   elements: 'Creative elements',
+  review: 'Needs review',
   logo: 'Brand marks',
   arrow: 'Arrows',
   effects: 'Effects',
@@ -39,6 +40,7 @@ const COLLECTION_LABELS: Readonly<Record<string, string>> = {
 
 const COLLECTION_ORDER = [
   'elements',
+  'review',
   'logo',
   'arrow',
   'effects',
@@ -66,6 +68,8 @@ export function assetCollectionId(asset: BrowserAsset): AssetCollectionId {
   if (taggedCategory !== undefined)
     return `category:${taggedCategory.slice(CATEGORY_PREFIX.length)}`;
 
+  // Do not silently present incomplete import metadata as a creative element.
+  if (tags.includes('category-unknown')) return 'category:review';
   if (tags.includes('logo')) return 'category:logo';
   if (tags.includes('arrow')) return 'category:arrow';
   if (asset.kind === 'video') return 'category:clips';

@@ -89,10 +89,10 @@ describe('asset library state', () => {
 
   it('provides a browse collection plus semantic collections for current and future media', () => {
     expect(assetCollectionId(items[1]!.asset)).toBe('category:logo');
-    expect(assetCollectionId(items[2]!.asset)).toBe('category:elements');
+    expect(assetCollectionId(items[2]!.asset)).toBe('category:review');
     expect(assetCollectionsForCategory(items, 'image')).toEqual([
       { id: 'browse', label: 'Browse', count: 2 },
-      { id: 'category:elements', label: 'Creative elements', count: 1 },
+      { id: 'category:review', label: 'Needs review', count: 1 },
       { id: 'category:logo', label: 'Brand marks', count: 1 },
     ]);
     expect(assetCollectionsForCategory(items, 'video')).toEqual([
