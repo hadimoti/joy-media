@@ -98,7 +98,7 @@ export class MediaAuthService implements MediaAuthApi {
       [
         gmail ?? null,
         telegramId ?? null,
-        input.telegramUsername?.trim().replace(/^@/, '') || null,
+        input.telegramUsername?.trim().replace(/^@+/, '').toLowerCase() || null,
         input.addedBy,
         new Date(),
       ],
@@ -124,10 +124,11 @@ export class MediaAuthService implements MediaAuthApi {
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
     if (allowed !== undefined && allowed.enabled) {
+      const otpContact = canonicalOtpContact(contact, method, allowed);
       const active = await this.pool.query<{ count: string }>(
         `SELECT count(*)::text AS count FROM media_otp_codes
          WHERE contact = $1 AND method = $2 AND used = false AND expires_at > $3`,
-        [contact, method, new Date()],
+        [otpContact, method, new Date()],
       );
       if (Number(active.rows[0]?.count ?? '0') < OTP_MAX_ACTIVE) {
         const code = randomInt(100_000, 1_000_000).toString();
@@ -135,7 +136,7 @@ export class MediaAuthService implements MediaAuthApi {
         await this.pool.query(
           `INSERT INTO media_otp_codes (contact, method, code_hash, created_at, expires_at, used)
            VALUES ($1, $2, $3, $4, $5, false)`,
-          [contact, method, codeHash(contact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
+          [otpContact, method, codeHash(otpContact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
         );
         await this.deliver(allowed, method, code);
       }
@@ -145,7 +146,12 @@ export class MediaAuthService implements MediaAuthApi {
 
   async verifyOtp(rawContact: string, method: MediaAuthMethod, code: string): Promise<string> {
     const contact = normalizeContact(rawContact, method);
-    const hash = codeHash(contact, method, code);
+    const allowed = await this.findAllowed(contact, method);
+    if (allowed === undefined || !allowed.enabled) {
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    }
+    const otpContact = canonicalOtpContact(contact, method, allowed);
+    const hash = codeHash(otpContact, method, code);
     const result = await this.pool.query<{ id: string }>(
       `UPDATE media_otp_codes SET used = true
        WHERE id = (
@@ -154,19 +160,15 @@ export class MediaAuthService implements MediaAuthApi {
          ORDER BY created_at DESC LIMIT 1
        )
        RETURNING id`,
-      [contact, method, hash, new Date()],
+      [otpContact, method, hash, new Date()],
     );
     if (result.rows.length === 0) throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
-    const allowed = await this.findAllowed(contact, method);
-    if (allowed === undefined || !allowed.enabled) {
-      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
-    }
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
     await this.pool.query(
       `INSERT INTO media_sessions (token_hash, contact, method, created_at, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [sessionHash(token), contact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
+      [sessionHash(token), otpContact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
     );
     return token;
   }
@@ -195,9 +197,30 @@ export class MediaAuthService implements MediaAuthApi {
     contact: string,
     method: MediaAuthMethod,
   ): Promise<MediaAllowedUser | undefined> {
-    const column = method === 'gmail' ? 'gmail' : 'telegram_id';
+    if (method === 'gmail') {
+      const result = await this.pool.query<AllowedUserRow>(
+        `SELECT * FROM media_allowed_users WHERE gmail = $1 LIMIT 1`,
+        [contact],
+      );
+      const row = result.rows[0];
+      return row === undefined ? undefined : allowedUserOf(row);
+    }
+
+    // Numeric Telegram user id, or username (with or without leading @).
+    // OTP is always delivered to telegram_id via the Bot API.
+    if (isTelegramNumericId(contact)) {
+      const result = await this.pool.query<AllowedUserRow>(
+        `SELECT * FROM media_allowed_users WHERE telegram_id = $1 LIMIT 1`,
+        [contact],
+      );
+      const row = result.rows[0];
+      return row === undefined ? undefined : allowedUserOf(row);
+    }
+
     const result = await this.pool.query<AllowedUserRow>(
-      `SELECT * FROM media_allowed_users WHERE ${column} = $1 LIMIT 1`,
+      `SELECT * FROM media_allowed_users
+       WHERE telegram_username IS NOT NULL AND LOWER(telegram_username) = $1
+       LIMIT 1`,
       [contact],
     );
     const row = result.rows[0];
@@ -249,10 +272,30 @@ function normalizeTelegramId(value: string | undefined): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
+function isTelegramNumericId(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+/** Strip optional @; lowercase usernames; keep numeric ids as-is. */
 function normalizeContact(value: string, method: MediaAuthMethod): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
-  return method === 'gmail' ? trimmed.toLowerCase() : trimmed;
+  if (method === 'gmail') return trimmed.toLowerCase();
+  const withoutAt = trimmed.replace(/^@+/, '');
+  if (withoutAt.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
+  return isTelegramNumericId(withoutAt) ? withoutAt : withoutAt.toLowerCase();
+}
+
+/** Key OTP/session rows by stable telegram_id when available (username or id login). */
+function canonicalOtpContact(
+  contact: string,
+  method: MediaAuthMethod,
+  allowed: MediaAllowedUser,
+): string {
+  if (method === 'telegram' && allowed.telegramId !== null && allowed.telegramId.length > 0) {
+    return allowed.telegramId;
+  }
+  return contact;
 }
 
 function codeHash(contact: string, method: MediaAuthMethod, code: string): string {

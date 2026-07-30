@@ -34,10 +34,10 @@ export function ProjectLibrary({
         <div className="project-library-brand app-brand">
           <img
             className="app-brand-logo"
-            src="/assets/logo.png?v=joycode"
+            src="/assets/JoyCodeNew_32x32.png"
             alt=""
-            width={28}
-            height={28}
+            width={26}
+            height={26}
             decoding="async"
           />
           <strong>JOY Studio</strong>

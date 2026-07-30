@@ -2591,10 +2591,10 @@ function EditorWorkspace({
           <span className="app-brand">
             <img
               className="app-brand-logo"
-              src="/assets/logo.png?v=joycode"
+              src="/assets/JoyCodeNew_32x32.png"
               alt=""
-              width={24}
-              height={24}
+              width={26}
+              height={26}
               decoding="async"
             />
             <strong>JOY Studio</strong>

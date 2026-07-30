@@ -510,8 +510,8 @@ main {
   height: 100%;
 }
 .app-brand-logo {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.65rem;
+  height: 1.65rem;
   object-fit: contain;
   display: block;
   flex-shrink: 0;

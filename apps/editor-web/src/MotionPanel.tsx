@@ -204,7 +204,7 @@ function MotionCard({
     <div className="motion-card" role="listitem">
       <div className="motion-card-preview" aria-hidden="true">
         <div className="motion-card-live" style={animStyle}>
-          <img src="/assets/logo.png?v=joycode" alt="" draggable={false} />
+          <img src="/assets/JoyCodeNew_32x32.png" alt="" draggable={false} />
         </div>
         <span className="motion-card-duration">{(motion.durationMs / 1000).toFixed(1)}s</span>
       </div>
