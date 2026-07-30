@@ -158,8 +158,25 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <img src="/assets/logo.png" className="login-logo" alt="JOY Media" />
             </div>
 
-            <h1 className="login-title" lang="fa" dir="rtl">
-              &#1580;&#1600;&#1608;&#1740; &#1578;&#1740;&#1600;&#1605;
+            <h1 className="login-title" lang="en" dir="ltr" aria-label="Joy Studio.">
+              {Array.from('Joy Studio').map((ch, index) => (
+                <span
+                  key={`${ch}-${index}`}
+                  className="login-title-char"
+                  style={{ animationDelay: `${index * 45}ms` }}
+                >
+                  {ch === ' ' ? '\u00A0' : ch}
+                </span>
+              ))}
+              <span
+                className="login-title-char login-title-dot"
+                style={{
+                  animationDelay: `${'Joy Studio'.length * 45}ms, ${'Joy Studio'.length * 45 + 550}ms`,
+                }}
+                aria-hidden="true"
+              >
+                .
+              </span>
             </h1>
 
             <div className="lmethods" data-active={method}>

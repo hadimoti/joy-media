@@ -1,35 +1,43 @@
 /**
- * Default Dockview arrangement (DESIGN.md §3 seed).
+ * Dockview arrangement seeds (DESIGN.md §3).
  *
- * Owner layout, 2026-07-26 — tuned for short-form edits and agent work:
+ * Two named view modes — panel placement only; composition size is unchanged.
+ *
+ * Vertical (default) — Monitor full-height right for 1080×1920 short-form:
  *
  *   ┌──────────┬──────────┬──────────┬─────────┐
  *   │ Assets   │ Inspector│ Agent    │         │
  *   │ Effects  │ Motion   │          │ Program │
- *   │ Trans.   │ History  │          │ Monitor │
- *   │ Captions │ Jobs     │          │         │
- *   │ Audio    │ Diagnost.│          │ (full   │
- *   │ Color    │ Workflows│          │  height)│
- *   │ Plugins  │ Camera   │          │         │
+ *   │ …        │ …        │          │ Monitor │
  *   ├──────────┴──────────┴──────────┤         │
  *   │ Timeline · Dual Lens           │         │
  *   └────────────────────────────────┴─────────┘
  *
- * Monitor is a full-height right column because the default composition is
- * 1080×1920 — a portrait preview needs the height far more than the width.
- * Agent gets its own column so a plan stays visible while you work the other
- * two groups, instead of being a tab you have to leave to see anything.
+ * Widescreen — Monitor top-center:
  *
- * Seeded as JSON rather than sequential `addPanel` splits so the proportions
- * survive: building it by splitting would leave Monitor at ~50% instead of the
- * ~23% it wants. Sizes are relative — Dockview rescales them to the real
- * container against `grid.width` / `grid.height`.
+ *   ┌──────────┬─────────────────────┬──────────┐
+ *   │ Assets   │ Program Monitor     │ Motion   │
+ *   │ …        │                     │ …        │
+ *   ├──────────┴──────────┬──────────┴──────────┤
+ *   │ Timeline · Dual Lens│ Agent (Joy Code)    │
+ *   └─────────────────────┴─────────────────────┘
+ *
+ * Seeded as JSON rather than sequential `addPanel` splits so proportions
+ * survive. Sizes are relative — Dockview rescales them to the real container
+ * against `grid.width` / `grid.height`.
  */
 
 import { PANEL_IDS, type PanelId } from './workspace.js';
 import { panelLabel } from './panel-tab-icons.js';
 
-/** Bump when the seed changes; older keys are purged in App's `onReady`. */
+export type EditorViewMode = 'vertical' | 'widescreen';
+
+export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
+
+/** Per-mode Dockview JSON keys (bump when a seed changes). */
+export const DOCK_LAYOUT_VERSION = 9;
+
+/** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
 export const DOCK_LAYOUT_KEY = 'joy-media.dockview.v8';
 
 export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
@@ -40,6 +48,7 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
   'joy-media.dockview.v5',
   'joy-media.dockview.v6',
   'joy-media.dockview.v7',
+  'joy-media.dockview.v8',
 ];
 
 /**
@@ -68,6 +77,48 @@ const CONTEXT_GROUP = [
   'workflows',
   'camera',
 ] as const;
+
+export interface ViewModeStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export function dockLayoutKey(mode: EditorViewMode): string {
+  return `joy-media.dockview.${mode}.v${DOCK_LAYOUT_VERSION}`;
+}
+
+export function isEditorViewMode(value: unknown): value is EditorViewMode {
+  return value === 'vertical' || value === 'widescreen';
+}
+
+export function loadViewMode(storage: ViewModeStorage): EditorViewMode {
+  const raw = storage.getItem(VIEW_MODE_KEY);
+  if (isEditorViewMode(raw)) return raw;
+  return 'vertical';
+}
+
+export function saveViewMode(storage: ViewModeStorage, mode: EditorViewMode): void {
+  storage.setItem(VIEW_MODE_KEY, mode);
+}
+
+/** Copy legacy single-key v8 layout into the vertical per-mode slot once. */
+export function migrateLegacyDockLayout(storage: ViewModeStorage): void {
+  const verticalKey = dockLayoutKey('vertical');
+  if (storage.getItem(verticalKey) !== null) return;
+  const legacy = storage.getItem(DOCK_LAYOUT_KEY);
+  if (legacy === null) return;
+  storage.setItem(verticalKey, legacy);
+}
+
+export function seedDockLayout(mode: EditorViewMode): unknown {
+  return mode === 'widescreen' ? widescreenDockLayout() : verticalDockLayout();
+}
+
+/** @deprecated Alias for vertical seed — tests and older call sites. */
+export function defaultDockLayout(): unknown {
+  return verticalDockLayout();
+}
 
 /** Dockview serialises every panel the same way; derive it so nothing drifts. */
 function panelEntries(): Record<string, unknown> {
@@ -111,7 +162,7 @@ export function normalizeDockLayoutConstraints(layout: unknown): unknown {
   return changed ? { ...layout, panels } : layout;
 }
 
-export function defaultDockLayout(): unknown {
+export function verticalDockLayout(): unknown {
   return {
     grid: {
       orientation: 'HORIZONTAL',
@@ -164,6 +215,62 @@ export function defaultDockLayout(): unknown {
     },
     panels: panelEntries(),
     activeGroup: 'monitor-col',
+  };
+}
+
+export function widescreenDockLayout(): unknown {
+  // Seed canvas 2200×1000 — top ~55% / bottom ~45%; top row browser|monitor|context.
+  return {
+    grid: {
+      orientation: 'VERTICAL',
+      width: 2200,
+      height: 1000,
+      root: {
+        type: 'branch',
+        size: 2200,
+        data: [
+          {
+            type: 'branch',
+            size: 550,
+            data: [
+              {
+                type: 'leaf',
+                size: 616,
+                data: { views: [...BROWSER_GROUP], activeView: 'media', id: 'browser' },
+              },
+              {
+                type: 'leaf',
+                size: 968,
+                data: { views: ['monitor'], activeView: 'monitor', id: 'monitor-row' },
+              },
+              {
+                type: 'leaf',
+                size: 616,
+                data: { views: [...CONTEXT_GROUP], activeView: 'motion', id: 'context' },
+              },
+            ],
+          },
+          {
+            type: 'branch',
+            size: 450,
+            data: [
+              {
+                type: 'leaf',
+                size: 1496,
+                data: { views: ['timeline', 'flow'], activeView: 'timeline', id: 'timeline-row' },
+              },
+              {
+                type: 'leaf',
+                size: 704,
+                data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    panels: panelEntries(),
+    activeGroup: 'monitor-row',
   };
 }
 

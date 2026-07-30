@@ -259,7 +259,8 @@
   margin-bottom: 16px;
   object-fit: contain;
   box-shadow: 0 0 32px #f9731633;
-  animation: jm-logo-glow 3s ease-in-out infinite;
+  transform-origin: 50% 65%;
+  animation: jm-logo-glow 3s ease-in-out infinite, jm-logo-wiggle 2.4s ease-in-out infinite;
 }
 
 @keyframes jm-logo-glow {
@@ -272,16 +273,87 @@
   }
 }
 
-/* ── title (BlockPro isn't bundled in this app; falls back to RooyinFree) ── */
+@keyframes jm-logo-wiggle {
+  0%,
+  100% {
+    transform: rotate(-3.5deg);
+  }
+  50% {
+    transform: rotate(3.5deg);
+  }
+}
+
+/* ── title (English brand, RooyinFree + letter cascade) ── */
 
 .login-title {
-  font-family: 'BlockPro', RooyinFree, Rooyin, Tahoma, sans-serif;
-  direction: rtl;
+  font-family: RooyinFree, Rooyin, Tahoma, sans-serif;
+  direction: ltr;
   text-align: center;
   font-size: 28px;
+  font-weight: 700;
   margin-bottom: 30px;
   letter-spacing: 0;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.login-title-char {
+  display: inline-block;
+  animation: jm-title-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.login-title-dot {
+  animation:
+    jm-title-in-motion 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    jm-title-dot-blink 1.1s step-end infinite;
+}
+
+@keyframes jm-title-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes jm-title-in-motion {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes jm-title-dot-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-logo {
+    animation: none;
+    filter: drop-shadow(0 0 16px #cc000066);
+  }
+
+  .login-title-char {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .login-title-dot {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ── method switcher (Gmail / Telegram / Token) ── */
@@ -352,11 +424,13 @@
   font-weight: 700;
 }
 
-.auth-input {
+/* Beat app.css `input:not([type=range])…` so size tokens actually apply. */
+.auth-input:not([type='range']):not([type='file']):not([type='checkbox']) {
   width: 100%;
+  height: 54px;
   box-sizing: border-box;
   padding: 16px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1.5px solid #f97316;
   outline: none;
   background: rgba(209, 209, 209, 0.25);
@@ -434,7 +508,9 @@
   border: 1.5px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   text-align: center;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 1.2rem;
+  font-weight: 600;
   color: #fff;
   outline: none;
   box-sizing: border-box;

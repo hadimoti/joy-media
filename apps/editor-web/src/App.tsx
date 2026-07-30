@@ -145,8 +145,13 @@ import {
   DOCK_PANEL_MINIMUM_HEIGHT,
   DOCK_PANEL_MINIMUM_WIDTH,
   SUPERSEDED_DOCK_LAYOUT_KEYS,
-  defaultDockLayout,
+  type EditorViewMode,
+  dockLayoutKey,
+  loadViewMode,
+  migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
+  saveViewMode,
+  seedDockLayout,
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -169,6 +174,8 @@ import {
   SkipForwardIcon,
   UndoIcon,
   UserIcon,
+  VerticalViewIcon,
+  WideViewIcon,
   YoutubeIcon,
   ZoomInIcon,
 } from './icons.js';
@@ -595,6 +602,10 @@ function EditorWorkspace({
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<EditorViewMode>(() => loadViewMode(window.localStorage));
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const paletteRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -1411,6 +1422,92 @@ function EditorWorkspace({
   const toggleKeyboardShortcuts = useCallback(() => {
     setKeyboardShortcutsOpen((open) => !open);
   }, []);
+
+  const ensureDockPanels = useCallback((api: DockviewApi) => {
+    const addPanel = (
+      id: string,
+      options: {
+        readonly inactive?: boolean;
+        readonly position?: {
+          readonly referencePanel: string;
+          readonly direction: 'left' | 'right' | 'above' | 'below' | 'within';
+        };
+      } = {},
+    ) => {
+      if (api.getPanel(id) !== undefined) return;
+      api.addPanel({
+        id,
+        component: 'editor-panel',
+        title: panelLabel(id),
+        inactive: options.inactive ?? true,
+        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+        ...(options.position !== undefined ? { position: options.position } : {}),
+      });
+    };
+
+    for (const panel of DEFAULT_WORKSPACE.panels) {
+      addPanel(panel, {
+        inactive: true,
+        ...(panel === 'flow' && api.getPanel('timeline') !== undefined
+          ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
+          : {}),
+      });
+    }
+  }, []);
+
+  const applyDockLayout = useCallback(
+    (api: DockviewApi, mode: EditorViewMode) => {
+      const layoutKey = dockLayoutKey(mode);
+      const saved = window.localStorage.getItem(layoutKey);
+      let restored = false;
+      if (saved !== null) {
+        try {
+          api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
+            reuseExistingPanels: false,
+          });
+          restored = true;
+        } catch {
+          window.localStorage.removeItem(layoutKey);
+        }
+      }
+      if (!restored) {
+        try {
+          api.fromJSON(seedDockLayout(mode) as never, { reuseExistingPanels: false });
+        } catch (error) {
+          console.warn('default dock layout rejected, falling back to a stack', error);
+        }
+      }
+      ensureDockPanels(api);
+      api.getPanel('monitor')?.api.setActive();
+      window.localStorage.setItem(layoutKey, JSON.stringify(api.toJSON()));
+    },
+    [ensureDockPanels],
+  );
+
+  const switchEditorView = useCallback(() => {
+    const api = dockviewApiRef.current;
+    if (api === null) return;
+    const current = viewModeRef.current;
+    window.localStorage.setItem(dockLayoutKey(current), JSON.stringify(api.toJSON()));
+    const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
+    saveViewMode(window.localStorage, next);
+    setViewMode(next);
+    applyDockLayout(api, next);
+  }, [applyDockLayout]);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = paletteRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setPaletteOpen(false);
+    };
+    // Capture so we close before other UI consumes the event; skip the same
+    // gesture that opened the palette by listening only after mount.
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [paletteOpen]);
   useEffect(() => {
     refreshJoySession();
   }, [refreshJoySession]);
@@ -2015,90 +2112,30 @@ function EditorWorkspace({
       undo,
     ],
   );
-  const onReady = useCallback((event: DockviewReadyEvent) => {
-    dockviewApiRef.current = event.api;
-    // v8: Browser | Context | Agent across the top, Timeline beneath them, and
-    // Monitor as a full-height right column — see dock-layout.ts for why.
-    const layoutKey = DOCK_LAYOUT_KEY;
-    for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
-      window.localStorage.removeItem(stale);
-    }
-    const saved = window.localStorage.getItem(layoutKey);
-    let restored = false;
-    if (saved !== null) {
-      try {
-        event.api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
-          reuseExistingPanels: false,
-        });
-        restored = true;
-      } catch {
-        window.localStorage.removeItem(layoutKey);
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      dockviewApiRef.current = event.api;
+      migrateLegacyDockLayout(window.localStorage);
+      for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
+        window.localStorage.removeItem(stale);
       }
-    }
+      // Drop the legacy single-key after migration copy.
+      window.localStorage.removeItem(DOCK_LAYOUT_KEY);
 
-    const previouslyActive = event.api.activePanel?.id;
-    const addPanel = (
-      id: string,
-      options: {
-        readonly inactive?: boolean;
-        readonly position?: {
-          readonly referencePanel: string;
-          readonly direction: 'left' | 'right' | 'above' | 'below' | 'within';
-        };
-      } = {},
-    ) => {
-      if (event.api.getPanel(id) !== undefined) return;
-      event.api.addPanel({
-        id,
-        component: 'editor-panel',
-        title: panelLabel(id),
-        inactive: options.inactive ?? true,
-        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
-        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
-        ...(options.position !== undefined ? { position: options.position } : {}),
-      });
-    };
+      const mode = loadViewMode(window.localStorage);
+      setViewMode(mode);
+      applyDockLayout(event.api, mode);
 
-    if (!restored) {
-      // Seeded from JSON so the column proportions survive; sequential splits
-      // would leave the monitor at half the width instead of a quarter.
-      try {
-        event.api.fromJSON(defaultDockLayout() as never, { reuseExistingPanels: false });
-      } catch (error) {
-        console.warn('default dock layout rejected, falling back to a stack', error);
-      }
-      for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, {
-          inactive: true,
-          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
-            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
-            : {}),
-        });
-      }
-      event.api.getPanel('monitor')?.api.setActive();
-    } else {
-      for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, {
-          inactive: true,
-          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
-            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
-            : {}),
-        });
-      }
-      const restoreId =
-        previouslyActive !== undefined && event.api.getPanel(previouslyActive) !== undefined
-          ? previouslyActive
-          : 'monitor';
-      event.api.getPanel(restoreId)?.api.setActive();
-    }
-
-    const persistDockLayout = () => {
-      window.localStorage.setItem(layoutKey, JSON.stringify(event.api.toJSON()));
-    };
-    event.api.onDidLayoutChange(persistDockLayout);
-    // Save the constraint migration immediately instead of waiting for a drag.
-    persistDockLayout();
-  }, []);
+      const persistDockLayout = () => {
+        window.localStorage.setItem(
+          dockLayoutKey(viewModeRef.current),
+          JSON.stringify(event.api.toJSON()),
+        );
+      };
+      event.api.onDidLayoutChange(persistDockLayout);
+    },
+    [applyDockLayout],
+  );
 
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
@@ -2579,6 +2616,19 @@ function EditorWorkspace({
           </button>
           <button
             className="icon-button"
+            onClick={switchEditorView}
+            aria-label={
+              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
+            }
+            title={
+              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
+            }
+            aria-pressed={viewMode === 'widescreen'}
+          >
+            {viewMode === 'vertical' ? <WideViewIcon /> : <VerticalViewIcon />}
+          </button>
+          <button
+            className="icon-button"
             onClick={toggleKeyboardShortcuts}
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
@@ -2802,7 +2852,7 @@ function EditorWorkspace({
       </header>
 
       {paletteOpen && (
-        <section className="palette" aria-label="Command palette">
+        <section ref={paletteRef} className="palette" aria-label="Command palette">
           <input
             autoFocus
             value={query}
@@ -2898,6 +2948,7 @@ function EditorWorkspace({
           className="workspace"
           components={dockviewComponents}
           defaultTabComponent={PanelTab}
+          disableTabsOverflowList
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
