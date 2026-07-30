@@ -279,7 +279,7 @@ export function JobsPanel({
                   <div className="jobs-worker-row">
                     <div className="jobs-worker-copy">
                       <div className="jobs-row-main">
-                        <strong>Thumbnail</strong>
+                        <strong>{job.type === 'asset.thumbnail' ? 'Thumbnail' : job.type}</strong>
                         <span className={`jobs-pill jobs-pill--${job.state}`}>
                           {jobStateLabel(job)}
                         </span>
@@ -366,8 +366,10 @@ export function JobsPanel({
                 should appear within a few seconds.
               </li>
               <li>
-                GPU jobs need local <code>image.comfy</code> or <code>audio.ml-denoise</code> on that
-                same machine and never run on the Media VPS.
+                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>,
+                or <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
+                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>, <code>edit.higgsfield</code>)
+                require API keys configured in <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
               </li>
             </ol>
           )}

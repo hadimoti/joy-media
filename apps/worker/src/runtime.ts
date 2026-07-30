@@ -20,6 +20,13 @@ import {
   runImageComfyJob,
   type LocalGpuReceipt,
 } from './local-gpu.js';
+import {
+  loadAiProviderConfigs,
+  runAiJob,
+  getConfiguredProviders,
+  type LocalAiReceipt,
+  type AiProvider,
+} from './local-ai.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -129,6 +136,8 @@ export interface ToolAvailability {
   readonly comfy: boolean;
   /** Local ML denoise tool/env on the Worker PC — ADR-0018. */
   readonly mlDenoise: boolean;
+  /** AI providers configured via ~/.joy-media/ai-providers.json — never on the VPS. */
+  readonly aiProviders: readonly AiProvider[];
 }
 
 /** Private mapping held only by the Worker; it is never serialized to the API. */
@@ -193,6 +202,8 @@ export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolA
     comfy: comfyUrl.length > 0,
     // Opt-in: owner PC has ML denoise tooling installed.
     mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
+    // AI providers configured via ~/.joy-media/ai-providers.json
+    aiProviders: getConfiguredProviders(),
   };
 }
 function canRun(tool: string): boolean {
@@ -234,6 +245,10 @@ export class WorkerRuntime {
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');
+    if (this.tools.aiProviders.includes('lm-studio')) capabilities.push('text.lm-studio');
+    if (this.tools.aiProviders.includes('openrouter')) capabilities.push('text.openrouter');
+    if (this.tools.aiProviders.includes('runway')) capabilities.push('video.runway');
+    if (this.tools.aiProviders.includes('higgsfield')) capabilities.push('edit.higgsfield');
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
       workerId: this.identity.workerId,
@@ -298,6 +313,32 @@ export class WorkerRuntime {
           jobId: job.id,
           ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
           ...(sourcePath === undefined ? {} : { sourcePath }),
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
+    // AI provider jobs (LM Studio, OpenRouter, Runway, Higgsfield)
+    if (job.type.startsWith('text.') || job.type.startsWith('video.') || job.type.startsWith('edit.')) {
+      const provider = job.type.replace(/^(text\.|video\.|edit\.)/, '') as AiProvider;
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write(`job ${job.id} started (${job.type})`);
+      try {
+        const result = await runAiJob({
+          jobId: job.id,
+          provider,
+          model: '',
+          prompt: '',
           derivativeDirectory,
           cancelled: options.cancelled,
           progress: options.progress,
@@ -394,11 +435,22 @@ export class WorkerRuntime {
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       return readGpuDerivative(directory, result);
     }
-    if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef))
+    if (result.kind === 'text' || result.kind === 'image' || result.kind === 'video') {
+      if (result.localRef === undefined) throw new Error('AI derivative has no local reference');
+      const ext = result.kind === 'video' ? 'mp4' : result.kind === 'text' ? 'txt' : 'png';
+      const directory = this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const bytes = readFileSync(join(directory, `${result.localRef}.${ext}`));
+      if (result.sha256 !== undefined && result.bytes !== undefined) {
+        if (bytes.length !== result.bytes || createHash('sha256').update(bytes).digest('hex') !== result.sha256)
+          throw new Error('retained AI derivative integrity check failed');
+      }
+      return bytes;
+    }
+    if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef!))
       throw new Error('derivative local reference is invalid');
     const directory =
       this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
-    const bytes = readFileSync(join(directory, `${result.localRef}.jpg`));
+    const bytes = readFileSync(join(directory, `${result.localRef!}.jpg`));
     if (
       bytes.length !== result.bytes ||
       createHash('sha256').update(bytes).digest('hex') !== result.sha256
@@ -408,7 +460,7 @@ export class WorkerRuntime {
   }
 }
 
-export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt;
+export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt;
 
 export interface RealThumbnailReceipt {
   readonly kind: 'asset.thumbnail';

@@ -36,7 +36,7 @@ describe('Worker runtime', () => {
     expect(log.lines()).toEqual(['b', 'c']);
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
     );
     expect(
       (
@@ -60,7 +60,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -109,7 +109,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -175,7 +175,7 @@ describe('Worker runtime', () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-ml-'));
     const runtime = new WorkerRuntime(
       { workerId: 'worker-ml', createdAt: '2026-07-24T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiProviders: [] },
       { derivativeDirectory },
     );
     try {
@@ -200,7 +200,7 @@ describe('Worker runtime', () => {
   it('advertises GPU capabilities only when local env is set', () => {
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
-      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true },
+      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true, aiProviders: [] },
     );
     expect(runtime.hello('linux', 'x64').capabilities).toEqual([
       'asset.thumbnail',

@@ -4,18 +4,27 @@ export const WORKER_PROTOCOL_VERSION = 1 as const;
 
 export type WorkerCapability =
   | 'asset.thumbnail'
-  /** Local PC ComfyUI (or equivalent); never assumed on the VPS (ADR-0018). */
   | 'image.comfy'
-  /** Local PC ML denoise (e.g. DeepFilterNet); VPS keeps gate + afftdn only. */
-  | 'audio.ml-denoise';
+  | 'audio.ml-denoise'
+  | 'text.lm-studio'
+  | 'text.openrouter'
+  | 'video.runway'
+  | 'edit.higgsfield';
 
-/** GPU-backed Worker job types leased only to capable local Workers (ADR-0018). */
-export type LocalGpuWorkerJobType = 'image.comfy' | 'audio.ml-denoise';
-
-export const LOCAL_GPU_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
+export type SpecializedJobType = 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield';
+export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
   'audio.ml-denoise',
+  'text.lm-studio',
+  'text.openrouter',
+  'video.runway',
+  'edit.higgsfield',
 ] as const;
+
+/** @deprecated Use SpecializedJobType */
+export type LocalGpuWorkerJobType = SpecializedJobType;
+/** @deprecated Use SPECIALIZED_JOB_TYPES */
+export const LOCAL_GPU_WORKER_CAPABILITIES: readonly WorkerCapability[] = SPECIALIZED_JOB_TYPES;
 export type ThumbnailJobState =
   'queued' | 'assigned' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
@@ -59,6 +68,25 @@ export interface ThumbnailJob {
   readonly requirements: {
     readonly capabilities: readonly WorkerCapability[];
     readonly privacy: 'local-only';
+  };
+  readonly idempotencyKey: string;
+  readonly maxAttempts: number;
+}
+
+export interface AiJob {
+  readonly protocolVersion: typeof WORKER_PROTOCOL_VERSION;
+  readonly jobId: string;
+  readonly type: SpecializedJobType;
+  readonly payload: {
+    readonly prompt: string;
+    readonly negativePrompt?: string;
+    readonly imageAssetId?: string;
+    readonly model?: string;
+    readonly params?: Record<string, unknown>;
+  };
+  readonly requirements: {
+    readonly capabilities: readonly WorkerCapability[];
+    readonly privacy: 'local-only' | 'remote-api';
   };
   readonly idempotencyKey: string;
   readonly maxAttempts: number;

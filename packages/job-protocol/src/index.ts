@@ -9,6 +9,8 @@ export const PACKAGE_NAME = '@joy-media/job-protocol' as const;
 export type {
   WorkerCapability,
   LocalGpuWorkerJobType,
+  SpecializedJobType,
+  AiJob,
   ThumbnailJobState,
   WorkerHello,
   PairingOffer,
@@ -23,6 +25,7 @@ export type {
 export {
   WORKER_PROTOCOL_VERSION,
   LOCAL_GPU_WORKER_CAPABILITIES,
+  SPECIALIZED_JOB_TYPES,
   WorkerProtocolError,
   InMemoryWorkerCoordinator,
 } from './protocol.js';
