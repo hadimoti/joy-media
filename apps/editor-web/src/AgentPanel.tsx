@@ -53,7 +53,7 @@ const THINKING_REVEAL_MS = 320;
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
-  { id: '3d', label: '3D' },
+  { id: '3d', label: '', iconUrl: 'https://media.joyteam.ir/assets/24_3d.png' },
 ];
 
 interface PendingPlan {
@@ -895,11 +895,11 @@ export function AgentPanel({
                 </button>
               </div>
             </div>
-           </section>
-         )}
+          </section>
+        )}
 
-         {tab === '3d' && <JoyCode3DViewer />}
-       </div>
-     </PanelShell>
+        {tab === '3d' && <JoyCode3DViewer />}
+      </div>
+    </PanelShell>
   );
 }

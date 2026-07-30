@@ -209,7 +209,7 @@ export class BrowserControlPlaneClient {
   async enqueueAiGeneration(
     projectId: string,
     id: string,
-    type: string,
+    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
     prompt: string,
     options?: { readonly imageAssetId?: string; readonly model?: string; readonly params?: Record<string, unknown> },
   ): Promise<BrowserJob> {

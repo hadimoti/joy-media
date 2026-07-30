@@ -101,6 +101,7 @@ export function PanelShell({
             role="tab"
             className="joy-panel-tab"
             aria-selected={activeTab === tab.id}
+            aria-label={tab.label || tab.id}
             disabled={tab.disabled === true}
             onClick={() => onTabChange?.(tab.id)}
           >

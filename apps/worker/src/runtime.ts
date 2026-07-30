@@ -261,7 +261,7 @@ export class WorkerRuntime {
     };
   }
   async run(
-    job: { readonly id: string; readonly type: string; readonly assetId?: string },
+    job: { readonly id: string; readonly type: string; readonly assetId?: string; readonly payload?: { readonly prompt?: string; readonly model?: string; readonly negativePrompt?: string; readonly imageAssetId?: string; readonly params?: Record<string, unknown> }; },
     options: {
       readonly cancelled: () => boolean;
       readonly progress: (progress: number) => Promise<void>;
@@ -337,8 +337,8 @@ export class WorkerRuntime {
         const result = await runAiJob({
           jobId: job.id,
           provider,
-          model: '',
-          prompt: '',
+          model: job.payload?.model ?? '',
+          prompt: job.payload?.prompt ?? '',
           derivativeDirectory,
           cancelled: options.cancelled,
           progress: options.progress,

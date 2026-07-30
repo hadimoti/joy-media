@@ -10,9 +10,38 @@ export function JoyCode3DViewer() {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number | undefined>(undefined);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const disposeModel = useCallback((model: THREE.Object3D) => {
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry?.dispose();
+        if (child.material instanceof THREE.Material) {
+          child.material.dispose();
+        } else if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        }
+      }
+    });
+  }, []);
+
+  const clearScene = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const toRemove: THREE.Object3D[] = [];
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.Group) {
+        toRemove.push(child);
+      }
+    });
+    toRemove.forEach((child) => {
+      scene.remove(child);
+      disposeModel(child);
+    });
+  }, [disposeModel]);
 
   const initScene = useCallback(() => {
     const container = containerRef.current;
@@ -63,16 +92,48 @@ export function JoyCode3DViewer() {
       renderer.render(scene, camera);
     };
     animate();
+
+    resizeObserverRef.current = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width: w, height: h } = entry.contentRect;
+        if (w > 0 && h > 0) {
+          camera.aspect = w / Math.max(1, h);
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h);
+        }
+      }
+    });
+    resizeObserverRef.current.observe(container);
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      if (animFrameRef.current !== undefined) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = undefined;
+      }
+      setStatus('WebGL context lost — attempting recovery...');
+    };
+    const handleContextRestored = () => {
+      setStatus('WebGL context restored — reinitializing...');
+      animate();
+    };
+    renderer.domElement.addEventListener('webglcontextlost', handleContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', handleContextRestored);
   }, []);
 
   useEffect(() => {
     initScene();
     return () => {
       if (animFrameRef.current !== undefined) cancelAnimationFrame(animFrameRef.current);
+      resizeObserverRef.current?.disconnect();
       rendererRef.current?.dispose();
-      sceneRef.current?.clear();
+      clearScene();
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      rendererRef.current = null;
     };
-  }, [initScene]);
+  }, [initScene, clearScene]);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -81,13 +142,16 @@ export function JoyCode3DViewer() {
     setFileList((prev) => [...prev, file.name]);
     setStatus(`Loading ${file.name}…`);
 
+    clearScene();
+
     const loader = new GLTFLoader();
     loader.load(
       url,
       (gltf) => {
+        URL.revokeObjectURL(url);
         const model = gltf.scene;
         model.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
+          if (child instanceof THREE.Mesh) {
             child.castShadow = true;
             child.receiveShadow = true;
           }
@@ -107,14 +171,15 @@ export function JoyCode3DViewer() {
         const pct = progress.loaded / Math.max(1, progress.total);
         setStatus(`Loading ${file.name}… ${Math.round(pct * 100)}%`);
       },
-          (err: unknown) => {
+      (err: unknown) => {
+        URL.revokeObjectURL(url);
         const msg = err instanceof Error ? err.message : String(err);
         setStatus(`Error loading ${file.name}: ${msg}`);
       },
     );
 
     event.target.value = '';
-  }, []);
+  }, [clearScene]);
 
   return (
     <div className="joy-code-3d" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
