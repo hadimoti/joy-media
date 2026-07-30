@@ -4,6 +4,8 @@ export interface MediaTelegramSenderOptions {
 
 export interface MediaTelegramSenderLike {
   sendOtp(telegramId: string, code: string): Promise<void>;
+  /** Best-effort profile JPEG bytes; undefined when unavailable or user has no photo. */
+  fetchProfilePhoto?(telegramId: string): Promise<Buffer | undefined>;
 }
 
 /** Logo sticker from owner; file_id is per-bot — failures are non-fatal. */
@@ -52,6 +54,51 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
     const plainOk = await this.sendMessage(telegramId, fallback);
     if (!plainOk) {
       throw new Error('Telegram sendMessage failed');
+    }
+  }
+
+  async fetchProfilePhoto(telegramId: string): Promise<Buffer | undefined> {
+    try {
+      const listResponse = await fetch(
+        `https://api.telegram.org/bot${this.botToken}/getUserProfilePhotos`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ user_id: Number(telegramId), limit: 1 }),
+        },
+      );
+      if (!listResponse.ok) return undefined;
+      const listBody = (await listResponse.json()) as {
+        readonly ok?: boolean;
+        readonly result?: {
+          readonly total_count?: number;
+          readonly photos?: ReadonlyArray<ReadonlyArray<{ readonly file_id: string }>>;
+        };
+      };
+      const sizes = listBody.result?.photos?.[0];
+      const fileId = sizes?.[sizes.length - 1]?.file_id;
+      if (fileId === undefined) return undefined;
+
+      const fileResponse = await fetch(`https://api.telegram.org/bot${this.botToken}/getFile`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ file_id: fileId }),
+      });
+      if (!fileResponse.ok) return undefined;
+      const fileBody = (await fileResponse.json()) as {
+        readonly result?: { readonly file_path?: string };
+      };
+      const filePath = fileBody.result?.file_path;
+      if (filePath === undefined || filePath.length === 0) return undefined;
+
+      const bytesResponse = await fetch(
+        `https://api.telegram.org/file/bot${this.botToken}/${filePath}`,
+      );
+      if (!bytesResponse.ok) return undefined;
+      const bytes = Buffer.from(await bytesResponse.arrayBuffer());
+      return bytes.length === 0 ? undefined : bytes;
+    } catch {
+      return undefined;
     }
   }
 

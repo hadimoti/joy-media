@@ -50,12 +50,24 @@ export interface MediaAuthServiceOptions {
   readonly telegram?: MediaTelegramSenderLike;
 }
 
+export interface MediaSessionProfile {
+  readonly contact: string;
+  readonly method: MediaAuthMethod;
+  /** Human label: @username or gmail — never a bare telegram numeric id when username exists. */
+  readonly displayName: string;
+  readonly avatarAvailable: boolean;
+}
+
 /** The subset of MediaAuthService that http-server.ts depends on (injectable, like ApiAuthentication). */
 export interface MediaAuthApi {
   requestOtp(contact: string, method: MediaAuthMethod): Promise<{ readonly message: string }>;
   verifyOtp(contact: string, method: MediaAuthMethod, code: string): Promise<string>;
   logout(token: string): Promise<void>;
   authenticate(request: IncomingMessage): Promise<Actor | undefined>;
+  sessionProfile(request: IncomingMessage): Promise<MediaSessionProfile | undefined>;
+  avatarBytes(
+    request: IncomingMessage,
+  ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined>;
 }
 
 /**
@@ -182,16 +194,68 @@ export class MediaAuthService implements MediaAuthApi {
 
   /** Satisfies the existing `ApiAuthentication` interface (see http-server.ts). */
   authenticate = async (request: IncomingMessage): Promise<Actor | undefined> => {
+    const row = await this.sessionRow(request);
+    return row === undefined ? undefined : { id: row.contact };
+  };
+
+  async sessionProfile(request: IncomingMessage): Promise<MediaSessionProfile | undefined> {
+    const row = await this.sessionRow(request);
+    if (row === undefined) return undefined;
+    const allowed = await this.findAllowed(row.contact, row.method);
+    const displayName = displayNameFor(row.contact, row.method, allowed);
+    return {
+      contact: row.contact,
+      method: row.method,
+      displayName,
+      avatarAvailable:
+        row.method === 'telegram'
+          ? this.telegram?.fetchProfilePhoto !== undefined
+          : row.method === 'gmail',
+    };
+  }
+
+  async avatarBytes(
+    request: IncomingMessage,
+  ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined> {
+    const row = await this.sessionRow(request);
+    if (row === undefined) return undefined;
+    if (row.method === 'telegram') {
+      const fetchPhoto = this.telegram?.fetchProfilePhoto;
+      if (fetchPhoto === undefined) return undefined;
+      const bytes = await fetchPhoto(row.contact);
+      return bytes === undefined ? undefined : { mimeType: 'image/jpeg', bytes };
+    }
+    if (row.method === 'gmail') {
+      const email = row.contact.trim().toLowerCase();
+      const hash = createHash('md5').update(email).digest('hex');
+      try {
+        const response = await fetch(`https://www.gravatar.com/avatar/${hash}?s=128&d=404`);
+        if (!response.ok) return undefined;
+        const bytes = Buffer.from(await response.arrayBuffer());
+        const mimeType = response.headers.get('content-type') ?? 'image/jpeg';
+        return bytes.length === 0 ? undefined : { mimeType, bytes };
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  private async sessionRow(
+    request: IncomingMessage,
+  ): Promise<{ readonly contact: string; readonly method: MediaAuthMethod } | undefined> {
     const token = bearerToken(request);
     if (token === undefined) return undefined;
-    const result = await this.pool.query<{ contact: string }>(
-      `SELECT contact FROM media_sessions
+    const result = await this.pool.query<{ contact: string; method: string }>(
+      `SELECT contact, method FROM media_sessions
        WHERE token_hash = $1 AND expires_at > $2 AND revoked_at IS NULL`,
       [sessionHash(token), new Date()],
     );
-    const contact = result.rows[0]?.contact;
-    return contact === undefined ? undefined : { id: contact };
-  };
+    const row = result.rows[0];
+    if (row === undefined) return undefined;
+    if (row.method !== 'gmail' && row.method !== 'telegram') return undefined;
+    return { contact: row.contact, method: row.method };
+  }
 
   private async findAllowed(
     contact: string,
@@ -248,6 +312,25 @@ export class DisabledMediaAuth implements MediaAuthApi {
   async authenticate(): Promise<Actor | undefined> {
     return undefined;
   }
+  async sessionProfile(): Promise<MediaSessionProfile | undefined> {
+    return undefined;
+  }
+  async avatarBytes(): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined> {
+    return undefined;
+  }
+}
+
+function displayNameFor(
+  contact: string,
+  method: MediaAuthMethod,
+  allowed: MediaAllowedUser | undefined,
+): string {
+  if (method === 'gmail') {
+    return allowed?.gmail ?? contact;
+  }
+  const username = allowed?.telegramUsername?.replace(/^@+/, '').trim();
+  if (username !== undefined && username.length > 0) return `@${username}`;
+  return 'Telegram account';
 }
 
 function allowedUserOf(row: AllowedUserRow): MediaAllowedUser {

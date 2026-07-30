@@ -246,13 +246,104 @@ async function route(
     return;
   }
 
-  const actor = await options.authentication.authenticate(request);
-  if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-
   if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
-    respondJson(response, 200, { data: { contact: actor.id } });
+    const profile = await options.mediaAuth.sessionProfile(request);
+    if (profile === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    // #region agent log
+    try {
+      const fs = await import('node:fs');
+      fs.appendFileSync(
+        '/opt/.cursor/debug-b1ff1d.log',
+        `${JSON.stringify({
+          sessionId: 'b1ff1d',
+          runId: 'post-fix',
+          hypothesisId: 'A,B,D',
+          location: 'http-server.ts:/v1/auth/session',
+          message: 'session endpoint enriched profile',
+          data: {
+            contactKind: /^[0-9]+$/.test(profile.contact)
+              ? 'numeric_id'
+              : profile.contact.includes('@')
+                ? 'email'
+                : 'other',
+            contactLen: profile.contact.length,
+            method: profile.method,
+            displayKind: profile.displayName.startsWith('@')
+              ? 'telegram_username'
+              : profile.displayName.includes('@')
+                ? 'email'
+                : 'other',
+            displayLen: profile.displayName.length,
+            avatarAvailable: profile.avatarAvailable,
+            payloadKeys: ['contact', 'method', 'displayName', 'avatarAvailable'],
+          },
+          timestamp: Date.now(),
+        })}\n`,
+      );
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
+    respondJson(response, 200, { data: profile });
     return;
   }
+
+  if (request.method === 'GET' && url.pathname === '/v1/auth/avatar') {
+    const avatar = await options.mediaAuth.avatarBytes(request);
+    if (avatar === undefined) {
+      // #region agent log
+      try {
+        const fs = await import('node:fs');
+        fs.appendFileSync(
+          '/opt/.cursor/debug-b1ff1d.log',
+          `${JSON.stringify({
+            sessionId: 'b1ff1d',
+            runId: 'post-fix',
+            hypothesisId: 'C,E',
+            location: 'http-server.ts:/v1/auth/avatar',
+            message: 'avatar unavailable',
+            data: { found: false },
+            timestamp: Date.now(),
+          })}\n`,
+        );
+      } catch {
+        /* debug log best-effort */
+      }
+      // #endregion
+      response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: { code: 'AVATAR_NOT_FOUND', message: 'no avatar' } }));
+      return;
+    }
+    // #region agent log
+    try {
+      const fs = await import('node:fs');
+      fs.appendFileSync(
+        '/opt/.cursor/debug-b1ff1d.log',
+        `${JSON.stringify({
+          sessionId: 'b1ff1d',
+          runId: 'post-fix',
+          hypothesisId: 'C,E',
+          location: 'http-server.ts:/v1/auth/avatar',
+          message: 'avatar served',
+          data: { found: true, mimeType: avatar.mimeType, bytes: avatar.bytes.length },
+          timestamp: Date.now(),
+        })}\n`,
+      );
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
+    response.writeHead(200, {
+      'content-type': avatar.mimeType,
+      'cache-control': 'private, max-age=3600',
+      'content-length': avatar.bytes.length,
+    });
+    response.end(avatar.bytes);
+    return;
+  }
+
+  const actor = await options.authentication.authenticate(request);
+  if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
 
   if (request.method === 'GET' && url.pathname === '/v1/workers') {
     respondJson(response, 200, { data: await options.controlPlane.workersForOwner(actor) });

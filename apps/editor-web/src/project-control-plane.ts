@@ -11,9 +11,27 @@ export interface ControlPlaneProjectBinding {
   readonly title: string;
 }
 
-interface BindingDatabase {
+interface BindingDatabaseV2 {
+  readonly version: 2;
+  readonly bindingsByOwner: Readonly<
+    Record<string, Readonly<Record<string, ControlPlaneProjectBinding>>>
+  >;
+}
+
+/** Legacy v1 shape — migrated into bindingsByOwner['legacy'] on read. */
+interface BindingDatabaseV1 {
   readonly version: 1;
   readonly bindings: Readonly<Record<string, ControlPlaneProjectBinding>>;
+}
+
+export interface ControlPlaneBindingOptions {
+  readonly createId?: () => string;
+  /**
+   * Session identity (Telegram id / Gmail). Bindings are per-owner so one
+   * browser profile can sign in as different accounts without reusing another
+   * account's control-plane project id (which surfaces as Jobs 409).
+   */
+  readonly ownerKey?: string;
 }
 
 /**
@@ -24,13 +42,18 @@ interface BindingDatabase {
 export function getOrCreateControlPlaneProjectBinding(
   storage: BrowserKeyValueStore,
   project: Pick<JoyProjectV1, 'id' | 'title'>,
-  createId: () => string = createOpaqueProjectId,
+  createIdOrOptions: (() => string) | ControlPlaneBindingOptions = {},
+  ownerKeyArg?: string,
 ): ControlPlaneProjectBinding {
   if (!isNonBlank(project.id) || !isNonBlank(project.title))
     throw new TypeError('editor project requires a non-empty id and title');
 
+  const options = normalizeOptions(createIdOrOptions, ownerKeyArg);
+  const ownerKey = options.ownerKey;
+  const createId = options.createId;
   const database = readDatabase(storage);
-  const existing = database.bindings[project.id];
+  const ownerBindings = database.bindingsByOwner[ownerKey] ?? {};
+  const existing = ownerBindings[project.id];
   if (existing !== undefined) return existing;
 
   const binding: ControlPlaneProjectBinding = {
@@ -41,11 +64,34 @@ export function getOrCreateControlPlaneProjectBinding(
   storage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      version: 1,
-      bindings: { ...database.bindings, [project.id]: binding },
-    } satisfies BindingDatabase),
+      version: 2,
+      bindingsByOwner: {
+        ...database.bindingsByOwner,
+        [ownerKey]: { ...ownerBindings, [project.id]: binding },
+      },
+    } satisfies BindingDatabaseV2),
   );
   return binding;
+}
+
+function normalizeOptions(
+  createIdOrOptions: (() => string) | ControlPlaneBindingOptions,
+  ownerKeyArg?: string,
+): { readonly createId: () => string; readonly ownerKey: string } {
+  if (typeof createIdOrOptions === 'function') {
+    return {
+      createId: createIdOrOptions,
+      ownerKey: isNonBlank(ownerKeyArg) ? ownerKeyArg.trim() : 'local',
+    };
+  }
+  return {
+    createId: createIdOrOptions.createId ?? createOpaqueProjectId,
+    ownerKey: isNonBlank(createIdOrOptions.ownerKey)
+      ? createIdOrOptions.ownerKey.trim()
+      : isNonBlank(ownerKeyArg)
+        ? ownerKeyArg.trim()
+        : 'local',
+  };
 }
 
 function createOpaqueProjectId(): string {
@@ -54,19 +100,40 @@ function createOpaqueProjectId(): string {
   return crypto.randomUUID();
 }
 
-function readDatabase(storage: BrowserKeyValueStore): BindingDatabase {
+function readDatabase(storage: BrowserKeyValueStore): BindingDatabaseV2 {
   const serialized = storage.getItem(STORAGE_KEY);
-  if (serialized === null) return { version: 1, bindings: {} };
+  if (serialized === null) return { version: 2, bindingsByOwner: {} };
   try {
     const parsed: unknown = JSON.parse(serialized);
-    if (!isDatabase(parsed)) return { version: 1, bindings: {} };
-    return parsed;
+    if (isDatabaseV2(parsed)) return parsed;
+    if (isDatabaseV1(parsed)) {
+      return {
+        version: 2,
+        bindingsByOwner: { legacy: parsed.bindings },
+      };
+    }
+    return { version: 2, bindingsByOwner: {} };
   } catch {
-    return { version: 1, bindings: {} };
+    return { version: 2, bindingsByOwner: {} };
   }
 }
 
-function isDatabase(value: unknown): value is BindingDatabase {
+function isDatabaseV2(value: unknown): value is BindingDatabaseV2 {
+  if (!isRecord(value) || value.version !== 2 || !isRecord(value.bindingsByOwner)) return false;
+  return Object.values(value.bindingsByOwner).every(
+    (ownerBindings) =>
+      isRecord(ownerBindings) &&
+      Object.entries(ownerBindings).every(
+        ([editorProjectId, binding]) =>
+          isRecord(binding) &&
+          binding.editorProjectId === editorProjectId &&
+          isNonBlank(binding.controlPlaneProjectId) &&
+          isNonBlank(binding.title),
+      ),
+  );
+}
+
+function isDatabaseV1(value: unknown): value is BindingDatabaseV1 {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.bindings)) return false;
   return Object.entries(value.bindings).every(
     ([editorProjectId, binding]) =>

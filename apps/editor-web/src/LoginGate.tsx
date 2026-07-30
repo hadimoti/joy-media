@@ -7,7 +7,13 @@ import {
   type LoginContactHistory,
 } from './login-contact-history.js';
 import { MatrixTitleChar } from './login-title-matrix.js';
-import { requestOtp, setStoredMediaToken, verifyOtp, type MediaAuthMethod } from './media-session.js';
+import {
+  MEDIA_SESSION_CHANGED_EVENT,
+  requestOtp,
+  setStoredMediaToken,
+  verifyOtp,
+  type MediaAuthMethod,
+} from './media-session.js';
 import './login-gate.css';
 
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
@@ -53,9 +59,34 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   const blurTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    void probeJoySession(window.localStorage).then((state) => {
-      setStep(state.kind === 'ready' ? 'unlocked' : 'contact');
-    });
+    let cancelled = false;
+    const applyInitial = (): void => {
+      void probeJoySession(window.localStorage).then((state) => {
+        if (cancelled) return;
+        setStep(state.kind === 'ready' ? 'unlocked' : 'contact');
+      });
+    };
+    const onSessionChange = (): void => {
+      void probeJoySession(window.localStorage).then((state) => {
+        if (cancelled) return;
+        if (state.kind === 'ready') {
+          // Login submit path owns unlock + success glow; do not short-circuit it.
+          return;
+        }
+        // Logout (or expired token) must return to the login card.
+        setSuccessGlow(false);
+        setError(undefined);
+        setHint(undefined);
+        otpSubmittingRef.current = false;
+        setStep('contact');
+      });
+    };
+    applyInitial();
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
+    };
   }, []);
 
   useEffect(() => {

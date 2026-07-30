@@ -7,6 +7,10 @@ import {
   type BrowserDerivative,
 } from './control-plane-client.js';
 import {
+  getStoredMediaToken,
+  MEDIA_SESSION_CHANGED_EVENT,
+} from './media-session.js';
+import {
   assetCollectionId,
   assetCollectionLabel,
   assetCollectionsForCategory,
@@ -135,13 +139,31 @@ export function AssetLibraryPanel({
   useEffect(() => () => previewRef.current?.revoke(), []);
 
   const refresh = useCallback(async () => {
+    if (getStoredMediaToken(window.localStorage) === undefined) {
+      // LoginGate keeps the editor mounted under the blur; don't wipe a prior
+      // catalog or treat "not signed in yet" as a hard failure.
+      return;
+    }
     try {
-      // Auto-create control-plane project so Assets never depends on Jobs → Initialize.
-      await client.ensureProject(projectId, projectTitle);
-      const [ownedAssets, sharedAssets] = await Promise.all([
+      // Catalog listing must not depend on ensureProject — a stale binding to
+      // another account's project returns PROJECT_EXISTS/NOT_FOUND and used to
+      // zero the whole Assets panel before cloud-assets could load.
+      void client.ensureProject(projectId, projectTitle).catch(() => undefined);
+
+      const [ownedResult, sharedResult] = await Promise.allSettled([
         client.myAssets(),
-        client.sharedCloudAssets().catch(() => [] as readonly BrowserAsset[]),
+        client.sharedCloudAssets(),
       ]);
+      const ownedAssets =
+        ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
+      const sharedAssets =
+        sharedResult.status === 'fulfilled' ? sharedResult.value : ([] as readonly BrowserAsset[]);
+      if (ownedResult.status === 'rejected' && sharedResult.status === 'rejected') {
+        throw ownedResult.reason instanceof Error
+          ? ownedResult.reason
+          : new Error('Failed to load media catalog');
+      }
+
       const byId = new Map<string, BrowserAsset>();
       for (const asset of ownedAssets) byId.set(asset.id, asset);
       for (const asset of sharedAssets) {
@@ -172,11 +194,17 @@ export function AssetLibraryPanel({
       const byAsset = new Map(derivatives);
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
-      setStatus(
-        assets.length === 0
-          ? 'No media yet. Import an image to sync with the shared cloud library.'
-          : undefined,
-      );
+      if (sharedResult.status === 'rejected') {
+        setStatus(
+          `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
+        );
+      } else {
+        setStatus(
+          assets.length === 0
+            ? 'No media yet. Import an image to sync with the shared cloud library.'
+            : undefined,
+        );
+      }
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
       const detail = message(error);
@@ -186,6 +214,13 @@ export function AssetLibraryPanel({
   }, [client, projectId, projectTitle]);
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+  useEffect(() => {
+    const onSession = (): void => {
+      void refresh();
+    };
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
+    return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
   }, [refresh]);
 
   useEffect(() => {

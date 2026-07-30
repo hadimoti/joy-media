@@ -182,7 +182,6 @@ import {
   ZoomInIcon,
 } from './icons.js';
 import {
-  JOY_LOGIN_URL,
   logoutJoySession,
   probeJoySession,
   type JoySessionState,
@@ -608,6 +607,7 @@ function EditorWorkspace({
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
   const paletteRef = useRef<HTMLElement | null>(null);
+  const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -631,7 +631,6 @@ function EditorWorkspace({
   const sessionRef = useRef<EditorSession | null>(null);
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
-  const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
@@ -689,12 +688,17 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
-  const controlPlaneProject =
-    controlPlaneProjectRef.current ??
-    (controlPlaneProjectRef.current = getOrCreateControlPlaneProjectBinding(
-      window.localStorage,
-      session.visualProject,
-    ));
+  const controlPlaneOwnerKey =
+    joySession.kind === 'ready'
+      ? (joySession.subject ?? 'signed-in')
+      : 'signed-out';
+  const controlPlaneProject = useMemo(
+    () =>
+      getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
+        ownerKey: controlPlaneOwnerKey,
+      }),
+    [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
+  );
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -1386,7 +1390,14 @@ function EditorWorkspace({
     [activatePanel, selectClips],
   );
   const refreshJoySession = useCallback(() => {
-    void probeJoySession(window.localStorage).then(setJoySession);
+    void probeJoySession(window.localStorage).then((next) => {
+      setJoySession((prev) => {
+        if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
+          URL.revokeObjectURL(prev.avatarObjectUrl);
+        }
+        return next;
+      });
+    });
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1511,9 +1522,20 @@ function EditorWorkspace({
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [paletteOpen]);
   useEffect(() => {
+    if (!accountOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = accountDropdownRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setAccountOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [accountOpen]);
+  useEffect(() => {
     refreshJoySession();
   }, [refreshJoySession]);
   const signOut = useCallback(async () => {
+    setAccountOpen(false);
     await logoutJoySession(window.localStorage);
     refreshJoySession();
   }, [refreshJoySession]);
@@ -2786,18 +2808,18 @@ function EditorWorkspace({
           <div className="header-menu">
             <button
               className="icon-button"
-              aria-label="JOY account"
+              aria-label="Joy Studio account"
               aria-expanded={accountOpen}
               title={
                 joySession.kind === 'ready'
-                  ? `Signed in · JOY account ${joySession.subject ?? ''}`
+                  ? `Signed in · ${joySession.displayName ?? joySession.subject ?? 'Joy Studio'}`
                   : joySession.kind === 'no-access'
-                    ? 'Signed in, JOY Media access not enabled'
+                    ? 'Signed in, Joy Studio access not enabled'
                     : joySession.kind === 'signed-out'
                       ? 'Signed out'
                       : joySession.kind === 'unavailable'
-                        ? 'JOY identity service unavailable'
-                        : 'JOY account'
+                        ? 'Sign-in status unavailable'
+                        : 'Joy Studio account'
               }
               onClick={() => {
                 setAccountOpen((open) => !open);
@@ -2810,22 +2832,88 @@ function EditorWorkspace({
               <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
             </button>
             {accountOpen && (
-              <section className="header-dropdown" aria-label="JOY account">
-                <h3>JOY account</h3>
+              <section ref={accountDropdownRef} className="header-dropdown account-dropdown" aria-label="Joy Studio account">
                 {joySession.kind === 'ready' && (
                   <>
-                    <p>
-                      Signed in
-                      {joySession.subject !== undefined && (
-                        <>
-                          {' '}
-                          · account <bdi>{joySession.subject}</bdi>
-                        </>
-                      )}
-                    </p>
+                    <div className="account-card">
+                      {(() => {
+                        // #region agent log
+                        const label = joySession.displayName ?? joySession.subject;
+                        fetch(
+                          'http://localhost:7725/ingest/231cd602-5e3b-4c10-8c3c-0246bf1a0f92',
+                          {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'X-Debug-Session-Id': 'b1ff1d',
+                            },
+                            body: JSON.stringify({
+                              sessionId: 'b1ff1d',
+                              runId: 'post-fix',
+                              hypothesisId: 'C,E',
+                              location: 'App.tsx:account-card',
+                              message: 'account card render inputs',
+                              data: {
+                                subjectKind:
+                                  joySession.subject === undefined
+                                    ? 'missing'
+                                    : /^[0-9]+$/.test(joySession.subject)
+                                      ? 'numeric_id'
+                                      : joySession.subject.includes('@')
+                                        ? 'email'
+                                        : 'other',
+                                displayKind:
+                                  label === undefined
+                                    ? 'missing'
+                                    : label.startsWith('@')
+                                      ? 'telegram_username'
+                                      : label.includes('@')
+                                        ? 'email'
+                                        : 'other',
+                                avatarMode:
+                                  joySession.avatarObjectUrl !== undefined
+                                    ? 'photo'
+                                    : 'letter-placeholder',
+                                showsTitleH3: false,
+                                method: joySession.method ?? null,
+                              },
+                              timestamp: Date.now(),
+                            }),
+                          },
+                        ).catch(() => {});
+                        // #endregion
+                        return null;
+                      })()}
+                      <div className="account-card-avatar" aria-hidden="true">
+                        {joySession.avatarObjectUrl !== undefined ? (
+                          <img
+                            className="account-card-avatar-img"
+                            src={joySession.avatarObjectUrl}
+                            alt=""
+                          />
+                        ) : (
+                          (
+                            (joySession.displayName ?? joySession.subject ?? 'J')
+                              .replace(/^@/, '')
+                              .trim()
+                              .charAt(0) || 'J'
+                          ).toUpperCase()
+                        )}
+                      </div>
+                      <div className="account-card-meta">
+                        <p className="account-card-status">Signed in</p>
+                        {(joySession.displayName ?? joySession.subject) !== undefined && (
+                          <p className="account-card-subject">
+                            <bdi>{joySession.displayName ?? joySession.subject}</bdi>
+                          </p>
+                        )}
+                      </div>
+                      <span className="account-card-dot session-ready" aria-hidden="true" />
+                    </div>
                     <button
-                      className="icon-button icon-button-labeled"
-                      title="Sign out of the shared JOY session"
+                      type="button"
+                      className="account-sign-out"
+                      title="Sign out of Joy Studio"
                       onClick={() => void signOut()}
                     >
                       <LogoutIcon />
@@ -2834,37 +2922,15 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'no-access' && (
-                  <p className="empty-hint">
-                    JOY Media access is not enabled for this account.
-                  </p>
+                  <p className="empty-hint">Joy Studio access is not enabled for this account.</p>
                 )}
                 {joySession.kind === 'signed-out' && (
-                  <>
-                    <p className="empty-hint">
-                      Not signed in. Sign in with your JOY account; this editor uses the shared JOY
-                      session.
-                    </p>
-                    <a
-                      className="icon-button icon-button-labeled"
-                      href={JOY_LOGIN_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Opens joyteam.ir sign-in in a new tab"
-                    >
-                      <UserIcon />
-                      Sign in at joyteam.ir
-                    </a>
-                  </>
+                  <p className="empty-hint">Returning to login…</p>
                 )}
-                {joySession.kind === 'unknown' && (
-                  <p className="empty-hint">
-                    Checking session…
-                  </p>
-                )}
+                {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
                 {joySession.kind === 'unavailable' && (
                   <p className="empty-hint">
-                    JOY identity service is unavailable. Your sign-in status is unchanged; try again
-                    shortly.
+                    Sign-in status could not be verified. Try again shortly.
                   </p>
                 )}
               </section>

@@ -7,10 +7,18 @@
 
 const STORAGE_KEY = 'joy-media-session-token';
 
+/** Dispatched on `window` whenever the local session token is set or cleared. */
+export const MEDIA_SESSION_CHANGED_EVENT = 'joy-media-session-changed';
+
 export interface MediaSessionStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+}
+
+function notifyMediaSessionChanged(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
 }
 
 export function getStoredMediaToken(storage: MediaSessionStorage): string | undefined {
@@ -27,6 +35,7 @@ export function setStoredMediaToken(token: string, storage: MediaSessionStorage)
   } catch {
     /* storage may be unavailable (private browsing); session just won't persist */
   }
+  notifyMediaSessionChanged();
 }
 
 export function clearStoredMediaToken(storage: MediaSessionStorage): void {
@@ -35,6 +44,7 @@ export function clearStoredMediaToken(storage: MediaSessionStorage): void {
   } catch {
     /* nothing to clear */
   }
+  notifyMediaSessionChanged();
 }
 
 export type MediaAuthMethod = 'gmail' | 'telegram';
