@@ -4,7 +4,7 @@
  * ag-psd is MIT-licensed, pure JavaScript (no WASM), works in browsers.
  * API: readPsd(ArrayBuffer, ReadOptions?) -> Psd
  *
- * Install when ready: pnpm --filter @joy-media/editor-web add ag-psd
+ * Installed: pnpm --filter @joy-media/editor-web add ag-psd
  */
 
 export interface PsdLayerDto {
@@ -29,17 +29,6 @@ export interface PsdParseResult {
   readonly height: number;
   readonly parseTimeMs: number;
 }
-
-// ag-psd is not yet installed — use a no-op stub until the package is added.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const agPsdModule: any = (() => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('ag-psd');
-  } catch {
-    return { readPsd: () => { throw new Error('ag-psd not installed'); } };
-  }
-})();
 
 interface AgPsdLayer {
   readonly top?: number;
@@ -80,7 +69,7 @@ export async function parsePsdFile(
   file: File | Blob,
   maxPixels: number = 3840 * 2160,
 ): Promise<PsdParseResult> {
-  const readPsd = agPsdModule.readPsd as (buf: ArrayBuffer, opts?: Record<string, unknown>) => AgPsdDocument;
+  const { readPsd } = await import('ag-psd');
   const arrayBuffer = await file.arrayBuffer();
 
   // Phase 1: structure-only parse (fast, safe, DoS-hardened)
