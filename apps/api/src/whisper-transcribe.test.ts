@@ -1,5 +1,12 @@
+import { execSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { runWhisperTranscription } from './whisper-transcribe.js';
+
+let whisperAvailable = false;
+try {
+  execSync('which faster-whisper', { stdio: 'ignore' });
+  whisperAvailable = true;
+} catch { /* faster-whisper not installed */ }
 
 /** Minimal silent WAV (16 kHz mono PCM16, 0.4s) for helper smoke tests. */
 function silentWav(durationSec = 0.4, sampleRate = 16_000): Uint8Array {
@@ -26,7 +33,7 @@ function silentWav(durationSec = 0.4, sampleRate = 16_000): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe('runWhisperTranscription', () => {
+describe.skipIf(!whisperAvailable)('runWhisperTranscription', () => {
   it('returns a faster-whisper payload for silent WAV (may be empty words)', () => {
     const transcript = runWhisperTranscription(silentWav(), 'en', {
       mediaExtension: 'wav',
