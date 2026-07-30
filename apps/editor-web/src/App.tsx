@@ -131,6 +131,8 @@ import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agen
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
+import { TemplatesPanel } from './TemplatesPanel.js';
+import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
@@ -2529,6 +2531,26 @@ function EditorWorkspace({
     }
     if (api.id === 'plugins') {
       return <PluginsPanel pluginHost={context.pluginHost} onChange={context.bumpPluginRevision} />;
+    }
+    if (api.id === 'templates') {
+      return (
+        <TemplatesPanel
+          session={context.session}
+          selectedClipIds={state.selectedIds}
+          playheadUs={state.playheadUs}
+          onApplyTemplate={(seeded) => {
+            buildContentTemplateTransaction(seeded, {
+              session: context.session,
+              selectedClipIds: state.selectedIds,
+              playheadUs: state.playheadUs,
+            });
+            setRevision((r) => r + 1);
+          }}
+          showToast={(message, kind) => {
+            console.log(`[Templates] ${kind}: ${message}`);
+          }}
+        />
+      );
     }
     return (
       <article>
