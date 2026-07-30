@@ -24,16 +24,11 @@ import type { VisualObjectTransaction } from '@joy-media/property-system';
 import {
   AutoCaptionIcon,
   BurnInIcon,
-  CaptionCleanIcon,
-  CaptionKaraokeIcon,
-  CaptionRtlIcon,
-  DownloadIcon,
   LanguageIcon,
-  MicIcon,
   PlusIcon,
   TrashIcon,
   UndoIcon,
-  UploadIcon,
+  PngMaskIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -47,9 +42,9 @@ import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
 > = {
-  'joy-clean': { Icon: CaptionCleanIcon, label: 'JOY Clean' },
-  'joy-karaoke-pop': { Icon: CaptionKaraokeIcon, label: 'JOY Karaoke Pop' },
-  'joy-rtl-classic': { Icon: CaptionRtlIcon, label: 'JOY RTL Classic' },
+  'joy-clean': { Icon: () => <PngMaskIcon src="/assets/24_Text.png" size={14} />, label: 'JOY Clean' },
+  'joy-karaoke-pop': { Icon: () => <PngMaskIcon src="/assets/24_creative.png" size={14} />, label: 'JOY Karaoke Pop' },
+  'joy-rtl-classic': { Icon: () => <PngMaskIcon src="/assets/24_UI.png" size={14} />, label: 'JOY RTL Classic' },
 };
 
 /**
@@ -292,7 +287,7 @@ function CaptionSlotEditor({
         <div className="captions-template-icons" role="group" aria-label="Caption template">
           {JOY_CAPTION_TEMPLATES.map((template) => {
             const meta = TEMPLATE_ICONS[template.id];
-            const Icon = meta?.Icon ?? CaptionCleanIcon;
+            const Icon = meta?.Icon ?? (() => <PngMaskIcon src="/assets/24_Text.png" size={14} />);
             const active = (document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID) === template.id;
             return (
               <button
@@ -315,7 +310,7 @@ function CaptionSlotEditor({
           data-guide="Export SRT"
           onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
         >
-          <DownloadIcon />
+          <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
         <button
           className="icon-button"
@@ -323,7 +318,7 @@ function CaptionSlotEditor({
           data-guide="Export VTT"
           onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
-          <DownloadIcon />
+          <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
         <button
           className="icon-button"
@@ -331,7 +326,7 @@ function CaptionSlotEditor({
           title="Import SRT/VTT file"
           onClick={() => fileInput.current?.click()}
         >
-          <UploadIcon />
+          <PngMaskIcon src="/assets/24_arrows.png" size={14} />
         </button>
         <input
           ref={fileInput}
@@ -374,7 +369,7 @@ function CaptionSlotEditor({
           data-guide="English (en)"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >
-          <MicIcon />
+          <PngMaskIcon src="/assets/24_Audio.png" size={14} />
         </button>
       </header>
       {importIssues > 0 && (

@@ -165,11 +165,10 @@ import {
   ExportIcon,
   FullscreenIcon,
   HighBitrateIcon,
-  InfoIcon,
-  ListIcon,
   LogoutIcon,
   PauseIcon,
   PlayIcon,
+  PngMaskIcon,
   RedoIcon,
   ReelsIcon,
   SkipBackIcon,
@@ -2615,8 +2614,8 @@ function EditorWorkspace({
               className="app-brand-logo"
               src="/assets/JoyCodeNew_32x32.png"
               alt=""
-              width={26}
-              height={26}
+              width={24}
+              height={24}
               decoding="async"
             />
             <strong>JOY Studio</strong>
@@ -2669,7 +2668,7 @@ function EditorWorkspace({
             }
             aria-pressed={viewMode === 'widescreen'}
           >
-            {viewMode === 'vertical' ? <WideViewIcon /> : <VerticalViewIcon />}
+            {viewMode === 'vertical' ? <VerticalViewIcon /> : <WideViewIcon />}
           </button>
           <button
             className="icon-button"
@@ -2677,7 +2676,7 @@ function EditorWorkspace({
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
           >
-            <InfoIcon />
+            <PngMaskIcon src="/assets/24_keyboard.png" size={14} />
           </button>
         </div>
         <div className="header-group" role="group" aria-label="Deliver">
@@ -2695,15 +2694,7 @@ function EditorWorkspace({
                 setAccountOpen(false);
               }}
             >
-              {exportPreset === 'youtube-1080' ? (
-                <YoutubeIcon />
-              ) : exportPreset === 'high-bitrate' ? (
-                <HighBitrateIcon />
-              ) : exportPreset === 'reels-1080' || exportPreset === 'shorts-1080' ? (
-                <ReelsIcon />
-              ) : (
-                <ExportIcon />
-              )}
+              <PngMaskIcon src="/assets/24_export-presets.png" size={14} />
             </button>
             {exportPresetOpen && (
               <section className="header-dropdown" aria-label="Export preset">
@@ -2763,7 +2754,7 @@ function EditorWorkspace({
                 setExportPresetOpen(false);
               }}
             >
-              <ListIcon />
+              <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
             </button>
             {processesOpen && (
               <section className="header-dropdown" aria-label="Recent processes">

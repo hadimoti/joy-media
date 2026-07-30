@@ -53,7 +53,7 @@ const THINKING_REVEAL_MS = 320;
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
-  { id: '3d', label: '', iconUrl: 'https://media.joyteam.ir/assets/24_3d.png' },
+  { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
 ];
 
 interface PendingPlan {

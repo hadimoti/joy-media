@@ -24,7 +24,7 @@ function Svg({ children, size = 14 }: { readonly children: ReactNode; readonly s
 }
 
 /** 24×24 PNG masked to currentColor (matches dockview panel tabs). */
-function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?: number }) {
+export function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?: number }) {
   return (
     <span
       className="png-mask-icon"

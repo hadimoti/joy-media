@@ -510,8 +510,8 @@ main {
   height: 100%;
 }
 .app-brand-logo {
-  width: 1.65rem;
-  height: 1.65rem;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
   display: block;
   flex-shrink: 0;
@@ -8896,6 +8896,81 @@ label {
   background: color-mix(in srgb, var(--joy-accent) 11%, transparent);
   box-shadow: inset 2px 0 0 var(--joy-accent);
 }
+.templates-content {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 3.35rem minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.templates-sidebar {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-inline-end: 1px solid color-mix(in srgb, var(--joy-border) 74%, transparent);
+  background: var(--joy-bg-panel);
+}
+.templates-sidebar-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+  padding: 0.2rem 0.28rem 0.55rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.templates-sidebar-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 0.35rem 0.2rem;
+  border: 1px solid transparent;
+  border-radius: 0.42rem;
+  background: transparent;
+  color: var(--joy-text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+.templates-sidebar-tab-icon {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+.templates-sidebar-tab:hover,
+.templates-sidebar-tab:focus-visible {
+  border-color: color-mix(in srgb, var(--joy-accent) 52%, var(--joy-border));
+  color: var(--joy-text);
+  outline: none;
+}
+.templates-sidebar-tab[aria-selected='true'] {
+  border-color: color-mix(in srgb, var(--joy-accent) 65%, var(--joy-border));
+  color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 11%, transparent);
+  box-shadow: inset 2px 0 0 var(--joy-accent);
+}
+.templates-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
 .asset-view-switch {
   display: inline-flex;
   align-items: center;
@@ -11217,20 +11292,26 @@ label {
 
 /* Square preview well per DESIGN.md §3a */
 .template-card-preview {
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 16 / 9;
   background: var(--joy-bg-deep);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
+.template-card-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
 /* Placeholder glyph for the preview well */
 .template-card-preview::before {
   content: '';
   display: block;
-  width: 32px;
-  height: 32px;
+  width: 40%;
+  aspect-ratio: 16 / 9;
+  max-width: 4rem;
   background: var(--joy-bg-elevated);
   border: 1px dashed var(--joy-border);
   border-radius: var(--radius-xs);
