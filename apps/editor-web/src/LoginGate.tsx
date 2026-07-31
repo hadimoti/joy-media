@@ -57,34 +57,50 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const otpSubmittingRef = useRef(false);
   const blurTimerRef = useRef<number | undefined>(undefined);
+  const sessionProbeSeqRef = useRef(0);
+  const unlockTimerRef = useRef<number | undefined>(undefined);
+
+  const clearUnlockTimer = (): void => {
+    if (unlockTimerRef.current === undefined) return;
+    window.clearTimeout(unlockTimerRef.current);
+    unlockTimerRef.current = undefined;
+  };
 
   useEffect(() => {
     let cancelled = false;
-    const applyInitial = (): void => {
-      void probeJoySession(window.localStorage).then((state) => {
-        if (cancelled) return;
-        setStep(state.kind === 'ready' ? 'unlocked' : 'contact');
-      });
+    const probeSession = async (onReady: () => void, onNotReady: () => void): Promise<void> => {
+      const requestId = ++sessionProbeSeqRef.current;
+      let state;
+      try {
+        state = await probeJoySession(window.localStorage);
+      } catch {
+        state = { kind: 'signed-out' as const };
+      }
+      if (cancelled || requestId !== sessionProbeSeqRef.current) return;
+      if (state.kind === 'ready') onReady();
+      else onNotReady();
     };
     const onSessionChange = (): void => {
-      void probeJoySession(window.localStorage).then((state) => {
-        if (cancelled) return;
-        if (state.kind === 'ready') {
+      void probeSession(
+        () => {
           // Login submit path owns unlock + success glow; do not short-circuit it.
-          return;
-        }
-        // Logout (or expired token) must return to the login card.
-        setSuccessGlow(false);
-        setError(undefined);
-        setHint(undefined);
-        otpSubmittingRef.current = false;
-        setStep('contact');
-      });
+        },
+        () => {
+          clearUnlockTimer();
+          // Logout (or expired token) must return to the login card.
+          setSuccessGlow(false);
+          setError(undefined);
+          setHint(undefined);
+          otpSubmittingRef.current = false;
+          setStep('contact');
+        },
+      );
     };
-    applyInitial();
+    void probeSession(() => setStep('unlocked'), () => setStep('contact'));
     window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
     return () => {
       cancelled = true;
+      clearUnlockTimer();
       window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
     };
   }, []);
@@ -92,6 +108,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   useEffect(() => {
     return () => {
       if (blurTimerRef.current !== undefined) window.clearTimeout(blurTimerRef.current);
+      clearUnlockTimer();
     };
   }, []);
 
@@ -107,8 +124,12 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   };
 
   const unlockAfterSuccess = (): void => {
+    clearUnlockTimer();
     setSuccessGlow(true);
-    window.setTimeout(() => setStep('unlocked'), 520);
+    unlockTimerRef.current = window.setTimeout(() => {
+      unlockTimerRef.current = undefined;
+      setStep('unlocked');
+    }, 520);
   };
 
   const persistContact = (value: string, authMethod: MediaAuthMethod): void => {

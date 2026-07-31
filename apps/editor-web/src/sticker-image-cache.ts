@@ -46,6 +46,11 @@ export class StickerImageCache {
     return out;
   }
 
+  clear(): void {
+    this.byObjectId.clear();
+    this.assetBlobs.clear();
+  }
+
   async syncObject(options: {
     readonly objectId: string;
     readonly assetId: string;
@@ -90,11 +95,33 @@ export class StickerImageCache {
       cropKey,
       bitmap: rgba,
     });
+    this.pruneUnusedAssetBlobs();
     return rgba;
   }
 
   clearObject(objectId: string): void {
     this.byObjectId.delete(objectId);
+    this.pruneUnusedAssetBlobs();
+  }
+
+  clearMissing(objectIds: ReadonlySet<string>): void {
+    for (const objectId of [...this.byObjectId.keys()]) {
+      if (!objectIds.has(objectId)) {
+        this.byObjectId.delete(objectId);
+      }
+    }
+    this.pruneUnusedAssetBlobs();
+  }
+
+  private pruneUnusedAssetBlobs(): void {
+    const usedAssetIds = new Set<string>();
+    for (const entry of this.byObjectId.values()) {
+      usedAssetIds.add(entry.assetId);
+      if (entry.matteAssetId !== undefined) usedAssetIds.add(entry.matteAssetId);
+    }
+    for (const assetId of [...this.assetBlobs.keys()]) {
+      if (!usedAssetIds.has(assetId)) this.assetBlobs.delete(assetId);
+    }
   }
 }
 

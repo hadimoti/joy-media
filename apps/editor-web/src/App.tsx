@@ -600,6 +600,7 @@ function EditorWorkspace({
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
@@ -613,6 +614,11 @@ function EditorWorkspace({
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
   >(undefined);
+  useEffect(() => {
+    return () => {
+      stickerImageCache.clear();
+    };
+  }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   const toastTimersRef = useRef<Map<string, number>>(new Map());
@@ -1089,6 +1095,12 @@ function EditorWorkspace({
 
   const syncStickerBitmaps = useCallback(async () => {
     const mattes = readImageMatteMap(session.visualProject);
+    const activeStickerIds = new Set(
+      Object.values(session.visualProject.visualObjects)
+        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
+        .map((object) => object.id),
+    );
+    stickerImageCache.clearMissing(activeStickerIds);
     await Promise.all(
       Object.values(session.visualProject.visualObjects).map(async (object) => {
         if (object.kind !== 'image' || object.assetId === undefined) return;
@@ -1406,14 +1418,23 @@ function EditorWorkspace({
     [activatePanel, selectClips],
   );
   const refreshJoySession = useCallback(() => {
-    void probeJoySession(window.localStorage).then((next) => {
-      setJoySession((prev) => {
-        if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
-          URL.revokeObjectURL(prev.avatarObjectUrl);
+    const requestId = ++joySessionRefreshSeqRef.current;
+    void probeJoySession(window.localStorage)
+      .then((next) => {
+        if (requestId !== joySessionRefreshSeqRef.current) {
+          if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
+            URL.revokeObjectURL(next.avatarObjectUrl);
+          }
+          return;
         }
-        return next;
-      });
-    });
+        setJoySession((prev) => {
+          if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
+            URL.revokeObjectURL(prev.avatarObjectUrl);
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -3187,6 +3208,12 @@ function MonitorPanel() {
   useEffect(() => {
     let cancelled = false;
     const mattes = readImageMatteMap(visualProject);
+    const activeStickerIds = new Set(
+      Object.values(visualProject.visualObjects)
+        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
+        .map((object) => object.id),
+    );
+    stickerImageCache.clearMissing(activeStickerIds);
     void Promise.all(
       Object.values(visualProject.visualObjects).map(async (object) => {
         if (object.kind !== 'image' || object.assetId === undefined) return;

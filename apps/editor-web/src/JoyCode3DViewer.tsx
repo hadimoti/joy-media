@@ -11,6 +11,9 @@ export function JoyCode3DViewer() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number | undefined>(undefined);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const loadSeqRef = useRef(0);
+  const contextLostHandlerRef = useRef<((event: Event) => void) | undefined>(undefined);
+  const contextRestoredHandlerRef = useRef<(() => void) | undefined>(undefined);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -117,6 +120,8 @@ export function JoyCode3DViewer() {
       setStatus('WebGL context restored — reinitializing...');
       animate();
     };
+    contextLostHandlerRef.current = handleContextLost;
+    contextRestoredHandlerRef.current = handleContextRestored;
     renderer.domElement.addEventListener('webglcontextlost', handleContextLost);
     renderer.domElement.addEventListener('webglcontextrestored', handleContextRestored);
   }, []);
@@ -126,12 +131,22 @@ export function JoyCode3DViewer() {
     return () => {
       if (animFrameRef.current !== undefined) cancelAnimationFrame(animFrameRef.current);
       resizeObserverRef.current?.disconnect();
+      const canvas = rendererRef.current?.domElement;
+      if (canvas && contextLostHandlerRef.current) {
+        canvas.removeEventListener('webglcontextlost', contextLostHandlerRef.current);
+      }
+      if (canvas && contextRestoredHandlerRef.current) {
+        canvas.removeEventListener('webglcontextrestored', contextRestoredHandlerRef.current);
+      }
+      controlsRef.current?.dispose();
       rendererRef.current?.dispose();
       clearScene();
       sceneRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
       rendererRef.current = null;
+      contextLostHandlerRef.current = undefined;
+      contextRestoredHandlerRef.current = undefined;
     };
   }, [initScene, clearScene]);
 
@@ -139,6 +154,7 @@ export function JoyCode3DViewer() {
     const file = event.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
+    const requestId = ++loadSeqRef.current;
     setFileList((prev) => [...prev, file.name]);
     setStatus(`Loading ${file.name}…`);
 
@@ -148,6 +164,10 @@ export function JoyCode3DViewer() {
     loader.load(
       url,
       (gltf) => {
+        if (requestId !== loadSeqRef.current) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         URL.revokeObjectURL(url);
         const model = gltf.scene;
         model.traverse((child) => {
@@ -168,10 +188,15 @@ export function JoyCode3DViewer() {
         setStatus(`Loaded: ${file.name}`);
       },
       (progress) => {
+        if (requestId !== loadSeqRef.current) return;
         const pct = progress.loaded / Math.max(1, progress.total);
         setStatus(`Loading ${file.name}… ${Math.round(pct * 100)}%`);
       },
       (err: unknown) => {
+        if (requestId !== loadSeqRef.current) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         URL.revokeObjectURL(url);
         const msg = err instanceof Error ? err.message : String(err);
         setStatus(`Error loading ${file.name}: ${msg}`);

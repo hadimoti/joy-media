@@ -106,6 +106,8 @@ export function AssetLibraryPanel({
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const cloudPreviewQueue = useMemo(() => new CloudPreviewQueue(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
+  const refreshSeqRef = useRef(0);
+  const previewSeqRef = useRef(0);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -139,6 +141,7 @@ export function AssetLibraryPanel({
   useEffect(() => () => previewRef.current?.revoke(), []);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshSeqRef.current;
     if (getStoredMediaToken(window.localStorage) === undefined) {
       // LoginGate keeps the editor mounted under the blur; don't wipe a prior
       // catalog or treat "not signed in yet" as a hard failure.
@@ -192,6 +195,7 @@ export function AssetLibraryPanel({
         }),
       );
       const byAsset = new Map(derivatives);
+      if (requestId !== refreshSeqRef.current) return;
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
       if (sharedResult.status === 'rejected') {
@@ -207,6 +211,7 @@ export function AssetLibraryPanel({
       }
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
+      if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
       setItems([]);
       setStatus(`Failed to load media catalog: ${detail}`);
@@ -222,6 +227,14 @@ export function AssetLibraryPanel({
     window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
     return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
   }, [refresh]);
+  useEffect(() => {
+    return () => {
+      refreshSeqRef.current += 1;
+      previewSeqRef.current += 1;
+      previewRef.current?.revoke();
+      previewRef.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     if (!filterOpen && !importOpen) return;
@@ -284,6 +297,7 @@ export function AssetLibraryPanel({
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
   const openPreview = useCallback(
     async (asset: BrowserAsset, derivative: BrowserDerivative) => {
+      const requestId = ++previewSeqRef.current;
       clearPreview();
       setStatus(`Opening ${derivative.kind} (verified)…`);
       try {
@@ -299,6 +313,10 @@ export function AssetLibraryPanel({
             mimeType: derivative.descriptor.mimeType,
           },
         });
+        if (requestId !== previewSeqRef.current) {
+          if (outcome.state === 'available-local') outcome.revoke();
+          return;
+        }
         if (outcome.state !== 'available-local') {
           setStatus(previewStatus(outcome.state));
           return;
@@ -316,6 +334,7 @@ export function AssetLibraryPanel({
           `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`,
         );
       } catch (error) {
+        if (requestId !== previewSeqRef.current) return;
         setStatus(`Failed to open preview: ${message(error)}`);
       }
     },

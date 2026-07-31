@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
   type BrowserJob,
@@ -34,8 +34,10 @@ export function JobsPanel({
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshSeqRef.current;
     try {
       const nextWorkers = await client.workers();
       let nextJobs: readonly BrowserJob[] = [];
@@ -46,11 +48,13 @@ export function JobsPanel({
         if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
         projectMissing = true;
       }
+      if (requestId !== refreshSeqRef.current) return;
       setWorkers(nextWorkers);
       setJobs(nextJobs);
       setProjectInitialized(!projectMissing);
       setStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
+      if (requestId !== refreshSeqRef.current) return;
       setStatus(`Not connected or not signed in: ${message(error)}`);
     }
   }, [client, projectId]);
@@ -58,7 +62,10 @@ export function JobsPanel({
   useEffect(() => {
     void refresh();
     const interval = window.setInterval(() => void refresh(), 2_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      refreshSeqRef.current += 1;
+      window.clearInterval(interval);
+    };
   }, [refresh]);
 
   const sortedWorkers = useMemo(() => {
