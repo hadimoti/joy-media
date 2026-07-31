@@ -6,10 +6,7 @@ import {
   type BrowserAssetRegistration,
   type BrowserDerivative,
 } from './control-plane-client.js';
-import {
-  getStoredMediaToken,
-  MEDIA_SESSION_CHANGED_EVENT,
-} from './media-session.js';
+import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
@@ -295,51 +292,6 @@ export function AssetLibraryPanel({
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [items, category, collection, deferredQuery, availability, sort]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
-  const openPreview = useCallback(
-    async (asset: BrowserAsset, derivative: BrowserDerivative) => {
-      const requestId = ++previewSeqRef.current;
-      clearPreview();
-      setStatus(`Opening ${derivative.kind} (verified)…`);
-      try {
-        const outcome = await (
-          await resolver
-        ).resolve({
-          projectId,
-          assetId: asset.id,
-          derivative: {
-            derivativeId: derivative.id,
-            sha256: derivative.sha256,
-            byteLength: derivative.bytes,
-            mimeType: derivative.descriptor.mimeType,
-          },
-        });
-        if (requestId !== previewSeqRef.current) {
-          if (outcome.state === 'available-local') outcome.revoke();
-          return;
-        }
-        if (outcome.state !== 'available-local') {
-          setStatus(previewStatus(outcome.state));
-          return;
-        }
-        const nextPreview: Preview = {
-          derivativeId: derivative.id,
-          displayName: asset.displayName,
-          mimeType: derivative.descriptor.mimeType,
-          url: outcome.url,
-          revoke: outcome.revoke,
-        };
-        previewRef.current = nextPreview;
-        setPreview(nextPreview);
-        setStatus(
-          `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`,
-        );
-      } catch (error) {
-        if (requestId !== previewSeqRef.current) return;
-        setStatus(`Failed to open preview: ${message(error)}`);
-      }
-    },
-    [clearPreview, projectId, resolver],
-  );
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
       setStatus('Choose a media file to register.');
@@ -430,6 +382,55 @@ export function AssetLibraryPanel({
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
+  );
+
+  const openPreview = useCallback(
+    async (asset: BrowserAsset, assetDerivatives: readonly BrowserDerivative[]) => {
+      const requestId = ++previewSeqRef.current;
+      clearPreview();
+      const sourceKind =
+        asset.kind === 'video' ? 'video' : asset.kind === 'audio' ? 'audio' : 'image';
+      setStatus(`Opening ${sourceKind} (verified)…`);
+      try {
+        const [resolverInstance, originalCache] = await Promise.all([resolver, originalAssetCache]);
+        const outcome = await resolveAssetThumb({
+          asset,
+          derivatives: assetDerivatives,
+          projectId,
+          resolver: resolverInstance,
+          originalCache,
+          fetchCloudOriginal,
+        });
+        if (requestId !== previewSeqRef.current) {
+          outcome.revoke();
+          return;
+        }
+        if (outcome.url === undefined) {
+          setStatus(`Preview unavailable: ${outcome.source}`);
+          return;
+        }
+        const nextPreview: Preview = {
+          derivativeId: asset.id,
+          displayName: asset.displayName,
+          mimeType: outcome.mimeType ?? asset.descriptor.mimeType,
+          url: outcome.url,
+          revoke: outcome.revoke,
+        };
+        previewRef.current = nextPreview;
+        setPreview(nextPreview);
+        setStatus(
+          outcome.source === 'derivative'
+            ? `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`
+            : outcome.source === 'cloud'
+              ? `Preview for ${asset.displayName} is shown from the shared cloud library.`
+              : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
+        );
+      } catch (error) {
+        if (requestId !== previewSeqRef.current) return;
+        setStatus(`Failed to open preview: ${message(error)}`);
+      }
+    },
+    [clearPreview, fetchCloudOriginal, originalAssetCache, projectId, resolver],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
@@ -1047,8 +1048,10 @@ export function AssetLibraryPanel({
                           resolverPromise={resolver}
                           originalCachePromise={originalAssetCache}
                           fetchCloudOriginal={fetchCloudOriginal}
-                          {...(derivative !== undefined
-                            ? { onOpenDerivative: () => void openPreview(asset, derivative) }
+                          {...(asset.kind === 'image' ||
+                          asset.kind === 'video' ||
+                          asset.kind === 'audio'
+                            ? { onOpenDerivative: () => void openPreview(asset, derivatives) }
                             : {})}
                         />
                       </div>
@@ -1289,22 +1292,6 @@ function AssetCardMedia({
   );
 }
 
-function previewStatus(
-  state: 'missing' | 'invalid' | 'unsupported' | 'unavailable' | 'revoked',
-): string {
-  switch (state) {
-    case 'missing':
-      return 'Local cache entry is missing and no cloud copy is available.';
-    case 'invalid':
-      return 'Local cache entry failed verification and was removed.';
-    case 'unsupported':
-      return 'This browser does not support local media storage via OPFS.';
-    case 'revoked':
-      return 'Your access to this private derivative was revoked.';
-    case 'unavailable':
-      return 'This private derivative is not available right now.';
-  }
-}
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

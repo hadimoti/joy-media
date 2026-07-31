@@ -182,11 +182,7 @@ import {
   YoutubeIcon,
   ZoomInIcon,
 } from './icons.js';
-import {
-  logoutJoySession,
-  probeJoySession,
-  type JoySessionState,
-} from './identity.js';
+import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import {
   loadExportHistory,
   saveExportHistory,
@@ -699,9 +695,7 @@ function EditorWorkspace({
   }
   const session = sessionRef.current;
   const controlPlaneOwnerKey =
-    joySession.kind === 'ready'
-      ? (joySession.subject ?? 'signed-in')
-      : 'signed-out';
+    joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
   const controlPlaneProject = useMemo(
     () =>
       getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
@@ -1977,8 +1971,8 @@ function EditorWorkspace({
             for (const media of exportMedia) {
               const audioSource = audioContext.createBufferSource();
               const playbackBuffer = audioContext.createBuffer(
-                media.audio.samples.length,
                 1,
+                media.audio.samples.length,
                 media.audio.sampleRate,
               );
               playbackBuffer.copyToChannel(media.audio.samples, 0);
@@ -2800,9 +2794,7 @@ function EditorWorkspace({
               <section className="header-dropdown" aria-label="Recent processes">
                 <h3>Recent processes</h3>
                 {exportHistory.length === 0 ? (
-                  <p className="empty-hint">
-                    No exports yet. Use Export to create an MP4.
-                  </p>
+                  <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
                 ) : (
                   <ul className="process-list">
                     {exportHistory.map((entry) => (
@@ -2863,7 +2855,11 @@ function EditorWorkspace({
               <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
             </button>
             {accountOpen && (
-              <section ref={accountDropdownRef} className="header-dropdown account-dropdown" aria-label="Joy Studio account">
+              <section
+                ref={accountDropdownRef}
+                className="header-dropdown account-dropdown"
+                aria-label="Joy Studio account"
+              >
                 {joySession.kind === 'ready' && (
                   <>
                     <div className="account-card">
