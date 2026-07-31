@@ -58,7 +58,12 @@ import {
 import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
-import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName, type TimelineTrackKind } from './timeline-track-kind.js';
+import {
+  timelineTrackKind,
+  timelineTrackCode,
+  timelineTrackDisplayName,
+  type TimelineTrackKind,
+} from './timeline-track-kind.js';
 import { formatTime } from './format-time.js';
 import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
@@ -1043,9 +1048,7 @@ export function TimelinePanel({
             className="icon-button"
             disabled={!canDelete && selectedMarkerId === undefined}
             aria-label={selectedMarkerId !== undefined ? 'Remove marker' : 'Ripple delete'}
-            title={
-              selectedMarkerId !== undefined ? 'Remove marker (Del)' : 'Ripple delete (Del)'
-            }
+            title={selectedMarkerId !== undefined ? 'Remove marker (Del)' : 'Ripple delete (Del)'}
             onClick={() => {
               if (selectedMarkerId !== undefined) {
                 removeMarker(selectedMarkerId);
@@ -1467,11 +1470,27 @@ export function TimelinePanel({
                         const source = composition.tracks.find((t) => t.id === track.id);
                         if (source === undefined) return;
                         const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+                        // Find the clip boundary nearest the drop point. Accept the drop
+                        // (a) within a small tolerance of the boundary for contiguous clips,
+                        // or (b) anywhere inside a real gap between two clips. The old code
+                        // required the drop time to land exactly on a gap, which made it
+                        // impossible to drop onto two contiguous clips (their shared
+                        // boundary is a single instant).
+                        const usPerPx =
+                          viewport.pixelsPerSecond > 0
+                            ? 1_000_000 / viewport.pixelsPerSecond
+                            : 1_000_000;
+                        const toleranceUs = 6 * usPerPx;
                         for (let i = 0; i < sorted.length - 1; i++) {
                           const left = sorted[i]!;
                           const right = sorted[i + 1]!;
                           const leftEnd = left.startUs + left.durationUs;
-                          if (dropUs >= leftEnd && dropUs <= right.startUs) {
+                          if (right.startUs < leftEnd) continue; // overlap — not a clean boundary
+                          const inGap = dropUs >= leftEnd && dropUs <= right.startUs;
+                          const nearBoundary =
+                            Math.abs(dropUs - leftEnd) <= toleranceUs ||
+                            Math.abs(dropUs - right.startUs) <= toleranceUs;
+                          if (inGap || (right.startUs === leftEnd && nearBoundary)) {
                             onTransitionDrop?.(payload.transitionId, left.id, right.id, track.id);
                             return;
                           }
@@ -1507,9 +1526,7 @@ export function TimelinePanel({
                       return (
                         <div
                           key={marker.id}
-                          className={
-                            selected ? 'timeline-marker is-selected' : 'timeline-marker'
-                          }
+                          className={selected ? 'timeline-marker is-selected' : 'timeline-marker'}
                           style={{
                             left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
                           }}

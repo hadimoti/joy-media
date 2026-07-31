@@ -190,6 +190,7 @@ import {
   type ExportProcessEntry,
 } from './export-history.js';
 import { createMonoAudioBuffer } from './export-audio.js';
+import { nextVideoClipAtOrAfter } from './timeline-playback.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -928,9 +929,16 @@ function EditorWorkspace({
         compositionTimeUs = playheadForSourceTime(clip, sourceTimeUs, stateRef.current.playheadUs);
       }
       if (compositionTimeUs >= clip.startUs + clip.durationUs) {
-        const nextPlayheadUs = clip.startUs + clip.durationUs;
-        const durationUs = session.timelineProject.compositions.root?.durationUs ?? nextPlayheadUs;
-        if (nextPlayheadUs >= durationUs) {
+        const clipEndUs = clip.startUs + clip.durationUs;
+        const durationUs = session.timelineProject.compositions.root?.durationUs ?? clipEndUs;
+        // Advance to the next video clip on the timeline, skipping any gap.
+        // The old code always synced to `clipEndUs`, which is in a gap when the
+        // clips are not contiguous — syncMediaToPlayhead returns false there,
+        // so playback silently stopped after the first clip.
+        const nextClip = nextVideoClipAtOrAfter(session.timelineProject, clipEndUs);
+        const nextPlayheadUs =
+          nextClip === undefined ? clipEndUs : Math.max(clipEndUs, nextClip.startUs);
+        if (nextClip === undefined) {
           video.pause();
           freezeWallStartRef.current = undefined;
           setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));

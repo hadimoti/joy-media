@@ -7,7 +7,6 @@ import { StarFilledIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
-
 const SHADER_CATALOG = listTransitionShaders();
 
 interface TransitionsPanelProps {
@@ -144,8 +143,11 @@ export function TransitionsPanel({
         const left = sortedClips[i];
         const right = sortedClips[i + 1];
         if (!left || !right) continue;
+        // "Junction" = two clips that overlap or touch, with a small tolerance
+        // so clips left a few ms apart by rounding/splits still count. Matches
+        // the drag-to-timeline tolerance so click-add and drag agree.
         const gapUs = right.startUs - (left.startUs + left.durationUs);
-        if (gapUs <= 0) {
+        if (gapUs <= 1_000) {
           junctions.push({
             trackId: track.id,
             trackName: track.name,
@@ -163,7 +165,15 @@ export function TransitionsPanel({
   const handleAddTransition = useCallback(
     (type: string) => {
       if (!selectedJunction) {
-        showToast('Place two overlapping clips on one video track to create a transition.', 'info');
+        // Diagnostic: tell the user exactly why no junction is available.
+        if (selectedClipIds.length < 2) {
+          showToast('Select two adjacent clips on one video track to add a transition.', 'info');
+        } else {
+          showToast(
+            'The selected clips are not adjacent on one video track. Drag a transition card to the gap or boundary between two clips on the timeline.',
+            'info',
+          );
+        }
         return;
       }
       const entry = SHADER_CATALOG.find((item) => item.id === type);
@@ -183,7 +193,7 @@ export function TransitionsPanel({
       });
       setPendingType(type);
     },
-    [selectedJunction, onAddTransition, showToast],
+    [selectedJunction, selectedClipIds, onAddTransition, showToast],
   );
 
   const handleDragStart = useCallback((type: string, event: React.DragEvent) => {
@@ -260,41 +270,17 @@ export function TransitionsPanel({
     >
       <>
         {hasFavorites && !favoritesOnly && (
-            <div className="transitions-subsection">
-              <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-                Favorites
-              </h4>
-              <div
-                className="transition-type-picker"
-                role="group"
-                aria-label="Favorite transitions"
-              >
-                {favItems.map((entry) => (
-                  <TransitionCard
-                    key={entry.id}
-                    entry={entry}
-                    isActive={selectedTransition === entry.id || pendingType === entry.id}
-                    isFavorite={true}
-                    onAdd={() => handleAddTransition(entry.id)}
-                    onToggleFavorite={() => toggleFavorite(entry.id)}
-                    onDragStart={(e) => handleDragStart(entry.id, e)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="transitions-subsection">
             <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
-              {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
+              Favorites
             </h4>
-            <div className="transition-type-picker" role="group" aria-label="Transition type">
-              {catalog.map((entry) => (
+            <div className="transition-type-picker" role="group" aria-label="Favorite transitions">
+              {favItems.map((entry) => (
                 <TransitionCard
                   key={entry.id}
                   entry={entry}
                   isActive={selectedTransition === entry.id || pendingType === entry.id}
-                  isFavorite={favorites.has(entry.id)}
+                  isFavorite={true}
                   onAdd={() => handleAddTransition(entry.id)}
                   onToggleFavorite={() => toggleFavorite(entry.id)}
                   onDragStart={(e) => handleDragStart(entry.id, e)}
@@ -302,7 +288,27 @@ export function TransitionsPanel({
               ))}
             </div>
           </div>
-        </>
+        )}
+
+        <div className="transitions-subsection">
+          <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+            {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
+          </h4>
+          <div className="transition-type-picker" role="group" aria-label="Transition type">
+            {catalog.map((entry) => (
+              <TransitionCard
+                key={entry.id}
+                entry={entry}
+                isActive={selectedTransition === entry.id || pendingType === entry.id}
+                isFavorite={favorites.has(entry.id)}
+                onAdd={() => handleAddTransition(entry.id)}
+                onToggleFavorite={() => toggleFavorite(entry.id)}
+                onDragStart={(e) => handleDragStart(entry.id, e)}
+              />
+            ))}
+          </div>
+        </div>
+      </>
     </PanelShell>
   );
 }
