@@ -189,6 +189,7 @@ import {
   upsertEntry,
   type ExportProcessEntry,
 } from './export-history.js';
+import { createMonoAudioBuffer } from './export-audio.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -1920,9 +1921,9 @@ function EditorWorkspace({
         durationUs,
         exportMedia[0]?.audio.sampleRate ?? 48000,
       );
-      const mixedAudioBuffer = audioContext.createBuffer(
-        1,
-        mixedAudio.length,
+      const mixedAudioBuffer = createMonoAudioBuffer(
+        audioContext,
+        mixedAudio,
         exportMedia[0]?.audio.sampleRate ?? 48000,
       );
       const mixedChannel = mixedAudioBuffer.getChannelData(0);
@@ -1970,9 +1971,9 @@ function EditorWorkspace({
             const startAt = audioContext.currentTime;
             for (const media of exportMedia) {
               const audioSource = audioContext.createBufferSource();
-              const playbackBuffer = audioContext.createBuffer(
-                1,
-                media.audio.samples.length,
+              const playbackBuffer = createMonoAudioBuffer(
+                audioContext,
+                media.audio.samples,
                 media.audio.sampleRate,
               );
               playbackBuffer.copyToChannel(media.audio.samples, 0);

@@ -28,4 +28,26 @@ export default defineConfig({
       '@joy-media/html-scene-runtime/first-party': pkg('html-scene-runtime/src/first-party.ts'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        /**
+         * Split stable vendor modules into separately-cached chunks (JOY-009):
+         * the app shipped as one ~2.4 MB `index` bundle. Separating React,
+         * dockview, and three.js means an app-only release reuses the cached
+         * vendor files and the 3D viewer's heavy three.js payload only loads
+         * when that panel mounts. Build-only; no runtime coupling introduced.
+         */
+        manualChunks: {
+          react: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'],
+          dockview: ['dockview'],
+          three: [
+            'three',
+            'three/examples/jsm/controls/OrbitControls.js',
+            'three/examples/jsm/loaders/GLTFLoader.js',
+          ],
+        },
+      },
+    },
+  },
 });
