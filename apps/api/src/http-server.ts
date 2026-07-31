@@ -223,6 +223,7 @@ async function route(
     const data = await options.mediaAuth.requestOtp(
       requiredString(body, 'contact'),
       requiredAuthMethod(body),
+      request,
     );
     respondJson(response, 200, { data });
     return;
@@ -249,41 +250,6 @@ async function route(
   if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
     const profile = await options.mediaAuth.sessionProfile(request);
     if (profile === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    // #region agent log
-    try {
-      const fs = await import('node:fs');
-      fs.appendFileSync(
-        '/opt/.cursor/debug-b1ff1d.log',
-        `${JSON.stringify({
-          sessionId: 'b1ff1d',
-          runId: 'post-fix',
-          hypothesisId: 'A,B,D',
-          location: 'http-server.ts:/v1/auth/session',
-          message: 'session endpoint enriched profile',
-          data: {
-            contactKind: /^[0-9]+$/.test(profile.contact)
-              ? 'numeric_id'
-              : profile.contact.includes('@')
-                ? 'email'
-                : 'other',
-            contactLen: profile.contact.length,
-            method: profile.method,
-            displayKind: profile.displayName.startsWith('@')
-              ? 'telegram_username'
-              : profile.displayName.includes('@')
-                ? 'email'
-                : 'other',
-            displayLen: profile.displayName.length,
-            avatarAvailable: profile.avatarAvailable,
-            payloadKeys: ['contact', 'method', 'displayName', 'avatarAvailable'],
-          },
-          timestamp: Date.now(),
-        })}\n`,
-      );
-    } catch {
-      /* debug log best-effort */
-    }
-    // #endregion
     respondJson(response, 200, { data: profile });
     return;
   }
@@ -291,48 +257,10 @@ async function route(
   if (request.method === 'GET' && url.pathname === '/v1/auth/avatar') {
     const avatar = await options.mediaAuth.avatarBytes(request);
     if (avatar === undefined) {
-      // #region agent log
-      try {
-        const fs = await import('node:fs');
-        fs.appendFileSync(
-          '/opt/.cursor/debug-b1ff1d.log',
-          `${JSON.stringify({
-            sessionId: 'b1ff1d',
-            runId: 'post-fix',
-            hypothesisId: 'C,E',
-            location: 'http-server.ts:/v1/auth/avatar',
-            message: 'avatar unavailable',
-            data: { found: false },
-            timestamp: Date.now(),
-          })}\n`,
-        );
-      } catch {
-        /* debug log best-effort */
-      }
-      // #endregion
       response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: { code: 'AVATAR_NOT_FOUND', message: 'no avatar' } }));
       return;
     }
-    // #region agent log
-    try {
-      const fs = await import('node:fs');
-      fs.appendFileSync(
-        '/opt/.cursor/debug-b1ff1d.log',
-        `${JSON.stringify({
-          sessionId: 'b1ff1d',
-          runId: 'post-fix',
-          hypothesisId: 'C,E',
-          location: 'http-server.ts:/v1/auth/avatar',
-          message: 'avatar served',
-          data: { found: true, mimeType: avatar.mimeType, bytes: avatar.bytes.length },
-          timestamp: Date.now(),
-        })}\n`,
-      );
-    } catch {
-      /* debug log best-effort */
-    }
-    // #endregion
     response.writeHead(200, {
       'content-type': avatar.mimeType,
       'cache-control': 'private, max-age=3600',
@@ -1153,7 +1081,12 @@ function respondJson(response: ServerResponse, status: number, payload: unknown)
 
 function respondError(response: ServerResponse, error: unknown): void {
   if (error instanceof MediaAuthError) {
-    const status = error.code === 'REQUEST_INVALID' ? 400 : 401;
+    const status =
+      error.code === 'RATE_LIMITED'
+        ? 429
+        : error.code === 'REQUEST_INVALID'
+          ? 400
+          : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

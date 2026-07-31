@@ -57,6 +57,8 @@ import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 
 registerBuiltins();
 
+const CLIP_FRAME_CACHE_LIMIT = 120;
+
 import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
@@ -613,9 +615,12 @@ function EditorWorkspace({
   >(undefined);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
+  const toastTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     return () => {
       window.clearTimeout(exportToastTimerRef.current);
+      for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
+      toastTimersRef.current.clear();
     };
   }, []);
   useEffect(() => {
@@ -721,7 +726,13 @@ function EditorWorkspace({
   const playbackFrameRef = useRef<number | undefined>(undefined);
 
   const rememberClipFrame = useCallback((clipId: string, bitmap: ImageDataLike) => {
-    clipFrameCacheRef.current.set(clipId, bitmap);
+    const cache = clipFrameCacheRef.current;
+    if (cache.has(clipId)) cache.delete(clipId);
+    cache.set(clipId, bitmap);
+    if (cache.size > CLIP_FRAME_CACHE_LIMIT) {
+      const oldest = cache.keys().next().value as string | undefined;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
     setClipFrameTick((tick) => tick + 1);
   }, []);
 
@@ -994,7 +1005,13 @@ function EditorWorkspace({
     const firstClip = activeVideoClipAt(session.timelineProject, 0);
     if (firstClip !== undefined && firstClip.kind === 'video')
       video.src = resolveReferenceMediaUrl(firstClip.assetId);
-    return () => video.pause();
+    return () => {
+      video.pause();
+      decoderRef.current = null;
+      clockRef.current = null;
+      video.removeAttribute('src');
+      video.load();
+    };
   }, [handleMediaReady, session]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
@@ -1401,9 +1418,11 @@ function EditorWorkspace({
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setToasts((prev) => [...prev, { id, message, kind }]);
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      toastTimersRef.current.delete(id);
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
+    toastTimersRef.current.set(id, timer);
   }, []);
   const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
     setKiloCodeAttachedAssets((current) => {
@@ -2828,51 +2847,7 @@ function EditorWorkspace({
                   <>
                     <div className="account-card">
                       {(() => {
-                        // #region agent log
                         const label = joySession.displayName ?? joySession.subject;
-                        fetch(
-                          'http://localhost:7725/ingest/231cd602-5e3b-4c10-8c3c-0246bf1a0f92',
-                          {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
-                              'X-Debug-Session-Id': 'b1ff1d',
-                            },
-                            body: JSON.stringify({
-                              sessionId: 'b1ff1d',
-                              runId: 'post-fix',
-                              hypothesisId: 'C,E',
-                              location: 'App.tsx:account-card',
-                              message: 'account card render inputs',
-                              data: {
-                                subjectKind:
-                                  joySession.subject === undefined
-                                    ? 'missing'
-                                    : /^[0-9]+$/.test(joySession.subject)
-                                      ? 'numeric_id'
-                                      : joySession.subject.includes('@')
-                                        ? 'email'
-                                        : 'other',
-                                displayKind:
-                                  label === undefined
-                                    ? 'missing'
-                                    : label.startsWith('@')
-                                      ? 'telegram_username'
-                                      : label.includes('@')
-                                        ? 'email'
-                                        : 'other',
-                                avatarMode:
-                                  joySession.avatarObjectUrl !== undefined
-                                    ? 'photo'
-                                    : 'letter-placeholder',
-                                showsTitleH3: false,
-                                method: joySession.method ?? null,
-                              },
-                              timestamp: Date.now(),
-                            }),
-                          },
-                        ).catch(() => {});
-                        // #endregion
                         return null;
                       })()}
                       <div className="account-card-avatar" aria-hidden="true">
@@ -3210,6 +3185,7 @@ function MonitorPanel() {
   }, [zoomDrawerOpen]);
 
   useEffect(() => {
+    let cancelled = false;
     const mattes = readImageMatteMap(visualProject);
     void Promise.all(
       Object.values(visualProject.visualObjects).map(async (object) => {
@@ -3222,7 +3198,18 @@ function MonitorPanel() {
           loadBlob: loadStickerAssetBlob,
         });
       }),
-    ).then(() => setSceneTick((tick) => tick + 1));
+    )
+      .then(() => {
+        if (cancelled) return;
+        setSceneTick((tick) => tick + 1);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('Failed to sync sticker bitmaps', error);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [visualProject, stickerTick]);
 
   paintRef.current = (): void => {

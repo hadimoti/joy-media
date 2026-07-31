@@ -10,6 +10,21 @@ export type MediaAuthMethod = 'gmail' | 'telegram';
 const OTP_TTL_MS = 5 * 60_000;
 const OTP_MAX_ACTIVE = 3;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
+const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
+
+const otpRateLimitWindow = new Map<string, number[]>();
+
+function checkOtpRateLimit(key: string): void {
+  const now = Date.now();
+  const timestamps = otpRateLimitWindow.get(key) ?? [];
+  const recent = timestamps.filter((ts) => now - ts < OTP_RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= OTP_RATE_LIMIT_MAX) {
+    throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
+  }
+  recent.push(now);
+  otpRateLimitWindow.set(key, recent);
+}
 
 /** Generic response text for both known and unknown contacts (no enumeration). */
 const OTP_REQUESTED_MESSAGE = 'If that account is registered, a login code was sent.';
@@ -60,7 +75,11 @@ export interface MediaSessionProfile {
 
 /** The subset of MediaAuthService that http-server.ts depends on (injectable, like ApiAuthentication). */
 export interface MediaAuthApi {
-  requestOtp(contact: string, method: MediaAuthMethod): Promise<{ readonly message: string }>;
+  requestOtp(
+    contact: string,
+    method: MediaAuthMethod,
+    request?: IncomingMessage,
+  ): Promise<{ readonly message: string }>;
   verifyOtp(contact: string, method: MediaAuthMethod, code: string): Promise<string>;
   logout(token: string): Promise<void>;
   authenticate(request: IncomingMessage): Promise<Actor | undefined>;
@@ -132,7 +151,14 @@ export class MediaAuthService implements MediaAuthApi {
   }
 
   /** Always returns the same generic message regardless of allow-list membership. */
-  async requestOtp(rawContact: string, method: MediaAuthMethod): Promise<{ message: string }> {
+  async requestOtp(
+    rawContact: string,
+    method: MediaAuthMethod,
+    request?: IncomingMessage,
+  ): Promise<{ message: string }> {
+    if (request !== undefined) {
+      checkOtpRateLimit(requestIp(request));
+    }
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
     if (allowed !== undefined && allowed.enabled) {
@@ -207,10 +233,7 @@ export class MediaAuthService implements MediaAuthApi {
       contact: row.contact,
       method: row.method,
       displayName,
-      avatarAvailable:
-        row.method === 'telegram'
-          ? this.telegram?.fetchProfilePhoto !== undefined
-          : row.method === 'gmail',
+      avatarAvailable: false,
     };
   }
 
@@ -224,19 +247,6 @@ export class MediaAuthService implements MediaAuthApi {
       if (fetchPhoto === undefined) return undefined;
       const bytes = await fetchPhoto(row.contact);
       return bytes === undefined ? undefined : { mimeType: 'image/jpeg', bytes };
-    }
-    if (row.method === 'gmail') {
-      const email = row.contact.trim().toLowerCase();
-      const hash = createHash('md5').update(email).digest('hex');
-      try {
-        const response = await fetch(`https://www.gravatar.com/avatar/${hash}?s=128&d=404`);
-        if (!response.ok) return undefined;
-        const bytes = Buffer.from(await response.arrayBuffer());
-        const mimeType = response.headers.get('content-type') ?? 'image/jpeg';
-        return bytes.length === 0 ? undefined : { mimeType, bytes };
-      } catch {
-        return undefined;
-      }
     }
     return undefined;
   }
@@ -392,4 +402,17 @@ function sessionHash(token: string): string {
 function bearerToken(request: IncomingMessage): string | undefined {
   const value = request.headers.authorization;
   return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice(7) : undefined;
+}
+
+function requestIp(request: IncomingMessage): string {
+  const headers = request.headers;
+  if (headers === undefined || headers === null) return 'unknown';
+  const forwarded = headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0]!.trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0]!.trim();
+  }
+  return request.socket.remoteAddress ?? 'unknown';
 }

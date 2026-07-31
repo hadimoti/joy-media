@@ -74,44 +74,7 @@ export async function probeJoySession(
         /* letter fallback */
       }
     }
-    // #region agent log
-    fetch('http://localhost:7725/ingest/231cd602-5e3b-4c10-8c3c-0246bf1a0f92', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b1ff1d' },
-      body: JSON.stringify({
-        sessionId: 'b1ff1d',
-        runId: 'post-fix',
-        hypothesisId: 'A,B,C,D',
-        location: 'identity.ts:probeJoySession',
-        message: 'session probe enriched payload',
-        data: {
-          status: response.status,
-          contactKind:
-            subject === undefined
-              ? 'missing'
-              : /^[0-9]+$/.test(subject)
-                ? 'numeric_id'
-                : subject.includes('@')
-                  ? 'email'
-                  : 'other',
-          displayKind:
-            displayName === undefined
-              ? 'missing'
-              : displayName.startsWith('@')
-                ? 'telegram_username'
-                : displayName.includes('@')
-                  ? 'email'
-                  : 'other',
-          method: method ?? null,
-          avatarAvailable,
-          hasAvatarObjectUrl: avatarObjectUrl !== undefined,
-          dataKeys:
-            body.data !== undefined && typeof body.data === 'object' ? Object.keys(body.data) : [],
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
+    // Production auth path must not contact localhost debug endpoints.
     return {
       kind: 'ready',
       subject,

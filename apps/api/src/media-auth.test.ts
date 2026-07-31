@@ -83,6 +83,19 @@ describe('MediaAuthService', () => {
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
+  it('rejects more than 3 OTP requests from the same IP within 10 minutes', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = { socket: { remoteAddress: '1.2.3.4' } } as never;
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', request),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {
     const { auth, telegram, mailer } = await service();
     await auth.addAllowed({ telegramId: '123456', addedBy: 'admin' });
