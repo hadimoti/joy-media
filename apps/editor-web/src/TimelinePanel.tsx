@@ -152,6 +152,7 @@ function isVoiceClip(clip: Clip): boolean {
 function TimelineClip({
   clip,
   selected,
+  isDragOver,
   maxStartUs,
   viewport,
   locked,
@@ -167,6 +168,7 @@ function TimelineClip({
 }: {
   readonly clip: Clip;
   readonly selected: boolean;
+  readonly isDragOver: boolean;
   readonly maxStartUs: number;
   readonly viewport: TimelineViewport;
   readonly locked: boolean;
@@ -250,7 +252,7 @@ function TimelineClip({
 
   return (
     <button
-      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}`}
+      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
@@ -481,6 +483,8 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
+  /** Clip being dragged over by an effect or transition — shows amber highlight. */
+  const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
   // §6.2: collapsed by default, so standard editing is visually unchanged.
   const [dataLanesOpen, setDataLanesOpen] = useState(false);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
@@ -1482,10 +1486,22 @@ export function TimelinePanel({
                       return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
+
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const dropUs = pixelToTime(event.clientX - rect.left, {
+                      originUs: 0,
+                      pixelsPerSecond: viewport.pixelsPerSecond,
+                    });
+                    const hitClip = source.clips.find((c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs);
+                    setDragEffectOverClipId(hitClip?.id ?? null);
+                  }}
+                  onDragLeave={() => {
+                    setDragEffectOverClipId(null);
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
                     if (track.locked) return;
+                    setDragEffectOverClipId(null);
 
                     // Effect drop
                     const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
@@ -1635,6 +1651,7 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       selected={selectedIds.includes(clip.id)}
+                      isDragOver={dragEffectOverClipId === clip.id}
                       maxStartUs={composition.durationUs - clip.durationUs}
                       viewport={{ ...viewport, originUs: 0 }}
                       locked={track.locked}

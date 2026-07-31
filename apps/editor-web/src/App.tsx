@@ -2390,9 +2390,10 @@ function EditorWorkspace({
             })
           }
           onEffectDrop={(effectId, clipId, trackId) => {
+            context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
-              context.showToast('Could not find this clip’s target.', 'error');
+              context.showToast("Could not find this clip's target.", 'error');
               return;
             }
             const descriptor = effectRegistry.getEffect(effectId);
@@ -2407,6 +2408,7 @@ function EditorWorkspace({
             } as unknown as VisualObjectTransaction);
           }}
           onTransitionDrop={(transitionId, leftClipId, rightClipId, trackId) => {
+            context.selectClips([leftClipId, rightClipId]);
             context.replaceVisualProject({
               ...visualProject,
               transitions: [

@@ -161,10 +161,6 @@ export function EffectsPanel({
 
   const handleDragStart = useCallback(
     (effectId: string, event: React.DragEvent) => {
-      if (!canApplyEffects) {
-        event.preventDefault();
-        return;
-      }
       const payload: EffectDragPayload = {
         kind: 'joy/effect',
         effectId,
@@ -173,7 +169,7 @@ export function EffectsPanel({
       event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
       event.dataTransfer.effectAllowed = 'copy';
     },
-    [canApplyEffects],
+    [],
   );
 
   const handleCreateRecipe = useCallback(() => {
@@ -214,7 +210,7 @@ export function EffectsPanel({
       note={
         canApplyEffects
           ? undefined
-          : 'Select one video clip to enable applying effects. Animated previews stay live.'
+          : 'Drag an effect to a clip on the timeline to apply it. Animated previews stay live.'
       }
     >
       <div className="effects-panel-content">
@@ -338,10 +334,10 @@ function EffectCard({
   return (
     <div
       className={`effect-card${canApply ? '' : ' is-unavailable'}`}
-      draggable={canApply}
-      onDragStart={canApply ? onDragStart : undefined}
+      draggable={true}
+      onDragStart={onDragStart}
       onDoubleClick={canApply ? onAdd : undefined}
-      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${canApply ? '' : ' Select a video clip to apply.'}`}
+      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${canApply ? '' : ' Drag to a clip on the timeline to apply.'}`}
     >
       <div className="effect-card-thumb">
         <EffectPreviewMedia effectId={descriptor.id} className="effect-card-preview-media" />
