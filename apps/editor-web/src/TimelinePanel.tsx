@@ -1288,7 +1288,15 @@ export function TimelinePanel({
               return s !== undefined && timelineTrackKind(s) === kind;
             }).length;
             return (
-              <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
+              <div
+                className={
+                  source.clips.some((clip) => selectedIds.includes(clip.id))
+                    ? 'timeline-track is-selected'
+                    : 'timeline-track'
+                }
+                key={track.id}
+                style={{ height: track.heightPx }}
+              >
                 <div
                   className="timeline-track-header"
                   onContextMenu={(event) => {

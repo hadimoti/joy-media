@@ -1727,6 +1727,10 @@ label {
   gap: 0.15rem;
   min-height: 1.75rem;
   margin-bottom: 0.3rem;
+  padding: 0.15rem 0.35rem;
+  margin-inline: -0.35rem;
+  background: color-mix(in srgb, var(--joy-bg-control) 55%, transparent);
+  border-radius: var(--radius-sm);
 }
 .timeline-toolbar-sep {
   width: 1px;
@@ -1844,7 +1848,7 @@ label {
   z-index: 2;
   min-height: 1.25rem;
   padding-block: 0.2rem;
-  background: transparent;
+  background: color-mix(in srgb, var(--joy-bg-panel) 92%, #fff 8%);
   border-bottom: 1px solid var(--joy-border, #2e2e32);
 }
 .timeline-scrub-gutter {
@@ -1934,6 +1938,23 @@ label {
   z-index: 1;
   min-height: 2rem;
   border-top: 1px solid #2e2e32;
+}
+
+/* Selected track: highlight both the header and a subtle lane tint so the
+   active composition row reads as one connected element. */
+.timeline-track.is-selected .timeline-track-header {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--joy-accent) 14%, transparent),
+    var(--joy-bg-panel)
+  );
+  box-shadow: inset 2px 0 0 var(--joy-accent);
+}
+.timeline-track.is-selected .timeline-lane {
+  background: color-mix(in srgb, var(--joy-accent) 5%, transparent);
+}
+.timeline-track.is-selected .track-code {
+  color: var(--joy-accent);
 }
 .timeline-track-header {
   display: flex;
