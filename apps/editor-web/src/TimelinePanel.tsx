@@ -76,6 +76,10 @@ import { polishMediaLabel } from './media-label.js';
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 const DEFAULT_PPS = 20;
+/** Height of a virtual (not-yet-created) empty lane. */
+const EMPTY_LANE_HEIGHT_PX = 44;
+/** Extra empty lanes rendered below the visible viewport during scrolling. */
+const EMPTY_LANE_OVERSCAN = 6;
 
 function frameDurationUs(frameRate: { readonly num: number; readonly den: number }): number {
   return Math.max(1, Math.round((1_000_000 * frameRate.den) / frameRate.num));
@@ -512,6 +516,19 @@ export function TimelinePanel({
     [tracks, tracksHeightPx],
   );
 
+  // Virtual (not-yet-created) empty lanes that fill the track viewport below the
+  // real tracks, so the grid reaches the bottom of the panel and media can be
+  // dropped to create new tracks. Computed from the observed container height
+  // minus the space the real tracks occupy.
+  const realTracksHeightPx = useMemo(
+    () => tracks.reduce((sum, track) => sum + track.heightPx, 0),
+    [tracks],
+  );
+  const virtualLaneCount = useMemo(() => {
+    const avail = Math.max(0, tracksHeightPx - realTracksHeightPx);
+    return Math.ceil(avail / EMPTY_LANE_HEIGHT_PX) + EMPTY_LANE_OVERSCAN;
+  }, [tracksHeightPx, realTracksHeightPx]);
+
   useEffect(() => {
     const root = scrollRef.current;
     if (root === null) return;
@@ -657,6 +674,46 @@ export function TimelinePanel({
               startUs,
               durationUs,
               sourceInUs: 0,
+            },
+          },
+        },
+      ],
+    });
+  };
+
+  /** Create a NEW real track for a dropped asset and place the clip on it. */
+  const createTrackFromAssetDrop = (
+    asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+    dropUs: number,
+  ) => {
+    const order = composition.tracks.length;
+    // The shared schema only models video tracks; audio clips are classified by
+    // their asset (isVoiceClip) rather than by a separate audio track kind.
+    const trackId = `V${order + 1}`;
+    const durationUs = 5_000_000;
+    const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+    onDispatch({
+      label: `Add ${asset.displayName ?? asset.assetId}`,
+      commands: [
+        {
+          type: 'timeline.addTrack',
+          payload: {
+            compositionId: composition.id,
+            track: {
+              id: trackId,
+              kind: 'video',
+              order,
+              enabled: true,
+              clips: [
+                {
+                  id: `clip-${asset.assetId}-${Date.now()}`,
+                  kind: 'video',
+                  assetId: asset.assetId,
+                  startUs,
+                  durationUs,
+                  sourceInUs: 0,
+                },
+              ],
             },
           },
         },
@@ -1598,6 +1655,52 @@ export function TimelinePanel({
               </div>
             );
           })}
+
+          {/* Virtual empty lanes: let the grid reach the bottom of the panel and
+              create a real track when media is dropped into an unused lane. */}
+          {Array.from({ length: virtualLaneCount }, (_, laneIndex) => (
+            <div
+              className="timeline-track timeline-virtual-lane"
+              key={`__virtual_${laneIndex}__`}
+              style={{ height: EMPTY_LANE_HEIGHT_PX }}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'copy';
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+                if (!raw) return;
+                try {
+                  const asset = JSON.parse(raw) as {
+                    assetId: string;
+                    kind: string;
+                    displayName?: string;
+                  };
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const dropUs = pixelToTime(event.clientX - rect.left, {
+                    originUs: 0,
+                    pixelsPerSecond: viewport.pixelsPerSecond,
+                  });
+                  createTrackFromAssetDrop(asset, dropUs);
+                } catch {
+                  /* ignore malformed payload */
+                }
+              }}
+            >
+              <div className="timeline-track-header timeline-virtual-lane-header">
+                <span className="timeline-virtual-lane-plus" aria-hidden="true">
+                  +
+                </span>
+              </div>
+              <span
+                className="timeline-lane timeline-virtual-lane-canvas"
+                style={{ minWidth: `${laneWidthPx}px` }}
+                title="Drop media to add a track here"
+              />
+            </div>
+          ))}
 
           {dataLanesOpen &&
             dataLanes !== undefined &&

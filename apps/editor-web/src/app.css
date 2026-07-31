@@ -9361,17 +9361,24 @@ label {
 }
 
 /* ===== TIMELINE EMPTY STATE ===== */
+/* Slim horizontal drop zone (reference image 2) — pinned near the top of the
+   track body, does NOT obscure the grid. Hidden once clips are added. */
 .timeline-empty-state {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: none;
+  z-index: 4;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: var(--color-surface-1);
-  border: 2px dashed var(--color-border-2);
-  border-radius: 8px;
+  gap: 0.6rem;
+  margin: 0.35rem 0.5rem 0.35rem 9.5rem;
+  padding: 0.55rem 0.9rem;
+  height: 3.1rem;
+  box-sizing: border-box;
+  border: 1px dashed var(--color-border-2);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-1) 70%, transparent);
   pointer-events: auto;
-  z-index: 5;
+  cursor: pointer;
   transition:
     border-color 0.2s ease,
     background 0.2s ease;
@@ -9379,84 +9386,69 @@ label {
 
 .timeline-empty-state.drag-active {
   border-color: var(--color-joy);
-  background: var(--color-joy-subtle);
+  background: color-mix(in srgb, var(--color-joy) 12%, transparent);
   border-style: solid;
 }
 
-.timeline-empty-content {
+.timeline-empty-strip-icon {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 24px;
-  text-align: center;
-  max-width: 360px;
-}
-
-.timeline-empty-icon {
-  width: 64px;
-  height: 64px;
+  justify-content: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
   color: var(--color-text-muted);
-  opacity: 0.7;
+  background: var(--color-surface-2);
 }
 
-.timeline-empty-state.drag-active .timeline-empty-icon {
+.timeline-empty-state.drag-active .timeline-empty-strip-icon {
   color: var(--color-joy);
-  opacity: 1;
 }
 
 .timeline-empty-text {
   margin: 0;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
-.timeline-empty-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+/* ===== VIRTUAL EMPTY LANES ===== */
+.timeline-virtual-lane {
+  border-top: 1px solid color-mix(in srgb, var(--joy-border) 55%, transparent);
+}
+
+.timeline-virtual-lane-header {
   justify-content: center;
-}
-
-.timeline-empty-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.timeline-empty-btn.primary {
-  background: var(--color-joy);
-  color: white;
-}
-
-.timeline-empty-btn.primary:hover {
-  background: var(--color-joy-hover);
-  transform: translateY(-1px);
-}
-
-.timeline-empty-btn.secondary {
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  border: 1px solid var(--color-border-2);
-}
-
-.timeline-empty-btn.secondary:hover {
-  background: var(--color-surface-3);
-  border-color: var(--color-border-3);
-}
-
-.timeline-empty-hint {
-  margin: 4px 0 0;
   color: var(--color-text-muted);
-  font-size: 12px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.timeline-virtual-lane:hover .timeline-virtual-lane-header {
+  opacity: 1;
+}
+
+.timeline-virtual-lane-plus {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.timeline-virtual-lane-canvas {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent calc(100% - 1px),
+      color-mix(in srgb, var(--joy-border) 30%, transparent) calc(100% - 1px),
+      transparent 100%
+    ),
+    transparent;
+  min-height: 100%;
+}
+
+.timeline-virtual-lane:hover .timeline-virtual-lane-canvas {
+  background-color: color-mix(in srgb, var(--color-joy) 6%, transparent);
 }
 
 /* ===== TIMELINE CONTEXT MENU (enhanced for empty state) ===== */
@@ -11275,7 +11267,10 @@ label {
   color: var(--joy-text-muted);
   font-size: 0.62rem;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
   white-space: nowrap;
 }
 
@@ -11311,7 +11306,9 @@ label {
   border-radius: var(--radius-sm);
   background: var(--joy-bg-elevated);
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
   position: relative;
   cursor: default;
 }
@@ -11425,7 +11422,6 @@ label {
   min-height: 5rem;
 }
 
-
 /* ─── PSD Import Tab ─────────────────────────────────────────────────────── */
 
 .psd-import-tab {
@@ -11452,7 +11448,9 @@ label {
   border-radius: var(--radius-sm);
   background: var(--joy-bg-deep);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .psd-import-drop:hover,

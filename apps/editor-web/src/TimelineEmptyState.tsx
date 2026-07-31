@@ -14,14 +14,15 @@ export interface TimelineEmptyStateProps {
   readonly onToast?: (message: string) => void;
 }
 
+/**
+ * Minimal horizontal drop zone shown while the timeline has no clips. It sits
+ * near the top of the track area as a slim dashed strip (reference image 2) and
+ * does not obscure the grid/empty lanes. Clicking it opens the import dialog.
+ */
 export function TimelineEmptyState({
   project,
   _playheadUs,
-  compositionDurationUs,
-  viewportPixelsPerSecond,
-  onSeek,
   onImportClick,
-  onAddFromLibrary,
   onContextMenu,
   onToast,
 }: TimelineEmptyStateProps) {
@@ -31,8 +32,6 @@ export function TimelineEmptyState({
   const handleDragOver = useCallback((event: React.DragEvent) => {
     if (
       !event.dataTransfer.types.includes('application/x-joy-media-asset') &&
-      !event.dataTransfer.types.includes('application/x-joy-effect') &&
-      !event.dataTransfer.types.includes('application/x-joy-transition') &&
       !event.dataTransfer.types.includes('Files')
     ) {
       return;
@@ -77,13 +76,9 @@ export function TimelineEmptyState({
   const handleClick = useCallback(
     (event: React.MouseEvent) => {
       if (event.target !== event.currentTarget) return;
-      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      const localX = event.clientX - rect.left;
-      const pxPerUs = viewportPixelsPerSecond / 1_000_000;
-      const timeUs = Math.max(0, Math.min(compositionDurationUs, localX / pxPerUs));
-      onSeek(timeUs);
+      onImportClick();
     },
-    [compositionDurationUs, viewportPixelsPerSecond, onSeek],
+    [onImportClick],
   );
 
   const composition = project.compositions[project.rootCompositionId];
@@ -107,41 +102,12 @@ export function TimelineEmptyState({
       tabIndex={0}
       aria-label="Empty timeline — drop media to start editing"
     >
-      <div className="timeline-empty-content">
-        <div className="timeline-empty-icon" aria-hidden="true">
-          <UploadIcon />
-        </div>
-        <p className="timeline-empty-text">
-          Drag media here to start editing
-        </p>
-        <div className="timeline-empty-actions">
-          <button
-            type="button"
-            className="timeline-empty-btn primary"
-            onClick={(e) => {
-              e.stopPropagation();
-              onImportClick();
-            }}
-            aria-label="Import media files"
-          >
-            Import Media
-          </button>
-          <button
-            type="button"
-            className="timeline-empty-btn secondary"
-            onClick={(e) => {
-              e.stopPropagation();
-              onAddFromLibrary();
-            }}
-            aria-label="Add from media library"
-          >
-            Add from Library
-          </button>
-        </div>
-        <p className="timeline-empty-hint">
-          Supports video, audio, images, and captions
-        </p>
+      <div className="timeline-empty-strip-icon" aria-hidden="true">
+        <UploadIcon />
       </div>
+      <p className="timeline-empty-text">
+        {dragActive ? 'Release to import media' : 'Drag media here and start creating'}
+      </p>
     </div>
   );
 }
