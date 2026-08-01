@@ -160,7 +160,7 @@ Every panel, and what it owes. `✔` = already conforms.
 | ---------------- | ---------- | -------------- | --------------------------------- | -------------------------------- | ----------------------- |
 | Effects          | ✔          | ✔              | ⌕                                 | ✔ categories                     | never                   |
 | Motion           | ✔          | ✔              | + ☆ ⌕                             | ✔ Library/Scenes/Presets/Spatial | ✔ on Presets + Spatial  |
-| Transitions      | ✔          | ✔              | ☆ ⌕                               | ✔ Browse/Applied                 | never                   |
+| Transitions      | ✔          | ✔              | ☆ ⌕                               | ✔ Browse (no Applied tab)        | never                   |
 | Assets (`media`) | ✔          | ✔              | start: ⬆ filter ↻ · end: ☁ view ⌕ | ✔ All/Video/Audio/Images         | never                   |
 | Captions         | ✔          | ✔              | burn-in ⌕                         | ✔ Transcript/Preview             | ✔ when no caption track |
 | Inspector        | ✔          | ✔              | —                                 | ✔ Transform/Effects/Audio        | ✔                       |
@@ -192,6 +192,18 @@ a third needs an owner decision recorded here.
 4. Panels, in the matrix order above, one commit per group.
 5. Sweep the remaining literal hexes in app.css onto tokens (§1).
 6. Browser verification before any claim of done (§6.6).
+
+## 3f. Panel decisions (binding — do not reverse without an ADR)
+
+Captions panel row layout (2026-07-31): each caption segment renders on two lines — line 1 = clickable timestamp + confidence percentage; line 2 = raw source text + undo icon + trash icon. Confidence is shown for every segment, not only low-confidence.
+
+Captions preview (2026-07-31): the live preview of caption burn-in appears on the Monitor's **Live** tab, not inside the Captions panel. The Captions panel shows only the transcript/segment list.
+
+Transitions panel (2026-07-31): the panel has **no Applied tab**. Transitions are visible only in the timeline after they are added. The Browse tab shows the available transition types.
+
+Panel header minimalism convention (2026-07-31): every panel header uses a 3-column CSS grid — center column holds the title, end column holds action buttons. Search is accessed via a magnifier icon that reveals the search bar on click and dismisses it on Escape.
+
+Favorite icons (2026-准则): effects and transitions panels show a minimal SVG star icon for favorites — no text labels alongside the icon.
 
 ## 4. Interaction standards
 
