@@ -57,6 +57,47 @@ describe('control-plane project binding', () => {
     expect(second.editorProjectId).toBe('local-edit-2');
   });
 
+  it('isolates bindings per signed-in owner key', () => {
+    const storage = memoryStorage();
+    const gmail = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-edit-1', title: 'Campaign cut' },
+      { createId: () => 'gmail-project', ownerKey: 'hadimoti96@gmail.com' },
+    );
+    const telegram = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-edit-1', title: 'Campaign cut' },
+      { createId: () => 'telegram-project', ownerKey: '68238523' },
+    );
+
+    expect(gmail.controlPlaneProjectId).toBe('project-gmail-project');
+    expect(telegram.controlPlaneProjectId).toBe('project-telegram-project');
+  });
+
+  it('migrates legacy v1 bindings under the legacy owner bucket', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      'joy-media.control-plane-project-bindings.v1',
+      JSON.stringify({
+        version: 1,
+        bindings: {
+          'local-edit-1': {
+            editorProjectId: 'local-edit-1',
+            controlPlaneProjectId: 'project-legacy-1',
+            title: 'Campaign cut',
+          },
+        },
+      }),
+    );
+
+    const rebound = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-edit-1', title: 'Campaign cut' },
+      { createId: () => 'must-not-be-used', ownerKey: 'legacy' },
+    );
+    expect(rebound.controlPlaneProjectId).toBe('project-legacy-1');
+  });
+
   it('does not reuse malformed browser state as a project binding', () => {
     const storage = memoryStorage();
     storage.setItem('joy-media.control-plane-project-bindings.v1', '{not-json');

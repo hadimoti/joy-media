@@ -243,6 +243,7 @@ async function route(
     const data = await options.mediaAuth.requestOtp(
       requiredString(body, 'contact'),
       requiredAuthMethod(body),
+      request,
     );
     respondJson(response, 200, { data });
     return;
@@ -266,13 +267,31 @@ async function route(
     return;
   }
 
-  const actor = await options.authentication.authenticate(request);
-  if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-
   if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
-    respondJson(response, 200, { data: { contact: actor.id } });
+    const profile = await options.mediaAuth.sessionProfile(request);
+    if (profile === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    respondJson(response, 200, { data: profile });
     return;
   }
+
+  if (request.method === 'GET' && url.pathname === '/v1/auth/avatar') {
+    const avatar = await options.mediaAuth.avatarBytes(request);
+    if (avatar === undefined) {
+      response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: { code: 'AVATAR_NOT_FOUND', message: 'no avatar' } }));
+      return;
+    }
+    response.writeHead(200, {
+      'content-type': avatar.mimeType,
+      'cache-control': 'private, max-age=3600',
+      'content-length': avatar.bytes.length,
+    });
+    response.end(avatar.bytes);
+    return;
+  }
+
+  const actor = await options.authentication.authenticate(request);
+  if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
 
   if (request.method === 'GET' && url.pathname === '/v1/providers/reasoning') {
     respondJson(response, 200, { data: { providers: [options.mistral.summary()] } });
@@ -1150,7 +1169,12 @@ function respondError(response: ServerResponse, error: unknown): void {
     return;
   }
   if (error instanceof MediaAuthError) {
-    const status = error.code === 'REQUEST_INVALID' ? 400 : 401;
+    const status =
+      error.code === 'RATE_LIMITED'
+        ? 429
+        : error.code === 'REQUEST_INVALID'
+          ? 400
+          : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

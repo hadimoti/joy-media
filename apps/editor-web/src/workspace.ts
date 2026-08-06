@@ -17,6 +17,7 @@ export const PANEL_IDS = [
   'agent',
   'workflows',
   'plugins',
+  'templates',
 ] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
@@ -46,6 +47,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'agent',
     'workflows',
     'plugins',
+    'templates',
   ],
 };
 

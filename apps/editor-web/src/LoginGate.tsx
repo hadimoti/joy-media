@@ -1,6 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { probeJoySession } from './identity.js';
-import { requestOtp, setStoredMediaToken, verifyOtp, type MediaAuthMethod } from './media-session.js';
+import {
+  loadLoginContactHistory,
+  rememberLoginContact,
+  suggestLoginContacts,
+  type LoginContactHistory,
+} from './login-contact-history.js';
+import { MatrixTitleChar } from './login-title-matrix.js';
+import {
+  MEDIA_SESSION_CHANGED_EVENT,
+  requestOtp,
+  setStoredMediaToken,
+  verifyOtp,
+  type MediaAuthMethod,
+} from './media-session.js';
 import './login-gate.css';
 
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
@@ -9,8 +22,8 @@ type Method = MediaAuthMethod | 'token';
 const METHOD_CONFIG: Record<Method, { sub: string; placeholder: string; type: string; btn: string }> = {
   gmail: { sub: 'Enter your Gmail address', placeholder: 'your@gmail.com', type: 'email', btn: 'Send Code →' },
   telegram: {
-    sub: 'Enter your Telegram numeric ID',
-    placeholder: '123456789',
+    sub: 'Enter your Telegram username or ID',
+    placeholder: 'username',
     type: 'text',
     btn: 'Send Code →',
   },
@@ -28,20 +41,81 @@ const METHOD_CONFIG: Record<Method, { sub: string; placeholder: string; type: st
 export function LoginGate({ children }: { readonly children: ReactNode }): ReactNode {
   const [step, setStep] = useState<Step>('checking');
   const [method, setMethod] = useState<Method>('gmail');
-  const [contact, setContact] = useState('');
+  const [history, setHistory] = useState<LoginContactHistory>(() =>
+    typeof window === 'undefined' ? { gmail: [], telegram: [] } : loadLoginContactHistory(window.localStorage),
+  );
+  const [contact, setContact] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return loadLoginContactHistory(window.localStorage).gmail[0] ?? '';
+  });
   const [hint, setHint] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [successGlow, setSuccessGlow] = useState(false);
   const [failBuzz, setFailBuzz] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const otpSubmittingRef = useRef(false);
+  const blurTimerRef = useRef<number | undefined>(undefined);
+  const sessionProbeSeqRef = useRef(0);
+  const unlockTimerRef = useRef<number | undefined>(undefined);
+
+  const clearUnlockTimer = (): void => {
+    if (unlockTimerRef.current === undefined) return;
+    window.clearTimeout(unlockTimerRef.current);
+    unlockTimerRef.current = undefined;
+  };
 
   useEffect(() => {
-    void probeJoySession(window.localStorage).then((state) => {
-      setStep(state.kind === 'ready' ? 'unlocked' : 'contact');
-    });
+    let cancelled = false;
+    const probeSession = async (onReady: () => void, onNotReady: () => void): Promise<void> => {
+      const requestId = ++sessionProbeSeqRef.current;
+      let state;
+      try {
+        state = await probeJoySession(window.localStorage);
+      } catch {
+        state = { kind: 'signed-out' as const };
+      }
+      if (cancelled || requestId !== sessionProbeSeqRef.current) return;
+      if (state.kind === 'ready') onReady();
+      else onNotReady();
+    };
+    const onSessionChange = (): void => {
+      void probeSession(
+        () => {
+          // Login submit path owns unlock + success glow; do not short-circuit it.
+        },
+        () => {
+          clearUnlockTimer();
+          // Logout (or expired token) must return to the login card.
+          setSuccessGlow(false);
+          setError(undefined);
+          setHint(undefined);
+          otpSubmittingRef.current = false;
+          setStep('contact');
+        },
+      );
+    };
+    void probeSession(() => setStep('unlocked'), () => setStep('contact'));
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
+    return () => {
+      cancelled = true;
+      clearUnlockTimer();
+      window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
+    };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current !== undefined) window.clearTimeout(blurTimerRef.current);
+      clearUnlockTimer();
+    };
+  }, []);
+
+  const suggestions = useMemo(() => {
+    if (method === 'token' || !suggestOpen) return [];
+    return suggestLoginContacts(history, method, contact);
+  }, [contact, history, method, suggestOpen]);
 
   const buzz = (message: string): void => {
     setError(message);
@@ -50,8 +124,16 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   };
 
   const unlockAfterSuccess = (): void => {
+    clearUnlockTimer();
     setSuccessGlow(true);
-    window.setTimeout(() => setStep('unlocked'), 520);
+    unlockTimerRef.current = window.setTimeout(() => {
+      unlockTimerRef.current = undefined;
+      setStep('unlocked');
+    }, 520);
+  };
+
+  const persistContact = (value: string, authMethod: MediaAuthMethod): void => {
+    setHistory(rememberLoginContact(window.localStorage, authMethod, value));
   };
 
   const submitContact = async (event: React.FormEvent): Promise<void> => {
@@ -60,6 +142,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     if (value.length === 0 || busy) return;
     setBusy(true);
     setError(undefined);
+    setSuggestOpen(false);
     if (method === 'token') {
       try {
         setStoredMediaToken(value, window.localStorage);
@@ -78,6 +161,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     }
     try {
       const message = await requestOtp(value, method);
+      persistContact(value, method);
       setHint(message);
       setStep('otp');
     } catch {
@@ -93,6 +177,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     setError(undefined);
     try {
       await verifyOtp(contact.trim(), method, code, window.localStorage);
+      persistContact(contact.trim(), method);
       unlockAfterSuccess();
     } catch {
       buzz('That code is invalid or has expired.');
@@ -140,6 +225,18 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     if (digits.length === 6) void submitOtp(digits.join(''));
   };
 
+  const switchMethod = (next: Method): void => {
+    setMethod(next);
+    setError(undefined);
+    setSuggestOpen(false);
+    if (next === 'gmail' || next === 'telegram') {
+      const remembered = history[next][0] ?? '';
+      setContact(remembered);
+    } else {
+      setContact('');
+    }
+  };
+
   const cfg = METHOD_CONFIG[method];
   const locked = step !== 'unlocked';
 
@@ -155,21 +252,52 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
             onAnimationEnd={() => setFailBuzz(false)}
           >
             <div className="lcard-logo-wrap">
-              <img src="/assets/logo.png" className="login-logo" alt="JOY Media" />
+              <img
+                src="/assets/JoyCodeNew_128x128.png"
+                className="login-logo"
+                alt="Joy Studio"
+                width={80}
+                height={80}
+                decoding="async"
+              />
             </div>
 
-            <h1 className="login-title" lang="fa" dir="rtl">
-              &#1580;&#1600;&#1608;&#1740; &#1578;&#1740;&#1600;&#1605;
+            <h1 className="login-title" lang="en" dir="ltr" aria-label="Joy Studio.">
+              <span className="login-title-joy">
+                {Array.from('Joy').map((ch, index) => (
+                  <MatrixTitleChar
+                    key={`matrix-${ch}-${index}`}
+                    finalChar={ch}
+                    delayMs={index * 80}
+                    cascadeDelayMs={index * 45}
+                  />
+                ))}
+              </span>
+              {Array.from(' Studio').map((ch, index) => (
+                <span
+                  key={`${ch}-${index + 3}`}
+                  className="login-title-char"
+                  style={{ animationDelay: `${(index + 3) * 45}ms` }}
+                >
+                  {ch === ' ' ? '\u00A0' : ch}
+                </span>
+              ))}
+              <span
+                className="login-title-char login-title-dot"
+                style={{
+                  animationDelay: `${'Joy Studio'.length * 45}ms, ${'Joy Studio'.length * 45 + 550}ms`,
+                }}
+                aria-hidden="true"
+              >
+                .
+              </span>
             </h1>
 
             <div className="lmethods" data-active={method}>
               <button
                 type="button"
                 className={`lmethod-btn${method === 'gmail' ? ' active' : ''}`}
-                onClick={() => {
-                  setMethod('gmail');
-                  setError(undefined);
-                }}
+                onClick={() => switchMethod('gmail')}
                 disabled={step === 'otp'}
               >
                 <img src="/assets/icons-login/gmail-64.png" className="lmethod-icon" alt="Gmail" />
@@ -178,10 +306,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <button
                 type="button"
                 className={`lmethod-btn${method === 'telegram' ? ' active' : ''}`}
-                onClick={() => {
-                  setMethod('telegram');
-                  setError(undefined);
-                }}
+                onClick={() => switchMethod('telegram')}
                 disabled={step === 'otp'}
               >
                 <img src="/assets/icons-login/telegram-64.png" className="lmethod-icon" alt="Telegram" />
@@ -190,10 +315,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <button
                 type="button"
                 className={`lmethod-btn${method === 'token' ? ' active' : ''}`}
-                onClick={() => {
-                  setMethod('token');
-                  setError(undefined);
-                }}
+                onClick={() => switchMethod('token')}
                 disabled={step === 'otp'}
               >
                 <span className="lmethod-icon lmethod-key">🔑</span>
@@ -203,18 +325,53 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
 
             <div className="login-panels">
               {step === 'contact' && (
-                <form onSubmit={(event) => void submitContact(event)}>
+                <form onSubmit={(event) => void submitContact(event)} autoComplete="off">
                   <p className="login-sub">{cfg.sub}</p>
-                  <input
-                    className="auth-input"
-                    type={cfg.type}
-                    placeholder={cfg.placeholder}
-                    value={contact}
-                    onChange={(event) => setContact(event.target.value)}
-                    autoCorrect="off"
-                    spellCheck={false}
-                    autoFocus
-                  />
+                  <div className="auth-input-wrap">
+                    <input
+                      className="auth-input"
+                      type={cfg.type === 'email' ? 'text' : cfg.type}
+                      inputMode={method === 'gmail' ? 'email' : 'text'}
+                      placeholder={cfg.placeholder}
+                      value={contact}
+                      onChange={(event) => {
+                        setContact(event.target.value);
+                        setSuggestOpen(true);
+                      }}
+                      onFocus={() => setSuggestOpen(true)}
+                      onBlur={() => {
+                        blurTimerRef.current = window.setTimeout(() => setSuggestOpen(false), 120);
+                      }}
+                      autoCorrect="off"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoFocus
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={suggestions.length > 0}
+                      aria-controls="login-contact-suggest"
+                    />
+                    {suggestions.length > 0 && (
+                      <ul id="login-contact-suggest" className="auth-suggest" role="listbox">
+                        {suggestions.map((entry) => (
+                          <li key={entry} role="option">
+                            <button
+                              type="button"
+                              className="auth-suggest-item"
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                setContact(entry);
+                                setSuggestOpen(false);
+                              }}
+                            >
+                              {entry}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                   <button type="submit" className="login-btn" disabled={busy}>
                     <span className="login-btn-gradient">{busy ? 'Sending…' : cfg.btn}</span>
                   </button>
@@ -243,6 +400,28 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                       </span>
                     ))}
                   </div>
+                  {method === 'telegram' && (
+                    <p className="login-tg-hint">
+                      Make sure you’ve sent{' '}
+                      <a
+                        className="login-tg-hint-link"
+                        href="https://t.me/joyserver_bot?start="
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        /start
+                      </a>{' '}
+                      to{' '}
+                      <a
+                        className="login-tg-hint-link"
+                        href="https://t.me/joyserver_bot?start="
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        @joyserver_bot
+                      </a>
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="login-back"

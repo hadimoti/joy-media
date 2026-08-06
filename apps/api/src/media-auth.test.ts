@@ -83,6 +83,19 @@ describe('MediaAuthService', () => {
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
+  it('rejects more than 3 OTP requests from the same IP within 10 minutes', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = { socket: { remoteAddress: '1.2.3.4' } } as never;
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', request),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {
     const { auth, telegram, mailer } = await service();
     await auth.addAllowed({ telegramId: '123456', addedBy: 'admin' });
@@ -90,6 +103,39 @@ describe('MediaAuthService', () => {
     expect(telegram.sendOtp).toHaveBeenCalledTimes(1);
     await auth.requestOtp('123456', 'gmail');
     expect(mailer.sendOtp).not.toHaveBeenCalled();
+  });
+
+  it('accepts Telegram username (with or without @) and delivers OTP to telegram_id', async () => {
+    const { auth, telegram } = await service();
+    await auth.addAllowed({
+      telegramId: '987654321',
+      telegramUsername: 'JoyUser',
+      addedBy: 'admin',
+    });
+
+    await auth.requestOtp('joyuser', 'telegram');
+    expect(telegram.sendOtp).toHaveBeenCalledWith('987654321', expect.any(String));
+
+    telegram.sendOtp.mockClear();
+    await auth.requestOtp('@JoyUser', 'telegram');
+    expect(telegram.sendOtp).toHaveBeenCalledWith('987654321', expect.any(String));
+
+    const code = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
+    const token = await auth.verifyOtp('joyuser', 'telegram', code);
+    expect(token.length).toBeGreaterThan(20);
+
+    // Username request + numeric-id verify (same canonical otp contact)
+    telegram.sendOtp.mockClear();
+    await auth.requestOtp('@joyuser', 'telegram');
+    const code2 = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
+    await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(expect.any(String));
+  });
+
+  it('does not deliver for an unknown Telegram username', async () => {
+    const { auth, telegram } = await service();
+    await auth.addAllowed({ telegramId: '1', telegramUsername: 'realuser', addedBy: 'admin' });
+    await auth.requestOtp('nobody', 'telegram');
+    expect(telegram.sendOtp).not.toHaveBeenCalled();
   });
 
   it('removing an allow-list entry revokes future logins', async () => {

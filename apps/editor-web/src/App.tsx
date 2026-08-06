@@ -57,6 +57,8 @@ import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 
 registerBuiltins();
 
+const CLIP_FRAME_CACHE_LIMIT = 120;
+
 import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
@@ -131,6 +133,8 @@ import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agen
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
+import { TemplatesPanel } from './TemplatesPanel.js';
+import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
@@ -145,8 +149,13 @@ import {
   DOCK_PANEL_MINIMUM_HEIGHT,
   DOCK_PANEL_MINIMUM_WIDTH,
   SUPERSEDED_DOCK_LAYOUT_KEYS,
-  defaultDockLayout,
+  type EditorViewMode,
+  dockLayoutKey,
+  loadViewMode,
+  migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
+  saveViewMode,
+  seedDockLayout,
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -158,32 +167,30 @@ import {
   ExportIcon,
   FullscreenIcon,
   HighBitrateIcon,
-  InfoIcon,
-  ListIcon,
   LogoutIcon,
   PauseIcon,
   PlayIcon,
+  PngMaskIcon,
   RedoIcon,
   ReelsIcon,
   SkipBackIcon,
   SkipForwardIcon,
   UndoIcon,
   UserIcon,
+  VerticalViewIcon,
+  WideViewIcon,
   YoutubeIcon,
   ZoomInIcon,
 } from './icons.js';
-import {
-  JOY_LOGIN_URL,
-  logoutJoySession,
-  probeJoySession,
-  type JoySessionState,
-} from './identity.js';
+import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import {
   loadExportHistory,
   saveExportHistory,
   upsertEntry,
   type ExportProcessEntry,
 } from './export-history.js';
+import { createMonoAudioBuffer } from './export-audio.js';
+import { nextVideoClipAtOrAfter } from './timeline-playback.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -591,19 +598,33 @@ function EditorWorkspace({
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<EditorViewMode>(() => loadViewMode(window.localStorage));
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const paletteRef = useRef<HTMLElement | null>(null);
+  const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
   >(undefined);
+  useEffect(() => {
+    return () => {
+      stickerImageCache.clear();
+    };
+  }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
+  const toastTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     return () => {
       window.clearTimeout(exportToastTimerRef.current);
+      for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
+      toastTimersRef.current.clear();
     };
   }, []);
   useEffect(() => {
@@ -618,7 +639,6 @@ function EditorWorkspace({
   const sessionRef = useRef<EditorSession | null>(null);
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
-  const controlPlaneProjectRef = useRef<ControlPlaneProjectBinding | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
@@ -676,12 +696,15 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
-  const controlPlaneProject =
-    controlPlaneProjectRef.current ??
-    (controlPlaneProjectRef.current = getOrCreateControlPlaneProjectBinding(
-      window.localStorage,
-      session.visualProject,
-    ));
+  const controlPlaneOwnerKey =
+    joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
+  const controlPlaneProject = useMemo(
+    () =>
+      getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
+        ownerKey: controlPlaneOwnerKey,
+      }),
+    [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
+  );
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -705,7 +728,13 @@ function EditorWorkspace({
   const playbackFrameRef = useRef<number | undefined>(undefined);
 
   const rememberClipFrame = useCallback((clipId: string, bitmap: ImageDataLike) => {
-    clipFrameCacheRef.current.set(clipId, bitmap);
+    const cache = clipFrameCacheRef.current;
+    if (cache.has(clipId)) cache.delete(clipId);
+    cache.set(clipId, bitmap);
+    if (cache.size > CLIP_FRAME_CACHE_LIMIT) {
+      const oldest = cache.keys().next().value as string | undefined;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
     setClipFrameTick((tick) => tick + 1);
   }, []);
 
@@ -900,9 +929,16 @@ function EditorWorkspace({
         compositionTimeUs = playheadForSourceTime(clip, sourceTimeUs, stateRef.current.playheadUs);
       }
       if (compositionTimeUs >= clip.startUs + clip.durationUs) {
-        const nextPlayheadUs = clip.startUs + clip.durationUs;
-        const durationUs = session.timelineProject.compositions.root?.durationUs ?? nextPlayheadUs;
-        if (nextPlayheadUs >= durationUs) {
+        const clipEndUs = clip.startUs + clip.durationUs;
+        const durationUs = session.timelineProject.compositions.root?.durationUs ?? clipEndUs;
+        // Advance to the next video clip on the timeline, skipping any gap.
+        // The old code always synced to `clipEndUs`, which is in a gap when the
+        // clips are not contiguous — syncMediaToPlayhead returns false there,
+        // so playback silently stopped after the first clip.
+        const nextClip = nextVideoClipAtOrAfter(session.timelineProject, clipEndUs);
+        const nextPlayheadUs =
+          nextClip === undefined ? clipEndUs : Math.max(clipEndUs, nextClip.startUs);
+        if (nextClip === undefined) {
           video.pause();
           freezeWallStartRef.current = undefined;
           setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));
@@ -978,7 +1014,13 @@ function EditorWorkspace({
     const firstClip = activeVideoClipAt(session.timelineProject, 0);
     if (firstClip !== undefined && firstClip.kind === 'video')
       video.src = resolveReferenceMediaUrl(firstClip.assetId);
-    return () => video.pause();
+    return () => {
+      video.pause();
+      decoderRef.current = null;
+      clockRef.current = null;
+      video.removeAttribute('src');
+      video.load();
+    };
   }, [handleMediaReady, session]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
@@ -1056,6 +1098,12 @@ function EditorWorkspace({
 
   const syncStickerBitmaps = useCallback(async () => {
     const mattes = readImageMatteMap(session.visualProject);
+    const activeStickerIds = new Set(
+      Object.values(session.visualProject.visualObjects)
+        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
+        .map((object) => object.id),
+    );
+    stickerImageCache.clearMissing(activeStickerIds);
     await Promise.all(
       Object.values(session.visualProject.visualObjects).map(async (object) => {
         if (object.kind !== 'image' || object.assetId === undefined) return;
@@ -1373,14 +1421,32 @@ function EditorWorkspace({
     [activatePanel, selectClips],
   );
   const refreshJoySession = useCallback(() => {
-    void probeJoySession(window.localStorage).then(setJoySession);
+    const requestId = ++joySessionRefreshSeqRef.current;
+    void probeJoySession(window.localStorage)
+      .then((next) => {
+        if (requestId !== joySessionRefreshSeqRef.current) {
+          if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
+            URL.revokeObjectURL(next.avatarObjectUrl);
+          }
+          return;
+        }
+        setJoySession((prev) => {
+          if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
+            URL.revokeObjectURL(prev.avatarObjectUrl);
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setToasts((prev) => [...prev, { id, message, kind }]);
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      toastTimersRef.current.delete(id);
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
+    toastTimersRef.current.set(id, timer);
   }, []);
   const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
     setKiloCodeAttachedAssets((current) => {
@@ -1411,10 +1477,107 @@ function EditorWorkspace({
   const toggleKeyboardShortcuts = useCallback(() => {
     setKeyboardShortcutsOpen((open) => !open);
   }, []);
+
+  const ensureDockPanels = useCallback((api: DockviewApi) => {
+    const addPanel = (
+      id: string,
+      options: {
+        readonly inactive?: boolean;
+        readonly position?: {
+          readonly referencePanel: string;
+          readonly direction: 'left' | 'right' | 'above' | 'below' | 'within';
+        };
+      } = {},
+    ) => {
+      if (api.getPanel(id) !== undefined) return;
+      api.addPanel({
+        id,
+        component: 'editor-panel',
+        title: panelLabel(id),
+        inactive: options.inactive ?? true,
+        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+        ...(options.position !== undefined ? { position: options.position } : {}),
+      });
+    };
+
+    for (const panel of DEFAULT_WORKSPACE.panels) {
+      addPanel(panel, {
+        inactive: true,
+        ...(panel === 'flow' && api.getPanel('timeline') !== undefined
+          ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
+          : {}),
+      });
+    }
+  }, []);
+
+  const applyDockLayout = useCallback(
+    (api: DockviewApi, mode: EditorViewMode) => {
+      const layoutKey = dockLayoutKey(mode);
+      const saved = window.localStorage.getItem(layoutKey);
+      let restored = false;
+      if (saved !== null) {
+        try {
+          api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
+            reuseExistingPanels: false,
+          });
+          restored = true;
+        } catch {
+          window.localStorage.removeItem(layoutKey);
+        }
+      }
+      if (!restored) {
+        try {
+          api.fromJSON(seedDockLayout(mode) as never, { reuseExistingPanels: false });
+        } catch (error) {
+          console.warn('default dock layout rejected, falling back to a stack', error);
+        }
+      }
+      ensureDockPanels(api);
+      api.getPanel('monitor')?.api.setActive();
+      window.localStorage.setItem(layoutKey, JSON.stringify(api.toJSON()));
+    },
+    [ensureDockPanels],
+  );
+
+  const switchEditorView = useCallback(() => {
+    const api = dockviewApiRef.current;
+    if (api === null) return;
+    const current = viewModeRef.current;
+    window.localStorage.setItem(dockLayoutKey(current), JSON.stringify(api.toJSON()));
+    const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
+    saveViewMode(window.localStorage, next);
+    setViewMode(next);
+    applyDockLayout(api, next);
+  }, [applyDockLayout]);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = paletteRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setPaletteOpen(false);
+    };
+    // Capture so we close before other UI consumes the event; skip the same
+    // gesture that opened the palette by listening only after mount.
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [paletteOpen]);
+  useEffect(() => {
+    if (!accountOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = accountDropdownRef.current;
+      if (root === null || root.contains(event.target as Node)) return;
+      setAccountOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [accountOpen]);
   useEffect(() => {
     refreshJoySession();
   }, [refreshJoySession]);
   const signOut = useCallback(async () => {
+    setAccountOpen(false);
     await logoutJoySession(window.localStorage);
     refreshJoySession();
   }, [refreshJoySession]);
@@ -1766,9 +1929,9 @@ function EditorWorkspace({
         durationUs,
         exportMedia[0]?.audio.sampleRate ?? 48000,
       );
-      const mixedAudioBuffer = audioContext.createBuffer(
-        1,
-        mixedAudio.length,
+      const mixedAudioBuffer = createMonoAudioBuffer(
+        audioContext,
+        mixedAudio,
         exportMedia[0]?.audio.sampleRate ?? 48000,
       );
       const mixedChannel = mixedAudioBuffer.getChannelData(0);
@@ -1816,9 +1979,9 @@ function EditorWorkspace({
             const startAt = audioContext.currentTime;
             for (const media of exportMedia) {
               const audioSource = audioContext.createBufferSource();
-              const playbackBuffer = audioContext.createBuffer(
-                media.audio.samples.length,
-                1,
+              const playbackBuffer = createMonoAudioBuffer(
+                audioContext,
+                media.audio.samples,
                 media.audio.sampleRate,
               );
               playbackBuffer.copyToChannel(media.audio.samples, 0);
@@ -2015,90 +2178,30 @@ function EditorWorkspace({
       undo,
     ],
   );
-  const onReady = useCallback((event: DockviewReadyEvent) => {
-    dockviewApiRef.current = event.api;
-    // v8: Browser | Context | Agent across the top, Timeline beneath them, and
-    // Monitor as a full-height right column — see dock-layout.ts for why.
-    const layoutKey = DOCK_LAYOUT_KEY;
-    for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
-      window.localStorage.removeItem(stale);
-    }
-    const saved = window.localStorage.getItem(layoutKey);
-    let restored = false;
-    if (saved !== null) {
-      try {
-        event.api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
-          reuseExistingPanels: false,
-        });
-        restored = true;
-      } catch {
-        window.localStorage.removeItem(layoutKey);
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      dockviewApiRef.current = event.api;
+      migrateLegacyDockLayout(window.localStorage);
+      for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
+        window.localStorage.removeItem(stale);
       }
-    }
+      // Drop the legacy single-key after migration copy.
+      window.localStorage.removeItem(DOCK_LAYOUT_KEY);
 
-    const previouslyActive = event.api.activePanel?.id;
-    const addPanel = (
-      id: string,
-      options: {
-        readonly inactive?: boolean;
-        readonly position?: {
-          readonly referencePanel: string;
-          readonly direction: 'left' | 'right' | 'above' | 'below' | 'within';
-        };
-      } = {},
-    ) => {
-      if (event.api.getPanel(id) !== undefined) return;
-      event.api.addPanel({
-        id,
-        component: 'editor-panel',
-        title: panelLabel(id),
-        inactive: options.inactive ?? true,
-        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
-        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
-        ...(options.position !== undefined ? { position: options.position } : {}),
-      });
-    };
+      const mode = loadViewMode(window.localStorage);
+      setViewMode(mode);
+      applyDockLayout(event.api, mode);
 
-    if (!restored) {
-      // Seeded from JSON so the column proportions survive; sequential splits
-      // would leave the monitor at half the width instead of a quarter.
-      try {
-        event.api.fromJSON(defaultDockLayout() as never, { reuseExistingPanels: false });
-      } catch (error) {
-        console.warn('default dock layout rejected, falling back to a stack', error);
-      }
-      for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, {
-          inactive: true,
-          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
-            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
-            : {}),
-        });
-      }
-      event.api.getPanel('monitor')?.api.setActive();
-    } else {
-      for (const panel of DEFAULT_WORKSPACE.panels) {
-        addPanel(panel, {
-          inactive: true,
-          ...(panel === 'flow' && event.api.getPanel('timeline') !== undefined
-            ? { position: { referencePanel: 'timeline', direction: 'within' as const } }
-            : {}),
-        });
-      }
-      const restoreId =
-        previouslyActive !== undefined && event.api.getPanel(previouslyActive) !== undefined
-          ? previouslyActive
-          : 'monitor';
-      event.api.getPanel(restoreId)?.api.setActive();
-    }
-
-    const persistDockLayout = () => {
-      window.localStorage.setItem(layoutKey, JSON.stringify(event.api.toJSON()));
-    };
-    event.api.onDidLayoutChange(persistDockLayout);
-    // Save the constraint migration immediately instead of waiting for a drag.
-    persistDockLayout();
-  }, []);
+      const persistDockLayout = () => {
+        window.localStorage.setItem(
+          dockLayoutKey(viewModeRef.current),
+          JSON.stringify(event.api.toJSON()),
+        );
+      };
+      event.api.onDidLayoutChange(persistDockLayout);
+    },
+    [applyDockLayout],
+  );
 
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
@@ -2287,9 +2390,10 @@ function EditorWorkspace({
             })
           }
           onEffectDrop={(effectId, clipId, trackId) => {
+            context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
-              context.showToast('Could not find this clip’s target.', 'error');
+              context.showToast("Could not find this clip's target.", 'error');
               return;
             }
             const descriptor = effectRegistry.getEffect(effectId);
@@ -2304,6 +2408,7 @@ function EditorWorkspace({
             } as unknown as VisualObjectTransaction);
           }}
           onTransitionDrop={(transitionId, leftClipId, rightClipId, trackId) => {
+            context.selectClips([leftClipId, rightClipId]);
             context.replaceVisualProject({
               ...visualProject,
               transitions: [
@@ -2493,6 +2598,26 @@ function EditorWorkspace({
     if (api.id === 'plugins') {
       return <PluginsPanel pluginHost={context.pluginHost} onChange={context.bumpPluginRevision} />;
     }
+    if (api.id === 'templates') {
+      return (
+        <TemplatesPanel
+          session={context.session}
+          selectedClipIds={state.selectedIds}
+          playheadUs={state.playheadUs}
+          onApplyTemplate={(seeded) => {
+            buildContentTemplateTransaction(seeded, {
+              session: context.session,
+              selectedClipIds: state.selectedIds,
+              playheadUs: state.playheadUs,
+            });
+            setRevision((r) => r + 1);
+          }}
+          showToast={(message, kind) => {
+            console.log(`[Templates] ${kind}: ${message}`);
+          }}
+        />
+      );
+    }
     return (
       <article>
         <p>{`Panel ${panelLabel(api.id)}`}</p>
@@ -2532,7 +2657,7 @@ function EditorWorkspace({
           <span className="app-brand">
             <img
               className="app-brand-logo"
-              src="/assets/logo.png?v=joycode"
+              src="/assets/JoyCodeNew_32x32.png"
               alt=""
               width={24}
               height={24}
@@ -2579,11 +2704,24 @@ function EditorWorkspace({
           </button>
           <button
             className="icon-button"
+            onClick={switchEditorView}
+            aria-label={
+              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
+            }
+            title={
+              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
+            }
+            aria-pressed={viewMode === 'widescreen'}
+          >
+            {viewMode === 'vertical' ? <VerticalViewIcon /> : <WideViewIcon />}
+          </button>
+          <button
+            className="icon-button"
             onClick={toggleKeyboardShortcuts}
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
           >
-            <InfoIcon />
+            <PngMaskIcon src="/assets/24_keyboard.png" size={14} />
           </button>
         </div>
         <div className="header-group" role="group" aria-label="Deliver">
@@ -2601,15 +2739,7 @@ function EditorWorkspace({
                 setAccountOpen(false);
               }}
             >
-              {exportPreset === 'youtube-1080' ? (
-                <YoutubeIcon />
-              ) : exportPreset === 'high-bitrate' ? (
-                <HighBitrateIcon />
-              ) : exportPreset === 'reels-1080' || exportPreset === 'shorts-1080' ? (
-                <ReelsIcon />
-              ) : (
-                <ExportIcon />
-              )}
+              <PngMaskIcon src="/assets/24_export-presets.png" size={14} />
             </button>
             {exportPresetOpen && (
               <section className="header-dropdown" aria-label="Export preset">
@@ -2669,15 +2799,13 @@ function EditorWorkspace({
                 setExportPresetOpen(false);
               }}
             >
-              <ListIcon />
+              <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
             </button>
             {processesOpen && (
               <section className="header-dropdown" aria-label="Recent processes">
                 <h3>Recent processes</h3>
                 {exportHistory.length === 0 ? (
-                  <p className="empty-hint">
-                    No exports yet. Use Export to create an MP4.
-                  </p>
+                  <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
                 ) : (
                   <ul className="process-list">
                     {exportHistory.map((entry) => (
@@ -2714,18 +2842,18 @@ function EditorWorkspace({
           <div className="header-menu">
             <button
               className="icon-button"
-              aria-label="JOY account"
+              aria-label="Joy Studio account"
               aria-expanded={accountOpen}
               title={
                 joySession.kind === 'ready'
-                  ? `Signed in · JOY account ${joySession.subject ?? ''}`
+                  ? `Signed in · ${joySession.displayName ?? joySession.subject ?? 'Joy Studio'}`
                   : joySession.kind === 'no-access'
-                    ? 'Signed in, JOY Media access not enabled'
+                    ? 'Signed in, Joy Studio access not enabled'
                     : joySession.kind === 'signed-out'
                       ? 'Signed out'
                       : joySession.kind === 'unavailable'
-                        ? 'JOY identity service unavailable'
-                        : 'JOY account'
+                        ? 'Sign-in status unavailable'
+                        : 'Joy Studio account'
               }
               onClick={() => {
                 setAccountOpen((open) => !open);
@@ -2738,22 +2866,48 @@ function EditorWorkspace({
               <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
             </button>
             {accountOpen && (
-              <section className="header-dropdown" aria-label="JOY account">
-                <h3>JOY account</h3>
+              <section
+                ref={accountDropdownRef}
+                className="header-dropdown account-dropdown"
+                aria-label="Joy Studio account"
+              >
                 {joySession.kind === 'ready' && (
                   <>
-                    <p>
-                      Signed in
-                      {joySession.subject !== undefined && (
-                        <>
-                          {' '}
-                          · account <bdi>{joySession.subject}</bdi>
-                        </>
-                      )}
-                    </p>
+                    <div className="account-card">
+                      {(() => {
+                        const label = joySession.displayName ?? joySession.subject;
+                        return null;
+                      })()}
+                      <div className="account-card-avatar" aria-hidden="true">
+                        {joySession.avatarObjectUrl !== undefined ? (
+                          <img
+                            className="account-card-avatar-img"
+                            src={joySession.avatarObjectUrl}
+                            alt=""
+                          />
+                        ) : (
+                          (
+                            (joySession.displayName ?? joySession.subject ?? 'J')
+                              .replace(/^@/, '')
+                              .trim()
+                              .charAt(0) || 'J'
+                          ).toUpperCase()
+                        )}
+                      </div>
+                      <div className="account-card-meta">
+                        <p className="account-card-status">Signed in</p>
+                        {(joySession.displayName ?? joySession.subject) !== undefined && (
+                          <p className="account-card-subject">
+                            <bdi>{joySession.displayName ?? joySession.subject}</bdi>
+                          </p>
+                        )}
+                      </div>
+                      <span className="account-card-dot session-ready" aria-hidden="true" />
+                    </div>
                     <button
-                      className="icon-button icon-button-labeled"
-                      title="Sign out of the shared JOY session"
+                      type="button"
+                      className="account-sign-out"
+                      title="Sign out of Joy Studio"
                       onClick={() => void signOut()}
                     >
                       <LogoutIcon />
@@ -2762,37 +2916,15 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'no-access' && (
-                  <p className="empty-hint">
-                    JOY Media access is not enabled for this account.
-                  </p>
+                  <p className="empty-hint">Joy Studio access is not enabled for this account.</p>
                 )}
                 {joySession.kind === 'signed-out' && (
-                  <>
-                    <p className="empty-hint">
-                      Not signed in. Sign in with your JOY account; this editor uses the shared JOY
-                      session.
-                    </p>
-                    <a
-                      className="icon-button icon-button-labeled"
-                      href={JOY_LOGIN_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Opens joyteam.ir sign-in in a new tab"
-                    >
-                      <UserIcon />
-                      Sign in at joyteam.ir
-                    </a>
-                  </>
+                  <p className="empty-hint">Returning to login…</p>
                 )}
-                {joySession.kind === 'unknown' && (
-                  <p className="empty-hint">
-                    Checking session…
-                  </p>
-                )}
+                {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
                 {joySession.kind === 'unavailable' && (
                   <p className="empty-hint">
-                    JOY identity service is unavailable. Your sign-in status is unchanged; try again
-                    shortly.
+                    Sign-in status could not be verified. Try again shortly.
                   </p>
                 )}
               </section>
@@ -2802,7 +2934,7 @@ function EditorWorkspace({
       </header>
 
       {paletteOpen && (
-        <section className="palette" aria-label="Command palette">
+        <section ref={paletteRef} className="palette" aria-label="Command palette">
           <input
             autoFocus
             value={query}
@@ -2898,6 +3030,7 @@ function EditorWorkspace({
           className="workspace"
           components={dockviewComponents}
           defaultTabComponent={PanelTab}
+          disableTabsOverflowList
           onReady={onReady}
         />
       </EditorPanelContext.Provider>
@@ -3080,7 +3213,14 @@ function MonitorPanel() {
   }, [zoomDrawerOpen]);
 
   useEffect(() => {
+    let cancelled = false;
     const mattes = readImageMatteMap(visualProject);
+    const activeStickerIds = new Set(
+      Object.values(visualProject.visualObjects)
+        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
+        .map((object) => object.id),
+    );
+    stickerImageCache.clearMissing(activeStickerIds);
     void Promise.all(
       Object.values(visualProject.visualObjects).map(async (object) => {
         if (object.kind !== 'image' || object.assetId === undefined) return;
@@ -3092,7 +3232,18 @@ function MonitorPanel() {
           loadBlob: loadStickerAssetBlob,
         });
       }),
-    ).then(() => setSceneTick((tick) => tick + 1));
+    )
+      .then(() => {
+        if (cancelled) return;
+        setSceneTick((tick) => tick + 1);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('Failed to sync sticker bitmaps', error);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [visualProject, stickerTick]);
 
   paintRef.current = (): void => {

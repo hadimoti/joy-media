@@ -7,9 +7,9 @@ const TRANSITION_B = '/transitions/preview/transition2.png';
 
 let sharedImageA: HTMLImageElement | null = null;
 let sharedImageB: HTMLImageElement | null = null;
-let loadPromise: Promise<[HTMLImageElement, HTMLImageElement]> | null = null;
+let loadPromise: Promise<readonly [HTMLImageElement, HTMLImageElement]> | null = null;
 
-function loadSharedImages(): Promise<[HTMLImageElement, HTMLImageElement]> {
+function loadSharedImages(): Promise<readonly [HTMLImageElement, HTMLImageElement]> {
   if (loadPromise !== null) return loadPromise;
   loadPromise = Promise.all([
     loadImage(TRANSITION_A),
@@ -18,6 +18,9 @@ function loadSharedImages(): Promise<[HTMLImageElement, HTMLImageElement]> {
     sharedImageA = a;
     sharedImageB = b;
     return [a, b] as const;
+  }).catch((error) => {
+    loadPromise = null;
+    throw error;
   });
   return loadPromise;
 }

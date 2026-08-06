@@ -10,6 +10,21 @@ export type MediaAuthMethod = 'gmail' | 'telegram';
 const OTP_TTL_MS = 5 * 60_000;
 const OTP_MAX_ACTIVE = 3;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
+const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
+
+const otpRateLimitWindow = new Map<string, number[]>();
+
+function checkOtpRateLimit(key: string): void {
+  const now = Date.now();
+  const timestamps = otpRateLimitWindow.get(key) ?? [];
+  const recent = timestamps.filter((ts) => now - ts < OTP_RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= OTP_RATE_LIMIT_MAX) {
+    throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
+  }
+  recent.push(now);
+  otpRateLimitWindow.set(key, recent);
+}
 
 /** Generic response text for both known and unknown contacts (no enumeration). */
 const OTP_REQUESTED_MESSAGE = 'If that account is registered, a login code was sent.';
@@ -50,12 +65,28 @@ export interface MediaAuthServiceOptions {
   readonly telegram?: MediaTelegramSenderLike;
 }
 
+export interface MediaSessionProfile {
+  readonly contact: string;
+  readonly method: MediaAuthMethod;
+  /** Human label: @username or gmail — never a bare telegram numeric id when username exists. */
+  readonly displayName: string;
+  readonly avatarAvailable: boolean;
+}
+
 /** The subset of MediaAuthService that http-server.ts depends on (injectable, like ApiAuthentication). */
 export interface MediaAuthApi {
-  requestOtp(contact: string, method: MediaAuthMethod): Promise<{ readonly message: string }>;
+  requestOtp(
+    contact: string,
+    method: MediaAuthMethod,
+    request?: IncomingMessage,
+  ): Promise<{ readonly message: string }>;
   verifyOtp(contact: string, method: MediaAuthMethod, code: string): Promise<string>;
   logout(token: string): Promise<void>;
   authenticate(request: IncomingMessage): Promise<Actor | undefined>;
+  sessionProfile(request: IncomingMessage): Promise<MediaSessionProfile | undefined>;
+  avatarBytes(
+    request: IncomingMessage,
+  ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined>;
 }
 
 /**
@@ -98,7 +129,7 @@ export class MediaAuthService implements MediaAuthApi {
       [
         gmail ?? null,
         telegramId ?? null,
-        input.telegramUsername?.trim().replace(/^@/, '') || null,
+        input.telegramUsername?.trim().replace(/^@+/, '').toLowerCase() || null,
         input.addedBy,
         new Date(),
       ],
@@ -120,14 +151,22 @@ export class MediaAuthService implements MediaAuthApi {
   }
 
   /** Always returns the same generic message regardless of allow-list membership. */
-  async requestOtp(rawContact: string, method: MediaAuthMethod): Promise<{ message: string }> {
+  async requestOtp(
+    rawContact: string,
+    method: MediaAuthMethod,
+    request?: IncomingMessage,
+  ): Promise<{ message: string }> {
+    if (request !== undefined) {
+      checkOtpRateLimit(requestIp(request));
+    }
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
     if (allowed !== undefined && allowed.enabled) {
+      const otpContact = canonicalOtpContact(contact, method, allowed);
       const active = await this.pool.query<{ count: string }>(
         `SELECT count(*)::text AS count FROM media_otp_codes
          WHERE contact = $1 AND method = $2 AND used = false AND expires_at > $3`,
-        [contact, method, new Date()],
+        [otpContact, method, new Date()],
       );
       if (Number(active.rows[0]?.count ?? '0') < OTP_MAX_ACTIVE) {
         const code = randomInt(100_000, 1_000_000).toString();
@@ -135,7 +174,7 @@ export class MediaAuthService implements MediaAuthApi {
         await this.pool.query(
           `INSERT INTO media_otp_codes (contact, method, code_hash, created_at, expires_at, used)
            VALUES ($1, $2, $3, $4, $5, false)`,
-          [contact, method, codeHash(contact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
+          [otpContact, method, codeHash(otpContact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
         );
         await this.deliver(allowed, method, code);
       }
@@ -145,7 +184,12 @@ export class MediaAuthService implements MediaAuthApi {
 
   async verifyOtp(rawContact: string, method: MediaAuthMethod, code: string): Promise<string> {
     const contact = normalizeContact(rawContact, method);
-    const hash = codeHash(contact, method, code);
+    const allowed = await this.findAllowed(contact, method);
+    if (allowed === undefined || !allowed.enabled) {
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    }
+    const otpContact = canonicalOtpContact(contact, method, allowed);
+    const hash = codeHash(otpContact, method, code);
     const result = await this.pool.query<{ id: string }>(
       `UPDATE media_otp_codes SET used = true
        WHERE id = (
@@ -154,19 +198,15 @@ export class MediaAuthService implements MediaAuthApi {
          ORDER BY created_at DESC LIMIT 1
        )
        RETURNING id`,
-      [contact, method, hash, new Date()],
+      [otpContact, method, hash, new Date()],
     );
     if (result.rows.length === 0) throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
-    const allowed = await this.findAllowed(contact, method);
-    if (allowed === undefined || !allowed.enabled) {
-      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
-    }
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
     await this.pool.query(
       `INSERT INTO media_sessions (token_hash, contact, method, created_at, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [sessionHash(token), contact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
+      [sessionHash(token), otpContact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
     );
     return token;
   }
@@ -180,24 +220,81 @@ export class MediaAuthService implements MediaAuthApi {
 
   /** Satisfies the existing `ApiAuthentication` interface (see http-server.ts). */
   authenticate = async (request: IncomingMessage): Promise<Actor | undefined> => {
+    const row = await this.sessionRow(request);
+    return row === undefined ? undefined : { id: row.contact };
+  };
+
+  async sessionProfile(request: IncomingMessage): Promise<MediaSessionProfile | undefined> {
+    const row = await this.sessionRow(request);
+    if (row === undefined) return undefined;
+    const allowed = await this.findAllowed(row.contact, row.method);
+    const displayName = displayNameFor(row.contact, row.method, allowed);
+    return {
+      contact: row.contact,
+      method: row.method,
+      displayName,
+      avatarAvailable: false,
+    };
+  }
+
+  async avatarBytes(
+    request: IncomingMessage,
+  ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined> {
+    const row = await this.sessionRow(request);
+    if (row === undefined) return undefined;
+    if (row.method === 'telegram') {
+      const fetchPhoto = this.telegram?.fetchProfilePhoto;
+      if (fetchPhoto === undefined) return undefined;
+      const bytes = await fetchPhoto(row.contact);
+      return bytes === undefined ? undefined : { mimeType: 'image/jpeg', bytes };
+    }
+    return undefined;
+  }
+
+  private async sessionRow(
+    request: IncomingMessage,
+  ): Promise<{ readonly contact: string; readonly method: MediaAuthMethod } | undefined> {
     const token = bearerToken(request);
     if (token === undefined) return undefined;
-    const result = await this.pool.query<{ contact: string }>(
-      `SELECT contact FROM media_sessions
+    const result = await this.pool.query<{ contact: string; method: string }>(
+      `SELECT contact, method FROM media_sessions
        WHERE token_hash = $1 AND expires_at > $2 AND revoked_at IS NULL`,
       [sessionHash(token), new Date()],
     );
-    const contact = result.rows[0]?.contact;
-    return contact === undefined ? undefined : { id: contact };
-  };
+    const row = result.rows[0];
+    if (row === undefined) return undefined;
+    if (row.method !== 'gmail' && row.method !== 'telegram') return undefined;
+    return { contact: row.contact, method: row.method };
+  }
 
   private async findAllowed(
     contact: string,
     method: MediaAuthMethod,
   ): Promise<MediaAllowedUser | undefined> {
-    const column = method === 'gmail' ? 'gmail' : 'telegram_id';
+    if (method === 'gmail') {
+      const result = await this.pool.query<AllowedUserRow>(
+        `SELECT * FROM media_allowed_users WHERE gmail = $1 LIMIT 1`,
+        [contact],
+      );
+      const row = result.rows[0];
+      return row === undefined ? undefined : allowedUserOf(row);
+    }
+
+    // Numeric Telegram user id, or username (with or without leading @).
+    // OTP is always delivered to telegram_id via the Bot API.
+    if (isTelegramNumericId(contact)) {
+      const result = await this.pool.query<AllowedUserRow>(
+        `SELECT * FROM media_allowed_users WHERE telegram_id = $1 LIMIT 1`,
+        [contact],
+      );
+      const row = result.rows[0];
+      return row === undefined ? undefined : allowedUserOf(row);
+    }
+
     const result = await this.pool.query<AllowedUserRow>(
-      `SELECT * FROM media_allowed_users WHERE ${column} = $1 LIMIT 1`,
+      `SELECT * FROM media_allowed_users
+       WHERE telegram_username IS NOT NULL AND LOWER(telegram_username) = $1
+       LIMIT 1`,
       [contact],
     );
     const row = result.rows[0];
@@ -225,6 +322,25 @@ export class DisabledMediaAuth implements MediaAuthApi {
   async authenticate(): Promise<Actor | undefined> {
     return undefined;
   }
+  async sessionProfile(): Promise<MediaSessionProfile | undefined> {
+    return undefined;
+  }
+  async avatarBytes(): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined> {
+    return undefined;
+  }
+}
+
+function displayNameFor(
+  contact: string,
+  method: MediaAuthMethod,
+  allowed: MediaAllowedUser | undefined,
+): string {
+  if (method === 'gmail') {
+    return allowed?.gmail ?? contact;
+  }
+  const username = allowed?.telegramUsername?.replace(/^@+/, '').trim();
+  if (username !== undefined && username.length > 0) return `@${username}`;
+  return 'Telegram account';
 }
 
 function allowedUserOf(row: AllowedUserRow): MediaAllowedUser {
@@ -249,10 +365,30 @@ function normalizeTelegramId(value: string | undefined): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
+function isTelegramNumericId(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+/** Strip optional @; lowercase usernames; keep numeric ids as-is. */
 function normalizeContact(value: string, method: MediaAuthMethod): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
-  return method === 'gmail' ? trimmed.toLowerCase() : trimmed;
+  if (method === 'gmail') return trimmed.toLowerCase();
+  const withoutAt = trimmed.replace(/^@+/, '');
+  if (withoutAt.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
+  return isTelegramNumericId(withoutAt) ? withoutAt : withoutAt.toLowerCase();
+}
+
+/** Key OTP/session rows by stable telegram_id when available (username or id login). */
+function canonicalOtpContact(
+  contact: string,
+  method: MediaAuthMethod,
+  allowed: MediaAllowedUser,
+): string {
+  if (method === 'telegram' && allowed.telegramId !== null && allowed.telegramId.length > 0) {
+    return allowed.telegramId;
+  }
+  return contact;
 }
 
 function codeHash(contact: string, method: MediaAuthMethod, code: string): string {
@@ -266,4 +402,17 @@ function sessionHash(token: string): string {
 function bearerToken(request: IncomingMessage): string | undefined {
   const value = request.headers.authorization;
   return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice(7) : undefined;
+}
+
+function requestIp(request: IncomingMessage): string {
+  const headers = request.headers;
+  if (headers === undefined || headers === null) return 'unknown';
+  const forwarded = headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0]!.trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0) {
+    return forwarded[0]!.trim();
+  }
+  return request.socket.remoteAddress ?? 'unknown';
 }

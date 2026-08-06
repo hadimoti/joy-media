@@ -101,6 +101,7 @@ export function PanelShell({
             role="tab"
             className="joy-panel-tab"
             aria-selected={activeTab === tab.id}
+            aria-label={tab.label || tab.id}
             disabled={tab.disabled === true}
             onClick={() => onTabChange?.(tab.id)}
           >
@@ -178,13 +179,15 @@ export function PanelShell({
       )}
 
       {search !== undefined && searchOpen && (
-        <div className="joy-panel-search">
+        <div className="joy-panel-search" id={`${searchFieldId}-wrap`}>
           <input
             id={searchFieldId}
             ref={searchInputRef}
             type="search"
+            role="searchbox"
             placeholder={search.placeholder ?? 'Search…'}
             aria-label={`Search ${title}`}
+            aria-controls={`${searchFieldId}-results`}
             value={search.value}
             onChange={(event) => search.onChange(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -207,6 +210,7 @@ export function PanelShell({
       )}
 
       <div
+        id={search !== undefined ? `${searchFieldId}-results` : undefined}
         className={inactive ? 'joy-panel-body is-inactive' : 'joy-panel-body'}
         aria-disabled={inactive ? true : undefined}
       >

@@ -59,6 +59,7 @@ import { EditorPanelContext } from './App.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { iconUrl } from './icon-assets.js';
 import {
   createMotionScene,
   duplicateMotionScene,
@@ -131,12 +132,12 @@ const IDLE_OBJECT: VisualObjectV1 = {
   },
 };
 
-const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string }[] = [
-  { id: 'my-motions', label: 'My Motions' },
-  { id: 'library', label: 'Library' },
-  { id: 'html-scenes', label: 'Scenes' },
-  { id: 'presets', label: 'Presets' },
-  { id: 'spatial', label: 'Spatial' },
+const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string; readonly iconUrl: string }[] = [
+  { id: 'my-motions', label: 'My Motions', iconUrl: iconUrl('24_my-media.png') },
+  { id: 'library', label: 'Library', iconUrl: iconUrl('24_library.png') },
+  { id: 'html-scenes', label: 'Scenes', iconUrl: iconUrl('24_scenes.png') },
+  { id: 'presets', label: 'Presets', iconUrl: iconUrl('24_presets.png') },
+  { id: 'spatial', label: 'Spatial', iconUrl: iconUrl('24_spatial.png') },
 ];
 
 /* ─── Motion Card ─── */
@@ -204,7 +205,7 @@ function MotionCard({
     <div className="motion-card" role="listitem">
       <div className="motion-card-preview" aria-hidden="true">
         <div className="motion-card-live" style={animStyle}>
-          <img src="/assets/logo.png?v=joycode" alt="" draggable={false} />
+          <img src="/assets/JoyCodeNew_32x32.png" alt="" draggable={false} />
         </div>
         <span className="motion-card-duration">{(motion.durationMs / 1000).toFixed(1)}s</span>
       </div>
@@ -1192,11 +1193,8 @@ export function MotionPanel({
       title="Motion"
       iconUrl={panelTabIconUrl('motion')}
       className="motion-panel"
-      search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}
-      tabs={LIBRARY_SUBTABS}
-      activeTab={subtab}
-      onTabChange={(id) => setSubtab(id as LibrarySubtab)}
       inactive={inactive}
+      search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}
       actions={
         <>
           <button
@@ -1221,57 +1219,83 @@ export function MotionPanel({
         </>
       }
     >
-      <>
-        {subtab === 'my-motions' && (
-          <MyMotionsTab
-            entries={myMotions}
-            onOpen={openMySceneMotion}
-            onRename={renameMySceneMotion}
-            onDuplicate={duplicateMySceneMotion}
-            onDelete={deleteMySceneMotion}
-          />
-        )}
+      <div className="templates-content">
+        <aside className="templates-sidebar" aria-label="Motion sections">
+          <div className="templates-sidebar-tabs" role="tablist" aria-label="Motion sections">
+            {LIBRARY_SUBTABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                className="templates-sidebar-tab"
+                aria-label={item.label}
+                title={item.label}
+                aria-selected={subtab === item.id}
+                onClick={() => setSubtab(item.id)}
+              >
+                <span
+                  className="templates-sidebar-tab-icon"
+                  style={{
+                    maskImage: `url(${item.iconUrl})`,
+                    WebkitMaskImage: `url(${item.iconUrl})`,
+                  }}
+                  aria-hidden="true"
+                />
+              </button>
+            ))}
+          </div>
+        </aside>
+        <div className="templates-main">
+          {subtab === 'my-motions' && (
+            <MyMotionsTab
+              entries={myMotions}
+              onOpen={openMySceneMotion}
+              onRename={renameMySceneMotion}
+              onDuplicate={duplicateMySceneMotion}
+              onDelete={deleteMySceneMotion}
+            />
+          )}
 
-        {subtab === 'library' && (
-          <LibraryTab
-            registry={motionRegistry}
-            favorites={favorites}
-            onToggleFavorite={toggleFavorite}
-            onOpenMotion={openMotion}
-            onDuplicate={duplicateMotion}
-            favoritesOnly={favoritesOnly}
-            query={query}
-          />
-        )}
+          {subtab === 'library' && (
+            <LibraryTab
+              registry={motionRegistry}
+              favorites={favorites}
+              onToggleFavorite={toggleFavorite}
+              onOpenMotion={openMotion}
+              onDuplicate={duplicateMotion}
+              favoritesOnly={favoritesOnly}
+              query={query}
+            />
+          )}
 
-        {subtab === 'presets' && (
-          <div className="motion-presets">
-            <header className="motion-presets-target">
-              <span className="motion-presets-target-label">Target</span>
-              <p className="motion-object-id" title={target.id}>
-                {inactive ? 'Select a clip' : target.id}
-              </p>
-            </header>
-            <div className="motion-controls motion-presets-toolbar">
-              <label className="motion-field">
-                Parent
-                <select
-                  value={target.parentId ?? ''}
-                  disabled={inactive}
-                  onChange={(event) => setParent(event.target.value)}
-                >
-                  <option value="">(none)</option>
-                  {parentCandidates.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.id}
-                      {candidate.kind === 'null' ? ' (null)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="motion-field motion-field-grow">
-                Preset
-                <select
+          {subtab === 'presets' && (
+            <div className="motion-presets">
+              <header className="motion-presets-target">
+                <span className="motion-presets-target-label">Target</span>
+                <p className="motion-object-id" title={target.id}>
+                  {inactive ? 'Select a clip' : target.id}
+                </p>
+              </header>
+              <div className="motion-controls motion-presets-toolbar">
+                <label className="motion-field">
+                  Parent
+                  <select
+                    value={target.parentId ?? ''}
+                    disabled={inactive}
+                    onChange={(event) => setParent(event.target.value)}
+                  >
+                    <option value="">(none)</option>
+                    {parentCandidates.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.id}
+                        {candidate.kind === 'null' ? ' (null)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="motion-field motion-field-grow">
+                  Preset
+                  <select
                   value={presetId}
                   disabled={inactive}
                   onChange={(event) => setPresetId(event.target.value)}
@@ -1408,7 +1432,8 @@ export function MotionPanel({
             onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
           />
         )}
-      </>
+        </div>
+      </div>
     </PanelShell>
   );
 }

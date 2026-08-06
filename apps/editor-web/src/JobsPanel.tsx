@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
   type BrowserJob,
@@ -34,8 +34,10 @@ export function JobsPanel({
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshSeqRef.current;
     try {
       const nextWorkers = await client.workers();
       let nextJobs: readonly BrowserJob[] = [];
@@ -46,11 +48,13 @@ export function JobsPanel({
         if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
         projectMissing = true;
       }
+      if (requestId !== refreshSeqRef.current) return;
       setWorkers(nextWorkers);
       setJobs(nextJobs);
       setProjectInitialized(!projectMissing);
       setStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
+      if (requestId !== refreshSeqRef.current) return;
       setStatus(`Not connected or not signed in: ${message(error)}`);
     }
   }, [client, projectId]);
@@ -58,7 +62,10 @@ export function JobsPanel({
   useEffect(() => {
     void refresh();
     const interval = window.setInterval(() => void refresh(), 2_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      refreshSeqRef.current += 1;
+      window.clearInterval(interval);
+    };
   }, [refresh]);
 
   const sortedWorkers = useMemo(() => {
@@ -279,7 +286,7 @@ export function JobsPanel({
                   <div className="jobs-worker-row">
                     <div className="jobs-worker-copy">
                       <div className="jobs-row-main">
-                        <strong>Thumbnail</strong>
+                        <strong>{job.type === 'asset.thumbnail' ? 'Thumbnail' : job.type}</strong>
                         <span className={`jobs-pill jobs-pill--${job.state}`}>
                           {jobStateLabel(job)}
                         </span>
@@ -366,8 +373,10 @@ export function JobsPanel({
                 should appear within a few seconds.
               </li>
               <li>
-                GPU jobs need local <code>image.comfy</code> or <code>audio.ml-denoise</code> on that
-                same machine and never run on the Media VPS.
+                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>,
+                or <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
+                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>, <code>edit.higgsfield</code>)
+                require API keys configured in <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
               </li>
             </ol>
           )}

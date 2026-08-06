@@ -3,7 +3,7 @@
  * joy-vps's shared login card (bot/webapp/shared/login.js +
  * shared/core.css) — same markup shape, same class names, same CSS
  * values/animations. The only intentional difference is the logo image
- * (this app's own /assets/logo.png instead of joyteam's dragon logo) and
+ * (this app's own JoyCodeNew mark instead of joyteam's dragon logo) and
  * that the "background" behind the card is the real blurred editor instead
  * of joyteam.ir's plain dot-grid screen.
  */
@@ -253,35 +253,144 @@
   display: block;
   margin-left: auto;
   margin-right: auto;
-  width: 72px;
-  height: 72px;
-  border-radius: 18px;
+  width: 80px;
+  height: 80px;
   margin-bottom: 16px;
   object-fit: contain;
-  box-shadow: 0 0 32px #f9731633;
-  animation: jm-logo-glow 3s ease-in-out infinite;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  transform-origin: 50% 65%;
+  animation: jm-logo-glow 3s ease-in-out infinite, jm-logo-wiggle 2.4s ease-in-out infinite;
 }
 
 @keyframes jm-logo-glow {
   0%,
   100% {
-    filter: drop-shadow(0 0 12px #cc000044);
+    filter: drop-shadow(0 0 12px #f4b72f44);
   }
   50% {
-    filter: drop-shadow(0 0 28px #cc000088);
+    filter: drop-shadow(0 0 28px #f4b72f88);
   }
 }
 
-/* ── title (BlockPro isn't bundled in this app; falls back to RooyinFree) ── */
+@keyframes jm-logo-wiggle {
+  0%,
+  100% {
+    transform: rotate(-3.5deg);
+  }
+  50% {
+    transform: rotate(3.5deg);
+  }
+}
+
+/* ── title (English brand, RooyinFree + letter cascade) ── */
 
 .login-title {
-  font-family: 'BlockPro', RooyinFree, Rooyin, Tahoma, sans-serif;
-  direction: rtl;
+  font-family: RooyinFree, Rooyin, Tahoma, sans-serif;
+  direction: ltr;
   text-align: center;
   font-size: 28px;
+  font-weight: 700;
+  line-height: 40px;
+  min-height: 40px;
   margin-bottom: 30px;
   letter-spacing: 0;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.login-title-char {
+  display: inline-block;
+  animation: jm-title-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Reserve width for J/o/y so Matrix glyph swaps don't shove “Studio”. */
+.login-title-joy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 2.55em;
+  min-height: 40px;
+  height: 40px;
+}
+
+.login-title-matrix-slot {
+  min-width: 0.82em;
+  min-height: 40px;
+  line-height: 40px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.login-title-char.is-matrix {
+  color: #f4b72f;
+  font-variant-ligatures: none;
+  text-shadow: 0 0 10px rgba(244, 183, 47, 0.45);
+}
+
+.login-title-dot {
+  animation:
+    jm-title-in-motion 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    jm-title-dot-blink 1.1s step-end infinite;
+}
+
+@keyframes jm-title-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes jm-title-in-motion {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes jm-title-dot-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-logo {
+    animation: none;
+    filter: drop-shadow(0 0 16px #f4b72f66);
+  }
+
+  .login-title-char {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .login-title-char.is-matrix {
+    color: inherit;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .login-title-dot {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ── method switcher (Gmail / Telegram / Token) ── */
@@ -352,12 +461,19 @@
   font-weight: 700;
 }
 
-.auth-input {
+.auth-input-wrap {
+  position: relative;
   width: 100%;
+}
+
+/* Beat app.css `input:not([type=range])…` so size tokens actually apply. */
+.auth-input:not([type='range']):not([type='file']):not([type='checkbox']) {
+  width: 100%;
+  height: 54px;
   box-sizing: border-box;
   padding: 16px;
-  border-radius: 14px;
-  border: 1.5px solid #f97316;
+  border-radius: 12px;
+  border: 1.5px solid #f4b72f;
   outline: none;
   background: rgba(209, 209, 209, 0.25);
   color: #ffffff;
@@ -370,6 +486,45 @@
   direction: ltr;
 }
 
+.auth-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 5;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: 12px;
+  border: 1px solid rgba(249, 115, 22, 0.45);
+  background: rgba(22, 20, 24, 0.96);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  max-height: 180px;
+  overflow: auto;
+}
+
+.auth-suggest-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.9rem;
+  text-align: left;
+  padding: 10px 12px;
+  cursor: pointer;
+  direction: ltr;
+}
+
+.auth-suggest-item:hover,
+.auth-suggest-item:focus-visible {
+  outline: none;
+  background: rgba(249, 115, 22, 0.18);
+}
+
 .auth-input::placeholder {
   color: rgba(255, 255, 255, 0.55);
   font-weight: 700;
@@ -377,9 +532,9 @@
 }
 
 .auth-input:focus {
-  border-color: #fb923c;
+  border-color: #ffc94f;
   box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.14), inset -4px -4px 8px rgba(255, 255, 255, 0.18),
-    0 0 0 3px rgba(249, 115, 22, 0.22);
+    0 0 0 3px rgba(244, 183, 47, 0.22);
 }
 
 .login-btn {
@@ -387,7 +542,7 @@
   margin-top: 24px;
   padding: 16px;
   border-radius: 12px;
-  border: 1.5px solid #f97316;
+  border: 1.5px solid #f4b72f;
   background: linear-gradient(165deg, #1c1a1d 0%, #111012 100%);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38), inset 4px 4px 8px #080809,
     inset -4px -4px 8px #252327;
@@ -410,11 +565,11 @@
 
 .login-btn-gradient {
   display: inline-block;
-  background: linear-gradient(92deg, #fed7aa 0%, #fb923c 48%, #ea580c 100%);
+  background: linear-gradient(92deg, #ffe08a 0%, #f4b72f 48%, #c99214 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  color: #f97316;
+  color: #f4b72f;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   letter-spacing: -0.01em;
 }
@@ -427,6 +582,29 @@
   margin: 8px 0 14px;
 }
 
+.login-tg-hint {
+  margin: 0 0 14px;
+  padding: 0 8px;
+  text-align: center;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--muted, #a8a8b0);
+  direction: ltr;
+}
+
+.login-tg-hint-link {
+  color: #f4b72f;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-tg-hint-link:hover,
+.login-tg-hint-link:focus-visible {
+  color: #ffc94f;
+}
+
 .otp-box {
   width: 44px;
   height: 54px;
@@ -434,7 +612,9 @@
   border: 1.5px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   text-align: center;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 1.2rem;
+  font-weight: 600;
   color: #fff;
   outline: none;
   box-sizing: border-box;

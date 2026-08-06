@@ -33,6 +33,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
+import { JoyCode3DViewer } from './JoyCode3DViewer.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import {
   addJoyCodeMessage,
@@ -52,6 +53,7 @@ const THINKING_REVEAL_MS = 320;
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
+  { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
 ];
 
 interface PendingPlan {
@@ -895,6 +897,8 @@ export function AgentPanel({
             </div>
           </section>
         )}
+
+        {tab === '3d' && <JoyCode3DViewer />}
       </div>
     </PanelShell>
   );

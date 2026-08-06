@@ -24,6 +24,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   agent: 'Joy Code',
   workflows: 'Workflows',
   plugins: 'Plugins',
+  templates: 'Templates',
 };
 
 /**
@@ -50,6 +51,7 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   agent: iconUrl('ui/agent-ai_24x24.png'),
   workflows: iconUrl('workflow.png'),
   plugins: iconUrl('plugin.png'),
+  templates: iconUrl('24_templates.png'),
 };
 
 /** Inline SVG tab icons (preferred over PNG masks when present). */

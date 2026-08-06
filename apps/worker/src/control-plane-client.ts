@@ -14,16 +14,19 @@ export interface LeasedJob {
   readonly assetId?: string;
 }
 export interface WorkerJobResult {
-  readonly kind: 'asset.thumbnail' | 'image.comfy' | 'audio.ml-denoise';
-  readonly assetId: string;
-  readonly sha256: string;
-  readonly bytes: number;
-  readonly localRef: string;
-  readonly descriptor: {
+  readonly kind: 'asset.thumbnail' | 'image.comfy' | 'audio.ml-denoise' | 'text' | 'image' | 'video';
+  readonly assetId?: string;
+  readonly sha256?: string;
+  readonly bytes?: number;
+  readonly localRef?: string;
+  readonly descriptor?: {
     readonly mimeType: string;
     readonly width?: number;
     readonly height?: number;
   };
+  readonly provider?: string;
+  readonly text?: string;
+  readonly model?: string;
 }
 
 export interface WorkerControlPlaneClientOptions {
@@ -114,15 +117,15 @@ export class WorkerControlPlaneClient {
     const headers: Record<string, string> = {
       authorization: `Bearer ${sessionToken}`,
       accept: 'application/json',
-      'content-type': result.descriptor.mimeType,
+      'content-type': result.descriptor?.mimeType ?? 'application/octet-stream',
       'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
-      'x-joy-asset-id': result.assetId,
-      'x-joy-sha256': result.sha256,
-      'x-joy-bytes': String(result.bytes),
+      'x-joy-asset-id': result.assetId ?? jobId,
+      'x-joy-sha256': result.sha256 ?? '',
+      'x-joy-bytes': String(result.bytes ?? 0),
     };
-    if (result.descriptor.width !== undefined)
+    if (result.descriptor?.width !== undefined)
       headers['x-joy-width'] = String(result.descriptor.width);
-    if (result.descriptor.height !== undefined)
+    if (result.descriptor?.height !== undefined)
       headers['x-joy-height'] = String(result.descriptor.height);
     const response = await this.#fetch(
       `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,

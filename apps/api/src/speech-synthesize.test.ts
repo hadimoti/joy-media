@@ -1,5 +1,12 @@
+import { execSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { resolveEdgeVoice, runEdgeSpeechSynthesis } from './speech-synthesize.js';
+
+let edgettsAvailable = false;
+try {
+  execSync('which edge-tts', { stdio: 'ignore' });
+  edgettsAvailable = true;
+} catch { /* edge-tts not installed */ }
 
 describe('resolveEdgeVoice', () => {
   it('maps FA/EN languages to neural voices', () => {
@@ -12,7 +19,7 @@ describe('resolveEdgeVoice', () => {
   });
 });
 
-describe('runEdgeSpeechSynthesis', () => {
+describe.skipIf(!edgettsAvailable)('runEdgeSpeechSynthesis', () => {
   it('produces MP3 bytes via edge-tts', () => {
     const result = runEdgeSpeechSynthesis({ text: 'JOY Media TTS check', language: 'en-US' });
     expect(result.engine).toBe('edge-tts');

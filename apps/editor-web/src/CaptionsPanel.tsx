@@ -4,7 +4,6 @@ import {
   captionCuesAt,
   captionSlots,
   DEFAULT_CAPTION_TEMPLATE_ID,
-  DEFAULT_CONFIDENCE_WARNING_THRESHOLD,
   formatSrt,
   formatWebVtt,
   JOY_CAPTION_TEMPLATES,
@@ -19,37 +18,28 @@ import {
   segmentTimelineRange,
 } from '@joy-media/captions-core';
 import type { CaptionSlot } from '@joy-media/captions-core';
+import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import {
   AutoCaptionIcon,
   BurnInIcon,
-  CaptionCleanIcon,
-  CaptionKaraokeIcon,
-  CaptionRtlIcon,
-  DownloadIcon,
   LanguageIcon,
-  MicIcon,
   PlusIcon,
   TrashIcon,
   UndoIcon,
-  UploadIcon,
+  PngMaskIcon,
 } from './icons.js';
-import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
-const TABS: readonly PanelTabSpec[] = [
-  { id: 'transcript', label: 'Transcript' },
-  { id: 'preview', label: 'Preview' },
-];
-import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
 > = {
-  'joy-clean': { Icon: CaptionCleanIcon, label: 'JOY Clean' },
-  'joy-karaoke-pop': { Icon: CaptionKaraokeIcon, label: 'JOY Karaoke Pop' },
-  'joy-rtl-classic': { Icon: CaptionRtlIcon, label: 'JOY RTL Classic' },
+  'joy-clean': { Icon: () => <PngMaskIcon src="/assets/24_Text.png" size={14} />, label: 'JOY Clean' },
+  'joy-karaoke-pop': { Icon: () => <PngMaskIcon src="/assets/24_creative.png" size={14} />, label: 'JOY Karaoke Pop' },
+  'joy-rtl-classic': { Icon: () => <PngMaskIcon src="/assets/24_UI.png" size={14} />, label: 'JOY RTL Classic' },
 };
 
 /**
@@ -77,7 +67,6 @@ export function CaptionsPanel({
   readonly onProjectChange: (next: JoyProjectV1) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState('transcript');
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('captions root composition is unavailable');
   const slots = captionSlots(composition, project.captionDocuments);
@@ -90,9 +79,6 @@ export function CaptionsPanel({
       title="Captions"
       iconUrl={panelTabIconUrl('captions')}
       className="captions-panel"
-      tabs={TABS}
-      activeTab={tab}
-      onTabChange={setTab}
       search={{ value: query, onChange: setQuery, placeholder: 'Search transcription…' }}
       inactive={idle}
       {...(idle
@@ -115,10 +101,7 @@ export function CaptionsPanel({
         </button>
       }
     >
-      {tab === 'preview' && <CaptionPreview project={project} playheadUs={playheadUs} />}
-
-      {tab === 'transcript' &&
-        slots.map((slot) => (
+      {slots.map((slot) => (
           <CaptionSlotEditor
             key={`${slot.trackId}:${slot.clip.id}`}
             slot={slot}
@@ -134,73 +117,6 @@ export function CaptionsPanel({
 }
 
 /** Renders the templated caption layout at the playhead, scaled to a small stage. */
-function CaptionPreview({
-  project,
-  playheadUs,
-}: {
-  readonly project: JoyProjectV1;
-  readonly playheadUs: number;
-}) {
-  const composition = project.compositions[project.rootCompositionId]!;
-  const cues = captionCuesAt(composition, project.captionDocuments, playheadUs);
-  const nodes = layoutTemplatedCaptionNodes(cues, {
-    viewportWidth: composition.width,
-    viewportHeight: composition.height,
-  }) as readonly TextNode[];
-  const stageWidth = 360;
-  const scale = stageWidth / composition.width;
-  return (
-    <div
-      className="caption-preview"
-      style={{ width: stageWidth, height: composition.height * scale }}
-      aria-label="Caption preview"
-    >
-      {nodes.map((node) => (
-        <span
-          key={node.id}
-          dir={node.direction}
-          style={{
-            position: 'absolute',
-            top: node.transform.translateY * scale,
-            left: node.transform.translateX * scale,
-            transform:
-              node.align === 'center'
-                ? 'translateX(-50%)'
-                : node.align === 'right'
-                  ? 'translateX(-100%)'
-                  : undefined,
-            fontSize: (node.fontSizePx ?? 24) * scale,
-            lineHeight: 1.15,
-            whiteSpace: 'nowrap',
-            color: rgbaCss(node.color),
-            backgroundColor: node.background === undefined ? undefined : rgbaCss(node.background),
-            padding: node.background === undefined ? undefined : '0.05em 0.35em',
-            borderRadius: '0.15em',
-          }}
-        >
-          {node.spans === undefined
-            ? node.text
-            : node.spans.map((span, index) => (
-                <span
-                  key={index}
-                  style={{
-                    color: rgbaCss(span.color),
-                    fontWeight: span.emphasis === true ? 700 : undefined,
-                  }}
-                >
-                  {span.text}
-                </span>
-              ))}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function rgbaCss(color: { r: number; g: number; b: number; a: number }): string {
-  return `rgba(${color.r}, ${color.g}, ${color.b}, ${(color.a / 255).toFixed(3)})`;
-}
-
 function downloadTextFile(fileName: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
   const anchor = window.document.createElement('a');
@@ -292,7 +208,7 @@ function CaptionSlotEditor({
         <div className="captions-template-icons" role="group" aria-label="Caption template">
           {JOY_CAPTION_TEMPLATES.map((template) => {
             const meta = TEMPLATE_ICONS[template.id];
-            const Icon = meta?.Icon ?? CaptionCleanIcon;
+            const Icon = meta?.Icon ?? (() => <PngMaskIcon src="/assets/24_Text.png" size={14} />);
             const active = (document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID) === template.id;
             return (
               <button
@@ -315,7 +231,7 @@ function CaptionSlotEditor({
           data-guide="Export SRT"
           onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
         >
-          <DownloadIcon />
+          <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
         <button
           className="icon-button"
@@ -323,7 +239,7 @@ function CaptionSlotEditor({
           data-guide="Export VTT"
           onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
-          <DownloadIcon />
+          <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
         <button
           className="icon-button"
@@ -331,7 +247,7 @@ function CaptionSlotEditor({
           title="Import SRT/VTT file"
           onClick={() => fileInput.current?.click()}
         >
-          <UploadIcon />
+          <PngMaskIcon src="/assets/24_arrows.png" size={14} />
         </button>
         <input
           ref={fileInput}
@@ -374,7 +290,7 @@ function CaptionSlotEditor({
           data-guide="English (en)"
           onClick={() => void onTranscribe(document.id, 'en-US')}
         >
-          <MicIcon />
+          <PngMaskIcon src="/assets/24_Audio.png" size={14} />
         </button>
       </header>
       {importIssues > 0 && (
@@ -393,77 +309,27 @@ function CaptionSlotEditor({
           const display = segmentDisplayText(document, segment);
           const source = segmentSourceText(document, segment);
           const confidence = segmentMinConfidence(document, segment);
-          const lowConfidence =
-            confidence !== undefined && confidence < DEFAULT_CONFIDENCE_WARNING_THRESHOLD;
-          const commitText = (value: string) => {
-            if (value === display) return;
-            onDispatch({
-              label: 'Edit caption text',
-              commands: [
-                {
-                  type: 'caption.setSegmentText',
-                  payload: {
-                    documentId: document.id,
-                    segmentId: segment.id,
-                    // Typing the source text back reverts to the source tokens.
-                    textOverride: value === source ? undefined : value,
-                  },
-                },
-              ],
-            });
-          };
-          const commitTiming = (startSeconds: number, endSeconds: number) => {
-            const startUs = Math.round(startSeconds * 1_000_000);
-            const endUs = Math.round(endSeconds * 1_000_000);
-            if (startUs === segment.startUs && endUs === segment.endUs) return;
-            if (startUs < 0 || endUs <= startUs) return;
-            onDispatch({
-              label: 'Retime caption',
-              commands: [
-                {
-                  type: 'caption.setSegmentTiming',
-                  payload: { documentId: document.id, segmentId: segment.id, startUs, endUs },
-                },
-              ],
-            });
-          };
           return (
             <li key={segment.id} className={active ? 'caption-row active' : 'caption-row'}>
-              <button
-                aria-label={`Seek to caption ${segment.id}`}
+              <span
+                className="caption-time"
+                role="button"
+                tabIndex={0}
+                aria-label={`Seek to ${(segment.startUs / 1_000_000).toFixed(2)}s`}
                 onClick={() => range !== undefined && onSeek(range.startUs)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && range !== undefined) onSeek(range.startUs); }}
               >
                 {(segment.startUs / 1_000_000).toFixed(2)}s
-              </button>
-              <TimingField
-                label="Start (s)"
-                value={segment.startUs / 1_000_000}
-                onCommit={(value) => commitTiming(value, segment.endUs / 1_000_000)}
-              />
-              <TimingField
-                label="End (s)"
-                value={segment.endUs / 1_000_000}
-                onCommit={(value) => commitTiming(segment.startUs / 1_000_000, value)}
-              />
-              <input
-                key={`${segment.id}:${display}`}
-                aria-label={`Caption text ${segment.id}`}
-                dir={direction}
-                defaultValue={display}
-                title={segment.textOverride === undefined ? undefined : `Source: ${source}`}
-                onBlur={(event) => commitText(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur();
-                }}
-              />
-              {lowConfidence && (
-                <span className="caption-warning" title="Low transcription confidence">
-                  ⚠ {Math.round(confidence * 100)}%
+              </span>
+              {confidence !== undefined && (
+                <span className="caption-warning" title={`Transcription confidence: ${Math.round(confidence * 100)}%`}>
+                  {Math.round(confidence * 100)}%
                 </span>
               )}
+              <span className="caption-source">{source}</span>
               {segment.textOverride !== undefined && (
                 <button
-                  className="icon-button"
+                  className="icon-button caption-undo-btn"
                   aria-label={`Revert caption ${segment.id} to source text`}
                   title={`Revert to source: ${source}`}
                   onClick={() =>
@@ -486,7 +352,7 @@ function CaptionSlotEditor({
                 </button>
               )}
               <button
-                className="icon-button"
+                className="icon-button caption-delete-btn"
                 aria-label={`Delete caption ${segment.id}`}
                 title="Delete caption"
                 onClick={() =>
@@ -511,30 +377,3 @@ function CaptionSlotEditor({
   );
 }
 
-function TimingField({
-  label,
-  value,
-  onCommit,
-}: {
-  readonly label: string;
-  readonly value: number;
-  readonly onCommit: (value: number) => void;
-}) {
-  return (
-    <input
-      key={value}
-      aria-label={label}
-      type="number"
-      step={0.05}
-      min={0}
-      defaultValue={value.toFixed(2)}
-      onBlur={(event) => {
-        const next = event.currentTarget.valueAsNumber;
-        if (Number.isFinite(next)) onCommit(next);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur();
-      }}
-    />
-  );
-}

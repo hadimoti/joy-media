@@ -219,13 +219,29 @@ export class BrowserControlPlaneClient {
   async enqueueWorkerGeneration(
     projectId: string,
     id: string,
-    type: 'image.comfy' | 'audio.ml-denoise',
+    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
     assetId: string,
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,
       type,
       assetId,
+    });
+  }
+  async enqueueAiGeneration(
+    projectId: string,
+    id: string,
+    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
+    prompt: string,
+    options?: { readonly imageAssetId?: string; readonly model?: string; readonly params?: Record<string, unknown> },
+  ): Promise<BrowserJob> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+      id,
+      type,
+      prompt,
+      ...(options?.imageAssetId !== undefined ? { assetId: options.imageAssetId } : {}),
+      ...(options?.model !== undefined ? { model: options.model } : {}),
+      ...(options?.params !== undefined ? { params: options.params } : {}),
     });
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<void> {

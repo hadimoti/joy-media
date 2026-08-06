@@ -5,22 +5,28 @@
  * docs/adr/0016-shared-joy-identity-boundary.md): this module now probes and
  * clears JOY Media's own session token (see media-session.ts for the token
  * itself and the login/OTP calls), issued by this app's own allow-list, not
- * by joyteam.ir. The header "JOY account" widget kept the same
- * `JoySessionState` shape so the rest of App.tsx didn't need to change.
+ * by joyteam.ir. The header account widget kept the same `JoySessionState`
+ * shape so the rest of App.tsx didn't need to change.
  */
 
 import { clearStoredMediaToken, getStoredMediaToken, type MediaSessionStorage } from './media-session.js';
-
-/** The header's "signed-out" sign-in link is unreachable once LoginGate covers
- *  the app (blurred + pointer-events:none), so this target is never followed. */
-export const JOY_LOGIN_URL = '#';
 
 export type JoySessionState =
   | { readonly kind: 'unknown' }
   | { readonly kind: 'signed-out' }
   | { readonly kind: 'no-access'; readonly message: string }
   | { readonly kind: 'unavailable' }
-  | { readonly kind: 'ready'; readonly subject: string | undefined };
+  | {
+      readonly kind: 'ready';
+      /** Stable actor id (telegram numeric id or gmail) — used for ownership keys. */
+      readonly subject: string | undefined;
+      /** Human label for the account card (@username or gmail). */
+      readonly displayName: string | undefined;
+      readonly method: 'gmail' | 'telegram' | undefined;
+      readonly avatarAvailable: boolean;
+      /** Object URL for the authenticated avatar fetch; revoke on logout. */
+      readonly avatarObjectUrl: string | undefined;
+    };
 
 export async function probeJoySession(
   storage: MediaSessionStorage,
@@ -37,9 +43,46 @@ export async function probeJoySession(
       return { kind: 'signed-out' };
     }
     if (!response.ok) return { kind: 'unavailable' };
-    const body = (await response.json()) as { data?: { contact?: unknown } };
+    const body = (await response.json()) as {
+      data?: {
+        contact?: unknown;
+        method?: unknown;
+        displayName?: unknown;
+        avatarAvailable?: unknown;
+      };
+    };
     const contact = body.data?.contact;
-    return { kind: 'ready', subject: typeof contact === 'string' ? contact : undefined };
+    const subject = typeof contact === 'string' ? contact : undefined;
+    const displayName =
+      typeof body.data?.displayName === 'string' ? body.data.displayName : subject;
+    const method =
+      body.data?.method === 'gmail' || body.data?.method === 'telegram'
+        ? body.data.method
+        : undefined;
+    const avatarAvailable = body.data?.avatarAvailable === true;
+    let avatarObjectUrl: string | undefined;
+    if (avatarAvailable) {
+      try {
+        const avatarResponse = await fetchFn('/api/v1/auth/avatar', {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (avatarResponse.ok) {
+          const blob = await avatarResponse.blob();
+          if (blob.size > 0) avatarObjectUrl = URL.createObjectURL(blob);
+        }
+      } catch {
+        /* letter fallback */
+      }
+    }
+    // Production auth path must not contact localhost debug endpoints.
+    return {
+      kind: 'ready',
+      subject,
+      displayName,
+      method,
+      avatarAvailable,
+      avatarObjectUrl,
+    };
   } catch {
     // A network outage is not evidence that the session ended.
     return { kind: 'unavailable' };

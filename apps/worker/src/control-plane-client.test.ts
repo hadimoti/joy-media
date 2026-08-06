@@ -1,8 +1,18 @@
 import type { Server } from 'node:http';
 import { once } from 'node:events';
+import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/api';
 import { WorkerControlPlaneClient } from './control-plane-client.js';
+
+const stubMediaAuth = {
+  requestOtp: async () => ({ message: 'stub' }),
+  verifyOtp: async () => 'stub-token',
+  logout: async () => {},
+  authenticate: async (_req: IncomingMessage) => undefined,
+  sessionProfile: async (_req: IncomingMessage) => undefined,
+  avatarBytes: async (_req: IncomingMessage) => undefined,
+};
 
 describe('WorkerControlPlaneClient', () => {
   it('uses a Worker-only session after the owner approves a pairing offer', async () => {
@@ -108,6 +118,7 @@ describe('WorkerControlPlaneClient', () => {
     const server = createControlPlaneHttpServer({
       controlPlane: new LocalControlPlane(),
       authentication: { authenticate: () => ({ id: 'joy-user-1' }) },
+      mediaAuth: stubMediaAuth,
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');

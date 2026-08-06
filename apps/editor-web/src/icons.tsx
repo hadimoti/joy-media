@@ -24,7 +24,7 @@ function Svg({ children, size = 14 }: { readonly children: ReactNode; readonly s
 }
 
 /** 24×24 PNG masked to currentColor (matches dockview panel tabs). */
-function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?: number }) {
+export function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly size?: number }) {
   return (
     <span
       className="png-mask-icon"
@@ -949,6 +949,18 @@ export function UnlockIcon() {
 
 export function LayersIcon() {
   return <PngMaskIcon src={UI_ICONS.layers} size={16} />;
+}
+
+export function VerticalViewIcon() {
+  return (
+    <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}>
+      <PngMaskIcon src={UI_ICONS.wideView} size={14} />
+    </span>
+  );
+}
+
+export function WideViewIcon() {
+  return <PngMaskIcon src={UI_ICONS.wideView} size={14} />;
 }
 
 export function SlidersIcon() {

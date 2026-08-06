@@ -25,10 +25,47 @@ describe('probeJoySession', () => {
   it('reports ready with the contact for a valid stored session', async () => {
     const storage = memoryStorage();
     setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(storage, async () =>
-      jsonResponse(200, { data: { contact: 'user@example.com' } }),
-    );
-    expect(state).toEqual({ kind: 'ready', subject: 'user@example.com' });
+    const state = await probeJoySession(storage, async (url) => {
+      if (String(url).includes('/avatar')) return new Response(null, { status: 404 });
+      return jsonResponse(200, {
+        data: {
+          contact: 'user@example.com',
+          method: 'gmail',
+          displayName: 'user@example.com',
+          avatarAvailable: false,
+        },
+      });
+    });
+    expect(state).toEqual({
+      kind: 'ready',
+      subject: 'user@example.com',
+      displayName: 'user@example.com',
+      method: 'gmail',
+      avatarAvailable: false,
+      avatarObjectUrl: undefined,
+    });
+  });
+
+  it('prefers displayName over numeric telegram contact for the account label', async () => {
+    const storage = memoryStorage();
+    setStoredMediaToken('token-abc', storage);
+    const state = await probeJoySession(storage, async (url) => {
+      if (String(url).includes('/avatar')) return new Response(null, { status: 404 });
+      return jsonResponse(200, {
+        data: {
+          contact: '68238523',
+          method: 'telegram',
+          displayName: '@hadimoti',
+          avatarAvailable: false,
+        },
+      });
+    });
+    expect(state).toMatchObject({
+      kind: 'ready',
+      subject: '68238523',
+      displayName: '@hadimoti',
+      method: 'telegram',
+    });
   });
 
   it('reports signed-out and clears the token on 401 (expired/revoked session)', async () => {

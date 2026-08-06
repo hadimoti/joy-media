@@ -58,7 +58,12 @@ import {
 import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
-import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName, type TimelineTrackKind } from './timeline-track-kind.js';
+import {
+  timelineTrackKind,
+  timelineTrackCode,
+  timelineTrackDisplayName,
+  type TimelineTrackKind,
+} from './timeline-track-kind.js';
 import { formatTime } from './format-time.js';
 import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
@@ -71,6 +76,10 @@ import { polishMediaLabel } from './media-label.js';
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 const DEFAULT_PPS = 20;
+/** Height of a virtual (not-yet-created) empty lane. */
+const EMPTY_LANE_HEIGHT_PX = 44;
+/** Extra empty lanes rendered below the visible viewport during scrolling. */
+const EMPTY_LANE_OVERSCAN = 6;
 
 function frameDurationUs(frameRate: { readonly num: number; readonly den: number }): number {
   return Math.max(1, Math.round((1_000_000 * frameRate.den) / frameRate.num));
@@ -143,6 +152,7 @@ function isVoiceClip(clip: Clip): boolean {
 function TimelineClip({
   clip,
   selected,
+  isDragOver,
   maxStartUs,
   viewport,
   locked,
@@ -158,6 +168,7 @@ function TimelineClip({
 }: {
   readonly clip: Clip;
   readonly selected: boolean;
+  readonly isDragOver: boolean;
   readonly maxStartUs: number;
   readonly viewport: TimelineViewport;
   readonly locked: boolean;
@@ -241,7 +252,7 @@ function TimelineClip({
 
   return (
     <button
-      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}`}
+      className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
@@ -472,6 +483,8 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
+  /** Clip being dragged over by an effect or transition — shows amber highlight. */
+  const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
   // §6.2: collapsed by default, so standard editing is visually unchanged.
   const [dataLanesOpen, setDataLanesOpen] = useState(false);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
@@ -506,6 +519,19 @@ export function TimelinePanel({
     () => virtualTracks(tracks, 0, Math.max(36, tracksHeightPx)),
     [tracks, tracksHeightPx],
   );
+
+  // Virtual (not-yet-created) empty lanes that fill the track viewport below the
+  // real tracks, so the grid reaches the bottom of the panel and media can be
+  // dropped to create new tracks. Computed from the observed container height
+  // minus the space the real tracks occupy.
+  const realTracksHeightPx = useMemo(
+    () => tracks.reduce((sum, track) => sum + track.heightPx, 0),
+    [tracks],
+  );
+  const virtualLaneCount = useMemo(() => {
+    const avail = Math.max(0, tracksHeightPx - realTracksHeightPx);
+    return Math.ceil(avail / EMPTY_LANE_HEIGHT_PX) + EMPTY_LANE_OVERSCAN;
+  }, [tracksHeightPx, realTracksHeightPx]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -652,6 +678,46 @@ export function TimelinePanel({
               startUs,
               durationUs,
               sourceInUs: 0,
+            },
+          },
+        },
+      ],
+    });
+  };
+
+  /** Create a NEW real track for a dropped asset and place the clip on it. */
+  const createTrackFromAssetDrop = (
+    asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+    dropUs: number,
+  ) => {
+    const order = composition.tracks.length;
+    // The shared schema only models video tracks; audio clips are classified by
+    // their asset (isVoiceClip) rather than by a separate audio track kind.
+    const trackId = `V${order + 1}`;
+    const durationUs = 5_000_000;
+    const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+    onDispatch({
+      label: `Add ${asset.displayName ?? asset.assetId}`,
+      commands: [
+        {
+          type: 'timeline.addTrack',
+          payload: {
+            compositionId: composition.id,
+            track: {
+              id: trackId,
+              kind: 'video',
+              order,
+              enabled: true,
+              clips: [
+                {
+                  id: `clip-${asset.assetId}-${Date.now()}`,
+                  kind: 'video',
+                  assetId: asset.assetId,
+                  startUs,
+                  durationUs,
+                  sourceInUs: 0,
+                },
+              ],
             },
           },
         },
@@ -1043,9 +1109,7 @@ export function TimelinePanel({
             className="icon-button"
             disabled={!canDelete && selectedMarkerId === undefined}
             aria-label={selectedMarkerId !== undefined ? 'Remove marker' : 'Ripple delete'}
-            title={
-              selectedMarkerId !== undefined ? 'Remove marker (Del)' : 'Ripple delete (Del)'
-            }
+            title={selectedMarkerId !== undefined ? 'Remove marker (Del)' : 'Ripple delete (Del)'}
             onClick={() => {
               if (selectedMarkerId !== undefined) {
                 removeMarker(selectedMarkerId);
@@ -1228,7 +1292,15 @@ export function TimelinePanel({
               return s !== undefined && timelineTrackKind(s) === kind;
             }).length;
             return (
-              <div className="timeline-track" key={track.id} style={{ height: track.heightPx }}>
+              <div
+                className={
+                  source.clips.some((clip) => selectedIds.includes(clip.id))
+                    ? 'timeline-track is-selected'
+                    : 'timeline-track'
+                }
+                key={track.id}
+                style={{ height: track.heightPx }}
+              >
                 <div
                   className="timeline-track-header"
                   onContextMenu={(event) => {
@@ -1414,10 +1486,22 @@ export function TimelinePanel({
                       return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
+
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const dropUs = pixelToTime(event.clientX - rect.left, {
+                      originUs: 0,
+                      pixelsPerSecond: viewport.pixelsPerSecond,
+                    });
+                    const hitClip = source.clips.find((c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs);
+                    setDragEffectOverClipId(hitClip?.id ?? null);
+                  }}
+                  onDragLeave={() => {
+                    setDragEffectOverClipId(null);
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
                     if (track.locked) return;
+                    setDragEffectOverClipId(null);
 
                     // Effect drop
                     const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
@@ -1467,11 +1551,27 @@ export function TimelinePanel({
                         const source = composition.tracks.find((t) => t.id === track.id);
                         if (source === undefined) return;
                         const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+                        // Find the clip boundary nearest the drop point. Accept the drop
+                        // (a) within a small tolerance of the boundary for contiguous clips,
+                        // or (b) anywhere inside a real gap between two clips. The old code
+                        // required the drop time to land exactly on a gap, which made it
+                        // impossible to drop onto two contiguous clips (their shared
+                        // boundary is a single instant).
+                        const usPerPx =
+                          viewport.pixelsPerSecond > 0
+                            ? 1_000_000 / viewport.pixelsPerSecond
+                            : 1_000_000;
+                        const toleranceUs = 6 * usPerPx;
                         for (let i = 0; i < sorted.length - 1; i++) {
                           const left = sorted[i]!;
                           const right = sorted[i + 1]!;
                           const leftEnd = left.startUs + left.durationUs;
-                          if (dropUs >= leftEnd && dropUs <= right.startUs) {
+                          if (right.startUs < leftEnd) continue; // overlap — not a clean boundary
+                          const inGap = dropUs >= leftEnd && dropUs <= right.startUs;
+                          const nearBoundary =
+                            Math.abs(dropUs - leftEnd) <= toleranceUs ||
+                            Math.abs(dropUs - right.startUs) <= toleranceUs;
+                          if (inGap || (right.startUs === leftEnd && nearBoundary)) {
                             onTransitionDrop?.(payload.transitionId, left.id, right.id, track.id);
                             return;
                           }
@@ -1507,9 +1607,7 @@ export function TimelinePanel({
                       return (
                         <div
                           key={marker.id}
-                          className={
-                            selected ? 'timeline-marker is-selected' : 'timeline-marker'
-                          }
+                          className={selected ? 'timeline-marker is-selected' : 'timeline-marker'}
                           style={{
                             left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
                           }}
@@ -1553,6 +1651,7 @@ export function TimelinePanel({
                       key={clip.id}
                       clip={clip}
                       selected={selectedIds.includes(clip.id)}
+                      isDragOver={dragEffectOverClipId === clip.id}
                       maxStartUs={composition.durationUs - clip.durationUs}
                       viewport={{ ...viewport, originUs: 0 }}
                       locked={track.locked}
@@ -1581,6 +1680,52 @@ export function TimelinePanel({
               </div>
             );
           })}
+
+          {/* Virtual empty lanes: let the grid reach the bottom of the panel and
+              create a real track when media is dropped into an unused lane. */}
+          {Array.from({ length: virtualLaneCount }, (_, laneIndex) => (
+            <div
+              className="timeline-track timeline-virtual-lane"
+              key={`__virtual_${laneIndex}__`}
+              style={{ height: EMPTY_LANE_HEIGHT_PX }}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'copy';
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+                if (!raw) return;
+                try {
+                  const asset = JSON.parse(raw) as {
+                    assetId: string;
+                    kind: string;
+                    displayName?: string;
+                  };
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const dropUs = pixelToTime(event.clientX - rect.left, {
+                    originUs: 0,
+                    pixelsPerSecond: viewport.pixelsPerSecond,
+                  });
+                  createTrackFromAssetDrop(asset, dropUs);
+                } catch {
+                  /* ignore malformed payload */
+                }
+              }}
+            >
+              <div className="timeline-track-header timeline-virtual-lane-header">
+                <span className="timeline-virtual-lane-plus" aria-hidden="true">
+                  +
+                </span>
+              </div>
+              <span
+                className="timeline-lane timeline-virtual-lane-canvas"
+                style={{ minWidth: `${laneWidthPx}px` }}
+                title="Drop media to add a track here"
+              />
+            </div>
+          ))}
 
           {dataLanesOpen &&
             dataLanes !== undefined &&

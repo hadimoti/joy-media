@@ -6,6 +6,7 @@ import {
   type BrowserAssetRegistration,
   type BrowserDerivative,
 } from './control-plane-client.js';
+import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
@@ -102,6 +103,8 @@ export function AssetLibraryPanel({
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const cloudPreviewQueue = useMemo(() => new CloudPreviewQueue(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
+  const refreshSeqRef = useRef(0);
+  const previewSeqRef = useRef(0);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -135,13 +138,32 @@ export function AssetLibraryPanel({
   useEffect(() => () => previewRef.current?.revoke(), []);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshSeqRef.current;
+    if (getStoredMediaToken(window.localStorage) === undefined) {
+      // LoginGate keeps the editor mounted under the blur; don't wipe a prior
+      // catalog or treat "not signed in yet" as a hard failure.
+      return;
+    }
     try {
-      // Auto-create control-plane project so Assets never depends on Jobs → Initialize.
-      await client.ensureProject(projectId, projectTitle);
-      const [ownedAssets, sharedAssets] = await Promise.all([
+      // Catalog listing must not depend on ensureProject — a stale binding to
+      // another account's project returns PROJECT_EXISTS/NOT_FOUND and used to
+      // zero the whole Assets panel before cloud-assets could load.
+      void client.ensureProject(projectId, projectTitle).catch(() => undefined);
+
+      const [ownedResult, sharedResult] = await Promise.allSettled([
         client.myAssets(),
-        client.sharedCloudAssets().catch(() => [] as readonly BrowserAsset[]),
+        client.sharedCloudAssets(),
       ]);
+      const ownedAssets =
+        ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
+      const sharedAssets =
+        sharedResult.status === 'fulfilled' ? sharedResult.value : ([] as readonly BrowserAsset[]);
+      if (ownedResult.status === 'rejected' && sharedResult.status === 'rejected') {
+        throw ownedResult.reason instanceof Error
+          ? ownedResult.reason
+          : new Error('Failed to load media catalog');
+      }
+
       const byId = new Map<string, BrowserAsset>();
       for (const asset of ownedAssets) byId.set(asset.id, asset);
       for (const asset of sharedAssets) {
@@ -170,15 +192,23 @@ export function AssetLibraryPanel({
         }),
       );
       const byAsset = new Map(derivatives);
+      if (requestId !== refreshSeqRef.current) return;
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
-      setStatus(
-        assets.length === 0
-          ? 'No media yet. Import an image to sync with the shared cloud library.'
-          : undefined,
-      );
+      if (sharedResult.status === 'rejected') {
+        setStatus(
+          `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
+        );
+      } else {
+        setStatus(
+          assets.length === 0
+            ? 'No media yet. Import an image to sync with the shared cloud library.'
+            : undefined,
+        );
+      }
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
+      if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
       setItems([]);
       setStatus(`Failed to load media catalog: ${detail}`);
@@ -187,6 +217,21 @@ export function AssetLibraryPanel({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    const onSession = (): void => {
+      void refresh();
+    };
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
+    return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
+  }, [refresh]);
+  useEffect(() => {
+    return () => {
+      refreshSeqRef.current += 1;
+      previewSeqRef.current += 1;
+      previewRef.current?.revoke();
+      previewRef.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     if (!filterOpen && !importOpen) return;
@@ -247,45 +292,6 @@ export function AssetLibraryPanel({
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [items, category, collection, deferredQuery, availability, sort]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
-  const openPreview = useCallback(
-    async (asset: BrowserAsset, derivative: BrowserDerivative) => {
-      clearPreview();
-      setStatus(`Opening ${derivative.kind} (verified)…`);
-      try {
-        const outcome = await (
-          await resolver
-        ).resolve({
-          projectId,
-          assetId: asset.id,
-          derivative: {
-            derivativeId: derivative.id,
-            sha256: derivative.sha256,
-            byteLength: derivative.bytes,
-            mimeType: derivative.descriptor.mimeType,
-          },
-        });
-        if (outcome.state !== 'available-local') {
-          setStatus(previewStatus(outcome.state));
-          return;
-        }
-        const nextPreview: Preview = {
-          derivativeId: derivative.id,
-          displayName: asset.displayName,
-          mimeType: derivative.descriptor.mimeType,
-          url: outcome.url,
-          revoke: outcome.revoke,
-        };
-        previewRef.current = nextPreview;
-        setPreview(nextPreview);
-        setStatus(
-          `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`,
-        );
-      } catch (error) {
-        setStatus(`Failed to open preview: ${message(error)}`);
-      }
-    },
-    [clearPreview, projectId, resolver],
-  );
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
       setStatus('Choose a media file to register.');
@@ -376,6 +382,55 @@ export function AssetLibraryPanel({
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
+  );
+
+  const openPreview = useCallback(
+    async (asset: BrowserAsset, assetDerivatives: readonly BrowserDerivative[]) => {
+      const requestId = ++previewSeqRef.current;
+      clearPreview();
+      const sourceKind =
+        asset.kind === 'video' ? 'video' : asset.kind === 'audio' ? 'audio' : 'image';
+      setStatus(`Opening ${sourceKind} (verified)…`);
+      try {
+        const [resolverInstance, originalCache] = await Promise.all([resolver, originalAssetCache]);
+        const outcome = await resolveAssetThumb({
+          asset,
+          derivatives: assetDerivatives,
+          projectId,
+          resolver: resolverInstance,
+          originalCache,
+          fetchCloudOriginal,
+        });
+        if (requestId !== previewSeqRef.current) {
+          outcome.revoke();
+          return;
+        }
+        if (outcome.url === undefined) {
+          setStatus(`Preview unavailable: ${outcome.source}`);
+          return;
+        }
+        const nextPreview: Preview = {
+          derivativeId: asset.id,
+          displayName: asset.displayName,
+          mimeType: outcome.mimeType ?? asset.descriptor.mimeType,
+          url: outcome.url,
+          revoke: outcome.revoke,
+        };
+        previewRef.current = nextPreview;
+        setPreview(nextPreview);
+        setStatus(
+          outcome.source === 'derivative'
+            ? `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`
+            : outcome.source === 'cloud'
+              ? `Preview for ${asset.displayName} is shown from the shared cloud library.`
+              : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
+        );
+      } catch (error) {
+        if (requestId !== previewSeqRef.current) return;
+        setStatus(`Failed to open preview: ${message(error)}`);
+      }
+    },
+    [clearPreview, fetchCloudOriginal, originalAssetCache, projectId, resolver],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
@@ -993,8 +1048,10 @@ export function AssetLibraryPanel({
                           resolverPromise={resolver}
                           originalCachePromise={originalAssetCache}
                           fetchCloudOriginal={fetchCloudOriginal}
-                          {...(derivative !== undefined
-                            ? { onOpenDerivative: () => void openPreview(asset, derivative) }
+                          {...(asset.kind === 'image' ||
+                          asset.kind === 'video' ||
+                          asset.kind === 'audio'
+                            ? { onOpenDerivative: () => void openPreview(asset, derivatives) }
                             : {})}
                         />
                       </div>
@@ -1235,22 +1292,6 @@ function AssetCardMedia({
   );
 }
 
-function previewStatus(
-  state: 'missing' | 'invalid' | 'unsupported' | 'unavailable' | 'revoked',
-): string {
-  switch (state) {
-    case 'missing':
-      return 'Local cache entry is missing and no cloud copy is available.';
-    case 'invalid':
-      return 'Local cache entry failed verification and was removed.';
-    case 'unsupported':
-      return 'This browser does not support local media storage via OPFS.';
-    case 'revoked':
-      return 'Your access to this private derivative was revoked.';
-    case 'unavailable':
-      return 'This private derivative is not available right now.';
-  }
-}
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
