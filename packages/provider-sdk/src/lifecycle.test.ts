@@ -59,6 +59,20 @@ describe('ProviderLifecycle', () => {
     expect(status.consecutiveFailures).toBe(1);
   });
 
+  it('can change lifecycle state after a recorded job failure without double-counting it', () => {
+    const lifecycle = new ProviderLifecycle();
+    const provider = createMockProvider('test-provider', ['speech.transcribe']);
+    lifecycle.register(provider);
+    lifecycle.recordJobStart('test-provider');
+    lifecycle.recordJobEnd('test-provider', false);
+    lifecycle.markUnauthorized('test-provider', 'invalid server credential', false);
+
+    expect(lifecycle.getStatus('test-provider')).toMatchObject({
+      state: 'unauthorized',
+      consecutiveFailures: 1,
+    });
+  });
+
   it('marks provider as offline', () => {
     const lifecycle = new ProviderLifecycle();
     const provider = createMockProvider('test-provider', ['speech.transcribe']);

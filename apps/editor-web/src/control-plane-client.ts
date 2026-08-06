@@ -62,6 +62,18 @@ export interface BrowserDerivative {
   readonly verifiedAt: number;
 }
 
+export interface BrowserReasoningProvider {
+  readonly providerId: string;
+  readonly state:
+    'unconfigured' | 'configured' | 'healthy' | 'degraded' | 'offline' | 'unauthorized';
+  readonly models: readonly {
+    readonly id: string;
+    readonly displayName: string;
+    readonly version?: string;
+  }[];
+  readonly adapterVersion: string;
+}
+
 export interface BrowserAssetRegistration {
   readonly id: string;
   readonly kind: BrowserAsset['kind'];
@@ -96,6 +108,13 @@ export class BrowserControlPlaneClient {
   async myAssets(): Promise<readonly BrowserAsset[]> {
     return this.get('/v1/library/my-assets');
   }
+  /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
+  async reasoningProviders(): Promise<readonly BrowserReasoningProvider[]> {
+    const data = await this.get<{ readonly providers: readonly BrowserReasoningProvider[] }>(
+      '/v1/providers/reasoning',
+    );
+    return data.providers;
+  }
   /** Fetch cloud-backed original bytes for any logged-in Joy user. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
     const token = await this.assertion();
@@ -125,9 +144,12 @@ export class BrowserControlPlaneClient {
   }
   /** Owner-only hard delete of catalog asset metadata (and derivative rows). */
   async deleteAsset(projectId: string, assetId: string): Promise<{ readonly id: string }> {
-    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, {
-      method: 'DELETE',
-    });
+    return this.request(
+      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
   }
   /**
    * Upload image original bytes to private cloud (ParsPack) and apply agent tags.

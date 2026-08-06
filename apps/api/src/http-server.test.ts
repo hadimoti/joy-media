@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
+import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
 const servers: Server[] = [];
@@ -45,6 +46,79 @@ describe('control-plane HTTP transport', () => {
       status: 401,
       body: { error: { code: 'AUTH_REQUIRED' } },
     });
+  });
+
+  it('keeps Mistral unconfigured without the dedicated runtime secret', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(await request(origin, 'GET', '/v1/providers/reasoning')).toMatchObject({
+      status: 200,
+      body: { data: { providers: [{ providerId: 'mistral', state: 'unconfigured', models: [] }] } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        model: 'mistral-small-latest',
+        messages: [{ role: 'user', content: 'Plan only.' }],
+        idempotencyKey: 'unconfigured-1',
+        privacyMode: 'ask-before-remote',
+        approvedRemoteProcessing: true,
+        approvedSpend: true,
+      }),
+    ).toMatchObject({ status: 503, body: { error: { code: 'PROVIDER_UNCONFIGURED' } } });
+  });
+
+  it('requires remote/spend approval and records an idempotent Mistral completion without secrets or prompts', async () => {
+    let calls = 0;
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new MemoryMistralInvocationLedger(),
+      async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'Guarded result.' } }],
+            usage: { prompt_tokens: 3, completion_tokens: 4 },
+          }),
+        );
+      },
+    );
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, registry);
+    const base = {
+      model: 'mistral-small-latest',
+      messages: [{ role: 'user', content: 'Do not persist this prompt.' }],
+      idempotencyKey: 'mistral-1',
+      privacyMode: 'ask-before-remote',
+      approvedRemoteProcessing: true,
+      approvedSpend: true,
+    };
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        ...base,
+        approvedSpend: false,
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROVIDER_SPEND_APPROVAL_REQUIRED' } },
+    });
+    const first = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    expect(first).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          status: 'succeeded',
+          provenance: {
+            providerId: 'mistral',
+            modelId: 'mistral-small-latest',
+            idempotencyKey: 'mistral-1',
+          },
+          usage: { inputTokens: 3, outputTokens: 4 },
+        },
+      },
+    });
+    const retried = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    expect(retried).toEqual(first);
+    expect(calls).toBe(1);
+    expect(JSON.stringify(first.body)).not.toContain('test-only-mistral-secret');
+    expect(JSON.stringify(first.body)).not.toContain('Do not persist this prompt.');
   });
 
   it('preserves project, Worker lease, completion, and cursor event semantics over v1', async () => {
@@ -329,12 +403,14 @@ describe('control-plane HTTP transport', () => {
 async function start(
   authentication: ApiAuthentication,
   privateObjectStore?: PrivateObjectStore,
+  mistral?: MistralProviderRegistry,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: new LocalControlPlane(),
     authentication,
     mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
+    ...(mistral === undefined ? {} : { mistral }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

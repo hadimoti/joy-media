@@ -47,11 +47,24 @@ export class ProviderLifecycle {
     status.consecutiveFailures = 0;
   }
 
-  markDegraded(providerId: string, error: string): void {
+  markUnconfigured(providerId: string): void {
+    const status = this.getMutable(providerId);
+    status.state = 'unconfigured';
+    status.lastError = undefined;
+  }
+
+  markUnauthorized(providerId: string, error: string, countFailure = true): void {
+    const status = this.getMutable(providerId);
+    status.state = 'unauthorized';
+    status.lastError = error;
+    if (countFailure) status.consecutiveFailures++;
+  }
+
+  markDegraded(providerId: string, error: string, countFailure = true): void {
     const status = this.getMutable(providerId);
     status.state = 'degraded';
     status.lastError = error;
-    status.consecutiveFailures++;
+    if (countFailure) status.consecutiveFailures++;
   }
 
   markOffline(providerId: string, error: string): void {

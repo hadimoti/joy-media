@@ -7,7 +7,17 @@ import {
   type ControlPlane,
   type LocalDerivativeRegistration,
 } from './control-plane.js';
-import { MediaAuthError, type MediaAuthApi, type MediaAuthMethod } from './media-auth.js';
+import {
+  DisabledMediaAuth,
+  MediaAuthError,
+  type MediaAuthApi,
+  type MediaAuthMethod,
+} from './media-auth.js';
+import {
+  createRuntimeMistralProviderRegistry,
+  MistralProviderError,
+  type MistralProviderRegistry,
+} from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 
 export interface ApiAuthentication {
@@ -17,8 +27,10 @@ export interface ApiAuthentication {
 export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
-  readonly mediaAuth: MediaAuthApi;
+  readonly mediaAuth?: MediaAuthApi;
   readonly privateObjectStore?: PrivateObjectStore;
+  /** Server-only provider registry; it never serializes a credential. */
+  readonly mistral?: MistralProviderRegistry;
 }
 
 /**
@@ -27,9 +39,14 @@ export interface ControlPlaneHttpServerOptions {
  * this module deliberately does not contain a header/token fallback.
  */
 export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOptions): Server {
+  const resolvedOptions = {
+    ...options,
+    mediaAuth: options.mediaAuth ?? new DisabledMediaAuth(),
+    mistral: options.mistral ?? createRuntimeMistralProviderRegistry(),
+  };
   return createServer(async (request, response) => {
     try {
-      await route(options, request, response);
+      await route(resolvedOptions, request, response);
     } catch (error) {
       respondError(response, error);
     }
@@ -37,7 +54,10 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
 }
 
 async function route(
-  options: ControlPlaneHttpServerOptions,
+  options: ControlPlaneHttpServerOptions & {
+    readonly mistral: MistralProviderRegistry;
+    readonly mediaAuth: MediaAuthApi;
+  },
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
@@ -254,6 +274,18 @@ async function route(
     return;
   }
 
+  if (request.method === 'GET' && url.pathname === '/v1/providers/reasoning') {
+    respondJson(response, 200, { data: { providers: [options.mistral.summary()] } });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/providers/mistral/complete') {
+    const body = await readJson(request);
+    const result = await options.mistral.complete(actor.id, mistralCompletionRequest(body));
+    respondJson(response, 200, { data: result });
+    return;
+  }
+
   if (request.method === 'GET' && url.pathname === '/v1/workers') {
     respondJson(response, 200, { data: await options.controlPlane.workersForOwner(actor) });
     return;
@@ -350,9 +382,8 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/transcribe') {
-    const { runWhisperOnReferenceAsset, runWhisperTranscription } = await import(
-      './whisper-transcribe.js'
-    );
+    const { runWhisperOnReferenceAsset, runWhisperTranscription } =
+      await import('./whisper-transcribe.js');
     const contentType = request.headers['content-type'] ?? '';
     let transcript;
     if (contentType.includes('application/json')) {
@@ -530,7 +561,11 @@ async function route(
       throw new ControlPlaneError('REQUEST_INVALID', 'original upload must be an image MIME type');
     const declaredSha = String(request.headers['x-joy-sha256'] ?? '').toLowerCase();
     const declaredBytes = Number(request.headers['x-joy-bytes'] ?? NaN);
-    if (!/^[a-f0-9]{64}$/.test(declaredSha) || !Number.isSafeInteger(declaredBytes) || declaredBytes < 1)
+    if (
+      !/^[a-f0-9]{64}$/.test(declaredSha) ||
+      !Number.isSafeInteger(declaredBytes) ||
+      declaredBytes < 1
+    )
       throw new ControlPlaneError('REQUEST_INVALID', 'original integrity headers are invalid');
     if (declaredSha !== asset.sha256 || declaredBytes !== asset.bytes)
       throw new ControlPlaneError('REQUEST_INVALID', 'original does not match registered asset');
@@ -542,10 +577,7 @@ async function route(
       throw new ControlPlaneError('REQUEST_INVALID', 'original sha256 does not match asset');
     await options.controlPlane.setAssetSync(actor, projectId, true);
     const ref = `orig-${asset.sha256.slice(0, 32)}`;
-    await store.put(
-      { ref, sha256: asset.sha256, bytes: asset.bytes, mimeType },
-      bytes,
-    );
+    await store.put({ ref, sha256: asset.sha256, bytes: asset.bytes, mimeType }, bytes);
     try {
       const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
       const tagged = await tagAssetWithHermes({
@@ -774,6 +806,50 @@ function requiredString(body: Record<string, unknown>, field: string): string {
   if (typeof value !== 'string' || value.length === 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
   return value;
+}
+
+function mistralCompletionRequest(body: Record<string, unknown>) {
+  const messages = body.messages;
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 64)
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'messages must contain between 1 and 64 entries',
+    );
+  const parsedMessages = messages.map((message) => {
+    if (message === null || typeof message !== 'object' || Array.isArray(message))
+      throw new ControlPlaneError('REQUEST_INVALID', 'message must be an object');
+    const value = message as Record<string, unknown>;
+    if (
+      (value.role !== 'system' && value.role !== 'user' && value.role !== 'assistant') ||
+      typeof value.content !== 'string' ||
+      value.content.length === 0
+    )
+      throw new ControlPlaneError('REQUEST_INVALID', 'message role/content is invalid');
+    return { role: value.role, content: value.content } as const;
+  });
+  const optionalNumber = (field: string): number | undefined =>
+    body[field] === undefined
+      ? undefined
+      : typeof body[field] === 'number' && Number.isFinite(body[field])
+        ? body[field]
+        : (() => {
+            throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a number`);
+          })();
+  const privacyMode = body.privacyMode;
+  if (privacyMode !== 'local-only' && privacyMode !== 'ask-before-remote')
+    throw new ControlPlaneError('REQUEST_INVALID', 'privacyMode is invalid');
+  const maxTokens = optionalNumber('maxTokens');
+  const temperature = optionalNumber('temperature');
+  return {
+    model: requiredString(body, 'model'),
+    messages: parsedMessages,
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    privacyMode: privacyMode as 'local-only' | 'ask-before-remote',
+    approvedRemoteProcessing: body.approvedRemoteProcessing === true,
+    approvedSpend: body.approvedSpend === true,
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(temperature === undefined ? {} : { temperature }),
+  };
 }
 
 function optionalPositiveInteger(body: Record<string, unknown>, field: string): number | undefined {
@@ -1061,6 +1137,18 @@ function respondJson(response: ServerResponse, status: number, payload: unknown)
 }
 
 function respondError(response: ServerResponse, error: unknown): void {
+  if (error instanceof MistralProviderError) {
+    const status =
+      error.code === 'PROVIDER_UNCONFIGURED' ||
+      error.code === 'MISTRAL_UNAUTHORIZED' ||
+      error.code === 'MISTRAL_UNAVAILABLE'
+        ? 503
+        : error.code.endsWith('APPROVAL_REQUIRED') || error.code === 'REMOTE_PROCESSING_BLOCKED'
+          ? 409
+          : 502;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
   if (error instanceof MediaAuthError) {
     const status = error.code === 'REQUEST_INVALID' ? 400 : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
