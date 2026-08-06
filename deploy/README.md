@@ -18,6 +18,9 @@ The environment file is created on the VPS with mode `0600` and contains (see
   SMTP account for OTP email, independent of joy-vps's mailer
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot token for OTP delivery,
   independent of the `joy-wg-bot` token
+- `JOY_MEDIA_MISTRAL_API_KEY` — optional, dedicated JOY Media Mistral key for
+  the server-side `llm.complete` provider. Leave it absent until the owner
+  provisions one; never reuse, print, or copy the Hermes credential.
 
 It is never committed. There is no signing key or JWKS endpoint to provision
 any more — the JWT identity bridge from the now-superseded ADR-0016 is

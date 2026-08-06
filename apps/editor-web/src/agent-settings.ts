@@ -9,11 +9,15 @@ import {
 
 export const AGENT_SETTINGS_STORAGE_KEY = 'joy-media.agent-settings.v1';
 
+/** These are IDs, never provider credentials or arbitrary user-entered model names. */
+export const CONFIGURABLE_REASONING_MODELS = ['mistral-small-latest'] as const;
+export type ConfigurableReasoningModel = (typeof CONFIGURABLE_REASONING_MODELS)[number] | '';
+
 export interface AgentSettings {
   readonly version: 1;
   readonly activeHost: 'kilocode';
   readonly executionMode: AgentExecutionMode;
-  readonly reasoningModel: string;
+  readonly reasoningModel: ConfigurableReasoningModel;
   readonly mediaProvider: string;
   readonly allowedCapabilities: readonly ToolCapability[];
   readonly maxCostPerRunUsd: number;
@@ -25,7 +29,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   version: 1,
   activeHost: 'kilocode',
   executionMode: 'preview-and-approve',
-  reasoningModel: 'Server default',
+  reasoningModel: '',
   mediaProvider: 'Approved provider',
   allowedCapabilities: ALL_TOOL_CAPABILITIES,
   maxCostPerRunUsd: 10,
@@ -105,8 +109,11 @@ function normalizeAgentSettings(value: unknown): AgentSettings {
       ? (candidate.executionMode as AgentExecutionMode)
       : DEFAULT_AGENT_SETTINGS.executionMode,
     reasoningModel:
-      typeof candidate.reasoningModel === 'string' && candidate.reasoningModel.trim().length > 0
-        ? candidate.reasoningModel.trim()
+      typeof candidate.reasoningModel === 'string' &&
+      CONFIGURABLE_REASONING_MODELS.includes(
+        candidate.reasoningModel.trim() as (typeof CONFIGURABLE_REASONING_MODELS)[number],
+      )
+        ? (candidate.reasoningModel.trim() as ConfigurableReasoningModel)
         : DEFAULT_AGENT_SETTINGS.reasoningModel,
     mediaProvider:
       typeof candidate.mediaProvider === 'string' && candidate.mediaProvider.trim().length > 0

@@ -48,4 +48,13 @@ describe('agent settings', () => {
 
     expect(loadAgentSettings(storage)).toEqual(DEFAULT_AGENT_SETTINGS);
   });
+
+  it('rejects arbitrary reasoning-model names instead of persisting a free-form provider value', () => {
+    const storage = new MemoryStorage();
+    storage.value = JSON.stringify({
+      ...DEFAULT_AGENT_SETTINGS,
+      reasoningModel: 'anything-from-user-input',
+    });
+    expect(loadAgentSettings(storage).reasoningModel).toBe('');
+  });
 });

@@ -1,7 +1,11 @@
 import { ALL_TOOL_CAPABILITIES, createKiloCodeAgentHostManifest } from '@joy-media/agent-tools';
 import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
-import { useEffect } from 'react';
-import type { AgentSettings } from './agent-settings.js';
+import { useEffect, useState } from 'react';
+import type { AgentSettings, ConfigurableReasoningModel } from './agent-settings.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserReasoningProvider,
+} from './control-plane-client.js';
 import { CloseIcon } from './icons.js';
 
 const MODE_LABELS: Readonly<Record<AgentExecutionMode, string>> = {
@@ -20,7 +24,45 @@ export function AgentSettingsDialog({
   readonly onChange: (settings: AgentSettings) => void;
   readonly onClose: () => void;
 }) {
-  const manifest = createKiloCodeAgentHostManifest();
+  const [reasoningProviders, setReasoningProviders] = useState<readonly BrowserReasoningProvider[]>(
+    [],
+  );
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const client = new BrowserControlPlaneClient();
+    void client
+      .reasoningProviders()
+      .then((providers) => {
+        if (active) setReasoningProviders(providers);
+      })
+      .catch(() => {
+        // Missing credentials/network never become a false configured state.
+        if (active) setReasoningProviders([]);
+      })
+      .finally(() => {
+        if (active) setModelsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const configuredModels = reasoningProviders.flatMap((provider) =>
+    provider.state === 'configured' || provider.state === 'healthy'
+      ? provider.models.map((model) => ({ ...model, providerId: provider.providerId }))
+      : [],
+  );
+  const manifest = createKiloCodeAgentHostManifest({
+    reasoningModels: configuredModels.map((model) => ({
+      kind: 'reasoning-model' as const,
+      providerId: model.providerId,
+      model: {
+        id: model.id,
+        displayName: model.displayName,
+        ...(model.version === undefined ? {} : { version: model.version }),
+      },
+    })),
+  });
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -81,13 +123,29 @@ export function AgentSettingsDialog({
             <h3>Models</h3>
             <label>
               Reasoning model
-              <input
+              <select
                 value={settings.reasoningModel}
-                onChange={(event) => update('reasoningModel', event.target.value)}
-              />
+                disabled={!modelsLoaded || configuredModels.length === 0}
+                onChange={(event) =>
+                  update('reasoningModel', event.target.value as ConfigurableReasoningModel)
+                }
+              >
+                <option value="">
+                  {modelsLoaded
+                    ? configuredModels.length === 0
+                      ? 'No configured reasoning model'
+                      : 'Select a configured model'
+                    : 'Checking provider status…'}
+                </option>
+                {configuredModels.map((model) => (
+                  <option key={`${model.providerId}:${model.id}`} value={model.id}>
+                    {model.displayName} · {model.providerId}
+                  </option>
+                ))}
+              </select>
             </label>
             <p lang="fa">
-              مدل توسط آداپتور سرور KiloCode انتخاب می‌شود و اطلاعات ورود مدل در سمت سرور باقی
+              فقط مدل‌های سالم یا پیکربندی‌شده نمایش داده می‌شوند؛ اطلاعات ورود مدل در سمت سرور باقی
               می‌ماند.
             </p>
           </section>
