@@ -10,7 +10,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 - **Host: `82.115.8.224`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`.** SSH alias `sweden`/`sweden-vps` is configured in `~/.ssh/config` (`ssh sweden` works directly). Without the alias: `ssh -i ~/.ssh/Joy-Vps-New.pem root@82.115.8.224`.
 - The box was compromised and rebuilt from scratch on 2026-07-26 — any reference to the old host `46.249.103.142` or old key `joy-vps.pem` anywhere is dead; don't use them.
 - **Public domain: `joyst.ir`** (canonical since 2026-07-30, Cloudflare-proxied, SSL/TLS mode Full, self-signed origin cert at `/etc/ssl/joyst/`). `media.joyteam.ir` still exists purely as a 301 redirect to `joyst.ir` (so joy-vps's super-app launcher link never had to change) — don't expect it to serve the app directly.
-- App layout on the VPS: `/opt/joy-media/repo` (git checkout, remote `origin` → bare repo `/opt/joy-media.git`), `/opt/joy-media/releases/<rev>[-slug]` (immutable API releases, `current-api` symlink), `/opt/joy-media/web-releases/<rev>[-slug]` (immutable static editor builds, `web` symlink), secrets in `/etc/joy-media/api.env` (mode 0600, never committed — see `deploy/README.md` for the env vars it holds).
+- App layout on the VPS: `/opt/joy-media/repo` (git checkout, remotes `origin` → GitHub and `vps-local` → `/opt/joy-media.git`), `/opt/joy-media/releases/<rev>[-slug]` (immutable API releases, `current-api` symlink), `/opt/joy-media/releases/editor-web-<timestamp>-<rev>` (immutable static editor builds, `web` symlink), secrets in `/etc/joy-media/api.env` (mode 0600, never committed — see `deploy/README.md` for the env vars it holds).
 - `pnpm` isn't on `PATH` by default in a fresh non-interactive SSH session on this box (no `corepack` binary either) — a shim was installed at `/usr/local/bin/pnpm` on 2026-07-30 pointing at the cached corepack pnpm binary matching this repo's `packageManager` version; if it's ever missing again, check `~/.cache/node/corepack/v1/pnpm/*/bin/pnpm.cjs`.
 - joy-vps's admin panel reaches this app's Postgres directly (not through this app's API) via a separate, least-privileged role `joyvps_media_admin` scoped to the `media_allowed_users` table only — see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`.
 
@@ -43,6 +43,43 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
+
+## Production hardening handoff (2026-08-08)
+
+**Source and deployment.** Functional commit `286c535` (on formatting baseline
+`1447f69`) is on both GitHub `origin/main` and the VPS bare remote
+`vps-local/main`; the canonical worktree is clean. Production points to API
+release `/opt/joy-media/releases/286c535-runtime-hardening` and editor release
+`/opt/joy-media/releases/editor-web-20260808-171809-286c535`. The previous
+rollback targets are `54f582f-cloud-assets-toggle` for API and
+`editor-web-20260808-145123-95bc6b3` for editor.
+
+**Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
+strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one
+skipped, 1,690 tests passed and two skipped, and the production dependency audit
+reported zero known vulnerabilities. `joy-media@api` is active from the new
+release with `NRestarts=0`; origin `GET 127.0.0.1:8790/health`, public
+`GET /api/health`, the deployed `index-D6aQGk7i.js`, and the host health script
+all passed.
+
+**Cloud behavior and privacy.** Original uploads now require automatic private
+ParsPack backup; `asset_sync_enabled=false` is rejected. The cloud toggle defaults
+to the curated catalog published by the `joy-media-library` service identity and
+switches to the signed-in owner's assets. Catalog responses expose only
+`cloudBacked`, never object-store refs, OPFS refs, filesystem paths, rclone names,
+or credentials. Production contains 21 projects (one curated), 1,273 assets
+(1,270 curated and three personal), 1,272 cloud-backed assets, and zero projects
+with backup disabled. Authenticated browser verification reproduced those counts,
+decoded a real curated cloud image at 1,536 px, and produced no console errors.
+
+**Recovery and residual.** Database backup
+`/opt/joy-media/data/backups/joymedia-20260808-171656.sql.gz` was created before
+cutover and synced to ParsPack. Private-object deletion is reference-counted, and
+failed metadata attachment never blindly removes a deterministic object that may
+already be shared. Original request bodies are currently bounded at 512 MiB. A
+read-only recursive ParsPack orphan inventory exceeded 120 seconds and was
+stopped; do not delete bucket objects without repeat DB/bucket snapshots and an
+explicitly reviewed deletion list.
 
 ## Handoff for next agent (2026-07-29)
 
@@ -121,7 +158,7 @@ none of this is visible to users yet; that switch is the owner's call.
 | -------------------------------------------------------------- | ------------------------------------------------------------ |
 | `/opt/joy-media/repo`                                          | Working git checkout                                         |
 | `/opt/joy-media.git`                                           | Bare remote `origin`                                         |
-| `/opt/joy-media/web` → `web-releases/<release>`                | Static editor (immutable releases)                           |
+| `/opt/joy-media/web` → `releases/editor-web-<timestamp>-<rev>` | Static editor (immutable releases)                           |
 | `/opt/joy-media/releases/current-api` → `releases/<short-sha>` | Node API (`dist/server.js`, user `joy-media`, port **8790**) |
 | `/etc/joy-media/api.env`                                       | DB + identity JWKS + object-store (mode 0600; never commit)  |
 
@@ -130,7 +167,7 @@ none of this is visible to users yet; that switch is the owner's call.
 1. `pnpm typecheck` + focused tests + `pnpm --filter @joy-media/api build` + editor `build`.
 2. Commit → `git push origin HEAD` (needs unrestricted FS for bare remote).
 3. API: copy `apps/api/dist` + `scripts` + `package.json` + `node_modules` into `/opt/joy-media/releases/<shortsha>`, `ln -sfn` → `current-api`, restart process on `:8790` as `joy-media` with `api.env`.
-4. Web: copy `apps/editor-web/dist` (+ `public/media/reference`) into `web-releases/<fullsha>`, flip `/opt/joy-media/web`.
+4. Web: copy `apps/editor-web/dist` (+ `public/media/reference`) into `releases/editor-web-<timestamp>-<shortsha>`, flip `/opt/joy-media/web`.
 5. Smoke: `GET :8790/health`; open `media.joyteam.ir` → **Projects** library → open sample → timeline.
 
 ### Honest residuals (post-P15)
@@ -177,6 +214,7 @@ none of this is visible to users yet; that switch is the owner's call.
 
 ## Session log (newest first)
 
+| 2026-08-08 | Runtime + cloud hardening | **Automatic owner-private backup, curated cloud isolation, import integrity, portability, and production verification.** Commit `286c535` plus formatting baseline `1447f69` are pushed to GitHub and the VPS bare remote. API/editor immutable releases deployed with rollback targets retained; pre-cutover PostgreSQL backup synced to ParsPack. `verify:ci` passed (222 test files, 1,690 tests; two skipped), production audit is clean, host/API health pass, and authenticated browser smoke confirms 1,270 curated cloud assets versus three personal assets with storage refs redacted. |
 | 2026-07-31 | UX polish + bug resolution | **Drag-to-select UX for effects and transitions.** Effect cards in EffectsPanel are now always draggable regardless of clip selection state (previously `canApply` gating blocked dragging with no selection). Double-click-to-add still requires a clip. Timeline clips highlight with amber outline when an effect/transition is dragged over them (`is-drag-over` CSS class via `dragEffectOverClipId` state). Effect and transition drop handlers in `App.tsx` now call `selectClips` before dispatching so the target clip(s) are selected on drop — no pre-selection needed. TransitionsPanel note updated to show detected junction. Fixed unescaped apostrophe in error message. EffectsPanel note changed from "Select one video clip to enable" to "Drag an effect to a clip on the timeline to apply it." All 1643 tests pass (212 files), TypeScript clean. Commit `854fb2e` on `main`. |
 | 2026-07-31 | Regression tests + bundle split | **Added regression tests for JOY-001 (export audio) and JOY-002 (asset preview).** `export-audio.test.ts`: 4 tests including exact 1.44M sample guard and empty/zero-rate rejection. `asset-card-preview.test.ts`: 5 tests for `resolveAssetThumb` chain (derivative → OPFS original → cloud original → `none`, no throw). Bundle split via `vite.config.ts` `manualChunks`: `react` (180KB), `dockview` (218KB), `three` (626KB) are now separate HTTP requests; `index` chunk 2.39MB→1.36MB, gzip 707KB→423KB. |
 | 2026-07-31 | Timeline UX | **Infinite virtual lanes, selected-track highlight, capture loop fix, transition drop tolerance.** Virtual lane count = `ceil((tracksHeightPx - realTracksHeightPx) / 44px) + 6` overscan — fills timeline to full scroll height. Selected track: amber gradient header + lane tint via `source.clips.some(clip => selectedIds.includes(clip.id))`. Capture loop: `nextVideoClipAtOrAfter` finds next clip at clip end, syncs to its start (skips gaps). Transition drop: accepts any drop in gap OR within 6px tolerance of contiguous boundary; junction tolerance `gapUs <= 1_000` (was `gapUs <= 0`). Empty state: slim 3.1rem horizontal strip with film icon, hidden once clips exist. Toolbar/ruler contrast: dark toolbar bg, `mix(panel,92%,white,8%)` ruler. `timeline-playback.ts` extracted to `src/` with 6 tests (gap skip, contiguous advance, no clip, undefined after last, non-video ignored). |
