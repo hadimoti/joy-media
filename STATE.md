@@ -54,6 +54,18 @@ release `/opt/joy-media/releases/286c535-runtime-hardening` and editor release
 rollback targets are `54f582f-cloud-assets-toggle` for API and
 `editor-web-20260808-145123-95bc6b3` for editor.
 
+**WP-24 editor-only deployment (2026-08-08).** Commit `88340d5` adds the
+owner-only exact-original recovery picker and client-side integrity gate. It was
+built from the clean canonical checkout and deployed without restarting or
+changing the API to immutable editor release
+`/opt/joy-media/releases/editor-web-20260808-195845-88340d5`; the prior editor
+release `editor-web-20260808-171809-286c535` remains the rollback target. Public
+`joyst.ir` index and all 175 built static assets match the release byte-for-byte;
+local/public API health passed and the API restart count and release target were
+unchanged. WP-24 data recovery remains open: the legacy personal video is not
+claimed backed up, and the owner must select the exact original before post-upload
+DB/ParsPack reconciliation can be performed.
+
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one
 skipped, 1,690 tests passed and two skipped, and the production dependency audit
