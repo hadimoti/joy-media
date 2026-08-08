@@ -26,6 +26,7 @@ import {
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
 import { CloudPreviewQueue } from './cloud-preview-queue.js';
+import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
 import {
   CloseIcon,
@@ -431,6 +432,23 @@ export function AssetLibraryPanel({
       }
     },
     [client, originalAssetCache, projectId, refresh],
+  );
+
+  const recoverOriginal = useCallback(
+    async (asset: BrowserAsset, file: File) => {
+      if (asset.cloudBacked || asset.kind !== 'video' || !ownedAssetIds.has(asset.id)) return;
+      try {
+        setStatus(`Verifying ${asset.displayName} before recovery…`);
+        await verifyOriginalRecoveryCandidate(asset, file);
+        setStatus(`Uploading the verified original for ${asset.displayName}…`);
+        await client.uploadAssetOriginal(asset.projectId || projectId, asset, file);
+        setStatus(`${asset.displayName} is backed up to private cloud storage.`);
+        await refresh();
+      } catch (error) {
+        setStatus(`Original recovery stopped: ${message(error)}`);
+      }
+    },
+    [client, ownedAssetIds, projectId, refresh],
   );
 
   const deleteAsset = useCallback(
@@ -1058,6 +1076,16 @@ export function AssetLibraryPanel({
                             onShare={() => void shareToCloud(asset)}
                           />
                         )}
+                        {assetSource === 'user' &&
+                          !cloudBacked &&
+                          asset.kind === 'video' &&
+                          ownedAssetIds.has(asset.id) && (
+                            <AssetLocateOriginalButton
+                              asset={asset}
+                              originalCachePromise={originalAssetCache}
+                              onRecover={(file) => void recoverOriginal(asset, file)}
+                            />
+                          )}
                         <button
                           type="button"
                           className="icon-button"
@@ -1146,6 +1174,56 @@ function AssetShareCloudButton({
     >
       <CloudIcon />
     </button>
+  );
+}
+
+function AssetLocateOriginalButton({
+  asset,
+  originalCachePromise,
+  onRecover,
+}: {
+  readonly asset: BrowserAsset;
+  readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
+  readonly onRecover: (file: File) => void;
+}) {
+  const [hasLocal, setHasLocal] = useState(true);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void originalCachePromise.then((cache) =>
+      cache.get(asset.id).then((blob) => {
+        if (!cancelled) setHasLocal(blob !== undefined);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, originalCachePromise]);
+  if (hasLocal) return null;
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="sr-only"
+        type="file"
+        accept="video/*"
+        aria-label={`Locate original for ${asset.displayName}`}
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (file !== undefined) onRecover(file);
+        }}
+      />
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={`Locate original for ${asset.displayName}`}
+        title="Locate original"
+        onClick={() => inputRef.current?.click()}
+      >
+        <UploadIcon />
+      </button>
+    </>
   );
 }
 
