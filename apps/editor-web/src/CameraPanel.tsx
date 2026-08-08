@@ -259,9 +259,9 @@ export function CameraPanel({ allObjects, composition, onDispatch }: CameraPanel
           </div>
           <p className="camera-hint">
             Depth <bdi>(Z)</bdi> moves the camera along the view axis; layers with{' '}
-            <code>positionZ</code> farther back shrink toward the horizon and move less when
-            panning — the parallax effect <bdi>(§20.3, ADR-0015)</bdi>. This camera only affects
-            render when selected as the active camera above.
+            <code>positionZ</code> farther back shrink toward the horizon and move less when panning
+            — the parallax effect <bdi>(§20.3, ADR-0015)</bdi>. This camera only affects render when
+            selected as the active camera above.
           </p>
         </>
       )}

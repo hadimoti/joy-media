@@ -7,7 +7,7 @@
 
 P07-workflows.md marks WP-07.1–07.4 complete and its exit criteria all checked.
 STATE.md's P07 row still read "in-progress" with the note "first-party ports
-still stubbed." The first-party workflow *definitions* exist
+still stubbed." The first-party workflow _definitions_ exist
 (`packages/workflow-engine/src/first-party.ts`: long-video→draft-reels,
 multilingual-promo, podcast-cleanup — each with tested JSON artifacts under
 `packages/workflow-engine/workflows/*.json`), but nothing in `apps/editor-web`
@@ -51,7 +51,7 @@ shipped workflow.
   not change it.
 - Wiring `multilingual-promo` and `podcast-cleanup` to live providers
   (TTS, denoise) — those need provider SDK work that lives in P05; WP-17
-  only proves the *runner* can execute the graph and park at approvals.
+  only proves the _runner_ can execute the graph and park at approvals.
 - First-party workflow edits — they are shipped as versioned JSON; the
   recorder is for user workflows.
 

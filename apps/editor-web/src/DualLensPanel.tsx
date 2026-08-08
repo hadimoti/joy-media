@@ -66,7 +66,11 @@ export interface DualLensPanelProps {
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
   readonly onRemoveMarker?: (id: string) => void;
-  readonly markers?: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
+  readonly markers?: readonly {
+    readonly id: string;
+    readonly timeUs: number;
+    readonly label: string;
+  }[];
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
 }
@@ -211,16 +215,18 @@ export function DualLensPanel({
         )}
       </div>
 
-      {workflowGraph !== undefined && onDispatchGraph !== undefined && (mode === 'flow' || mode === 'split') && (
-        <div className="dual-lens-content">
-          <WorkflowGraphEditor
-            graph={workflowGraph}
-            onDispatch={onDispatchGraph}
-            selectedClipIds={selectedClipIds}
-            {...(selectionRange === undefined ? {} : { selectionRange })}
-          />
-        </div>
-      )}
+      {workflowGraph !== undefined &&
+        onDispatchGraph !== undefined &&
+        (mode === 'flow' || mode === 'split') && (
+          <div className="dual-lens-content">
+            <WorkflowGraphEditor
+              graph={workflowGraph}
+              onDispatch={onDispatchGraph}
+              selectedClipIds={selectedClipIds}
+              {...(selectionRange === undefined ? {} : { selectionRange })}
+            />
+          </div>
+        )}
 
       {specialistReview !== undefined && (mode === 'flow' || mode === 'split') && (
         <div className="dual-lens-content">{specialistReview}</div>
@@ -318,7 +324,11 @@ function TimeProjection({
   readonly onDispatch: (transaction: CommandTransaction) => void;
   readonly onAddMarker?: (timeUs: number, label: string) => void;
   readonly onRemoveMarker?: (id: string) => void;
-  readonly markers: readonly { readonly id: string; readonly timeUs: number; readonly label: string }[];
+  readonly markers: readonly {
+    readonly id: string;
+    readonly timeUs: number;
+    readonly label: string;
+  }[];
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
   const tracks = useMemo(() => {
@@ -634,7 +644,9 @@ function FlowProjection({
             return (
               <path
                 key={edge.id}
-                className={traceEdgeIds.has(edge.id) ? 'dual-flow-edge is-traced' : 'dual-flow-edge'}
+                className={
+                  traceEdgeIds.has(edge.id) ? 'dual-flow-edge is-traced' : 'dual-flow-edge'
+                }
                 d={`M ${from.x + NODE_WIDTH} ${from.y + 28} C ${from.x + 185} ${from.y + 28}, ${to.x - 35} ${to.y + 28}, ${to.x} ${to.y + 28}`}
                 markerEnd="url(#dual-flow-arrow)"
               />
@@ -725,7 +737,12 @@ function FlowMinimap({
   readonly focusedNodeId: string | undefined;
   readonly width: number;
   readonly height: number;
-  readonly viewport: { readonly left: number; readonly top: number; readonly width: number; readonly height: number };
+  readonly viewport: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  };
 }) {
   const covered = viewport.width >= 1 && viewport.height >= 1;
   return (

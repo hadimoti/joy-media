@@ -4,16 +4,23 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
 import { PlusIcon, TrashIcon } from './icons.js';
 import { CONTENT_TEMPLATES, contentTemplateById } from './content-template-catalog.js';
-import {
-  listTemplates,
-  removeTemplate,
-  type TemplateCatalogEntry,
-} from './template-catalog.js';
-import type { SeededContentTemplate, ContentTemplateV1, FirstPartySceneId } from './content-template-types.js';
+import { listTemplates, removeTemplate, type TemplateCatalogEntry } from './template-catalog.js';
+import type {
+  SeededContentTemplate,
+  ContentTemplateV1,
+  FirstPartySceneId,
+} from './content-template-types.js';
 import type { EditorSession } from './editor-session.js';
 import { getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
-import { createScenePreviewHost, defaultVariablesForScene, type ScenePreviewHost } from '@joy-media/html-scene-runtime/browser';
-import { findFirstPartyScene, type FirstPartyScenePackage } from '@joy-media/html-scene-runtime/first-party';
+import {
+  createScenePreviewHost,
+  defaultVariablesForScene,
+  type ScenePreviewHost,
+} from '@joy-media/html-scene-runtime/browser';
+import {
+  findFirstPartyScene,
+  type FirstPartyScenePackage,
+} from '@joy-media/html-scene-runtime/first-party';
 
 interface TemplatesPanelProps {
   readonly session: EditorSession;
@@ -23,7 +30,8 @@ interface TemplatesPanelProps {
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
 
-type TemplateView = 'library' | 'mine' | 'Titles' | 'Lower Thirds' | 'Utility' | 'Effects' | 'Social';
+type TemplateView =
+  'library' | 'mine' | 'Titles' | 'Lower Thirds' | 'Utility' | 'Effects' | 'Social';
 
 const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: string }[] = [
   { id: 'library', iconUrl: iconUrl('24_library.png') },
@@ -63,7 +71,9 @@ export function TemplatesPanel({
         label: entry.label,
         description: entry.description,
         category: entry.category,
-        actions: entry.actions as unknown as Parameters<typeof onApplyTemplate>[0]['template']['actions'],
+        actions: entry.actions as unknown as Parameters<
+          typeof onApplyTemplate
+        >[0]['template']['actions'],
       };
       onApplyTemplate({ template, seed, scopeLabel: entry.category });
       showToast(`Template "${entry.label}" applied`, 'success');
@@ -90,14 +100,12 @@ export function TemplatesPanel({
   const body = useMemo(() => {
     if (filteredTemplates.length === 0) {
       return (
-        <p className="empty-hint">
-          {isMine ? 'No saved templates yet.' : 'No templates found.'}
-        </p>
+        <p className="empty-hint">{isMine ? 'No saved templates yet.' : 'No templates found.'}</p>
       );
     }
     return (
       <div className="templates-grid">
-        {filteredTemplates.map((tpl: typeof CONTENT_TEMPLATES[number] | TemplateCatalogEntry) => (
+        {filteredTemplates.map((tpl: (typeof CONTENT_TEMPLATES)[number] | TemplateCatalogEntry) => (
           <div
             key={tpl.id}
             className="template-card"
@@ -140,7 +148,13 @@ export function TemplatesPanel({
         ))}
       </div>
     );
-  }, [filteredTemplates, isMine, handleApplyLibraryTemplate, handleApplyCatalogTemplate, handleDeleteTemplate]);
+  }, [
+    filteredTemplates,
+    isMine,
+    handleApplyLibraryTemplate,
+    handleApplyCatalogTemplate,
+    handleDeleteTemplate,
+  ]);
 
   return (
     <PanelShell
@@ -157,8 +171,12 @@ export function TemplatesPanel({
                 type="button"
                 role="tab"
                 className="templates-sidebar-tab"
-                aria-label={item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id}
-                title={item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id}
+                aria-label={
+                  item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id
+                }
+                title={
+                  item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id
+                }
                 aria-selected={view === item.id}
                 onClick={() => setView(item.id)}
               >
@@ -174,19 +192,27 @@ export function TemplatesPanel({
             ))}
           </div>
         </aside>
-        <div className="templates-main">
-          {body}
-        </div>
+        <div className="templates-main">{body}</div>
       </div>
     </PanelShell>
   );
 }
 
-function TemplatePreviewThumb({ template }: { readonly template: ContentTemplateV1 | TemplateCatalogEntry }) {
-  const firstSceneId = 'actions' in template
-    ? (template.actions.find((a) => a.kind === 'html-scene') as { readonly kind: 'html-scene'; readonly sceneId: FirstPartySceneId } | undefined)?.sceneId
+function TemplatePreviewThumb({
+  template,
+}: {
+  readonly template: ContentTemplateV1 | TemplateCatalogEntry;
+}) {
+  const firstSceneId =
+    'actions' in template
+      ? (
+          template.actions.find((a) => a.kind === 'html-scene') as
+            { readonly kind: 'html-scene'; readonly sceneId: FirstPartySceneId } | undefined
+        )?.sceneId
+      : undefined;
+  const scene: FirstPartyScenePackage | undefined = firstSceneId
+    ? findFirstPartyScene(firstSceneId)
     : undefined;
-  const scene: FirstPartyScenePackage | undefined = firstSceneId ? findFirstPartyScene(firstSceneId) : undefined;
   const [url, setUrl] = useState<string | undefined>(undefined);
   const [hovering, setHovering] = useState(false);
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -199,7 +225,9 @@ function TemplatePreviewThumb({ template }: { readonly template: ContentTemplate
     void getFirstPartySceneThumbUrl(firstSceneId, 120).then((next) => {
       if (!cancelled) setUrl(next);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [firstSceneId]);
 
   useEffect(() => {
@@ -233,7 +261,10 @@ function TemplatePreviewThumb({ template }: { readonly template: ContentTemplate
     };
 
     void host.ready.then(() => {
-      if (cancelled) { host.destroy(); return; }
+      if (cancelled) {
+        host.destroy();
+        return;
+      }
       hostRef.current = host;
       start = performance.now();
       rafRef.current = requestAnimationFrame(loop);

@@ -343,7 +343,8 @@ export function applyVisualObjectProjectCommand(
     const { objectId } = command.payload;
     const scene = project.visualObjects[objectId];
     if (scene === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
-    if (scene.kind !== 'html-scene') throw new RangeError(`object "${objectId}" is not an html-scene`);
+    if (scene.kind !== 'html-scene')
+      throw new RangeError(`object "${objectId}" is not an html-scene`);
     const parentOf = Object.values(project.visualObjects).find(
       (candidate) => candidate.parentId === objectId,
     );
@@ -358,8 +359,7 @@ export function applyVisualObjectProjectCommand(
   }
   if (command.type === 'image.create') {
     const { object } = command.payload;
-    if (object.kind !== 'image')
-      throw new RangeError('image.create requires an image-kind object');
+    if (object.kind !== 'image') throw new RangeError('image.create requires an image-kind object');
     if (typeof object.assetId !== 'string' || object.assetId.length === 0)
       throw new RangeError('image.create requires assetId');
     if (project.visualObjects[object.id] !== undefined)

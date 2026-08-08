@@ -278,16 +278,12 @@ describe('temporal bindings', () => {
     expect(validateTemporalBinding({ type: 'global' }, 'b')).toEqual([]);
     expect(validateTemporalBinding({ type: 'none' }, 'b')).toEqual([]);
     expect(validateTemporalBinding({ type: 'point', timeUs: 0 }, 'b')).toEqual([]);
-    expect(
-      validateTemporalBinding({ type: 'range', startUs: 0, durationUs: 1 }, 'b'),
-    ).toEqual([]);
+    expect(validateTemporalBinding({ type: 'range', startUs: 0, durationUs: 1 }, 'b')).toEqual([]);
   });
 
   it('rejects a zero-length range, which is a point wearing the wrong type', () => {
     expect(
-      validateTemporalBinding({ type: 'range', startUs: 0, durationUs: 0 }, 'b').map(
-        (d) => d.code,
-      ),
+      validateTemporalBinding({ type: 'range', startUs: 0, durationUs: 0 }, 'b').map((d) => d.code),
     ).toEqual(['BINDING_RANGE_DURATION']);
   });
 
@@ -387,9 +383,11 @@ describe('workflow graph contracts', () => {
       executionPolicy: { requiredCapabilities: ['timeline.destroy'], requiresApproval: false },
     };
 
-    expect(validateWorkflowGraph({ schemaVersion: 1, nodes: [rogue], edges: [] }, 'w').map(
-      (d) => d.code,
-    )).toContain('GRAPH_NODE_CAPABILITY_UNKNOWN');
+    expect(
+      validateWorkflowGraph({ schemaVersion: 1, nodes: [rogue], edges: [] }, 'w').map(
+        (d) => d.code,
+      ),
+    ).toContain('GRAPH_NODE_CAPABILITY_UNKNOWN');
   });
 
   it('accepts every capability in the shared vocabulary', () => {
@@ -398,9 +396,9 @@ describe('workflow graph contracts', () => {
       executionPolicy: { requiredCapabilities: CREATIVE_CAPABILITIES, requiresApproval: true },
     };
 
-    expect(validateWorkflowGraph({ schemaVersion: 1, nodes: [permissive], edges: [] }, 'w')).toEqual(
-      [],
-    );
+    expect(
+      validateWorkflowGraph({ schemaVersion: 1, nodes: [permissive], edges: [] }, 'w'),
+    ).toEqual([]);
   });
 
   it('accepts a graph whose groups name nodes it actually has', () => {

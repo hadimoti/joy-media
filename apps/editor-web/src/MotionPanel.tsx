@@ -132,7 +132,11 @@ const IDLE_OBJECT: VisualObjectV1 = {
   },
 };
 
-const LIBRARY_SUBTABS: readonly { readonly id: LibrarySubtab; readonly label: string; readonly iconUrl: string }[] = [
+const LIBRARY_SUBTABS: readonly {
+  readonly id: LibrarySubtab;
+  readonly label: string;
+  readonly iconUrl: string;
+}[] = [
   { id: 'my-motions', label: 'My Motions', iconUrl: iconUrl('24_my-media.png') },
   { id: 'library', label: 'Library', iconUrl: iconUrl('24_library.png') },
   { id: 'html-scenes', label: 'Scenes', iconUrl: iconUrl('24_scenes.png') },
@@ -347,9 +351,7 @@ function LibraryTab({
     <div className="motion-library">
       <div className="motion-library-scroll">
         {filtered.length === 0 && rest.length === 0 ? (
-          <p className="motion-library-empty">
-            No motions available.
-          </p>
+          <p className="motion-library-empty">No motions available.</p>
         ) : (
           <>
             {filtered.length > 0 && (
@@ -459,7 +461,9 @@ function MotionSceneCard({
           aria-label={`Delete ${entry.title}`}
           title="Delete"
           onClick={() => {
-            if (window.confirm(`Remove “${entry.title}” from your motions? This can't be undone.`)) {
+            if (
+              window.confirm(`Remove “${entry.title}” from your motions? This can't be undone.`)
+            ) {
               onDelete(entry.id);
             }
           }}
@@ -487,9 +491,7 @@ function MyMotionsTab({
   if (entries.length === 0) {
     return (
       <div className="motion-library">
-        <p className="motion-library-empty">
-          You have not created a motion yet. Tap + to start.
-        </p>
+        <p className="motion-library-empty">You have not created a motion yet. Tap + to start.</p>
       </div>
     );
   }
@@ -672,9 +674,7 @@ function HtmlSceneInfoPanel({ scene }: { readonly scene: FirstPartyScenePackage 
       </dl>
       <h4 className="html-scene-info-vars-title">Variables</h4>
       {Object.keys(scene.variableSchema).length === 0 ? (
-        <p className="html-scene-info-empty">
-          No variables.
-        </p>
+        <p className="html-scene-info-empty">No variables.</p>
       ) : (
         <ul className="html-scene-info-vars">
           {Object.entries(scene.variableSchema).map(([key, def]) => (
@@ -976,9 +976,7 @@ function SpatialPathPreview({
   if (xCurve === undefined || yCurve === undefined) {
     return (
       <section className="motion-spatial">
-        <p className="empty-hint">
-          Animate both X and Y to preview a 2D motion path.
-        </p>
+        <p className="empty-hint">Animate both X and Y to preview a 2D motion path.</p>
       </section>
     );
   }
@@ -1296,142 +1294,142 @@ export function MotionPanel({
                 <label className="motion-field motion-field-grow">
                   Preset
                   <select
-                  value={presetId}
-                  disabled={inactive}
-                  onChange={(event) => setPresetId(event.target.value)}
-                >
-                  {JOY_MOTION_PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="field-action">
-                <span className="field-action-label">Apply</span>
-                <div className="field-action-row">
-                  <button
-                    type="button"
-                    className="icon-button motion-preset-apply"
-                    data-guide="Apply preset"
-                    aria-label="Apply motion preset"
+                    value={presetId}
                     disabled={inactive}
-                    onClick={applyPreset}
+                    onChange={(event) => setPresetId(event.target.value)}
                   >
-                    <CheckIcon />
-                  </button>
+                    {JOY_MOTION_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="field-action">
+                  <span className="field-action-label">Apply</span>
+                  <div className="field-action-row">
+                    <button
+                      type="button"
+                      className="icon-button motion-preset-apply"
+                      data-guide="Apply preset"
+                      aria-label="Apply motion preset"
+                      disabled={inactive}
+                      onClick={applyPreset}
+                    >
+                      <CheckIcon />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-            <section className="motion-presets-channels" aria-label="Animation channels">
-              {channels.length === 0 ? (
-                <p className="motion-empty">
-                  No keyframes yet; add them in Inspector or apply a preset above.
-                </p>
-              ) : (
-                <div className="motion-lanes">
-                  {channels.map((channel) => {
-                    const curve = target.animations![channel]!;
-                    return (
-                      <div key={channel} className="motion-lane">
-                        <button
-                          type="button"
-                          className={
-                            activeGraph === channel
-                              ? 'motion-lane-label active'
-                              : 'motion-lane-label'
-                          }
-                          onClick={() => setGraphChannel(channel)}
-                          title="Show this channel in the graph"
-                        >
-                          {channel}
-                        </button>
-                        <svg
-                          className="motion-lane-track"
-                          viewBox={`0 0 ${LANE_WIDTH} 16`}
-                          width={LANE_WIDTH}
-                          height={16}
-                          role="img"
-                          aria-label={`${channel} keyframes`}
-                        >
-                          <line
-                            x1={0}
-                            y1={8}
-                            x2={LANE_WIDTH}
-                            y2={8}
-                            stroke={JOY_COLORS.border}
-                            strokeWidth={1}
-                          />
-                          <line
-                            x1={timeToX(playheadUs)}
-                            y1={0}
-                            x2={timeToX(playheadUs)}
-                            y2={16}
-                            stroke={JOY_COLORS.accent}
-                            strokeWidth={1}
-                          />
-                          {curve.keyframes.map((kf) => (
-                            <rect
-                              key={kf.timeUs}
-                              x={timeToX(kf.timeUs) - 4}
-                              y={4}
-                              width={8}
-                              height={8}
-                              transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
-                              fill={JOY_COLORS.textMuted}
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => onSeek(kf.timeUs)}
-                            >
-                              <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
-                            </rect>
-                          ))}
-                        </svg>
-                      </div>
-                    );
-                  })}
-                </div>
+              <section className="motion-presets-channels" aria-label="Animation channels">
+                {channels.length === 0 ? (
+                  <p className="motion-empty">
+                    No keyframes yet; add them in Inspector or apply a preset above.
+                  </p>
+                ) : (
+                  <div className="motion-lanes">
+                    {channels.map((channel) => {
+                      const curve = target.animations![channel]!;
+                      return (
+                        <div key={channel} className="motion-lane">
+                          <button
+                            type="button"
+                            className={
+                              activeGraph === channel
+                                ? 'motion-lane-label active'
+                                : 'motion-lane-label'
+                            }
+                            onClick={() => setGraphChannel(channel)}
+                            title="Show this channel in the graph"
+                          >
+                            {channel}
+                          </button>
+                          <svg
+                            className="motion-lane-track"
+                            viewBox={`0 0 ${LANE_WIDTH} 16`}
+                            width={LANE_WIDTH}
+                            height={16}
+                            role="img"
+                            aria-label={`${channel} keyframes`}
+                          >
+                            <line
+                              x1={0}
+                              y1={8}
+                              x2={LANE_WIDTH}
+                              y2={8}
+                              stroke={JOY_COLORS.border}
+                              strokeWidth={1}
+                            />
+                            <line
+                              x1={timeToX(playheadUs)}
+                              y1={0}
+                              x2={timeToX(playheadUs)}
+                              y2={16}
+                              stroke={JOY_COLORS.accent}
+                              strokeWidth={1}
+                            />
+                            {curve.keyframes.map((kf) => (
+                              <rect
+                                key={kf.timeUs}
+                                x={timeToX(kf.timeUs) - 4}
+                                y={4}
+                                width={8}
+                                height={8}
+                                transform={`rotate(45 ${timeToX(kf.timeUs)} 8)`}
+                                fill={JOY_COLORS.textMuted}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => onSeek(kf.timeUs)}
+                              >
+                                <title>{`${channel} @ ${(kf.timeUs / 1_000_000).toFixed(2)}s = ${kf.value}`}</title>
+                              </rect>
+                            ))}
+                          </svg>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+              {activeGraph !== undefined && (
+                <GraphEditor
+                  object={target}
+                  channel={activeGraph}
+                  duration={duration}
+                  playheadUs={playheadUs}
+                  onSeek={onSeek}
+                  onDispatch={onDispatch}
+                />
               )}
-            </section>
-            {activeGraph !== undefined && (
-              <GraphEditor
-                object={target}
-                channel={activeGraph}
-                duration={duration}
-                playheadUs={playheadUs}
-                onSeek={onSeek}
-                onDispatch={onDispatch}
-              />
-            )}
-          </div>
-        )}
-
-        {subtab === 'spatial' && (
-          <>
-            <div className="motion-spatial-actions">
-              <button
-                type="button"
-                className="icon-button"
-                data-guide="Save spatial path"
-                aria-label="Save spatial path"
-                title="Save spatial path"
-                disabled={inactive || !canSaveSpatial}
-                onClick={saveSpatialPath}
-              >
-                <SaveIcon />
-              </button>
             </div>
-            <SpatialPathPreview object={target} duration={duration} playheadUs={playheadUs} />
-          </>
-        )}
+          )}
 
-        {subtab === 'html-scenes' && (
-          <HtmlScenesSection
-            allObjects={allObjects}
-            onDispatch={onDispatch}
-            {...(selectedClipId !== undefined ? { selectedClipId } : {})}
-            onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
-          />
-        )}
+          {subtab === 'spatial' && (
+            <>
+              <div className="motion-spatial-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  data-guide="Save spatial path"
+                  aria-label="Save spatial path"
+                  title="Save spatial path"
+                  disabled={inactive || !canSaveSpatial}
+                  onClick={saveSpatialPath}
+                >
+                  <SaveIcon />
+                </button>
+              </div>
+              <SpatialPathPreview object={target} duration={duration} playheadUs={playheadUs} />
+            </>
+          )}
+
+          {subtab === 'html-scenes' && (
+            <HtmlScenesSection
+              allObjects={allObjects}
+              onDispatch={onDispatch}
+              {...(selectedClipId !== undefined ? { selectedClipId } : {})}
+              onAddHtmlSceneToSelection={onAddHtmlSceneToSelection}
+            />
+          )}
         </div>
       </div>
     </PanelShell>

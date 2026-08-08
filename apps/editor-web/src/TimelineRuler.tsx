@@ -125,11 +125,7 @@ export function TimelineTracksGrid({
   readonly widthPx: number;
 }) {
   return (
-    <div
-      className="timeline-tracks-grid"
-      style={{ width: widthPx }}
-      aria-hidden="true"
-    >
+    <div className="timeline-tracks-grid" style={{ width: widthPx }} aria-hidden="true">
       {ticks.map((tick) => (
         <span
           key={`${tick.timeUs}-${tick.major ? 'M' : 'm'}`}

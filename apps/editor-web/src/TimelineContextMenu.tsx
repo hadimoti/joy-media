@@ -1,12 +1,5 @@
 import type { ReactNode } from 'react';
-import {
-  CutIcon,
-  DuplicateIcon,
-  FreezeIcon,
-  SelectIcon,
-  SpeedIcon,
-  TrashIcon,
-} from './icons.js';
+import { CutIcon, DuplicateIcon, FreezeIcon, SelectIcon, SpeedIcon, TrashIcon } from './icons.js';
 
 export const SPEED_PRESETS = [0.5, 0.75, 1, 1.5, 2] as const;
 
@@ -52,11 +45,7 @@ export function TimelineContextMenu({
         {menu.items.map((item, index) => {
           if (item.dividerBefore) {
             return (
-              <div
-                key={`divider-${index}`}
-                className="timeline-context-sep"
-                role="separator"
-              />
+              <div key={`divider-${index}`} className="timeline-context-sep" role="separator" />
             );
           }
           return (
@@ -71,9 +60,7 @@ export function TimelineContextMenu({
                 onClose();
               }}
             >
-              <span className="timeline-context-icon">
-                {item.icon ? <item.icon /> : null}
-              </span>
+              <span className="timeline-context-icon">{item.icon ? <item.icon /> : null}</span>
               {item.label}
             </button>
           );

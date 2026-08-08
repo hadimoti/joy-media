@@ -3,11 +3,7 @@ import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 export type ExportPresetId =
-  | 'social-h264-aac'
-  | 'reels-1080'
-  | 'shorts-1080'
-  | 'youtube-1080'
-  | 'high-bitrate';
+  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
 export interface RenderManifest {
   readonly projectId: string;

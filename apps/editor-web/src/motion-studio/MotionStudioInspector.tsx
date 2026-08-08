@@ -18,7 +18,12 @@ import { setKeyframeAt, hasKeyframeAtMotion, type LayerEvaluation } from '@joy-m
 import type { SceneCommand } from './state/sceneCommands.js';
 import { UI_ICONS } from '../ui-icons.js';
 import { MsTitle } from './MsTitle.js';
-import { layerCapabilities, commonCapabilities, MOTION_BLEND_MODES, type CapabilitySection } from './state/motionCapabilities.js';
+import {
+  layerCapabilities,
+  commonCapabilities,
+  MOTION_BLEND_MODES,
+  type CapabilitySection,
+} from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
 
 /**
@@ -129,7 +134,12 @@ function NumberRow({
     <div className="ms-inspector-row" key={label}>
       <label className="ms-inspector-label">{label}</label>
       {diamond && (
-        <button type="button" className="ms-inspector-keyframe" aria-label="Toggle keyframe" title="Keyframe (Phase 4)">
+        <button
+          type="button"
+          className="ms-inspector-keyframe"
+          aria-label="Toggle keyframe"
+          title="Keyframe (Phase 4)"
+        >
           <KeyframeDiamondIcon />
         </button>
       )}
@@ -168,11 +178,20 @@ function SelectRow({
     <div className="ms-inspector-row" key={label}>
       <label className="ms-inspector-label">{label}</label>
       {diamond && (
-        <button type="button" className="ms-inspector-keyframe" aria-label="Toggle keyframe" title="Keyframe (Phase 4)">
+        <button
+          type="button"
+          className="ms-inspector-keyframe"
+          aria-label="Toggle keyframe"
+          title="Keyframe (Phase 4)"
+        >
           <KeyframeDiamondIcon />
         </button>
       )}
-      <select className="ms-inspector-input" value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        className="ms-inspector-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
         {options.map((opt) => (
           <option key={opt} value={opt}>
             {opt}
@@ -215,9 +234,15 @@ function ColorRow({
   );
 }
 
-function useSelectedLayers(document: MotionSceneDocument, selectedLayerIds: readonly MotionLayerId[]) {
+function useSelectedLayers(
+  document: MotionSceneDocument,
+  selectedLayerIds: readonly MotionLayerId[],
+) {
   return useMemo(
-    () => selectedLayerIds.map((id) => document.layers.find((l) => l.id === id)).filter((l): l is MotionLayer => Boolean(l)),
+    () =>
+      selectedLayerIds
+        .map((id) => document.layers.find((l) => l.id === id))
+        .filter((l): l is MotionLayer => Boolean(l)),
     [document, selectedLayerIds],
   );
 }
@@ -232,15 +257,24 @@ function SceneInspector({
   const bg = document.background;
 
   const setBg = useCallback(
-    (background: SceneBackground) => dispatch('Set background', { type: 'scene.setSceneBackground', payload: { background } }),
+    (background: SceneBackground) =>
+      dispatch('Set background', { type: 'scene.setSceneBackground', payload: { background } }),
     [dispatch],
   );
   const setDimensions = useCallback(
-    (w: number, h: number) => dispatch('Set dimensions', { type: 'scene.setDocumentDimensions', payload: { width: w, height: h } }),
+    (w: number, h: number) =>
+      dispatch('Set dimensions', {
+        type: 'scene.setDocumentDimensions',
+        payload: { width: w, height: h },
+      }),
     [dispatch],
   );
   const setDuration = useCallback(
-    (durationMs: number) => dispatch('Set duration', { type: 'scene.setDocumentDuration', payload: { durationMs: Math.max(100, durationMs) } }),
+    (durationMs: number) =>
+      dispatch('Set duration', {
+        type: 'scene.setDocumentDuration',
+        payload: { durationMs: Math.max(100, durationMs) },
+      }),
     [dispatch],
   );
 
@@ -258,8 +292,20 @@ function SceneInspector({
             <label className="ms-inspector-label">Name</label>
             <span className="ms-inspector-readonly">{document.name}</span>
           </div>
-          <NumberRow label="Width" value={document.width} step={1} min={1} onChange={(w) => setDimensions(w, document.height)} />
-          <NumberRow label="Height" value={document.height} step={1} min={1} onChange={(h) => setDimensions(document.width, h)} />
+          <NumberRow
+            label="Width"
+            value={document.width}
+            step={1}
+            min={1}
+            onChange={(w) => setDimensions(w, document.height)}
+          />
+          <NumberRow
+            label="Height"
+            value={document.height}
+            step={1}
+            min={1}
+            onChange={(h) => setDimensions(document.width, h)}
+          />
           <NumberRow
             label="Duration"
             value={document.durationMs / 1000}
@@ -280,7 +326,16 @@ function SceneInspector({
           <SelectRow
             label="Kind"
             value={bg.kind}
-            options={['transparent', 'solid', 'gradient', 'image', 'video', 'animated-gradient', 'noise', 'particles']}
+            options={[
+              'transparent',
+              'solid',
+              'gradient',
+              'image',
+              'video',
+              'animated-gradient',
+              'noise',
+              'particles',
+            ]}
             onChange={(kind) => setBg({ kind: kind as SceneBackground['kind'] })}
           />
           {bg.kind === 'solid' && (
@@ -297,9 +352,7 @@ function SceneInspector({
                 label="Angle"
                 value={bg.gradient.angle ?? 0}
                 step={1}
-                onChange={(angle) =>
-                  setBg({ ...bg, gradient: { ...bg.gradient!, angle } })
-                }
+                onChange={(angle) => setBg({ ...bg, gradient: { ...bg.gradient!, angle } })}
               />
               <NumberRow
                 label="Opacity"
@@ -350,20 +403,71 @@ function TransformSection({
   const updateTransform = (patch: Partial<MotionTransform>) => {
     dispatch(
       'Set transform',
-      ...selected.map<SceneCommand>((layer) => ({ type: 'scene.setLayerTransform', payload: { layerId: layer.id, transform: patch } })),
+      ...selected.map<SceneCommand>((layer) => ({
+        type: 'scene.setLayerTransform',
+        payload: { layerId: layer.id, transform: patch },
+      })),
     );
   };
 
   return (
     <div className="ms-inspector-section">
       <h4 className="ms-inspector-section-title">Transform</h4>
-      <NumberRow label="X" value={mixedNumber(xs)} step={1} onChange={(v) => updateTransform({ x: v })} diamond={showDiamonds} />
-      <NumberRow label="Y" value={mixedNumber(ys)} step={1} onChange={(v) => updateTransform({ y: v })} diamond={showDiamonds} />
-      <NumberRow label="Width" value={mixedNumber(ws)} step={1} min={1} onChange={(v) => updateTransform({ width: Math.max(1, v) })} diamond={showDiamonds} />
-      <NumberRow label="Height" value={mixedNumber(hs)} step={1} min={1} onChange={(v) => updateTransform({ height: Math.max(1, v) })} diamond={showDiamonds} />
-      <NumberRow label="Rotation" value={mixedNumber(rots)} step={1} onChange={(v) => updateTransform({ rotationDeg: v })} diamond={showDiamonds} />
-      <NumberRow label="Scale X" value={mixedNumber(scaleXs)} step={0.05} min={-10} max={10} onChange={(v) => updateTransform({ scaleX: v })} diamond={showDiamonds} />
-      <NumberRow label="Scale Y" value={mixedNumber(scaleYs)} step={0.05} min={-10} max={10} onChange={(v) => updateTransform({ scaleY: v })} diamond={showDiamonds} />
+      <NumberRow
+        label="X"
+        value={mixedNumber(xs)}
+        step={1}
+        onChange={(v) => updateTransform({ x: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Y"
+        value={mixedNumber(ys)}
+        step={1}
+        onChange={(v) => updateTransform({ y: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Width"
+        value={mixedNumber(ws)}
+        step={1}
+        min={1}
+        onChange={(v) => updateTransform({ width: Math.max(1, v) })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Height"
+        value={mixedNumber(hs)}
+        step={1}
+        min={1}
+        onChange={(v) => updateTransform({ height: Math.max(1, v) })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Rotation"
+        value={mixedNumber(rots)}
+        step={1}
+        onChange={(v) => updateTransform({ rotationDeg: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Scale X"
+        value={mixedNumber(scaleXs)}
+        step={0.05}
+        min={-10}
+        max={10}
+        onChange={(v) => updateTransform({ scaleX: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Scale Y"
+        value={mixedNumber(scaleYs)}
+        step={0.05}
+        min={-10}
+        max={10}
+        onChange={(v) => updateTransform({ scaleY: v })}
+        diamond={showDiamonds}
+      />
       <NumberRow
         label="Opacity"
         value={mixedNumber(ops)}
@@ -399,11 +503,20 @@ function TextSection({
   const directions = selected.map((l) => l.typography?.direction ?? 'auto');
 
   const updateText = (text: string) =>
-    dispatch('Set text', ...selected.map<SceneCommand>((layer) => ({ type: 'scene.setLayerText', payload: { layerId: layer.id, text } })));
+    dispatch(
+      'Set text',
+      ...selected.map<SceneCommand>((layer) => ({
+        type: 'scene.setLayerText',
+        payload: { layerId: layer.id, text },
+      })),
+    );
   const updateTypography = (patch: Partial<MotionTypography>) =>
     dispatch(
       'Set typography',
-      ...selected.map<SceneCommand>((layer) => ({ type: 'scene.setLayerTypography', payload: { layerId: layer.id, typography: patch } })),
+      ...selected.map<SceneCommand>((layer) => ({
+        type: 'scene.setLayerTypography',
+        payload: { layerId: layer.id, typography: patch },
+      })),
     );
 
   return (
@@ -420,16 +533,85 @@ function TextSection({
       </div>
       <div className="ms-inspector-section">
         <h4 className="ms-inspector-section-title">Typography</h4>
-        <SelectRow label="Font Family" value={mixedString(fontFamilies)} options={CONTENT_FONT_FAMILIES} onChange={(v) => updateTypography({ fontFamily: v })} />
-        <NumberRow label="Font Size" value={mixedNumber(fontSizes)} step={1} min={1} max={400} onChange={(v) => updateTypography({ fontSize: v })} diamond={showDiamonds} />
-        <NumberRow label="Line Height" value={mixedNumber(lineHeights)} step={0.1} min={0.5} max={5} onChange={(v) => updateTypography({ lineHeight: v })} diamond={showDiamonds} />
-        <NumberRow label="Letter Spacing" value={mixedNumber(letterSpacings)} step={0.1} min={-20} max={100} onChange={(v) => updateTypography({ letterSpacing: v })} diamond={showDiamonds} />
-        <NumberRow label="Word Spacing" value={mixedNumber(wordSpacings)} step={0.1} min={-50} max={100} onChange={(v) => updateTypography({ wordSpacing: v })} diamond={showDiamonds} />
-        <NumberRow label="Paragraph Spacing" value={mixedNumber(paragraphSpacings)} step={0.1} min={0} max={200} onChange={(v) => updateTypography({ paragraphSpacing: v })} diamond={showDiamonds} />
-        <NumberRow label="Font Weight" value={mixedNumber(fontWeights)} step={100} min={100} max={900} onChange={(v) => updateTypography({ fontWeight: v })} />
-        <SelectRow label="Text Align" value={mixedString(textAligns)} options={TEXT_ALIGNS} onChange={(v) => updateTypography({ textAlign: v as MotionTypography['textAlign'] })} />
-        <SelectRow label="Text Transform" value={mixedString(textTransforms)} options={TEXT_TRANSFORMS} onChange={(v) => updateTypography({ textTransform: v as MotionTypography['textTransform'] })} />
-        <SelectRow label="Direction" value={mixedString(directions)} options={['auto', 'ltr', 'rtl']} onChange={(v) => updateTypography({ direction: v as MotionTypography['direction'] })} />
+        <SelectRow
+          label="Font Family"
+          value={mixedString(fontFamilies)}
+          options={CONTENT_FONT_FAMILIES}
+          onChange={(v) => updateTypography({ fontFamily: v })}
+        />
+        <NumberRow
+          label="Font Size"
+          value={mixedNumber(fontSizes)}
+          step={1}
+          min={1}
+          max={400}
+          onChange={(v) => updateTypography({ fontSize: v })}
+          diamond={showDiamonds}
+        />
+        <NumberRow
+          label="Line Height"
+          value={mixedNumber(lineHeights)}
+          step={0.1}
+          min={0.5}
+          max={5}
+          onChange={(v) => updateTypography({ lineHeight: v })}
+          diamond={showDiamonds}
+        />
+        <NumberRow
+          label="Letter Spacing"
+          value={mixedNumber(letterSpacings)}
+          step={0.1}
+          min={-20}
+          max={100}
+          onChange={(v) => updateTypography({ letterSpacing: v })}
+          diamond={showDiamonds}
+        />
+        <NumberRow
+          label="Word Spacing"
+          value={mixedNumber(wordSpacings)}
+          step={0.1}
+          min={-50}
+          max={100}
+          onChange={(v) => updateTypography({ wordSpacing: v })}
+          diamond={showDiamonds}
+        />
+        <NumberRow
+          label="Paragraph Spacing"
+          value={mixedNumber(paragraphSpacings)}
+          step={0.1}
+          min={0}
+          max={200}
+          onChange={(v) => updateTypography({ paragraphSpacing: v })}
+          diamond={showDiamonds}
+        />
+        <NumberRow
+          label="Font Weight"
+          value={mixedNumber(fontWeights)}
+          step={100}
+          min={100}
+          max={900}
+          onChange={(v) => updateTypography({ fontWeight: v })}
+        />
+        <SelectRow
+          label="Text Align"
+          value={mixedString(textAligns)}
+          options={TEXT_ALIGNS}
+          onChange={(v) => updateTypography({ textAlign: v as MotionTypography['textAlign'] })}
+        />
+        <SelectRow
+          label="Text Transform"
+          value={mixedString(textTransforms)}
+          options={TEXT_TRANSFORMS}
+          onChange={(v) =>
+            updateTypography({ textTransform: v as MotionTypography['textTransform'] })
+          }
+        />
+        <SelectRow
+          label="Direction"
+          value={mixedString(directions)}
+          options={['auto', 'ltr', 'rtl']}
+          onChange={(v) => updateTypography({ direction: v as MotionTypography['direction'] })}
+        />
       </div>
     </>
   );
@@ -465,7 +647,12 @@ function FillSection({
       <MsTitle as="h4" iconSrc={UI_ICONS.paint} className="ms-inspector-section-title">
         Fill
       </MsTitle>
-      <SelectRow label="Kind" value={mixedString(kinds)} options={['solid', 'gradient', 'transparent']} onChange={(v) => updateFill({ kind: v as MotionFill['kind'] })} />
+      <SelectRow
+        label="Kind"
+        value={mixedString(kinds)}
+        options={['solid', 'gradient', 'transparent']}
+        onChange={(v) => updateFill({ kind: v as MotionFill['kind'] })}
+      />
       {(mixedString(kinds) === 'solid' || isMixedString(mixedString(kinds))) && (
         <ColorRow
           label="Fill"
@@ -475,7 +662,15 @@ function FillSection({
         />
       )}
       {showDiamonds && (
-        <NumberRow label="Opacity" value={mixedNumber(opacities)} step={0.05} min={0} max={1} onChange={(v) => updateFill({ opacity: v })} diamond />
+        <NumberRow
+          label="Opacity"
+          value={mixedNumber(opacities)}
+          step={0.05}
+          min={0}
+          max={1}
+          onChange={(v) => updateFill({ opacity: v })}
+          diamond
+        />
       )}
     </div>
   );
@@ -510,12 +705,30 @@ function StrokeSection({
       <MsTitle as="h4" iconSrc={UI_ICONS.borderRadius} className="ms-inspector-section-title">
         <StrokeIcon /> Stroke
       </MsTitle>
-      <NumberRow label="Width" value={mixedNumber(widths)} step={0.5} min={0} max={50} onChange={(v) => updateStrokes({ width: v })} diamond={showDiamonds} />
+      <NumberRow
+        label="Width"
+        value={mixedNumber(widths)}
+        step={0.5}
+        min={0}
+        max={50}
+        onChange={(v) => updateStrokes({ width: v })}
+        diamond={showDiamonds}
+      />
       <div className="ms-inspector-row">
         <label className="ms-inspector-label">Color</label>
-        <input type="color" className="ms-inspector-color" value={mixedString(colors)} onChange={(e) => updateStrokes({ color: e.target.value })} />
+        <input
+          type="color"
+          className="ms-inspector-color"
+          value={mixedString(colors)}
+          onChange={(e) => updateStrokes({ color: e.target.value })}
+        />
       </div>
-      <SelectRow label="Style" value={mixedString(styles)} options={STROKE_STYLES} onChange={(v) => updateStrokes({ style: v as NonNullable<MotionStroke['style']> })} />
+      <SelectRow
+        label="Style"
+        value={mixedString(styles)}
+        options={STROKE_STYLES}
+        onChange={(v) => updateStrokes({ style: v as NonNullable<MotionStroke['style']> })}
+      />
     </div>
   );
 }
@@ -541,7 +754,15 @@ function ShadowSection({
     dispatch(
       'Set shadow',
       ...selected.map<SceneCommand>((layer) => {
-        const existing = layer.shadows[0] ?? { x: 0, y: 0, blur: 0, spread: 0, color: '#000000', opacity: 1, inset: false };
+        const existing = layer.shadows[0] ?? {
+          x: 0,
+          y: 0,
+          blur: 0,
+          spread: 0,
+          color: '#000000',
+          opacity: 1,
+          inset: false,
+        };
         const next = { ...existing, ...patch } as MotionShadow;
         return { type: 'scene.setLayerShadows', payload: { layerId: layer.id, shadows: [next] } };
       }),
@@ -553,14 +774,55 @@ function ShadowSection({
       <MsTitle as="h4" iconSrc={UI_ICONS.opacity} className="ms-inspector-section-title">
         <ShadowIcon /> Shadow
       </MsTitle>
-      <NumberRow label="X" value={mixedNumber(xs)} step={1} onChange={(v) => updateShadows({ x: v })} diamond={showDiamonds} />
-      <NumberRow label="Y" value={mixedNumber(ys)} step={1} onChange={(v) => updateShadows({ y: v })} diamond={showDiamonds} />
-      <NumberRow label="Blur" value={mixedNumber(blurs)} step={0.5} min={0} max={100} onChange={(v) => updateShadows({ blur: v })} diamond={showDiamonds} />
-      <NumberRow label="Spread" value={mixedNumber(spreads)} step={0.5} min={0} max={100} onChange={(v) => updateShadows({ spread: v })} diamond={showDiamonds} />
-      <NumberRow label="Opacity" value={mixedNumber(opacities)} step={0.05} min={0} max={1} onChange={(v) => updateShadows({ opacity: v })} diamond={showDiamonds} />
+      <NumberRow
+        label="X"
+        value={mixedNumber(xs)}
+        step={1}
+        onChange={(v) => updateShadows({ x: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Y"
+        value={mixedNumber(ys)}
+        step={1}
+        onChange={(v) => updateShadows({ y: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Blur"
+        value={mixedNumber(blurs)}
+        step={0.5}
+        min={0}
+        max={100}
+        onChange={(v) => updateShadows({ blur: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Spread"
+        value={mixedNumber(spreads)}
+        step={0.5}
+        min={0}
+        max={100}
+        onChange={(v) => updateShadows({ spread: v })}
+        diamond={showDiamonds}
+      />
+      <NumberRow
+        label="Opacity"
+        value={mixedNumber(opacities)}
+        step={0.05}
+        min={0}
+        max={1}
+        onChange={(v) => updateShadows({ opacity: v })}
+        diamond={showDiamonds}
+      />
       <div className="ms-inspector-row">
         <label className="ms-inspector-label">Color</label>
-        <input type="color" className="ms-inspector-color" value={mixedString(colors)} onChange={(e) => updateShadows({ color: e.target.value })} />
+        <input
+          type="color"
+          className="ms-inspector-color"
+          value={mixedString(colors)}
+          onChange={(e) => updateShadows({ color: e.target.value })}
+        />
       </div>
       <div className="ms-inspector-row">
         <label className="ms-inspector-label">Inset</label>
@@ -595,7 +857,10 @@ function CornerRadiusSection({
       ...selected.map<SceneCommand>((layer) => {
         const next = [...layer.borderRadius] as [number, number, number, number];
         next[index] = value;
-        return { type: 'scene.setLayerBorderRadius', payload: { layerId: layer.id, borderRadius: next } };
+        return {
+          type: 'scene.setLayerBorderRadius',
+          payload: { layerId: layer.id, borderRadius: next },
+        };
       }),
     );
   };
@@ -606,10 +871,34 @@ function CornerRadiusSection({
         Corner Radius
       </MsTitle>
       <div className="ms-inspector-row ms-inspector-four">
-        <NumberRow label="TL" value={mixedNumber(r0)} step={1} min={0} onChange={(v) => update(0, v)} />
-        <NumberRow label="TR" value={mixedNumber(r1)} step={1} min={0} onChange={(v) => update(1, v)} />
-        <NumberRow label="BR" value={mixedNumber(r2)} step={1} min={0} onChange={(v) => update(2, v)} />
-        <NumberRow label="BL" value={mixedNumber(r3)} step={1} min={0} onChange={(v) => update(3, v)} />
+        <NumberRow
+          label="TL"
+          value={mixedNumber(r0)}
+          step={1}
+          min={0}
+          onChange={(v) => update(0, v)}
+        />
+        <NumberRow
+          label="TR"
+          value={mixedNumber(r1)}
+          step={1}
+          min={0}
+          onChange={(v) => update(1, v)}
+        />
+        <NumberRow
+          label="BR"
+          value={mixedNumber(r2)}
+          step={1}
+          min={0}
+          onChange={(v) => update(2, v)}
+        />
+        <NumberRow
+          label="BL"
+          value={mixedNumber(r3)}
+          step={1}
+          min={0}
+          onChange={(v) => update(3, v)}
+        />
       </div>
     </div>
   );
@@ -627,7 +916,10 @@ function BlendModeSection({
   const update = (blendMode: BlendMode) =>
     dispatch(
       'Set blend mode',
-      ...selected.map<SceneCommand>((layer) => ({ type: 'scene.setLayerProperty', payload: { layerId: layer.id, property: 'blendMode', value: blendMode } })),
+      ...selected.map<SceneCommand>((layer) => ({
+        type: 'scene.setLayerProperty',
+        payload: { layerId: layer.id, property: 'blendMode', value: blendMode },
+      })),
     );
 
   return (
@@ -635,7 +927,12 @@ function BlendModeSection({
       <MsTitle as="h4" iconSrc={UI_ICONS.blend} className="ms-inspector-section-title">
         Blend Mode
       </MsTitle>
-      <SelectRow label="Blend" value={mixedString(values)} options={MOTION_BLEND_MODES} onChange={(v) => update(v as BlendMode)} />
+      <SelectRow
+        label="Blend"
+        value={mixedString(values)}
+        options={MOTION_BLEND_MODES}
+        onChange={(v) => update(v as BlendMode)}
+      />
     </div>
   );
 }
@@ -659,7 +956,10 @@ function SimpleFilterSection({
       ...selected.map<SceneCommand>((layer) => {
         const existing = layer.filters[0] ?? { kind: 'blur', value: 0 };
         const next = { ...existing, ...patch } as MotionFilter;
-        return { type: 'scene.setLayerProperty', payload: { layerId: layer.id, property: 'filters', value: [next] } };
+        return {
+          type: 'scene.setLayerProperty',
+          payload: { layerId: layer.id, property: 'filters', value: [next] },
+        };
       }),
     );
   };
@@ -669,8 +969,21 @@ function SimpleFilterSection({
       <MsTitle as="h4" iconSrc={UI_ICONS.opacity} className="ms-inspector-section-title">
         <FilterIcon /> Filter
       </MsTitle>
-      <SelectRow label="Kind" value={mixedString(kinds)} options={FILTER_KINDS} onChange={(v) => updateFilters({ kind: v as MotionFilter['kind'] })} />
-      <NumberRow label="Value" value={mixedNumber(values)} step={1} min={0} max={1000} onChange={(v) => updateFilters({ value: v })} diamond={showDiamonds} />
+      <SelectRow
+        label="Kind"
+        value={mixedString(kinds)}
+        options={FILTER_KINDS}
+        onChange={(v) => updateFilters({ kind: v as MotionFilter['kind'] })}
+      />
+      <NumberRow
+        label="Value"
+        value={mixedNumber(values)}
+        step={1}
+        min={0}
+        max={1000}
+        onChange={(v) => updateFilters({ value: v })}
+        diamond={showDiamonds}
+      />
     </div>
   );
 }
@@ -686,7 +999,10 @@ function LayerInspector({
 }) {
   const isMulti = selected.length > 1;
   const types = selected.map((l) => l.type);
-  const sections = useMemo(() => (isMulti ? commonCapabilities(types) : layerCapabilities(types[0]!).sections), [isMulti, types]);
+  const sections = useMemo(
+    () => (isMulti ? commonCapabilities(types) : layerCapabilities(types[0]!).sections),
+    [isMulti, types],
+  );
   const showDiamonds = !isMulti;
   const first = selected[0]!;
 
@@ -696,20 +1012,50 @@ function LayerInspector({
         <h3 className="ms-panel-title">{isMulti ? `${selected.length} selected` : first.name}</h3>
       </div>
       <div className="ms-panel-body">
-        {sections.includes('transform') && <TransformSection selected={selected} dispatch={dispatch} isMulti={isMulti} showDiamonds={showDiamonds} />}
-        {sections.includes('text') && <TextSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />}
-        {sections.includes('fill') && <FillSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />}
-        {sections.includes('stroke') && <StrokeSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />}
-        {sections.includes('shadow') && <ShadowSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />}
-        {sections.includes('cornerRadius') && <CornerRadiusSection selected={selected} dispatch={dispatch} />}
-        {sections.includes('blendMode') && <BlendModeSection selected={selected} dispatch={dispatch} />}
-        {sections.includes('filter') && <SimpleFilterSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />}
+        {sections.includes('transform') && (
+          <TransformSection
+            selected={selected}
+            dispatch={dispatch}
+            isMulti={isMulti}
+            showDiamonds={showDiamonds}
+          />
+        )}
+        {sections.includes('text') && (
+          <TextSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+        )}
+        {sections.includes('fill') && (
+          <FillSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+        )}
+        {sections.includes('stroke') && (
+          <StrokeSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+        )}
+        {sections.includes('shadow') && (
+          <ShadowSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+        )}
+        {sections.includes('cornerRadius') && (
+          <CornerRadiusSection selected={selected} dispatch={dispatch} />
+        )}
+        {sections.includes('blendMode') && (
+          <BlendModeSection selected={selected} dispatch={dispatch} />
+        )}
+        {sections.includes('filter') && (
+          <SimpleFilterSection
+            selected={selected}
+            dispatch={dispatch}
+            showDiamonds={showDiamonds}
+          />
+        )}
       </div>
     </aside>
   );
 }
 
-export function MotionStudioInspector({ document, selectedLayerIds, dispatch, playheadMs = 0 }: InspectorProps) {
+export function MotionStudioInspector({
+  document,
+  selectedLayerIds,
+  dispatch,
+  playheadMs = 0,
+}: InspectorProps) {
   const selected = useSelectedLayers(document, selectedLayerIds);
   if (selected.length === 0) {
     return <SceneInspector document={document} dispatch={dispatch} />;

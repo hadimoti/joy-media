@@ -120,31 +120,31 @@ export function SpecialistReviewPanel({
             (proposal) => proposal.edits.length > 0 && approved.includes(proposal.roleId),
           );
           return {
-          label: `Apply ${contributing.length} specialist change set(s)`,
-          commands: contributing.map((proposal) => ({
-            type: 'artifact.create' as const,
-            payload: {
-              artifact: {
-                id: `changeset-${proposal.roleId}-${Date.now()}`,
-                kind: 'changeSet' as const,
-                schemaVersion: 1,
-                revision: 0,
-                label: proposal.title,
-                contentRef: {
-                  type: 'inline' as const,
-                  value: JSON.stringify({ findings: proposal.findings, edits: proposal.edits }),
+            label: `Apply ${contributing.length} specialist change set(s)`,
+            commands: contributing.map((proposal) => ({
+              type: 'artifact.create' as const,
+              payload: {
+                artifact: {
+                  id: `changeset-${proposal.roleId}-${Date.now()}`,
+                  kind: 'changeSet' as const,
+                  schemaVersion: 1,
+                  revision: 0,
+                  label: proposal.title,
+                  contentRef: {
+                    type: 'inline' as const,
+                    value: JSON.stringify({ findings: proposal.findings, edits: proposal.edits }),
+                  },
+                  binding: { type: 'none' as const },
+                  provenance: {
+                    sourceArtifactIds: [],
+                    inputHashes: [],
+                    createdBy: { type: 'agent' as const, id: proposal.roleId },
+                  },
+                  createdAt: now,
+                  updatedAt: now,
                 },
-                binding: { type: 'none' as const },
-                provenance: {
-                  sourceArtifactIds: [],
-                  inputHashes: [],
-                  createdBy: { type: 'agent' as const, id: proposal.roleId },
-                },
-                createdAt: now,
-                updatedAt: now,
               },
-            },
-          })),
+            })),
           };
         },
         commit: (transaction) => {

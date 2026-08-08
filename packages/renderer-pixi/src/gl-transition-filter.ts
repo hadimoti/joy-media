@@ -91,8 +91,7 @@ export function createGlTransitionFilter(
   });
 
   const uniforms = filter.resources['transitionUniforms'] as
-    | { uniforms: Record<string, number> }
-    | undefined;
+    { uniforms: Record<string, number> } | undefined;
 
   return {
     filter,

@@ -104,7 +104,13 @@ export function validateEnvelope(envelope: AgentCommandEnvelope): EnvelopeValida
       `unsupported schemaVersion "${String(envelope.schemaVersion)}" (expected ${AGENT_COMMAND_SCHEMA_VERSION})`,
     );
   }
-  for (const field of ['commandId', 'projectId', 'transactionId', 'idempotencyKey', 'type'] as const) {
+  for (const field of [
+    'commandId',
+    'projectId',
+    'transactionId',
+    'idempotencyKey',
+    'type',
+  ] as const) {
     const value = envelope[field];
     if (typeof value !== 'string' || value.trim().length === 0) {
       errors.push(`${field} is required`);
@@ -113,7 +119,11 @@ export function validateEnvelope(envelope: AgentCommandEnvelope): EnvelopeValida
   if (typeof envelope.baseRevision !== 'string' || envelope.baseRevision.trim().length === 0) {
     errors.push('baseRevision must be a non-empty revision id');
   }
-  if (envelope.actor === undefined || typeof envelope.actor.id !== 'string' || envelope.actor.id === '') {
+  if (
+    envelope.actor === undefined ||
+    typeof envelope.actor.id !== 'string' ||
+    envelope.actor.id === ''
+  ) {
     errors.push('actor.id is required');
   } else if (!['agent', 'human', 'plugin'].includes(envelope.actor.type)) {
     errors.push(`invalid actor.type "${envelope.actor.type}"`);

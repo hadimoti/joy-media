@@ -174,7 +174,13 @@ export class MediaAuthService implements MediaAuthApi {
         await this.pool.query(
           `INSERT INTO media_otp_codes (contact, method, code_hash, created_at, expires_at, used)
            VALUES ($1, $2, $3, $4, $5, false)`,
-          [otpContact, method, codeHash(otpContact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
+          [
+            otpContact,
+            method,
+            codeHash(otpContact, method, code),
+            now,
+            new Date(now.getTime() + OTP_TTL_MS),
+          ],
         );
         await this.deliver(allowed, method, code);
       }
@@ -200,7 +206,8 @@ export class MediaAuthService implements MediaAuthApi {
        RETURNING id`,
       [otpContact, method, hash, new Date()],
     );
-    if (result.rows.length === 0) throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    if (result.rows.length === 0)
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
     await this.pool.query(
@@ -301,10 +308,18 @@ export class MediaAuthService implements MediaAuthApi {
     return row === undefined ? undefined : allowedUserOf(row);
   }
 
-  private async deliver(allowed: MediaAllowedUser, method: MediaAuthMethod, code: string): Promise<void> {
+  private async deliver(
+    allowed: MediaAllowedUser,
+    method: MediaAuthMethod,
+    code: string,
+  ): Promise<void> {
     if (method === 'gmail' && allowed.gmail !== null && this.mailer !== undefined) {
       await this.mailer.sendOtp(allowed.gmail, code);
-    } else if (method === 'telegram' && allowed.telegramId !== null && this.telegram !== undefined) {
+    } else if (
+      method === 'telegram' &&
+      allowed.telegramId !== null &&
+      this.telegram !== undefined
+    ) {
       await this.telegram.sendOtp(allowed.telegramId, code);
     }
   }

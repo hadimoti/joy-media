@@ -1,19 +1,21 @@
 /* Tajrid — JOY Media content-creation font. Source: fontiran pack. */
 
 @font-face {
-    font-family: 'Tajrid';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('Tajrid-Regular.woff2') format('woff2'),
-         url('Tajrid-Regular.woff') format('woff');
+  font-family: 'Tajrid';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url('Tajrid-Regular.woff2') format('woff2'),
+    url('Tajrid-Regular.woff') format('woff');
 }
 
 @font-face {
-    font-family: 'Tajrid';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('Tajrid-Bold.woff2') format('woff2'),
-         url('Tajrid-Bold.woff') format('woff');
+  font-family: 'Tajrid';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url('Tajrid-Bold.woff2') format('woff2'),
+    url('Tajrid-Bold.woff') format('woff');
 }

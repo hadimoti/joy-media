@@ -28,7 +28,10 @@ export interface SpeechSynthesisResult {
   readonly durationUs: number;
 }
 
-export function resolveEdgeVoice(language: string | undefined, voiceId: string | undefined): string {
+export function resolveEdgeVoice(
+  language: string | undefined,
+  voiceId: string | undefined,
+): string {
   if (voiceId !== undefined && voiceId.length > 0 && !voiceId.startsWith('stock:')) {
     return voiceId;
   }
@@ -39,7 +42,12 @@ export function resolveEdgeVoice(language: string | undefined, voiceId: string |
 }
 
 function resolvePiperModel(language: string | undefined, voiceId: string | undefined): string {
-  if (voiceId !== undefined && voiceId.length > 0 && voiceId.endsWith('.onnx') && existsSync(voiceId)) {
+  if (
+    voiceId !== undefined &&
+    voiceId.length > 0 &&
+    voiceId.endsWith('.onnx') &&
+    existsSync(voiceId)
+  ) {
     return voiceId;
   }
   const voicesDir =
@@ -119,8 +127,7 @@ export function runPiperSpeechSynthesis(request: SpeechSynthesisRequest): Speech
   if (typeof request.text !== 'string' || request.text.trim().length === 0) {
     throw new ControlPlaneError('REQUEST_INVALID', 'text is required');
   }
-  const command =
-    process.env.JOY_MEDIA_PIPER?.trim() || '/opt/joy-media/data/piper/piper/piper';
+  const command = process.env.JOY_MEDIA_PIPER?.trim() || '/opt/joy-media/data/piper/piper/piper';
   if (!existsSync(command)) {
     throw new ControlPlaneError(
       'PROVIDER_UNAVAILABLE',
@@ -157,7 +164,8 @@ export function runPiperSpeechSynthesis(request: SpeechSynthesisRequest): Speech
       engine: 'piper',
       modelId: 'piper-onnx',
       dataLeavesDevice: false,
-      retentionDisclosure: 'Text is synthesized locally with Piper ONNX; it does not leave this host',
+      retentionDisclosure:
+        'Text is synthesized locally with Piper ONNX; it does not leave this host',
       durationUs: estimateDurationUs(request.text),
     };
   } finally {

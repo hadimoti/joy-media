@@ -417,9 +417,7 @@ export function WorkflowsPanel({
               })}
             </ul>
           ) : (
-            <p className="empty-hint">
-              Review the {approval.request.kind} request and continue.
-            </p>
+            <p className="empty-hint">Review the {approval.request.kind} request and continue.</p>
           )}
           <div className="workflow-run-actions">
             <button

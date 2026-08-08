@@ -33,13 +33,21 @@ import {
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
-
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
 > = {
-  'joy-clean': { Icon: () => <PngMaskIcon src="/assets/24_Text.png" size={14} />, label: 'JOY Clean' },
-  'joy-karaoke-pop': { Icon: () => <PngMaskIcon src="/assets/24_creative.png" size={14} />, label: 'JOY Karaoke Pop' },
-  'joy-rtl-classic': { Icon: () => <PngMaskIcon src="/assets/24_UI.png" size={14} />, label: 'JOY RTL Classic' },
+  'joy-clean': {
+    Icon: () => <PngMaskIcon src="/assets/24_Text.png" size={14} />,
+    label: 'JOY Clean',
+  },
+  'joy-karaoke-pop': {
+    Icon: () => <PngMaskIcon src="/assets/24_creative.png" size={14} />,
+    label: 'JOY Karaoke Pop',
+  },
+  'joy-rtl-classic': {
+    Icon: () => <PngMaskIcon src="/assets/24_UI.png" size={14} />,
+    label: 'JOY RTL Classic',
+  },
 };
 
 /**
@@ -102,16 +110,16 @@ export function CaptionsPanel({
       }
     >
       {slots.map((slot) => (
-          <CaptionSlotEditor
-            key={`${slot.trackId}:${slot.clip.id}`}
-            slot={slot}
-            query={query}
-            playheadUs={playheadUs}
-            onSeek={onSeek}
-            onDispatch={onDispatch}
-            onTranscribe={onTranscribe}
-          />
-        ))}
+        <CaptionSlotEditor
+          key={`${slot.trackId}:${slot.clip.id}`}
+          slot={slot}
+          query={query}
+          playheadUs={playheadUs}
+          onSeek={onSeek}
+          onDispatch={onDispatch}
+          onTranscribe={onTranscribe}
+        />
+      ))}
     </PanelShell>
   );
 }
@@ -294,9 +302,7 @@ function CaptionSlotEditor({
         </button>
       </header>
       {importIssues > 0 && (
-        <p className="caption-warning">
-          On import, {importIssues} bad cue(s) were skipped.
-        </p>
+        <p className="caption-warning">On import, {importIssues} bad cue(s) were skipped.</p>
       )}
       {segments.length === 0 && <p>No matching captions found.</p>}
       <ol className="captions-list">
@@ -317,12 +323,17 @@ function CaptionSlotEditor({
                 tabIndex={0}
                 aria-label={`Seek to ${(segment.startUs / 1_000_000).toFixed(2)}s`}
                 onClick={() => range !== undefined && onSeek(range.startUs)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && range !== undefined) onSeek(range.startUs); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && range !== undefined) onSeek(range.startUs);
+                }}
               >
                 {(segment.startUs / 1_000_000).toFixed(2)}s
               </span>
               {confidence !== undefined && (
-                <span className="caption-warning" title={`Transcription confidence: ${Math.round(confidence * 100)}%`}>
+                <span
+                  className="caption-warning"
+                  title={`Transcription confidence: ${Math.round(confidence * 100)}%`}
+                >
                   {Math.round(confidence * 100)}%
                 </span>
               )}
@@ -376,4 +387,3 @@ function CaptionSlotEditor({
     </section>
   );
 }
-

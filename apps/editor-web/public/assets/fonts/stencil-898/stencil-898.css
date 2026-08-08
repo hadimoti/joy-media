@@ -1,10 +1,11 @@
 /* 898 Stencil — JOY Media content-creation font. Source: fontiran pack. */
 
 @font-face {
-    font-family: '898 Stencil';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('898Stencil.woff2') format('woff2'),
-         url('898Stencil.woff') format('woff');
+  font-family: '898 Stencil';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url('898Stencil.woff2') format('woff2'),
+    url('898Stencil.woff') format('woff');
 }

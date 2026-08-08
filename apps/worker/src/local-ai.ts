@@ -59,7 +59,11 @@ export function loadAiProviderConfigs(): Record<string, AiProviderConfig> {
     const result: Record<string, AiProviderConfig> = {};
     for (const [key, val] of Object.entries(parsed)) {
       const v = val as Record<string, unknown>;
-      if (typeof v.baseUrl === 'string' && typeof v.apiKey === 'string' && typeof v.defaultModel === 'string') {
+      if (
+        typeof v.baseUrl === 'string' &&
+        typeof v.apiKey === 'string' &&
+        typeof v.defaultModel === 'string'
+      ) {
         result[key] = { baseUrl: v.baseUrl, apiKey: v.apiKey, defaultModel: v.defaultModel };
       }
     }
@@ -73,7 +77,11 @@ export function getConfiguredProviders(): readonly AiProvider[] {
   return Object.keys(loadAiProviderConfigs()) as AiProvider[];
 }
 
-async function runLmStudio(options: LocalAiRunOptions, config: AiProviderConfig, fetchFn: typeof fetch): Promise<LocalAiReceipt> {
+async function runLmStudio(
+  options: LocalAiRunOptions,
+  config: AiProviderConfig,
+  fetchFn: typeof fetch,
+): Promise<LocalAiReceipt> {
   await options.progress(10);
   const body = {
     model: options.model || config.defaultModel,
@@ -88,13 +96,17 @@ async function runLmStudio(options: LocalAiRunOptions, config: AiProviderConfig,
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`LM Studio error: ${response.status} ${await response.text()}`);
-  const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const text = json.choices?.[0]?.message?.content ?? '';
   await options.progress(100);
   return { kind: 'text', jobId: options.jobId, provider: 'lm-studio', text, model: body.model };
 }
 
-async function runOpenRouter(options: LocalAiRunOptions, config: AiProviderConfig, fetchFn: typeof fetch): Promise<LocalAiReceipt> {
+async function runOpenRouter(
+  options: LocalAiRunOptions,
+  config: AiProviderConfig,
+  fetchFn: typeof fetch,
+): Promise<LocalAiReceipt> {
   await options.progress(10);
   const body: Record<string, unknown> = {
     model: options.model || config.defaultModel,
@@ -107,20 +119,31 @@ async function runOpenRouter(options: LocalAiRunOptions, config: AiProviderConfi
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       'HTTP-Referer': 'https://joyst.ir',
       'X-Title': 'JOY Media',
     },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`OpenRouter error: ${response.status} ${await response.text()}`);
-  const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  if (!response.ok)
+    throw new Error(`OpenRouter error: ${response.status} ${await response.text()}`);
+  const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const text = json.choices?.[0]?.message?.content ?? '';
   await options.progress(100);
-  return { kind: 'text', jobId: options.jobId, provider: 'openrouter', text, model: String(body.model) };
+  return {
+    kind: 'text',
+    jobId: options.jobId,
+    provider: 'openrouter',
+    text,
+    model: String(body.model),
+  };
 }
 
-async function runRunway(options: LocalAiRunOptions, config: AiProviderConfig, fetchFn: typeof fetch): Promise<LocalAiReceipt> {
+async function runRunway(
+  options: LocalAiRunOptions,
+  config: AiProviderConfig,
+  fetchFn: typeof fetch,
+): Promise<LocalAiReceipt> {
   await options.progress(10);
   if (options.cancelled()) throw new Error('canceled');
   const taskBody: Record<string, unknown> = {
@@ -131,24 +154,26 @@ async function runRunway(options: LocalAiRunOptions, config: AiProviderConfig, f
   if (options.params) taskBody.params = options.params;
   const createResponse = await fetchFn(`${config.baseUrl.replace(/\/$/, '')}/tasks`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
     body: JSON.stringify(taskBody),
   });
   if (!createResponse.ok) throw new Error(`Runway task creation failed: ${createResponse.status}`);
-  const createJson = await createResponse.json() as { id?: string };
+  const createJson = (await createResponse.json()) as { id?: string };
   const taskId = createJson.id;
   if (!taskId) throw new Error('Runway task ID missing');
   await options.progress(30);
   for (let attempt = 0; attempt < 120; attempt++) {
     if (options.cancelled()) throw new Error('canceled');
     const statusResponse = await fetchFn(`${config.baseUrl.replace(/\/$/, '')}/tasks/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${config.apiKey}` },
+      headers: { Authorization: `Bearer ${config.apiKey}` },
     });
     if (!statusResponse.ok) throw new Error(`Runway status check failed: ${statusResponse.status}`);
-    const statusJson = await statusResponse.json() as { status?: string; output?: unknown };
+    const statusJson = (await statusResponse.json()) as { status?: string; output?: unknown };
     if (statusJson.status === 'succeeded' && statusJson.output) {
-      const videoUrl = typeof statusJson.output === 'string' ? statusJson.output :
-        String((statusJson.output as Record<string, unknown>)?.url ?? '');
+      const videoUrl =
+        typeof statusJson.output === 'string'
+          ? statusJson.output
+          : String((statusJson.output as Record<string, unknown>)?.url ?? '');
       if (!videoUrl) throw new Error('Runway succeeded but no output URL');
       await options.progress(70);
       const videoResponse = await fetchFn(videoUrl);
@@ -160,16 +185,30 @@ async function runRunway(options: LocalAiRunOptions, config: AiProviderConfig, f
       const outPath = join(options.derivativeDirectory, `${localRef}.mp4`);
       writeFileSync(outPath, Buffer.from(bytes));
       await options.progress(100);
-      return { kind: 'video', jobId: options.jobId, provider: 'runway', sha256, bytes: bytes.length, localRef, mimeType: 'video/mp4', model: options.model || 'gen-4' };
+      return {
+        kind: 'video',
+        jobId: options.jobId,
+        provider: 'runway',
+        sha256,
+        bytes: bytes.length,
+        localRef,
+        mimeType: 'video/mp4',
+        model: options.model || 'gen-4',
+      };
     }
-    if (statusJson.status === 'failed') throw new Error(`Runway task failed: ${JSON.stringify(statusJson)}`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (statusJson.status === 'failed')
+      throw new Error(`Runway task failed: ${JSON.stringify(statusJson)}`);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     await options.progress(30 + attempt * 0.5);
   }
   throw new Error('Runway task timed out');
 }
 
-async function runHiggsfield(options: LocalAiRunOptions, config: AiProviderConfig, fetchFn: typeof fetch): Promise<LocalAiReceipt> {
+async function runHiggsfield(
+  options: LocalAiRunOptions,
+  config: AiProviderConfig,
+  fetchFn: typeof fetch,
+): Promise<LocalAiReceipt> {
   await options.progress(10);
   if (options.cancelled()) throw new Error('canceled');
   const body: Record<string, unknown> = {
@@ -180,12 +219,17 @@ async function runHiggsfield(options: LocalAiRunOptions, config: AiProviderConfi
   if (options.params) Object.assign(body, options.params);
   const response = await fetchFn(`${config.baseUrl.replace(/\/$/, '')}/edit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Higgsfield error: ${response.status} ${await response.text()}`);
+  if (!response.ok)
+    throw new Error(`Higgsfield error: ${response.status} ${await response.text()}`);
   const text = await response.text();
-  const json = JSON.parse(text) as { output?: { image?: string; video?: string }; image?: string; video?: string };
+  const json = JSON.parse(text) as {
+    output?: { image?: string; video?: string };
+    image?: string;
+    video?: string;
+  };
   const imageUrl = json.output?.image || json.image || '';
   const videoUrl = json.output?.video || json.video || '';
   const url = videoUrl || imageUrl;
@@ -202,19 +246,36 @@ async function runHiggsfield(options: LocalAiRunOptions, config: AiProviderConfi
   const outPath = join(options.derivativeDirectory, `${localRef}.${ext}`);
   writeFileSync(outPath, Buffer.from(mediaBytes));
   await options.progress(100);
-  return { kind, jobId: options.jobId, provider: 'higgsfield', sha256, bytes: mediaBytes.length, localRef, mimeType: kind === 'video' ? 'video/mp4' : 'image/png', model: options.model || 'default' };
+  return {
+    kind,
+    jobId: options.jobId,
+    provider: 'higgsfield',
+    sha256,
+    bytes: mediaBytes.length,
+    localRef,
+    mimeType: kind === 'video' ? 'video/mp4' : 'image/png',
+    model: options.model || 'default',
+  };
 }
 
 export async function runAiJob(options: LocalAiRunOptions): Promise<LocalAiReceipt> {
   const configs = loadAiProviderConfigs();
   const config = configs[options.provider];
-  if (!config) throw new Error(`AI provider "${options.provider}" is not configured. Create ~/.joy-media/ai-providers.json`);
+  if (!config)
+    throw new Error(
+      `AI provider "${options.provider}" is not configured. Create ~/.joy-media/ai-providers.json`,
+    );
   const fetchFn = options.fetch ?? fetch;
   switch (options.provider) {
-    case 'lm-studio': return runLmStudio(options, config, fetchFn);
-    case 'openrouter': return runOpenRouter(options, config, fetchFn);
-    case 'runway': return runRunway(options, config, fetchFn);
-    case 'higgsfield': return runHiggsfield(options, config, fetchFn);
-    default: throw new Error(`Unknown AI provider: ${options.provider}`);
+    case 'lm-studio':
+      return runLmStudio(options, config, fetchFn);
+    case 'openrouter':
+      return runOpenRouter(options, config, fetchFn);
+    case 'runway':
+      return runRunway(options, config, fetchFn);
+    case 'higgsfield':
+      return runHiggsfield(options, config, fetchFn);
+    default:
+      throw new Error(`Unknown AI provider: ${options.provider}`);
   }
 }

@@ -37,7 +37,9 @@ export function isJoyProjectV2(project: AnyJoyProject): project is JoyProjectV2 
 
 export function validateJoyProjectV2(value: unknown): ProjectDiagnostic[] {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return [{ code: 'PROJECT_SCHEMA_V2_NOT_OBJECT', message: 'project must be an object', path: '' }];
+    return [
+      { code: 'PROJECT_SCHEMA_V2_NOT_OBJECT', message: 'project must be an object', path: '' },
+    ];
   }
   const candidate = value as Record<string, unknown>;
   const diagnostics: ProjectDiagnostic[] = [];

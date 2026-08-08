@@ -18,9 +18,7 @@ export interface EffectInstanceV1 {
   readonly effectId: string;
   readonly enabled: boolean;
   readonly params: Readonly<Record<string, EffectParamValue>>;
-  readonly animations?: Readonly<
-    Partial<Record<string, AnimationCurveV1>>
-  >;
+  readonly animations?: Readonly<Partial<Record<string, AnimationCurveV1>>>;
   readonly label?: string;
 }
 
@@ -394,11 +392,7 @@ export interface TransitionV1 {
 }
 
 export type ExportPresetId =
-  | 'social-h264-aac'
-  | 'reels-1080'
-  | 'shorts-1080'
-  | 'youtube-1080'
-  | 'high-bitrate';
+  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
 export type JsonValue =
   null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };

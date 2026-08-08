@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildReferenceSpikeProject, emptySpikeProject, makeVideoClip, SECOND_US } from '@joy-media/test-fixtures';
+import {
+  buildReferenceSpikeProject,
+  emptySpikeProject,
+  makeVideoClip,
+  SECOND_US,
+} from '@joy-media/test-fixtures';
 import { createPlan, type AgentPlanStep } from '@joy-media/agent-tools';
 import { runWorkflow } from './workflow-runner.js';
 import { saveWorkflow } from './workflow-recorder.js';
@@ -37,9 +42,10 @@ describe('workflow-runner', () => {
     const plan = createPlan('Run workflow test', [step]);
     const recorded = saveWorkflow(session, plan);
 
-    const beforeClips = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const beforeClips =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
 
     await runWorkflow(session, recorded.workflow.id, {
       trackId: 'track-0',
@@ -49,9 +55,10 @@ describe('workflow-runner', () => {
       clipSourceInUs: baseClip.sourceInUs,
     });
 
-    const afterClips = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const afterClips =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
 
     expect(afterClips).toEqual([...beforeClips, 'agent-clip-1']);
   });
@@ -87,9 +94,10 @@ describe('workflow-runner', () => {
     const plan = createPlan('Re-use workflow on different clip', [step]);
     const recorded = saveWorkflow(session, plan);
 
-    const beforeClips = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const beforeClips =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
 
     const first = await runWorkflow(session, recorded.workflow.id, {
       trackId: 'track-0',
@@ -100,9 +108,10 @@ describe('workflow-runner', () => {
     });
     expect(first.status).toBe('succeeded');
 
-    const afterClipA = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const afterClipA =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
     expect(afterClipA).toEqual([...beforeClips, 'clip-a']);
 
     session.undo();
@@ -122,9 +131,10 @@ describe('workflow-runner', () => {
     });
     expect(second.status).toBe('succeeded');
 
-    const afterClipB = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const afterClipB =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
     expect(afterClipB).toEqual([...beforeClips, 'clip-b']);
   });
 });

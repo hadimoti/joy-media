@@ -73,7 +73,9 @@ export const CAPTION_AGENT: SpecialistDefinition = {
           targetId: clip.id,
           summary: `End caption before "${next.id}" begins`,
           domain: 'parameters',
-          parameters: { durationUs: Math.max(MIN_CAPTION_DURATION_US, next.startUs - clip.startUs) },
+          parameters: {
+            durationUs: Math.max(MIN_CAPTION_DURATION_US, next.startUs - clip.startUs),
+          },
         });
       }
       if (clip.durationUs < MIN_CAPTION_DURATION_US) {

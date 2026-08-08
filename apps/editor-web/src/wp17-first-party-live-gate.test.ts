@@ -4,7 +4,11 @@ import { FIRST_PARTY_WORKFLOW_IDS } from '@joy-media/workflow-engine';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { EditorSession } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { detectDerivedFrom, loadFirstPartyWorkflows, getFirstPartyWorkflowVersion } from './first-party-workflows.js';
+import {
+  detectDerivedFrom,
+  loadFirstPartyWorkflows,
+  getFirstPartyWorkflowVersion,
+} from './first-party-workflows.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import {
   getParkedWorkflowRun,
@@ -46,7 +50,10 @@ describe('WP-17 first-party workflows', () => {
       preconditions: [],
       requiresConfirmation: false,
     };
-    const recorded = saveWorkflow(session, createPlan('Teach long video draft reels caption step', [step]));
+    const recorded = saveWorkflow(
+      session,
+      createPlan('Teach long video draft reels caption step', [step]),
+    );
     expect(detectDerivedFrom(recorded)).toBe('joy.first-party.long-video-draft-reels');
   });
 
@@ -80,7 +87,11 @@ describe('WP-17 first-party workflows', () => {
     expect(first.request.kind).toBe('choose-candidates');
     expect(getParkedWorkflowRun(first.runId)?.nodeId).toBe('approve-candidates');
     const payload = first.request.payload as { candidates: readonly { title: string }[] };
-    expect(payload.candidates.map((candidate) => candidate.title)).toEqual(['Hook A', 'Hook B', 'Hook C']);
+    expect(payload.candidates.map((candidate) => candidate.title)).toEqual([
+      'Hook A',
+      'Hook B',
+      'Hook C',
+    ]);
 
     const second = await resumeWorkflow(session, first.runId, {
       'approve-candidates': { candidates: payload.candidates.slice(0, 2) },

@@ -62,7 +62,11 @@ function parseTranscript(stdout: string): WhisperTranscript {
       throw new ControlPlaneError('PROVIDER_FAILED', `whisper word ${index} invalid`);
     }
     const word = item as Record<string, unknown>;
-    if (typeof word.text !== 'string' || typeof word.startUs !== 'number' || typeof word.endUs !== 'number') {
+    if (
+      typeof word.text !== 'string' ||
+      typeof word.startUs !== 'number' ||
+      typeof word.endUs !== 'number'
+    ) {
       throw new ControlPlaneError('PROVIDER_FAILED', `whisper word ${index} shape invalid`);
     }
     return {
@@ -107,7 +111,8 @@ export function runWhisperTranscription(
   try {
     writeFileSync(inputPath, mediaBytes);
     ffmpegExtractWav(inputPath, wavPath);
-    const timeoutMs = options.timeoutMs ?? Number(process.env.JOY_MEDIA_WHISPER_TIMEOUT_MS ?? 180_000);
+    const timeoutMs =
+      options.timeoutMs ?? Number(process.env.JOY_MEDIA_WHISPER_TIMEOUT_MS ?? 180_000);
     const result = spawnSync(
       resolvePython(),
       [SCRIPT, '--audio', wavPath, '--language', language],
@@ -129,19 +134,14 @@ export function runWhisperTranscription(
 }
 
 export function resolveReferenceMediaPath(assetId: string): string | undefined {
-  const root =
-    process.env.JOY_MEDIA_REFERENCE_MEDIA_DIR ??
-    '/opt/joy-media/web/media/reference';
+  const root = process.env.JOY_MEDIA_REFERENCE_MEDIA_DIR ?? '/opt/joy-media/web/media/reference';
   const safe = assetId.replace(/[^a-zA-Z0-9._-]/g, '');
   if (safe.length === 0 || safe !== assetId) return undefined;
   const path = join(root, `${safe}.mp4`);
   return existsSync(path) ? path : undefined;
 }
 
-export function runWhisperOnReferenceAsset(
-  assetId: string,
-  language: string,
-): WhisperTranscript {
+export function runWhisperOnReferenceAsset(assetId: string, language: string): WhisperTranscript {
   const path = resolveReferenceMediaPath(assetId);
   if (path === undefined) {
     throw new ControlPlaneError('REQUEST_INVALID', `unknown reference asset ${assetId}`);

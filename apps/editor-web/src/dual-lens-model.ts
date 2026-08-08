@@ -49,15 +49,7 @@ export interface DualLensLaneItem {
 }
 
 export type DualLensItemIcon =
-  | 'video'
-  | 'audio'
-  | 'text'
-  | 'caption'
-  | 'script'
-  | 'prompt'
-  | 'generation'
-  | 'agent'
-  | 'generic';
+  'video' | 'audio' | 'text' | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
 
 export interface DualLensLane {
   readonly id: string;
@@ -309,8 +301,9 @@ function buildLanes(
   const tracks = composition?.tracks ?? [];
   const core: DualLensLane[] = tracks.map((track, index) => {
     const kind = timelineTrackKind(track);
-    const kindIndex = tracks.slice(0, index + 1).filter((row) => timelineTrackKind(row) === kind)
-      .length;
+    const kindIndex = tracks
+      .slice(0, index + 1)
+      .filter((row) => timelineTrackKind(row) === kind).length;
     const code = timelineTrackCode(kind, kindIndex);
     const name = timelineTrackDisplayName(kind, kindIndex);
     return {

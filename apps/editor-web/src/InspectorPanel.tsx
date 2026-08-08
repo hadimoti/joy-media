@@ -449,9 +449,7 @@ export function InspectorPanel({
             dispatch={dispatchAudio}
           />
         ) : (
-          <p className="empty-hint">
-            Select a clip to mix its audio.
-          </p>
+          <p className="empty-hint">Select a clip to mix its audio.</p>
         ))}
     </PanelShell>
   );

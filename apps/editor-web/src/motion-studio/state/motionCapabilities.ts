@@ -69,7 +69,17 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
   switch (type) {
     case 'text':
       return {
-        sections: ['transform', 'text', 'typography', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        sections: [
+          'transform',
+          'text',
+          'typography',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
         animatable: [
           'transform.x',
           'transform.y',
@@ -88,7 +98,16 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
           'typography.wordSpacing',
           'typography.paragraphSpacing',
         ],
-        supportsMultiSelect: ['transform', 'text', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        supportsMultiSelect: [
+          'transform',
+          'text',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
       };
     case 'shape':
       return {
@@ -106,12 +125,29 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
           'stroke.width',
           'shadow.opacity',
         ],
-        supportsMultiSelect: ['transform', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        supportsMultiSelect: [
+          'transform',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
       };
     case 'image':
     case 'video':
       return {
-        sections: ['transform', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter', 'crop'],
+        sections: [
+          'transform',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+          'crop',
+        ],
         animatable: [
           'transform.x',
           'transform.y',
@@ -125,7 +161,15 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
           'stroke.width',
           'shadow.opacity',
         ],
-        supportsMultiSelect: ['transform', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        supportsMultiSelect: [
+          'transform',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
       };
     case 'svg':
       return {
@@ -143,7 +187,15 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
           'stroke.width',
           'shadow.opacity',
         ],
-        supportsMultiSelect: ['transform', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        supportsMultiSelect: [
+          'transform',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
       };
     case 'container':
     case 'group':
@@ -162,7 +214,15 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
           'stroke.width',
           'shadow.opacity',
         ],
-        supportsMultiSelect: ['transform', 'fill', 'stroke', 'shadow', 'cornerRadius', 'blendMode', 'filter'],
+        supportsMultiSelect: [
+          'transform',
+          'fill',
+          'stroke',
+          'shadow',
+          'cornerRadius',
+          'blendMode',
+          'filter',
+        ],
       };
     case 'component-instance':
       return {
@@ -211,11 +271,17 @@ export function layerCapabilities(type: MotionLayerType): LayerCapability {
         supportsMultiSelect: ['transform', 'blendMode', 'filter'],
       };
     default:
-      return { sections: ['transform'], animatable: ['transform.x', 'transform.y', 'transform.opacity'], supportsMultiSelect: ['transform'] };
+      return {
+        sections: ['transform'],
+        animatable: ['transform.x', 'transform.y', 'transform.opacity'],
+        supportsMultiSelect: ['transform'],
+      };
   }
 }
 
-export function commonCapabilities(types: readonly MotionLayerType[]): readonly CapabilitySection[] {
+export function commonCapabilities(
+  types: readonly MotionLayerType[],
+): readonly CapabilitySection[] {
   if (types.length === 0) return [];
   const caps = types.map((t) => layerCapabilities(t).supportsMultiSelect);
   const first = caps[0]!;

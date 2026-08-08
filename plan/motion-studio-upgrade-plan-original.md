@@ -32,20 +32,20 @@ Scenes، Main Project Timeline. هرکدام مسیر و مدل داده‌ی م
 
 قابلیت‌های فعلی:
 
-| بخش | وضعیت فعلی |
-|---|---|
-| Studio Shell | Fullscreen overlay فعال |
-| Scene creation | همیشه با Untitled Motion باز می‌شود |
-| Layer types | Text، Rectangle، Ellipse |
-| Layer operations | Add، select، reorder، hide، lock، delete |
-| Canvas | Render، selection، drag-to-move |
-| Inspector | Transform، text basics، font، fill |
-| Timeline | Play/seek، zoom/fit، layer lanes، mute/lock |
-| Undo/redo | فعال |
-| Panel resizing | فعال |
-| Visual/code toggle | UI موجود، Code Mode هنوز placeholder |
-| Publish | دکمه موجود، عملکرد واقعی ندارد |
-| Library Open | Studio باز می‌شود ولی motion id نادیده گرفته می‌شود |
+| بخش                | وضعیت فعلی                                          |
+| ------------------ | --------------------------------------------------- |
+| Studio Shell       | Fullscreen overlay فعال                             |
+| Scene creation     | همیشه با Untitled Motion باز می‌شود                 |
+| Layer types        | Text، Rectangle، Ellipse                            |
+| Layer operations   | Add، select، reorder، hide، lock، delete            |
+| Canvas             | Render، selection، drag-to-move                     |
+| Inspector          | Transform، text basics، font، fill                  |
+| Timeline           | Play/seek، zoom/fit، layer lanes، mute/lock         |
+| Undo/redo          | فعال                                                |
+| Panel resizing     | فعال                                                |
+| Visual/code toggle | UI موجود، Code Mode هنوز placeholder                |
+| Publish            | دکمه موجود، عملکرد واقعی ندارد                      |
+| Library Open       | Studio باز می‌شود ولی motion id نادیده گرفته می‌شود |
 
 محدودیت‌های فعلی:
 
@@ -159,7 +159,7 @@ Accordion و Hover نباید داخل فایل Scene ذخیره شوند.
 ```ts
 interface MotionStudioEditorState {
   selectedLayerIds: string[];
-  activeTool: "select" | "hand" | "text" | "shape";
+  activeTool: 'select' | 'hand' | 'text' | 'shape';
   currentTimeMs: number;
   viewportZoom: number;
   viewportOffset: { x: number; y: number };
@@ -186,7 +186,7 @@ interface MotionSceneDocument {
     createdAt: string;
     updatedAt: string;
     thumbnailAssetId?: string;
-    source?: "studio" | "template" | "import";
+    source?: 'studio' | 'template' | 'import';
   };
 }
 ```
@@ -213,14 +213,7 @@ Layer Types پیشنهادی:
 
 ```ts
 type MotionLayerType =
-  | "text"
-  | "rectangle"
-  | "ellipse"
-  | "image"
-  | "video"
-  | "svg"
-  | "group"
-  | "html";
+  'text' | 'rectangle' | 'ellipse' | 'image' | 'video' | 'svg' | 'group' | 'html';
 ```
 
 در فازهای اولیه، HTML Layer می‌تواند فقط به‌صورت Placeholder و Read-only اضافه شود.
@@ -473,13 +466,7 @@ interface MotionKeyframe<T = unknown> {
   id: string;
   timeMs: number;
   value: T;
-  interpolation:
-    | "hold"
-    | "linear"
-    | "bezier"
-    | "ease-in"
-    | "ease-out"
-    | "ease-in-out";
+  interpolation: 'hold' | 'linear' | 'bezier' | 'ease-in' | 'ease-out' | 'ease-in-out';
   easing?: { inX: number; inY: number; outX: number; outY: number };
 }
 
@@ -538,12 +525,14 @@ Timeline playback، Headless rendering، Agent editing API.
 Direct Manipulation، Inspector و Animation کامل شود.
 
 **Phase B — Media Layers**:
+
 - Image: Asset picker، Replace source، Fit/Fill/Contain/Cover، Crop، Corner
   radius، Mask، Filters
 - Video: Poster frame، In/out source trim، Fit/crop، Muted preview، Loop option،
   Basic playback synchronization
 
 **Phase C — Structural Layers**:
+
 - Group: Parent-child transform، Group selection، Ungroup، Nested hierarchy،
   Group opacity، Group blend behavior
 - SVG: Import، Scale، Fill override (در صورت امکان)، Preserve original colors،
@@ -567,7 +556,7 @@ Draft اولیه را در Motion Library ثبت کند، Studio را با هم�
 Library Open باید motion id را منتقل کند:
 
 ```ts
-openMotionStudio({ mode: "edit", motionDocumentId });
+openMotionStudio({ mode: 'edit', motionDocumentId });
 ```
 
 Studio باید: سند را Load کند، Version را Validate کند، در صورت نیاز Migration
@@ -658,25 +647,25 @@ Editor-only state مانند Zoom یا Open Accordion نباید وارد Undo h
 
 میان‌برهای اولیه:
 
-| Action | Shortcut |
-|---|---|
-| Select tool | `V` |
-| Hand tool | `H` یا Space |
-| Text tool | `T` |
-| Rectangle | `R` |
-| Ellipse | `O` |
-| Delete | Delete / Backspace |
-| Duplicate | Ctrl/Cmd+D |
-| Copy / Paste | Ctrl/Cmd+C / V |
-| Undo / Redo | Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z |
-| Save | Ctrl/Cmd+S |
-| Select all | Ctrl/Cmd+A |
-| Group | Ctrl/Cmd+G |
-| Ungroup | Shift+Ctrl/Cmd+G |
-| Zoom in/out | `+` / `-` |
-| Fit canvas | `0` |
-| Preview | Space، زمانی که Text Edit فعال نیست |
-| Exit text edit | Escape |
+| Action         | Shortcut                            |
+| -------------- | ----------------------------------- |
+| Select tool    | `V`                                 |
+| Hand tool      | `H` یا Space                        |
+| Text tool      | `T`                                 |
+| Rectangle      | `R`                                 |
+| Ellipse        | `O`                                 |
+| Delete         | Delete / Backspace                  |
+| Duplicate      | Ctrl/Cmd+D                          |
+| Copy / Paste   | Ctrl/Cmd+C / V                      |
+| Undo / Redo    | Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z       |
+| Save           | Ctrl/Cmd+S                          |
+| Select all     | Ctrl/Cmd+A                          |
+| Group          | Ctrl/Cmd+G                          |
+| Ungroup        | Shift+Ctrl/Cmd+G                    |
+| Zoom in/out    | `+` / `-`                           |
+| Fit canvas     | `0`                                 |
+| Preview        | Space، زمانی که Text Edit فعال نیست |
+| Exit text edit | Escape                              |
 
 Focus management باید مشخص کند Shortcut متعلق به Canvas، Inspector input یا Text
 Editor است.

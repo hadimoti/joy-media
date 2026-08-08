@@ -6,7 +6,9 @@ let whisperAvailable = false;
 try {
   execSync('which faster-whisper', { stdio: 'ignore' });
   whisperAvailable = true;
-} catch { /* faster-whisper not installed */ }
+} catch {
+  /* faster-whisper not installed */
+}
 
 /** Minimal silent WAV (16 kHz mono PCM16, 0.4s) for helper smoke tests. */
 function silentWav(durationSec = 0.4, sampleRate = 16_000): Uint8Array {

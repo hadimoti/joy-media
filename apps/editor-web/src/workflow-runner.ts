@@ -59,7 +59,9 @@ const parkedRuns = new Map<string, ParkedWorkflowRun>();
 let stubLibrary = createStubFirstPartyLibrary();
 
 /** Test seam: replace the stub library (e.g. to assert call counts). */
-export function setFirstPartyLibraryForTests(library: ReturnType<typeof createStubFirstPartyLibrary>): void {
+export function setFirstPartyLibraryForTests(
+  library: ReturnType<typeof createStubFirstPartyLibrary>,
+): void {
   stubLibrary = library;
 }
 
@@ -108,7 +110,10 @@ function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
   return mapped;
 }
 
-function kahnTopoOrder(nodes: readonly WorkflowNode[], edges: readonly WorkflowEdge[]): readonly string[] {
+function kahnTopoOrder(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+): readonly string[] {
   const indegree = new Map<string, number>();
   const downstream = new Map<string, string[]>();
   for (const node of nodes) {
@@ -156,7 +161,11 @@ export function normalizeFirstPartyInputs(
   inputs: Readonly<Record<string, unknown>>,
 ): unknown {
   const required = (workflow.inputs.required as string[] | undefined) ?? [];
-  if (required.includes('asset') && inputs.asset === undefined && typeof inputs.assetId === 'string') {
+  if (
+    required.includes('asset') &&
+    inputs.asset === undefined &&
+    typeof inputs.assetId === 'string'
+  ) {
     return { ...inputs, asset: { assetId: inputs.assetId, fixture: true } };
   }
   if (typeof inputs.asset === 'string') {
@@ -165,10 +174,12 @@ export function normalizeFirstPartyInputs(
   return inputs;
 }
 
-function findPendingApproval(checkpoint: RunCheckpoint): {
-  readonly nodeId: string;
-  readonly request: HumanInputRequest;
-} | undefined {
+function findPendingApproval(checkpoint: RunCheckpoint):
+  | {
+      readonly nodeId: string;
+      readonly request: HumanInputRequest;
+    }
+  | undefined {
   for (const [nodeId, record] of Object.entries(checkpoint.nodes)) {
     if (record.state === 'waiting_for_input' && record.pendingRequest !== undefined) {
       return { nodeId, request: record.pendingRequest };
@@ -222,7 +233,11 @@ async function runRecordedWorkflow(
       const label = (node.params.label as string | undefined) ?? nodeId;
       const result = bus.dispatchTimeline(spikeCommands, label);
       const success = result.success ?? false;
-      const nodeResult: NodeRunResult = { ...(!success ? { error: result.error } : {}), nodeId, success };
+      const nodeResult: NodeRunResult = {
+        ...(!success ? { error: result.error } : {}),
+        nodeId,
+        success,
+      };
       results.set(nodeId, nodeResult);
       if (!success && workflow.policy.failure === 'stop') {
         return {
@@ -233,7 +248,11 @@ async function runRecordedWorkflow(
         };
       }
     } else {
-      const nodeResult: NodeRunResult = { nodeId, success: false, error: `unsupported node type ${node.type}` };
+      const nodeResult: NodeRunResult = {
+        nodeId,
+        success: false,
+        error: `unsupported node type ${node.type}`,
+      };
       results.set(nodeId, nodeResult);
       if (workflow.policy.failure === 'stop') {
         return {

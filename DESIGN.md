@@ -8,37 +8,37 @@ Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red a
 
 **The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
 
-| Token                  | Hex                      | Use                                                            |
-| ---------------------- | ------------------------ | -------------------------------------------------------------- |
-| `--joy-bg-app`         | `#000000`                | Root/page background, dock canvas, gap bleed                   |
-| `--joy-bg-panel`       | `#252525`                | Dockview group + content background, panel tile fill           |
+| Token                  | Hex                      | Use                                                                      |
+| ---------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| `--joy-bg-app`         | `#000000`                | Root/page background, dock canvas, gap bleed                             |
+| `--joy-bg-panel`       | `#252525`                | Dockview group + content background, panel tile fill                     |
 | `--joy-bg-chrome`      | `#2d2d2d`                | Dock tab strips, nested toolbars (app header/menubar are `--joy-bg-app`) |
-| `--joy-bg-elevated`    | `#333333`                | Dropdowns, popovers, active dock tab tile                      |
-| `--joy-bg-raised`      | `#383838`                | Cards, list rows (history entries, workflow rows, asset cards) |
-| `--joy-bg-inset`       | `#1e1e1e`                | Sunken sections, inactive dock tab tile                        |
-| `--joy-bg-control`     | `#3a3a3a`                | Buttons, lanes, interactive fills                              |
-| `--joy-bg-hover`       | `#323232`                | Hovered controls, hovered dock tab                             |
-| `--joy-bg-active`      | `#404040`                | Pressed / selected control fill                                |
-| `--joy-bg-input`       | `#1a1a1a`                | Text inputs, selects                                           |
-| `--joy-bg-deep`        | `#000000`                | Canvases, code/expression fields, preview wells                |
-| `--joy-border-subtle`  | `rgb(255 255 255 / 7%)`  | Hairlines inside a surface                                     |
-| `--joy-border`         | `#3a3a3a`                | Default borders/dividers                                       |
-| `--joy-border-strong`  | `#484848`                | Control borders                                                |
-| `--joy-border-hover`   | `#5a5a62`                | Hovered control borders, clip borders                          |
-| `--joy-gap`            | `#000000`                | Dockview separators, workspace gaps (same as canvas)            |
-| `--joy-shell-gap`      | `2px`                    | Outer dock padding + split separator width + groupview border    |
-| `--joy-radius-panel`   | `16px`                   | Outer dock group / panel tile corners (tab rail + body)        |
-| `--joy-radius-inner`   | `10px`                   | Inner wells, dock icon-tab corners, import zones               |
-| `--joy-text`           | `#ececef`                | Primary text                                                   |
-| `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                   |
-| `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                  |
-| `--joy-text-faint`     | `#96969f`                | Hints, timestamps, metadata; still AA-readable on panel gray   |
-| `--joy-text-disabled`  | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)                       |
-| `--joy-accent`         | `#f4b72f`                | **The** accent — see the scarcity list below                   |
-| `--joy-accent-hover`   | `#ffc94f`                | Accent under hover only                                        |
-| `--joy-accent-dim`     | `rgb(244 183 47 / 22%)`  | Accent washes: drag-over fill, active-tab underline            |
-| `--joy-ok`             | `#6fcf97`                | Success/connected status only                                  |
-| `--joy-danger`         | `#ef6a6a`                | Failure/revoked status and error text only                     |
+| `--joy-bg-elevated`    | `#333333`                | Dropdowns, popovers, active dock tab tile                                |
+| `--joy-bg-raised`      | `#383838`                | Cards, list rows (history entries, workflow rows, asset cards)           |
+| `--joy-bg-inset`       | `#1e1e1e`                | Sunken sections, inactive dock tab tile                                  |
+| `--joy-bg-control`     | `#3a3a3a`                | Buttons, lanes, interactive fills                                        |
+| `--joy-bg-hover`       | `#323232`                | Hovered controls, hovered dock tab                                       |
+| `--joy-bg-active`      | `#404040`                | Pressed / selected control fill                                          |
+| `--joy-bg-input`       | `#1a1a1a`                | Text inputs, selects                                                     |
+| `--joy-bg-deep`        | `#000000`                | Canvases, code/expression fields, preview wells                          |
+| `--joy-border-subtle`  | `rgb(255 255 255 / 7%)`  | Hairlines inside a surface                                               |
+| `--joy-border`         | `#3a3a3a`                | Default borders/dividers                                                 |
+| `--joy-border-strong`  | `#484848`                | Control borders                                                          |
+| `--joy-border-hover`   | `#5a5a62`                | Hovered control borders, clip borders                                    |
+| `--joy-gap`            | `#000000`                | Dockview separators, workspace gaps (same as canvas)                     |
+| `--joy-shell-gap`      | `2px`                    | Outer dock padding + split separator width + groupview border            |
+| `--joy-radius-panel`   | `16px`                   | Outer dock group / panel tile corners (tab rail + body)                  |
+| `--joy-radius-inner`   | `10px`                   | Inner wells, dock icon-tab corners, import zones                         |
+| `--joy-text`           | `#ececef`                | Primary text                                                             |
+| `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                             |
+| `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                            |
+| `--joy-text-faint`     | `#96969f`                | Hints, timestamps, metadata; still AA-readable on panel gray             |
+| `--joy-text-disabled`  | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)                                 |
+| `--joy-accent`         | `#f4b72f`                | **The** accent — see the scarcity list below                             |
+| `--joy-accent-hover`   | `#ffc94f`                | Accent under hover only                                                  |
+| `--joy-accent-dim`     | `rgb(244 183 47 / 22%)`  | Accent washes: drag-over fill, active-tab underline                      |
+| `--joy-ok`             | `#6fcf97`                | Success/connected status only                                            |
+| `--joy-danger`         | `#ef6a6a`                | Failure/revoked status and error text only                               |
 
 **Retired.** `--joy-accent-soft` (`#d4b06a`) and the hardcoded `#e9b949` are removed. Three yellows within one surface is why the editor reads mustard rather than Adobe-amber. Anything that used `accent-soft` for a "secondary active" state now uses `--joy-text` (active but not special) or `--joy-accent` (genuinely the current thing).
 
@@ -80,14 +80,14 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 
 Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab — **black canvas**, **gray panel tiles**, **2px black gaps**, **16px rounded outer corners** on each dock group (tab rail + panel body as one tile). The app header and menubar sit on the same pure-black canvas (`--joy-bg-app`), not gray chrome. Gaps are not borders painted on panels; they are the canvas showing between separated tiles.
 
-| Rule | Implementation |
-| ---- | -------------- |
-| Canvas | `#root .workspace`, `.app-header`, `.app-menubar`, and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). `--dv-group-view-background-color` must stay black too — dockview paints `.dv-dockview` with that variable; gray there shows through rounded tile corners. |
-| Panel tile | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (16px), `overflow: hidden`. Apply radius on `.dv-groupview` itself (not only under `.dv-resize-container` — docked groups live in `.dv-view`). Tab rail + `.dv-content-container` share the same outer radius as one tile. |
-| Gap rhythm | `--dv-separator-border` and split `::before` separators use `--joy-gap` at `--joy-shell-gap` width. Each groupview also carries a `2px solid var(--joy-bg-app)` border so adjacent tiles never touch. |
-| Tab rail | `.dv-tabs-and-actions-container` / `.dv-void-container` / `.dv-tab` / `.panel-tab` are **transparent** — no gray chips behind icons. Active tab icon tint stays amber (§1a); inactive stays `--joy-text-muted`. |
-| Panel content | `.dv-content-container` / `.dv-react-part` fill `--joy-bg-panel`. `.joy-panel-root` does not repaint its own background — content sits inside the dock tile. Timeline, Dual Lens, and Monitor stay flush (`padding: 0`) inside their tile. |
-| Inner wells | Import zones, category rails, nested lists use `--joy-bg-inset` / `--joy-bg-elevated` with `--joy-radius-inner`. |
+| Rule          | Implementation                                                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canvas        | `#root .workspace`, `.app-header`, `.app-menubar`, and `--joy-bg-app` are `#000000`. Workspace gets `padding: var(--joy-shell-gap)` (2px). `--dv-group-view-background-color` must stay black too — dockview paints `.dv-dockview` with that variable; gray there shows through rounded tile corners.                     |
+| Panel tile    | Each `.dv-groupview` is `--joy-bg-panel` (`#252525`), `border-radius: var(--joy-radius-panel)` (16px), `overflow: hidden`. Apply radius on `.dv-groupview` itself (not only under `.dv-resize-container` — docked groups live in `.dv-view`). Tab rail + `.dv-content-container` share the same outer radius as one tile. |
+| Gap rhythm    | `--dv-separator-border` and split `::before` separators use `--joy-gap` at `--joy-shell-gap` width. Each groupview also carries a `2px solid var(--joy-bg-app)` border so adjacent tiles never touch.                                                                                                                     |
+| Tab rail      | `.dv-tabs-and-actions-container` / `.dv-void-container` / `.dv-tab` / `.panel-tab` are **transparent** — no gray chips behind icons. Active tab icon tint stays amber (§1a); inactive stays `--joy-text-muted`.                                                                                                           |
+| Panel content | `.dv-content-container` / `.dv-react-part` fill `--joy-bg-panel`. `.joy-panel-root` does not repaint its own background — content sits inside the dock tile. Timeline, Dual Lens, and Monitor stay flush (`padding: 0`) inside their tile.                                                                                |
+| Inner wells   | Import zones, category rails, nested lists use `--joy-bg-inset` / `--joy-bg-elevated` with `--joy-radius-inner`.                                                                                                                                                                                                          |
 
 **Forbidden:** full-bleed dock groups with no outer gap, transparent tab rails that float on the canvas, card-style `article` padding around panel roots, or reintroducing charcoal `#0d0e10` / `#111216` shell fills.
 
@@ -117,12 +117,12 @@ Nothing may be inserted above the header or between the header and the tabs exce
 
 | Class                                | Rule                                                                                                                                                                                                                                                                               |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Background transparent (§3b); padding lives here, once. |
+| `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Background transparent (§3b); padding lives here, once.                                                                                           |
 | `.joy-panel-header`                  | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. The center column never moves; the two outer columns balance each other so the title stays optically centered. Height is one control (`--control-sm`).                                                                              |
 | `.joy-panel-leading-actions`         | Optional icon-button group in column 1, `justify-self:start`. Use only when a panel has a meaningful start-edge action group; Assets uses Import, Filter/Sort, and Refresh here. It must not become a second toolbar.                                                              |
-| `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. `--joy-type-sm` (13px), `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.                       |
+| `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. `--joy-type-sm` (13px), `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.        |
 | `.joy-panel-actions`                 | Column 3, `justify-self:end`, `gap:0.1rem`. Ordered inline-end-ward: **create (+) · favorites (☆) · filter · search (⌕)**. Only `icon-button`s. Two to four buttons; more than four means the panel needs tabs or a justified `.joy-panel-leading-actions` split, not more chrome. |
-| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (`--joy-type-xs`, 12px) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders.                                                                         |
+| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (`--joy-type-xs`, 12px) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders.                                                           |
 | `.joy-panel-body`                    | The only scrolling element: `flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain`. Holds the item grid or the settings stack.                                                                                                                                   |
 
 A panel with a single view still renders `.joy-panel-tabs` — with one tab, or omitted entirely if the panel genuinely has one view (Monitor, Timeline). It never renders a _different_ structure.

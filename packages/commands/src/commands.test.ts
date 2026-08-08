@@ -380,7 +380,9 @@ describe('applyCommand', () => {
       { id: 'clip-a-right', startUs: 2 * SECOND_US, durationUs: SECOND_US },
       { id: 'clip-b', startUs: 4 * SECOND_US, durationUs: SECOND_US },
     ]);
-    const freeze = next.compositions['root']!.tracks[0]!.clips.find((c) => c.id === 'clip-a-freeze');
+    const freeze = next.compositions['root']!.tracks[0]!.clips.find(
+      (c) => c.id === 'clip-a-freeze',
+    );
     expect(freeze?.kind === 'video' && freeze.playbackRate === 0).toBe(true);
     expect(inverse.type).toBe('timeline.restoreTrackClips');
     expect(applyCommand(next, inverse).project).toEqual(project);

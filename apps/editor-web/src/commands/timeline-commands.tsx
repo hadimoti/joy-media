@@ -61,7 +61,15 @@ export function SkipForwardIcon({ className }: { className?: string }) {
 }
 export function TrackAddIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="12" y1="8" x2="12" y2="16" />
       <line x1="8" y1="12" x2="16" y2="12" />
@@ -77,7 +85,15 @@ export function MarkerIcon({ className }: { className?: string }) {
 }
 export function SelectIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <path d="M3 3l18 18" />
       <path d="M13.73 13.73A9 9 0 1 0 10.27 10.27" />
     </svg>
@@ -85,7 +101,15 @@ export function SelectIcon({ className }: { className?: string }) {
 }
 export function ScissorsIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <circle cx="6" cy="6" r="3" />
       <path d="M8.12 8.12 20 20" />
       <path d="M20 4 8.12 15.88" />
@@ -95,7 +119,15 @@ export function ScissorsIcon({ className }: { className?: string }) {
 }
 export function DuplicateIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <rect x="9" y="9" width="13" height="13" rx="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
@@ -103,7 +135,15 @@ export function DuplicateIcon({ className }: { className?: string }) {
 }
 export function TrashIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
@@ -111,7 +151,15 @@ export function TrashIcon({ className }: { className?: string }) {
 }
 export function ZoomInIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
       <line x1="11" y1="8" x2="11" y2="14" />
@@ -121,7 +169,15 @@ export function ZoomInIcon({ className }: { className?: string }) {
 }
 export function ZoomOutIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
       <line x1="8" y1="11" x2="14" y2="11" />
@@ -281,55 +337,55 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
-      id: 'clip.freezeFrame',
-      label: 'Freeze frame at playhead',
-      icon: ScissorsIcon,
-      shortcut: 'F',
-      group: 'edit',
-      canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
-      execute: (ctx) => {
-        const clip = ctx.selectedClip?.clip;
-        const track = ctx.selectedClip?.track;
-        if (!clip || !track || clip.kind !== 'video') return null;
-        const holdUs = 2_000_000; // 2 seconds default
-        return {
-          type: 'timeline.freezeFrame',
-          payload: {
-            compositionId: ctx.compositionId,
-            trackId: track.id,
-            clipId: clip.id,
-            atUs: ctx.playheadUs,
-            holdUs,
-            freezeClipId: `${clip.id}-freeze-${ctx.playheadUs}`,
-            rightClipId: `${clip.id}-right-${ctx.playheadUs}`,
-          },
-        };
-      },
+    id: 'clip.freezeFrame',
+    label: 'Freeze frame at playhead',
+    icon: ScissorsIcon,
+    shortcut: 'F',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+    execute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      const track = ctx.selectedClip?.track;
+      if (!clip || !track || clip.kind !== 'video') return null;
+      const holdUs = 2_000_000; // 2 seconds default
+      return {
+        type: 'timeline.freezeFrame',
+        payload: {
+          compositionId: ctx.compositionId,
+          trackId: track.id,
+          clipId: clip.id,
+          atUs: ctx.playheadUs,
+          holdUs,
+          freezeClipId: `${clip.id}-freeze-${ctx.playheadUs}`,
+          rightClipId: `${clip.id}-right-${ctx.playheadUs}`,
+        },
+      };
     },
-    {
-      id: 'clip.setRate',
-      label: 'Set playback rate',
-      icon: ZoomInIcon,
-      shortcut: 'R',
-      group: 'edit',
-      canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
-      execute: (ctx) => {
-        const clip = ctx.selectedClip?.clip;
-        const track = ctx.selectedClip?.track;
-        if (!clip || !track || clip.kind !== 'video') return null;
-        // Return a rate of 0.5x as example - actual rate chosen via submenu
-        return {
-          type: 'timeline.setClipRate',
-          payload: {
-            compositionId: ctx.compositionId,
-            trackId: track.id,
-            clipId: clip.id,
-            playbackRate: 0.5,
-            preserveSourceRange: true,
-          },
-        };
-      },
+  },
+  {
+    id: 'clip.setRate',
+    label: 'Set playback rate',
+    icon: ZoomInIcon,
+    shortcut: 'R',
+    group: 'edit',
+    canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+    execute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      const track = ctx.selectedClip?.track;
+      if (!clip || !track || clip.kind !== 'video') return null;
+      // Return a rate of 0.5x as example - actual rate chosen via submenu
+      return {
+        type: 'timeline.setClipRate',
+        payload: {
+          compositionId: ctx.compositionId,
+          trackId: track.id,
+          clipId: clip.id,
+          playbackRate: 0.5,
+          preserveSourceRange: true,
+        },
+      };
     },
+  },
 
   // ZOOM GROUP
   {
@@ -379,7 +435,7 @@ export interface ContextMenuItem {
 
 export function buildClipContextMenu(
   ctx: CommandContext,
-  onExecute: (cmd: SpikeCommand) => void
+  onExecute: (cmd: SpikeCommand) => void,
 ): readonly ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
 
@@ -460,7 +516,7 @@ export function buildClipContextMenu(
 
 export function buildEmptyCanvasContextMenu(
   onImportClick: () => void,
-  onAddFromLibrary: () => void
+  onAddFromLibrary: () => void,
 ): readonly ContextMenuItem[] {
   return [
     {
@@ -481,22 +537,30 @@ export function buildTrackHeaderContextMenu(
   onAddTrack: () => void,
   onRemoveTrack: () => void,
   onToggleEnabled: (enabled: boolean) => void,
-  currentEnabled: boolean
+  currentEnabled: boolean,
 ): readonly ContextMenuItem[] {
   return [
     { label: 'Add Video Track', shortcut: 'T', action: onAddTrack },
     { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: true }, // TODO
     { label: '', action: () => {}, dividerBefore: true },
-    { label: currentEnabled ? 'Disable Track' : 'Enable Track', shortcut: 'E', action: () => onToggleEnabled(!currentEnabled) },
+    {
+      label: currentEnabled ? 'Disable Track' : 'Enable Track',
+      shortcut: 'E',
+      action: () => onToggleEnabled(!currentEnabled),
+    },
   ];
 }
 
 export function buildRulerContextMenu(
   onAddMarker: (timeUs: number) => void,
-  timeUs: number
+  timeUs: number,
 ): readonly ContextMenuItem[] {
   return [
-    { label: `Add Marker at ${formatTimecode(timeUs)}`, shortcut: 'M', action: () => onAddMarker(timeUs) },
+    {
+      label: `Add Marker at ${formatTimecode(timeUs)}`,
+      shortcut: 'M',
+      action: () => onAddMarker(timeUs),
+    },
   ];
 }
 

@@ -6,15 +6,9 @@ export type EffectParamValue =
   | readonly [number, number, number]
   | readonly [number, number, number, number];
 
-export type EffectCategory =
-  | "color"
-  | "blur"
-  | "distort"
-  | "artistic"
-  | "depth"
-  | "stylize";
+export type EffectCategory = 'color' | 'blur' | 'distort' | 'artistic' | 'depth' | 'stylize';
 
-export type EffectParamType = "number" | "boolean" | "color" | "vector2" | "enum";
+export type EffectParamType = 'number' | 'boolean' | 'color' | 'vector2' | 'enum';
 
 export interface EffectParamDescriptor {
   readonly key: string;
@@ -48,7 +42,7 @@ export interface EffectDescriptor {
   readonly params: readonly EffectParamDescriptor[];
   readonly tags: readonly string[];
   readonly backend: EffectBackendSupport;
-  readonly cost: "low" | "medium" | "high";
+  readonly cost: 'low' | 'medium' | 'high';
   readonly createPixiFilter?: (
     params: Readonly<Record<string, EffectParamValue>>,
   ) => Promise<unknown> | unknown;
@@ -60,7 +54,7 @@ export interface EffectInstanceV1 {
   readonly enabled: boolean;
   readonly params: Readonly<Record<string, EffectParamValue>>;
   readonly animations?: Readonly<
-    Partial<Record<string, import("@joy-media/project-schema").AnimationCurveV1>>
+    Partial<Record<string, import('@joy-media/project-schema').AnimationCurveV1>>
   >;
   readonly label?: string;
 }
@@ -80,7 +74,7 @@ export interface EffectRegistryEntry {
 }
 
 export interface EffectRegistry {
-  registerEffect(descriptor: EffectDescriptor, factory?: EffectRegistryEntry["factory"]): void;
+  registerEffect(descriptor: EffectDescriptor, factory?: EffectRegistryEntry['factory']): void;
   getEffect(id: string): EffectDescriptor | undefined;
   hasEffect(id: string): boolean;
   listEffects(): readonly EffectDescriptor[];
@@ -89,13 +83,13 @@ export interface EffectRegistry {
 }
 
 export interface EffectDragPayload {
-  readonly kind: "joy/effect";
+  readonly kind: 'joy/effect';
   readonly effectId: string;
-  readonly source: "effects-panel";
+  readonly source: 'effects-panel';
 }
 
 export interface TransitionDragPayload {
-  readonly kind: "joy/transition";
+  readonly kind: 'joy/transition';
   readonly transitionId: string;
-  readonly source: "transitions-panel";
+  readonly source: 'transitions-panel';
 }

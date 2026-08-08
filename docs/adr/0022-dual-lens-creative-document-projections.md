@@ -84,7 +84,7 @@ Recorded so they are chosen, not forgotten:
   provenance, temporal bindings, versions, and the v1→v2 migration now exist in
   `project-schema`. The projection here still derives its nodes from timeline
   and document state; nothing reads the durable artifacts yet.
-- ~~**No persisted workflow graph.**~~ Closed by ADR-0023 for *storage* —
+- ~~**No persisted workflow graph.**~~ Closed by ADR-0023 for _storage_ —
   nodes, typed ports, execution policy, and document-level DAG validation.
   Caching, staleness, and port-type compatibility remain `workflow-engine`
   concerns not yet joined to this projection.

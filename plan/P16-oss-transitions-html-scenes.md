@@ -14,15 +14,15 @@
 
 First-party packages in `packages/html-scene-runtime/src/first-party.ts` (Motion panel picker):
 
-| Id | Role |
-|----|------|
-| `joy.firstparty.lower-third-bar` | Sliding name/role bar |
-| `joy.firstparty.lower-third-split` | Two-tone bar |
-| `joy.firstparty.title-cinematic` | Full-bleed title + subtitle |
-| `joy.firstparty.countdown` | Deterministic countdown from variables |
-| `joy.firstparty.caption-card` | Quote / callout |
-| `joy.firstparty.end-slate` | End card + CTA |
-| `joy.firstparty.super-app-hero` | JOY Super App hero copy (from wg-bot client) |
+| Id                                 | Role                                         |
+| ---------------------------------- | -------------------------------------------- |
+| `joy.firstparty.lower-third-bar`   | Sliding name/role bar                        |
+| `joy.firstparty.lower-third-split` | Two-tone bar                                 |
+| `joy.firstparty.title-cinematic`   | Full-bleed title + subtitle                  |
+| `joy.firstparty.countdown`         | Deterministic countdown from variables       |
+| `joy.firstparty.caption-card`      | Quote / callout                              |
+| `joy.firstparty.end-slate`         | End card + CTA                               |
+| `joy.firstparty.super-app-hero`    | JOY Super App hero copy (from wg-bot client) |
 
 All motion uses `ctx.progress` / `ctx.timeUs` only. Reference-frame hashes are pinned in `first-party.test.ts`.
 

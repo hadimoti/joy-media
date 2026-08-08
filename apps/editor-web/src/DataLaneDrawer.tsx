@@ -75,7 +75,8 @@ export function DataLaneDrawer({
   };
 
   const versions = openArtifactId === undefined ? [] : (artifacts.versions[openArtifactId] ?? []);
-  const openArtifact = openArtifactId === undefined ? undefined : artifacts.artifacts[openArtifactId];
+  const openArtifact =
+    openArtifactId === undefined ? undefined : artifacts.artifacts[openArtifactId];
 
   const promote = (versionId: string) => {
     if (openArtifact === undefined) return;
@@ -101,7 +102,10 @@ export function DataLaneDrawer({
     onDispatchArtifacts({
       label: `${pinned ? 'Pin' : 'Unpin'} version of ${openArtifact.label}`,
       commands: [
-        { type: 'artifact.pinVersion', payload: { artifactId: openArtifact.id, versionId, pinned } },
+        {
+          type: 'artifact.pinVersion',
+          payload: { artifactId: openArtifact.id, versionId, pinned },
+        },
       ],
     });
   };
@@ -143,7 +147,11 @@ export function DataLaneDrawer({
       ))}
 
       {openArtifact !== undefined && (
-        <div className="version-tray" role="dialog" aria-label={`Versions of ${openArtifact.label}`}>
+        <div
+          className="version-tray"
+          role="dialog"
+          aria-label={`Versions of ${openArtifact.label}`}
+        >
           <div className="version-tray-head">
             <strong>{openArtifact.label}</strong>
             <span>
@@ -165,7 +173,10 @@ export function DataLaneDrawer({
                   <span className="version-revision">rev {version.revision}</span>
                   <span className="version-summary">{summarize(version.contentRef)}</span>
                   {version.pinned === true && <span className="version-pin">pinned</span>}
-                  <button type="button" onClick={() => setPinned(version.id, version.pinned !== true)}>
+                  <button
+                    type="button"
+                    onClick={() => setPinned(version.id, version.pinned !== true)}
+                  >
                     {version.pinned === true ? 'Unpin' : 'Pin'}
                   </button>
                   <button type="button" onClick={() => promote(version.id)}>

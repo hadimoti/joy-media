@@ -112,9 +112,7 @@ describe('Dual Lens reveal bridge', () => {
         'visual:intro-title',
         'output:program',
       ]);
-      expect(formatProvenanceRibbon(steps)).toBe(
-        'Asset-intro → Intro → JOY → Program Output',
-      );
+      expect(formatProvenanceRibbon(steps)).toBe('Asset-intro → Intro → JOY → Program Output');
     });
 
     it('places a generative provider before the asset it produced, not beside it', () => {

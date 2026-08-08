@@ -150,64 +150,70 @@ export function JoyCode3DViewer() {
     };
   }, [initScene, clearScene]);
 
-  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    const requestId = ++loadSeqRef.current;
-    setFileList((prev) => [...prev, file.name]);
-    setStatus(`Loading ${file.name}…`);
+  const handleFileSelect = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const requestId = ++loadSeqRef.current;
+      setFileList((prev) => [...prev, file.name]);
+      setStatus(`Loading ${file.name}…`);
 
-    clearScene();
+      clearScene();
 
-    const loader = new GLTFLoader();
-    loader.load(
-      url,
-      (gltf) => {
-        if (requestId !== loadSeqRef.current) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        URL.revokeObjectURL(url);
-        const model = gltf.scene;
-        model.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
+      const loader = new GLTFLoader();
+      loader.load(
+        url,
+        (gltf) => {
+          if (requestId !== loadSeqRef.current) {
+            URL.revokeObjectURL(url);
+            return;
           }
-        });
-        const box = new THREE.Box3().setFromObject(model);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z, 1);
-        const scale = 3 / maxDim;
-        model.scale.setScalar(scale);
-        model.position.sub(center.multiplyScalar(scale));
-        model.position.y += size.y * scale * 0.5;
-        sceneRef.current?.add(model);
-        setStatus(`Loaded: ${file.name}`);
-      },
-      (progress) => {
-        if (requestId !== loadSeqRef.current) return;
-        const pct = progress.loaded / Math.max(1, progress.total);
-        setStatus(`Loading ${file.name}… ${Math.round(pct * 100)}%`);
-      },
-      (err: unknown) => {
-        if (requestId !== loadSeqRef.current) {
           URL.revokeObjectURL(url);
-          return;
-        }
-        URL.revokeObjectURL(url);
-        const msg = err instanceof Error ? err.message : String(err);
-        setStatus(`Error loading ${file.name}: ${msg}`);
-      },
-    );
+          const model = gltf.scene;
+          model.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          const center = box.getCenter(new THREE.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z, 1);
+          const scale = 3 / maxDim;
+          model.scale.setScalar(scale);
+          model.position.sub(center.multiplyScalar(scale));
+          model.position.y += size.y * scale * 0.5;
+          sceneRef.current?.add(model);
+          setStatus(`Loaded: ${file.name}`);
+        },
+        (progress) => {
+          if (requestId !== loadSeqRef.current) return;
+          const pct = progress.loaded / Math.max(1, progress.total);
+          setStatus(`Loading ${file.name}… ${Math.round(pct * 100)}%`);
+        },
+        (err: unknown) => {
+          if (requestId !== loadSeqRef.current) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          URL.revokeObjectURL(url);
+          const msg = err instanceof Error ? err.message : String(err);
+          setStatus(`Error loading ${file.name}: ${msg}`);
+        },
+      );
 
-    event.target.value = '';
-  }, [clearScene]);
+      event.target.value = '';
+    },
+    [clearScene],
+  );
 
   return (
-    <div className="joy-code-3d" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className="joy-code-3d"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+    >
       <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--joy-border)' }}>
         <button
           type="button"
@@ -216,7 +222,14 @@ export function JoyCode3DViewer() {
           title="Import GLB/GLTF"
           onClick={() => fileInputRef.current?.click()}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
             <path d="M8 2v9M4 7l4-4 4 4M3 13h10" />
           </svg>
         </button>
@@ -227,11 +240,20 @@ export function JoyCode3DViewer() {
           style={{ display: 'none' }}
           onChange={handleFileSelect}
         />
-        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--joy-text-muted)' }}>{status}</span>
+        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--joy-text-muted)' }}>
+          {status}
+        </span>
       </div>
       <div ref={containerRef} style={{ flex: 1, minHeight: 0, cursor: 'grab' }} />
       {fileList.length > 0 && (
-        <div style={{ padding: '4px 12px', borderTop: '1px solid var(--joy-border)', fontSize: 11, color: 'var(--joy-text-muted)' }}>
+        <div
+          style={{
+            padding: '4px 12px',
+            borderTop: '1px solid var(--joy-border)',
+            fontSize: 11,
+            color: 'var(--joy-text-muted)',
+          }}
+        >
           {fileList.length} model(s) loaded
         </div>
       )}

@@ -37,7 +37,10 @@ function node(id: string): WorkflowNodeV2 {
 }
 
 function addNode(id: string): GraphTransaction {
-  return { label: `Add ${id}`, commands: [{ type: 'graph.node.create', payload: { node: node(id) } }] };
+  return {
+    label: `Add ${id}`,
+    commands: [{ type: 'graph.node.create', payload: { node: node(id) } }],
+  };
 }
 
 const TRIM_INTRO = {

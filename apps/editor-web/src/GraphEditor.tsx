@@ -113,8 +113,7 @@ export function GraphEditor({
       if (!selected.includes(index)) return key;
       if (interpolation === 'bezier')
         return { ...key, interpolation, bezier: key.bezier ?? defaultBezier() };
-      if (interpolation === 'eased')
-        return { ...key, interpolation, bezier: EASED_HANDLES };
+      if (interpolation === 'eased') return { ...key, interpolation, bezier: EASED_HANDLES };
       const { bezier: _drop, ...rest } = key;
       return { ...rest, interpolation };
     });
@@ -165,9 +164,7 @@ export function GraphEditor({
       const nx = Math.max(0, Math.min(1, localX / LANE_WIDTH));
       const ny = 1 - Math.max(0, Math.min(1, localY / GRAPH_HEIGHT));
       const nextBezier =
-        drag.which === 'out'
-          ? { ...bezier, x2: nx, y2: ny }
-          : { ...bezier, x1: nx, y1: ny };
+        drag.which === 'out' ? { ...bezier, x2: nx, y2: ny } : { ...bezier, x1: nx, y1: ny };
       const next = setKeyframe(curve, {
         ...key,
         interpolation: 'bezier',
@@ -321,7 +318,13 @@ export function GraphEditor({
                       (event.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(
                         event.pointerId,
                       );
-                      dragRef.current = { kind: 'handle', index, which: 'out', originX: 0, originY: 0 };
+                      dragRef.current = {
+                        kind: 'handle',
+                        index,
+                        which: 'out',
+                        originX: 0,
+                        originY: 0,
+                      };
                     }}
                   />
                 </>

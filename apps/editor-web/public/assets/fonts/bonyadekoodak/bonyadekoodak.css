@@ -1,19 +1,21 @@
 /* Bonyade Koodak — JOY Media content-creation font. Source: fontiran pack. */
 
 @font-face {
-    font-family: 'Bonyade Koodak';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('BonyadeKoodak-Regular.woff2') format('woff2'),
-         url('BonyadeKoodak-Regular.woff') format('woff');
+  font-family: 'Bonyade Koodak';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url('BonyadeKoodak-Regular.woff2') format('woff2'),
+    url('BonyadeKoodak-Regular.woff') format('woff');
 }
 
 @font-face {
-    font-family: 'Bonyade Koodak';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('BonyadeKoodak-Bold.woff2') format('woff2'),
-         url('BonyadeKoodak-Bold.woff') format('woff');
+  font-family: 'Bonyade Koodak';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url('BonyadeKoodak-Bold.woff2') format('woff2'),
+    url('BonyadeKoodak-Bold.woff') format('woff');
 }

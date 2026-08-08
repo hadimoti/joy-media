@@ -222,7 +222,9 @@ describe('transition timing', () => {
   });
 
   it('emits a transition node only while active', () => {
-    const objects: ResolvedObject[] = [resolved(makeObject({ id: 'a', kind: 'shape', shape: 'rectangle' }))];
+    const objects: ResolvedObject[] = [
+      resolved(makeObject({ id: 'a', kind: 'shape', shape: 'rectangle' })),
+    ];
     const inactive = buildRenderFrameIR('c', 0, 100, 100, objects, {
       transitions: [transition],
       clipTimes,

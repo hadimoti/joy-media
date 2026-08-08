@@ -19,15 +19,28 @@ import './login-gate.css';
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
 type Method = MediaAuthMethod | 'token';
 
-const METHOD_CONFIG: Record<Method, { sub: string; placeholder: string; type: string; btn: string }> = {
-  gmail: { sub: 'Enter your Gmail address', placeholder: 'your@gmail.com', type: 'email', btn: 'Send Code →' },
+const METHOD_CONFIG: Record<
+  Method,
+  { sub: string; placeholder: string; type: string; btn: string }
+> = {
+  gmail: {
+    sub: 'Enter your Gmail address',
+    placeholder: 'your@gmail.com',
+    type: 'email',
+    btn: 'Send Code →',
+  },
   telegram: {
     sub: 'Enter your Telegram username or ID',
     placeholder: 'username',
     type: 'text',
     btn: 'Send Code →',
   },
-  token: { sub: 'Paste your access token', placeholder: 'paste token here...', type: 'text', btn: 'Login →' },
+  token: {
+    sub: 'Paste your access token',
+    placeholder: 'paste token here...',
+    type: 'text',
+    btn: 'Login →',
+  },
 };
 
 /**
@@ -42,7 +55,9 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   const [step, setStep] = useState<Step>('checking');
   const [method, setMethod] = useState<Method>('gmail');
   const [history, setHistory] = useState<LoginContactHistory>(() =>
-    typeof window === 'undefined' ? { gmail: [], telegram: [] } : loadLoginContactHistory(window.localStorage),
+    typeof window === 'undefined'
+      ? { gmail: [], telegram: [] }
+      : loadLoginContactHistory(window.localStorage),
   );
   const [contact, setContact] = useState(() => {
     if (typeof window === 'undefined') return '';
@@ -96,7 +111,10 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
         },
       );
     };
-    void probeSession(() => setStep('unlocked'), () => setStep('contact'));
+    void probeSession(
+      () => setStep('unlocked'),
+      () => setStep('contact'),
+    );
     window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
     return () => {
       cancelled = true;
@@ -190,7 +208,10 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   };
 
   const onOtpChange = (index: number, raw: string): void => {
-    const digits = raw.replace(/\D/g, '').slice(0, 6 - index).split('');
+    const digits = raw
+      .replace(/\D/g, '')
+      .slice(0, 6 - index)
+      .split('');
     if (digits.length > 1) {
       digits.forEach((digit, offset) => {
         const target = otpRefs.current[index + offset];
@@ -309,7 +330,11 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                 onClick={() => switchMethod('telegram')}
                 disabled={step === 'otp'}
               >
-                <img src="/assets/icons-login/telegram-64.png" className="lmethod-icon" alt="Telegram" />
+                <img
+                  src="/assets/icons-login/telegram-64.png"
+                  className="lmethod-icon"
+                  alt="Telegram"
+                />
                 <span>Telegram</span>
               </button>
               <button

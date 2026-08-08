@@ -10,9 +10,7 @@ export type ImportedAsset = {
 
 type ManifestAsset = ImportedAsset & { exported?: boolean };
 
-export function importAlphaAssetManifest(payload: {
-  assets: ManifestAsset[];
-}): ImportedAsset[] {
+export function importAlphaAssetManifest(payload: { assets: ManifestAsset[] }): ImportedAsset[] {
   return payload.assets
     .filter((asset) => asset.exported !== false)
     .map(({ id, filePath, title, category, description, tags, sourceFile }) => ({

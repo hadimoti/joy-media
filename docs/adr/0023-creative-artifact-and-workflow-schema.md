@@ -8,7 +8,7 @@ Date: 2026-07-27
 
 ADR-0022 made Flow a projection of live session state, and its 2026-07-27
 amendment made the two lenses cross: selection, reveal, and a provenance ribbon.
-Everything that projection shows is *derived* — from timeline clips, visual
+Everything that projection shows is _derived_ — from timeline clips, visual
 objects, caption documents, and `AssetRecordV1.generationProvenance`.
 
 Derivation is enough to explain what already exists, and not enough for what
@@ -19,7 +19,7 @@ cited as the source of something else — so there is nothing for a graph edge t
 connect, and nothing for a re-run to invalidate.
 
 The workflow graph has the same gap in reverse. `workflow-engine` can execute a
-graph, but the project cannot *store* one, so a graph cannot survive a reload,
+graph, but the project cannot _store_ one, so a graph cannot survive a reload,
 be validated on import, or be edited through the command bus.
 
 ## Decision
@@ -46,7 +46,7 @@ contain the playhead" two answers.
 
 **One capability vocabulary.** `CreativeCapability` lives in `project-schema`
 because a workflow node persists the capabilities it requires, and
-`@joy-media/agent-tools` now *aliases* `ToolCapability` to it rather than
+`@joy-media/agent-tools` now _aliases_ `ToolCapability` to it rather than
 keeping the parallel copy it had. Two lists would drift, and a capability the
 policy engine does not recognise grants nothing while still looking declared —
 a failure in the direction of "the gate never fired". The dependency runs
@@ -56,8 +56,8 @@ agent-tools → project-schema, so the schema is the correct home.
 `validateWorkflowGraph` checks node id uniqueness, edge endpoints, port
 existence, capability names, and acyclicity. Cycle detection lives in the
 schema and not only in `workflow-engine` because a cyclic graph must not be
-*storable*: a hand-edited or imported project that round trips a cycle would
-fail much later, at execution, far from the edit that caused it. Port *type*
+_storable_: a hand-edited or imported project that round trips a cycle would
+fail much later, at execution, far from the edit that caused it. Port _type_
 compatibility stays in `workflow-engine`, so adding a node type does not
 require a schema migration.
 

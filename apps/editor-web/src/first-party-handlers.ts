@@ -337,8 +337,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           deferred: true,
           mode: args.mode,
           profile: args.profile ?? 'social-h264-aac',
-          reason:
-            'Use the editor Export with an output preset; Worker encoding is not wired yet.',
+          reason: 'Use the editor Export with an output preset; Worker encoding is not wired yet.',
         }),
       },
       output: {
@@ -346,8 +345,7 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           written: false,
           deferred: true,
           folderId: args.folderId,
-          reason:
-            'The browser runner cannot write host folders; use Export or Jobs.',
+          reason: 'The browser runner cannot write host folders; use Export or Jobs.',
         }),
         writeMetadataFile: (args: { readonly fileName: string }) => ({
           written: false,

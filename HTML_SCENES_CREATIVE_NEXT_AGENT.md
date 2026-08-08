@@ -9,13 +9,13 @@ This brief is for the next coding agent. Read it end-to-end before editing.
 
 ## 1. Repo & runtime locations
 
-| What | Path |
-|------|------|
-| Working checkout (VPS) | `/opt/joy-media/repo` |
-| Bare git remote | `/opt/joy-media.git` (`origin`) |
-| Public editor | https://media.joyteam.ir |
-| Live web symlink | `/opt/joy-media/web` → `/opt/joy-media/web-releases/<sha>-<label>` |
-| Editor app package | `apps/editor-web` (`@joy-media/editor-web`) |
+| What                   | Path                                                               |
+| ---------------------- | ------------------------------------------------------------------ |
+| Working checkout (VPS) | `/opt/joy-media/repo`                                              |
+| Bare git remote        | `/opt/joy-media.git` (`origin`)                                    |
+| Public editor          | https://media.joyteam.ir                                           |
+| Live web symlink       | `/opt/joy-media/web` → `/opt/joy-media/web-releases/<sha>-<label>` |
+| Editor app package     | `apps/editor-web` (`@joy-media/editor-web`)                        |
 
 **Do not** restore from backups/tarballs into live paths. Forward-only edits on the current tree.
 
@@ -23,7 +23,7 @@ This brief is for the next coding agent. Read it end-to-end before editing.
 
 ## 2. What the user pointed at vs what to build
 
-### 2.1 DOM they selected (Motion library — *not* HTML scenes)
+### 2.1 DOM they selected (Motion library — _not_ HTML scenes)
 
 ```text
 article.joy-panel-root.motion-panel
@@ -33,12 +33,12 @@ article.joy-panel-root.motion-panel
 
 That section lists **built-in keyframe motion presets** (Fade In / Fade Out / Pop In / Slide Up). Those are **not** HTML/React overlays.
 
-| Role | Path |
-|------|------|
+| Role              | Path                                                                        |
+| ----------------- | --------------------------------------------------------------------------- |
 | UI (library grid) | `apps/editor-web/src/MotionPanel.tsx` (`.motion-library-section`, Built-in) |
-| Preset builders | `packages/motion-core/src/presets.ts` (`JOY_MOTION_PRESETS`) |
-| Registry wrappers | `packages/motion-core/src/builtins.ts` (`registerBuiltinMotions`) |
-| Poster PNGs | `apps/editor-web/public/assets/motion-previews/` |
+| Preset builders   | `packages/motion-core/src/presets.ts` (`JOY_MOTION_PRESETS`)                |
+| Registry wrappers | `packages/motion-core/src/builtins.ts` (`registerBuiltinMotions`)           |
+| Poster PNGs       | `apps/editor-web/public/assets/motion-previews/`                            |
 
 **Out of scope for this brief** unless the user explicitly asks to expand Fade/Pop/Slide presets.
 
@@ -46,20 +46,20 @@ That section lists **built-in keyframe motion presets** (Fade In / Fade Out / Po
 
 Creative “HTML effects” live as **first-party scene packages**, shown under Motion panel → **Scenes** subtab (`LibrarySubtab === 'html-scenes'`).
 
-| Role | Path |
-|------|------|
-| **Author here (primary)** | `packages/html-scene-runtime/src/first-party.ts` |
-| Catalog export | `FIRST_PARTY_SCENES`, `FirstPartySceneId`, `findFirstPartyScene` |
-| Pinned golden hashes | `packages/html-scene-runtime/src/first-party.test.ts` (`REFERENCE_FRAME_SHA256`) |
-| How-to runbook | `plan/P16-oss-transitions-html-scenes.md` § “How to add one more HTML scene” |
-| Determinism contract | `docs/adr/0006-html-scene-sandbox-and-deterministic-clock.md` |
-| Package README | `packages/html-scene-runtime/README.md` |
-| Variable types | `packages/html-scene-runtime/src/variables.ts` (`string` \| `number` \| `boolean` \| `color` \| `enum`) |
-| Scene context API | `packages/html-scene-runtime/src/runtime.ts` (`JoySceneContext`) |
-| Live thumbs / add UI | `apps/editor-web/src/MotionPanel.tsx` (Scenes section; maps `FIRST_PARTY_SCENES`) |
-| Thumb helpers | `apps/editor-web/src/html-scene-thumbs.ts` |
-| Place on timeline | `apps/editor-web/src/App.tsx` → `addHtmlSceneToSelectedClip` / `htmlScene.create` |
-| Prior OSS pack notes | `plan/P16-oss-transitions-html-scenes.md` |
+| Role                      | Path                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Author here (primary)** | `packages/html-scene-runtime/src/first-party.ts`                                                        |
+| Catalog export            | `FIRST_PARTY_SCENES`, `FirstPartySceneId`, `findFirstPartyScene`                                        |
+| Pinned golden hashes      | `packages/html-scene-runtime/src/first-party.test.ts` (`REFERENCE_FRAME_SHA256`)                        |
+| How-to runbook            | `plan/P16-oss-transitions-html-scenes.md` § “How to add one more HTML scene”                            |
+| Determinism contract      | `docs/adr/0006-html-scene-sandbox-and-deterministic-clock.md`                                           |
+| Package README            | `packages/html-scene-runtime/README.md`                                                                 |
+| Variable types            | `packages/html-scene-runtime/src/variables.ts` (`string` \| `number` \| `boolean` \| `color` \| `enum`) |
+| Scene context API         | `packages/html-scene-runtime/src/runtime.ts` (`JoySceneContext`)                                        |
+| Live thumbs / add UI      | `apps/editor-web/src/MotionPanel.tsx` (Scenes section; maps `FIRST_PARTY_SCENES`)                       |
+| Thumb helpers             | `apps/editor-web/src/html-scene-thumbs.ts`                                                              |
+| Place on timeline         | `apps/editor-web/src/App.tsx` → `addHtmlSceneToSelectedClip` / `htmlScene.create`                       |
+| Prior OSS pack notes      | `plan/P16-oss-transitions-html-scenes.md`                                                               |
 
 New scenes appear automatically in the Scenes picker once they are on `FIRST_PARTY_SCENES` — no separate registry file.
 
@@ -71,8 +71,8 @@ Design **new first-party HTML scenes** that feel modern and editorial — CapCut
 
 1. **Visual anchor:** an image (or strong image-like block: photo frame, product still, poster crop). Prefer left or right of copy, not a floating card collage unless the template is clearly a card.
 2. **2–3 text parts beside the image**, staggered in time:
-   - Part A — primary title / name  
-   - Part B — secondary line (role, product, location)  
+   - Part A — primary title / name
+   - Part B — secondary line (role, product, location)
    - Part C — optional tertiary (tag, handle, timestamp, CTA chip)
 3. **Motion:** entrance/exit driven only by `ctx.progress` / `ctx.timeUs` / `ctx.random()` (seeded). Stagger text parts (e.g. 0.00 / 0.08 / 0.16 progress offsets). Prefer intentional motion (slide + fade, wipe reveal, scale settle) — not noisy glow spam.
 4. **Variables:** expose editable strings/colors via `variableSchema` so editors can localize without code changes.
@@ -107,14 +107,14 @@ Each entry in `first-party.ts` is a `FirstPartyScenePackage`:
 
 Inside `source`, the function receives `ctx` and must return a React element via `React.createElement` (global React in the sandbox):
 
-| Field | Use |
-|-------|-----|
-| `ctx.progress` | `0…1` over scene duration — **primary animation driver** |
-| `ctx.timeUs` / `ctx.durationUs` | absolute timing if needed |
-| `ctx.variables` | resolved schema values |
-| `ctx.random()` | deterministic random (seeded); **not** `Math.random` |
-| `ctx.assets.resolve(id)` | only if resolvers supplied (first-party browser preview often has empty assets — see below) |
-| `ctx.fonts.resolve(id)` | same restriction |
+| Field                           | Use                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| `ctx.progress`                  | `0…1` over scene duration — **primary animation driver**                                    |
+| `ctx.timeUs` / `ctx.durationUs` | absolute timing if needed                                                                   |
+| `ctx.variables`                 | resolved schema values                                                                      |
+| `ctx.random()`                  | deterministic random (seeded); **not** `Math.random`                                        |
+| `ctx.assets.resolve(id)`        | only if resolvers supplied (first-party browser preview often has empty assets — see below) |
+| `ctx.fonts.resolve(id)`         | same restriction                                                                            |
 
 **Forbidden (ADR-0006 / P16):**
 
@@ -166,23 +166,23 @@ Stagger with progress gates, e.g. `showA = clamp((p - 0.00) * 4)`, `showB = clam
 
 Already in `FIRST_PARTY_SCENES` (as of this brief):
 
-| Id | Name |
-|----|------|
-| `joy.firstparty.title` | JOY Title |
-| `joy.firstparty.product-card` | JOY Product Card |
-| `joy.firstparty.lower-third` | JOY Lower Third |
-| `joy.firstparty.data-list` | JOY Data List |
-| `joy.firstparty.lower-third-bar` | Lower Third Bar |
+| Id                                 | Name              |
+| ---------------------------------- | ----------------- |
+| `joy.firstparty.title`             | JOY Title         |
+| `joy.firstparty.product-card`      | JOY Product Card  |
+| `joy.firstparty.lower-third`       | JOY Lower Third   |
+| `joy.firstparty.data-list`         | JOY Data List     |
+| `joy.firstparty.lower-third-bar`   | Lower Third Bar   |
 | `joy.firstparty.lower-third-split` | Lower Third Split |
-| `joy.firstparty.title-cinematic` | Title Cinematic |
-| `joy.firstparty.countdown` | Countdown |
-| `joy.firstparty.caption-card` | Caption Card |
-| `joy.firstparty.end-slate` | End Slate |
-| `joy.firstparty.super-app-hero` | Super App Hero |
-| `joy.firstparty.news-ticker` | News Ticker |
-| `joy.firstparty.social-badge` | Social Badge |
-| `joy.firstparty.chapter-marker` | Chapter Marker |
-| `joy.firstparty.score-bug` | Score Bug |
+| `joy.firstparty.title-cinematic`   | Title Cinematic   |
+| `joy.firstparty.countdown`         | Countdown         |
+| `joy.firstparty.caption-card`      | Caption Card      |
+| `joy.firstparty.end-slate`         | End Slate         |
+| `joy.firstparty.super-app-hero`    | Super App Hero    |
+| `joy.firstparty.news-ticker`       | News Ticker       |
+| `joy.firstparty.social-badge`      | Social Badge      |
+| `joy.firstparty.chapter-marker`    | Chapter Marker    |
+| `joy.firstparty.score-bug`         | Score Bug         |
 
 Use these as style/motion references (`super-app-hero` is the richest progress choreography). New work should **add** image+text templates rather than regress existing goldens.
 
@@ -227,25 +227,25 @@ Hard-refresh https://media.joyteam.ir → Motion panel → **Scenes**.
 
 ## 7. Related-but-different systems (do not confuse)
 
-| System | Location | Notes |
-|--------|----------|-------|
-| Keyframe motion presets | `motion-core` presets/builtins + Motion **Library** Built-in | Opacity/scale/position curves on selected objects |
-| Pixi visual effects | `packages/visual-effects`, `EffectsPanel.tsx` | Blur/color-style effects — not HTML overlays |
-| gl-transitions | `packages/transition-shaders` | Clip A↔B blends (P16 A) |
-| Motion Studio | `apps/editor-web/src/motion-studio/` | User-authored motion scenes — separate from first-party HTML pack |
+| System                  | Location                                                     | Notes                                                             |
+| ----------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Keyframe motion presets | `motion-core` presets/builtins + Motion **Library** Built-in | Opacity/scale/position curves on selected objects                 |
+| Pixi visual effects     | `packages/visual-effects`, `EffectsPanel.tsx`                | Blur/color-style effects — not HTML overlays                      |
+| gl-transitions          | `packages/transition-shaders`                                | Clip A↔B blends (P16 A)                                           |
+| Motion Studio           | `apps/editor-web/src/motion-studio/`                         | User-authored motion scenes — separate from first-party HTML pack |
 
 ---
 
 ## 8. Acceptance criteria for the next agent
 
-- [ ] 3+ new `joy.firstparty.*` scenes with **image (or image-like) + 2–3 text parts** beside it  
-- [ ] All motion from `ctx.progress` / seeded `ctx.random` only (ADR-0006)  
-- [ ] Editable variables for each text part + accent color  
-- [ ] Registered on `FirstPartySceneId` + `FIRST_PARTY_SCENES`  
-- [ ] `first-party.test.ts` goldens updated and green  
-- [ ] Visible in Motion → Scenes; add-to-clip works; Monitor scrub shows staggered text  
-- [ ] Deployed web tip under `/opt/joy-media/web-releases/…` if shipping to production  
-- [ ] Short note in `STATE.md` / `THIRD_PARTY_NOTICES.md` if layouts were adapted from external references  
+- [ ] 3+ new `joy.firstparty.*` scenes with **image (or image-like) + 2–3 text parts** beside it
+- [ ] All motion from `ctx.progress` / seeded `ctx.random` only (ADR-0006)
+- [ ] Editable variables for each text part + accent color
+- [ ] Registered on `FirstPartySceneId` + `FIRST_PARTY_SCENES`
+- [ ] `first-party.test.ts` goldens updated and green
+- [ ] Visible in Motion → Scenes; add-to-clip works; Monitor scrub shows staggered text
+- [ ] Deployed web tip under `/opt/joy-media/web-releases/…` if shipping to production
+- [ ] Short note in `STATE.md` / `THIRD_PARTY_NOTICES.md` if layouts were adapted from external references
 
 ---
 

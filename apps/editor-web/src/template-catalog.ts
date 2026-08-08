@@ -36,13 +36,9 @@ interface CatalogDatabase {
   readonly templates: Readonly<Record<string, TemplateCatalogEntry>>;
 }
 
-export function listTemplates(
-  storage: BrowserKeyValueStore,
-): readonly TemplateCatalogEntry[] {
+export function listTemplates(storage: BrowserKeyValueStore): readonly TemplateCatalogEntry[] {
   const db = readCatalog(storage);
-  return Object.values(db.templates).sort(
-    (a, b) => b.updatedAt.localeCompare(a.updatedAt),
-  );
+  return Object.values(db.templates).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export function getTemplate(
@@ -52,10 +48,7 @@ export function getTemplate(
   return readCatalog(storage).templates[id];
 }
 
-export function saveTemplate(
-  storage: BrowserKeyValueStore,
-  entry: TemplateCatalogEntry,
-): void {
+export function saveTemplate(storage: BrowserKeyValueStore, entry: TemplateCatalogEntry): void {
   if (!isTemplateCatalogEntry(entry)) {
     throw new TypeError('Invalid template catalog entry');
   }
@@ -66,10 +59,7 @@ export function saveTemplate(
   });
 }
 
-export function removeTemplate(
-  storage: BrowserKeyValueStore,
-  id: string,
-): void {
+export function removeTemplate(storage: BrowserKeyValueStore, id: string): void {
   const db = readCatalog(storage);
   if (db.templates[id] === undefined) return;
   const templates = { ...db.templates };

@@ -90,9 +90,9 @@ describe('MediaAuthService', () => {
     await auth.requestOtp('user@example.com', 'gmail', request);
     await auth.requestOtp('user@example.com', 'gmail', request);
     await auth.requestOtp('user@example.com', 'gmail', request);
-    await expect(
-      auth.requestOtp('user@example.com', 'gmail', request),
-    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await expect(auth.requestOtp('user@example.com', 'gmail', request)).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+    });
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
@@ -128,7 +128,9 @@ describe('MediaAuthService', () => {
     telegram.sendOtp.mockClear();
     await auth.requestOtp('@joyuser', 'telegram');
     const code2 = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
-    await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(expect.any(String));
+    await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(
+      expect.any(String),
+    );
   });
 
   it('does not deliver for an unknown Telegram username', async () => {

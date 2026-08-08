@@ -3,16 +3,8 @@ import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { AuditTrail } from './audit.js';
 import { RevisionConflictError } from './envelope.js';
-import {
-  combineProposals,
-  commitCombinedChangeSet,
-  runSpecialists,
-} from './specialists.js';
-import type {
-  ChangeSetProposal,
-  SpecialistContext,
-  SpecialistDefinition,
-} from './specialists.js';
+import { combineProposals, commitCombinedChangeSet, runSpecialists } from './specialists.js';
+import type { ChangeSetProposal, SpecialistContext, SpecialistDefinition } from './specialists.js';
 import {
   AUDIO_CLEANUP_AGENT,
   BUILT_IN_SPECIALISTS,
@@ -177,9 +169,7 @@ describe('specialist agents', () => {
 
       const result = await runSpecialists([broken, CAPTION_AGENT], context(), READ_ONLY);
 
-      expect(result.failed).toEqual([
-        { roleId: 'broken', error: 'provider unavailable' },
-      ]);
+      expect(result.failed).toEqual([{ roleId: 'broken', error: 'provider unavailable' }]);
       expect(result.proposals.map((p) => p.roleId)).toEqual(['caption-agent']);
     });
   });
@@ -439,7 +429,11 @@ describe('specialist agents', () => {
       const loud = context({
         creative: {
           ...CREATIVE,
-          audio: { clips: { intro: { gain: 2.4, pan: 0, mute: false, solo: false } }, buses: [], effects: [] },
+          audio: {
+            clips: { intro: { gain: 2.4, pan: 0, mute: false, solo: false } },
+            buses: [],
+            effects: [],
+          },
         },
       });
 
@@ -551,10 +545,7 @@ describe('specialist agents', () => {
   });
 });
 
-function proposal(
-  roleId: string,
-  edits: ChangeSetProposal['edits'],
-): ChangeSetProposal {
+function proposal(roleId: string, edits: ChangeSetProposal['edits']): ChangeSetProposal {
   return {
     roleId,
     capability: 'test.analyse',

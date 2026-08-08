@@ -1,10 +1,11 @@
 /* Vazin — JOY Media content-creation font. Source: fontiran pack. */
 
 @font-face {
-    font-family: 'Vazin';
-    font-style: normal;
-    font-weight: 900;
-    font-display: swap;
-    src: url('VazinGap-Black.woff2') format('woff2'),
-         url('VazinGap-Black.woff') format('woff');
+  font-family: 'Vazin';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src:
+    url('VazinGap-Black.woff2') format('woff2'),
+    url('VazinGap-Black.woff') format('woff');
 }

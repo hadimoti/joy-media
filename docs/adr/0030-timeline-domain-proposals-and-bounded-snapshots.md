@@ -25,7 +25,7 @@ loss fix, and it is a defect in ADR-0028's own `saveSnapshot`.
 
 `LocalProjectPersistence.latestRevision()` counted transaction revisions only.
 `saveSnapshot` writes no transaction, so two consecutive document replacements
-were assigned the *same* revision number — and `recover()` picks the first of a
+were assigned the _same_ revision number — and `recover()` picks the first of a
 tie, so the second replacement was silently lost on reload. A `saveTransaction`
 written after a `saveSnapshot` collided the same way and was skipped during
 replay. `latestRevision` now takes the max over both.
@@ -45,7 +45,7 @@ browser and desktop stores serialize the whole database per write, so pruning
 after writing would double the cost of the exact path being bounded.
 
 **A specialist emits timeline edits, so the path is exercised.** `PACING_AGENT`
-is a 4th built-in. It finds gaps of 500 ms or more *between* clips and proposes
+is a 4th built-in. It finds gaps of 500 ms or more _between_ clips and proposes
 `domain: 'timeline'` edits carrying `startUs`.
 
 Gaps before the first clip are excluded — a hole at the top of a sequence is
@@ -148,7 +148,7 @@ without touching the apply path, and the whole review surface renders only when
 shifted 2s later): `Run review` correctly reported "2.00s of dead air before
 'product'" **and** "2.00s of dead air before 'outro'" — the second finding
 demonstrates the accumulating cursor exactly as designed, since it is computed
-against product's *proposed* corrected position, not its actual (already
+against product's _proposed_ corrected position, not its actual (already
 adjacent) neighbor.
 
 Approving only the pacing proposal and clicking apply correctly did **nothing**

@@ -1492,7 +1492,9 @@ export function TimelinePanel({
                       originUs: 0,
                       pixelsPerSecond: viewport.pixelsPerSecond,
                     });
-                    const hitClip = source.clips.find((c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs);
+                    const hitClip = source.clips.find(
+                      (c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs,
+                    );
                     setDragEffectOverClipId(hitClip?.id ?? null);
                   }}
                   onDragLeave={() => {

@@ -101,7 +101,7 @@ reported truthfully instead of as the single change the user asked for.
 
 - `dispatchGraph` records on the same history stack as timeline and document
   edits, so undo follows what the user did rather than which lens they were
-  looking through. Per-family record stacks say *how* to reverse an entry the
+  looking through. Per-family record stacks say _how_ to reverse an entry the
   one stack has already ordered — the same split `EditorCommandController` and
   `VisualObjectProjectHistory` already use.
 - Graph edits advance `projectRevisionId`. The graph is part of the creative
@@ -110,8 +110,8 @@ reported truthfully instead of as the single change the user asked for.
   stored, not merely nothing drawn — otherwise disabling the feature would
   leave a document behind that the old path does not understand.
 - `WorkflowGraphEditor` authors nodes and edges. It sits below the Flow
-  projection rather than on the same canvas: that graph is *derived* from the
-  document, this one is *authored*, and drawing them together would imply an
+  projection rather than on the same canvas: that graph is _derived_ from the
+  document, this one is _authored_, and drawing them together would imply an
   equivalence that does not exist yet.
 - The panel dry-runs before dispatching, so a rejected edit reports why instead
   of throwing past the click handler.

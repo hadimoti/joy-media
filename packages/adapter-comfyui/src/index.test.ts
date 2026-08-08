@@ -108,10 +108,9 @@ describe('ComfyUI adapter invoke', () => {
   });
 
   it('handles image.removeBackground successfully via real HTTP protocol', async () => {
-    const adapter = createComfyUIAdapter(
-      { ...DEFAULT_CONFIG, fetch: mockComfyFetch(2) },
-      [BACKGROUND_REMOVAL_TEMPLATE],
-    );
+    const adapter = createComfyUIAdapter({ ...DEFAULT_CONFIG, fetch: mockComfyFetch(2) }, [
+      BACKGROUND_REMOVAL_TEMPLATE,
+    ]);
     const result = await adapter.invoke('image.removeBackground', {
       image: new Uint8Array([1, 2, 3]),
     });
@@ -123,10 +122,9 @@ describe('ComfyUI adapter invoke', () => {
   });
 
   it('fails closed when the endpoint is empty', async () => {
-    const adapter = createComfyUIAdapter(
-      { endpoint: '', timeoutMs: 1000, pollIntervalMs: 10 },
-      [IMAGE_UPSCALE_TEMPLATE],
-    );
+    const adapter = createComfyUIAdapter({ endpoint: '', timeoutMs: 1000, pollIntervalMs: 10 }, [
+      IMAGE_UPSCALE_TEMPLATE,
+    ]);
     const result = await adapter.invoke('image.upscale', { image: new Uint8Array([1]) });
     expect(result.status).toBe('failed');
     expect(result.diagnostics.some((d) => d.message.includes('COMFYUI_UNAVAILABLE'))).toBe(true);

@@ -217,9 +217,7 @@ export function JobsPanel({
             </span>
           </div>
           {visibleWorkers.length === 0 ? (
-            <p className="jobs-empty">
-              No active Worker. Pair one using the guide below.
-            </p>
+            <p className="jobs-empty">No active Worker. Pair one using the guide below.</p>
           ) : (
             <ul className="jobs-workers">
               {visibleWorkers.map((worker) => {
@@ -276,9 +274,7 @@ export function JobsPanel({
             <span className="jobs-section-meta">{jobs.length}</span>
           </div>
           {jobs.length === 0 ? (
-            <p className="jobs-empty">
-              No derivative jobs yet.
-            </p>
+            <p className="jobs-empty">No derivative jobs yet.</p>
           ) : (
             <ul className="jobs-list">
               {jobs.map((job) => (
@@ -373,10 +369,11 @@ export function JobsPanel({
                 should appear within a few seconds.
               </li>
               <li>
-                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>,
-                or <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
-                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>, <code>edit.higgsfield</code>)
-                require API keys configured in <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
+                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>, or{' '}
+                <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
+                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>,{' '}
+                <code>edit.higgsfield</code>) require API keys configured in{' '}
+                <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
               </li>
             </ol>
           )}

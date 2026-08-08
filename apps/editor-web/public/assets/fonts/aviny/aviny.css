@@ -1,10 +1,11 @@
 /* Aviny — JOY Media content-creation font. Source: fontiran pack. */
 
 @font-face {
-    font-family: 'Aviny';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('aviny.woff2') format('woff2'),
-         url('aviny.woff') format('woff');
+  font-family: 'Aviny';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url('aviny.woff2') format('woff2'),
+    url('aviny.woff') format('woff');
 }

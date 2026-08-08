@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  WorkflowEdgeV2,
-  WorkflowGraphV2,
-  WorkflowNodeV2,
-} from '@joy-media/project-schema';
+import type { WorkflowEdgeV2, WorkflowGraphV2, WorkflowNodeV2 } from '@joy-media/project-schema';
 import { validateWorkflowGraph } from '@joy-media/project-schema';
 import { applyGraphCommand, GraphCommandError } from './graph-commands.js';
 import type { WorkflowGraphCommand } from './graph-commands.js';
@@ -331,10 +327,13 @@ describe('graph commands', () => {
     });
 
     it('reports why an invalid transaction would fail instead of throwing', () => {
-      const result = dryRunGraphTransaction(graphOf([node('a'), node('b')], [edge('e1', 'a', 'b')]), {
-        label: 'Close the loop',
-        commands: [{ type: 'graph.edge.connect', payload: { edge: edge('e2', 'b', 'a') } }],
-      });
+      const result = dryRunGraphTransaction(
+        graphOf([node('a'), node('b')], [edge('e1', 'a', 'b')]),
+        {
+          label: 'Close the loop',
+          commands: [{ type: 'graph.edge.connect', payload: { edge: edge('e2', 'b', 'a') } }],
+        },
+      );
 
       expect(result.ok).toBe(false);
       expect(result.preview).toBeUndefined();

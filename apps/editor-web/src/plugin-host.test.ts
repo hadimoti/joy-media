@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEMO_PANEL_PLUGIN_ID,
-  createEditorPluginHost,
-} from './plugin-host.js';
+import { DEMO_PANEL_PLUGIN_ID, createEditorPluginHost } from './plugin-host.js';
 
 describe('WP-18 plugin host', () => {
   it('seeds the demo panel disabled under safe mode by default', () => {

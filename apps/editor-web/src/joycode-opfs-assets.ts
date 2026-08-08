@@ -46,7 +46,11 @@ function classifyFile(file: File): { kind: JoyCodeStoredKind; mimeType: string }
   return undefined;
 }
 
-async function writeJson(directory: OpfsDirectoryHandle, name: string, value: unknown): Promise<void> {
+async function writeJson(
+  directory: OpfsDirectoryHandle,
+  name: string,
+  value: unknown,
+): Promise<void> {
   const writable = await (await directory.getFileHandle(name, { create: true })).createWritable();
   try {
     await writable.write(new Blob([JSON.stringify(value)], { type: 'application/json' }));
@@ -81,40 +85,40 @@ export class JoyCodeOpfsAssetCache {
   }
 
   async put(file: File): Promise<JoyCodeStoredAssetMeta> {
-      const classified = classifyFile(file);
-      if (classified === undefined) {
-          throw new Error('Only images and Markdown (.md) files can be attached to Joy Code');
-      }
-      if (file.size <= 0 || file.size > JOYCODE_ASSET_MAX_BYTES) {
-          throw new Error(
-              `File must be between 1 byte and ${JOYCODE_ASSET_MAX_BYTES / (1024 * 1024)} MiB`,
-          );
-      }
-      const buffer = await file.arrayBuffer();
-      const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
-      const assetId = opaqueId();
-      const meta: JoyCodeStoredAssetMeta = {
-          assetId,
-          displayName: file.name.trim() || assetId,
-          kind: classified.kind,
-          mimeType: classified.mimeType,
-          sha256,
-          bytes: file.size,
-          createdAt: new Date().toISOString(),
-      };
+    const classified = classifyFile(file);
+    if (classified === undefined) {
+      throw new Error('Only images and Markdown (.md) files can be attached to Joy Code');
+    }
+    if (file.size <= 0 || file.size > JOYCODE_ASSET_MAX_BYTES) {
+      throw new Error(
+        `File must be between 1 byte and ${JOYCODE_ASSET_MAX_BYTES / (1024 * 1024)} MiB`,
+      );
+    }
+    const buffer = await file.arrayBuffer();
+    const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
+    const assetId = opaqueId();
+    const meta: JoyCodeStoredAssetMeta = {
+      assetId,
+      displayName: file.name.trim() || assetId,
+      kind: classified.kind,
+      mimeType: classified.mimeType,
+      sha256,
+      bytes: file.size,
+      createdAt: new Date().toISOString(),
+    };
 
-      const directory = await this.joycodeDir(true);
-      const index = await readIndex(directory);
-      const bin = await (
-          await directory.getFileHandle(`${assetId}.bin`, { create: true })
-      ).createWritable();
-      try {
-          await bin.write(new Blob([buffer], { type: classified.mimeType }));
-      } finally {
-          await bin.close();
-      }
-      await writeJson(directory, 'index.json', [...index, meta]);
-      return meta;
+    const directory = await this.joycodeDir(true);
+    const index = await readIndex(directory);
+    const bin = await (
+      await directory.getFileHandle(`${assetId}.bin`, { create: true })
+    ).createWritable();
+    try {
+      await bin.write(new Blob([buffer], { type: classified.mimeType }));
+    } finally {
+      await bin.close();
+    }
+    await writeJson(directory, 'index.json', [...index, meta]);
+    return meta;
   }
 
   async list(): Promise<readonly JoyCodeStoredAssetMeta[]> {
@@ -160,8 +164,7 @@ export class JoyCodeOpfsAssetCache {
 export async function openJoyCodeOpfsAssetCache(): Promise<JoyCodeOpfsAssetCache> {
   const getDirectory = (
     globalThis.navigator?.storage as
-      | (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> })
-      | undefined
+      (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> }) | undefined
   )?.getDirectory;
   return new JoyCodeOpfsAssetCache(
     getDirectory === undefined ? undefined : await getDirectory.call(navigator.storage),

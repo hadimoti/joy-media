@@ -17,13 +17,7 @@ export type { TTSRequestWithConsent } from './consent-tts.js';
 export { synthesizeWithConsent, VoiceConsentError } from './consent-tts.js';
 
 export type TTSEngine =
-  | 'fish-speech'
-  | 'f5-tts'
-  | 'kokoro'
-  | 'chatterbox'
-  | 'elevenlabs'
-  | 'edge-tts'
-  | 'piper';
+  'fish-speech' | 'f5-tts' | 'kokoro' | 'chatterbox' | 'elevenlabs' | 'edge-tts' | 'piper';
 
 export interface TTSConfig {
   readonly execution: 'worker-local' | 'remote-api';
@@ -172,7 +166,10 @@ function generateWordTimings(text: string, speed: number): WordTiming[] {
 }
 
 /** Map BCP-47 / short language codes to Edge neural voices. */
-export function resolveEdgeVoice(language: string | undefined, voiceId: string | undefined): string {
+export function resolveEdgeVoice(
+  language: string | undefined,
+  voiceId: string | undefined,
+): string {
   if (voiceId !== undefined && voiceId.length > 0 && !voiceId.startsWith('stock:')) {
     return voiceId;
   }
@@ -194,16 +191,7 @@ function synthesizeWithEdgeTts(
   const dir = mkdtempSync(join(tmpdir(), 'joy-edge-tts-'));
   const mediaPath = join(dir, 'speech.mp3');
   try {
-    const args = [
-      '-t',
-      input.text,
-      '-v',
-      voice,
-      '--rate',
-      rate,
-      '--write-media',
-      mediaPath,
-    ];
+    const args = ['-t', input.text, '-v', voice, '--rate', rate, '--write-media', mediaPath];
     const result = spawnSync(command, args, {
       encoding: 'utf8',
       timeout: Number(process.env.JOY_MEDIA_TTS_TIMEOUT_MS ?? 60_000),
@@ -226,7 +214,12 @@ function resolvePiperModel(
   language: string | undefined,
   voiceId: string | undefined,
 ): string {
-  if (voiceId !== undefined && voiceId.length > 0 && voiceId.endsWith('.onnx') && existsSync(voiceId)) {
+  if (
+    voiceId !== undefined &&
+    voiceId.length > 0 &&
+    voiceId.endsWith('.onnx') &&
+    existsSync(voiceId)
+  ) {
     return voiceId;
   }
   const voicesDir =
@@ -274,9 +267,12 @@ function synthesizeWithPiper(
   }
 }
 
-function synthesizeSineFixture(
-  input: TTSInput,
-): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
+function synthesizeSineFixture(input: TTSInput): {
+  audioData: Uint8Array;
+  timings: WordTiming[];
+  mimeType: string;
+  sampleRate: number;
+} {
   const speed = input.speed ?? 1.0;
   const timings = generateWordTimings(input.text, speed);
   const totalDurationUs = timings.length > 0 ? timings[timings.length - 1]!.endUs : 1_000_000;

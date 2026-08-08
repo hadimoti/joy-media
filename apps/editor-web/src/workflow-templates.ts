@@ -36,12 +36,7 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     id: 'auto-captions',
     label: 'Auto Captions',
     description: 'Dialogue audio → transcript → caption style → caption track.',
-    nodes: [
-      'source.audio',
-      'analysis.transcribe',
-      'transform.captionStyle',
-      'output.captionTrack',
-    ],
+    nodes: ['source.audio', 'analysis.transcribe', 'transform.captionStyle', 'output.captionTrack'],
     links: [
       [0, 1],
       [1, 2],

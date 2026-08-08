@@ -158,7 +158,9 @@ function parameterizeRecord(
       continue;
     }
     if (typeof value === 'object' && value !== null) {
-      const childPrefix = keyPrefix ? `${keyPrefix}${key.charAt(0).toUpperCase()}${key.slice(1)}` : key;
+      const childPrefix = keyPrefix
+        ? `${keyPrefix}${key.charAt(0).toUpperCase()}${key.slice(1)}`
+        : key;
       const { params: nestedParams, parameters: nestedParameters } = parameterizeRecord(
         value as Readonly<Record<string, unknown>>,
         childPrefix,
@@ -263,7 +265,10 @@ function resolveMarker(
 }
 
 /** Deep-resolve parameter markers in a recorded node params object. */
-export function resolveParameterizedValue(value: unknown, inputs: Readonly<Record<string, unknown>>): unknown {
+export function resolveParameterizedValue(
+  value: unknown,
+  inputs: Readonly<Record<string, unknown>>,
+): unknown {
   if (isParameterMarker(value)) {
     return resolveMarker(value, inputs);
   }
@@ -282,12 +287,18 @@ export function resolveParameterizedValue(value: unknown, inputs: Readonly<Recor
 
 /** Extract workflow input schema from recorded nodes. */
 export function extractWorkflowInputs(nodes: readonly WorkflowNode[]): Record<string, unknown> {
-  let merged: Record<string, unknown> = { type: 'object', properties: {}, required: [] as string[] };
+  let merged: Record<string, unknown> = {
+    type: 'object',
+    properties: {},
+    required: [] as string[],
+  };
   for (const node of nodes) {
-    const nodeInputs = (node.params as Record<string, unknown> & { __inputs?: Record<string, unknown> }).__inputs;
+    const nodeInputs = (
+      node.params as Record<string, unknown> & { __inputs?: Record<string, unknown> }
+    ).__inputs;
     if (nodeInputs === undefined) continue;
-    const nodeProps = nodeInputs.properties as Record<string, unknown> ?? {};
-    const nodeRequired = nodeInputs.required as string[] ?? [];
+    const nodeProps = (nodeInputs.properties as Record<string, unknown>) ?? {};
+    const nodeRequired = (nodeInputs.required as string[]) ?? [];
     merged = {
       type: 'object',
       properties: { ...(merged.properties as Record<string, unknown>), ...nodeProps },
@@ -379,4 +390,3 @@ export function deleteWorkflow(_session: unknown, workflowId: string): boolean {
   storageRemoveItem(key);
   return true;
 }
-

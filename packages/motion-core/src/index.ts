@@ -162,8 +162,4 @@ export {
   resolveLayerWorld,
   type LayerWorldEvaluation,
 } from './evaluator.js';
-export type {
-  LayerEvaluation,
-  EvaluatedTransform,
-  SceneEvaluation,
-} from './evaluator.js';
+export type { LayerEvaluation, EvaluatedTransform, SceneEvaluation } from './evaluator.js';

@@ -57,11 +57,7 @@ export function computeNodeCacheKey(graph: WorkflowGraphV2, nodeId: string): str
   return computeKeyWithSeen(graph, nodeId, new Set());
 }
 
-function computeKeyWithSeen(
-  graph: WorkflowGraphV2,
-  nodeId: string,
-  seen: Set<string>,
-): string {
+function computeKeyWithSeen(graph: WorkflowGraphV2, nodeId: string, seen: Set<string>): string {
   const node = graph.nodes.find((candidate) => candidate.id === nodeId);
   if (node === undefined) return digest(`missing:${nodeId}`);
   // The document validator rejects cycles, but a caller may hold a graph mid

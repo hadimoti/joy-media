@@ -9,7 +9,10 @@ import { applyChangeSet, buildTimelineChangeSet, planChangeSet } from './apply-c
 /** Clip ids present in the reference timeline fixture. */
 const CLIPS = new Set(['intro', 'product', 'outro', 'b-roll-a', 'b-roll-b']);
 
-function proposal(edits: ChangeSetProposal['edits'], roleId = 'audio-cleanup-agent'): ChangeSetProposal {
+function proposal(
+  edits: ChangeSetProposal['edits'],
+  roleId = 'audio-cleanup-agent',
+): ChangeSetProposal {
   return {
     roleId,
     capability: 'test.apply',
@@ -40,16 +43,20 @@ function session() {
 describe('applying specialist change sets', () => {
   describe('parameter edits reach the document', () => {
     it('sets the master grade', () => {
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          {
-            targetId: 'colorGrade',
-            summary: 'base grade',
-            domain: 'parameters',
-            parameters: { lift: 0, gamma: 1, gain: 1, saturation: 1.05, lutId: 'rec709' },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            {
+              targetId: 'colorGrade',
+              summary: 'base grade',
+              domain: 'parameters',
+              parameters: { lift: 0, gamma: 1, gain: 1, saturation: 1.05, lutId: 'rec709' },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(result.document.colorGrade).toEqual({
         lift: 0,
@@ -67,16 +74,20 @@ describe('applying specialist change sets', () => {
         colorGrade: { lift: 0.2, gamma: 1.1, gain: 1, saturation: 2, lutId: 'contrast' as const },
       };
 
-      const result = applyChangeSet(graded, [
-        proposal([
-          {
-            targetId: 'colorGrade',
-            summary: 'tame saturation',
-            domain: 'parameters',
-            parameters: { saturation: 1.2 },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        graded,
+        [
+          proposal([
+            {
+              targetId: 'colorGrade',
+              summary: 'tame saturation',
+              domain: 'parameters',
+              parameters: { saturation: 1.2 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(result.document.colorGrade).toEqual({
         lift: 0.2,
@@ -88,16 +99,20 @@ describe('applying specialist change sets', () => {
     });
 
     it('writes audio config for a clip that had none', () => {
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          {
-            targetId: 'intro',
-            summary: 'normalize',
-            domain: 'parameters',
-            parameters: { gain: 1, pan: 0 },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            {
+              targetId: 'intro',
+              summary: 'normalize',
+              domain: 'parameters',
+              parameters: { gain: 1, pan: 0 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(result.document.audio?.clips['intro']).toEqual({
         gain: 1,
@@ -108,16 +123,20 @@ describe('applying specialist change sets', () => {
     });
 
     it('retimes a caption clip', () => {
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          {
-            targetId: 'caption-clip-1',
-            summary: 'trim to sequence end',
-            domain: 'parameters',
-            parameters: { durationUs: 2_000_000 },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            {
+              targetId: 'caption-clip-1',
+              summary: 'trim to sequence end',
+              domain: 'parameters',
+              parameters: { durationUs: 2_000_000 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       const clip = result.document.compositions[result.document.rootCompositionId]?.tracks
         .flatMap((track) => track.clips)
@@ -128,11 +147,15 @@ describe('applying specialist change sets', () => {
     it('never mutates the document it was given', () => {
       const before = JSON.parse(JSON.stringify(INITIAL_EDITOR_PROJECT));
 
-      applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          { targetId: 'colorGrade', summary: 'x', domain: 'parameters', parameters: { gain: 2 } },
-        ]),
-      ], CLIPS);
+      applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            { targetId: 'colorGrade', summary: 'x', domain: 'parameters', parameters: { gain: 2 } },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(INITIAL_EDITOR_PROJECT).toEqual(before);
     });
@@ -142,41 +165,51 @@ describe('applying specialist change sets', () => {
     it('reports an edit naming something it cannot resolve', () => {
       // Claiming a change set was applied when it was not is worse than
       // admitting it could not be.
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          {
-            targetId: 'ghost-clip',
-            summary: 'normalize',
-            domain: 'parameters',
-            parameters: { gain: 1 },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            {
+              targetId: 'ghost-clip',
+              summary: 'normalize',
+              domain: 'parameters',
+              parameters: { gain: 1 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(result.applied).toEqual([]);
       expect(result.unapplied[0]?.targetId).toBe('ghost-clip');
     });
 
     it('does not apply timeline-domain edits through this path', () => {
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([{ targetId: 'intro', summary: 'trim', domain: 'timeline' }]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [proposal([{ targetId: 'intro', summary: 'trim', domain: 'timeline' }])],
+        CLIPS,
+      );
 
       expect(result.unapplied[0]?.reason).toMatch(/timeline edits are not applied/);
     });
 
     it('discards the whole result rather than producing an invalid document', () => {
-      const result = applyChangeSet(INITIAL_EDITOR_PROJECT, [
-        proposal([
-          {
-            targetId: 'caption-clip-1',
-            summary: 'break it',
-            domain: 'parameters',
-            // Zero duration is rejected by the v1 validator.
-            parameters: { durationUs: 0 },
-          },
-        ]),
-      ], CLIPS);
+      const result = applyChangeSet(
+        INITIAL_EDITOR_PROJECT,
+        [
+          proposal([
+            {
+              targetId: 'caption-clip-1',
+              summary: 'break it',
+              domain: 'parameters',
+              // Zero duration is rejected by the v1 validator.
+              parameters: { durationUs: 0 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       expect(result.document).toEqual(INITIAL_EDITOR_PROJECT);
       expect(result.applied).toEqual([]);
@@ -366,16 +399,20 @@ describe('applying specialist change sets', () => {
   describe('one undo reverts the change and its record together', () => {
     it('applies the document change and the artifact in one history step', () => {
       const editor = session();
-      const applied = applyChangeSet(editor.visualProject, [
-        proposal([
-          {
-            targetId: 'colorGrade',
-            summary: 'base grade',
-            domain: 'parameters',
-            parameters: { saturation: 1.05 },
-          },
-        ]),
-      ], CLIPS);
+      const applied = applyChangeSet(
+        editor.visualProject,
+        [
+          proposal([
+            {
+              targetId: 'colorGrade',
+              summary: 'base grade',
+              domain: 'parameters',
+              parameters: { saturation: 1.05 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
 
       editor.dispatchCompound('Apply colour review', {
         document: applied.document,
@@ -423,16 +460,20 @@ describe('applying specialist change sets', () => {
 
     it('redoes both halves together', () => {
       const editor = session();
-      const applied = applyChangeSet(editor.visualProject, [
-        proposal([
-          {
-            targetId: 'intro',
-            summary: 'normalize',
-            domain: 'parameters',
-            parameters: { gain: 1 },
-          },
-        ]),
-      ], CLIPS);
+      const applied = applyChangeSet(
+        editor.visualProject,
+        [
+          proposal([
+            {
+              targetId: 'intro',
+              summary: 'normalize',
+              domain: 'parameters',
+              parameters: { gain: 1 },
+            },
+          ]),
+        ],
+        CLIPS,
+      );
       editor.dispatchCompound('Apply audio cleanup', {
         document: applied.document,
         artifacts: {
@@ -475,16 +516,20 @@ describe('applying specialist change sets', () => {
     it('leaves a timeline edit made afterwards untouched', () => {
       const editor = session();
       editor.dispatchCompound('Apply colour review', {
-        document: applyChangeSet(editor.visualProject, [
-          proposal([
-            {
-              targetId: 'colorGrade',
-              summary: 'grade',
-              domain: 'parameters',
-              parameters: { saturation: 1.4 },
-            },
-          ]),
-        ], CLIPS).document,
+        document: applyChangeSet(
+          editor.visualProject,
+          [
+            proposal([
+              {
+                targetId: 'colorGrade',
+                summary: 'grade',
+                domain: 'parameters',
+                parameters: { saturation: 1.4 },
+              },
+            ]),
+          ],
+          CLIPS,
+        ).document,
       });
       editor.dispatchTimeline({
         label: 'Trim intro',
@@ -511,7 +556,10 @@ describe('applying specialist change sets', () => {
       const before = editor.projectRevisionId;
 
       editor.dispatchCompound('Apply colour review', {
-        document: { ...editor.visualProject, colorGrade: { lift: 0, gamma: 1, gain: 1, saturation: 1.1 } },
+        document: {
+          ...editor.visualProject,
+          colorGrade: { lift: 0, gamma: 1, gain: 1, saturation: 1.1 },
+        },
       });
 
       expect(editor.projectRevisionId).not.toBe(before);

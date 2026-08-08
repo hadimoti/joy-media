@@ -42,10 +42,7 @@ function emptyVisualProject(): JoyProjectV1 {
   };
 }
 
-function makeMockSession(
-  timelineProject: SpikeProject,
-  visualProject: JoyProjectV1,
-) {
+function makeMockSession(timelineProject: SpikeProject, visualProject: JoyProjectV1) {
   const dispatchTimeline = vi.fn<(tx: CommandTransaction) => SpikeProject>();
   const dispatchVisualObjects = vi.fn<(tx: VisualObjectTransaction) => JoyProjectV1>();
   const replaceVisualProject = vi.fn<(p: JoyProjectV1) => JoyProjectV1>();
@@ -55,8 +52,12 @@ function makeMockSession(
     dispatchVisualObjects,
     replaceVisualProject,
     session: {
-      get timelineProject() { return timelineProject; },
-      get visualProject() { return visualProject; },
+      get timelineProject() {
+        return timelineProject;
+      },
+      get visualProject() {
+        return visualProject;
+      },
       dispatchTimeline,
       dispatchVisualObjects,
       replaceVisualProject,
@@ -93,7 +94,9 @@ describe('buildContentTemplateTransaction', () => {
     const voCall = dispatchVisualObjects.mock.calls[0]![0];
     expect(voCall.commands).toHaveLength(1);
     expect(voCall.commands[0]!.type).toBe('htmlScene.create');
-    expect((voCall.commands[0] as { payload: { object: { id: string } } }).payload.object.id).toBe('joy.title-0-abc');
+    expect((voCall.commands[0] as { payload: { object: { id: string } } }).payload.object.id).toBe(
+      'joy.title-0-abc',
+    );
 
     expect(dispatchTimeline).toHaveBeenCalledTimes(1);
     const tlCall = dispatchTimeline.mock.calls[0]![0];
@@ -148,15 +151,23 @@ describe('buildContentTemplateTransaction', () => {
       seed: 'abc',
     };
 
-    buildContentTemplateTransaction(seeded, { session: s1, selectedClipIds: [], playheadUs: PLAYHEAD_US });
-    buildContentTemplateTransaction(seeded, { session: s2, selectedClipIds: [], playheadUs: PLAYHEAD_US });
+    buildContentTemplateTransaction(seeded, {
+      session: s1,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
+    buildContentTemplateTransaction(seeded, {
+      session: s2,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
 
-    const ids1 = (dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>).map(
-      (c) => c.payload.object.id,
-    );
-    const ids2 = (dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>).map(
-      (c) => c.payload.object.id,
-    );
+    const ids1 = (
+      dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
+    ).map((c) => c.payload.object.id);
+    const ids2 = (
+      dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
+    ).map((c) => c.payload.object.id);
     expect(ids1).toEqual(ids2);
   });
 
@@ -180,15 +191,23 @@ describe('buildContentTemplateTransaction', () => {
       seed,
     });
 
-    buildContentTemplateTransaction(makeSeeded('abc'), { session: s1, selectedClipIds: [], playheadUs: PLAYHEAD_US });
-    buildContentTemplateTransaction(makeSeeded('xyz'), { session: s2, selectedClipIds: [], playheadUs: PLAYHEAD_US });
+    buildContentTemplateTransaction(makeSeeded('abc'), {
+      session: s1,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
+    buildContentTemplateTransaction(makeSeeded('xyz'), {
+      session: s2,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
 
-    const ids1 = (dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>).map(
-      (c) => c.payload.object.id,
-    );
-    const ids2 = (dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>).map(
-      (c) => c.payload.object.id,
-    );
+    const ids1 = (
+      dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
+    ).map((c) => c.payload.object.id);
+    const ids2 = (
+      dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
+    ).map((c) => c.payload.object.id);
     expect(ids1).not.toEqual(ids2);
   });
 
@@ -237,8 +256,16 @@ describe('buildContentTemplateTransaction', () => {
     };
 
     expect(() => {
-      buildContentTemplateTransaction(seeded, { session, selectedClipIds: [], playheadUs: PLAYHEAD_US });
-      buildContentTemplateTransaction(seeded, { session, selectedClipIds: [], playheadUs: PLAYHEAD_US });
+      buildContentTemplateTransaction(seeded, {
+        session,
+        selectedClipIds: [],
+        playheadUs: PLAYHEAD_US,
+      });
+      buildContentTemplateTransaction(seeded, {
+        session,
+        selectedClipIds: [],
+        playheadUs: PLAYHEAD_US,
+      });
     }).not.toThrow();
 
     expect(dispatchVisualObjects).toHaveBeenCalledTimes(2);

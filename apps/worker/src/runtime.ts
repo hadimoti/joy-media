@@ -261,7 +261,18 @@ export class WorkerRuntime {
     };
   }
   async run(
-    job: { readonly id: string; readonly type: string; readonly assetId?: string; readonly payload?: { readonly prompt?: string; readonly model?: string; readonly negativePrompt?: string; readonly imageAssetId?: string; readonly params?: Record<string, unknown> }; },
+    job: {
+      readonly id: string;
+      readonly type: string;
+      readonly assetId?: string;
+      readonly payload?: {
+        readonly prompt?: string;
+        readonly model?: string;
+        readonly negativePrompt?: string;
+        readonly imageAssetId?: string;
+        readonly params?: Record<string, unknown>;
+      };
+    },
     options: {
       readonly cancelled: () => boolean;
       readonly progress: (progress: number) => Promise<void>;
@@ -328,7 +339,11 @@ export class WorkerRuntime {
       }
     }
     // AI provider jobs (LM Studio, OpenRouter, Runway, Higgsfield)
-    if (job.type.startsWith('text.') || job.type.startsWith('video.') || job.type.startsWith('edit.')) {
+    if (
+      job.type.startsWith('text.') ||
+      job.type.startsWith('video.') ||
+      job.type.startsWith('edit.')
+    ) {
       const provider = job.type.replace(/^(text\.|video\.|edit\.)/, '') as AiProvider;
       const derivativeDirectory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
@@ -438,10 +453,14 @@ export class WorkerRuntime {
     if (result.kind === 'text' || result.kind === 'image' || result.kind === 'video') {
       if (result.localRef === undefined) throw new Error('AI derivative has no local reference');
       const ext = result.kind === 'video' ? 'mp4' : result.kind === 'text' ? 'txt' : 'png';
-      const directory = this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const directory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       const bytes = readFileSync(join(directory, `${result.localRef}.${ext}`));
       if (result.sha256 !== undefined && result.bytes !== undefined) {
-        if (bytes.length !== result.bytes || createHash('sha256').update(bytes).digest('hex') !== result.sha256)
+        if (
+          bytes.length !== result.bytes ||
+          createHash('sha256').update(bytes).digest('hex') !== result.sha256
+        )
           throw new Error('retained AI derivative integrity check failed');
       }
       return bytes;

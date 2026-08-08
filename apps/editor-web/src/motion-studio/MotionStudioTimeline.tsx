@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MotionLayer, MotionSceneDocument, MotionLayerId, MotionAnimation, MotionKeyframe } from '@joy-media/motion-core';
+import type {
+  MotionLayer,
+  MotionSceneDocument,
+  MotionLayerId,
+  MotionAnimation,
+  MotionKeyframe,
+} from '@joy-media/motion-core';
 import {
   clampPixelsPerSecond,
   fitPixelsPerSecond,
@@ -132,7 +138,10 @@ export function MotionStudioTimeline({
 
   // ── Keyframe rows per selected layer ──
   const selectedLayer = useMemo(
-    () => (selectedLayerIds.length === 1 ? document.layers.find((l) => l.id === selectedLayerIds[0]) : null),
+    () =>
+      selectedLayerIds.length === 1
+        ? document.layers.find((l) => l.id === selectedLayerIds[0])
+        : null,
     [document.layers, selectedLayerIds],
   );
 

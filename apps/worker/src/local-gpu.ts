@@ -72,11 +72,7 @@ async function uploadComfyImage(
 ): Promise<string> {
   const bytes = readFileSync(filePath);
   const form = new FormData();
-  form.append(
-    'image',
-    new Blob([Uint8Array.from(bytes)], { type: 'image/png' }),
-    'joy-input.png',
-  );
+  form.append('image', new Blob([Uint8Array.from(bytes)], { type: 'image/png' }), 'joy-input.png');
   form.append('overwrite', 'true');
   const response = await fetchFn(`${base}/upload/image`, { method: 'POST', body: form });
   if (!response.ok) throw new Error(`ComfyUI image upload failed (${response.status})`);
@@ -137,16 +133,7 @@ async function runComfyPrompt(
 function writeSolidPng(path: string): void {
   const result = spawnSync(
     'ffmpeg',
-    [
-      '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=c=#e9b949:s=64x64:d=0.04',
-      '-frames:v',
-      '1',
-      path,
-    ],
+    ['-y', '-f', 'lavfi', '-i', 'color=c=#e9b949:s=64x64:d=0.04', '-frames:v', '1', path],
     { encoding: 'utf8' },
   );
   if (result.status !== 0 || !existsSync(path))

@@ -212,10 +212,7 @@ export type { AgentMemory, AgentPreference } from './memory.js';
 export { AgentMemoryManager, createAgentMemoryManager } from './memory.js';
 
 export type { KiloCodeHostOptions } from './kilocode-host.js';
-export {
-  KILOCODE_AGENT_HOST_ID,
-  createKiloCodeAgentHostManifest,
-} from './kilocode-host.js';
+export { KILOCODE_AGENT_HOST_ID, createKiloCodeAgentHostManifest } from './kilocode-host.js';
 
 export type {
   BenchmarkIntent,

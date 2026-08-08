@@ -138,9 +138,15 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.splitClip': { description: 'Split a clip into source-continuous halves.' },
   'timeline.joinClips': { description: 'Join adjacent source-continuous clips.' },
   'timeline.duplicateClip': { description: 'Clone a clip onto the same track after it.' },
-  'timeline.setClipRate': { description: 'Set clip playback rate (0.1–8×); rescale duration by default.' },
-  'timeline.freezeFrame': { description: 'Insert a freeze/hold segment at a time inside a video clip.' },
-  'timeline.restoreTrackClips': { description: 'Replace a track clip list (undo for compound edits).' },
+  'timeline.setClipRate': {
+    description: 'Set clip playback rate (0.1–8×); rescale duration by default.',
+  },
+  'timeline.freezeFrame': {
+    description: 'Insert a freeze/hold segment at a time inside a video clip.',
+  },
+  'timeline.restoreTrackClips': {
+    description: 'Replace a track clip list (undo for compound edits).',
+  },
   'timeline.addTrack': { description: 'Add a track to a composition.' },
   'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
@@ -660,9 +666,7 @@ function applyFreezeFrame(project: SpikeProject, payload: FreezeFramePayload): A
   };
   const others = track.clips
     .filter((c) => c.id !== clip.id)
-    .map((c) =>
-      c.startUs >= payload.atUs ? { ...c, startUs: c.startUs + payload.holdUs } : c,
-    );
+    .map((c) => (c.startUs >= payload.atUs ? { ...c, startUs: c.startUs + payload.holdUs } : c));
   const nextClips = [...others, left, freeze, right];
   for (const item of nextClips) {
     assertClipRange(item.startUs, item.durationUs, 'freezeFrame');

@@ -87,13 +87,13 @@ export async function parsePsdFile(
   if (width * height > maxPixels) {
     throw new Error(
       `PSD too large: ${width}x${height} = ${width * height} px ` +
-      `(max ${maxPixels}). Rejected to prevent memory exhaustion.`,
+        `(max ${maxPixels}). Rejected to prevent memory exhaustion.`,
     );
   }
   if (width * height * 4 > 256 * 1024 * 1024) {
     throw new Error(
       `PSD memory budget exceeded: ${width}x${height} x 4 bytes = ` +
-      `${((width * height * 4) / (1024 * 1024)).toFixed(1)} MB (max 256 MB).`,
+        `${((width * height * 4) / (1024 * 1024)).toFixed(1)} MB (max 256 MB).`,
     );
   }
   const phase1Time = performance.now() - phase1Start;
@@ -144,12 +144,8 @@ export async function parsePsdFile(
     // Build a fully-populated copy including optional fields
     return {
       ...dto,
-      ...(type === 'raster'
-        ? { imageBlobId: `psd-layer-${layer.id ?? index}` }
-        : {}),
-      ...(type === 'text' && layer.text !== undefined
-        ? { text: layer.text.text }
-        : {}),
+      ...(type === 'raster' ? { imageBlobId: `psd-layer-${layer.id ?? index}` } : {}),
+      ...(type === 'text' && layer.text !== undefined ? { text: layer.text.text } : {}),
     };
   }
 

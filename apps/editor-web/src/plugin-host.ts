@@ -57,12 +57,20 @@ export function createEditorPluginHost(
 ): EditorPluginHost {
   const persisted = (() => {
     if (storage === undefined) {
-      return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+      return {
+        safeMode: true,
+        enabledIds: [] as string[],
+        projectData: {} as Record<string, unknown>,
+      };
     }
     try {
       const raw = storage.getItem(STORAGE_KEY);
       if (raw === null) {
-        return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+        return {
+          safeMode: true,
+          enabledIds: [] as string[],
+          projectData: {} as Record<string, unknown>,
+        };
       }
       const parsed = JSON.parse(raw) as PersistedHostState;
       return {
@@ -76,7 +84,11 @@ export function createEditorPluginHost(
             : {},
       };
     } catch {
-      return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+      return {
+        safeMode: true,
+        enabledIds: [] as string[],
+        projectData: {} as Record<string, unknown>,
+      };
     }
   })();
 

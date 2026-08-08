@@ -39,9 +39,10 @@ describe('WP-16 live gate: record → save → run → undo', () => {
     const reloaded = loadWorkflow(session, recorded.workflow.id);
     expect(reloaded?.workflow.id).toBe(recorded.workflow.id);
 
-    const beforeClips = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const beforeClips =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
 
     await runWorkflow(session, recorded.workflow.id, {
       trackId: 'track-0',
@@ -51,9 +52,10 @@ describe('WP-16 live gate: record → save → run → undo', () => {
       clipSourceInUs: baseClip.sourceInUs,
     });
 
-    const afterClips = session.timelineProject.compositions.root?.tracks
-      .find((t) => t.id === 'track-0')
-      ?.clips.map((c) => c.id) ?? [];
+    const afterClips =
+      session.timelineProject.compositions.root?.tracks
+        .find((t) => t.id === 'track-0')
+        ?.clips.map((c) => c.id) ?? [];
     expect(afterClips).toEqual([...beforeClips, 'agent-clip-1']);
 
     session.undo();

@@ -1,5 +1,16 @@
-import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { MotionStudioTopBar, type MotionStudioMode, type MotionSaveState } from './MotionStudioTopBar.js';
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  MotionStudioTopBar,
+  type MotionStudioMode,
+  type MotionSaveState,
+} from './MotionStudioTopBar.js';
 import { MotionStudioCanvas } from './MotionStudioCanvas.js';
 import { MotionStudioLayersPanel } from './MotionStudioLayersPanel.js';
 import { MotionStudioInspector } from './MotionStudioInspector.js';
@@ -7,8 +18,18 @@ import { MotionStudioTimeline } from './MotionStudioTimeline.js';
 import { useSceneEditor } from './state/useSceneEditor.js';
 import type { MotionLayer, MotionLayerId } from '@joy-media/motion-core';
 import { createBlankScene } from '@joy-media/motion-core';
-import { createTextLayer, createRectangleLayer, createEllipseLayer, createImageLayer, createVideoLayer } from './state/layerFactory.js';
-import { loadMotionSceneDocument, saveMotionSceneDocument, publishMotionScene } from '../motion-scene-catalog.js';
+import {
+  createTextLayer,
+  createRectangleLayer,
+  createEllipseLayer,
+  createImageLayer,
+  createVideoLayer,
+} from './state/layerFactory.js';
+import {
+  loadMotionSceneDocument,
+  saveMotionSceneDocument,
+  publishMotionScene,
+} from '../motion-scene-catalog.js';
 
 export interface MotionStudioShellProps {
   readonly sceneId: string;
@@ -255,7 +276,8 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const editing = target?.isContentEditable || target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+      const editing =
+        target?.isContentEditable || target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         saveNow();
@@ -287,13 +309,26 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
           if (!layer || layer.locked) continue;
           updateTransaction({
             type: 'scene.setLayerTransform',
-            payload: { layerId: id, transform: { x: layer.transform.x + dx, y: layer.transform.y + dy } },
+            payload: {
+              layerId: id,
+              transform: { x: layer.transform.x + dx, y: layer.transform.y + dy },
+            },
           });
         }
         commitTransaction('Nudge layers');
       }
     },
-    [beginTransaction, clearSelection, commitTransaction, deleteSelected, document.layers, saveNow, selectLayers, selectedLayerIds, updateTransaction],
+    [
+      beginTransaction,
+      clearSelection,
+      commitTransaction,
+      deleteSelected,
+      document.layers,
+      saveNow,
+      selectLayers,
+      selectedLayerIds,
+      updateTransaction,
+    ],
   );
 
   useEffect(() => {
@@ -337,7 +372,9 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
         if (edge === 'left') {
           setLeftWidth(clamp(startLeft + (ev.clientX - startX), LEFT_WIDTH_MIN, LEFT_WIDTH_MAX));
         } else if (edge === 'right') {
-          setRightWidth(clamp(startRight - (ev.clientX - startX), RIGHT_WIDTH_MIN, RIGHT_WIDTH_MAX));
+          setRightWidth(
+            clamp(startRight - (ev.clientX - startX), RIGHT_WIDTH_MIN, RIGHT_WIDTH_MAX),
+          );
         } else {
           setBottomHeight(
             clamp(startBottom - (ev.clientY - startY), BOTTOM_HEIGHT_MIN, BOTTOM_HEIGHT_MAX),
@@ -505,7 +542,11 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               className="ms-sash ms-sash-west"
               onPointerDown={(e) => startPanelResize('right', e)}
             />
-            <MotionStudioInspector document={document} selectedLayerIds={selectedLayerIds} dispatch={dispatch} />
+            <MotionStudioInspector
+              document={document}
+              selectedLayerIds={selectedLayerIds}
+              dispatch={dispatch}
+            />
           </div>
         )}
       </div>

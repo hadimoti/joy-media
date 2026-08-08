@@ -167,8 +167,7 @@ export async function runSpecialists(
       // One specialist failing must not lose the others' work.
       failed.push({
         roleId: specialist.roleId,
-        error:
-          outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
       });
       return;
     }
@@ -222,9 +221,7 @@ export interface CombinedChangeSet {
  * that as a conflict would make every run with a pacing specialist unresolvable
  * on every clip the audio specialist also touched.
  */
-export function combineProposals(
-  proposals: readonly ChangeSetProposal[],
-): CombinedChangeSet {
+export function combineProposals(proposals: readonly ChangeSetProposal[]): CombinedChangeSet {
   const byTarget = new Map<
     string,
     { targetId: string; domain: ProposalDomain; roles: Set<string>; summaries: string[] }
@@ -279,7 +276,10 @@ export interface CommitCombinedOptions<TTransaction> {
   /** Turns the approved change set into exactly one transaction. */
   readonly build: (combined: CombinedChangeSet) => TTransaction;
   /** The single project transaction authority (§8.2). */
-  readonly commit: (transaction: TTransaction) => { readonly success: boolean; readonly error?: string };
+  readonly commit: (transaction: TTransaction) => {
+    readonly success: boolean;
+    readonly error?: string;
+  };
   readonly audit?: AuditTrail;
   readonly planId?: string;
 }

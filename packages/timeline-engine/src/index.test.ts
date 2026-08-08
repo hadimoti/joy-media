@@ -72,13 +72,10 @@ describe('timeline coordinates', () => {
     expect(fitPixelsPerSecond(10_000_000, 224, 24)).toBe(20);
     expect(clampPixelsPerSecond(1000)).toBe(200);
     expect(
-      placeDuplicateAfter(
+      placeDuplicateAfter({ id: 'a', startUs: 0, durationUs: 10 }, [
         { id: 'a', startUs: 0, durationUs: 10 },
-        [
-          { id: 'a', startUs: 0, durationUs: 10 },
-          { id: 'b', startUs: 10, durationUs: 5 },
-        ],
-      ),
+        { id: 'b', startUs: 10, durationUs: 5 },
+      ]),
     ).toBe(15);
     expect(
       clipRateLabel({

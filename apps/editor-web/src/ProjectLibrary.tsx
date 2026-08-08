@@ -56,9 +56,7 @@ export function ProjectLibrary({
       <main className="project-library-main">
         <div className="project-library-intro">
           <h1>Projects</h1>
-          <p>
-            Open a recent project or create a new one to enter the editor.
-          </p>
+          <p>Open a recent project or create a new one to enter the editor.</p>
         </div>
 
         {creating && (

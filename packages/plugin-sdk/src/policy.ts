@@ -1,7 +1,12 @@
 /** Browser-safe execution policy — no Node crypto (§24.5 safe mode). */
 
 import { executionTierFor } from './manifest.js';
-import type { PluginEntrypoint, PluginExecutionTier, PluginManifestV1, PluginPermission } from './manifest.js';
+import type {
+  PluginEntrypoint,
+  PluginExecutionTier,
+  PluginManifestV1,
+  PluginPermission,
+} from './manifest.js';
 
 export interface PluginExecutionPolicy {
   readonly safeMode: boolean;
@@ -14,10 +19,7 @@ export interface PluginExecutionDecision {
   readonly allowed: boolean;
   readonly tier: PluginExecutionTier;
   readonly reason?:
-    | 'safe-mode'
-    | 'server-plugin-disabled'
-    | 'permission-unapproved'
-    | 'entrypoint-missing';
+    'safe-mode' | 'server-plugin-disabled' | 'permission-unapproved' | 'entrypoint-missing';
 }
 
 /** Blocks all third-party code in safe mode and enforces tier permissions. */

@@ -11,7 +11,13 @@ export type WorkerCapability =
   | 'video.runway'
   | 'edit.higgsfield';
 
-export type SpecializedJobType = 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield';
+export type SpecializedJobType =
+  | 'image.comfy'
+  | 'audio.ml-denoise'
+  | 'text.lm-studio'
+  | 'text.openrouter'
+  | 'video.runway'
+  | 'edit.higgsfield';
 export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
   'audio.ml-denoise',

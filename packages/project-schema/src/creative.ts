@@ -402,12 +402,22 @@ export function validateTemporalBinding(value: unknown, path: string): ProjectDi
     case 'point':
       return isTimeUs(value.timeUs)
         ? []
-        : [diagnostic('BINDING_POINT_TIME', 'timeUs must be a non-negative integer', `${path}.timeUs`)];
+        : [
+            diagnostic(
+              'BINDING_POINT_TIME',
+              'timeUs must be a non-negative integer',
+              `${path}.timeUs`,
+            ),
+          ];
     case 'range': {
       const diagnostics: ProjectDiagnostic[] = [];
       if (!isTimeUs(value.startUs)) {
         diagnostics.push(
-          diagnostic('BINDING_RANGE_START', 'startUs must be a non-negative integer', `${path}.startUs`),
+          diagnostic(
+            'BINDING_RANGE_START',
+            'startUs must be a non-negative integer',
+            `${path}.startUs`,
+          ),
         );
       }
       // A zero-length range is a point wearing the wrong type; rejecting it
@@ -443,7 +453,11 @@ export function validateTemporalBinding(value: unknown, path: string): ProjectDi
           ];
     default:
       return [
-        diagnostic('BINDING_KIND', `unknown temporal binding type "${String(value.type)}"`, `${path}.type`),
+        diagnostic(
+          'BINDING_KIND',
+          `unknown temporal binding type "${String(value.type)}"`,
+          `${path}.type`,
+        ),
       ];
   }
 }
@@ -460,7 +474,13 @@ export function validateArtifactContentRef(value: unknown, path: string): Projec
     case 'asset':
       return isNonEmptyString(value.assetId)
         ? []
-        : [diagnostic('CONTENT_REF_ASSET', 'assetId must be a non-empty string', `${path}.assetId`)];
+        : [
+            diagnostic(
+              'CONTENT_REF_ASSET',
+              'assetId must be a non-empty string',
+              `${path}.assetId`,
+            ),
+          ];
     case 'document':
       return isNonEmptyString(value.documentId)
         ? []
@@ -477,7 +497,11 @@ export function validateArtifactContentRef(value: unknown, path: string): Projec
         : [diagnostic('CONTENT_REF_EXTERNAL', 'uri must be a non-empty string', `${path}.uri`)];
     default:
       return [
-        diagnostic('CONTENT_REF_KIND', `unknown contentRef type "${String(value.type)}"`, `${path}.type`),
+        diagnostic(
+          'CONTENT_REF_KIND',
+          `unknown contentRef type "${String(value.type)}"`,
+          `${path}.type`,
+        ),
       ];
   }
 }
@@ -498,7 +522,11 @@ export function validateArtifactProvenance(value: unknown, path: string): Projec
   }
   if (!isStringArray(value.inputHashes)) {
     diagnostics.push(
-      diagnostic('PROVENANCE_HASHES', 'inputHashes must be an array of strings', `${path}.inputHashes`),
+      diagnostic(
+        'PROVENANCE_HASHES',
+        'inputHashes must be an array of strings',
+        `${path}.inputHashes`,
+      ),
     );
   }
   const actor = value.createdBy;
@@ -543,11 +571,17 @@ export function validateCreativeArtifact(value: unknown, path: string): ProjectD
     );
   }
   if (!isNonEmptyString(value.label)) {
-    diagnostics.push(diagnostic('ARTIFACT_LABEL', 'label must be a non-empty string', `${path}.label`));
+    diagnostics.push(
+      diagnostic('ARTIFACT_LABEL', 'label must be a non-empty string', `${path}.label`),
+    );
   }
   if (!isNonNegativeInteger(value.revision)) {
     diagnostics.push(
-      diagnostic('ARTIFACT_REVISION', 'revision must be a non-negative integer', `${path}.revision`),
+      diagnostic(
+        'ARTIFACT_REVISION',
+        'revision must be a non-negative integer',
+        `${path}.revision`,
+      ),
     );
   }
   diagnostics.push(...validateArtifactContentRef(value.contentRef, `${path}.contentRef`));
@@ -581,7 +615,9 @@ export function validateWorkflowGraph(value: unknown, path: string): ProjectDiag
       return;
     }
     if (!isNonEmptyString(node.id)) {
-      diagnostics.push(diagnostic('GRAPH_NODE_ID', 'node id must be a non-empty string', `${nodePath}.id`));
+      diagnostics.push(
+        diagnostic('GRAPH_NODE_ID', 'node id must be a non-empty string', `${nodePath}.id`),
+      );
       return;
     }
     if (nodeIds.has(node.id)) {
@@ -595,9 +631,16 @@ export function validateWorkflowGraph(value: unknown, path: string): ProjectDiag
         diagnostic('GRAPH_NODE_TYPE', 'node type must be a non-empty string', `${nodePath}.type`),
       );
     }
-    if (node.status !== undefined && !WORKFLOW_NODE_STATUSES.includes(node.status as WorkflowNodeStatus)) {
+    if (
+      node.status !== undefined &&
+      !WORKFLOW_NODE_STATUSES.includes(node.status as WorkflowNodeStatus)
+    ) {
       diagnostics.push(
-        diagnostic('GRAPH_NODE_STATUS', `unknown node status "${String(node.status)}"`, `${nodePath}.status`),
+        diagnostic(
+          'GRAPH_NODE_STATUS',
+          `unknown node status "${String(node.status)}"`,
+          `${nodePath}.status`,
+        ),
       );
     }
     if (node.binding !== undefined) {
@@ -606,7 +649,11 @@ export function validateWorkflowGraph(value: unknown, path: string): ProjectDiag
     const policy = node.executionPolicy;
     if (!isRecord(policy)) {
       diagnostics.push(
-        diagnostic('GRAPH_NODE_POLICY', 'executionPolicy must be an object', `${nodePath}.executionPolicy`),
+        diagnostic(
+          'GRAPH_NODE_POLICY',
+          'executionPolicy must be an object',
+          `${nodePath}.executionPolicy`,
+        ),
       );
     } else {
       const required = policy.requiredCapabilities;
@@ -647,29 +694,55 @@ export function validateWorkflowGraph(value: unknown, path: string): ProjectDiag
     const { fromNodeId, toNodeId, fromPortId, toPortId } = edge;
     if (!isNonEmptyString(fromNodeId) || !nodeIds.has(fromNodeId)) {
       diagnostics.push(
-        diagnostic('GRAPH_EDGE_FROM', `edge source node "${String(fromNodeId)}" is not in the graph`, `${edgePath}.fromNodeId`),
+        diagnostic(
+          'GRAPH_EDGE_FROM',
+          `edge source node "${String(fromNodeId)}" is not in the graph`,
+          `${edgePath}.fromNodeId`,
+        ),
       );
-    } else if (isNonEmptyString(fromPortId) && !portsByNode.get(fromNodeId)?.outputs.has(fromPortId)) {
+    } else if (
+      isNonEmptyString(fromPortId) &&
+      !portsByNode.get(fromNodeId)?.outputs.has(fromPortId)
+    ) {
       diagnostics.push(
-        diagnostic('GRAPH_EDGE_FROM_PORT', `node "${fromNodeId}" has no output port "${fromPortId}"`, `${edgePath}.fromPortId`),
+        diagnostic(
+          'GRAPH_EDGE_FROM_PORT',
+          `node "${fromNodeId}" has no output port "${fromPortId}"`,
+          `${edgePath}.fromPortId`,
+        ),
       );
     }
     if (!isNonEmptyString(toNodeId) || !nodeIds.has(toNodeId)) {
       diagnostics.push(
-        diagnostic('GRAPH_EDGE_TO', `edge target node "${String(toNodeId)}" is not in the graph`, `${edgePath}.toNodeId`),
+        diagnostic(
+          'GRAPH_EDGE_TO',
+          `edge target node "${String(toNodeId)}" is not in the graph`,
+          `${edgePath}.toNodeId`,
+        ),
       );
     } else if (isNonEmptyString(toPortId) && !portsByNode.get(toNodeId)?.inputs.has(toPortId)) {
       diagnostics.push(
-        diagnostic('GRAPH_EDGE_TO_PORT', `node "${toNodeId}" has no input port "${toPortId}"`, `${edgePath}.toPortId`),
+        diagnostic(
+          'GRAPH_EDGE_TO_PORT',
+          `node "${toNodeId}" has no input port "${toPortId}"`,
+          `${edgePath}.toPortId`,
+        ),
       );
     }
   });
 
   diagnostics.push(...validateGroups(value.groups, nodeIds, path));
 
-  if (nodeIds.size > 0 && findCycle(nodes as readonly WorkflowNodeV2[], edges as readonly WorkflowEdgeV2[])) {
+  if (
+    nodeIds.size > 0 &&
+    findCycle(nodes as readonly WorkflowNodeV2[], edges as readonly WorkflowEdgeV2[])
+  ) {
     diagnostics.push(
-      diagnostic('GRAPH_CYCLE', 'workflow graph must be acyclic; iteration needs an explicit bounded node', `${path}.edges`),
+      diagnostic(
+        'GRAPH_CYCLE',
+        'workflow graph must be acyclic; iteration needs an explicit bounded node',
+        `${path}.edges`,
+      ),
     );
   }
   return diagnostics;
@@ -714,7 +787,11 @@ function validateGroups(
     groupIds.add(group.id);
     if (!isNonEmptyString(group.label)) {
       diagnostics.push(
-        diagnostic('GRAPH_GROUP_LABEL', 'group label must be a non-empty string', `${groupPath}.label`),
+        diagnostic(
+          'GRAPH_GROUP_LABEL',
+          'group label must be a non-empty string',
+          `${groupPath}.label`,
+        ),
       );
     }
     if (!Array.isArray(group.nodeIds)) {

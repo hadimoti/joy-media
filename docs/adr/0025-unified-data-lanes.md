@@ -7,7 +7,7 @@ Date: 2026-07-27
 ## Context
 
 ADR-0023 gave scripts, prompts, analyses, and change sets a durable shape.
-ADR-0024 made the workflow graph authorable. Neither made the *data* authorable:
+ADR-0024 made the workflow graph authorable. Neither made the _data_ authorable:
 `artifact.*` commands did not exist, so the schema could describe a project that
 no code path could produce, and the timeline had nowhere to show it.
 

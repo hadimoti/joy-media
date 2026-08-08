@@ -47,9 +47,7 @@ export function polishMediaLabel(raw: string): string {
 
   return parts
     .map((part, index) =>
-      index === 0
-        ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-        : part.toLowerCase(),
+      index === 0 ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part.toLowerCase(),
     )
     .join('-');
 }

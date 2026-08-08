@@ -13,9 +13,9 @@ Use this skill to turn transparent PNG sheets into individual RGBA assets withou
 2. Choose a new output folder outside the source directory when possible.
 3. Run the package with resume enabled:
 
-~~~powershell
+```powershell
 alpha-assets extract "C:\archive" --recursive --output "C:\joy-media-assets" --workers 4 --resume
-~~~
+```
 
 4. Inspect contact-sheets/, review-needed.csv, and reports/failed-files.json.
 5. Correct uncertain items with alpha-assets apply-review review-needed.csv --output <package>.
@@ -40,7 +40,7 @@ For bulk model/agent results, produce a JSONL file matching [references/semantic
 
 ## Useful Commands
 
-~~~powershell
+```powershell
 alpha-assets analyze sheet.png --json
 alpha-assets status C:\joy-media-assets
 alpha-assets review C:\joy-media-assets
@@ -48,7 +48,7 @@ alpha-assets prepare-cloud C:\joy-media-assets --minimum-alpha-pixels 128 --json
 alpha-assets rebuild-manifest C:\joy-media-assets
 alpha-assets resume C:\archive --output C:\joy-media-assets --workers 4
 alpha-assets reset-checkpoint C:\joy-media-assets --yes
-~~~
+```
 
 reset-checkpoint deletes only resume records and requires --yes; it never deletes exported assets.
 
@@ -58,7 +58,7 @@ artifacts; adjust it explicitly only when tiny standalone assets are intended.
 
 ## Package Layout
 
-~~~text
+```text
 joy-media-assets/
   assets/<category>/*.png + *.json
   contact-sheets/
@@ -68,6 +68,6 @@ joy-media-assets/
   checkpoints/checkpoint.sqlite3
   debug/
   review-needed.csv
-~~~
+```
 
 Use typescript/joy-media-asset-adapter.ts as the importer-neutral JOY Media adapter. Read [README.md](README.md) for installation, configuration, and the complete CLI reference.

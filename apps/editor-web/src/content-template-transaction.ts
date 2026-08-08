@@ -29,9 +29,12 @@ export function buildContentTemplateTransaction(
         kind: 'html-scene';
         scenePackageId: string;
         transform: {
-          x: number; y: number;
-          scaleX: number; scaleY: number;
-          rotationDeg: number; opacity: number;
+          x: number;
+          y: number;
+          scaleX: number;
+          scaleY: number;
+          rotationDeg: number;
+          opacity: number;
           crop: { left: number; top: number; right: number; bottom: number };
         };
       };

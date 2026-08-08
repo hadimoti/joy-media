@@ -53,12 +53,7 @@ export interface HistoryEntry {
  * command form and therefore no inverse the object history can compute. The
  * session keeps the before/after pair itself so it can still be undone.
  */
-type EditorOperation =
-  | 'timeline'
-  | 'visual-object'
-  | 'document-snapshot'
-  | 'graph'
-  | 'artifact';
+type EditorOperation = 'timeline' | 'visual-object' | 'document-snapshot' | 'graph' | 'artifact';
 
 /**
  * The graph needs an id to share the persistence adapter shape, and the adapter
@@ -181,10 +176,7 @@ export class EditorSession {
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
     // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
-    const visualObjects = recoverOrInitialize(
-      this.#visualObjectPersistence,
-      initialVisualProject,
-    );
+    const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
     this.#timelineRevision = timeline.revision;
     this.#visualObjectRevision = visualObjects.revision;
     this.#timeline = new EditorCommandController(timeline.project);
@@ -289,9 +281,7 @@ export class EditorSession {
       const isTip = index === this.#undo.length - 1;
       return this.#toEntry(e, isTip ? 'current' : 'undo');
     });
-    const futureRows = [...this.#redo]
-      .reverse()
-      .map((e) => this.#toEntry(e, 'redo'));
+    const futureRows = [...this.#redo].reverse().map((e) => this.#toEntry(e, 'redo'));
     if (cursorSequence === 0) {
       return [document, ...futureRows];
     }
@@ -325,10 +315,7 @@ export class EditorSession {
     }
   }
 
-  #toEntry(
-    entry: HistoryStackEntry,
-    direction: 'undo' | 'redo' | 'current',
-  ): HistoryEntry {
+  #toEntry(entry: HistoryStackEntry, direction: 'undo' | 'redo' | 'current'): HistoryEntry {
     return {
       id: `history-${entry.sequence}`,
       source:

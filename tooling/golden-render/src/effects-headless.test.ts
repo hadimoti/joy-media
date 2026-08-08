@@ -37,73 +37,120 @@ function headlessDigest(frame: RenderFrameIR): string {
 
 describe('@joy-media/golden-render (effects headless)', () => {
   it('brightness-contrast effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'brightness-contrast', enabled: true, params: { brightness: 0.1, contrast: 0.2 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([
+        {
+          id: 'e1',
+          kind: 'brightness-contrast',
+          enabled: true,
+          params: { brightness: 0.1, contrast: 0.2 },
+        },
+      ]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
-    expect(h).toBe(headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'brightness-contrast', enabled: true, params: { brightness: 0.1, contrast: 0.2 } },
-    ])));
+    expect(h).toBe(
+      headlessDigest(
+        makeEffectFrame([
+          {
+            id: 'e1',
+            kind: 'brightness-contrast',
+            enabled: true,
+            params: { brightness: 0.1, contrast: 0.2 },
+          },
+        ]),
+      ),
+    );
   });
 
   it('sepia effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'sepia', enabled: true, params: { amount: 0.5 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([{ id: 'e1', kind: 'sepia', enabled: true, params: { amount: 0.5 } }]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
-    expect(h).toBe(headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'sepia', enabled: true, params: { amount: 0.5 } },
-    ])));
+    expect(h).toBe(
+      headlessDigest(
+        makeEffectFrame([{ id: 'e1', kind: 'sepia', enabled: true, params: { amount: 0.5 } }]),
+      ),
+    );
   });
 
   it('gaussian-blur effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'gaussian-blur', enabled: true, params: { amount: 3 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([{ id: 'e1', kind: 'gaussian-blur', enabled: true, params: { amount: 3 } }]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
-    expect(h).toBe(headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'gaussian-blur', enabled: true, params: { amount: 3 } },
-    ])));
+    expect(h).toBe(
+      headlessDigest(
+        makeEffectFrame([
+          { id: 'e1', kind: 'gaussian-blur', enabled: true, params: { amount: 3 } },
+        ]),
+      ),
+    );
   });
 
   it('posterize effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'posterize', enabled: true, params: { levels: 6 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([{ id: 'e1', kind: 'posterize', enabled: true, params: { levels: 6 } }]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('vibrance effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'vibrance', enabled: true, params: { amount: 0.4 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([{ id: 'e1', kind: 'vibrance', enabled: true, params: { amount: 0.4 } }]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('hue-saturation effect produces a deterministic headless digest', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'hue-saturation', enabled: true, params: { hue: 0.1, saturation: 0.3 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([
+        { id: 'e1', kind: 'hue-saturation', enabled: true, params: { hue: 0.1, saturation: 0.3 } },
+      ]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('multiple effects stack is deterministic', () => {
-    const h = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'brightness-contrast', enabled: true, params: { brightness: 0.05, contrast: 0.1 } },
-      { id: 'e2', kind: 'sepia', enabled: true, params: { amount: 0.3 } },
-    ]));
+    const h = headlessDigest(
+      makeEffectFrame([
+        {
+          id: 'e1',
+          kind: 'brightness-contrast',
+          enabled: true,
+          params: { brightness: 0.05, contrast: 0.1 },
+        },
+        { id: 'e2', kind: 'sepia', enabled: true, params: { amount: 0.3 } },
+      ]),
+    );
     expect(h).toMatch(/^[0-9a-f]{16}$/);
-    expect(h).toBe(headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'brightness-contrast', enabled: true, params: { brightness: 0.05, contrast: 0.1 } },
-      { id: 'e2', kind: 'sepia', enabled: true, params: { amount: 0.3 } },
-    ])));
+    expect(h).toBe(
+      headlessDigest(
+        makeEffectFrame([
+          {
+            id: 'e1',
+            kind: 'brightness-contrast',
+            enabled: true,
+            params: { brightness: 0.05, contrast: 0.1 },
+          },
+          { id: 'e2', kind: 'sepia', enabled: true, params: { amount: 0.3 } },
+        ]),
+      ),
+    );
   });
 
   it('disabled effect matches baseline', () => {
     const baseline = headlessDigest(makeEffectFrame([]));
-    const disabled = headlessDigest(makeEffectFrame([
-      { id: 'e1', kind: 'brightness-contrast', enabled: false, params: { brightness: 1, contrast: 1 } },
-    ]));
+    const disabled = headlessDigest(
+      makeEffectFrame([
+        {
+          id: 'e1',
+          kind: 'brightness-contrast',
+          enabled: false,
+          params: { brightness: 1, contrast: 1 },
+        },
+      ]),
+    );
     expect(disabled).toBe(baseline);
   });
 });
