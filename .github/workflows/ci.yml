@@ -13,4 +13,4 @@ jobs:
           node-version: 22
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm run verify:ci

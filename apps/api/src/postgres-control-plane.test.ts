@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
+import { SHARED_LIBRARY_OWNER_ID } from './control-plane.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 
 describe('PostgresControlPlane', () => {
@@ -111,6 +112,42 @@ describe('PostgresControlPlane', () => {
     });
     await pool.end();
   });
+
+  it('keeps personal backups private and reference-counts cloud objects on delete', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'owner' };
+    const peer = { id: 'peer' };
+    const publisher = { id: SHARED_LIBRARY_OWNER_ID };
+    await controlPlane.createProject(owner, 'personal', 'Personal');
+    await controlPlane.createProject(publisher, 'library', 'Library');
+    await controlPlane.registerAsset(owner, 'personal', cloudAsset('personal-a', 'orig-shared'));
+    await controlPlane.registerAsset(owner, 'personal', cloudAsset('personal-b', 'orig-shared'));
+    await controlPlane.registerAsset(publisher, 'library', cloudAsset('library-a', 'orig-library'));
+
+    await expect(controlPlane.sharedCloudAssets(peer)).resolves.toMatchObject([
+      { id: 'library-a' },
+    ]);
+    await expect(controlPlane.sharedCloudAsset(peer, 'personal-a')).rejects.toMatchObject({
+      code: 'ASSET_NOT_FOUND',
+    });
+    await expect(controlPlane.sharedCloudAsset(owner, 'personal-a')).resolves.toMatchObject({
+      id: 'personal-a',
+    });
+    await expect(controlPlane.setAssetSync(owner, 'personal', false)).rejects.toMatchObject({
+      code: 'ASSET_SYNC_REQUIRED',
+    });
+    await expect(controlPlane.deleteAsset(owner, 'personal', 'personal-a')).resolves.toMatchObject({
+      orphanedPrivateObjectRefs: [],
+    });
+    await expect(controlPlane.deleteAsset(owner, 'personal', 'personal-b')).resolves.toMatchObject({
+      orphanedPrivateObjectRefs: ['orig-shared'],
+    });
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {
@@ -149,5 +186,14 @@ function localDerivativeRegistration() {
     descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1280, height: 720 },
     availability: 'available-local' as const,
     locations: [{ kind: 'opfs-cache' as const, ref: 'opfs-d1' }],
+  };
+}
+
+function cloudAsset(id: string, ref: string) {
+  return {
+    ...assetRegistration(),
+    id,
+    bytes: 1024,
+    locations: [{ kind: 'private-object' as const, ref }],
   };
 }

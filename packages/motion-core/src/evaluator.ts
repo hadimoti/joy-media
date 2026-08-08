@@ -9,7 +9,6 @@ import type {
   MotionAnimation,
   MotionEasing,
   MotionEasingName,
-  MotionKeyframe,
   MotionKeyframeCurve,
   MotionLayer,
   MotionLayerId,

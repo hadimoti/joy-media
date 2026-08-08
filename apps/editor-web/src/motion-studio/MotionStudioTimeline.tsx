@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  MotionLayer,
   MotionSceneDocument,
   MotionLayerId,
   MotionAnimation,
@@ -29,7 +28,6 @@ import {
 } from './motionSceneToTimelineTracks.js';
 import { UI_ICONS } from '../ui-icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
-import { useSceneEditor } from './state/useSceneEditor.js';
 
 export interface MotionStudioTimelineProps {
   readonly document: MotionSceneDocument;
@@ -191,29 +189,6 @@ export function MotionStudioTimeline({
     [dispatch, selectedLayer, playheadMs],
   );
 
-  const handleRemoveKeyframe = useCallback(
-    (property: string, keyframeId: string) => {
-      if (!selectedLayer) return;
-      const next = selectedLayer.animations
-        .map((anim) => {
-          if (anim.property !== property) return anim;
-          return {
-            ...anim,
-            curve: {
-              ...anim.curve,
-              keyframes: anim.curve.keyframes.filter((kf) => kf.id !== keyframeId),
-            },
-          };
-        })
-        .filter((anim) => anim.curve.keyframes.length > 0);
-      dispatch('Remove keyframe', {
-        type: 'scene.setLayerAnimations',
-        payload: { layerId: selectedLayer.id, animations: next },
-      });
-    },
-    [dispatch, selectedLayer],
-  );
-
   // ── Layer trim (in/out point drag) ──
   const handleTrimIn = useCallback(
     (layerId: MotionLayerId, newInMs: number) => {
@@ -239,32 +214,6 @@ export function MotionStudioTimeline({
       });
     },
     [dispatch, document.layers, document.durationMs],
-  );
-
-  // ── Ease/hold/linear preset for selected keyframe ──
-  const handleSetKeyframeEasing = useCallback(
-    (property: string, keyframeId: string, easingKind: 'builtin' | 'cubic-bezier') => {
-      if (!selectedLayer) return;
-      const next = selectedLayer.animations.map((anim) => {
-        if (anim.property !== property) return anim;
-        return {
-          ...anim,
-          curve: {
-            ...anim.curve,
-            keyframes: anim.curve.keyframes.map((kf) =>
-              kf.id === keyframeId
-                ? ({ ...kf, easing: { kind: easingKind, name: 'ease' as const } } as MotionKeyframe)
-                : kf,
-            ),
-          },
-        } as MotionAnimation;
-      });
-      dispatch('Set easing', {
-        type: 'scene.setLayerAnimations',
-        payload: { layerId: selectedLayer.id, animations: next },
-      });
-    },
-    [dispatch, selectedLayer],
   );
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LocalControlPlane } from './control-plane.js';
+import { LocalControlPlane, SHARED_LIBRARY_OWNER_ID } from './control-plane.js';
 describe('local control plane', () => {
   it('enforces revisions, revocation, leases, and cursored events', () => {
     const api = new LocalControlPlane();
@@ -70,7 +70,10 @@ describe('local control plane', () => {
     api.createProject(owner, 'project-1', 'Project');
     api.registerAsset(owner, 'project-1', assetRegistration(), 100);
     api.registerLocalDerivative(owner, 'project-1', localDerivativeRegistration(), 101);
-    expect(api.deleteAsset(owner, 'project-1', 'asset-1')).toEqual({ id: 'asset-1' });
+    expect(api.deleteAsset(owner, 'project-1', 'asset-1')).toEqual({
+      id: 'asset-1',
+      orphanedPrivateObjectRefs: [],
+    });
     expect(api.assetsForProject(owner, 'project-1')).toHaveLength(0);
     expect(() => api.derivativesForAsset(owner, 'project-1', 'asset-1')).toThrow(
       expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
@@ -83,7 +86,7 @@ describe('local control plane', () => {
     );
   });
 
-  it('lists private-object assets in the shared cloud library for any authenticated Joy user', () => {
+  it('keeps personal cloud backups owner-only', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-a' };
     const peer = { id: 'owner-b' };
@@ -107,23 +110,59 @@ describe('local control plane', () => {
       kind: 'private-object',
       ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
-    expect(api.sharedCloudAssets(peer)).toMatchObject([
-      { id: 'img-1', kind: 'image', displayName: 'shot.png' },
-    ]);
-    expect(api.sharedCloudAsset(peer, 'img-1').id).toBe('img-1');
+    expect(api.sharedCloudAssets(peer)).toHaveLength(0);
+    expect(() => api.sharedCloudAsset(peer, 'img-1')).toThrow(
+      expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
+    );
+    expect(api.sharedCloudAsset(owner, 'img-1').id).toBe('img-1');
   });
 
-  it('allows video originals to join the shared cloud library', () => {
+  it('lists only service-published originals in the curated cloud library', () => {
     const api = new LocalControlPlane();
-    const owner = { id: 'owner-video' };
     const peer = { id: 'peer-video' };
-    api.createProject(owner, 'project-video', 'Video');
-    const video = api.registerAsset(owner, 'project-video', assetRegistration(), 300);
-    api.attachCloudOriginal(owner, 'project-video', video.id, {
+    const publisher = { id: SHARED_LIBRARY_OWNER_ID };
+    api.createProject(publisher, 'project-library', 'Library');
+    const video = api.registerAsset(publisher, 'project-library', assetRegistration(), 300);
+    api.attachCloudOriginal(publisher, 'project-library', video.id, {
       kind: 'private-object',
       ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
     expect(api.sharedCloudAssets(peer)).toMatchObject([{ id: 'asset-1', kind: 'video' }]);
+    expect(api.sharedCloudAsset(peer, 'asset-1').id).toBe('asset-1');
+  });
+
+  it('returns only private objects no remaining record references when deleting', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-delete' };
+    const ref = 'orig-shared-content';
+    api.createProject(owner, 'project-delete', 'Delete');
+    api.registerAsset(owner, 'project-delete', {
+      ...assetRegistration(),
+      id: 'asset-a',
+      locations: [{ kind: 'private-object', ref }],
+    });
+    api.registerAsset(owner, 'project-delete', {
+      ...assetRegistration(),
+      id: 'asset-b',
+      locations: [{ kind: 'private-object', ref }],
+    });
+
+    expect(api.deleteAsset(owner, 'project-delete', 'asset-a').orphanedPrivateObjectRefs).toEqual(
+      [],
+    );
+    expect(api.deleteAsset(owner, 'project-delete', 'asset-b').orphanedPrivateObjectRefs).toEqual([
+      ref,
+    ]);
+  });
+
+  it('keeps mandatory private backup enabled', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-sync' };
+    api.createProject(owner, 'project-sync', 'Sync');
+    expect(() => api.setAssetSync(owner, 'project-sync', false)).toThrow(
+      expect.objectContaining({ code: 'ASSET_SYNC_REQUIRED' }),
+    );
+    expect(api.setAssetSync(owner, 'project-sync', true).assetSyncEnabled).toBe(true);
   });
 
   it('lists every owned asset across projects for the same Joy identity', () => {

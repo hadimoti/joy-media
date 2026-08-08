@@ -147,7 +147,7 @@ this doc is meant to survive multiple agent sessions.
 ### Phase 4 — Animation Engine
 
 - [ ] Build the **evaluator**: `MotionSceneDocument → currentTimeMs → resolved
-    per-layer property values`, pure and independent of React (so it's reusable
+per-layer property values`, pure and independent of React (so it's reusable
       for export/thumbnails later). `MotionLayer.animations: MotionAnimation[]`
       and `MotionKeyframeCurve`/`MotionKeyframe` already exist in `scene.ts` with
       bezier/hold/ease interpolation kinds — there is no reader for them yet.

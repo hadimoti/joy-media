@@ -1,7 +1,13 @@
 # ADR-0017: Hybrid OPFS editing cache and private object-storage replica
 
-Status: Accepted
+Status: Accepted; cloud opt-in and deletion sections superseded by ADR-0031
 Date: 2026-07-22
+
+> **2026-08-08:** ADR-0031 makes original backup mandatory, keeps personal
+> backups owner-only, limits cross-account cloud visibility to the curated
+> library publisher, and reference-counts remote deletion. The OPFS,
+> opaque-reference, broker, integrity, and no-public-URL decisions below remain
+> active.
 
 ## Context
 

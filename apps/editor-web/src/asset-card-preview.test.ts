@@ -20,6 +20,7 @@ const IMAGE: BrowserAsset = {
   bytes: 1000,
   descriptor: { mimeType: 'image/png' },
   createdAt: 1_700_000_000_000,
+  cloudBacked: false,
 };
 
 const VIDEO: BrowserAsset = {
@@ -31,6 +32,7 @@ const VIDEO: BrowserAsset = {
   bytes: 2000,
   descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
   createdAt: 1_700_000_000_000,
+  cloudBacked: false,
 };
 
 const DERIVATIVE: BrowserDerivative = {

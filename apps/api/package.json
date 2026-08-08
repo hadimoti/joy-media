@@ -17,15 +17,15 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/nodemailer": "^6.4.17",
-    "@types/pg": "^8.20.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.20.4",
     "pg-mem": "^3.0.14",
-    "tsx": "^4.20.0"
+    "tsx": "^4.23.11"
   },
   "dependencies": {
     "@joy-media/adapter-mistral": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^9.0.5",
     "pg": "^8.22.0"
   }
 }

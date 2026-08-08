@@ -325,13 +325,6 @@ export function applyMotionProjectCommand(
     return effects.findIndex((e) => e.id === instanceId);
   }
 
-  function getEffect(
-    effects: readonly EffectInstanceV1[],
-    instanceId: string,
-  ): EffectInstanceV1 | undefined {
-    return effects.find((e) => e.id === instanceId);
-  }
-
   if (command.type === 'effect.add') {
     const { effectId, params, index } = command.payload;
     const effects = getEffectsArray(object);

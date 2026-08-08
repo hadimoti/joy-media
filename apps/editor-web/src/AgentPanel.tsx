@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
@@ -33,7 +33,6 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
-import { JoyCode3DViewer } from './JoyCode3DViewer.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import {
   addJoyCodeMessage,
@@ -49,6 +48,9 @@ import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './
 /** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
 const THINKING_REVEAL_MS = 320;
+const JoyCode3DViewer = lazy(() =>
+  import('./JoyCode3DViewer.js').then((module) => ({ default: module.JoyCode3DViewer })),
+);
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
@@ -898,7 +900,11 @@ export function AgentPanel({
           </section>
         )}
 
-        {tab === '3d' && <JoyCode3DViewer />}
+        {tab === '3d' && (
+          <Suspense fallback={null}>
+            <JoyCode3DViewer />
+          </Suspense>
+        )}
       </div>
     </PanelShell>
   );

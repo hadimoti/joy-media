@@ -16,7 +16,7 @@ export interface AssetThumbResult {
 
 /**
  * Resolve a card preview URL:
- * preferredDerivative -> OPFS original -> shared cloud original -> none.
+ * preferredDerivative -> OPFS original -> authorized cloud original -> none.
  */
 export async function resolveAssetThumb(options: {
   readonly asset: BrowserAsset;

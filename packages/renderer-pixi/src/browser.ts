@@ -30,13 +30,12 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js
 import type {
   Rgba,
   RenderFrameIR,
-  SpriteNode,
   TextNode,
   TransitionNode,
   VideoFrameNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
-import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
 import {
   buildPixiColorGradeFilter,
   buildPixiEffectFilters,
@@ -94,6 +93,8 @@ interface LayerContainer extends Container {
   /** Persistent CPU canvas and GPU texture for a decoded video node. */
   videoCanvas?: HTMLCanvasElement | undefined;
   videoTexture?: Texture | undefined;
+  /** Optional plate rendered behind a text visual. */
+  textBackground?: Graphics | undefined;
   /** Persistent GPU texture for a transition node. */
   transitionTexture?: Texture | undefined;
 }
@@ -172,12 +173,20 @@ export async function createBrowserPixiRenderer(
     app.renderer.resize(width, height, resolution);
   };
 
-  const paintRectVisual = (node: Exclude<VisualRenderNode, { kind: 'text' }>): Graphics => {
-    const graphic = new Graphics();
+  const updateRectVisual = (
+    graphic: Graphics,
+    node: Exclude<VisualRenderNode, { kind: 'text' }>,
+  ): void => {
     graphic
+      .clear()
       .rect(0, 0, node.width, node.height)
       .fill({ color: rgbaToHex(node.color), alpha: node.color.a / 255 });
     graphic.label = `${node.kind}:${node.id}`;
+  };
+
+  const paintRectVisual = (node: Exclude<VisualRenderNode, { kind: 'text' }>): Graphics => {
+    const graphic = new Graphics();
+    updateRectVisual(graphic, node);
     return graphic;
   };
 
@@ -217,28 +226,57 @@ export async function createBrowserPixiRenderer(
     layer.visual.height = node.height;
   };
 
-  const paintTextVisual = (node: TextNode): Text => {
-    const text = new Text({
-      text: node.text,
-      style: {
-        fill: rgbaToHexString(node.color),
-        fontSize: node.fontSizePx ?? 16,
-        ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
-      },
-    });
-    text.label = `text:${node.id}`;
-    applyTextAlignment(text, node);
-    // TODO(WP-11.x): paint a background plate behind the text when
-    // `node.background` is set. Requires a layout pass to size the plate to
-    // the rendered text width/height; deferred until caption-plate UX lands.
-    return text;
-  };
-
   const applyTextAlignment = (text: Text, node: TextNode): void => {
     const align = node.align ?? 'left';
     if (align === 'center') text.anchor.set(0.5, 0);
     else if (align === 'right') text.anchor.set(1, 0);
     else text.anchor.set(0, 0);
+  };
+
+  const updateTextVisual = (text: Text, node: TextNode): void => {
+    text.text = node.text;
+    text.style = {
+      fill: rgbaToHexString(node.color),
+      fontSize: node.fontSizePx ?? 16,
+      align: node.align ?? 'left',
+      ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
+    };
+    text.label = `text:${node.id}`;
+    applyTextAlignment(text, node);
+  };
+
+  const paintTextVisual = (node: TextNode): Text => {
+    const text = new Text();
+    updateTextVisual(text, node);
+    return text;
+  };
+
+  const clearTextBackground = (layer: LayerContainer): void => {
+    const plate = layer.textBackground;
+    if (plate === undefined) return;
+    layer.removeChild(plate);
+    plate.destroy();
+    layer.textBackground = undefined;
+  };
+
+  const syncTextBackground = (layer: LayerContainer, node: TextNode): void => {
+    if (node.background === undefined || !(layer.visual instanceof Text)) {
+      clearTextBackground(layer);
+      return;
+    }
+    const text = layer.visual;
+    const padding = Math.max(2, Math.round((node.fontSizePx ?? 16) * 0.12));
+    const bounds = textPlateBounds(text.width, text.height, node.align, padding);
+    const plate = layer.textBackground ?? new Graphics();
+    plate
+      .clear()
+      .rect(bounds.x, bounds.y, bounds.width, bounds.height)
+      .fill({ color: rgbaToHex(node.background), alpha: node.background.a / 255 });
+    plate.label = `text-background:${node.id}`;
+    if (layer.textBackground === undefined) {
+      layer.addChildAt(plate, 0);
+      layer.textBackground = plate;
+    }
   };
 
   const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
@@ -282,12 +320,14 @@ export async function createBrowserPixiRenderer(
       container.visual = visual;
     }
     container.kind = node.kind;
+    if (node.kind === 'text') syncTextBackground(container, node);
     updateLayerTransform(container, node);
     syncLayerEffects(container, node);
     return container;
   };
 
   const replaceVisual = (layer: LayerContainer, visual: Graphics | Sprite | Text): void => {
+    clearTextBackground(layer);
     layer.visual.destroy();
     layer.removeChildren();
     layer.addChild(visual);
@@ -342,7 +382,13 @@ export async function createBrowserPixiRenderer(
             existing.videoCanvas = video.videoCanvas;
             existing.videoTexture = video.videoTexture;
           }
+        } else if (node.kind === 'text' && existing.visual instanceof Text) {
+          updateTextVisual(existing.visual, node);
+        } else if (node.kind !== 'text' && existing.visual instanceof Graphics) {
+          updateRectVisual(existing.visual, node);
         }
+        if (node.kind === 'text') syncTextBackground(existing, node);
+        else clearTextBackground(existing);
         updateLayerTransform(existing, node);
         syncLayerEffects(existing, node);
         reused += 1;

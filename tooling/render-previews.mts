@@ -602,6 +602,7 @@ if (existsSync(T1) && existsSync(T2)) {
     'gl:GlitchDisplace',
   ];
   for (const id of TRANSITION_IDS) {
+    const outputName = id.replace(':', '-');
     const p = new Uint8Array(SZ * SZ * 4);
     for (let i = 0; i < p.length; i += 4) {
       p[i] = Math.round(t1p[i]! * 0.5 + t2p[i]! * 0.5);
@@ -609,8 +610,8 @@ if (existsSync(T1) && existsSync(T2)) {
       p[i + 2] = Math.round(t1p[i + 2]! * 0.5 + t2p[i + 2]! * 0.5);
       p[i + 3] = 255;
     }
-    writeFileSync(resolve(OT, `${id}.png`), enc(SZ, SZ, p));
-    console.log(`  transitions/${id}.png`);
+    writeFileSync(resolve(OT, `${outputName}.png`), enc(SZ, SZ, p));
+    console.log(`  transitions/${outputName}.png`);
   }
 } else {
   console.log('Skipped transition previews: legacy source frames are not installed.');

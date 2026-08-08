@@ -47,12 +47,6 @@ interface AgPsdLayer {
   readonly placedLayer?: unknown;
 }
 
-interface AgPsdDocument {
-  readonly width: number;
-  readonly height: number;
-  readonly children?: AgPsdLayer[];
-}
-
 /**
  * Parse a PSD file and extract layers.
  *

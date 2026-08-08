@@ -3,9 +3,9 @@ import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
   type BrowserAsset,
-  type BrowserAssetRegistration,
   type BrowserDerivative,
 } from './control-plane-client.js';
+import { importMediaFile } from './media-import.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
@@ -318,47 +318,18 @@ export function AssetLibraryPanel({
       return;
     }
     try {
-      const kind = assetKind(selectedFile);
-      const mimeType = normalizedMimeType(selectedFile, kind);
-      setImportProgress(0.02);
-      setStatus(`Reading ${selectedFile.name}…`);
-      const buffer = await readFileWithProgress(selectedFile, (ratio) => {
-        setImportProgress(0.02 + 0.38 * ratio);
-      });
-      setImportProgress(0.42);
-      setStatus(`Hashing ${selectedFile.name}…`);
-      const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
-      setImportProgress(0.55);
-      const registration: BrowserAssetRegistration = {
-        id: normalizedId,
-        kind,
-        displayName: selectedFile.name,
-        sha256,
-        bytes: selectedFile.size,
-        descriptor: { mimeType },
-        locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
-      };
-      setStatus(`Saving ${selectedFile.name} locally…`);
-      setImportProgress(0.62);
-      await (
-        await originalAssetCache
-      ).put(
-        {
-          assetId: registration.id,
-          sha256: registration.sha256,
-          bytes: registration.bytes,
-          mimeType: registration.descriptor.mimeType,
+      await importMediaFile({
+        projectId,
+        projectTitle,
+        file: selectedFile,
+        assetId: normalizedId,
+        client,
+        originalAssetCache,
+        onProgress: ({ ratio, message: progressMessage }) => {
+          setImportProgress(ratio);
+          setStatus(progressMessage);
         },
-        selectedFile,
-      );
-      setImportProgress(0.88);
-      setStatus(`Registering ${selectedFile.name}…`);
-      const registered = await client.registerAsset(projectId, registration);
-      setImportProgress(0.9);
-      setStatus(`Uploading ${selectedFile.name} to private cloud storage…`);
-      await client.uploadAssetOriginal(projectId, registered, selectedFile, (ratio) =>
-        setImportProgress(0.9 + 0.08 * ratio),
-      );
+      });
       setStatus(
         `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
       );
@@ -373,7 +344,7 @@ export function AssetLibraryPanel({
       setImportProgress(undefined);
       setStatus(`Failed to register media: ${message(error)}`);
     }
-  }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
+  }, [assetId, client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
@@ -439,8 +410,8 @@ export function AssetLibraryPanel({
 
   const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
-      if (cloudAssetIds.has(asset.id)) {
-        setStatus(`${asset.displayName} is already in the shared cloud library.`);
+      if (asset.cloudBacked) {
+        setStatus(`${asset.displayName} is already backed up to private cloud storage.`);
         return;
       }
       try {
@@ -453,13 +424,13 @@ export function AssetLibraryPanel({
         }
         setStatus(`Uploading ${asset.displayName} to private cloud storage…`);
         await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        setStatus(`${asset.displayName} shared to cloud storage.`);
+        setStatus(`${asset.displayName} backed up to private cloud storage.`);
         await refresh();
       } catch (error) {
-        setStatus(`Cloud share failed: ${message(error)}`);
+        setStatus(`Cloud backup failed: ${message(error)}`);
       }
     },
-    [client, cloudAssetIds, originalAssetCache, projectId, refresh],
+    [client, originalAssetCache, projectId, refresh],
   );
 
   const deleteAsset = useCallback(
@@ -467,14 +438,18 @@ export function AssetLibraryPanel({
       const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
       if (!ok) return;
       try {
-        await client.deleteAsset(asset.projectId || projectId, asset.id);
+        const deleted = await client.deleteAsset(asset.projectId || projectId, asset.id);
         setSelectedAssetIds((current) => {
           if (!current.has(asset.id)) return current;
           const next = new Set(current);
           next.delete(asset.id);
           return next;
         });
-        setStatus(`${asset.displayName} deleted.`);
+        setStatus(
+          deleted.cloudObjectPurgeFailures === 0
+            ? `${asset.displayName} deleted.`
+            : `${asset.displayName} deleted; cloud cleanup will need an operational retry.`,
+        );
         await refresh();
       } catch (error) {
         setStatus(`Failed to delete media: ${message(error)}`);
@@ -485,10 +460,10 @@ export function AssetLibraryPanel({
 
   const bulkShare = useCallback(async () => {
     const targets = visible.filter(
-      ({ asset }) => selectedAssetIds.has(asset.id) && !cloudAssetIds.has(asset.id),
+      ({ asset }) => selectedAssetIds.has(asset.id) && !asset.cloudBacked,
     );
     if (targets.length === 0) {
-      setStatus('No selected media is ready to share; an OPFS original is required.');
+      setStatus('No selected media needs backup; an OPFS original is required.');
       return;
     }
     let shared = 0;
@@ -502,9 +477,9 @@ export function AssetLibraryPanel({
         /* continue remaining */
       }
     }
-    setStatus(`Shared ${shared} of ${targets.length} selected media item(s) to the cloud.`);
+    setStatus(`Backed up ${shared} of ${targets.length} selected media item(s) to the cloud.`);
     await refresh();
-  }, [client, cloudAssetIds, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
+  }, [client, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
@@ -535,16 +510,22 @@ export function AssetLibraryPanel({
     const ok = window.confirm(`Delete ${targets.length} selected media item(s) from the catalog?`);
     if (!ok) return;
     let deleted = 0;
+    let cloudObjectPurgeFailures = 0;
     for (const { asset } of targets) {
       try {
-        await client.deleteAsset(asset.projectId || projectId, asset.id);
+        const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
         deleted += 1;
+        cloudObjectPurgeFailures += result.cloudObjectPurgeFailures;
       } catch {
         /* continue remaining */
       }
     }
     setSelectedAssetIds(new Set());
-    setStatus(`Deleted ${deleted} of ${targets.length} selected media items.`);
+    setStatus(
+      `Deleted ${deleted} of ${targets.length} selected media items.${
+        cloudObjectPurgeFailures > 0 ? ' Some cloud objects need an operational cleanup retry.' : ''
+      }`,
+    );
     await refresh();
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
@@ -995,7 +976,7 @@ export function AssetLibraryPanel({
                   const avail =
                     derivative?.availability ??
                     (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
-                  const cloudBacked = cloudAssetIds.has(asset.id);
+                  const cloudBacked = asset.cloudBacked;
                   const selected = selectedAssetIds.has(asset.id);
                   const assetCollection = assetCollectionLabel(assetCollectionId(asset));
                   const detailHint = [
@@ -1296,20 +1277,6 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assetKind(file: File): BrowserAsset['kind'] {
-  if (file.type.startsWith('video/')) return 'video';
-  if (file.type.startsWith('audio/')) return 'audio';
-  if (file.type.startsWith('image/')) return 'image';
-  throw new Error('selected file must be video, audio, or an image');
-}
-function normalizedMimeType(file: File, kind: BrowserAsset['kind']): string {
-  if (/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(file.type)) return file.type;
-  throw new Error(`${kind} file has no supported MIME type`);
-}
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 const ASSET_VIEW_KEY = 'joy-media.asset-view.v1';
 
 function readAssetViewMode(): AssetViewMode {
@@ -1328,35 +1295,4 @@ function writeAssetViewMode(mode: AssetViewMode): void {
   } catch {
     /* ignore */
   }
-}
-
-/** Stream a File into memory while reporting 0–1 read progress (falls back to arrayBuffer). */
-async function readFileWithProgress(
-  file: File,
-  onProgress: (ratio: number) => void,
-): Promise<ArrayBuffer> {
-  if (typeof file.stream !== 'function' || file.size <= 0) {
-    onProgress(1);
-    return file.arrayBuffer();
-  }
-  const reader = file.stream().getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value !== undefined) {
-      chunks.push(value);
-      received += value.byteLength;
-      onProgress(Math.min(1, received / file.size));
-    }
-  }
-  const merged = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  onProgress(1);
-  return merged.buffer;
 }

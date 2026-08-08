@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /**
@@ -14,8 +14,96 @@ import react from '@vitejs/plugin-react';
 const pkg = (relative: string): string =>
   fileURLToPath(new URL(`../../packages/${relative}`, import.meta.url));
 
+const CHUNK_BUDGET_KIB = 640;
+
+function editorChunk(id: string): string | undefined {
+  const moduleId = id.replaceAll('\\', '/');
+  if (moduleId.includes('/node_modules/three/examples/')) return 'three-addons';
+  if (moduleId.includes('/node_modules/three/')) return 'three-core';
+  if (moduleId.includes('/node_modules/react') || moduleId.includes('/node_modules/scheduler/')) {
+    return 'react';
+  }
+  if (moduleId.includes('/node_modules/dockview/')) return 'dockview';
+  if (
+    moduleId.includes('/node_modules/pixi.js/') ||
+    moduleId.includes('/node_modules/earcut/') ||
+    moduleId.includes('/node_modules/eventemitter3/')
+  ) {
+    return 'pixi';
+  }
+
+  const packageMatch = moduleId.match(/\/packages\/([^/]+)\//);
+  const packageName = packageMatch?.[1];
+  if (packageName === undefined) return undefined;
+  if (
+    [
+      'render-ir',
+      'renderer-headless',
+      'renderer-pixi',
+      'transition-shaders',
+      'visual-effects',
+      'visual-object-renderer',
+    ].includes(packageName)
+  ) {
+    return 'joy-rendering';
+  }
+  if (
+    [
+      'audio-core',
+      'camera-core',
+      'captions-core',
+      'commands',
+      'evaluator',
+      'motion-core',
+      'playback-engine',
+      'property-system',
+      'timeline-engine',
+    ].includes(packageName)
+  ) {
+    return 'joy-editing';
+  }
+  if (packageName === 'html-scene-runtime') return 'joy-scenes';
+  if (packageName === 'agent-tools' || packageName === 'workflow-engine') {
+    return 'joy-automation';
+  }
+  return 'joy-platform';
+}
+
+function bundlePolicy(): Plugin {
+  return {
+    name: 'joy-bundle-policy',
+    generateBundle(_options, bundle) {
+      const oversized: string[] = [];
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'chunk') continue;
+        const outputBytes = Buffer.byteLength(output.code);
+        if (outputBytes > CHUNK_BUDGET_KIB * 1024) {
+          oversized.push(`${output.fileName} (${(outputBytes / 1024).toFixed(1)} KiB)`);
+        }
+        if (process.env.JOY_BUNDLE_ANALYZE !== '1') continue;
+        const modules = Object.entries(output.modules)
+          .map(([id, details]) => ({ id, bytes: details.renderedLength }))
+          .sort((left, right) => right.bytes - left.bytes)
+          .slice(0, 15);
+        this.info(
+          `${output.fileName} (${outputBytes} bytes)\n${modules
+            .map(({ id, bytes }) => `  ${bytes.toString().padStart(8)} ${id}`)
+            .join('\n')}`,
+        );
+      }
+      if (oversized.length > 0) {
+        this.error(
+          `Editor chunks exceed the ${CHUNK_BUDGET_KIB} KiB budget:\n${oversized
+            .map((chunk) => `  - ${chunk}`)
+            .join('\n')}`,
+        );
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), bundlePolicy()],
   resolve: {
     alias: {
       '@joy-media/workflow-engine': pkg('workflow-engine/dist/index.js'),
@@ -29,6 +117,7 @@ export default defineConfig({
     },
   },
   build: {
+    chunkSizeWarningLimit: CHUNK_BUDGET_KIB,
     rollupOptions: {
       output: {
         /**
@@ -38,15 +127,7 @@ export default defineConfig({
          * vendor files and the 3D viewer's heavy three.js payload only loads
          * when that panel mounts. Build-only; no runtime coupling introduced.
          */
-        manualChunks: {
-          react: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'],
-          dockview: ['dockview'],
-          three: [
-            'three',
-            'three/examples/jsm/controls/OrbitControls.js',
-            'three/examples/jsm/loaders/GLTFLoader.js',
-          ],
-        },
+        manualChunks: editorChunk,
       },
     },
   },

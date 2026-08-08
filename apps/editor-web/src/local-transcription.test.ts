@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderUnavailableError } from '@joy-media/provider-sdk';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
+import type { BrowserControlPlaneClient } from './control-plane-client.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 
 describe('transcribeReferenceCaption (live + fixture fallback)', () => {

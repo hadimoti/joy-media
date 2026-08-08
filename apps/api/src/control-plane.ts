@@ -1,12 +1,16 @@
 export interface Actor {
   readonly id: string;
 }
+
+/** Only this service identity may publish cross-account library media. */
+export const SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
+
 export interface ProjectMetadata {
   readonly id: string;
   readonly title: string;
   readonly revision: number;
   readonly ownerId: string;
-  /** Explicit opt-in prerequisite for private object-storage synchronization. */
+  /** Always true: originals and eligible derivatives use private durable storage. */
   readonly assetSyncEnabled: boolean;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
@@ -66,6 +70,12 @@ export interface AssetRegistration {
   readonly bytes: number;
   readonly descriptor: MediaDescriptor;
   readonly locations: readonly AssetLocationRecord[];
+}
+
+export interface AssetDeletionResult {
+  readonly id: string;
+  /** Internal opaque refs that no remaining asset or derivative still uses. */
+  readonly orphanedPrivateObjectRefs: readonly string[];
 }
 
 /** The browser may only register a local/pending derivative; cloud state is API-owned later. */
@@ -215,15 +225,12 @@ export interface ControlPlane {
       readonly displayName?: string;
     },
   ): MediaAssetRecord | Promise<MediaAssetRecord>;
-  /**
-   * Owner-only hard delete of an asset and its derivative metadata rows.
-   * Private-object bytes in remote storage are not purged in v1.
-   */
+  /** Owner-only hard delete, including reference-count candidates for object purge. */
   deleteAsset(
     actor: Actor,
     projectId: string,
     assetId: string,
-  ): { readonly id: string } | Promise<{ readonly id: string }>;
+  ): AssetDeletionResult | Promise<AssetDeletionResult>;
   assetsForProject(
     actor: Actor,
     projectId: string,
@@ -232,16 +239,11 @@ export interface ControlPlane {
    * All assets across every project owned by this Joy identity (cross-browser catalog).
    */
   assetsForOwner(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
-  /**
-   * Shared cloud library: any authenticated Joy user may list assets that have a
-   * private-object original (cross-account catalog, login still required).
-   */
+  /** Curated cloud library published by the dedicated library service identity. */
   sharedCloudAssets(
     actor: Actor,
   ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
-  /**
-   * Resolve a cloud-backed asset for any authenticated Joy user (private-object required).
-   */
+  /** Resolve a cloud original only when it is curated or owned by the actor. */
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
@@ -393,10 +395,13 @@ export class LocalControlPlane implements ControlPlane {
     return next;
   }
   setAssetSync(actor: Actor, projectId: string, enabled: boolean): ProjectMetadata {
-    if (typeof enabled !== 'boolean')
-      throw new ControlPlaneError('ASSET_SYNC_INVALID', 'asset sync enabled must be boolean');
+    if (enabled !== true)
+      throw new ControlPlaneError(
+        'ASSET_SYNC_REQUIRED',
+        'private asset backup is mandatory for JOY Media projects',
+      );
     const current = this.project(actor, projectId);
-    const next = { ...current, assetSyncEnabled: enabled };
+    const next = { ...current, assetSyncEnabled: true };
     this.#projects.set(projectId, next);
     return next;
   }
@@ -465,17 +470,27 @@ export class LocalControlPlane implements ControlPlane {
     this.#assets.set(assetId, next);
     return cloneAsset(next);
   }
-  deleteAsset(actor: Actor, projectId: string, assetId: string): { readonly id: string } {
+  deleteAsset(actor: Actor, projectId: string, assetId: string): AssetDeletionResult {
     this.project(actor, projectId);
     const current = this.#assets.get(assetId);
     if (current === undefined || current.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const privateObjectRefs = new Set(privateRefs(current.locations));
     for (const [derivativeId, derivative] of this.#derivatives) {
-      if (derivative.projectId === projectId && derivative.assetId === assetId)
+      if (derivative.projectId === projectId && derivative.assetId === assetId) {
+        for (const ref of privateRefs(derivative.locations)) privateObjectRefs.add(ref);
         this.#derivatives.delete(derivativeId);
+      }
     }
     this.#assets.delete(assetId);
-    return { id: assetId };
+    const remainingRefs = new Set([
+      ...[...this.#assets.values()].flatMap((asset) => privateRefs(asset.locations)),
+      ...[...this.#derivatives.values()].flatMap((derivative) => privateRefs(derivative.locations)),
+    ]);
+    return {
+      id: assetId,
+      orphanedPrivateObjectRefs: [...privateObjectRefs].filter((ref) => !remainingRefs.has(ref)),
+    };
   }
   assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
     this.project(actor, projectId);
@@ -500,8 +515,17 @@ export class LocalControlPlane implements ControlPlane {
   }
   sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] {
     this.auth(actor);
+    const sharedProjectIds = new Set(
+      [...this.#projects.values()]
+        .filter((project) => project.ownerId === SHARED_LIBRARY_OWNER_ID)
+        .map((project) => project.id),
+    );
     return [...this.#assets.values()]
-      .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'))
+      .filter(
+        (asset) =>
+          sharedProjectIds.has(asset.projectId) &&
+          asset.locations.some((location) => location.kind === 'private-object'),
+      )
       .map(cloneAsset)
       .sort(
         (left, right) =>
@@ -511,8 +535,11 @@ export class LocalControlPlane implements ControlPlane {
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord {
     this.auth(actor);
     const asset = this.#assets.get(assetId);
+    const project = asset === undefined ? undefined : this.#projects.get(asset.projectId);
     if (
       asset === undefined ||
+      project === undefined ||
+      (project.ownerId !== actor.id && project.ownerId !== SHARED_LIBRARY_OWNER_ID) ||
       !asset.locations.some((location) => location.kind === 'private-object')
     ) {
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
@@ -919,6 +946,12 @@ export class LocalControlPlane implements ControlPlane {
   private event(jobId: string, type: string, at: number): void {
     this.#events.push({ cursor: this.#events.length + 1, jobId, type, at });
   }
+}
+
+function privateRefs(locations: readonly AssetLocationRecord[]): string[] {
+  return locations
+    .filter((location) => location.kind === 'private-object')
+    .map((location) => location.ref);
 }
 
 function isFixtureReceipt(

@@ -24,7 +24,7 @@ import {
   createSetFadeTool,
   createAddEffectTool,
 } from './index.js';
-import type { SpikeProject } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 
 const mockProject: SpikeProject = {
   schemaVersion: 0,
@@ -75,6 +75,88 @@ const mockProject: SpikeProject = {
   },
 };
 
+const creativeProject: JoyProjectV1 = {
+  schemaVersion: 1,
+  id: 'test-project',
+  title: 'Test Project',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  rootCompositionId: 'comp-1',
+  settings: { defaultLocale: 'en-US' },
+  compositions: {
+    'comp-1': {
+      id: 'comp-1',
+      name: 'Main Composition',
+      width: 1920,
+      height: 1080,
+      pixelAspectRatio: { num: 1, den: 1 },
+      frameRate: { num: 30, den: 1 },
+      durationUs: 60_000_000,
+      background: '#000000',
+      tracks: [],
+    },
+  },
+  assets: {
+    'asset-1': { id: 'asset-1', kind: 'video', displayName: 'Opening Interview' },
+  },
+  variables: {},
+  markers: [],
+  visualObjects: {
+    'title-1': {
+      id: 'title-1',
+      kind: 'text',
+      text: 'Hello',
+      transform: {
+        x: 20,
+        y: 30,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    },
+  },
+  captionDocuments: {
+    'captions-1': {
+      id: 'captions-1',
+      language: 'en-US',
+      direction: 'ltr',
+      speakers: [],
+      words: {
+        hello: { id: 'hello', text: 'Hello', startUs: 0, endUs: 400_000, confidence: 0.95 },
+        world: { id: 'world', text: 'world', startUs: 400_000, endUs: 900_000 },
+      },
+      segments: [
+        {
+          id: 'segment-1',
+          startUs: 0,
+          endUs: 900_000,
+          wordIds: ['hello', 'world'],
+        },
+      ],
+    },
+  },
+  pluginData: {},
+  audio: {
+    clips: {
+      'clip-1': { gain: 1, pan: 0, mute: false, solo: false },
+    },
+    buses: [
+      {
+        id: 'master',
+        name: 'Master',
+        gain: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        inputs: [],
+      },
+    ],
+    effects: [],
+  },
+};
+
 describe('Context Builder', () => {
   it('produces bounded summaries', () => {
     const context = buildEditorContext(mockProject);
@@ -101,10 +183,9 @@ describe('Context Builder', () => {
     expect(context.timeline.compositions.length).toBeLessThanOrEqual(1);
   });
 
-  it('handles missing assets', () => {
+  it('does not claim opaque SpikeProject asset references are missing', () => {
     const context = buildEditorContext(mockProject);
-    expect(context.project.missingAssets).toContain('asset-1');
-    expect(context.project.missingAssets).toContain('asset-2');
+    expect(context.project.missingAssets).toEqual([]);
   });
 
   it('reports no audio/captions for a SpikeProject, whose tracks are video-only by design', () => {
@@ -116,6 +197,30 @@ describe('Context Builder', () => {
     expect(context.project.hasAudio).toBe(false);
     expect(context.project.hasCaptions).toBe(false);
   });
+
+  it('binds creative metadata, live selection, captions, audio, and real missing assets', () => {
+    const context = buildEditorContext(mockProject, undefined, undefined, {
+      creativeProject,
+      selection: {
+        selectedClipIds: ['clip-2'],
+        selectedTrackIds: ['track-1'],
+        playheadUs: 5_500_000,
+      },
+    });
+    expect(context.project).toMatchObject({
+      name: 'Test Project',
+      hasAudio: true,
+      hasCaptions: true,
+      missingAssets: ['asset-2'],
+    });
+    expect(context.selection).toEqual({
+      selectedClipIds: ['clip-2'],
+      selectedTrackIds: ['track-1'],
+      playheadUs: 5_500_000,
+    });
+    expect(context.captions).toMatchObject({ documentCount: 1, totalWordCount: 2 });
+    expect(context.audio).toMatchObject({ clipCount: 1, busCount: 1, hasDialogue: true });
+  });
 });
 
 describe('Query Tools', () => {
@@ -124,7 +229,14 @@ describe('Query Tools', () => {
     const context = buildEditorContext(mockProject);
     const result = tool.execute(context, { clipId: 'clip-1' });
     expect(result.success).toBe(true);
-    expect(result.stableIds).toBeDefined();
+    expect(result.stableIds).toEqual(['clip-1']);
+  });
+
+  it('findClip searches creative asset names and sources', () => {
+    const tool = createFindClipTool();
+    const context = buildEditorContext(mockProject, undefined, undefined, { creativeProject });
+    expect(tool.execute(context, { name: 'interview' }).stableIds).toEqual(['clip-1']);
+    expect(tool.execute(context, { source: 'asset-2' }).stableIds).toEqual(['clip-2']);
   });
 
   it('findClip handles missing input', () => {
@@ -143,12 +255,38 @@ describe('Query Tools', () => {
     expect(result.error).toBeDefined();
   });
 
+  it('findActiveClips returns every clip overlapping the requested range', () => {
+    const result = createFindActiveClipsTool().execute(buildEditorContext(mockProject), {
+      startUs: 4_500_000,
+      endUs: 5_500_000,
+    });
+    expect(result.stableIds).toEqual(['clip-1', 'clip-2']);
+  });
+
   it('searchTranscript requires captions', () => {
     const tool = createSearchTranscriptTool();
     const context = buildEditorContext(mockProject);
     const result = tool.execute(context, { query: 'test' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('no captions');
+  });
+
+  it('searchTranscript returns matching caption segments', () => {
+    const context = buildEditorContext(mockProject, undefined, undefined, { creativeProject });
+    const result = createSearchTranscriptTool().execute(context, { query: 'WORLD' });
+    expect(result.stableIds).toEqual(['segment-1']);
+    expect(result.data).toEqual({
+      segments: [
+        {
+          id: 'segment-1',
+          documentId: 'captions-1',
+          language: 'en-US',
+          text: 'Hello world',
+          startUs: 0,
+          endUs: 900_000,
+        },
+      ],
+    });
   });
 
   it('getAudioRegions validates type', () => {
@@ -159,6 +297,19 @@ describe('Query Tools', () => {
     expect(result.error).toBeDefined();
   });
 
+  it('getAudioRegions distinguishes unavailable analysis from an empty result', () => {
+    const tool = createGetAudioRegionsTool();
+    expect(tool.execute(buildEditorContext(mockProject), { type: 'silence' })).toMatchObject({
+      success: false,
+      error: 'audio analysis regions are unavailable',
+    });
+    const context = buildEditorContext(mockProject, undefined, undefined, {
+      audioRegions: [{ id: 'silence-1', type: 'silence', startUs: 1_000_000, endUs: 2_000_000 }],
+    });
+    expect(tool.execute(context, { type: 'silence' }).stableIds).toEqual(['silence-1']);
+    expect(tool.execute(context, { type: 'speech' }).stableIds).toEqual([]);
+  });
+
   it('inspectProperties requires entityId', () => {
     const tool = createInspectPropertiesTool();
     const context = buildEditorContext(mockProject);
@@ -167,12 +318,26 @@ describe('Query Tools', () => {
     expect(result.error).toBeDefined();
   });
 
+  it('inspectProperties returns indexed entity data and rejects unknown IDs', () => {
+    const tool = createInspectPropertiesTool();
+    const context = buildEditorContext(mockProject, undefined, undefined, { creativeProject });
+    expect(tool.execute(context, { entityId: 'title-1' })).toMatchObject({
+      success: true,
+      stableIds: ['title-1'],
+      data: { entity: { id: 'title-1', kind: 'visual.text' } },
+    });
+    expect(tool.execute(context, { entityId: 'missing' })).toMatchObject({
+      success: false,
+      error: 'entity "missing" not found',
+    });
+  });
+
   it('findMissingAssets returns stable IDs', () => {
     const tool = createFindMissingAssetsTool();
-    const context = buildEditorContext(mockProject);
+    const context = buildEditorContext(mockProject, undefined, undefined, { creativeProject });
     const result = tool.execute(context, {});
     expect(result.success).toBe(true);
-    expect(result.stableIds).toEqual(['asset-1', 'asset-2']);
+    expect(result.stableIds).toEqual(['asset-2']);
   });
 
   it('estimateImpact requires changeType', () => {
@@ -181,6 +346,21 @@ describe('Query Tools', () => {
     const result = tool.execute(context, {});
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
+  });
+
+  it('estimateImpact returns a deterministic render estimate', () => {
+    const result = createEstimateImpactTool().execute(buildEditorContext(mockProject), {
+      changeType: 'export video',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        affectedClipCount: 2,
+        timelineDurationUs: 60_000_000,
+        estimatedWorkerTimeMs: 60_000,
+        confidence: 'medium',
+      },
+    });
   });
 
   it('getTimelineSummary returns composition IDs', () => {

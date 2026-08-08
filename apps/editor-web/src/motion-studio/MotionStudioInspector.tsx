@@ -11,10 +11,7 @@ import type {
   MotionFilter,
   SceneBackground,
   BlendMode,
-  MotionAnimation,
-  MotionEasing,
 } from '@joy-media/motion-core';
-import { setKeyframeAt, hasKeyframeAtMotion, type LayerEvaluation } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 import { UI_ICONS } from '../ui-icons.js';
 import { MsTitle } from './MsTitle.js';
@@ -22,7 +19,6 @@ import {
   layerCapabilities,
   commonCapabilities,
   MOTION_BLEND_MODES,
-  type CapabilitySection,
 } from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
 
@@ -97,16 +93,6 @@ function mixedBoolean(values: readonly boolean[]): boolean | 'mixed' {
   if (values.length === 0) return false;
   const first = values[0];
   return values.some((v) => v !== first) ? 'mixed' : first!;
-}
-
-function isMixedNumber(value: number | string): value is string {
-  return typeof value === 'string';
-}
-
-function parseNumber(value: number | string): number | undefined {
-  if (typeof value === 'number') return value;
-  const n = parseFloat(value);
-  return isNaN(n) ? undefined : n;
 }
 
 function isMixedString(value: string | number): value is string {
@@ -383,12 +369,10 @@ function SceneInspector({
 function TransformSection({
   selected,
   dispatch,
-  isMulti,
   showDiamonds,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly isMulti: boolean;
   readonly showDiamonds: boolean;
 }) {
   const xs = selected.map((l) => l.transform.x);
@@ -991,11 +975,9 @@ function SimpleFilterSection({
 function LayerInspector({
   selected,
   dispatch,
-  playheadMs = 0,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly playheadMs?: number;
 }) {
   const isMulti = selected.length > 1;
   const types = selected.map((l) => l.type);
@@ -1013,12 +995,7 @@ function LayerInspector({
       </div>
       <div className="ms-panel-body">
         {sections.includes('transform') && (
-          <TransformSection
-            selected={selected}
-            dispatch={dispatch}
-            isMulti={isMulti}
-            showDiamonds={showDiamonds}
-          />
+          <TransformSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
         )}
         {sections.includes('text') && (
           <TextSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
@@ -1050,15 +1027,10 @@ function LayerInspector({
   );
 }
 
-export function MotionStudioInspector({
-  document,
-  selectedLayerIds,
-  dispatch,
-  playheadMs = 0,
-}: InspectorProps) {
+export function MotionStudioInspector({ document, selectedLayerIds, dispatch }: InspectorProps) {
   const selected = useSelectedLayers(document, selectedLayerIds);
   if (selected.length === 0) {
     return <SceneInspector document={document} dispatch={dispatch} />;
   }
-  return <LayerInspector selected={selected} dispatch={dispatch} playheadMs={playheadMs} />;
+  return <LayerInspector selected={selected} dispatch={dispatch} />;
 }

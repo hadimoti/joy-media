@@ -1,6 +1,8 @@
 import type { Pool, PoolClient } from 'pg';
 import {
   ControlPlaneError,
+  SHARED_LIBRARY_OWNER_ID,
+  type AssetDeletionResult,
   type AssetLocationRecord,
   type AssetRegistration,
   type Actor,
@@ -169,12 +171,15 @@ export class PostgresControlPlane implements ControlPlane {
 
   async setAssetSync(actor: Actor, projectId: string, enabled: boolean): Promise<ProjectMetadata> {
     assertActor(actor);
-    if (typeof enabled !== 'boolean')
-      throw new ControlPlaneError('ASSET_SYNC_INVALID', 'asset sync enabled must be boolean');
+    if (enabled !== true)
+      throw new ControlPlaneError(
+        'ASSET_SYNC_REQUIRED',
+        'private asset backup is mandatory for JOY Media projects',
+      );
     const result = await this.pool.query<ProjectRow>(
-      `UPDATE projects SET asset_sync_enabled = $3
+      `UPDATE projects SET asset_sync_enabled = true
        WHERE id = $1 AND owner_id = $2 RETURNING *`,
-      [projectId, actor.id, enabled],
+      [projectId, actor.id],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     return projectOf(result.rows[0]);
@@ -291,14 +296,22 @@ export class PostgresControlPlane implements ControlPlane {
     actor: Actor,
     projectId: string,
     assetId: string,
-  ): Promise<{ readonly id: string }> {
+  ): Promise<AssetDeletionResult> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      const existing = await client.query<{ id: string }>(
-        'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2',
+      const existing = await client.query<MediaAssetRow>(
+        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
         [assetId, projectId],
       );
       if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      const derivatives = await client.query<MediaDerivativeRow>(
+        'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
+        [projectId, assetId],
+      );
+      const candidateRefs = new Set([
+        ...privateRefsFromLocations(existing.rows[0].locations),
+        ...derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+      ]);
       await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
         projectId,
         assetId,
@@ -307,7 +320,21 @@ export class PostgresControlPlane implements ControlPlane {
         assetId,
         projectId,
       ]);
-      return { id: assetId };
+      const remainingAssets = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_assets',
+      );
+      const remainingDerivatives = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_derivatives',
+      );
+      const remainingRefs = new Set(
+        [...remainingAssets.rows, ...remainingDerivatives.rows].flatMap((row) =>
+          privateRefsFromLocations(row.locations),
+        ),
+      );
+      return {
+        id: assetId,
+        orphanedPrivateObjectRefs: [...candidateRefs].filter((ref) => !remainingRefs.has(ref)),
+      };
     });
   }
 
@@ -336,29 +363,32 @@ export class PostgresControlPlane implements ControlPlane {
   async sharedCloudAssets(actor: Actor): Promise<readonly MediaAssetRecord[]> {
     assertActor(actor);
     const result = await this.pool.query<MediaAssetRow>(
-      `SELECT * FROM media_assets
-       WHERE EXISTS (
-         SELECT 1 FROM jsonb_array_elements(locations) AS loc
-         WHERE loc->>'kind' = 'private-object'
-       )
-       ORDER BY COALESCE(CASE WHEN sort_name = '' THEN NULL ELSE sort_name END, lower(display_name)), id`,
+      `SELECT a.* FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE p.owner_id = $1
+       ORDER BY COALESCE(CASE WHEN a.sort_name = '' THEN NULL ELSE a.sort_name END, lower(a.display_name)), a.id`,
+      [SHARED_LIBRARY_OWNER_ID],
     );
-    return result.rows.map(mediaAssetOf);
+    return result.rows
+      .map(mediaAssetOf)
+      .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'));
   }
 
   async sharedCloudAsset(actor: Actor, assetId: string): Promise<MediaAssetRecord> {
     assertActor(actor);
     const result = await this.pool.query<MediaAssetRow>(
-      `SELECT * FROM media_assets
-       WHERE id = $1
-         AND EXISTS (
-           SELECT 1 FROM jsonb_array_elements(locations) AS loc
-           WHERE loc->>'kind' = 'private-object'
-         )`,
-      [assetId],
+      `SELECT a.* FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE a.id = $1
+         AND (p.owner_id = $2 OR p.owner_id = $3)`,
+      [assetId, actor.id, SHARED_LIBRARY_OWNER_ID],
     );
-    if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    return mediaAssetOf(result.rows[0]);
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const asset = mediaAssetOf(row);
+    if (!asset.locations.some((location) => location.kind === 'private-object'))
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    return asset;
   }
 
   async registerLocalDerivative(
@@ -1085,6 +1115,16 @@ function jsonArray(value: unknown): readonly unknown[] {
   if (!Array.isArray(value))
     throw new ControlPlaneError('DATABASE_ERROR', 'stored media locations are invalid');
   return value;
+}
+
+function privateRefsFromLocations(value: unknown): string[] {
+  return jsonArray(value).flatMap((entry) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const location = entry as Record<string, unknown>;
+    return location.kind === 'private-object' && typeof location.ref === 'string'
+      ? [location.ref]
+      : [];
+  });
 }
 
 function isFixtureReceipt(

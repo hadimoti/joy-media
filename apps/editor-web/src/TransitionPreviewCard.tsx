@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TransitionShaderEntry } from '@joy-media/transition-shaders';
-import { getTransitionShader } from '@joy-media/transition-shaders';
 
 const TRANSITION_A = '/transitions/preview/transition1.png';
 const TRANSITION_B = '/transitions/preview/transition2.png';
@@ -209,7 +208,6 @@ function drawTransition(
   }
 
   if (id === 'gl:CrossZoom') {
-    const scale = 1 + t * 0.5;
     ctx.globalAlpha = 1 - t;
     ctx.save();
     ctx.translate(w / 2, h / 2);

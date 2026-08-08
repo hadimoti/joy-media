@@ -95,7 +95,7 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
-  it('registers only asset metadata and explicit sync consent through the owner API', async () => {
+  it('registers only asset metadata and the mandatory-sync compatibility call through the owner API', async () => {
     const requests: Array<{ readonly url: string; readonly body?: string }> = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {

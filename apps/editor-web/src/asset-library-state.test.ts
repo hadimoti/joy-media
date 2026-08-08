@@ -18,6 +18,7 @@ const items: readonly AssetLibraryItem[] = [
       bytes: 200,
       descriptor: { mimeType: 'video/mp4' },
       tags: ['category-clips'],
+      cloudBacked: true,
       createdAt: 20,
     },
     derivatives: [
@@ -57,6 +58,7 @@ const items: readonly AssetLibraryItem[] = [
       bytes: 50,
       descriptor: { mimeType: 'image/png' },
       tags: ['category-logo', 'logo'],
+      cloudBacked: false,
       createdAt: 10,
     },
     derivatives: [],
@@ -71,6 +73,7 @@ const items: readonly AssetLibraryItem[] = [
       bytes: 40,
       descriptor: { mimeType: 'image/png' },
       tags: ['joy-media-library', 'category-unknown', 'transparent'],
+      cloudBacked: true,
       createdAt: 9,
     },
     derivatives: [],

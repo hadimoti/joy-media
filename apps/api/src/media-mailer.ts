@@ -58,6 +58,8 @@ export class MediaMailer implements MediaMailerLike {
       port: options.port,
       secure: options.port === 465,
       auth: { user: options.user, pass: options.pass },
+      disableFileAccess: true,
+      disableUrlAccess: true,
     });
     this.from = options.from;
   }
@@ -72,6 +74,8 @@ export class MediaMailer implements MediaMailerLike {
         `Expires in 5 minutes.\n\n` +
         `Do not share this code with anyone.`,
       html: joyStudioOtpHtml(code),
+      disableFileAccess: true,
+      disableUrlAccess: true,
     });
   }
 }

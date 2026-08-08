@@ -26,3 +26,5 @@ export type {
   EditorOverlayIR,
 } from './model.js';
 export { flattenRenderNodes, validateRenderFrameIR } from './model.js';
+export type { TextPlateBounds } from './text-layout.js';
+export { textPlateBounds } from './text-layout.js';

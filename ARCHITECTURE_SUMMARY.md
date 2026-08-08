@@ -1097,8 +1097,10 @@ Project update
 
 ### 10.2 Cloud Integration
 
+- Automatic owner-private original backup through the authenticated API
+- Curated cross-account cloud catalog, isolated from personal backups
+- Reference-counted private-object deletion
 - Cloud rendering
-- Asset synchronization
 - Provider marketplace
 
 ### 10.3 Plugin System

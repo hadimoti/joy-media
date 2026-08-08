@@ -2,6 +2,11 @@
 
 **Status:** done* (live private-media gate passed; repository baseline exceptions remain) · **Gate to enter:** WP-13 complete · **Master plan:** §13, §27, §39 items 27–39
 
+> **Policy update (2026-08-08):** ADR-0031 supersedes the opt-in portions of
+> this historical work package. Imported originals now receive mandatory
+> owner-private backup; only the curated library publisher is cross-account;
+> unreferenced private objects are purged on asset deletion.
+
 **Goal:** turn the WP-13 verified derivative receipt into a real, safely
 resolvable media asset that can be played in the editor without ever exposing a
 local filesystem path, Worker session, pairing code, or original source bytes

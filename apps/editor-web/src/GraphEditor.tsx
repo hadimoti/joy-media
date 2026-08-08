@@ -114,8 +114,9 @@ export function GraphEditor({
       if (interpolation === 'bezier')
         return { ...key, interpolation, bezier: key.bezier ?? defaultBezier() };
       if (interpolation === 'eased') return { ...key, interpolation, bezier: EASED_HANDLES };
-      const { bezier: _drop, ...rest } = key;
-      return { ...rest, interpolation };
+      const next = { ...key };
+      delete next.bezier;
+      return { ...next, interpolation };
     });
     replaceCurve({ keyframes: nextKeys }, `Set ${channel} interpolation → ${interpolation}`);
   };

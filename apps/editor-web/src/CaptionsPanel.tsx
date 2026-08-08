@@ -1,25 +1,21 @@
 import { useRef, useState, type ReactElement } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
-  captionCuesAt,
   captionSlots,
   DEFAULT_CAPTION_TEMPLATE_ID,
   formatSrt,
   formatWebVtt,
   JOY_CAPTION_TEMPLATES,
-  layoutTemplatedCaptionNodes,
   parseSrt,
   parseWebVtt,
   resolveCaptionDirection,
   searchCaptionSegments,
-  segmentDisplayText,
   segmentMinConfidence,
   segmentSourceText,
   segmentTimelineRange,
 } from '@joy-media/captions-core';
 import type { CaptionSlot } from '@joy-media/captions-core';
 import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
-import type { TextNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import {
   AutoCaptionIcon,
@@ -312,7 +308,6 @@ function CaptionSlotEditor({
             range !== undefined &&
             playheadUs >= range.startUs &&
             playheadUs < range.startUs + range.durationUs;
-          const display = segmentDisplayText(document, segment);
           const source = segmentSourceText(document, segment);
           const confidence = segmentMinConfidence(document, segment);
           return (

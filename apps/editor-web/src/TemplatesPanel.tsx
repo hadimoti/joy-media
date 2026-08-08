@@ -10,7 +10,6 @@ import type {
   ContentTemplateV1,
   FirstPartySceneId,
 } from './content-template-types.js';
-import type { EditorSession } from './editor-session.js';
 import { getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
 import {
   createScenePreviewHost,
@@ -23,9 +22,6 @@ import {
 } from '@joy-media/html-scene-runtime/first-party';
 
 interface TemplatesPanelProps {
-  readonly session: EditorSession;
-  readonly selectedClipIds: readonly string[];
-  readonly playheadUs: number;
   readonly onApplyTemplate: (seeded: SeededContentTemplate) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
 }
@@ -43,13 +39,7 @@ const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: str
   { id: 'Effects', iconUrl: iconUrl('ui/motion_24x24.png') },
 ];
 
-export function TemplatesPanel({
-  session,
-  selectedClipIds: _selectedClipIds,
-  playheadUs,
-  onApplyTemplate,
-  showToast,
-}: TemplatesPanelProps) {
+export function TemplatesPanel({ onApplyTemplate, showToast }: TemplatesPanelProps) {
   const [view, setView] = useState<TemplateView>('library');
 
   const handleApplyLibraryTemplate = useCallback(
@@ -86,7 +76,7 @@ export function TemplatesPanel({
       removeTemplate(window.localStorage, id);
       showToast('Template deleted', 'info');
     },
-    [session, showToast],
+    [showToast],
   );
 
   const filteredTemplates = useMemo(() => {

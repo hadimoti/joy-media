@@ -198,9 +198,9 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
         },
       },
     },
-    models: config.modelPath
-      ? [{ id: config.modelPath, displayName: 'Voice Isolation Model' }]
-      : undefined,
+    ...(config.modelPath
+      ? { models: [{ id: config.modelPath, displayName: 'Voice Isolation Model' }] }
+      : {}),
     estimatedResources: {
       estimatedDurationMs: 5000,
       estimatedMemoryMb: isLocal ? 512 : 0,
@@ -230,7 +230,7 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
     secretFields: [],
     privacy: {
       dataLeavesDevice: !isLocal,
-      retentionDisclosure: isLocal ? undefined : 'Audio sent to remote API for processing',
+      ...(!isLocal ? { retentionDisclosure: 'Audio sent to remote API for processing' } : {}),
     },
   };
 

@@ -11,6 +11,6 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0030** (timeline-domain proposals applied through the same single undo, and a snapshot log bounded as part of the write — which also fixes a revision collision introduced by ADR-0028's `saveSnapshot` that silently lost the second of two consecutive document replacements).
+Accepted through **ADR-0031** (automatic owner-private original backup, curated-only cross-account cloud visibility, and reference-counted private-object deletion).
 
-Most recent: **ADR-0029** navigating a workflow graph (flat node groups with a breadcrumb, and keyboard traversal that follows edges and stops rather than wrapping) · **ADR-0030** as above.
+Most recent: **ADR-0030** timeline-domain proposals and bounded snapshots · **ADR-0031** automatic private media backup and curated cloud visibility.

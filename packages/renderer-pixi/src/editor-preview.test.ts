@@ -71,4 +71,31 @@ describe('Pixi editor preview host', () => {
     expect(preview.pixels[0]).toBeGreaterThan(0);
     expect(preview.pixels[(2 * 4 + 0) * 4] ?? preview.pixels[8]).toBeDefined();
   });
+
+  it('paints caption plates behind text glyphs', () => {
+    const frame: RenderFrameIR = {
+      version: 1,
+      compositionId: 'root',
+      timeUs: 0,
+      viewport: { width: 16, height: 8, dpr: 1 },
+      background: { r: 0, g: 0, b: 0, a: 255 },
+      nodes: [
+        {
+          kind: 'text',
+          id: 'caption',
+          text: 'JOY',
+          color: { r: 255, g: 255, b: 255, a: 255 },
+          background: { r: 200, g: 20, b: 30, a: 255 },
+          align: 'left',
+          zIndex: 1,
+          opacity: 1,
+          transform: { translateX: 1, translateY: 1, scaleX: 1, scaleY: 1 },
+        },
+      ],
+    };
+
+    const preview = renderPixiPreview(frame);
+    const platePixel = (1 * frame.viewport.width + 1) * 4;
+    expect([...preview.pixels.slice(platePixel, platePixel + 4)]).toEqual([200, 20, 30, 255]);
+  });
 });

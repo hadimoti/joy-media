@@ -10,7 +10,6 @@ import type { CaptionCommand } from '@joy-media/captions-core';
 import { applyMotionProjectCommand } from '@joy-media/motion-core';
 import type {
   MotionCommand,
-  SetSpatialPathCommand,
   AddEffectCommand,
   RemoveEffectCommand,
   ReorderEffectCommand,

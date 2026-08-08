@@ -5,8 +5,6 @@
  * into DOM/CSS at render time (not stored as raw HTML).
  */
 
-import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
-
 /* ─── Basic units ─── */
 
 export type MotionLayerId = string;

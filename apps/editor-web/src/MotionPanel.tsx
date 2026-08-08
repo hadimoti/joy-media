@@ -581,7 +581,7 @@ function HtmlSceneLiveThumb({
     const mount = mountRef.current;
     const root = rootRef.current;
     if (mount === null || root === null) return;
-    let host: ScenePreviewHost | undefined;
+    const listeners = listenersRef.current;
     let cancelled = false;
     const variables = defaultVariablesForScene(scene.id);
     const viewport = scene.manifest.viewport;
@@ -593,7 +593,7 @@ function HtmlSceneLiveThumb({
       scene.previewFocus,
     );
 
-    host = createScenePreviewHost({
+    const host: ScenePreviewHost = createScenePreviewHost({
       instanceId: `${instancePrefix}-${scene.id}`,
       scene,
       parent: mount,
@@ -604,7 +604,7 @@ function HtmlSceneLiveThumb({
     host.iframe.setAttribute('aria-hidden', 'true');
 
     const onProgress: LiveProgressListener = (progress) => {
-      if (cancelled || host === undefined) return;
+      if (cancelled) return;
       const durationUs = scene.manifest.durationUs;
       const timeUs = Math.max(0, Math.min(durationUs, Math.floor(progress * durationUs)));
       host.update(timeUs, variables);
@@ -613,15 +613,15 @@ function HtmlSceneLiveThumb({
 
     void host.ready.then(() => {
       if (cancelled) return;
-      listenersRef.current.add(onProgress);
+      listeners.add(onProgress);
       onProgress(0.12);
       setReady(true);
     });
 
     return () => {
       cancelled = true;
-      listenersRef.current.delete(onProgress);
-      host?.destroy();
+      listeners.delete(onProgress);
+      host.destroy();
     };
   }, [scene, listenersRef, tileW, tileH, instancePrefix]);
 
@@ -1033,10 +1033,10 @@ export function MotionPanel({
   // box rendered and filtered nothing. PanelShell owns the toggle now and this
   // is the query it feeds.
   const [query, setQuery] = useState('');
-  const [myMotionsTick, setMyMotionsTick] = useState(0);
+  const [, setMyMotionsTick] = useState(0);
 
   const editorContext = useContext(EditorPanelContext);
-  const openMotionStudio = editorContext?.openMotionStudio ?? (() => {});
+  const openMotionStudio = editorContext?.openMotionStudio;
   const motionStudioOpen = editorContext?.motionStudioOpen ?? false;
 
   // The catalog lives in localStorage, written by Motion Studio's own
@@ -1050,16 +1050,16 @@ export function MotionPanel({
     wasMotionStudioOpenRef.current = motionStudioOpen;
   }, [motionStudioOpen]);
 
-  // myMotionsTick is the refresh signal; window.localStorage's identity never changes.
-  const myMotions = useMemo(() => listCatalogScenes(window.localStorage), [myMotionsTick]);
+  // Catalog writes increment state above; each resulting render reads current storage.
+  const myMotions = listCatalogScenes(window.localStorage);
 
   const createMotion = useCallback(() => {
     const scene = createMotionScene(window.localStorage, `Untitled Motion ${myMotions.length + 1}`);
     setMyMotionsTick((tick) => tick + 1);
-    openMotionStudio(scene.id);
+    openMotionStudio?.(scene.id);
   }, [myMotions.length, openMotionStudio]);
 
-  const openMySceneMotion = useCallback((id: string) => openMotionStudio(id), [openMotionStudio]);
+  const openMySceneMotion = useCallback((id: string) => openMotionStudio?.(id), [openMotionStudio]);
 
   const renameMySceneMotion = useCallback((id: string, title: string) => {
     renameMotionScene(window.localStorage, id, title);
@@ -1104,7 +1104,7 @@ export function MotionPanel({
   // same as before. Motion Studio only ever edits its own scene documents.
   const openMotion = useCallback(
     (id: string) => {
-      openMotionStudio(id);
+      openMotionStudio?.(id);
     },
     [openMotionStudio],
   );

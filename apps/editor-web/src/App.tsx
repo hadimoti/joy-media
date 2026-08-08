@@ -1,5 +1,7 @@
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -58,6 +60,12 @@ import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 registerBuiltins();
 
 const CLIP_FRAME_CACHE_LIMIT = 120;
+const MotionStudioShell = lazy(() =>
+  import('./motion-studio/index.js').then((module) => ({ default: module.MotionStudioShell })),
+);
+const EffectStudioShell = lazy(() =>
+  import('./effect-studio/index.js').then((module) => ({ default: module.EffectStudioShell })),
+);
 
 import {
   createBrowserPixiRenderer,
@@ -95,11 +103,11 @@ import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
-import { MotionStudioShell } from './motion-studio/index.js';
-import { EffectStudioShell } from './effect-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import { BrowserControlPlaneClient } from './control-plane-client.js';
+import { importMediaFile } from './media-import.js';
 import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
@@ -226,6 +234,7 @@ function renderFrameOptions(
 
 const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
+const mediaControlPlaneClient = new BrowserControlPlaneClient();
 
 async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> {
   const cache = await originalAssetCachePromise;
@@ -621,10 +630,11 @@ function EditorWorkspace({
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   const toastTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
+    const toastTimers = toastTimersRef.current;
     return () => {
       window.clearTimeout(exportToastTimerRef.current);
-      for (const timer of toastTimersRef.current.values()) window.clearTimeout(timer);
-      toastTimersRef.current.clear();
+      for (const timer of toastTimers.values()) window.clearTimeout(timer);
+      toastTimers.clear();
     };
   }, []);
   useEffect(() => {
@@ -653,8 +663,6 @@ function EditorWorkspace({
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
-  const previewMixerSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const previewMixerBufferRef = useRef<Float32Array | null>(null);
 
   const ensurePreviewAudioGraph = useCallback(() => {
     const video = videoRef.current;
@@ -703,7 +711,7 @@ function EditorWorkspace({
       getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
         ownerKey: controlPlaneOwnerKey,
       }),
-    [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
+    [controlPlaneOwnerKey, session.visualProject],
   );
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
@@ -712,14 +720,25 @@ function EditorWorkspace({
     );
   // WP-15.1/15.2: rebuilt each render so a dry-run/execute always sees the
   // current real timeline, bound to the real command bus above — not a mock.
-  // `buildEditorContext`'s selection/audio fields are pre-existing, unwired
-  // summarizers (always empty); the Agent panel reads real selection/playhead
-  // state directly as props instead, documented in the WP-15 plan.
+  const selectedClipIdSet = new Set(state.selectedIds);
+  const selectedTrackIds =
+    session.timelineProject.compositions[session.timelineProject.rootCompositionId]?.tracks
+      .filter((track) => track.clips.some((clip) => selectedClipIdSet.has(clip.id)))
+      .map((track) => track.id) ?? [];
   const agentContext = buildEditorContext(
     session.timelineProject,
     undefined,
     agentCommandBusRef.current,
-    { liveAudio: audioState },
+    {
+      liveAudio: audioState,
+      creativeProject: session.visualProject,
+      selection: {
+        selectedClipIds: state.selectedIds,
+        selectedTrackIds,
+        playheadUs: state.playheadUs,
+      },
+      recentHistory: session.historyEntries.map((entry) => entry.label),
+    },
   );
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -1033,7 +1052,7 @@ function EditorWorkspace({
     void syncMediaToPlayhead(current.playheadUs, true)
       .then((ready) => setState((active) => ({ ...active, playing: ready })))
       .catch(() => setState((active) => ({ ...active, playing: false })));
-  }, [syncMediaToPlayhead]);
+  }, [ensurePreviewAudioGraph, syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       session.dispatchTimeline(transaction);
@@ -1319,13 +1338,16 @@ function EditorWorkspace({
     [projectId, session],
   );
 
-  const timelineClipIds =
-    session.timelineProject.compositions.root?.tracks.flatMap((track) =>
-      track.clips.map((clip) => clip.id),
-    ) ?? [];
+  const timelineClipIds = useMemo(
+    () =>
+      session.timelineProject.compositions.root?.tracks.flatMap((track) =>
+        track.clips.map((clip) => clip.id),
+      ) ?? [],
+    [session.timelineProject],
+  );
   useEffect(() => {
     setAudioStateRaw((current) => ensureClipAudio(current, timelineClipIds));
-  }, [timelineClipIds.join('|')]);
+  }, [timelineClipIds]);
 
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
@@ -1823,8 +1845,6 @@ function EditorWorkspace({
       const objectsById = session.visualProject.visualObjects as Readonly<
         Record<string, VisualObjectV1>
       >;
-      const clipTimes = compositionV1 ? clipTimesFromTracks(compositionV1.tracks) : undefined;
-      const effectsByObjectId = buildEffectsMap(session.visualProject);
       const buildFrame = (timeUs: number) => {
         const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
           (object) => ({
@@ -2099,7 +2119,15 @@ function EditorWorkspace({
     } finally {
       setExporting(false);
     }
-  }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
+  }, [
+    audioState.buses,
+    audioState.clips,
+    exportPreset,
+    exporting,
+    recordExportEntry,
+    session,
+    syncStickerBitmaps,
+  ]);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
     setAgentPanelCommand((current) => ({
       serial: (current?.serial ?? 0) + 1,
@@ -2359,6 +2387,16 @@ function EditorWorkspace({
                 artifacts: context.artifacts,
                 onDispatchArtifacts: context.dispatchArtifacts,
               })}
+          onOpenAssetLibrary={() => context.activatePanel('media')}
+          onImportMedia={(file) =>
+            importMediaFile({
+              projectId: controlPlaneProject.controlPlaneProjectId,
+              projectTitle: controlPlaneProject.title,
+              file,
+              client: mediaControlPlaneClient,
+              originalAssetCache: originalAssetCachePromise,
+            })
+          }
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
@@ -2389,7 +2427,7 @@ function EditorWorkspace({
               commands: [{ type: 'marker.remove', payload: { markerId: id } }],
             })
           }
-          onEffectDrop={(effectId, clipId, trackId) => {
+          onEffectDrop={(effectId, clipId, _trackId) => {
             context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
@@ -2601,9 +2639,6 @@ function EditorWorkspace({
     if (api.id === 'templates') {
       return (
         <TemplatesPanel
-          session={context.session}
-          selectedClipIds={state.selectedIds}
-          playheadUs={state.playheadUs}
           onApplyTemplate={(seeded) => {
             buildContentTemplateTransaction(seeded, {
               session: context.session,
@@ -2612,9 +2647,7 @@ function EditorWorkspace({
             });
             setRevision((r) => r + 1);
           }}
-          showToast={(message, kind) => {
-            console.log(`[Templates] ${kind}: ${message}`);
-          }}
+          showToast={context.showToast}
         />
       );
     }
@@ -2874,10 +2907,6 @@ function EditorWorkspace({
                 {joySession.kind === 'ready' && (
                   <>
                     <div className="account-card">
-                      {(() => {
-                        const label = joySession.displayName ?? joySession.subject;
-                        return null;
-                      })()}
                       <div className="account-card-avatar" aria-hidden="true">
                         {joySession.avatarObjectUrl !== undefined ? (
                           <img
@@ -3034,58 +3063,62 @@ function EditorWorkspace({
         />
       </EditorPanelContext.Provider>
       {motionStudioSceneId !== undefined && (
-        <MotionStudioShell
-          key={motionStudioSceneId}
-          sceneId={motionStudioSceneId}
-          onClose={() => setMotionStudioSceneId(undefined)}
-        />
+        <Suspense fallback={null}>
+          <MotionStudioShell
+            key={motionStudioSceneId}
+            sceneId={motionStudioSceneId}
+            onClose={() => setMotionStudioSceneId(undefined)}
+          />
+        </Suspense>
       )}
       {effectStudioSession !== undefined && (
-        <EffectStudioShell
-          key={effectStudioSession.recipeId}
-          recipeId={effectStudioSession.recipeId}
-          canApply={
-            effectStudioSession.objectId !== undefined ||
-            resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
-          }
-          onApply={(effects) => {
-            const objectId =
-              effectStudioSession.objectId ??
-              resolveObjectIdForSelection(session.visualProject, state.selectedIds);
-            if (objectId === undefined) {
-              showToast('Select a clip to apply the recipe.', 'info');
-              return;
+        <Suspense fallback={null}>
+          <EffectStudioShell
+            key={effectStudioSession.recipeId}
+            recipeId={effectStudioSession.recipeId}
+            canApply={
+              effectStudioSession.objectId !== undefined ||
+              resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
             }
-            const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
-            const commands = [
-              ...existing.map((effect) => ({
-                type: 'effect.remove' as const,
-                payload: { objectId, effectInstanceId: effect.id },
-              })),
-              ...effects
-                .filter((effect) => effect.enabled)
-                .map((effect) => ({
-                  type: 'effect.add' as const,
-                  payload: {
-                    objectId,
-                    effectId: effect.effectId,
-                    params: effect.params,
-                  },
+            onApply={(effects) => {
+              const objectId =
+                effectStudioSession.objectId ??
+                resolveObjectIdForSelection(session.visualProject, state.selectedIds);
+              if (objectId === undefined) {
+                showToast('Select a clip to apply the recipe.', 'info');
+                return;
+              }
+              const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
+              const commands = [
+                ...existing.map((effect) => ({
+                  type: 'effect.remove' as const,
+                  payload: { objectId, effectInstanceId: effect.id },
                 })),
-            ];
-            if (commands.length === 0) {
-              showToast('This recipe has no active effects to apply.', 'info');
-              return;
-            }
-            dispatchProject({
-              label: 'Apply Effect Recipe',
-              commands,
-            } as unknown as VisualObjectTransaction);
-            showToast('Effect recipe applied to the clip.', 'success');
-            setEffectStudioSession(undefined);
-          }}
-          onClose={() => setEffectStudioSession(undefined)}
-        />
+                ...effects
+                  .filter((effect) => effect.enabled)
+                  .map((effect) => ({
+                    type: 'effect.add' as const,
+                    payload: {
+                      objectId,
+                      effectId: effect.effectId,
+                      params: effect.params,
+                    },
+                  })),
+              ];
+              if (commands.length === 0) {
+                showToast('This recipe has no active effects to apply.', 'info');
+                return;
+              }
+              dispatchProject({
+                label: 'Apply Effect Recipe',
+                commands,
+              } as unknown as VisualObjectTransaction);
+              showToast('Effect recipe applied to the clip.', 'success');
+              setEffectStudioSession(undefined);
+            }}
+            onClose={() => setEffectStudioSession(undefined)}
+          />
+        </Suspense>
       )}
       {agentSettingsOpen && (
         <AgentSettingsDialog

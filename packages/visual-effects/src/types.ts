@@ -1,3 +1,5 @@
+import type { AnimationCurveV1 } from '@joy-media/project-schema';
+
 export type EffectParamValue =
   | number
   | string
@@ -53,9 +55,7 @@ export interface EffectInstanceV1 {
   readonly effectId: string;
   readonly enabled: boolean;
   readonly params: Readonly<Record<string, EffectParamValue>>;
-  readonly animations?: Readonly<
-    Partial<Record<string, import('@joy-media/project-schema').AnimationCurveV1>>
-  >;
+  readonly animations?: Readonly<Partial<Record<string, AnimationCurveV1>>>;
   readonly label?: string;
 }
 

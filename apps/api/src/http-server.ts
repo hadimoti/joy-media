@@ -5,7 +5,10 @@ import {
   type Actor,
   type AssetRegistration,
   type ControlPlane,
+  type Job,
   type LocalDerivativeRegistration,
+  type MediaAssetRecord,
+  type MediaDerivativeRecord,
 } from './control-plane.js';
 import {
   DisabledMediaAuth,
@@ -204,27 +207,22 @@ async function route(
         },
         bytes,
       );
-      try {
-        const derivative = await options.controlPlane.registerWorkerCloudDerivative(
-          decodeURIComponent(workerId),
-          decodeURIComponent(workerDerivativeUploadMatch[2]!),
-          {
-            id: `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}`,
-            assetId: receipt.assetId,
-            kind: 'thumbnail',
-            profile: 'jpeg-640',
-            sha256: receipt.sha256,
-            bytes: receipt.bytes,
-            descriptor: receipt.descriptor,
-            availability: 'available-cloud',
-            locations: [{ kind: 'private-object', ref }],
-          },
-        );
-        respondJson(response, 201, { data: derivative });
-      } catch (error) {
-        await store.remove(ref).catch(() => undefined);
-        throw error;
-      }
+      const derivative = await options.controlPlane.registerWorkerCloudDerivative(
+        decodeURIComponent(workerId),
+        decodeURIComponent(workerDerivativeUploadMatch[2]!),
+        {
+          id: `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}`,
+          assetId: receipt.assetId,
+          kind: 'thumbnail',
+          profile: 'jpeg-640',
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          descriptor: receipt.descriptor,
+          availability: 'available-cloud',
+          locations: [{ kind: 'private-object', ref }],
+        },
+      );
+      respondJson(response, 201, { data: derivativeForBrowser(derivative) });
       return;
     }
     respondJson(response, 200, {
@@ -312,12 +310,14 @@ async function route(
   }
 
   if (request.method === 'GET' && url.pathname === '/v1/library/cloud-assets') {
-    respondJson(response, 200, { data: await options.controlPlane.sharedCloudAssets(actor) });
+    const assets = await options.controlPlane.sharedCloudAssets(actor);
+    respondJson(response, 200, { data: assets.map(assetForBrowser) });
     return;
   }
 
   if (request.method === 'GET' && url.pathname === '/v1/library/my-assets') {
-    respondJson(response, 200, { data: await options.controlPlane.assetsForOwner(actor) });
+    const assets = await options.controlPlane.assetsForOwner(actor);
+    respondJson(response, 200, { data: assets.map(assetForBrowser) });
     return;
   }
 
@@ -530,31 +530,48 @@ async function route(
 
   const assetMatch = /^\/v1\/projects\/([^/]+)\/assets$/.exec(url.pathname);
   if (request.method === 'GET' && assetMatch !== null) {
+    const assets = await options.controlPlane.assetsForProject(
+      actor,
+      decodeURIComponent(assetMatch[1]!),
+    );
     respondJson(response, 200, {
-      data: await options.controlPlane.assetsForProject(actor, decodeURIComponent(assetMatch[1]!)),
+      data: assets.map(assetForBrowser),
     });
     return;
   }
   if (request.method === 'POST' && assetMatch !== null) {
     const body = await readJson(request);
+    const asset = await options.controlPlane.registerAsset(
+      actor,
+      decodeURIComponent(assetMatch[1]!),
+      assetRegistration(body),
+    );
     respondJson(response, 201, {
-      data: await options.controlPlane.registerAsset(
-        actor,
-        decodeURIComponent(assetMatch[1]!),
-        assetRegistration(body),
-      ),
+      data: assetForBrowser(asset),
     });
     return;
   }
 
   const assetByIdMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)$/.exec(url.pathname);
   if (request.method === 'DELETE' && assetByIdMatch !== null) {
+    const deleted = await options.controlPlane.deleteAsset(
+      actor,
+      decodeURIComponent(assetByIdMatch[1]!),
+      decodeURIComponent(assetByIdMatch[2]!),
+    );
+    let cloudObjectsPurged = 0;
+    let cloudObjectPurgeFailures = 0;
+    for (const ref of deleted.orphanedPrivateObjectRefs) {
+      try {
+        if (options.privateObjectStore === undefined) throw new Error('private store unavailable');
+        await options.privateObjectStore.remove(ref);
+        cloudObjectsPurged += 1;
+      } catch {
+        cloudObjectPurgeFailures += 1;
+      }
+    }
     respondJson(response, 200, {
-      data: await options.controlPlane.deleteAsset(
-        actor,
-        decodeURIComponent(assetByIdMatch[1]!),
-        decodeURIComponent(assetByIdMatch[2]!),
-      ),
+      data: { id: deleted.id, cloudObjectsPurged, cloudObjectPurgeFailures },
     });
     return;
   }
@@ -599,36 +616,30 @@ async function route(
     await options.controlPlane.setAssetSync(actor, projectId, true);
     const ref = `orig-${asset.sha256.slice(0, 32)}`;
     await store.put({ ref, sha256: asset.sha256, bytes: asset.bytes, mimeType }, bytes);
-    try {
-      const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
-      const tagged = await tagAssetWithHermes({
-        kind: asset.kind,
-        displayName: asset.displayName,
-        mimeType: asset.descriptor.mimeType,
-        bytes: asset.bytes,
-        ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
-        ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
-        ...(asset.kind === 'image' ? { imageBytes: bytes } : {}),
-      });
-      let updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
-        kind: 'private-object',
-        ref,
-      });
-      updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
-        tags: tagged.tags,
-        sortName: tagged.sortName,
-      });
-      respondJson(response, 201, {
-        data: {
-          asset: updated,
-          cloudRef: ref,
-          tagProvenance: tagged.provenance,
-        },
-      });
-    } catch (error) {
-      await store.remove(ref).catch(() => undefined);
-      throw error;
-    }
+    const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
+    const tagged = await tagAssetWithHermes({
+      kind: asset.kind,
+      displayName: asset.displayName,
+      mimeType: asset.descriptor.mimeType,
+      bytes: asset.bytes,
+      ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
+      ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
+      ...(asset.kind === 'image' ? { imageBytes: bytes } : {}),
+    });
+    let updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
+      kind: 'private-object',
+      ref,
+    });
+    updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+      tags: tagged.tags,
+      sortName: tagged.sortName,
+    });
+    respondJson(response, 201, {
+      data: {
+        asset: assetForBrowser(updated),
+        tagProvenance: tagged.provenance,
+      },
+    });
     return;
   }
 
@@ -642,18 +653,17 @@ async function route(
       : undefined;
     const sortName = typeof body.sortName === 'string' ? body.sortName : undefined;
     const displayName = typeof body.displayName === 'string' ? body.displayName : undefined;
-    respondJson(response, 200, {
-      data: await options.controlPlane.updateAssetMetadata(
-        actor,
-        decodeURIComponent(assetMetadataMatch[1]!),
-        decodeURIComponent(assetMetadataMatch[2]!),
-        {
-          ...(tags !== undefined ? { tags } : {}),
-          ...(sortName !== undefined ? { sortName } : {}),
-          ...(displayName !== undefined ? { displayName } : {}),
-        },
-      ),
-    });
+    const asset = await options.controlPlane.updateAssetMetadata(
+      actor,
+      decodeURIComponent(assetMetadataMatch[1]!),
+      decodeURIComponent(assetMetadataMatch[2]!),
+      {
+        ...(tags !== undefined ? { tags } : {}),
+        ...(sortName !== undefined ? { sortName } : {}),
+        ...(displayName !== undefined ? { displayName } : {}),
+      },
+    );
+    respondJson(response, 200, { data: assetForBrowser(asset) });
     return;
   }
 
@@ -673,12 +683,11 @@ async function route(
       ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
       ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
     });
-    respondJson(response, 200, {
-      data: await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
-        tags: tagged.tags,
-        sortName: tagged.sortName,
-      }),
+    const updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+      tags: tagged.tags,
+      sortName: tagged.sortName,
     });
+    respondJson(response, 200, { data: assetForBrowser(updated) });
     return;
   }
 
@@ -686,12 +695,13 @@ async function route(
     url.pathname,
   );
   if (request.method === 'GET' && derivativeMatch !== null) {
+    const derivatives = await options.controlPlane.derivativesForAsset(
+      actor,
+      decodeURIComponent(derivativeMatch[1]!),
+      decodeURIComponent(derivativeMatch[2]!),
+    );
     respondJson(response, 200, {
-      data: await options.controlPlane.derivativesForAsset(
-        actor,
-        decodeURIComponent(derivativeMatch[1]!),
-        decodeURIComponent(derivativeMatch[2]!),
-      ),
+      data: derivatives.map(derivativeForBrowser),
     });
     return;
   }
@@ -700,74 +710,73 @@ async function route(
     const derivative = localDerivativeRegistration(body);
     if (derivative.assetId !== decodeURIComponent(derivativeMatch[2]!))
       throw new ControlPlaneError('REQUEST_INVALID', 'derivative assetId must match the route');
+    const registered = await options.controlPlane.registerLocalDerivative(
+      actor,
+      decodeURIComponent(derivativeMatch[1]!),
+      derivative,
+    );
     respondJson(response, 201, {
-      data: await options.controlPlane.registerLocalDerivative(
-        actor,
-        decodeURIComponent(derivativeMatch[1]!),
-        derivative,
-      ),
+      data: derivativeForBrowser(registered),
     });
     return;
   }
 
   const jobMatch = /^\/v1\/projects\/([^/]+)\/jobs$/.exec(url.pathname);
   if (request.method === 'GET' && jobMatch !== null) {
+    const jobs = await options.controlPlane.jobsForProject(actor, decodeURIComponent(jobMatch[1]!));
     respondJson(response, 200, {
-      data: await options.controlPlane.jobsForProject(actor, decodeURIComponent(jobMatch[1]!)),
+      data: jobs.map(jobForBrowser),
     });
     return;
   }
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
     const type = requiredString(body, 'type');
-    respondJson(response, 201, {
-      data:
-        type === 'asset.thumbnail'
-          ? await options.controlPlane.enqueueAssetThumbnail(
+    const job =
+      type === 'asset.thumbnail'
+        ? await options.controlPlane.enqueueAssetThumbnail(
+            actor,
+            requiredString(body, 'id'),
+            decodeURIComponent(jobMatch[1]!),
+            requiredString(body, 'assetId'),
+          )
+        : type === 'image.comfy' || type === 'audio.ml-denoise'
+          ? await options.controlPlane.enqueue(
               actor,
               requiredString(body, 'id'),
               decodeURIComponent(jobMatch[1]!),
+              type,
+              Date.now(),
               requiredString(body, 'assetId'),
             )
-          : type === 'image.comfy' || type === 'audio.ml-denoise'
-            ? await options.controlPlane.enqueue(
-                actor,
-                requiredString(body, 'id'),
-                decodeURIComponent(jobMatch[1]!),
-                type,
-                Date.now(),
-                requiredString(body, 'assetId'),
-              )
-            : await options.controlPlane.enqueue(
-                actor,
-                requiredString(body, 'id'),
-                decodeURIComponent(jobMatch[1]!),
-                type,
-              ),
-    });
+          : await options.controlPlane.enqueue(
+              actor,
+              requiredString(body, 'id'),
+              decodeURIComponent(jobMatch[1]!),
+              type,
+            );
+    respondJson(response, 201, { data: jobForBrowser(job) });
     return;
   }
 
   const cancelMatch = /^\/v1\/projects\/([^/]+)\/jobs\/([^/]+)\/cancel$/.exec(url.pathname);
   if (request.method === 'POST' && cancelMatch !== null) {
-    respondJson(response, 200, {
-      data: await options.controlPlane.cancel(
-        actor,
-        decodeURIComponent(cancelMatch[1]!),
-        decodeURIComponent(cancelMatch[2]!),
-      ),
-    });
+    const job = await options.controlPlane.cancel(
+      actor,
+      decodeURIComponent(cancelMatch[1]!),
+      decodeURIComponent(cancelMatch[2]!),
+    );
+    respondJson(response, 200, { data: jobForBrowser(job) });
     return;
   }
   const retryMatch = /^\/v1\/projects\/([^/]+)\/jobs\/([^/]+)\/retry$/.exec(url.pathname);
   if (request.method === 'POST' && retryMatch !== null) {
-    respondJson(response, 200, {
-      data: await options.controlPlane.retry(
-        actor,
-        decodeURIComponent(retryMatch[1]!),
-        decodeURIComponent(retryMatch[2]!),
-      ),
-    });
+    const job = await options.controlPlane.retry(
+      actor,
+      decodeURIComponent(retryMatch[1]!),
+      decodeURIComponent(retryMatch[2]!),
+    );
+    respondJson(response, 200, { data: jobForBrowser(job) });
     return;
   }
 
@@ -1054,6 +1063,64 @@ function optionalCursor(value: string | null): number {
   if (!Number.isSafeInteger(cursor) || cursor < 0)
     throw new ControlPlaneError('REQUEST_INVALID', 'cursor must be a non-negative integer');
   return cursor;
+}
+
+function assetForBrowser(asset: MediaAssetRecord) {
+  return {
+    id: asset.id,
+    projectId: asset.projectId,
+    kind: asset.kind,
+    displayName: asset.displayName,
+    sha256: asset.sha256,
+    bytes: asset.bytes,
+    descriptor: asset.descriptor,
+    tags: asset.tags,
+    sortName: asset.sortName,
+    createdAt: asset.createdAt,
+    cloudBacked: asset.locations.some((location) => location.kind === 'private-object'),
+  };
+}
+
+function derivativeForBrowser(derivative: MediaDerivativeRecord) {
+  return {
+    id: derivative.id,
+    projectId: derivative.projectId,
+    assetId: derivative.assetId,
+    kind: derivative.kind,
+    profile: derivative.profile,
+    sha256: derivative.sha256,
+    bytes: derivative.bytes,
+    descriptor: derivative.descriptor,
+    availability: derivative.availability,
+    verifiedAt: derivative.verifiedAt,
+  };
+}
+
+function jobForBrowser(job: Job) {
+  const derivative = job.derivative;
+  return {
+    id: job.id,
+    projectId: job.projectId,
+    type: job.type,
+    state: job.state,
+    progress: job.progress,
+    cancelRequested: job.cancelRequested,
+    ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+    ...(job.error === undefined ? {} : { error: job.error }),
+    ...(derivative === undefined
+      ? {}
+      : {
+          derivative: {
+            jobId: derivative.jobId,
+            kind: derivative.kind,
+            sha256: derivative.sha256,
+            bytes: derivative.bytes,
+            workerRef: derivative.workerRef,
+            resultRef: derivative.resultRef,
+            verifiedAt: derivative.verifiedAt,
+          },
+        }),
+  };
 }
 
 function assetRegistration(body: Record<string, unknown>): AssetRegistration {

@@ -52,6 +52,8 @@ export interface CostEstimate {
 export interface ToolResult {
   readonly success: boolean;
   readonly stableIds?: readonly string[];
+  /** Structured query/analysis payload. Must remain JSON-serializable. */
+  readonly data?: JsonValue;
   readonly diff?: ToolDiff;
   readonly warnings?: readonly string[];
   readonly error?: string;
@@ -66,4 +68,4 @@ export interface ToolDiff {
 
 export type JsonSchema = Record<string, unknown>;
 export type JsonValue =
-  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+  string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };

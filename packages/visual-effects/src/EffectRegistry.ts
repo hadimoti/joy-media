@@ -2,7 +2,6 @@ import type {
   EffectDescriptor,
   EffectParamDescriptor,
   EffectParamType,
-  EffectParamValue,
   EffectRegistry,
   EffectRegistryEntry,
 } from './types.js';

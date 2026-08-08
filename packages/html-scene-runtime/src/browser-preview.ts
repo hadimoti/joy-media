@@ -10,7 +10,7 @@ import {
   ScenePreviewSession,
   validateScenePreviewEvent,
 } from './preview-protocol.js';
-import type { ScenePreviewSurface } from './preview-protocol.js';
+import type { ScenePreviewMessage, ScenePreviewSurface } from './preview-protocol.js';
 import { resolveSceneVariables } from './variables.js';
 
 export interface SceneSurfaceBitmap {
@@ -149,10 +149,7 @@ export function createScenePreviewHost(options: {
   parent.appendChild(iframe);
 
   const sessionEndpoint = {
-    postMessage(
-      message: import('./preview-protocol.js').ScenePreviewMessage,
-      _targetOrigin: '*',
-    ): void {
+    postMessage(message: ScenePreviewMessage, _targetOrigin: '*'): void {
       iframe.contentWindow?.postMessage(message, '*');
     },
   };

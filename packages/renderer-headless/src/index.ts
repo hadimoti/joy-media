@@ -6,7 +6,7 @@
  */
 
 import type { RenderFrameIR, Rgba, VisualRenderNode, EffectInstanceIR } from '@joy-media/render-ir';
-import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
 import { applyCreativeEffect } from './creative-effects.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
@@ -96,12 +96,24 @@ function drawTextRaw(
   height: number,
   node: Extract<VisualRenderNode, { kind: 'text' }>,
 ): void {
+  const textWidth = node.text.length * 4;
+  const textBounds = textPlateBounds(textWidth, 5, node.align);
+  const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
   rasterizeRaw(pixels, width, height, node, (u, v) => {
-    const glyphColumn = Math.floor(u) % 4;
-    const characterIndex = Math.floor(Math.floor(u) / 4);
-    return bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))
-      ? node.color
-      : undefined;
+    const textX = Math.floor(u - textBounds.x);
+    const glyphColumn = textX % 4;
+    const characterIndex = Math.floor(textX / 4);
+    if (bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))) return node.color;
+    if (
+      node.background !== undefined &&
+      u >= plateBounds.x &&
+      u < plateBounds.x + plateBounds.width &&
+      v >= plateBounds.y &&
+      v < plateBounds.y + plateBounds.height
+    ) {
+      return node.background;
+    }
+    return undefined;
   });
 }
 

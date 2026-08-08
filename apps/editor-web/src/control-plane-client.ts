@@ -13,6 +13,7 @@ export interface BrowserJob {
   readonly id: string;
   readonly projectId: string;
   readonly type: string;
+  readonly assetId?: string;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly progress: number;
   readonly cancelRequested: boolean;
@@ -40,6 +41,7 @@ export interface BrowserAsset {
   readonly tags?: readonly string[];
   readonly sortName?: string;
   readonly createdAt: number;
+  readonly cloudBacked: boolean;
 }
 
 export interface BrowserMediaDescriptor {
@@ -100,7 +102,7 @@ export class BrowserControlPlaneClient {
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
   }
-  /** Shared cloud library visible to any logged-in Joy user (private-object originals). */
+  /** Curated service-published cloud library visible to entitled Joy users. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
     return this.get('/v1/library/cloud-assets');
   }
@@ -115,7 +117,7 @@ export class BrowserControlPlaneClient {
     );
     return data.providers;
   }
-  /** Fetch cloud-backed original bytes for any logged-in Joy user. */
+  /** Fetch a curated original or a cloud-backed original owned by this identity. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
     const token = await this.assertion();
     const response = await fetch(
@@ -142,8 +144,15 @@ export class BrowserControlPlaneClient {
   async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
   }
-  /** Owner-only hard delete of catalog asset metadata (and derivative rows). */
-  async deleteAsset(projectId: string, assetId: string): Promise<{ readonly id: string }> {
+  /** Owner-only hard delete with reference-counted private-object cleanup. */
+  async deleteAsset(
+    projectId: string,
+    assetId: string,
+  ): Promise<{
+    readonly id: string;
+    readonly cloudObjectsPurged: number;
+    readonly cloudObjectPurgeFailures: number;
+  }> {
     return this.request(
       `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
       {

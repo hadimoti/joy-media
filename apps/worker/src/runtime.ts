@@ -21,7 +21,6 @@ import {
   type LocalGpuReceipt,
 } from './local-gpu.js';
 import {
-  loadAiProviderConfigs,
   runAiJob,
   getConfiguredProviders,
   type LocalAiReceipt,

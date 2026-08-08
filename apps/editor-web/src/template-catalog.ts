@@ -11,7 +11,6 @@
  */
 
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import type { ContentTemplateV1 } from './content-template-types.js';
 
 export const TEMPLATE_CATALOG_KEY = 'joy-media.template-catalog.v1';
 

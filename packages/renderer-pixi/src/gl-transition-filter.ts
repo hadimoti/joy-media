@@ -2,7 +2,8 @@
  * Pixi v8 Filter adapter for curated gl-transitions shaders.
  */
 
-import { Filter, GlProgram, Texture } from 'pixi.js';
+import type { Texture } from 'pixi.js';
+import { Filter, GlProgram } from 'pixi.js';
 import {
   buildPixiTransitionFragment,
   getTransitionShader,

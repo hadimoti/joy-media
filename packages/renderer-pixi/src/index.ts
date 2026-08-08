@@ -20,7 +20,7 @@ import type {
   TransitionNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
-import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
 import {
   applyColorGradeToPixels,
   applyCpuEffectsToColor,
@@ -123,13 +123,27 @@ function paintText(
   node: Extract<VisualRenderNode, { kind: 'text' }>,
   effects: readonly EffectInstanceIR[] | undefined,
 ): void {
+  const textWidth = node.text.length * 4;
+  const textBounds = textPlateBounds(textWidth, 5, node.align);
+  const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
-    const x = Math.floor(localX);
+    const x = Math.floor(localX - textBounds.x);
     const y = Math.floor(localY);
     const character = Math.floor(x / 4);
     const glyphX = x % 4;
-    if (!glyph(node.text[character] ?? ' ', glyphX, y)) return null;
-    return applyCpuEffectsToColor(node.color, effects, localX, localY);
+    if (glyph(node.text[character] ?? ' ', glyphX, y)) {
+      return applyCpuEffectsToColor(node.color, effects, localX, localY);
+    }
+    if (
+      node.background !== undefined &&
+      localX >= plateBounds.x &&
+      localX < plateBounds.x + plateBounds.width &&
+      localY >= plateBounds.y &&
+      localY < plateBounds.y + plateBounds.height
+    ) {
+      return applyCpuEffectsToColor(node.background, effects, localX, localY);
+    }
+    return null;
   });
 }
 

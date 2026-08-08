@@ -533,15 +533,15 @@ export function buildEmptyCanvasContextMenu(
 }
 
 export function buildTrackHeaderContextMenu(
-  trackId: string,
   onAddTrack: () => void,
   onRemoveTrack: () => void,
   onToggleEnabled: (enabled: boolean) => void,
   currentEnabled: boolean,
+  canRemove: boolean,
 ): readonly ContextMenuItem[] {
   return [
     { label: 'Add Video Track', shortcut: 'T', action: onAddTrack },
-    { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: true }, // TODO
+    { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: !canRemove },
     { label: '', action: () => {}, dividerBefore: true },
     {
       label: currentEnabled ? 'Disable Track' : 'Enable Track',

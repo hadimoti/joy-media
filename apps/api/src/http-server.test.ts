@@ -2,7 +2,14 @@ import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LocalControlPlane } from './control-plane.js';
+import {
+  ControlPlaneError,
+  LocalControlPlane,
+  type Actor,
+  type AssetLocationRecord,
+  type ControlPlane,
+  type MediaAssetRecord,
+} from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
@@ -168,7 +175,7 @@ describe('control-plane HTTP transport', () => {
     const metadata = await request(origin, 'GET', '/v1/projects/p/assets/asset-1/derivatives');
     expect(metadata).toMatchObject({ status: 200, body: { data: [{ id: 'derivative-1' }] } });
     expect(JSON.stringify(metadata.body)).not.toMatch(
-      /path|pairing|session|access_token|https?:\/\//i,
+      /path|locations|opfs-|pairing|session|access_token|https?:\/\//i,
     );
     expect(
       await request(origin, 'POST', '/v1/projects/p/assets', {
@@ -297,10 +304,12 @@ describe('control-plane HTTP transport', () => {
     });
     const serializedCompletion = JSON.stringify(completion.body);
     expect(serializedCompletion).not.toMatch(/path|pairing|session|access_token|\\bbytesData\\b/i);
-    expect(await request(origin, 'GET', '/v1/projects/p/jobs')).toMatchObject({
+    const jobs = await request(origin, 'GET', '/v1/projects/p/jobs');
+    expect(jobs).toMatchObject({
       status: 200,
       body: { data: [{ id: 'j', state: 'completed' }] },
     });
+    expect(JSON.stringify(jobs.body)).not.toMatch(/localRef|locations|opfs-/i);
     const events = await request(origin, 'GET', '/v1/projects/p/events?cursor=0');
     expect(events.status).toBe(200);
     expect(
@@ -320,7 +329,7 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
-  it('backs up a registered video original through private storage and shared cloud content', async () => {
+  it('backs up an owner-only original and purges its unreferenced cloud object on delete', async () => {
     const store = new MemoryPrivateObjectStore();
     const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
     const bytes = new TextEncoder().encode('verified video bytes');
@@ -347,9 +356,11 @@ describe('control-plane HTTP transport', () => {
     });
 
     expect(upload.status).toBe(201);
-    expect(await upload.json()).toMatchObject({
-      data: { asset: { id: 'video-1', kind: 'video' } },
+    const uploadBody = await upload.json();
+    expect(uploadBody).toMatchObject({
+      data: { asset: { id: 'video-1', kind: 'video', cloudBacked: true } },
     });
+    expect(JSON.stringify(uploadBody)).not.toMatch(/cloudRef|locations|orig-/i);
     expect(store.objects).toHaveLength(1);
     expect(store.objects[0]?.descriptor).toMatchObject({
       mimeType: 'video/mp4',
@@ -360,6 +371,61 @@ describe('control-plane HTTP transport', () => {
     expect(content.status).toBe(200);
     expect(content.headers.get('content-type')).toBe('video/mp4');
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(bytes);
+    expect(await request(origin, 'GET', '/v1/library/cloud-assets')).toMatchObject({
+      status: 200,
+      body: { data: [] },
+    });
+
+    expect(await request(origin, 'DELETE', '/v1/projects/p/assets/video-1')).toMatchObject({
+      status: 200,
+      body: {
+        data: { id: 'video-1', cloudObjectsPurged: 1, cloudObjectPurgeFailures: 0 },
+      },
+    });
+    expect(store.objects).toHaveLength(0);
+    expect(store.removed).toHaveLength(1);
+  });
+
+  it('does not purge shared content-addressed bytes when a later metadata attach fails', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      store,
+      undefined,
+      new FailingSecondAttachControlPlane(),
+    );
+    const bytes = new TextEncoder().encode('shared verified bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    for (const id of ['video-1', 'video-2']) {
+      await request(origin, 'POST', '/v1/projects/p/assets', {
+        id,
+        kind: 'video',
+        displayName: `${id}.mp4`,
+        sha256,
+        bytes: bytes.byteLength,
+        descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+        locations: [{ kind: 'opfs-cache', ref: `opfs-${id}` }],
+      });
+    }
+
+    const upload = (id: string) =>
+      fetch(`${origin}/v1/projects/p/assets/${id}/original`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'video/mp4',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.byteLength),
+        },
+        body: bytes,
+      });
+
+    expect((await upload('video-1')).status).toBe(201);
+    expect((await upload('video-2')).status).toBe(409);
+    expect(store.removed).toEqual([]);
+    const firstContent = await fetch(`${origin}/v1/library/cloud-assets/video-1/content`);
+    expect(firstContent.status).toBe(200);
+    expect(new Uint8Array(await firstContent.arrayBuffer())).toEqual(bytes);
   });
 
   it('brokers a Worker thumbnail through private storage by default, then streams verified bytes to the owner', async () => {
@@ -440,9 +506,10 @@ async function start(
   authentication: ApiAuthentication,
   privateObjectStore?: PrivateObjectStore,
   mistral?: MistralProviderRegistry,
+  controlPlane: ControlPlane = new LocalControlPlane(),
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
-    controlPlane: new LocalControlPlane(),
+    controlPlane,
     authentication,
     mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
@@ -464,7 +531,12 @@ class MemoryPrivateObjectStore implements PrivateObjectStore {
   readonly removed: string[] = [];
 
   async put(descriptor: PrivateObjectDescriptor, bytes: Uint8Array): Promise<void> {
-    this.objects.push({ descriptor, bytes });
+    const index = this.objects.findIndex(
+      (candidate) => candidate.descriptor.ref === descriptor.ref,
+    );
+    const object = { descriptor, bytes };
+    if (index < 0) this.objects.push(object);
+    else this.objects.splice(index, 1, object);
   }
   async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
     const object = this.objects.find((candidate) => candidate.descriptor.ref === descriptor.ref);
@@ -475,6 +547,20 @@ class MemoryPrivateObjectStore implements PrivateObjectStore {
     this.removed.push(ref);
     const index = this.objects.findIndex((candidate) => candidate.descriptor.ref === ref);
     if (index >= 0) this.objects.splice(index, 1);
+  }
+}
+
+class FailingSecondAttachControlPlane extends LocalControlPlane {
+  override attachCloudOriginal(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    location: AssetLocationRecord & { readonly kind: 'private-object' },
+  ): MediaAssetRecord {
+    if (assetId === 'video-2') {
+      throw new ControlPlaneError('ASSET_UPDATE_FAILED', 'simulated metadata failure');
+    }
+    return super.attachCloudOriginal(actor, projectId, assetId, location);
   }
 }
 

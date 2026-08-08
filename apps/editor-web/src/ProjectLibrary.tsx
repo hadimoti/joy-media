@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import {
   listCatalogProjects,
@@ -16,10 +16,10 @@ export function ProjectLibrary({
   readonly onOpen: (entry: ProjectCatalogEntry) => void;
   readonly onCreate: (title: string) => void;
 }) {
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   const [draftTitle, setDraftTitle] = useState('');
   const [creating, setCreating] = useState(false);
-  const projects = useMemo(() => listCatalogProjects(storage), [storage, tick]);
+  const projects = listCatalogProjects(storage);
 
   const submitCreate = () => {
     const title = draftTitle.trim() || `Untitled project ${projects.length + 1}`;
