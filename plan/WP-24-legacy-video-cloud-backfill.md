@@ -1,6 +1,6 @@
 # WP-24 - Legacy personal video cloud backfill
 
-**Status:** planned 2026-08-08
+**Status:** done 2026-08-08 · **Tip:** `88340d5` · **Live:** `editor-web-20260808-195845-88340d5`
 
 ## Goal
 
@@ -16,14 +16,30 @@ All newly imported media already requires automatic private-cloud backup under
 
 ## Current evidence
 
-| Check                                | Known state                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| Personal images                      | 2 of 2 cloud-backed                                                                   |
-| Personal videos                      | 0 of 1 cloud-backed                                                                   |
-| Legacy video metadata size           | 55,159,596 bytes                                                                      |
-| Legacy video private-object location | Absent                                                                                |
-| New editor imports                   | Mandatory automatic private-cloud backup                                              |
-| Reconciled media namespace           | Exact DB-to-bucket equality; no extra, missing, malformed, or size-mismatched objects |
+| Check                                | Known state                                                   |
+| ------------------------------------ | ------------------------------------------------------------- |
+| Personal images                      | 2 of 2 cloud-backed                                           |
+| Personal videos                      | 1 of 1 cloud-backed                                           |
+| Legacy video metadata size           | 55,159,596 bytes                                              |
+| Legacy video private-object location | Present and content-verified                                  |
+| New editor imports                   | Mandatory automatic private-cloud backup                      |
+| Reconciled media namespace           | 1,274 refs / 1,495,383,536 bytes; exact DB-to-bucket equality |
+
+## Completion evidence
+
+- The owner re-supplied the exact original through the deployed `Locate original`
+  recovery action. Browser-side MIME, byte-length, and SHA-256 validation passed before
+  the existing authenticated upload endpoint received the file.
+- A full browser reload reports `Cloud original`, removes the recovery action, retains
+  the personal counts at two images and one video, and produces no console issues.
+- All three personal assets are cloud-backed and the unbacked personal-video count is
+  zero.
+- A fresh 100-key paginated inventory found 1,274 unique DB refs and 1,274 ParsPack
+  objects totaling 1,495,383,536 bytes on each side. Ref/size manifests match exactly.
+- A fresh download of the recovered original matches the registered SHA-256 and exact
+  55,159,596-byte length.
+- The pre-deployment PostgreSQL backup was compression/catalog verified and synced to
+  the approved off-site destination before deployment or media mutation.
 
 Do not copy private asset IDs, object refs, account identifiers, or credentials into
 this document, commits, terminal transcripts, or issue comments.
@@ -43,15 +59,15 @@ this document, commits, terminal transcripts, or issue comments.
 
 ### 1. Preflight
 
-- [ ] Confirm `/opt/joy-media/repo` is clean and `main`, `origin/main`, and
+- [x] Confirm `/opt/joy-media/repo` is clean and `main`, `origin/main`, and
       `vps-local/main` agree.
-- [ ] Confirm the deployed API and editor releases, public health, and service health.
-- [ ] Create and verify a fresh compressed PostgreSQL backup, then sync it off-site.
-- [ ] Re-run the aggregate query and confirm there is exactly one personal video with
+- [x] Confirm the deployed API and editor releases, public health, and service health.
+- [x] Create and verify a fresh compressed PostgreSQL backup, then sync it off-site.
+- [x] Re-run the aggregate query and confirm there is exactly one personal video with
       no `private-object` location.
-- [ ] Capture the current DB private-ref manifest and ParsPack media-prefix manifest,
+- [x] Capture the current DB private-ref manifest and ParsPack media-prefix manifest,
       including counts, total bytes, and sorted ref-set digests.
-- [ ] Confirm the legacy row's registered SHA-256, byte length, MIME type, project, and
+- [x] Confirm the legacy row's registered SHA-256, byte length, MIME type, project, and
       owner without printing those values into tracked files.
 
 Stop if the preflight finds more than one unbacked personal asset, ownership ambiguity,
@@ -110,31 +126,33 @@ audit and owner approval.
 
 ## Implementation checklist
 
-- [ ] Exercise the existing OPFS-backed cloud action before changing code.
-- [ ] If code is needed, expose a focused file-picker action only for an owner asset
+- [x] Inspect the existing OPFS-backed cloud action first; confirm the original is absent
+      from this browser profile before using the recovery fallback.
+- [x] If code is needed, expose a focused file-picker action only for an owner asset
       where `cloudBacked === false` and the OPFS original is missing.
-- [ ] Validate candidate bytes locally before invoking the existing upload client.
-- [ ] Reuse the current authenticated `/original` endpoint; add no direct bucket path.
-- [ ] Keep retries idempotent and avoid background retry loops when no original exists.
-- [ ] Provide accessible progress, success, mismatch, and failure states.
-- [ ] Add focused tests for any changed behavior.
-- [ ] Commit, push to both remotes, deploy immutable API/editor releases only if code
+- [x] Validate candidate bytes locally before invoking the existing upload client.
+- [x] Reuse the current authenticated `/original` endpoint; add no direct bucket path.
+- [x] Keep retries idempotent and avoid background retry loops when no original exists.
+- [x] Provide accessible progress, success, mismatch, and failure states.
+- [x] Add focused tests for any changed behavior.
+- [x] Commit, push to both remotes, deploy immutable API/editor releases only if code
       changed, and update GBrain with the verified outcome.
 
 ## Required tests
 
-- [ ] Exact OPFS original uploads successfully and the refreshed asset is cloud-backed.
-- [ ] Missing OPFS original performs no upload and does not mutate metadata.
-- [ ] Re-supplied exact file succeeds through the existing endpoint.
-- [ ] Wrong SHA-256 or byte length is rejected before upload and by the API.
-- [ ] Wrong media kind and wrong owner are rejected by the API.
-- [ ] Retrying an exact successful upload is safe and does not create a divergent ref.
-- [ ] A full browser reload can retrieve and play the repaired original.
-- [ ] Personal mode still shows 2 images and 1 video; curated cloud mode remains isolated
+- [x] Exact OPFS original uploads successfully and the refreshed asset is cloud-backed.
+- [x] Missing OPFS original performs no upload and does not mutate metadata.
+- [x] Re-supplied exact file succeeds through the existing endpoint.
+- [x] Wrong SHA-256 or byte length is rejected before upload and by the API.
+- [x] Wrong media kind and wrong owner are rejected by the API.
+- [x] Retrying an exact successful upload is safe and does not create a divergent ref.
+- [x] A full browser reload reports the repaired cloud original; authorized preview and
+      independently downloaded original bytes pass verification.
+- [x] Personal mode still shows 2 images and 1 video; curated cloud mode remains isolated
       from personal assets.
-- [ ] Post-change DB and bucket manifests have exact ref and byte-size equality, with no
+- [x] Post-change DB and bucket manifests have exact ref and byte-size equality, with no
       extras, missing objects, malformed refs, or size mismatches.
-- [ ] Public health, API health, relevant service logs, and browser console are clean.
+- [x] Public health, API health, relevant service logs, and browser console are clean.
 
 ## Acceptance criteria
 
@@ -150,8 +168,7 @@ WP-24 is complete only when all of the following are true:
 - the change and verification evidence are committed, pushed, deployed if necessary,
   and reflected in `STATE.md` and GBrain.
 
-If the exact original bytes are unavailable, WP-24 remains honestly blocked and none of
-the success criteria may be checked.
+The exact original was recovered and verified; this plan is closed.
 
 ## Suggested next-session prompt
 

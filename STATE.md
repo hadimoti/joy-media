@@ -54,7 +54,7 @@ release `/opt/joy-media/releases/286c535-runtime-hardening` and editor release
 rollback targets are `54f582f-cloud-assets-toggle` for API and
 `editor-web-20260808-145123-95bc6b3` for editor.
 
-**WP-24 editor-only deployment (2026-08-08).** Commit `88340d5` adds the
+**WP-24 complete (2026-08-08).** Commit `88340d5` adds the
 owner-only exact-original recovery picker and client-side integrity gate. It was
 built from the clean canonical checkout and deployed without restarting or
 changing the API to immutable editor release
@@ -62,9 +62,12 @@ changing the API to immutable editor release
 release `editor-web-20260808-171809-286c535` remains the rollback target. Public
 `joyst.ir` index and all 175 built static assets match the release byte-for-byte;
 local/public API health passed and the API restart count and release target were
-unchanged. WP-24 data recovery remains open: the legacy personal video is not
-claimed backed up, and the owner must select the exact original before post-upload
-DB/ParsPack reconciliation can be performed.
+unchanged. The owner then re-supplied the exact original. Browser integrity checks,
+the authenticated upload path, a full reload showing `Cloud original`, and a fresh
+download matching the registered SHA-256 and 55,159,596-byte length all passed. All
+three personal assets are cloud-backed. Post-upload reconciliation is exact at 1,274
+database refs and 1,274 ParsPack objects totaling 1,495,383,536 bytes on each side,
+with zero unbacked personal videos. WP-24 is complete.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one
@@ -80,7 +83,7 @@ to the curated catalog published by the `joy-media-library` service identity and
 switches to the signed-in owner's assets. Catalog responses expose only
 `cloudBacked`, never object-store refs, OPFS refs, filesystem paths, rclone names,
 or credentials. Production contains 21 projects (one curated), 1,273 assets
-(1,270 curated and three personal), 1,272 cloud-backed assets, and zero projects
+(1,270 curated and three personal), 1,273 cloud-backed assets, and zero projects
 with backup disabled. Authenticated browser verification reproduced those counts,
 decoded a real curated cloud image at 1,536 px, and produced no console errors.
 
@@ -106,12 +109,13 @@ objects (11,026,468 bytes) with zero failures. Root-only evidence is in
 `/opt/joy-backups/storage-reconcile-20260808-174936`; its compressed archive is
 also synced off-site under `sweden-backups/audits/`.
 
-One legacy personal video record remains metadata-only: it declares 55,159,596
-bytes but has no private-object location to verify or migrate server-side. The two
-personal images are cloud-backed. Mandatory backup covers all new uploads; do not
-claim the legacy video is backed up unless its original bytes are re-supplied.
-Next-session runbook:
-[`WP-24 legacy video cloud backfill`](plan/WP-24-legacy-video-cloud-backfill.md).
+The formerly metadata-only personal video was recovered under
+[`WP-24`](plan/WP-24-legacy-video-cloud-backfill.md) after the owner re-supplied
+the exact original. Client and server integrity gates accepted it, and a fresh
+store download matched the registered SHA-256 and 55,159,596-byte length.
+Post-upload 100-key pagination found exact DB/ParsPack equality at 1,274 objects
+and 1,495,383,536 bytes, with all three personal assets cloud-backed and zero
+unbacked personal videos. Mandatory backup remains enforced for all new uploads.
 
 ## Handoff for next agent (2026-07-29)
 
@@ -246,6 +250,7 @@ none of this is visible to users yet; that switch is the owner's call.
 
 ## Session log (newest first)
 
+| 2026-08-08 | WP-24 | **Legacy personal video recovery complete.** Deployed the owner-only exact-original picker from `88340d5` as immutable editor release `editor-web-20260808-195845-88340d5` after a verified off-site PostgreSQL backup. The owner supplied the exact original; browser reload reports `Cloud original`, the recovery control disappears, and console/health checks are clean. All 3 personal assets are cloud-backed, unbacked personal videos are zero, and a fresh store download matches the registered SHA-256 and 55,159,596-byte length. Post-upload DB and ParsPack manifests match exactly at 1,274 objects / 1,495,383,536 bytes. |
 | 2026-08-08 | ParsPack reconciliation | **Storage caution closed with complete, repeated evidence.** Worked around ParsPack's oversized-list timeout using signed 100-key S3 pagination. Initial 1,794-object namespace contained exactly 1,273 DB media refs plus 521 files from one obsolete July 30 release backup. Archived and exact-manifest-verified the 521 files (28,429,520 bytes) in a sibling prefix, then removed only their reviewed source copies. Two post-clean passes agree at 1,273 objects / 1,440,223,940 bytes with matching DB/bucket ref-set SHA-256, zero extra, missing, non-opaque, or size-mismatched objects. Production-client sample GETs passed 19/19; browser cloud/personal counts and a 1,536 px cloud preview still pass. Fresh DB and audit archives are synced off-site. One legacy 55,159,596-byte personal video remains honestly metadata-only because its original bytes are unavailable server-side. |
 | 2026-08-08 | Runtime + cloud hardening | **Automatic owner-private backup, curated cloud isolation, import integrity, portability, and production verification.** Commit `286c535` plus formatting baseline `1447f69` are pushed to GitHub and the VPS bare remote. API/editor immutable releases deployed with rollback targets retained; pre-cutover PostgreSQL backup synced to ParsPack. `verify:ci` passed (222 test files, 1,690 tests; two skipped), production audit is clean, host/API health pass, and authenticated browser smoke confirms 1,270 curated cloud assets versus three personal assets with storage refs redacted. |
 | 2026-07-31 | UX polish + bug resolution | **Drag-to-select UX for effects and transitions.** Effect cards in EffectsPanel are now always draggable regardless of clip selection state (previously `canApply` gating blocked dragging with no selection). Double-click-to-add still requires a clip. Timeline clips highlight with amber outline when an effect/transition is dragged over them (`is-drag-over` CSS class via `dragEffectOverClipId` state). Effect and transition drop handlers in `App.tsx` now call `selectClips` before dispatching so the target clip(s) are selected on drop — no pre-selection needed. TransitionsPanel note updated to show detected junction. Fixed unescaped apostrophe in error message. EffectsPanel note changed from "Select one video clip to enable" to "Drag an effect to a clip on the timeline to apply it." All 1643 tests pass (212 files), TypeScript clean. Commit `854fb2e` on `main`. |
