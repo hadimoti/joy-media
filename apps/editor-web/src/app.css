@@ -3142,7 +3142,7 @@ label {
 }
 
 .motion-card-duration {
-  font-size: 0.6rem;
+  font-size: var(--joy-type-2xs);
   color: var(--joy-text-faint);
   padding: 0.2rem 0.35rem;
   background: rgba(0, 0, 0, 0.5);
@@ -3615,7 +3615,7 @@ label {
 }
 
 .motion-card-source {
-  font-size: 0.6rem;
+  font-size: var(--joy-type-2xs);
   color: var(--joy-text-faint);
 }
 
@@ -8603,7 +8603,7 @@ label {
     grid-template-columns: 1fr;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 840px) {
   .es-topbar {
     display: flex;
     justify-content: space-between;
