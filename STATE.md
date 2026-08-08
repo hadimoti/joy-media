@@ -98,6 +98,8 @@ One legacy personal video record remains metadata-only: it declares 55,159,596
 bytes but has no private-object location to verify or migrate server-side. The two
 personal images are cloud-backed. Mandatory backup covers all new uploads; do not
 claim the legacy video is backed up unless its original bytes are re-supplied.
+Next-session runbook:
+[`WP-24 legacy video cloud backfill`](plan/WP-24-legacy-video-cloud-backfill.md).
 
 ## Handoff for next agent (2026-07-29)
 
