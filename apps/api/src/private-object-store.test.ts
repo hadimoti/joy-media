@@ -4,6 +4,7 @@ import {
   PrivateObjectIntegrityError,
   RclonePrivateObjectStore,
   type RcloneRunner,
+  type S3ObjectClient,
 } from './private-object-store.js';
 
 const bytes = new TextEncoder().encode('verified derivative');
@@ -42,6 +43,32 @@ describe('RclonePrivateObjectStore', () => {
         'ERROR',
       ],
     ]);
+  });
+
+  it('uses an injected private S3 client before falling back to rclone', async () => {
+    const calls: string[] = [];
+    const s3: S3ObjectClient = {
+      async put(ref, input) {
+        calls.push(`put:${ref}:${input.byteLength}`);
+      },
+      async get(ref) {
+        calls.push(`get:${ref}`);
+        return bytes;
+      },
+      async remove(ref) {
+        calls.push(`remove:${ref}`);
+      },
+    };
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      s3,
+    });
+
+    await store.put(descriptor, bytes);
+    await expect(store.get(descriptor)).resolves.toEqual(bytes);
+    await store.remove(descriptor.ref);
+
+    expect(calls).toEqual(['put:derivative-1:19', 'get:derivative-1', 'remove:derivative-1']);
   });
 
   it('rejects tampered reads instead of returning media bytes', async () => {
