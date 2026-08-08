@@ -208,7 +208,7 @@ export function verticalDockLayout(): unknown {
           {
             type: 'leaf',
             size: 500,
-            data: { views: ['monitor'], activeView: 'monitor', id: 'monitor-col' },
+            data: { views: ['monitor', 'templates'], activeView: 'monitor', id: 'monitor-col' },
           },
         ],
       },
@@ -241,7 +241,7 @@ export function widescreenDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 968,
-                data: { views: ['monitor'], activeView: 'monitor', id: 'monitor-row' },
+                data: { views: ['monitor', 'templates'], activeView: 'monitor', id: 'monitor-row' },
               },
               {
                 type: 'leaf',

@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
+import { PlusIcon, TrashIcon } from './icons.js';
 import { CONTENT_TEMPLATES, contentTemplateById } from './content-template-catalog.js';
 import {
   listTemplates,
@@ -109,6 +110,7 @@ export function TemplatesPanel({
               type="button"
               className="icon-button template-card-apply"
               aria-label={`Apply ${tpl.label}`}
+              title={`Apply ${tpl.label}`}
               onClick={(e) => {
                 e.stopPropagation();
                 if (isMine) {
@@ -118,7 +120,7 @@ export function TemplatesPanel({
                 }
               }}
             >
-              Apply
+              <PlusIcon />
             </button>
             {isMine && (
               <button
@@ -131,7 +133,7 @@ export function TemplatesPanel({
                   handleDeleteTemplate(tpl.id);
                 }}
               >
-                Delete
+                <TrashIcon />
               </button>
             )}
           </div>

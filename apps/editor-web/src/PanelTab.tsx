@@ -1,7 +1,7 @@
 import type { IDockviewPanelHeaderProps } from 'dockview';
 import { panelLabel, panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
 
-/** Icon-only dockview tab; label stays on title/aria for hover and a11y. */
+/** Icon-only dock tab; the label becomes visible in Dockview's overflow menu. */
 export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   const label = panelLabel(api.id);
   const SvgIcon = panelTabSvgIcon(api.id);
@@ -25,6 +25,7 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
       ) : (
         <span className="panel-tab-fallback">{label}</span>
       )}
+      <span className="panel-tab-label">{label}</span>
     </div>
   );
 }

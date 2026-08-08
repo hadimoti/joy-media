@@ -54,7 +54,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['{apps,packages,tooling}/**/src/**/*.test.ts'],
+    include: ['{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 });

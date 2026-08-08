@@ -3030,7 +3030,6 @@ function EditorWorkspace({
           className="workspace"
           components={dockviewComponents}
           defaultTabComponent={PanelTab}
-          disableTabsOverflowList
           onReady={onReady}
         />
       </EditorPanelContext.Provider>

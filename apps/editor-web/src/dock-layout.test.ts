@@ -65,6 +65,24 @@ function leafIds(layout: LayoutWithPanels): string[] {
   return ids;
 }
 
+function leafViews(layout: LayoutWithPanels, id: string): string[] {
+  let views: string[] = [];
+  const walk = (node: unknown): void => {
+    if (!isRecord(node)) return;
+    if (node.type === 'leaf' && isRecord(node.data) && node.data.id === id) {
+      views = Array.isArray(node.data.views)
+        ? node.data.views.filter((view): view is string => typeof view === 'string')
+        : [];
+      return;
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) {
+      for (const child of node.data) walk(child);
+    }
+  };
+  walk(layout.grid?.root);
+  return views;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -142,6 +160,8 @@ describe('view modes', () => {
     expect(leafIds(vertical)).toContain('monitor-col');
     expect(leafIds(wide)).toContain('monitor-row');
     expect(leafIds(wide)).not.toContain('monitor-col');
+    expect(leafViews(vertical, 'monitor-col')).toEqual(['monitor', 'templates']);
+    expect(leafViews(wide, 'monitor-row')).toEqual(['monitor', 'templates']);
     expect(wide.activeGroup).toBe('monitor-row');
     expect(seedDockLayout('widescreen')).toEqual(wide);
     expect(seedDockLayout('vertical')).toEqual(vertical);

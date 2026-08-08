@@ -32,7 +32,7 @@ Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red a
 | `--joy-text`           | `#ececef`                | Primary text                                                   |
 | `--joy-text-secondary` | `rgb(255 255 255 / 64%)` | Supporting text inside a row                                   |
 | `--joy-text-muted`     | `#a8a8b0`                | Secondary text, inactive tabs                                  |
-| `--joy-text-faint`     | `#7e7e86`                | Hints, timestamps, metadata                                    |
+| `--joy-text-faint`     | `#96969f`                | Hints, timestamps, metadata; still AA-readable on panel gray   |
 | `--joy-text-disabled`  | `rgb(255 255 255 / 28%)` | Text inside an inactive panel body (§3c)                       |
 | `--joy-accent`         | `#f4b72f`                | **The** accent — see the scarcity list below                   |
 | `--joy-accent-hover`   | `#ffc94f`                | Accent under hover only                                        |
@@ -70,7 +70,7 @@ Current icon set: play, pause, skip back/forward, undo, redo, scissors (split), 
 ## 3. Layout & panels
 
 - Panels are dockview tabs (Adobe-style dockable windows). Every panel id must be registered in [workspace.ts](apps/editor-web/src/workspace.ts) `PANEL_IDS` + `DEFAULT_WORKSPACE` **and** given a label + tab icon in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) — a panel that isn't registered does not exist.
-- **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` (and in App's `labels` / panel `title` for overflow menus). Never put the panel name as visible tab text. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
+- **Panel tabs are icon-only.** Dockview uses [PanelTab.tsx](apps/editor-web/src/PanelTab.tsx) as `defaultTabComponent`: black-on-transparent PNGs from `public/assets/icons/` are CSS-masked with `currentColor` so active/inactive `--dv-*-tab-color` tints them. The human label stays on `title` + `aria-label` in the rail, and becomes visible only inside Dockview's overflow menu when a group is too narrow to show every tab. Never disable that overflow menu or leave a panel unreachable. New panels add a matching PNG + entry in [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts).
 - Dockview chrome is themed via the `--dv-*` variables in the `#root .workspace` block of app.css, plus the **CapCut shell tile rules** in §3b. Tab glyph styling uses our own `.panel-tab` / `.panel-tab-icon` classes — do not restyle other `.dv-*` internals ad hoc.
 - Panel root: `<article className="joy-panel-root <name>-panel">` built from the shell in §3a. The `<name>-panel` class carries only what is genuinely unique to that panel — never its header, tabs or scroll behaviour. `.joy-panel-root` is **background-transparent**; the gray tile comes from the dock group (§3b).
 - Toolbars: `display:flex; align-items:center; gap:0.4rem` (see `.timeline-toolbar`). Lists of records use `bg-raised` rows with `--joy-radius-inner` (see `.history-entry`, `.workflow-row`).
@@ -120,9 +120,9 @@ Nothing may be inserted above the header or between the header and the tabs exce
 | `.joy-panel-root`                    | Panel root, always `<article>`. `display:flex; flex-direction:column; height:100%; overflow:hidden; container-type:inline-size`. Background transparent (§3b); padding lives here, once. |
 | `.joy-panel-header`                  | 3-column grid `1fr auto 1fr`, `flex-shrink:0`. The center column never moves; the two outer columns balance each other so the title stays optically centered. Height is one control (`--control-sm`).                                                                              |
 | `.joy-panel-leading-actions`         | Optional icon-button group in column 1, `justify-self:start`. Use only when a panel has a meaningful start-edge action group; Assets uses Import, Filter/Sort, and Refresh here. It must not become a second toolbar.                                                              |
-| `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. 0.72rem, `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.                       |
+| `.joy-panel-title`                   | `<h3>` in column 2, `justify-self:center`. `--joy-type-sm` (13px), `--joy-text`, weight 600, no letter-spacing tricks. Carries a 16×16 leading glyph — the **same** icon as the panel's dockview tab, read from `PANEL_TAB_ICONS`. Never duplicate the icon file per panel.                       |
 | `.joy-panel-actions`                 | Column 3, `justify-self:end`, `gap:0.1rem`. Ordered inline-end-ward: **create (+) · favorites (☆) · filter · search (⌕)**. Only `icon-button`s. Two to four buttons; more than four means the panel needs tabs or a justified `.joy-panel-leading-actions` split, not more chrome. |
-| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (0.66rem) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders.                                                                         |
+| `.joy-panel-tabs` / `.joy-panel-tab` | Centered flex row, `role="tablist"`, `flex-shrink:0`. Tabs are plain text (`--joy-type-xs`, 12px) — muted at rest, `--joy-text` + 2px `--joy-accent-dim` underline when `aria-selected`. No pills, no boxes, no borders.                                                                         |
 | `.joy-panel-body`                    | The only scrolling element: `flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain`. Holds the item grid or the settings stack.                                                                                                                                   |
 
 A panel with a single view still renders `.joy-panel-tabs` — with one tab, or omitted entirely if the panel genuinely has one view (Monitor, Timeline). It never renders a _different_ structure.
@@ -276,7 +276,13 @@ guidance paragraph floating in a panel.
 | ----------------------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
 | `--joy-font-ui`         | `'Modam Pro', Tahoma, system-ui, sans-serif`        | Root, body, buttons, inputs, selects, textareas, panel chrome          |
 | `--joy-font-mono`       | `ui-monospace, SFMono-Regular, Consolas, monospace` | Timecode, expressions, diagnostic/code wells only                      |
+| `--joy-type-2xs`        | `0.6875rem` (11px)                                  | Dense metadata, badges, IDs; the minimum normal UI text size           |
+| `--joy-type-xs`         | `0.75rem` (12px)                                    | Tabs, inputs, secondary labels                                         |
+| `--joy-type-sm`         | `0.8125rem` (13px)                                  | Panel titles and primary compact labels                                |
+| `--joy-type-md`         | `0.875rem` (14px)                                   | Dialog headings and emphasized controls                                |
 | `'Modam Pro Condensed'` | Optional condensed weights in `modam-pro.css`       | Dense labels only when explicitly requested — not the default UI stack |
+
+Text below 11px is reserved for non-textual diagram annotations inside a fixed SVG. It is not permitted for buttons, metadata, empty states, timeline labels, or studio controls.
 
 - Source files: [`apps/editor-web/public/assets/fonts/modam-pro/`](apps/editor-web/public/assets/fonts/modam-pro/) (`modam-pro.css` + WOFF2/WOFF). Preload Regular in [`index.html`](apps/editor-web/index.html); stack is applied in [`app.css`](apps/editor-web/src/app.css) `:root`.
 - Persian explainer copy follows §4d: centered, layout-neutral, and tagged
