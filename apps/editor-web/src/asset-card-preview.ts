@@ -16,7 +16,7 @@ export interface AssetThumbResult {
 
 /**
  * Resolve a card preview URL:
- * preferredDerivative → OPFS original → shared cloud original (images) → none.
+ * preferredDerivative -> OPFS original -> shared cloud original -> none.
  */
 export async function resolveAssetThumb(options: {
   readonly asset: BrowserAsset;
@@ -73,20 +73,18 @@ export async function resolveAssetThumb(options: {
     /* fall through */
   }
 
-  if (asset.kind === 'image') {
-    try {
-      const cloud = await fetchCloudOriginal(asset.id);
-      const url = URL.createObjectURL(cloud);
-      return {
-        url,
-        mimeType: cloud.type || asset.descriptor.mimeType,
-        source: 'cloud',
-        revoke: () => URL.revokeObjectURL(url),
-        hasOpfsOriginal,
-      };
-    } catch {
-      /* fall through */
-    }
+  try {
+    const cloud = await fetchCloudOriginal(asset.id);
+    const url = URL.createObjectURL(cloud);
+    return {
+      url,
+      mimeType: cloud.type || asset.descriptor.mimeType,
+      source: 'cloud',
+      revoke: () => URL.revokeObjectURL(url),
+      hasOpfsOriginal,
+    };
+  } catch {
+    /* fall through */
   }
 
   return { source: 'none', revoke: () => undefined, hasOpfsOriginal };

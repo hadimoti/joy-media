@@ -269,7 +269,8 @@ async function route(
 
   if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
     const profile = await options.mediaAuth.sessionProfile(request);
-    if (profile === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    if (profile === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
     respondJson(response, 200, { data: profile });
     return;
   }
@@ -573,11 +574,12 @@ async function route(
     const assets = await options.controlPlane.assetsForProject(actor, projectId);
     const asset = assets.find((entry) => entry.id === assetId);
     if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    if (asset.kind !== 'image')
-      throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
     const mimeType = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() ?? '';
-    if (!/^image\/[a-z0-9.+-]+$/.test(mimeType))
-      throw new ControlPlaneError('REQUEST_INVALID', 'original upload must be an image MIME type');
+    if (!new RegExp(`^${asset.kind}/[a-z0-9.+-]+$`).test(mimeType))
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'original upload MIME type must match the registered asset kind',
+      );
     const declaredSha = String(request.headers['x-joy-sha256'] ?? '').toLowerCase();
     const declaredBytes = Number(request.headers['x-joy-bytes'] ?? NaN);
     if (
@@ -588,7 +590,7 @@ async function route(
       throw new ControlPlaneError('REQUEST_INVALID', 'original integrity headers are invalid');
     if (declaredSha !== asset.sha256 || declaredBytes !== asset.bytes)
       throw new ControlPlaneError('REQUEST_INVALID', 'original does not match registered asset');
-    const bytes = await readBytes(request, 50 * 1024 * 1024);
+    const bytes = await readBytes(request, 512 * 1024 * 1024);
     if (bytes.byteLength !== asset.bytes)
       throw new ControlPlaneError('REQUEST_INVALID', 'original byte length does not match asset');
     const digest = createHash('sha256').update(bytes).digest('hex');
@@ -606,7 +608,7 @@ async function route(
         bytes: asset.bytes,
         ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
         ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
-        imageBytes: bytes,
+        ...(asset.kind === 'image' ? { imageBytes: bytes } : {}),
       });
       let updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
         kind: 'private-object',
@@ -1170,11 +1172,7 @@ function respondError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof MediaAuthError) {
     const status =
-      error.code === 'RATE_LIMITED'
-        ? 429
-        : error.code === 'REQUEST_INVALID'
-          ? 400
-          : 401;
+      error.code === 'RATE_LIMITED' ? 429 : error.code === 'REQUEST_INVALID' ? 400 : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

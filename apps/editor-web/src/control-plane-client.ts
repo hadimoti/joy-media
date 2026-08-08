@@ -151,10 +151,7 @@ export class BrowserControlPlaneClient {
       },
     );
   }
-  /**
-   * Upload image original bytes to private cloud (ParsPack) and apply agent tags.
-   * Videos are not accepted by the API in v1.
-   */
+  /** Upload original media bytes to private cloud (ParsPack) and apply agent tags. */
   async uploadAssetOriginal(
     projectId: string,
     asset: Pick<BrowserAsset, 'id' | 'sha256' | 'bytes' | 'descriptor'>,
@@ -219,7 +216,13 @@ export class BrowserControlPlaneClient {
   async enqueueWorkerGeneration(
     projectId: string,
     id: string,
-    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
+    type:
+      | 'image.comfy'
+      | 'audio.ml-denoise'
+      | 'text.lm-studio'
+      | 'text.openrouter'
+      | 'video.runway'
+      | 'edit.higgsfield',
     assetId: string,
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
@@ -231,9 +234,19 @@ export class BrowserControlPlaneClient {
   async enqueueAiGeneration(
     projectId: string,
     id: string,
-    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
+    type:
+      | 'image.comfy'
+      | 'audio.ml-denoise'
+      | 'text.lm-studio'
+      | 'text.openrouter'
+      | 'video.runway'
+      | 'edit.higgsfield',
     prompt: string,
-    options?: { readonly imageAssetId?: string; readonly model?: string; readonly params?: Record<string, unknown> },
+    options?: {
+      readonly imageAssetId?: string;
+      readonly model?: string;
+      readonly params?: Record<string, unknown>;
+    },
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,

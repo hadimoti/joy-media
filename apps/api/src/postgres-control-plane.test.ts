@@ -12,8 +12,7 @@ describe('PostgresControlPlane', () => {
     await first.initialize();
     const owner = { id: 'joy-user-1' };
 
-    await first.createProject(owner, 'project-1', 'Reference');
-    await expect(first.setAssetSync(owner, 'project-1', true)).resolves.toMatchObject({
+    await expect(first.createProject(owner, 'project-1', 'Reference')).resolves.toMatchObject({
       assetSyncEnabled: true,
     });
     await first.registerAsset(owner, 'project-1', assetRegistration(), 99);

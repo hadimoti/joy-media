@@ -320,7 +320,49 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
-  it('brokers a Worker thumbnail through private storage only with sync consent, then streams verified bytes to the owner', async () => {
+  it('backs up a registered video original through private storage and shared cloud content', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
+    const bytes = new TextEncoder().encode('verified video bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'video-1',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256,
+      bytes: bytes.byteLength,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+      locations: [{ kind: 'opfs-cache', ref: 'opfs-video' }],
+    });
+
+    const upload = await fetch(`${origin}/v1/projects/p/assets/video-1/original`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'video/mp4',
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(bytes.byteLength),
+      },
+      body: bytes,
+    });
+
+    expect(upload.status).toBe(201);
+    expect(await upload.json()).toMatchObject({
+      data: { asset: { id: 'video-1', kind: 'video' } },
+    });
+    expect(store.objects).toHaveLength(1);
+    expect(store.objects[0]?.descriptor).toMatchObject({
+      mimeType: 'video/mp4',
+      bytes: bytes.byteLength,
+    });
+
+    const content = await fetch(`${origin}/v1/library/cloud-assets/video-1/content`);
+    expect(content.status).toBe(200);
+    expect(content.headers.get('content-type')).toBe('video/mp4');
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(bytes);
+  });
+
+  it('brokers a Worker thumbnail through private storage by default, then streams verified bytes to the owner', async () => {
     const store = new MemoryPrivateObjectStore();
     const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
     const source = {
@@ -375,12 +417,6 @@ describe('control-plane HTTP transport', () => {
         body: thumbnail,
       });
 
-    const denied = await upload();
-    expect(denied.status).toBe(409);
-    expect(store.removed).toEqual([`thumb-j-${sha256.slice(0, 16)}`]);
-    expect(store.objects).toHaveLength(0);
-
-    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
     const uploaded = await upload();
     expect(uploaded.status).toBe(201);
     expect(await uploaded.json()).toMatchObject({

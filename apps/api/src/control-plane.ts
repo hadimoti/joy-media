@@ -150,9 +150,7 @@ export interface LocalGpuWorkerReceipt {
   };
 }
 export type WorkerResultReceipt =
-  | FixtureThumbnailReceipt
-  | AssetThumbnailReceipt
-  | LocalGpuWorkerReceipt;
+  FixtureThumbnailReceipt | AssetThumbnailReceipt | LocalGpuWorkerReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
@@ -197,7 +195,7 @@ export interface ControlPlane {
     now?: number,
   ): MediaAssetRecord | Promise<MediaAssetRecord>;
   /**
-   * Attach a private-object location for an owner-uploaded image original (ParsPack).
+   * Attach a private-object location for an owner-uploaded original (ParsPack).
    * Replaces any existing private-object location; keeps opfs-cache when present.
    */
   attachCloudOriginal(
@@ -238,14 +236,13 @@ export interface ControlPlane {
    * Shared cloud library: any authenticated Joy user may list assets that have a
    * private-object original (cross-account catalog, login still required).
    */
-  sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  sharedCloudAssets(
+    actor: Actor,
+  ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
   /**
    * Resolve a cloud-backed asset for any authenticated Joy user (private-object required).
    */
-  sharedCloudAsset(
-    actor: Actor,
-    assetId: string,
-  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -380,7 +377,7 @@ export class LocalControlPlane implements ControlPlane {
   createProject(actor: Actor, id: string, title: string): ProjectMetadata {
     this.auth(actor);
     if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
-    const result = { id, title, revision: 0, ownerId: actor.id, assetSyncEnabled: false };
+    const result = { id, title, revision: 0, ownerId: actor.id, assetSyncEnabled: true };
     this.#projects.set(id, result);
     return result;
   }
@@ -436,8 +433,6 @@ export class LocalControlPlane implements ControlPlane {
     const current = this.#assets.get(assetId);
     if (current === undefined || current.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    if (current.kind !== 'image')
-      throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
     const kept = current.locations.filter((entry) => entry.kind !== 'private-object');
     const locations = [...kept, { kind: 'private-object' as const, ref: location.ref }];
     validateLocations(locations);
@@ -459,12 +454,9 @@ export class LocalControlPlane implements ControlPlane {
     const current = this.#assets.get(assetId);
     if (current === undefined || current.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    const tags =
-      patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
+    const tags = patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
     const sortName =
-      patch.sortName === undefined
-        ? current.sortName
-        : validateSortName(patch.sortName);
+      patch.sortName === undefined ? current.sortName : validateSortName(patch.sortName);
     const displayName =
       patch.displayName === undefined
         ? current.displayName
@@ -511,7 +503,10 @@ export class LocalControlPlane implements ControlPlane {
     return [...this.#assets.values()]
       .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'))
       .map(cloneAsset)
-      .sort((left, right) => left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id));
+      .sort(
+        (left, right) =>
+          left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id),
+      );
   }
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord {
     this.auth(actor);
@@ -954,9 +949,7 @@ function isAssetThumbnailReceipt(
   );
 }
 
-function isLocalGpuReceipt(
-  value: WorkerResultReceipt | undefined,
-): value is LocalGpuWorkerReceipt {
+function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is LocalGpuWorkerReceipt {
   return (
     (value?.kind === 'image.comfy' || value?.kind === 'audio.ml-denoise') &&
     /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&

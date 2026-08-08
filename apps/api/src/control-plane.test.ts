@@ -24,8 +24,9 @@ describe('local control plane', () => {
   it('records opaque asset and local-derivative metadata without accepting paths or cloud claims', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };
-    api.createProject(owner, 'project-1', 'Project');
-    expect(api.setAssetSync(owner, 'project-1', true)).toMatchObject({ assetSyncEnabled: true });
+    expect(api.createProject(owner, 'project-1', 'Project')).toMatchObject({
+      assetSyncEnabled: true,
+    });
     const asset = api.registerAsset(owner, 'project-1', assetRegistration(), 100);
     expect(asset).toMatchObject({
       id: 'asset-1',
@@ -110,6 +111,19 @@ describe('local control plane', () => {
       { id: 'img-1', kind: 'image', displayName: 'shot.png' },
     ]);
     expect(api.sharedCloudAsset(peer, 'img-1').id).toBe('img-1');
+  });
+
+  it('allows video originals to join the shared cloud library', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-video' };
+    const peer = { id: 'peer-video' };
+    api.createProject(owner, 'project-video', 'Video');
+    const video = api.registerAsset(owner, 'project-video', assetRegistration(), 300);
+    api.attachCloudOriginal(owner, 'project-video', video.id, {
+      kind: 'private-object',
+      ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    expect(api.sharedCloudAssets(peer)).toMatchObject([{ id: 'asset-1', kind: 'video' }]);
   });
 
   it('lists every owned asset across projects for the same Joy identity', () => {

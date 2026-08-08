@@ -138,7 +138,7 @@ export class PostgresControlPlane implements ControlPlane {
     assertActor(actor);
     try {
       const result = await this.pool.query<ProjectRow>(
-        'INSERT INTO projects (id, owner_id, title, revision) VALUES ($1, $2, $3, 0) RETURNING *',
+        'INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled) VALUES ($1, $2, $3, 0, true) RETURNING *',
         [id, actor.id, title],
       );
       return projectOf(requiredRow(result.rows[0], 'PROJECT_CREATE_FAILED'));
@@ -234,8 +234,6 @@ export class PostgresControlPlane implements ControlPlane {
       );
       if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
       const asset = mediaAssetOf(existing.rows[0]);
-      if (asset.kind !== 'image')
-        throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
       const kept = asset.locations.filter((entry) => entry.kind !== 'private-object');
       const locations = [...kept, { kind: 'private-object' as const, ref: location.ref }];
       if (locations.length === 0 || locations.length > 2)
@@ -301,10 +299,10 @@ export class PostgresControlPlane implements ControlPlane {
         [assetId, projectId],
       );
       if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-      await client.query(
-        'DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
-        [projectId, assetId],
-      );
+      await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
+        projectId,
+        assetId,
+      ]);
       await client.query('DELETE FROM media_assets WHERE id = $1 AND project_id = $2', [
         assetId,
         projectId,
@@ -1100,9 +1098,7 @@ function isFixtureReceipt(
 }
 
 function isWorkerReceipt(value: WorkerResultReceipt): boolean {
-  return (
-    isFixtureReceipt(value) || isAssetThumbnailReceipt(value) || isLocalGpuReceipt(value)
-  );
+  return isFixtureReceipt(value) || isAssetThumbnailReceipt(value) || isLocalGpuReceipt(value);
 }
 
 function isAssetThumbnailReceipt(value: WorkerResultReceipt): value is AssetThumbnailReceipt {

@@ -22,6 +22,17 @@ const IMAGE: BrowserAsset = {
   createdAt: 1_700_000_000_000,
 };
 
+const VIDEO: BrowserAsset = {
+  id: 'vid-1',
+  projectId: 'prj-1',
+  kind: 'video',
+  displayName: 'clip.mp4',
+  sha256: 'c'.repeat(64),
+  bytes: 2000,
+  descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+  createdAt: 1_700_000_000_000,
+};
+
 const DERIVATIVE: BrowserDerivative = {
   id: 'dv-1',
   projectId: 'prj-1',
@@ -87,6 +98,19 @@ describe('resolveAssetThumb fallback chain', () => {
       fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'image/png' })),
     });
     expect(result.source).toBe('cloud');
+  });
+
+  it('falls back to the shared cloud original for videos when nothing local exists', async () => {
+    const result = await resolveAssetThumb({
+      asset: VIDEO,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'video/mp4' })),
+    });
+    expect(result.source).toBe('cloud');
+    expect(result.mimeType).toBe('video/mp4');
   });
 
   it('returns none (no throw) when no source is available', async () => {

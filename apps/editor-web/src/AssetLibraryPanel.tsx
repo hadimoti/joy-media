@@ -46,6 +46,7 @@ import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-ic
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
 const ASSET_RENDER_PAGE_SIZE = 120;
+type AssetSource = 'cloud' | 'user';
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -107,6 +108,7 @@ export function AssetLibraryPanel({
   const previewSeqRef = useRef(0);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>('image');
   const [collection, setCollection] = useState<AssetCollectionId>('browse');
@@ -120,7 +122,7 @@ export function AssetLibraryPanel({
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
-  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [assetSource, setAssetSource] = useState<AssetSource>('cloud');
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
@@ -194,6 +196,7 @@ export function AssetLibraryPanel({
       const byAsset = new Map(derivatives);
       if (requestId !== refreshSeqRef.current) return;
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
+      setOwnedAssetIds(new Set(ownedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
       if (sharedResult.status === 'rejected') {
         setStatus(
@@ -202,7 +205,7 @@ export function AssetLibraryPanel({
       } else {
         setStatus(
           assets.length === 0
-            ? 'No media yet. Import an image to sync with the shared cloud library.'
+            ? 'No media yet. Import media to sync with the shared cloud library.'
             : undefined,
         );
       }
@@ -211,6 +214,8 @@ export function AssetLibraryPanel({
       if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
       setItems([]);
+      setCloudAssetIds(new Set());
+      setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
   }, [client, projectId, projectTitle]);
@@ -276,21 +281,31 @@ export function AssetLibraryPanel({
     [onEditWithAi],
   );
 
+  const sourceItems = useMemo(
+    () =>
+      items.filter(({ asset }) =>
+        assetSource === 'cloud' ? cloudAssetIds.has(asset.id) : ownedAssetIds.has(asset.id),
+      ),
+    [assetSource, cloudAssetIds, items, ownedAssetIds],
+  );
   const collections = useMemo(
-    () => assetCollectionsForCategory(items, category),
-    [items, category],
+    () => assetCollectionsForCategory(sourceItems, category),
+    [sourceItems, category],
   );
   useEffect(() => {
     if (collections.some((entry) => entry.id === collection)) return;
     setCollection('browse');
   }, [collection, collections]);
   const visible = useMemo(
-    () => filterAssetLibrary(items, category, collection, deferredQuery, availability, sort),
-    [items, category, collection, deferredQuery, availability, sort],
+    () => filterAssetLibrary(sourceItems, category, collection, deferredQuery, availability, sort),
+    [sourceItems, category, collection, deferredQuery, availability, sort],
   );
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
-  }, [items, category, collection, deferredQuery, availability, sort]);
+  }, [sourceItems, category, collection, deferredQuery, availability, sort]);
+  useEffect(() => {
+    setSelectedAssetIds(new Set());
+  }, [assetSource]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
@@ -339,25 +354,14 @@ export function AssetLibraryPanel({
       setImportProgress(0.88);
       setStatus(`Registering ${selectedFile.name}…`);
       const registered = await client.registerAsset(projectId, registration);
-      if (kind === 'image') {
-        setImportProgress(0.9);
-        setStatus(`Uploading ${selectedFile.name} to private cloud storage…`);
-        await client.uploadAssetOriginal(projectId, registered, selectedFile, (ratio) =>
-          setImportProgress(0.9 + 0.08 * ratio),
-        );
-        setStatus(
-          `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
-        );
-      } else {
-        try {
-          await client.retagAsset(projectId, registered.id);
-        } catch {
-          /* heuristic retag is best-effort for video/audio */
-        }
-        setStatus(
-          `${selectedFile.name} registered locally. Cloud backup for video and audio is lower priority in v1.`,
-        );
-      }
+      setImportProgress(0.9);
+      setStatus(`Uploading ${selectedFile.name} to private cloud storage…`);
+      await client.uploadAssetOriginal(projectId, registered, selectedFile, (ratio) =>
+        setImportProgress(0.9 + 0.08 * ratio),
+      );
+      setStatus(
+        `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
+      );
       setImportProgress(1);
       setSelectedFile(undefined);
       setAssetId('');
@@ -370,15 +374,6 @@ export function AssetLibraryPanel({
       setStatus(`Failed to register media: ${message(error)}`);
     }
   }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
-  const enableSync = useCallback(async () => {
-    try {
-      const result = await client.setAssetSync(projectId, true);
-      setSyncEnabled(result.assetSyncEnabled);
-      setStatus('Private derivative backup is enabled for this project.');
-    } catch (error) {
-      setStatus(`Failed to enable private backup: ${message(error)}`);
-    }
-  }, [client, projectId]);
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
@@ -444,10 +439,6 @@ export function AssetLibraryPanel({
 
   const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
-      if (asset.kind !== 'image') {
-        setStatus('Cloud sharing is available for images only in v1.');
-        return;
-      }
       if (cloudAssetIds.has(asset.id)) {
         setStatus(`${asset.displayName} is already in the shared cloud library.`);
         return;
@@ -456,7 +447,7 @@ export function AssetLibraryPanel({
         const blob = await (await originalAssetCache).get(asset.id);
         if (blob === undefined) {
           setStatus(
-            'The OPFS original is missing in this browser. Re-import the image here first.',
+            'The OPFS original is missing in this browser. Re-import the media here first.',
           );
           return;
         }
@@ -494,11 +485,10 @@ export function AssetLibraryPanel({
 
   const bulkShare = useCallback(async () => {
     const targets = visible.filter(
-      ({ asset }) =>
-        selectedAssetIds.has(asset.id) && asset.kind === 'image' && !cloudAssetIds.has(asset.id),
+      ({ asset }) => selectedAssetIds.has(asset.id) && !cloudAssetIds.has(asset.id),
     );
     if (targets.length === 0) {
-      setStatus('No selected images are ready to share; an OPFS original is required.');
+      setStatus('No selected media is ready to share; an OPFS original is required.');
       return;
     }
     let shared = 0;
@@ -512,7 +502,7 @@ export function AssetLibraryPanel({
         /* continue remaining */
       }
     }
-    setStatus(`Shared ${shared} of ${targets.length} selected images to the cloud.`);
+    setStatus(`Shared ${shared} of ${targets.length} selected media item(s) to the cloud.`);
     await refresh();
   }, [client, cloudAssetIds, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
 
@@ -566,7 +556,7 @@ export function AssetLibraryPanel({
   // The top level is intentionally media-specific. Collections below it are
   // driven by category-* tags, so future videos and audio inherit the same UI.
   const categoryTabs: readonly PanelTabSpec[] = categories.map((entry) => {
-    const count = items.filter(({ asset }) => asset.kind === entry.id).length;
+    const count = sourceItems.filter(({ asset }) => asset.kind === entry.id).length;
     return {
       id: entry.id,
       label: `${entry.label} ${count}`,
@@ -635,15 +625,16 @@ export function AssetLibraryPanel({
           <button
             type="button"
             className="icon-button asset-sync"
-            disabled={syncEnabled}
-            aria-pressed={syncEnabled}
+            aria-pressed={assetSource === 'cloud'}
             aria-label={
-              syncEnabled
-                ? 'Private backup is enabled for this project'
-                : 'Enable private cloud backup for this project'
+              assetSource === 'cloud'
+                ? 'Showing cloud bucket assets; switch to user assets'
+                : 'Showing user assets; switch to cloud bucket assets'
             }
-            data-guide={syncEnabled ? 'Backup on' : 'Enable backup'}
-            onClick={() => void enableSync()}
+            title={assetSource === 'cloud' ? 'Cloud assets' : 'User assets'}
+            data-guide={assetSource === 'cloud' ? 'Cloud assets' : 'User assets'}
+            data-active={assetSource === 'cloud' ? 'true' : undefined}
+            onClick={() => setAssetSource((current) => (current === 'cloud' ? 'user' : 'cloud'))}
           >
             <CloudIcon />
           </button>
@@ -910,7 +901,7 @@ export function AssetLibraryPanel({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Share selected images to cloud"
+                aria-label="Share selected media to cloud"
                 title="Share to cloud"
                 data-guide="Share to cloud"
                 onClick={() => void bulkShare()}
@@ -956,7 +947,11 @@ export function AssetLibraryPanel({
                 <p>Failed to load media catalog.</p>
               ) : (
                 <>
-                  <p>No media matches the current filters.</p>
+                  <p>
+                    {assetSource === 'cloud'
+                      ? 'No cloud assets match the current filters.'
+                      : 'No user assets match the current filters.'}
+                  </p>
                   <button
                     type="button"
                     className="icon-button icon-button-labeled"
@@ -1075,7 +1070,7 @@ export function AssetLibraryPanel({
                             <AiEffectIcon />
                           </button>
                         )}
-                        {asset.kind === 'image' && !cloudBacked && (
+                        {!cloudBacked && (
                           <AssetShareCloudButton
                             asset={asset}
                             originalCachePromise={originalAssetCache}
@@ -1281,7 +1276,7 @@ function AssetCardMedia({
     >
       {url !== undefined && mimeType?.startsWith('video/') ? (
         <video src={url} muted playsInline preload="metadata" />
-      ) : url !== undefined ? (
+      ) : url !== undefined && mimeType?.startsWith('image/') ? (
         <img src={url} alt="" loading="lazy" decoding="async" />
       ) : (
         <span className="asset-card-placeholder" aria-hidden>
