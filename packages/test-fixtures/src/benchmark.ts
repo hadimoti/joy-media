@@ -43,7 +43,7 @@ export interface TimelineScaleTrack {
   readonly id: string;
   readonly heightPx: number;
   readonly locked: boolean;
-  readonly muted: boolean;
+  readonly visible: boolean;
   readonly solo: boolean;
 }
 
@@ -64,7 +64,7 @@ export function createTimelineScaleFixture(
     id: `track-${index}`,
     heightPx: 36,
     locked: false,
-    muted: false,
+    visible: true,
     solo: false,
   }));
   const clips = Array.from({ length: counts.clipCount }, (_, index) => ({

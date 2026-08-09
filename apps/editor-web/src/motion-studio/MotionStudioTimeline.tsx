@@ -28,6 +28,7 @@ import {
 } from './motionSceneToTimelineTracks.js';
 import { UI_ICONS } from '../ui-icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
+import { timelineContentWidthPx } from '../timeline-layout.js';
 
 export interface MotionStudioTimelineProps {
   readonly document: MotionSceneDocument;
@@ -42,13 +43,13 @@ export interface MotionStudioTimelineProps {
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
 }
 
-/** Visible lane width = scrollport minus fixed 9.5rem track gutter. */
+/** Visible lane width = scrollport minus the shared timeline track gutter. */
 function measureLaneWidthPx(root: HTMLElement | null): number {
   if (root === null) return 0;
   const scroll = root.querySelector('.timeline-tracks');
   if (!(scroll instanceof HTMLElement)) return 0;
   // Never use .timeline-lane clientWidth — that grows with zoomed content.
-  return Math.max(0, scroll.clientWidth - 152);
+  return timelineContentWidthPx(scroll.clientWidth);
 }
 
 /**

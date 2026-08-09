@@ -22,15 +22,19 @@ import {
   ImageIcon,
   ListIcon,
   LockIcon,
-  MuteIcon,
   SearchIcon,
   SoloIcon,
-  SpeakerOnIcon,
   TimelineAudioTrackIcon,
   TimelineMarkerIcon,
   TimelineScriptTrackIcon,
   TimelineVideoTrackIcon,
 } from './icons.js';
+import {
+  timelineContentWidthPx,
+  timelineMinWidthStyle,
+  timelineOriginStyle,
+} from './timeline-layout.js';
+import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 
 export type TimelineCanvasIcon =
   'video' | 'audio' | 'text' | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
@@ -56,13 +60,13 @@ export interface TimelineCanvasTrack {
     readonly code: string;
     readonly name: string;
   };
-  /** Lock / mute / solo — same controls as the main Timeline gutter. */
+  /** Lock / visibility / solo — same controls as the main Timeline gutter. */
   readonly controls?: {
     readonly trackId: string;
     readonly locked: boolean;
-    readonly muted: boolean;
+    readonly visible: boolean;
     readonly solo: boolean;
-    readonly onToggle: (flag: 'locked' | 'muted' | 'solo') => void;
+    readonly onToggle: (flag: 'locked' | 'visible' | 'solo') => void;
   };
 }
 
@@ -146,9 +150,9 @@ function TrackHeaderChrome({
     | {
         readonly trackId: string;
         readonly locked: boolean;
-        readonly muted: boolean;
+        readonly visible: boolean;
         readonly solo: boolean;
-        readonly onToggle: (flag: 'locked' | 'muted' | 'solo') => void;
+        readonly onToggle: (flag: 'locked' | 'visible' | 'solo') => void;
       }
     | undefined;
 }) {
@@ -189,16 +193,11 @@ function TrackHeaderChrome({
       >
         <LockIcon />
       </button>
-      <button
-        type="button"
-        className="icon-button"
-        aria-pressed={controls.muted}
-        aria-label={`Mute ${controls.trackId}`}
-        title={controls.muted ? 'Unmute track' : 'Mute track'}
-        onClick={() => controls.onToggle('muted')}
-      >
-        {controls.muted ? <MuteIcon /> : <SpeakerOnIcon />}
-      </button>
+      <TimelineTrackVisibilityButton
+        trackId={controls.trackId}
+        visible={controls.visible}
+        onToggle={() => controls.onToggle('visible')}
+      />
       <button
         type="button"
         className="icon-button"
@@ -330,7 +329,7 @@ export function TimelineCanvas({
       const entry = entries[0];
       if (entry === undefined) return;
       const lane = laneMeasureRef.current;
-      const width = lane?.clientWidth ?? Math.max(0, entry.contentRect.width - 152);
+      const width = timelineContentWidthPx(entry.contentRect.width) || (lane?.clientWidth ?? 0);
       if (width > 0) {
         onViewportChange({
           ...viewport,
@@ -344,11 +343,11 @@ export function TimelineCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
   }, [autoFit, safeDurationUs, onViewportChange]);
 
-  const playheadLeft = `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`;
+  const playheadLeft = timelineOriginStyle(timeToPixel(playheadUs, { ...viewport, originUs: 0 }));
 
   return (
     <div className={['timeline-tracks', className].filter(Boolean).join(' ')} ref={scrollRef}>
-      <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
+      <div className="timeline-scrub-row" style={{ minWidth: timelineMinWidthStyle(laneWidthPx) }}>
         <div className="timeline-scrub-gutter">
           <output className="timeline-timecode" aria-live="polite">
             {gutterIconSrc !== undefined ? (

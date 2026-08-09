@@ -24,14 +24,12 @@ import {
   DuplicateIcon,
   FitWidthIcon,
   LockIcon,
-  MuteIcon,
   PauseIcon,
   PlayIcon,
   ScissorsIcon,
   SkipBackIcon,
   SkipForwardIcon,
   SoloIcon,
-  SpeakerOnIcon,
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -57,6 +55,7 @@ import {
 } from './commands/timeline-commands.js';
 import { ContextMenu } from './ContextMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
+import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import {
   timelineTrackKind,
@@ -64,6 +63,11 @@ import {
   timelineTrackDisplayName,
   type TimelineTrackKind,
 } from './timeline-track-kind.js';
+import {
+  timelineContentWidthPx,
+  timelineMinWidthStyle,
+  timelineOriginStyle,
+} from './timeline-layout.js';
 import { formatTime } from './format-time.js';
 import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
 import type { ProvenanceStep } from './dual-lens-reveal.js';
@@ -483,7 +487,7 @@ export function TimelinePanel({
   readonly onOpenAssetLibrary?: () => void;
   readonly onImportMedia?: (file: File) => Promise<TimelineMediaAsset>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
-  /** Shared with Dual Lens so lock/mute/solo stay one source of truth. */
+  /** Shared with Dual Lens so lock/visibility/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
   readonly onTrackFlagsChange?: (next: readonly TimelineTrackView[]) => void;
 }) {
@@ -514,16 +518,18 @@ export function TimelinePanel({
 
   const tracks = composition.tracks.map((track, index) => {
     const saved = trackFlags.find((item) => item.id === track.id);
-    return (
-      saved ?? {
+    return {
+      ...(saved ?? {
         id: track.id,
         heightPx: 44,
         locked: false,
-        muted: !track.enabled,
         solo: false,
         order: index,
-      }
-    );
+      }),
+      // The schema command is the output source of truth; visibility in this
+      // presentation model must follow it after undo/redo or another surface.
+      visible: track.enabled ?? true,
+    };
   });
   const compositionRef = useRef(composition);
   const tracksRef = useRef(tracks);
@@ -564,7 +570,7 @@ export function TimelinePanel({
       if (entry === undefined) return;
       setTracksHeightPx(entry.contentRect.height);
       const scrollW = scrollRef.current?.clientWidth ?? entry.contentRect.width;
-      const width = Math.max(0, scrollW - 152);
+      const width = timelineContentWidthPx(scrollW);
       if (autoFit && width > 0) {
         onViewportChange({
           ...viewport,
@@ -580,7 +586,7 @@ export function TimelinePanel({
   useEffect(() => {
     if (!autoFit) return;
     const scrollW = scrollRef.current?.clientWidth ?? 0;
-    const width = Math.max(0, scrollW - 152) || (laneMeasureRef.current?.clientWidth ?? 0);
+    const width = timelineContentWidthPx(scrollW) || (laneMeasureRef.current?.clientWidth ?? 0);
     if (width <= 0) return;
     onViewportChange({
       ...viewport,
@@ -589,17 +595,39 @@ export function TimelinePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
   }, [autoFit, composition.durationUs, onViewportChange]);
 
-  const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
+  const toggle = (id: string, flag: 'locked' | 'solo') => {
     const next = tracks
       .map((track) => (track.id === id ? toggleTrackFlag(track, flag) : track))
-      .map(({ id: trackId, heightPx, locked, muted, solo }) => ({
+      .map(({ id: trackId, heightPx, locked, visible, solo }) => ({
         id: trackId,
         heightPx,
         locked,
-        muted,
+        visible,
         solo,
       }));
     setTrackFlags(next);
+  };
+
+  const setVisibility = (id: string, visible: boolean) => {
+    const next = tracks
+      .map((track) => (track.id === id ? { ...track, visible } : track))
+      .map(({ id: trackId, heightPx, locked, visible: trackVisible, solo }) => ({
+        id: trackId,
+        heightPx,
+        locked,
+        visible: trackVisible,
+        solo,
+      }));
+    setTrackFlags(next);
+    onDispatch({
+      label: visible ? `Show ${id}` : `Hide ${id}`,
+      commands: [
+        {
+          type: 'property.setTrackEnabled',
+          payload: { compositionId: composition.id, trackId: id, enabled: visible },
+        },
+      ],
+    });
   };
 
   const selected = selectedIds
@@ -1289,7 +1317,10 @@ export function TimelinePanel({
           applyZoom(viewport.pixelsPerSecond * factor, event.clientX);
         }}
       >
-        <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
+        <div
+          className="timeline-scrub-row"
+          style={{ minWidth: timelineMinWidthStyle(laneWidthPx) }}
+        >
           <div className="timeline-scrub-gutter">
             <output className="timeline-timecode" aria-live="polite">
               {formatTime(playheadUs)}
@@ -1312,7 +1343,7 @@ export function TimelinePanel({
           <span
             className="timeline-playhead timeline-playhead--scrub"
             style={{
-              left: `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`,
+              left: timelineOriginStyle(timeToPixel(playheadUs, { ...viewport, originUs: 0 })),
             }}
             aria-hidden="true"
           />
@@ -1322,7 +1353,7 @@ export function TimelinePanel({
           <span
             className="timeline-playhead"
             style={{
-              left: `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`,
+              left: timelineOriginStyle(timeToPixel(playheadUs, { ...viewport, originUs: 0 })),
             }}
             aria-hidden="true"
           />
@@ -1330,7 +1361,7 @@ export function TimelinePanel({
             <span
               className="timeline-split-guide"
               style={{
-                left: `calc(9.5rem + ${timeToPixel(splitGuideUs, { ...viewport, originUs: 0 })}px)`,
+                left: timelineOriginStyle(timeToPixel(splitGuideUs, { ...viewport, originUs: 0 })),
               }}
               aria-hidden="true"
             />
@@ -1391,21 +1422,7 @@ export function TimelinePanel({
                           ],
                         });
                       },
-                      (enabled: boolean) => {
-                        onDispatch({
-                          label: enabled ? `Enable ${track.id}` : `Mute ${track.id}`,
-                          commands: [
-                            {
-                              type: 'property.setTrackEnabled',
-                              payload: {
-                                compositionId: composition.id,
-                                trackId: track.id,
-                                enabled,
-                              },
-                            },
-                          ],
-                        });
-                      },
+                      (visible: boolean) => setVisibility(track.id, visible),
                       source.enabled ?? true,
                       source.clips.length === 0 && composition.tracks.length > 1,
                     );
@@ -1427,6 +1444,7 @@ export function TimelinePanel({
                     </span>
                   </div>
                   <button
+                    type="button"
                     className="icon-button"
                     aria-pressed={track.locked}
                     aria-label={`Lock ${track.id}`}
@@ -1435,31 +1453,13 @@ export function TimelinePanel({
                   >
                     <LockIcon />
                   </button>
+                  <TimelineTrackVisibilityButton
+                    trackId={track.id}
+                    visible={track.visible}
+                    onToggle={(visible) => setVisibility(track.id, visible)}
+                  />
                   <button
-                    className="icon-button"
-                    aria-pressed={track.muted}
-                    aria-label={`Mute ${track.id}`}
-                    title={track.muted ? 'Unmute track' : 'Mute track'}
-                    onClick={() => {
-                      toggle(track.id, 'muted');
-                      onDispatch({
-                        label: track.muted ? `Enable ${track.id}` : `Mute ${track.id}`,
-                        commands: [
-                          {
-                            type: 'property.setTrackEnabled',
-                            payload: {
-                              compositionId: composition.id,
-                              trackId: track.id,
-                              enabled: track.muted,
-                            },
-                          },
-                        ],
-                      });
-                    }}
-                  >
-                    {track.muted ? <MuteIcon /> : <SpeakerOnIcon />}
-                  </button>
-                  <button
+                    type="button"
                     className="icon-button"
                     aria-pressed={track.solo}
                     aria-label={`Solo ${track.id}`}

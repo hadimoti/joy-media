@@ -61,12 +61,12 @@ describe('timeline coordinates', () => {
   });
   it('virtualizes visible track rows and keeps track controls ephemeral', () => {
     const tracks = [
-      { id: 'a', heightPx: 20, locked: false, muted: false, solo: false },
-      { id: 'b', heightPx: 20, locked: false, muted: false, solo: false },
-      { id: 'c', heightPx: 20, locked: false, muted: false, solo: false },
+      { id: 'a', heightPx: 20, locked: false, visible: true, solo: false },
+      { id: 'b', heightPx: 20, locked: false, visible: true, solo: false },
+      { id: 'c', heightPx: 20, locked: false, visible: true, solo: false },
     ];
     expect(virtualTracks(tracks, 20, 20).map((track) => track.id)).toEqual(['a', 'b', 'c']);
-    expect(toggleTrackFlag(tracks[0]!, 'muted').muted).toBe(true);
+    expect(toggleTrackFlag(tracks[0]!, 'visible').visible).toBe(false);
   });
   it('fits zoom to width and places duplicates after gaps', () => {
     expect(fitPixelsPerSecond(10_000_000, 224, 24)).toBe(20);

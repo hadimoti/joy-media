@@ -64,11 +64,11 @@ export function motionSceneToTimelineTracks(
       controls: {
         trackId: layer.id,
         locked: layer.locked,
-        muted: !layer.visible,
+        visible: layer.visible,
         solo: false,
         onToggle: (flag) => {
           if (flag === 'locked') handlers.onToggleLocked(layer.id);
-          if (flag === 'muted') handlers.onToggleVisibility(layer.id);
+          if (flag === 'visible') handlers.onToggleVisibility(layer.id);
         },
       },
       items: [

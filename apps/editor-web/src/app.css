@@ -79,6 +79,14 @@ textarea:focus:not(:focus-visible) {
   font-family: var(--joy-font-ui);
 }
 
+/* Timeline geometry is scoped so shared TimelineCanvas surfaces inherit one
+   exact 168px gutter without changing unrelated panel grids. Keep this aligned
+   with TIMELINE_TRACK_GUTTER_WIDTH_PX in timeline-layout.ts. */
+.timeline-panel,
+.dual-time {
+  --timeline-track-gutter-width: 168px;
+}
+
 /* Persian explainer/guidance copy stays centered and layout-neutral. Titles,
    controls, ids, filenames, and timeline chrome keep their existing direction. */
 [lang='fa'] {
@@ -1762,7 +1770,7 @@ label {
   gap: 0.4rem;
 }
 .timeline-track {
-  /* Must be 0: playhead/grid/ruler origin is exactly 9.5rem (header width).
+  /* Must be 0: playhead/grid/ruler origin is exactly the header width.
      A flex gap here shifts the lane and leaves an empty strip at t=0. */
   gap: 0;
 }
@@ -1912,8 +1920,8 @@ label {
   flex: none;
   align-items: center;
   justify-content: flex-start;
-  width: 9.5rem;
-  min-width: 9.5rem;
+  width: var(--timeline-track-gutter-width);
+  min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
 }
@@ -1971,7 +1979,7 @@ label {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 9.5rem;
+  left: var(--timeline-track-gutter-width);
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
@@ -2017,8 +2025,8 @@ label {
   flex: none;
   align-items: center;
   gap: 0.25rem;
-  width: 9.5rem;
-  min-width: 9.5rem;
+  width: var(--timeline-track-gutter-width);
+  min-width: var(--timeline-track-gutter-width);
 }
 .timeline-track strong {
   flex: 1 1 auto;
@@ -2292,8 +2300,9 @@ label {
   flex: none;
   align-items: center;
   gap: 0.2rem;
-  width: 9.5rem;
-  min-width: 9.5rem;
+  width: var(--timeline-track-gutter-width);
+  min-width: var(--timeline-track-gutter-width);
+  box-sizing: border-box;
   padding-inline-end: var(--space-1);
   background: var(--joy-bg-panel);
   position: relative;
@@ -2341,7 +2350,7 @@ label {
   align-items: center;
   justify-content: center;
   min-height: 3.5rem;
-  margin: var(--space-2) 0 0 9.5rem;
+  margin: var(--space-2) 0 0 var(--timeline-track-gutter-width);
   border: 1px dashed var(--joy-border-strong);
   border-radius: var(--radius-md);
   color: var(--joy-text-faint);
@@ -9516,7 +9525,7 @@ label {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  margin: 0.35rem 0.5rem 0.35rem 9.5rem;
+  margin: 0.35rem 0.5rem 0.35rem var(--timeline-track-gutter-width);
   padding: 0.55rem 0.9rem;
   height: 3.1rem;
   box-sizing: border-box;
@@ -9992,11 +10001,11 @@ label {
 /* Dual Lens Time View hosts TimelineCanvas — same ruler/grid/lanes/clips.
    Only clip hue differs from the main NLE. */
 .dual-time .timeline-track-header {
-  /* Inset chrome inside the fixed 9.5rem gutter — never margin-shrink the
+  /* Inset chrome inside the fixed gutter — never margin-shrink the
      header width, or padding-inline-end pushes the lane past the playhead. */
   margin-left: 0;
-  width: 9.5rem;
-  min-width: 9.5rem;
+  width: var(--timeline-track-gutter-width);
+  min-width: var(--timeline-track-gutter-width);
   padding-inline-start: 5px;
   box-sizing: border-box;
 }
@@ -10387,9 +10396,10 @@ label {
 
 .data-lane-label {
   display: flex;
-  width: 9.5rem;
+  width: var(--timeline-track-gutter-width);
   flex: none;
   align-items: center;
+  box-sizing: border-box;
   padding-left: 10px;
   color: var(--joy-text-muted);
   font-size: 11px;

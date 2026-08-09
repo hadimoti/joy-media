@@ -29,6 +29,19 @@ describe('timeline context menu commands', () => {
     expect(onRemove).toHaveBeenCalledOnce();
   });
 
+  it('uses visibility language for the track output toggle', () => {
+    const onToggleVisibility = vi.fn();
+    const visible = buildTrackHeaderContextMenu(vi.fn(), vi.fn(), onToggleVisibility, true, true);
+    const hidden = buildTrackHeaderContextMenu(vi.fn(), vi.fn(), onToggleVisibility, false, true);
+
+    expect(visible[3]).toMatchObject({ label: 'Hide Track' });
+    expect(hidden[3]).toMatchObject({ label: 'Show Track' });
+    visible[3]?.action?.();
+    hidden[3]?.action?.();
+    expect(onToggleVisibility).toHaveBeenNthCalledWith(1, false);
+    expect(onToggleVisibility).toHaveBeenNthCalledWith(2, true);
+  });
+
   it('forwards the ruler time to the marker command', () => {
     const onAddMarker = vi.fn();
     const [item] = buildRulerContextMenu(onAddMarker, 2_500_000);

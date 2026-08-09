@@ -27,6 +27,7 @@ import {
 } from './dual-lens-reveal.js';
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
+import { timelineContentWidthPx } from './timeline-layout.js';
 import {
   FitWidthIcon,
   MarkerIcon,
@@ -59,7 +60,7 @@ export interface DualLensPanelProps {
   /** Shared with TimelinePanel so Time View clip widths match the main NLE. */
   readonly timelineViewport: TimelineViewport;
   readonly onTimelineViewportChange: (next: TimelineViewport) => void;
-  /** Shared lock/mute/solo flags with the main Timeline gutter. */
+  /** Shared lock/visibility/solo flags with the main Timeline gutter. */
   readonly trackFlags: readonly TimelineTrackView[];
   readonly onTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
   readonly compositionId: string;
@@ -241,7 +242,7 @@ function lanesToCanvasTracks(
   trackFlags: readonly TimelineTrackView[],
   onToggleTrackFlag: (
     trackId: string,
-    flag: 'locked' | 'muted' | 'solo',
+    flag: 'locked' | 'visible' | 'solo',
     enabledSeed: boolean,
   ) => void,
 ): readonly TimelineCanvasTrack[] {
@@ -256,7 +257,8 @@ function lanesToCanvasTracks(
         controls = {
           trackId: sourceTrackId,
           locked: saved?.locked ?? false,
-          muted: saved?.muted ?? !enabled,
+          // Time View mirrors the project track, while lock/solo stay ephemeral.
+          visible: enabled,
           solo: saved?.solo ?? false,
           onToggle: (flag) => onToggleTrackFlag(sourceTrackId, flag, enabled),
         };
@@ -334,28 +336,29 @@ function TimeProjection({
   const tracks = useMemo(() => {
     const onToggleTrackFlag = (
       trackId: string,
-      flag: 'locked' | 'muted' | 'solo',
+      flag: 'locked' | 'visible' | 'solo',
       enabledSeed: boolean,
     ) => {
-      const current =
-        trackFlags.find((item) => item.id === trackId) ??
-        ({
+      const current = {
+        ...(trackFlags.find((item) => item.id === trackId) ?? {
           id: trackId,
           heightPx: 44,
           locked: false,
-          muted: !enabledSeed,
           solo: false,
-        } satisfies TimelineTrackView);
-      if (flag === 'muted') {
+        }),
+        // The lane projection is derived from the schema command result.
+        visible: enabledSeed,
+      };
+      if (flag === 'visible') {
         onDispatch({
-          label: current.muted ? `Enable ${trackId}` : `Mute ${trackId}`,
+          label: current.visible ? `Hide ${trackId}` : `Show ${trackId}`,
           commands: [
             {
               type: 'property.setTrackEnabled',
               payload: {
                 compositionId,
                 trackId,
-                enabled: current.muted,
+                enabled: !current.visible,
               },
             },
           ],
@@ -378,7 +381,7 @@ function TimeProjection({
     const lane = rootRef.current?.querySelector('.timeline-lane');
     const scrollClientW = scroll instanceof HTMLElement ? scroll.clientWidth : 0;
     const laneW = lane instanceof HTMLElement ? lane.clientWidth : 0;
-    const width = Math.max(0, scrollClientW - 152) || laneW;
+    const width = timelineContentWidthPx(scrollClientW) || laneW;
     if (width <= 0) return;
     onViewportChange({
       ...viewport,
