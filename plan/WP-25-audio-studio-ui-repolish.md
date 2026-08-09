@@ -1,6 +1,6 @@
 # WP-25 — Audio Studio UI repolish
 
-Status: `gate-review` (implementation and automated verification complete; third visual/density correction awaiting live remeasurement)
+Status: `done` (2026-08-09)
 
 ## Problem
 
@@ -46,7 +46,7 @@ the footer’s resources, readiness, and action.
 - [x] Capability Library is collapsed by default, exposes all 16 capabilities and its purpose in the summary, and provides accessible target filters with counts and pressed state.
 - [x] Touched audio styles use existing design tokens and preserve compact/responsive behavior, including the ≤22rem container query.
 - [x] Focused server-render test covers action-first labels, honest statuses/readiness, collapsed library summary/count, filters, retained capability content, and ARIA.
-- [ ] Live browser measurement at the representative dock size and ≤22rem has been rerun by the orchestrator.
+- [x] Live browser measurement at the representative dock size and ≤22rem has been rerun by the orchestrator.
 
 ## Implementation checklist
 
@@ -73,6 +73,9 @@ the footer’s resources, readiness, and action.
 - Independent orchestrator verification passed `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests).
 - Independent orchestrator verification passed `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed).
 - Third-correction verification with installed local binaries passed the focused Vitest suite (3 files, 10 tests), `tsc -b`, `eslint .`, `prettier --check .`, `git diff --check`, and the editor Vite build (1,268 modules transformed).
-- The prior independent live review on `https://joyst.ir/` at deployed commit `da2858958ca7303726201fc874dc539116a4415d`, release `/opt/joy-media/releases/editor-web-20260809-114501-da28589-audio-studio`, exposed this third correction. Its exact evidence was 440×512, body top 161 / bottom 594, clientHeight 433, width 424, scrollHeight 498, scrollTop 0, and no horizontal overflow; Runtime was 102 px (grid 72, closed settings 29), Workflow was 299 px (heading 44, preset grid 69, selected card 186, steps 69, footer 48), Run was top 535 / bottom 566, and Capability Library began at 583.
-- The third correction is not live-verified. The orchestrator must remeasure the 440×512 default state and the narrow responsive fallbacks before this WP can close.
-- No deploy, commit, push, runtime-data, or secret mutation was performed.
+- Final independent live browser gate passed after reload on `https://joyst.ir/` at commit `35f80978ea28d4b15e0a11fc8c2803c74868c64e`, release `/opt/joy-media/releases/editor-web-20260809-120957-35f8097-audio-studio`. At 440×512, the body was top 161 / bottom 594, clientHeight 433, scrollHeight 433, scrollTop 0, width 424, with no horizontal overflow. The Studio stack was 161–566 (405 px), leaving 28 px; Runtime was 96 px, Workflow 242 px, selected card 138 px, connected steps 31 px, and footer 46 px. Run was 466–495 (29 px) and the collapsed Capability Library summary was 520–566 (46 px), fully visible without scrolling. All six Podcast Quality labels fit: Denoise, Enhance, EQ, Compress, Limiter, Normalize.
+- At the 340 px narrow gate, there was no body horizontal overflow; presets computed to 2 columns, steps to a 3-column grid, the footer to one column, and the Capability Library summary wrapped intentionally. All six labels remained visible and Run stayed compact.
+- Live interactions passed: Runtime settings opened and exposed the editable Audio model cache path, then closed; YouTube Master updated the selected card and Run aria-label, then reset; Capability filters returned Local Worker 9, Browser DSP 6, and Cloud Brain 1 before the library was collapsed again. Models, Master, Clips, and Studio remained covered by the unchanged tab code/tests. No new console errors appeared; only the retained prior-bundle transition preview error remained in tab history. The runtime contained no old PNG mask; the device rendered as a shared rectangular compute-card SVG and the workflow heading as a shared path-nodes SVG with no play triangle.
+- Final deployment evidence: HEAD, `origin/main`, and `vps-local/main` matched `35f8097`; the canonical worktree was clean; `nginx -t` passed; API health was `{ok:true, service:joy-media-api, controlPlane:true}`. Release, live symlink, and public index SHA-256 all matched `7986c1cb90b2fa1547736d5d5f314b87f62ae3d1d3185b229bd4b5a1282790c9`; release, live, and public CSS SHA-256 all matched `ff8516cd9dc486b80f63c7274af0174700c2ec62da6dda68f05c82e7d3499153`. Rollback releases `3bae8ec`, `da28589`, `e4860c7`, and `88340d5` remain available.
+- Independent orchestrator verification after the final CSS change passed `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests), `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
+- This documentation-only closeout performed no product, deployment, runtime-data, or secret change, and made no commit or push in this docs-edit session.
