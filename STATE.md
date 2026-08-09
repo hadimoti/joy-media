@@ -80,13 +80,15 @@ defect in that release: Local Worker and Cloud Brain were 60.32 px tall while
 the Device label was 44.32 px because the broad global `label` rule contributed
 8 px top and bottom margins; the icon wrapper also spanned both content rows.
 
-The working-tree correction scopes `margin: 0` to `.audio-runtime-control` and
+The working-tree correction scopes `margin: 0` to `.audio-runtime-control`,
 explicitly places each runtime icon/title/status or select in the two-row grid,
-with block SVGs and no inline-baseline artifact. Focused Vitest (3 files, 10
-tests), `tsc -b`, ESLint, Prettier, and the 1,268-module editor build passed in
-this session; live equal-height/icon-row plus the existing 440×512 and ≤22rem
-gates remain open for remeasurement. No deploy, commit, push, runtime-data, or
-secret mutation was performed.
+and gives the ≤22rem runtime grid equal implicit `1fr` tracks. This preserves
+the 440 px three-column layout and the no-horizontal-overflow constraint, with
+block SVGs and no inline-baseline artifact. Focused Vitest (3 files, 10 tests),
+`tsc -b`, ESLint, Prettier, and the 1,268-module editor build passed after this
+follow-up CSS change; live equal-height/icon-row plus the existing 440×512 and
+≤22rem gates remain open for remeasurement. No deploy, commit, push,
+runtime-data, or secret mutation was performed.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one

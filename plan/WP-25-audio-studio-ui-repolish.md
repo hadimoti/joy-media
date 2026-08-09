@@ -47,8 +47,11 @@ rule contributed 8 px top and bottom margins. The runtime glyph wrapper also
 spanned both content rows, placing each icon between the title and status.
 This correction scopes `margin: 0` to the Device runtime label and explicitly
 places each icon/title/status or select in the two-row runtime grid. It keeps
-the existing density, status semantics, responsive layout, and no-scroll gate;
-the live equal-height and icon-row result remains open for remeasurement.
+the existing density, status semantics, responsive layout, and no-scroll gate.
+At `max-width: 22rem`, the runtime grid now gives its implicit rows equal `1fr`
+tracks, so the taller Device card establishes the shared row height without
+changing the three-column 440 px layout or introducing horizontal overflow. The
+live equal-height and icon-row result remains open for remeasurement.
 
 ## Acceptance criteria
 
@@ -76,6 +79,7 @@ the live equal-height and icon-row result remains open for remeasurement.
 - [x] Replace the false PlayIcon heading affordance and redraw the device icon as a rectangular compute card.
 - [x] Rebalance the workflow footer so resources, readiness, and the disabled action align coherently.
 - [x] Scope the runtime Device label margin and align runtime icons/titles/statuses to explicit grid rows.
+- [x] Equalize implicit runtime grid rows at `max-width: 22rem` without changing the desktop layout.
 - [x] Run Prettier on touched source, test, CSS, and documentation files.
 
 ## Verification notes
@@ -90,6 +94,7 @@ the live equal-height and icon-row result remains open for remeasurement.
 - At the 340 px narrow gate, there was no body horizontal overflow; presets computed to 2 columns, steps to a 3-column grid, the footer to one column, and the Capability Library summary wrapped intentionally. All six labels remained visible and Run stayed compact.
 - Live interactions passed: Runtime settings opened and exposed the editable Audio model cache path, then closed; YouTube Master updated the selected card and Run aria-label, then reset; Capability filters returned Local Worker 9, Browser DSP 6, and Cloud Brain 1 before the library was collapsed again. Models, Master, Clips, and Studio remained covered by the unchanged tab code/tests. No new console errors appeared; only the retained prior-bundle transition preview error remained in tab history. The runtime contained no old PNG mask; the device rendered as a shared rectangular compute-card SVG and the workflow heading as a shared path-nodes SVG with no play triangle.
 - Final deployment evidence: HEAD, `origin/main`, and `vps-local/main` matched `35f8097`; the canonical worktree was clean; `nginx -t` passed; API health was `{ok:true, service:joy-media-api, controlPlane:true}`. Release, live symlink, and public index SHA-256 all matched `7986c1cb90b2fa1547736d5d5f314b87f62ae3d1d3185b229bd4b5a1282790c9`; release, live, and public CSS SHA-256 all matched `ff8516cd9dc486b80f63c7274af0174700c2ec62da6dda68f05c82e7d3499153`. Rollback releases `3bae8ec`, `da28589`, `e4860c7`, and `88340d5` remain available.
-- Independent orchestrator verification after the final CSS change passed `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests), `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
+- Independent orchestrator verification before this narrow implicit-row follow-up passed `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests), `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
+- Follow-up verification after the implicit-row CSS change passed the same focused Vitest suite (3 files, 10 tests), `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
 - The fourth correction is not live-verified. The orchestrator must remeasure equal runtime-card outer heights, title-row icon placement, and the existing 440×512 / ≤22rem gates after deployment.
 - This fourth-correction working-tree session performed no deployment, commit, push, runtime-data, or secret mutation.

@@ -12411,6 +12411,9 @@ label {
   color: var(--joy-accent);
 }
 @container (max-width: 22rem) {
+  .audio-runtime-grid {
+    grid-auto-rows: 1fr;
+  }
   .audio-runtime-grid,
   .audio-workflow-pickers,
   .audio-capability-grid {
