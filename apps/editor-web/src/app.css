@@ -12252,6 +12252,12 @@ label {
   font-size: var(--joy-type-xs);
   line-height: 1;
 }
+@container (min-width: 22.01rem) {
+  .audio-workflow-steps li {
+    gap: 0.2rem;
+    padding-inline: 0.1rem;
+  }
+}
 .audio-workflow-footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
