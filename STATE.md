@@ -42,7 +42,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-21 baseline hygiene           | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                    |
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
-| WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live first-viewport and narrow responsive gates passed on 35f8097; deployment integrity verified            |
+| WP-25 audio Studio UI            | gate-review | —        | 2026-08-09   | Fourth runtime-card alignment correction in working tree; remeasure live before closure                     |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
 ## Production hardening handoff (2026-08-08)
@@ -70,46 +70,23 @@ three personal assets are cloud-backed. Post-upload reconciliation is exact at 1
 database refs and 1,274 ParsPack objects totaling 1,495,383,536 bytes on each side,
 with zero unbacked personal videos. WP-24 is complete.
 
-**WP-25 complete (2026-08-09).** Audio Studio is action-first inside the
-existing PanelShell with honest runtime status, selected workflow/run surface,
-and a collapsed filtered Capability Library. Final source commit
-`35f80978ea28d4b15e0a11fc8c2803c74868c64e` is deployed at immutable release
-`/opt/joy-media/releases/editor-web-20260809-120957-35f8097-audio-studio`;
-HEAD, `origin/main`, `vps-local/main`, and the canonical worktree are clean and
-match `35f8097`.
+**WP-25 in progress (fourth runtime-card alignment correction, 2026-08-09).**
+Audio Studio’s prior final gate passed on deployed source commit `35f8097`:
+the 440×512 body and complete collapsed Studio surface fit without scrolling,
+the 340 px responsive layout had no horizontal overflow, all workflow labels
+fit, and the deployment/interactions/integrity evidence is recorded in the WP
+plan. The owner’s computed-style audit then found a runtime-card alignment
+defect in that release: Local Worker and Cloud Brain were 60.32 px tall while
+the Device label was 44.32 px because the broad global `label` rule contributed
+8 px top and bottom margins; the icon wrapper also spanned both content rows.
 
-The final live gate passed after reload on `https://joyst.ir/` at 440×512:
-body top 161 / bottom 594, clientHeight 433, scrollHeight 433, scrollTop 0,
-width 424, no horizontal overflow; Studio stack 161–566 (405 px) with 28 px
-spare; Runtime 96 px; Workflow 242 px; selected card 138 px; connected steps
-31 px; footer 46 px; Run 466–495 (29 px); and the collapsed Capability Library
-summary 520–566 (46 px), fully visible without scrolling. Denoise, Enhance, EQ,
-Compress, Limiter, and Normalize all fit without truncation. The narrow 340 px
-gate also had no horizontal overflow: presets computed to 2 columns, steps to
-3 columns, footer to 1 column, the library summary wrapped intentionally, all
-six labels remained visible, and Run stayed compact.
-
-Runtime settings opened and exposed the editable Audio model cache path, then
-closed. YouTube Master updated the selected card and Run aria-label, then reset
-to Podcast Quality. Capability filters returned Local Worker 9, Browser DSP 6,
-and Cloud Brain 1 before the library was collapsed again. Models, Master,
-Clips, and Studio remain covered by the unchanged tab code/tests. No new
-console errors appeared after the final reload/interactions; only the retained
-prior-bundle transition preview error remained in tab history. No old runtime
-PNG mask remained; the device rendered as a shared rectangular compute-card
-SVG and the workflow heading as a shared path-nodes SVG with no play triangle.
-
-Independent verification after the final CSS change passed `pnpm typecheck`,
-`pnpm lint`, `pnpm format:check`, `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests),
-`pnpm --filter @joy-media/editor-web build` (1,268 modules), and
-`git diff --check`. Deployment verification passed `nginx -t` and API health
-returned `{ok:true, service:joy-media-api, controlPlane:true}`. Release, live
-symlink, and public index SHA-256 matched
-`7986c1cb90b2fa1547736d5d5f314b87f62ae3d1d3185b229bd4b5a1282790c9`; release,
-live, and public CSS SHA-256 matched
-`ff8516cd9dc486b80f63c7274af0174700c2ec62da6dda68f05c82e7d3499153`.
-Rollback releases `3bae8ec`, `da28589`, `e4860c7`, and `88340d5` remain
-available.
+The working-tree correction scopes `margin: 0` to `.audio-runtime-control` and
+explicitly places each runtime icon/title/status or select in the two-row grid,
+with block SVGs and no inline-baseline artifact. Focused Vitest (3 files, 10
+tests), `tsc -b`, ESLint, Prettier, and the 1,268-module editor build passed in
+this session; live equal-height/icon-row plus the existing 440×512 and ≤22rem
+gates remain open for remeasurement. No deploy, commit, push, runtime-data, or
+secret mutation was performed.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one

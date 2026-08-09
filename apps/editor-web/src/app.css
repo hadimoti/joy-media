@@ -11845,8 +11845,28 @@ label {
   border-radius: var(--radius-sm);
   background: var(--joy-bg-raised);
 }
+.audio-runtime-control {
+  margin: 0;
+}
 .audio-runtime-cell > .icon-tool {
-  grid-row: span 2;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  min-width: 1rem;
+  min-height: 1rem;
+  padding: 0;
+  line-height: 0;
+}
+.audio-runtime-cell > .icon-tool svg {
+  display: block;
+}
+.audio-runtime-cell > strong {
+  grid-column: 2;
+  grid-row: 1;
+}
+.audio-runtime-cell > span:not(.icon-tool) {
+  grid-column: 2;
+  grid-row: 2;
 }
 .audio-runtime-cell strong,
 .audio-section-heading strong,
