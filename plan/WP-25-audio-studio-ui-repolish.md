@@ -1,6 +1,6 @@
 # WP-25 — Audio Studio UI repolish
 
-Status: `gate-review` (fourth runtime-card alignment correction awaiting live remeasurement)
+Status: `done` (2026-08-09; final orchestrator live gate passed)
 
 ## Problem
 
@@ -51,7 +51,41 @@ the existing density, status semantics, responsive layout, and no-scroll gate.
 At `max-width: 22rem`, the runtime grid now gives its implicit rows equal `1fr`
 tracks, so the taller Device card establishes the shared row height without
 changing the three-column 440 px layout or introducing horizontal overflow. The
-live equal-height and icon-row result remains open for remeasurement.
+final orchestrator live gate below confirms equal runtime-card heights, aligned
+title/icon centers, and preserved desktop and narrow-container behavior.
+
+## Final orchestrator live gate — 2026-08-09
+
+Product commit `fc8ef7d116082b2f40b6302bfdafcafdc71c8e87` is deployed as
+immutable editor release
+`/opt/joy-media/releases/editor-web-20260809-124017-fc8ef7d-audio-studio`.
+At the pre-closeout gate, `HEAD`, `origin/main`, and `vps-local/main` all
+matched that product commit; after the subsequent docs-only closeout commit,
+the immutable live product release remains built from `fc8ef7d`.
+`nginx -t` passed, and public API health was `{ok:true, service:joy-media-api,
+controlPlane:true}`. Release/live/public index SHA-256 was
+`64043dd8f1f70e86219e23add3c9e8abab067fa7e63e61d6504d6100c5cad7f8`; release/live/public
+CSS SHA-256 was
+`7ca5a28cee02411d7bc51ae4f62c30485e428943bc6fbb81254da356dd24d109`.
+
+At the `439.8×511.8` Audio panel, body `clientHeight` and `scrollHeight` were
+both `433`, `clientWidth` and `scrollWidth` were both `413`, and `scrollTop` was
+`0`. The Studio stack was `389.8px`. All runtime cards were top `164.2`, bottom
+`205.0`, height `40.8`, with margins `0`. Local Worker and Cloud Brain icon/title
+centers were `175.8`; Device icon/title centers were `174.6`. Run was
+`449.6–478.4`, Capability Library was `502.8–550.8`, and all six workflow labels
+fit.
+
+At the `339.8px` panel, body `clientWidth` and `scrollWidth` were both `313`
+with no horizontal overflow. The runtime grid had two columns and two equal
+`40.8px` rows; the first cards were `152.7×40.8` and Device was `307×40.8`.
+Presets were two columns, steps three columns, and the footer one column; every
+workflow label fit. Vertical scroll was expected at this width: body
+`scrollHeight` was `539`.
+
+Runtime settings opened with the cache input and closed; GPU Device remained
+selected. YouTube Master updated the selected workflow and Run `aria-label`, then
+reset successfully to Podcast Quality. Browser logs were empty.
 
 ## Acceptance criteria
 
@@ -61,7 +95,7 @@ live equal-height and icon-row result remains open for remeasurement.
 - [x] Capability Library is collapsed by default, exposes all 16 capabilities and its purpose in the summary, and provides accessible target filters with counts and pressed state.
 - [x] Touched audio styles use existing design tokens and preserve compact/responsive behavior, including the ≤22rem container query.
 - [x] Focused server-render test covers action-first labels, honest statuses/readiness, collapsed library summary/count, filters, retained capability content, and ARIA.
-- [ ] Live browser measurement at the representative dock size and ≤22rem has been rerun by the orchestrator.
+- [x] Live browser measurement at the representative dock size and ≤22rem has been rerun by the orchestrator.
 
 ## Implementation checklist
 
@@ -90,11 +124,11 @@ live equal-height and icon-row result remains open for remeasurement.
 - Independent orchestrator verification passed `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests).
 - Independent orchestrator verification passed `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed).
 - Third-correction verification with installed local binaries passed the focused Vitest suite (3 files, 10 tests), `tsc -b`, `eslint .`, `prettier --check .`, `git diff --check`, and the editor Vite build (1,268 modules transformed).
-- Final independent live browser gate passed after reload on `https://joyst.ir/` at commit `35f80978ea28d4b15e0a11fc8c2803c74868c64e`, release `/opt/joy-media/releases/editor-web-20260809-120957-35f8097-audio-studio`. At 440×512, the body was top 161 / bottom 594, clientHeight 433, scrollHeight 433, scrollTop 0, width 424, with no horizontal overflow. The Studio stack was 161–566 (405 px), leaving 28 px; Runtime was 96 px, Workflow 242 px, selected card 138 px, connected steps 31 px, and footer 46 px. Run was 466–495 (29 px) and the collapsed Capability Library summary was 520–566 (46 px), fully visible without scrolling. All six Podcast Quality labels fit: Denoise, Enhance, EQ, Compress, Limiter, Normalize.
+- Prior independent live browser gate passed after reload on `https://joyst.ir/` at commit `35f80978ea28d4b15e0a11fc8c2803c74868c64e`, release `/opt/joy-media/releases/editor-web-20260809-120957-35f8097-audio-studio`. At 440×512, the body was top 161 / bottom 594, clientHeight 433, scrollHeight 433, scrollTop 0, width 424, with no horizontal overflow. The Studio stack was 161–566 (405 px), leaving 28 px; Runtime was 96 px, Workflow 242 px, selected card 138 px, connected steps 31 px, and footer 46 px. Run was 466–495 (29 px) and the collapsed Capability Library summary was 520–566 (46 px), fully visible without scrolling. All six Podcast Quality labels fit: Denoise, Enhance, EQ, Compress, Limiter, Normalize.
 - At the 340 px narrow gate, there was no body horizontal overflow; presets computed to 2 columns, steps to a 3-column grid, the footer to one column, and the Capability Library summary wrapped intentionally. All six labels remained visible and Run stayed compact.
 - Live interactions passed: Runtime settings opened and exposed the editable Audio model cache path, then closed; YouTube Master updated the selected card and Run aria-label, then reset; Capability filters returned Local Worker 9, Browser DSP 6, and Cloud Brain 1 before the library was collapsed again. Models, Master, Clips, and Studio remained covered by the unchanged tab code/tests. No new console errors appeared; only the retained prior-bundle transition preview error remained in tab history. The runtime contained no old PNG mask; the device rendered as a shared rectangular compute-card SVG and the workflow heading as a shared path-nodes SVG with no play triangle.
-- Final deployment evidence: HEAD, `origin/main`, and `vps-local/main` matched `35f8097`; the canonical worktree was clean; `nginx -t` passed; API health was `{ok:true, service:joy-media-api, controlPlane:true}`. Release, live symlink, and public index SHA-256 all matched `7986c1cb90b2fa1547736d5d5f314b87f62ae3d1d3185b229bd4b5a1282790c9`; release, live, and public CSS SHA-256 all matched `ff8516cd9dc486b80f63c7274af0174700c2ec62da6dda68f05c82e7d3499153`. Rollback releases `3bae8ec`, `da28589`, `e4860c7`, and `88340d5` remain available.
+- Prior deployment evidence: HEAD, `origin/main`, and `vps-local/main` matched `35f8097`; the canonical worktree was clean; `nginx -t` passed; API health was `{ok:true, service:joy-media-api, controlPlane:true}`. Release, live symlink, and public index SHA-256 all matched `7986c1cb90b2fa1547736d5d5f314b87f62ae3d1d3185b229bd4b5a1282790c9`; release, live, and public CSS SHA-256 all matched `ff8516cd9dc486b80f63c7274af0174700c2ec62da6dda68f05c82e7d3499153`. Rollback releases `3bae8ec`, `da28589`, `e4860c7`, and `88340d5` remain available.
 - Independent orchestrator verification before this narrow implicit-row follow-up passed `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests), `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
 - Follow-up verification after the implicit-row CSS change passed the same focused Vitest suite (3 files, 10 tests), `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm --filter @joy-media/editor-web build` (1,268 modules), and `git diff --check`.
-- The fourth correction is not live-verified. The orchestrator must remeasure equal runtime-card outer heights, title-row icon placement, and the existing 440×512 / ≤22rem gates after deployment.
+- Final orchestrator live-gate evidence is recorded above; WP-25 acceptance is complete.
 - This fourth-correction working-tree session performed no deployment, commit, push, runtime-data, or secret mutation.

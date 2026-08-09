@@ -42,7 +42,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-21 baseline hygiene           | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                    |
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
-| WP-25 audio Studio UI            | gate-review | —        | 2026-08-09   | Fourth runtime-card alignment correction in working tree; remeasure live before closure                     |
+| WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                  |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
 ## Production hardening handoff (2026-08-08)
@@ -70,25 +70,36 @@ three personal assets are cloud-backed. Post-upload reconciliation is exact at 1
 database refs and 1,274 ParsPack objects totaling 1,495,383,536 bytes on each side,
 with zero unbacked personal videos. WP-24 is complete.
 
-**WP-25 in progress (fourth runtime-card alignment correction, 2026-08-09).**
-Audio Studio’s prior final gate passed on deployed source commit `35f8097`:
-the 440×512 body and complete collapsed Studio surface fit without scrolling,
-the 340 px responsive layout had no horizontal overflow, all workflow labels
-fit, and the deployment/interactions/integrity evidence is recorded in the WP
-plan. The owner’s computed-style audit then found a runtime-card alignment
-defect in that release: Local Worker and Cloud Brain were 60.32 px tall while
-the Device label was 44.32 px because the broad global `label` rule contributed
-8 px top and bottom margins; the icon wrapper also spanned both content rows.
+**WP-25 complete (2026-08-09).** The final orchestrator live gate passed on
+product commit `fc8ef7d116082b2f40b6302bfdafcafdc71c8e87`, deployed as immutable
+editor release
+`/opt/joy-media/releases/editor-web-20260809-124017-fc8ef7d-audio-studio`.
+At the pre-closeout gate, `HEAD`, `origin/main`, and `vps-local/main` all
+matched that product commit; after the subsequent docs-only closeout commit,
+the immutable live product release remains built from `fc8ef7d`. `nginx -t`
+passed; public API health was `{ok:true, service:joy-media-api,
+controlPlane:true}`. Release/live/public index SHA-256 was
+`64043dd8f1f70e86219e23add3c9e8abab067fa7e63e61d6504d6100c5cad7f8`; release/live/public
+CSS SHA-256 was
+`7ca5a28cee02411d7bc51ae4f62c30485e428943bc6fbb81254da356dd24d109`.
 
-The working-tree correction scopes `margin: 0` to `.audio-runtime-control`,
-explicitly places each runtime icon/title/status or select in the two-row grid,
-and gives the ≤22rem runtime grid equal implicit `1fr` tracks. This preserves
-the 440 px three-column layout and the no-horizontal-overflow constraint, with
-block SVGs and no inline-baseline artifact. Focused Vitest (3 files, 10 tests),
-`tsc -b`, ESLint, Prettier, and the 1,268-module editor build passed after this
-follow-up CSS change; live equal-height/icon-row plus the existing 440×512 and
-≤22rem gates remain open for remeasurement. No deploy, commit, push,
-runtime-data, or secret mutation was performed.
+At the `439.8×511.8` Audio panel, body `clientHeight` and `scrollHeight` were
+both `433`, `clientWidth` and `scrollWidth` were both `413`, `scrollTop` was
+`0`, and the Studio stack was `389.8px`. All runtime cards were top `164.2`,
+bottom `205.0`, height `40.8`, with margins `0`; Local/Cloud icon and title
+centers were `175.8`, and Device icon/title centers were `174.6`. Run was
+`449.6–478.4`, Capability Library was `502.8–550.8`, and all six workflow
+labels fit.
+
+At the `339.8px` panel, body `clientWidth` and `scrollWidth` were both `313`
+with no horizontal overflow. The runtime grid had two columns and two equal
+`40.8px` rows; first cards were `152.7×40.8` and Device was `307×40.8`.
+Presets were two columns, steps three columns, and the footer one column; every
+workflow label fit. Vertical scroll was expected at this width with body
+`scrollHeight` `539`. Runtime settings opened with the cache input and closed;
+GPU Device remained selected; YouTube Master changed the selected workflow and
+Run `aria-label`, then Podcast Quality reset succeeded. Browser logs were empty.
+WP-25 is closed; no further live gate remains open.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one
@@ -271,6 +282,7 @@ none of this is visible to users yet; that switch is the owner's call.
 
 ## Session log (newest first)
 
+| 2026-08-09 | WP-25 | **Final orchestrator live gate passed and WP-25 closed.** Product commit `fc8ef7d116082b2f40b6302bfdafcafdc71c8e87` is deployed as immutable editor release `editor-web-20260809-124017-fc8ef7d-audio-studio`; at the pre-closeout gate, HEAD, `origin/main`, and `vps-local/main` matched that product commit. After the subsequent docs-only closeout commit, the immutable live product remains built from `fc8ef7d`; no future docs commit hash is asserted. `nginx -t` passed; public API health is `{ok:true, service:joy-media-api, controlPlane:true}`; release/live/public index SHA-256 is `64043dd8f1f70e86219e23add3c9e8abab067fa7e63e61d6504d6100c5cad7f8`; release/live/public CSS SHA-256 is `7ca5a28cee02411d7bc51ae4f62c30485e428943bc6fbb81254da356dd24d109`. At 439.8×511.8, body client/scroll height is 433, client/scroll width is 413, scrollTop 0, stack 389.8 px, all runtime cards 40.8 px with margins 0, Run 449.6–478.4, library 502.8–550.8, and all labels fit. At 339.8 px, body width is 313 with no horizontal overflow, runtime rows are two equal 40.8 px tracks, responsive columns are 2/3/1, all labels fit, and expected body scrollHeight is 539. Runtime settings/cache, GPU selection, YouTube Master → Podcast Quality reset, and empty browser logs all pass. WP-25 is done. |
 | 2026-08-08 | WP-24 | **Legacy personal video recovery complete.** Deployed the owner-only exact-original picker from `88340d5` as immutable editor release `editor-web-20260808-195845-88340d5` after a verified off-site PostgreSQL backup. The owner supplied the exact original; browser reload reports `Cloud original`, the recovery control disappears, and console/health checks are clean. All 3 personal assets are cloud-backed, unbacked personal videos are zero, and a fresh store download matches the registered SHA-256 and 55,159,596-byte length. Post-upload DB and ParsPack manifests match exactly at 1,274 objects / 1,495,383,536 bytes. |
 | 2026-08-08 | ParsPack reconciliation | **Storage caution closed with complete, repeated evidence.** Worked around ParsPack's oversized-list timeout using signed 100-key S3 pagination. Initial 1,794-object namespace contained exactly 1,273 DB media refs plus 521 files from one obsolete July 30 release backup. Archived and exact-manifest-verified the 521 files (28,429,520 bytes) in a sibling prefix, then removed only their reviewed source copies. Two post-clean passes agree at 1,273 objects / 1,440,223,940 bytes with matching DB/bucket ref-set SHA-256, zero extra, missing, non-opaque, or size-mismatched objects. Production-client sample GETs passed 19/19; browser cloud/personal counts and a 1,536 px cloud preview still pass. Fresh DB and audit archives are synced off-site. One legacy 55,159,596-byte personal video remains honestly metadata-only because its original bytes are unavailable server-side. |
 | 2026-08-08 | Runtime + cloud hardening | **Automatic owner-private backup, curated cloud isolation, import integrity, portability, and production verification.** Commit `286c535` plus formatting baseline `1447f69` are pushed to GitHub and the VPS bare remote. API/editor immutable releases deployed with rollback targets retained; pre-cutover PostgreSQL backup synced to ParsPack. `verify:ci` passed (222 test files, 1,690 tests; two skipped), production audit is clean, host/API health pass, and authenticated browser smoke confirms 1,270 curated cloud assets versus three personal assets with storage refs redacted. |
