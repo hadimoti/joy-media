@@ -43,6 +43,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
 | WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                  |
+| WP-26 timeline track visibility  | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md             |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
 ## Production hardening handoff (2026-08-08)
@@ -100,6 +101,23 @@ workflow label fit. Vertical scroll was expected at this width with body
 GPU Device remained selected; YouTube Master changed the selected workflow and
 Run `aria-label`, then Podcast Quality reset succeeded. Browser logs were empty.
 WP-25 is closed; no further live gate remains open.
+
+**WP-26 complete (2026-08-09).** At the pre-closeout live gate, `HEAD`,
+`origin/main`, and `vps-local/main` matched product commit
+`5f917b1fca674a909188d0212e07d3ab44d71d86`. The subsequent docs-only closeout
+may advance repo refs; the immutable live product remains built from that
+product commit and is deployed as immutable editor release
+`/opt/joy-media/releases/editor-web-20260809-133945-5f917b1-track-visibility`;
+the live symlink resolves there. Local/public index SHA-256 is
+`a9c4ddcf67e449edbb413a813245bfdb9e417fa26b153426bcbc68fedd403746`; CSS
+`index-CvLlghVu.css` SHA-256 is
+`e4722f157deee86836da8e75bf2fa0bf7c129d10fd525d19acf178c53dfa6710`.
+`nginx -t` and `/api/health` passed. Browser verification measured exact 168px
+Dual Lens/Main Timeline gutters with lane origins matching their header edges at
+`x=171.7143`/`x=180.5089`, no page overflow at document client/scroll `1639`,
+and synchronized eye visibility toggles in both directions; browser logs were
+empty. The WP-26 live gate is closed. Final checks: 14 focused tests, typecheck,
+lint, format, editor build, and diff-check passed.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one
@@ -282,6 +300,7 @@ none of this is visible to users yet; that switch is the owner's call.
 
 ## Session log (newest first)
 
+| 2026-08-09 | WP-26 | **Timeline track visibility live gate passed and WP-26 closed.** At the pre-closeout gate, `HEAD`, `origin/main`, and `vps-local/main` matched product commit `5f917b1fca674a909188d0212e07d3ab44d71d86`; subsequent docs-only closeout may advance repo refs while the immutable live product remains built from that commit. Release `editor-web-20260809-133945-5f917b1-track-visibility`, exact 168px gutter/visibility-sync browser proof, hashes, and final checks are recorded in [`WP-26`](plan/WP-26-timeline-track-visibility.md). |
 | 2026-08-09 | WP-25 | **Final orchestrator live gate passed and WP-25 closed.** Product commit `fc8ef7d116082b2f40b6302bfdafcafdc71c8e87` is deployed as immutable editor release `editor-web-20260809-124017-fc8ef7d-audio-studio`; at the pre-closeout gate, HEAD, `origin/main`, and `vps-local/main` matched that product commit. After the subsequent docs-only closeout commit, the immutable live product remains built from `fc8ef7d`; no future docs commit hash is asserted. `nginx -t` passed; public API health is `{ok:true, service:joy-media-api, controlPlane:true}`; release/live/public index SHA-256 is `64043dd8f1f70e86219e23add3c9e8abab067fa7e63e61d6504d6100c5cad7f8`; release/live/public CSS SHA-256 is `7ca5a28cee02411d7bc51ae4f62c30485e428943bc6fbb81254da356dd24d109`. At 439.8×511.8, body client/scroll height is 433, client/scroll width is 413, scrollTop 0, stack 389.8 px, all runtime cards 40.8 px with margins 0, Run 449.6–478.4, library 502.8–550.8, and all labels fit. At 339.8 px, body width is 313 with no horizontal overflow, runtime rows are two equal 40.8 px tracks, responsive columns are 2/3/1, all labels fit, and expected body scrollHeight is 539. Runtime settings/cache, GPU selection, YouTube Master → Podcast Quality reset, and empty browser logs all pass. WP-25 is done. |
 | 2026-08-08 | WP-24 | **Legacy personal video recovery complete.** Deployed the owner-only exact-original picker from `88340d5` as immutable editor release `editor-web-20260808-195845-88340d5` after a verified off-site PostgreSQL backup. The owner supplied the exact original; browser reload reports `Cloud original`, the recovery control disappears, and console/health checks are clean. All 3 personal assets are cloud-backed, unbacked personal videos are zero, and a fresh store download matches the registered SHA-256 and 55,159,596-byte length. Post-upload DB and ParsPack manifests match exactly at 1,274 objects / 1,495,383,536 bytes. |
 | 2026-08-08 | ParsPack reconciliation | **Storage caution closed with complete, repeated evidence.** Worked around ParsPack's oversized-list timeout using signed 100-key S3 pagination. Initial 1,794-object namespace contained exactly 1,273 DB media refs plus 521 files from one obsolete July 30 release backup. Archived and exact-manifest-verified the 521 files (28,429,520 bytes) in a sibling prefix, then removed only their reviewed source copies. Two post-clean passes agree at 1,273 objects / 1,440,223,940 bytes with matching DB/bucket ref-set SHA-256, zero extra, missing, non-opaque, or size-mismatched objects. Production-client sample GETs passed 19/19; browser cloud/personal counts and a 1,536 px cloud preview still pass. Fresh DB and audit archives are synced off-site. One legacy 55,159,596-byte personal video remains honestly metadata-only because its original bytes are unavailable server-side. |
