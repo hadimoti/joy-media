@@ -142,4 +142,20 @@ describe('EditorSession', () => {
     session.jumpToHistory(entries[2]!.sequence);
     expect(session.visualProject.visualObjects['intro-title']?.transform.x).toBe(90);
   });
+
+  it('restores whole-project replacements without asking command history to undo them', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    session.replaceVisualProject({
+      ...session.visualProject,
+      title: 'Temporary replacement',
+    });
+
+    expect(session.visualProject.title).toBe('Temporary replacement');
+    expect(() => session.jumpToHistory(0)).not.toThrow();
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+  });
 });

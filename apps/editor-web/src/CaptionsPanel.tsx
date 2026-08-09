@@ -1,5 +1,10 @@
 import { useRef, useState, type ReactElement } from 'react';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type {
+  CaptionClipV1,
+  CaptionDocumentV1,
+  JoyProjectV1,
+  TrackV1,
+} from '@joy-media/project-schema';
 import {
   captionSlots,
   DEFAULT_CAPTION_TEMPLATE_ID,
@@ -46,6 +51,62 @@ const TEMPLATE_ICONS: Readonly<
   },
 };
 
+function createCaptionSlotProject(project: JoyProjectV1): JoyProjectV1 {
+  const compositionId = project.rootCompositionId;
+  const composition = project.compositions[compositionId];
+  if (composition === undefined) return project;
+
+  const token =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const documentId = `captions-${token}`;
+  const document: CaptionDocumentV1 = {
+    id: documentId,
+    language: 'en-US',
+    direction: 'auto',
+    speakers: [],
+    words: {},
+    segments: [],
+  };
+  const clip: CaptionClipV1 = {
+    id: `caption-clip-${token}`,
+    kind: 'caption',
+    startUs: 0,
+    durationUs: Math.max(1_000_000, composition.durationUs),
+    captionDocumentId: documentId,
+  };
+  const existingTrack = composition.tracks.find(
+    (track) => track.kind === 'caption' && track.enabled && !track.locked,
+  );
+  const nextTrack: TrackV1 =
+    existingTrack !== undefined
+      ? { ...existingTrack, clips: [...existingTrack.clips, clip] }
+      : {
+          id: `caption-track-${token}`,
+          kind: 'caption',
+          name: 'Captions',
+          order: composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1,
+          enabled: true,
+          locked: false,
+          clips: [clip],
+        };
+  const tracks =
+    existingTrack === undefined
+      ? [...composition.tracks, nextTrack]
+      : composition.tracks.map((track) => (track.id === existingTrack.id ? nextTrack : track));
+
+  return {
+    ...project,
+    updatedAt: new Date().toISOString(),
+    captionDocuments: { ...project.captionDocuments, [documentId]: document },
+    compositions: {
+      ...project.compositions,
+      [compositionId]: { ...composition, tracks },
+    },
+  };
+}
+
 /**
  * Transcript-first caption editing (WP-03.2/03.3). Every durable change goes
  * through the shared v1 command history; text edits write display overrides
@@ -84,7 +145,9 @@ export function CaptionsPanel({
       iconUrl={panelTabIconUrl('captions')}
       className="captions-panel"
       search={{ value: query, onChange: setQuery, placeholder: 'Search transcription…' }}
-      inactive={idle}
+      // Keep the empty-state CTA interactive; PanelShell's inactive body uses
+      // pointer-events:none, which would make the only recovery action dead.
+      inactive={false}
       {...(idle
         ? { note: 'Add a caption track to start transcription.' }
         : transcriptionError !== undefined
@@ -105,17 +168,35 @@ export function CaptionsPanel({
         </button>
       }
     >
-      {slots.map((slot) => (
-        <CaptionSlotEditor
-          key={`${slot.trackId}:${slot.clip.id}`}
-          slot={slot}
-          query={query}
-          playheadUs={playheadUs}
-          onSeek={onSeek}
-          onDispatch={onDispatch}
-          onTranscribe={onTranscribe}
-        />
-      ))}
+      {idle ? (
+        <div className="caption-empty-state">
+          <p className="empty-hint">
+            Add a caption track to begin editing, importing, or transcribing captions.
+          </p>
+          <button
+            type="button"
+            className="icon-button icon-button-labeled"
+            aria-label="Add caption track"
+            title="Add caption track"
+            onClick={() => onProjectChange(createCaptionSlotProject(project))}
+          >
+            <PlusIcon />
+            Add caption track
+          </button>
+        </div>
+      ) : (
+        slots.map((slot) => (
+          <CaptionSlotEditor
+            key={`${slot.trackId}:${slot.clip.id}`}
+            slot={slot}
+            query={query}
+            playheadUs={playheadUs}
+            onSeek={onSeek}
+            onDispatch={onDispatch}
+            onTranscribe={onTranscribe}
+          />
+        ))
+      )}
     </PanelShell>
   );
 }

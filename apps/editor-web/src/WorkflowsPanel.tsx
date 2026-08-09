@@ -98,6 +98,44 @@ function candidateKey(candidate: unknown, index: number): string {
   return `candidate-${String(index)}`;
 }
 
+/** Map each approval request to the response shape its workflow declares. */
+export function humanInputsForApproval(
+  request: HumanInputRequest,
+  nodeId: string,
+  selected: ReadonlySet<string>,
+): Record<string, unknown> {
+  const payload =
+    typeof request.payload === 'object' && request.payload !== null
+      ? (request.payload as Record<string, unknown>)
+      : {};
+
+  if (request.kind === 'choose-candidates') {
+    const field = Array.isArray(payload.speakers)
+      ? 'speakers'
+      : Array.isArray(payload.candidates)
+        ? 'candidates'
+        : 'candidates';
+    const values = Array.isArray(payload[field]) ? payload[field] : [];
+    return {
+      [nodeId]: {
+        [field]: values.filter((candidate, index) => selected.has(candidateKey(candidate, index))),
+      },
+    };
+  }
+
+  if (request.kind === 'approve-render') {
+    return { [nodeId]: { approved: Array.isArray(payload.items) ? payload.items : [] } };
+  }
+
+  if (request.kind === 'accept-edit-diff') {
+    // The podcast workflow consumes `response.ranges`; sending the generic
+    // `{approved: true}` shape leaves trim's reference unresolved.
+    return { [nodeId]: { ranges: Array.isArray(payload.ranges) ? payload.ranges : [] } };
+  }
+
+  return { [nodeId]: { approved: true } };
+}
+
 export function WorkflowsPanel({
   session,
   selectedClipIds,
@@ -212,20 +250,11 @@ export function WorkflowsPanel({
 
   async function submitApproval() {
     if (approval === undefined) return;
-    const payload = approval.request.payload as
-      { candidates?: readonly unknown[]; items?: readonly unknown[] } | undefined;
-    let humanInputs: Record<string, unknown>;
-
-    if (approval.request.kind === 'choose-candidates') {
-      const candidates = (payload?.candidates ?? []).filter((candidate, index) =>
-        approval.selected.has(candidateKey(candidate, index)),
-      );
-      humanInputs = { [approval.nodeId]: { candidates } };
-    } else if (approval.request.kind === 'approve-render') {
-      humanInputs = { [approval.nodeId]: { approved: payload?.items ?? [] } };
-    } else {
-      humanInputs = { [approval.nodeId]: { approved: true } };
-    }
+    const humanInputs = humanInputsForApproval(
+      approval.request,
+      approval.nodeId,
+      approval.selected,
+    );
 
     const outcome = await onResume(approval.runId, humanInputs);
     applyOutcome(outcome);

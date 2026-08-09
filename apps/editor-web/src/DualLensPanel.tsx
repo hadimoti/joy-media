@@ -398,8 +398,8 @@ function TimeProjection({
               type="button"
               className="icon-button"
               onClick={onTogglePlayback}
-              aria-label={playing ? 'Pause' : 'Play proxy'}
-              title={playing ? 'Pause (Space)' : 'Play proxy (Space)'}
+              aria-label={playing ? 'Pause' : 'Play'}
+              title={playing ? 'Pause (Space)' : 'Play (Space)'}
             >
               {playing ? <PauseIcon /> : <PlayIcon />}
             </button>

@@ -72,3 +72,20 @@ export function nextVideoClipAtOrAfter(
   }
   return best;
 }
+
+/**
+ * Returns a safe composition time at which proxy playback can start. If the
+ * requested time is in a gap or past the composition, move to the next clip;
+ * when there is no later clip, wrap to the first video clip.
+ */
+export function playbackStartAtOrAfter(
+  project: PlaybackProject,
+  requestedUs: number,
+): number | undefined {
+  const active = activeVideoClipAt(project, requestedUs);
+  if (active !== undefined) return requestedUs;
+  const next = nextVideoClipAtOrAfter(project, Math.max(0, requestedUs));
+  if (next !== undefined) return next.startUs;
+  const first = nextVideoClipAtOrAfter(project, 0);
+  return first?.startUs;
+}

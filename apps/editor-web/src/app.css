@@ -2522,6 +2522,15 @@ label {
   box-sizing: border-box;
   font-size: 0.78rem;
 }
+.caption-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  padding: 1rem 0.5rem;
+}
+.caption-empty-state .empty-hint {
+  padding: 0;
+}
 .captions-slot-header {
   display: flex;
   flex-wrap: wrap;

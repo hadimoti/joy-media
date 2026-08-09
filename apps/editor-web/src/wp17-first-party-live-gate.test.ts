@@ -67,6 +67,17 @@ describe('WP-17 first-party workflows', () => {
     });
   });
 
+  it('normalizes a visible source asset id into the podcast input shape', () => {
+    const workflow = loadFirstPartyWorkflows().find((entry) =>
+      entry.workflow.id.endsWith('podcast-cleanup'),
+    )?.workflow;
+    expect(workflow).toBeDefined();
+    if (workflow === undefined) return;
+    expect(normalizeFirstPartyInputs(workflow, { source: 'asset-episode-1' })).toEqual({
+      source: { assetId: 'asset-episode-1', fixture: true },
+    });
+  });
+
   it('runs long-video→draft-reels with stubs, parks, resumes, and produces a manifest', async () => {
     const storage = new Map<string, string>();
     const session = new EditorSession(

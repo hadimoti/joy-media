@@ -198,7 +198,7 @@ import {
   type ExportProcessEntry,
 } from './export-history.js';
 import { createMonoAudioBuffer } from './export-audio.js';
-import { nextVideoClipAtOrAfter } from './timeline-playback.js';
+import { nextVideoClipAtOrAfter, playbackStartAtOrAfter } from './timeline-playback.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -1049,10 +1049,19 @@ function EditorWorkspace({
       return;
     }
     ensurePreviewAudioGraph();
-    void syncMediaToPlayhead(current.playheadUs, true)
+    const startUs = playbackStartAtOrAfter(session.timelineProject, current.playheadUs);
+    if (startUs === undefined) {
+      setState((active) => ({ ...active, playing: false }));
+      return;
+    }
+    if (startUs !== current.playheadUs) {
+      scheduler.current.seek(startUs);
+      setState((active) => ({ ...active, playheadUs: startUs }));
+    }
+    void syncMediaToPlayhead(startUs, true)
       .then((ready) => setState((active) => ({ ...active, playing: ready })))
       .catch(() => setState((active) => ({ ...active, playing: false })));
-  }, [ensurePreviewAudioGraph, syncMediaToPlayhead]);
+  }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       session.dispatchTimeline(transaction);
@@ -2026,8 +2035,6 @@ function EditorWorkspace({
               (transition !== undefined
                 ? findVideoClipById(session.timelineProject, transition.leftClipId)
                 : undefined);
-            if (clip === undefined || clip.kind !== 'video')
-              throw new Error(`No active video clip at ${timeUs}µs during export`);
             const bitmaps = new Map<string, ImageDataLike>();
             const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
               const media = mediaForClip.get(target.id);
@@ -2047,8 +2054,11 @@ function EditorWorkspace({
                 height: media.video.videoHeight,
               });
             };
-            const node = await captureExportClip(clip);
-            if (transition !== undefined) {
+            let node: VideoFrameNode | undefined;
+            if (clip !== undefined && clip.kind === 'video') {
+              node = await captureExportClip(clip);
+            }
+            if (transition !== undefined && node !== undefined) {
               for (const clipId of [transition.leftClipId, transition.rightClipId]) {
                 if (bitmaps.has(clipId)) continue;
                 const partner = findVideoClipById(session.timelineProject, clipId);
@@ -2060,7 +2070,8 @@ function EditorWorkspace({
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
-            renderer.render(withVideoFrameNode(buildFrame(timeUs), node), bitmaps);
+            const frame = buildFrame(timeUs);
+            renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
           },
           onProgress: (completed, total) => {
             setExportProgress(0.05 + 0.93 * (completed / total));

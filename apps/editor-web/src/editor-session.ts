@@ -462,12 +462,18 @@ export class EditorSession {
   }
 
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
+    const before = this.#visualObjects.present;
     const project = this.#visualObjects.replacePresent(next);
     // Was persisting an empty transaction, which the object adapter rejects and
     // which would have replayed to the previous document even if it did not.
     this.#visualObjectPersistence.saveSnapshot(project, false);
     this.#visualObjectRevision += 1;
-    this.#record('visual-object', 'Replace project document', 0);
+    // Whole-document replacement is not represented by a visual-object command.
+    // Keep its before/after pair on the snapshot stack so History → Document
+    // can undo it without asking object history to undo a record it never saw.
+    this.#snapshotUndo.push({ before, after: project });
+    this.#snapshotRedo.length = 0;
+    this.#record('document-snapshot', 'Replace project document', 0);
     return project;
   }
 

@@ -19,12 +19,18 @@ export function ProjectLibrary({
   const [, setTick] = useState(0);
   const [draftTitle, setDraftTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | undefined>(undefined);
   const projects = listCatalogProjects(storage);
 
   const submitCreate = () => {
-    const title = draftTitle.trim() || `Untitled project ${projects.length + 1}`;
+    const title = draftTitle.trim();
+    if (title.length === 0) {
+      setCreateError('Enter a project name before creating it.');
+      return;
+    }
     onCreate(title);
     setDraftTitle('');
+    setCreateError(undefined);
     setCreating(false);
   };
 
@@ -47,7 +53,10 @@ export function ProjectLibrary({
           className="icon-button"
           aria-label="New project"
           data-guide="New project"
-          onClick={() => setCreating(true)}
+          onClick={() => {
+            setCreateError(undefined);
+            setCreating(true);
+          }}
         >
           <PlusIcon />
         </button>
@@ -73,9 +82,19 @@ export function ProjectLibrary({
                 autoFocus
                 value={draftTitle}
                 placeholder="Project name"
-                onChange={(event) => setDraftTitle(event.currentTarget.value)}
+                aria-invalid={createError !== undefined}
+                aria-describedby={createError !== undefined ? 'project-create-error' : undefined}
+                onChange={(event) => {
+                  setDraftTitle(event.currentTarget.value);
+                  if (createError !== undefined) setCreateError(undefined);
+                }}
               />
             </label>
+            {createError !== undefined && (
+              <p id="project-create-error" className="empty-hint" role="alert">
+                {createError}
+              </p>
+            )}
             <button
               type="submit"
               className="icon-button"
@@ -92,6 +111,7 @@ export function ProjectLibrary({
               onClick={() => {
                 setCreating(false);
                 setDraftTitle('');
+                setCreateError(undefined);
               }}
             >
               <CloseIcon />

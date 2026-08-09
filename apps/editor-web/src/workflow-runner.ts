@@ -168,6 +168,9 @@ export function normalizeFirstPartyInputs(
   ) {
     return { ...inputs, asset: { assetId: inputs.assetId, fixture: true } };
   }
+  if (required.includes('source') && typeof inputs.source === 'string') {
+    return { ...inputs, source: { assetId: inputs.source, fixture: true } };
+  }
   if (typeof inputs.asset === 'string') {
     return { ...inputs, asset: { assetId: inputs.asset, fixture: true } };
   }

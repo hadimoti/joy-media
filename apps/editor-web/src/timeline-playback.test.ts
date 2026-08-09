@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeVideoClipAt,
   nextVideoClipAtOrAfter,
+  playbackStartAtOrAfter,
   type PlaybackClip,
   type PlaybackProject,
 } from './timeline-playback.js';
@@ -94,5 +95,24 @@ describe('activeVideoClipAt', () => {
     const p = project([{ id: 'V1', clips: [clip('a', 'video', 0, 5_000_000)] }]);
     expect(activeVideoClipAt(p, 2_000_000)?.id).toBe('a');
     expect(activeVideoClipAt(p, 5_000_000)).toBeUndefined(); // not past its end
+  });
+});
+
+describe('playbackStartAtOrAfter', () => {
+  it('moves a playhead in a gap to the next video clip', () => {
+    const p = project([
+      { id: 'V1', clips: [clip('a', 'video', 0, 2_000_000), clip('b', 'video', 5_000_000)] },
+    ]);
+    expect(playbackStartAtOrAfter(p, 3_000_000)).toBe(5_000_000);
+  });
+
+  it('wraps an end-of-timeline playhead to the first clip', () => {
+    const p = project([{ id: 'V1', clips: [clip('a', 'video', 0, 2_000_000)] }]);
+    expect(playbackStartAtOrAfter(p, 30_000_000)).toBe(0);
+  });
+
+  it('preserves an in-clip playhead', () => {
+    const p = project([{ id: 'V1', clips: [clip('a', 'video', 0, 2_000_000)] }]);
+    expect(playbackStartAtOrAfter(p, 1_000_000)).toBe(1_000_000);
   });
 });
