@@ -42,6 +42,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-21 baseline hygiene           | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                    |
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
+| WP-25 audio Studio UI            | gate-review | —        | 2026-08-09   | Action-first Studio repolish in working tree; exact pnpm checks pass, live browser review remains           |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
 ## Production hardening handoff (2026-08-08)
@@ -68,6 +69,21 @@ download matching the registered SHA-256 and 55,159,596-byte length all passed. 
 three personal assets are cloud-backed. Post-upload reconciliation is exact at 1,274
 database refs and 1,274 ParsPack objects totaling 1,495,383,536 bytes on each side,
 with zero unbacked personal videos. WP-24 is complete.
+
+**WP-25 in progress (2026-08-09, working tree only).** Audio Studio is being
+repolished action-first inside the existing PanelShell: compact honest runtime
+status, selected workflow/run surface, and a collapsed filtered Capability
+Library. Models, Master, and Clips remain in scope unchanged. The orchestrator
+independently verified, outside the restricted Codex sandbox:
+
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm format:check`
+- `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests)
+- `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed)
+
+All passed. Live browser measurement remains for review. No deploy, commit, push,
+runtime-data, or secret mutation was performed.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one

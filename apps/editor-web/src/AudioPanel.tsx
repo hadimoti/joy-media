@@ -34,6 +34,7 @@ import {
   getAudioCapability,
   summarizeLocalAudioResources,
   type AudioAtomicCapability,
+  type AudioExecutionTarget,
   type AudioModelSpec,
 } from './audio-studio-runtime.js';
 
@@ -42,6 +43,18 @@ const TABS: readonly PanelTabSpec[] = [
   { id: 'models', label: 'Models' },
   { id: 'master', label: 'Master' },
   { id: 'clips', label: 'Clips' },
+];
+
+type CapabilityFilter = 'all' | AudioExecutionTarget;
+
+const CAPABILITY_FILTERS: readonly {
+  readonly id: CapabilityFilter;
+  readonly label: string;
+}[] = [
+  { id: 'all', label: 'All' },
+  { id: 'local-worker', label: 'Local Worker' },
+  { id: 'browser-dsp', label: 'Browser DSP' },
+  { id: 'vps-orchestrated', label: 'Cloud Brain' },
 ];
 
 interface AudioPanelProps {
@@ -145,6 +158,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
+  const [capabilityFilter, setCapabilityFilter] = useState<CapabilityFilter>('all');
   const dispatch = (command: AudioCommand, label: string) => {
     try {
       const { state } = applyAudioCommand(audioState, command);
@@ -164,9 +178,18 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
     () => summarizeLocalAudioResources(selectedWorkflow.steps),
     [selectedWorkflow.steps],
   );
+  const visibleCapabilities = useMemo(
+    () =>
+      capabilityFilter === 'all'
+        ? AUDIO_ATOMIC_CAPABILITIES
+        : AUDIO_ATOMIC_CAPABILITIES.filter(({ target }) => target === capabilityFilter),
+    [capabilityFilter],
+  );
   const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
   const noClips = clipIds.length === 0;
   const clipsInactive = tab === 'clips' && noClips;
+  const localWorkerReady = false;
+  const runReadinessId = `audio-${selectedWorkflow.id}-run-readiness`;
 
   return (
     <PanelShell
@@ -185,47 +208,60 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
     >
       {tab === 'studio' && (
         <div className="audio-studio-stack">
-          <section className="audio-runtime-grid" aria-label="Audio runtime status">
-            <div className="audio-runtime-cell" data-state="offline">
-              <span className="icon-tool" aria-hidden="true">
-                <MicIcon />
-              </span>
-              <strong>Local Worker</strong>
-              <span>Pairing</span>
+          <section className="audio-runtime-section" aria-label="Audio runtime status">
+            <div className="audio-runtime-grid">
+              <div className="audio-runtime-cell" data-state="pairing">
+                <span className="icon-tool" aria-hidden="true">
+                  <MicIcon />
+                </span>
+                <strong>Local Worker</strong>
+                <span>Pairing</span>
+              </div>
+              <div className="audio-runtime-cell" data-state="online">
+                <span className="icon-tool" aria-hidden="true">
+                  <CloudIcon />
+                </span>
+                <strong>Cloud Brain</strong>
+                <span>Online</span>
+              </div>
+              <label className="audio-runtime-cell audio-runtime-control">
+                <span className="icon-tool" aria-hidden="true">
+                  <SettingsGearIcon />
+                </span>
+                <strong>Device</strong>
+                <select
+                  value={device}
+                  aria-label="Audio worker device"
+                  onChange={(event) =>
+                    setDevice(event.currentTarget.value === 'cpu' ? 'cpu' : 'gpu')
+                  }
+                >
+                  <option value="gpu">GPU</option>
+                  <option value="cpu">CPU</option>
+                </select>
+              </label>
             </div>
-            <div className="audio-runtime-cell" data-state="online">
-              <span className="icon-tool" aria-hidden="true">
-                <CloudIcon />
-              </span>
-              <strong>Cloud Brain</strong>
-              <span>Online</span>
+            <div className="audio-readiness" role="status" aria-live="polite">
+              <span className="audio-status-dot" aria-hidden="true" />
+              <strong>Run readiness</strong>
+              <span>Pair local worker to run</span>
             </div>
-            <label className="audio-runtime-cell audio-runtime-control">
-              <span className="icon-tool" aria-hidden="true">
+            <details className="audio-runtime-settings">
+              <summary>
                 <SettingsGearIcon />
-              </span>
-              <strong>Device</strong>
-              <select
-                value={device}
-                aria-label="Audio worker device"
-                onChange={(event) => setDevice(event.currentTarget.value === 'cpu' ? 'cpu' : 'gpu')}
-              >
-                <option value="gpu">GPU</option>
-                <option value="cpu">CPU</option>
-              </select>
-            </label>
-            <label className="audio-runtime-cell audio-runtime-path">
-              <span className="icon-tool" aria-hidden="true">
-                <DownloadIcon />
-              </span>
-              <strong>Model Cache</strong>
-              <input
-                type="text"
-                value={modelCachePath}
-                aria-label="Audio model cache path"
-                onChange={(event) => setModelCachePath(event.currentTarget.value)}
-              />
-            </label>
+                <strong>Runtime settings</strong>
+                <span>Local model cache</span>
+              </summary>
+              <label className="audio-runtime-path">
+                <span>Model Cache</span>
+                <input
+                  type="text"
+                  value={modelCachePath}
+                  aria-label="Audio model cache path"
+                  onChange={(event) => setModelCachePath(event.currentTarget.value)}
+                />
+              </label>
+            </details>
           </section>
 
           <section className="audio-workflow-section" aria-label="Audio AI workflows">
@@ -233,10 +269,16 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               <span className="icon-tool" aria-hidden="true">
                 <PlayIcon />
               </span>
-              <strong>AI Workflows</strong>
-              <span>{workflowResources.modelCount} models</span>
+              <div>
+                <strong>Choose a workflow</strong>
+                <span>Start with a focused audio preset</span>
+              </div>
             </div>
-            <div className="audio-workflow-pickers" role="list">
+            <div
+              className="audio-workflow-pickers"
+              role="group"
+              aria-label="Audio workflow presets"
+            >
               {AUDIO_WORKFLOW_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
@@ -250,43 +292,96 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 </button>
               ))}
             </div>
-            <div className="audio-workflow-graph" aria-label={`${selectedWorkflow.label} graph`}>
-              {workflowGraph.nodes.map((node, index) => (
-                <span className="audio-graph-node" key={node.id}>
-                  {node.label}
-                  {index < workflowGraph.nodes.length - 1 && <span aria-hidden="true">→</span>}
-                </span>
-              ))}
-            </div>
-            <div className="audio-workflow-resources">
-              <ResourcePill value={`${workflowResources.ramGb}G`} label="RAM" />
-              <ResourcePill value={`${workflowResources.vramGb}G`} label="VRAM" />
-              <ResourcePill value={`${workflowResources.diskGb}G`} label="Disk" />
-              <button
-                type="button"
-                className="audio-run-button"
-                aria-label="Run selected workflow on local worker"
-                disabled
+            <div className="audio-workflow-card">
+              <div className="audio-workflow-card-heading">
+                <div>
+                  <strong>{selectedWorkflow.label}</strong>
+                  <span>{selectedWorkflow.steps.length} steps · local estimate</span>
+                </div>
+                <p className="audio-workflow-command">“{selectedWorkflow.command}”</p>
+              </div>
+              <ol
+                className="audio-workflow-steps"
+                aria-label={`${selectedWorkflow.label} workflow path`}
               >
-                Run Local
-              </button>
+                {workflowGraph.nodes.map((node, index) => (
+                  <li key={node.id}>
+                    <span className="audio-workflow-step-number" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <span>{node.label}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="audio-workflow-footer">
+                <div className="audio-workflow-resources" aria-label="Workflow resource estimate">
+                  <ResourcePill value={`${workflowResources.ramGb}G`} label="RAM" />
+                  <ResourcePill value={`${workflowResources.vramGb}G`} label="VRAM" />
+                  <ResourcePill value={`${workflowResources.diskGb}G`} label="Disk" />
+                  <ResourcePill value={String(workflowResources.modelCount)} label="models" />
+                </div>
+                <div className="audio-run-action">
+                  <span className="audio-run-readiness" id={runReadinessId}>
+                    Pair local worker to run
+                  </span>
+                  <button
+                    type="button"
+                    className="audio-run-button"
+                    aria-label={`Run ${selectedWorkflow.label} locally`}
+                    aria-describedby={runReadinessId}
+                    title={localWorkerReady ? 'Run on local worker' : 'Pair local worker to run'}
+                    disabled={!localWorkerReady}
+                  >
+                    Run locally
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 
-          <section className="audio-capability-section" aria-label="Audio atomic APIs">
-            <div className="audio-section-heading">
+          <details className="audio-capability-library">
+            <summary>
               <span className="icon-tool" aria-hidden="true">
                 <SlidersIcon />
               </span>
-              <strong>Atomic APIs</strong>
-              <span>{AUDIO_ATOMIC_CAPABILITIES.length}</span>
+              <strong>Capability Library</strong>
+              <span>{AUDIO_ATOMIC_CAPABILITIES.length} capabilities</span>
+              <small>Browse the building blocks behind each workflow</small>
+            </summary>
+            <div className="audio-capability-section" aria-label="Audio capabilities">
+              <div
+                className="audio-capability-filters"
+                role="group"
+                aria-label="Filter capabilities by target"
+              >
+                {CAPABILITY_FILTERS.map((filter) => {
+                  const count =
+                    filter.id === 'all'
+                      ? AUDIO_ATOMIC_CAPABILITIES.length
+                      : AUDIO_ATOMIC_CAPABILITIES.filter(({ target }) => target === filter.id)
+                          .length;
+                  return (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className="audio-capability-filter"
+                      aria-label={`${filter.label}: ${count} ${count === 1 ? 'capability' : 'capabilities'}`}
+                      aria-pressed={capabilityFilter === filter.id}
+                      onClick={() => setCapabilityFilter(filter.id)}
+                    >
+                      {filter.label}
+                      <span aria-hidden="true">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <ul className="audio-capability-grid">
+                {visibleCapabilities.map((capability) => (
+                  <CapabilityTile key={capability.id} capability={capability} />
+                ))}
+              </ul>
             </div>
-            <ul className="audio-capability-grid">
-              {AUDIO_ATOMIC_CAPABILITIES.map((capability) => (
-                <CapabilityTile key={capability.id} capability={capability} />
-              ))}
-            </ul>
-          </section>
+          </details>
         </div>
       )}
 
