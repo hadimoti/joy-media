@@ -66,6 +66,21 @@ Confirmed defects:
 3. The console records `RangeError: nothing to undo` from the history jump path.
 4. A reload recovers the project and returns History to the clean `Document` state, but the restore action itself is not reliable.
 
+## Remediation status
+
+All six confirmed defects were fixed and deployed in release `4a39872` (`fix(editor): resolve Chrome audit defects`). The original case verdicts above remain unchanged as the record of the pre-fix audit; the table below records the post-audit disposition.
+
+| Defect | Status | Remediation / verification |
+|---|---|---|
+| `JOY-QA-001` | FIXED | Empty or whitespace-only project names now stay in the dialog, show an accessible validation message, and do not create a project. |
+| `JOY-QA-002` | FIXED | Timeline/Dual Lens transport now starts at the requested in-clip position (or the next valid video clip), synchronizes media, and changes to `Pause`; live smoke check confirmed the state transition. |
+| `JOY-QA-003` | FIXED | The captions empty state now exposes an accessible `Add caption track` CTA; the new track contains a valid editable caption slot. |
+| `JOY-QA-004` | FIXED | Export no longer dereferences a missing video clip while rendering gaps or end-of-timeline frames; the previously fixed audio-channel guard is included in the deployed build. |
+| `JOY-QA-005` | FIXED | Approval payloads now match each first-party workflow (`speakers`, render selections, and edit ranges), and asset-id inputs normalize to fixture-backed asset references. |
+| `JOY-QA-006` | FIXED | Whole-project replacements now record a document snapshot undo pair, so History can restore the document without the `nothing to undo` range error. |
+
+Post-fix checks: editor-web tests `302 passed`, typecheck, lint, and build passed; the full repository suite passed `1,709` tests with one unrelated pre-existing RNNoise fixture failure. VPS health checks and a public HTTPS smoke check passed after deployment.
+
 ## Case results
 
 Verdicts are separate: `Func` is functional behavior; `UI/A11y` covers visual, interaction, keyboard, focus, and accessible naming checks. `NOT-RUN` means the visible surface or safe fixture was unavailable; it is not a product failure. All timestamps and evidence are from the 2026-08-09 run.
@@ -243,4 +258,3 @@ Verdicts are separate: `Func` is functional behavior; `UI/A11y` covers visual, i
 - [recent-export-failures.png](evidence/20260809/recent-export-failures.png)
 - [recent-export-failure-fresh.png](evidence/20260809/recent-export-failure-fresh.png)
 - [workflow-failure.png](evidence/20260809/workflow-failure.png)
-
