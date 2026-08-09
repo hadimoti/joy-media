@@ -21,10 +21,11 @@ export interface ProjectCatalogEntry {
   readonly updatedAt: string;
   readonly timelineProjectId: string;
   readonly visualProjectId: string;
+  readonly trashedAt?: string;
 }
 
 interface CatalogDatabase {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly projects: Readonly<Record<string, ProjectCatalogEntry>>;
 }
 
@@ -35,8 +36,17 @@ interface ActiveProjectDatabase {
 
 export function listCatalogProjects(storage: BrowserKeyValueStore): readonly ProjectCatalogEntry[] {
   ensureSeedCatalog(storage);
-  return Object.values(readCatalog(storage).projects).sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
+  return sortCatalog(
+    Object.values(readCatalog(storage).projects).filter((entry) => entry.trashedAt === undefined),
+  );
+}
+
+export function listTrashedCatalogProjects(
+  storage: BrowserKeyValueStore,
+): readonly ProjectCatalogEntry[] {
+  ensureSeedCatalog(storage);
+  return sortCatalog(
+    Object.values(readCatalog(storage).projects).filter((entry) => entry.trashedAt !== undefined),
   );
 }
 
@@ -53,21 +63,59 @@ export function upsertCatalogProject(
 ): ProjectCatalogEntry {
   const database = readCatalog(storage);
   writeCatalog(storage, {
-    version: 1,
+    version: 2,
     projects: { ...database.projects, [entry.id]: entry },
   });
   return entry;
 }
 
-export function removeCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {
+export function trashCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {
+  const database = readCatalog(storage);
+  const entry = database.projects[projectId];
+  if (entry === undefined || entry.trashedAt !== undefined) return;
+  writeCatalog(storage, {
+    version: 2,
+    projects: {
+      ...database.projects,
+      [projectId]: {
+        ...entry,
+        trashedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  });
+  if (loadActiveProjectId(storage) === projectId) clearActiveProjectId(storage);
+}
+
+export function restoreCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {
+  const database = readCatalog(storage);
+  const entry = database.projects[projectId];
+  if (entry === undefined || entry.trashedAt === undefined) return;
+  const { trashedAt, ...rest } = entry;
+  void trashedAt;
+  writeCatalog(storage, {
+    version: 2,
+    projects: {
+      ...database.projects,
+      [projectId]: { ...rest, updatedAt: new Date().toISOString() },
+    },
+  });
+}
+
+export function purgeCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {
   const database = readCatalog(storage);
   if (database.projects[projectId] === undefined) return;
   const rest: Record<string, ProjectCatalogEntry> = {};
   for (const [id, entry] of Object.entries(database.projects)) {
     if (id !== projectId) rest[id] = entry;
   }
-  writeCatalog(storage, { version: 1, projects: rest });
+  writeCatalog(storage, { version: 2, projects: rest });
   if (loadActiveProjectId(storage) === projectId) clearActiveProjectId(storage);
+}
+
+/** Backward-compatible alias for callers that already remove a catalog entry. */
+export function removeCatalogProject(storage: BrowserKeyValueStore, projectId: string): void {
+  purgeCatalogProject(storage, projectId);
 }
 
 export function loadActiveProjectId(storage: BrowserKeyValueStore): string | null {
@@ -113,7 +161,7 @@ export function ensureSeedCatalog(storage: BrowserKeyValueStore): void {
   for (const entry of migrated) {
     if (projects[entry.id] === undefined) projects[entry.id] = entry;
   }
-  writeCatalog(storage, { version: 1, projects });
+  writeCatalog(storage, { version: 2, projects });
 }
 
 function migrateFromStores(
@@ -152,13 +200,23 @@ function migrateFromStores(
 
 function readCatalog(storage: BrowserKeyValueStore): CatalogDatabase {
   const serialized = storage.getItem(PROJECT_CATALOG_KEY);
-  if (serialized === null) return { version: 1, projects: {} };
+  if (serialized === null) return { version: 2, projects: {} };
   try {
     const parsed: unknown = JSON.parse(serialized);
-    if (!isCatalog(parsed)) return { version: 1, projects: {} };
-    return parsed;
+    if (!isCatalog(parsed)) return { version: 2, projects: {} };
+    const database: CatalogDatabase = {
+      version: 2,
+      projects: Object.fromEntries(
+        Object.entries(parsed.projects).map(([id, entry]) => [
+          id,
+          entry.trashedAt === undefined ? entry : { ...entry, trashedAt: entry.trashedAt },
+        ]),
+      ),
+    };
+    if (parsed.version === 1) writeCatalog(storage, database);
+    return database;
   } catch {
-    return { version: 1, projects: {} };
+    return { version: 2, projects: {} };
   }
 }
 
@@ -167,7 +225,8 @@ function writeCatalog(storage: BrowserKeyValueStore, database: CatalogDatabase):
 }
 
 function isCatalog(value: unknown): value is CatalogDatabase {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.projects)) return false;
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2) || !isRecord(value.projects))
+    return false;
   return Object.entries(value.projects).every(([id, entry]) => {
     if (!isRecord(entry) || entry.id !== id) return false;
     return (
@@ -175,9 +234,14 @@ function isCatalog(value: unknown): value is CatalogDatabase {
       typeof entry.createdAt === 'string' &&
       typeof entry.updatedAt === 'string' &&
       typeof entry.timelineProjectId === 'string' &&
-      typeof entry.visualProjectId === 'string'
+      typeof entry.visualProjectId === 'string' &&
+      (entry.trashedAt === undefined || typeof entry.trashedAt === 'string')
     );
   });
+}
+
+function sortCatalog(entries: readonly ProjectCatalogEntry[]): readonly ProjectCatalogEntry[] {
+  return [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

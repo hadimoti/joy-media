@@ -76,6 +76,22 @@ export interface BrowserReasoningProvider {
   readonly adapterVersion: string;
 }
 
+export interface BrowserProjectMetadata {
+  readonly id: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly ownerId: string;
+  readonly assetSyncEnabled: boolean;
+  readonly trashedAt?: number;
+  readonly activeJobCount: number;
+}
+
+export interface BrowserProjectDuplicateResult {
+  readonly project: BrowserProjectMetadata;
+  readonly assetIdMap: Readonly<Record<string, string>>;
+  readonly derivativeIdMap: Readonly<Record<string, string>>;
+}
+
 export interface BrowserAssetRegistration {
   readonly id: string;
   readonly kind: BrowserAsset['kind'];
@@ -204,6 +220,45 @@ export class BrowserControlPlaneClient {
   }
   async createProject(id: string, title: string): Promise<void> {
     await this.post('/v1/projects', { id, title });
+  }
+  async project(id: string): Promise<BrowserProjectMetadata> {
+    return this.get(`/v1/projects/${encodeURIComponent(id)}`);
+  }
+  async renameProject(
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): Promise<BrowserProjectMetadata> {
+    return this.request(`/v1/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title, baseRevision }),
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  async duplicateProject(
+    sourceId: string,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): Promise<BrowserProjectDuplicateResult> {
+    return this.post(`/v1/projects/${encodeURIComponent(sourceId)}/duplicate`, {
+      id,
+      title,
+      baseRevision,
+    });
+  }
+  async trashProject(id: string, baseRevision: number): Promise<BrowserProjectMetadata> {
+    return this.post(`/v1/projects/${encodeURIComponent(id)}/trash`, { baseRevision });
+  }
+  async restoreProject(id: string, baseRevision: number): Promise<BrowserProjectMetadata> {
+    return this.post(`/v1/projects/${encodeURIComponent(id)}/restore`, { baseRevision });
+  }
+  async deleteProject(id: string): Promise<{
+    readonly id: string;
+    readonly cloudObjectsPurged: number;
+    readonly cloudObjectPurgeFailures: number;
+  }> {
+    return this.request(`/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
   async enqueueFixture(projectId: string, id: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {

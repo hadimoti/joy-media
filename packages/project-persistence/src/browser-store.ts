@@ -6,6 +6,7 @@ import type { ProjectStore, StoredSnapshot, StoredTransaction } from './persiste
 export interface BrowserKeyValueStore {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
 }
 
 interface BrowserDatabase<P, T> {
@@ -60,6 +61,14 @@ export class BrowserProjectStore<P, T> implements ProjectStore<P, T> {
 
   listProjectIds(): readonly string[] {
     return Object.keys(this.read().projects).sort();
+  }
+
+  deleteProject(projectId: string): void {
+    const database = this.read();
+    if (database.projects[projectId] === undefined) return;
+    const projects = { ...database.projects };
+    delete projects[projectId];
+    this.write({ projects });
   }
 
   private read(): BrowserDatabase<P, T> {

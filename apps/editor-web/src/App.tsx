@@ -99,6 +99,13 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import {
+  duplicateProject as duplicateProjectLifecycle,
+  purgeProject as purgeProjectLifecycle,
+  renameProject as renameProjectLifecycle,
+  restoreProject as restoreProjectLifecycle,
+  trashProject as trashProjectLifecycle,
+} from './project-lifecycle.js';
 import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
@@ -508,6 +515,10 @@ export function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
     if (id === null) return null;
+    if (getCatalogProject(storage, id)?.trashedAt !== undefined) {
+      clearActiveProjectId(storage);
+      return null;
+    }
     if (getCatalogProject(storage, id) === undefined) {
       clearActiveProjectId(storage);
       return null;
@@ -550,13 +561,45 @@ export function App() {
     [storage],
   );
 
+  const renameProject = useCallback(
+    (entry: ProjectCatalogEntry, title: string) => renameProjectLifecycle(storage, entry, title),
+    [storage],
+  );
+  const duplicateProject = useCallback(
+    (entry: ProjectCatalogEntry, title: string) => duplicateProjectLifecycle(storage, entry, title),
+    [storage],
+  );
+  const trashProject = useCallback(
+    (entry: ProjectCatalogEntry) => trashProjectLifecycle(storage, entry),
+    [storage],
+  );
+  const restoreProject = useCallback(
+    (entry: ProjectCatalogEntry) => restoreProjectLifecycle(storage, entry),
+    [storage],
+  );
+  const purgeProject = useCallback(
+    (entry: ProjectCatalogEntry) => purgeProjectLifecycle(storage, entry),
+    [storage],
+  );
+
   const backToLibrary = useCallback(() => {
     clearActiveProjectId(storage);
     setActiveProjectId(null);
   }, [storage]);
 
   if (activeProjectId === null) {
-    return <ProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />;
+    return (
+      <ProjectLibrary
+        storage={storage}
+        onOpen={openProject}
+        onCreate={createProject}
+        onRename={renameProject}
+        onDuplicate={duplicateProject}
+        onTrash={trashProject}
+        onRestore={restoreProject}
+        onPurge={purgeProject}
+      />
+    );
   }
 
   return (

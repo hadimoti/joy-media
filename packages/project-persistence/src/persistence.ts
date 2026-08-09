@@ -57,6 +57,8 @@ export interface ProjectStore<P, T> {
   transactions(projectId: string): readonly StoredTransaction<T>[];
   /** Stable project ids that currently have at least one snapshot or transaction. */
   listProjectIds(): readonly string[];
+  /** Remove every snapshot and transaction belonging to one project. */
+  deleteProject(projectId: string): void;
 }
 
 /**
@@ -107,6 +109,11 @@ export class InMemoryProjectStore<P, T> implements ProjectStore<P, T> {
   listProjectIds(): readonly string[] {
     const ids = new Set<string>([...this.#snapshots.keys(), ...this.#transactions.keys()]);
     return [...ids].sort();
+  }
+
+  deleteProject(projectId: string): void {
+    this.#snapshots.delete(projectId);
+    this.#transactions.delete(projectId);
   }
 
   /** Simulates a crash that leaves a truncated last log entry. */

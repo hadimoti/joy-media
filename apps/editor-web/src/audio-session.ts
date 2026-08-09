@@ -4,6 +4,7 @@
  */
 
 import type { AudioState } from '@joy-media/commands';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, JsonValue } from '@joy-media/project-schema';
 
 const KEY = (projectId: string) => `joy-media.audio-graph.v1.${projectId}`;
@@ -15,8 +16,12 @@ export const EMPTY_AUDIO_STATE: AudioState = {
 };
 
 export function loadAudioState(projectId: string): AudioState {
+  return loadAudioStateFrom(window.localStorage, projectId);
+}
+
+export function loadAudioStateFrom(storage: BrowserKeyValueStore, projectId: string): AudioState {
   try {
-    const raw = window.localStorage.getItem(KEY(projectId));
+    const raw = storage.getItem(KEY(projectId));
     if (raw === null) return EMPTY_AUDIO_STATE;
     const parsed = JSON.parse(raw) as AudioState;
     if (parsed === null || typeof parsed !== 'object' || parsed.clips === undefined)
@@ -32,7 +37,19 @@ export function loadAudioState(projectId: string): AudioState {
 }
 
 export function saveAudioState(projectId: string, state: AudioState): void {
-  window.localStorage.setItem(KEY(projectId), JSON.stringify(state));
+  saveAudioStateTo(window.localStorage, projectId, state);
+}
+
+export function saveAudioStateTo(
+  storage: BrowserKeyValueStore,
+  projectId: string,
+  state: AudioState,
+): void {
+  storage.setItem(KEY(projectId), JSON.stringify(state));
+}
+
+export function removeAudioState(storage: BrowserKeyValueStore, projectId: string): void {
+  storage.removeItem?.(KEY(projectId));
 }
 
 export function ensureClipAudio(state: AudioState, clipIds: readonly string[]): AudioState {

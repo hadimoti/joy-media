@@ -3,6 +3,13 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 const STORAGE_PREFIX = 'joy-media.agent-idempotency.v1';
 
+export function removeAgentIdempotencyRecords(
+  storage: BrowserKeyValueStore,
+  projectId: string,
+): void {
+  storage.removeItem?.(`${STORAGE_PREFIX}:${encodeURIComponent(projectId)}`);
+}
+
 /**
  * Project-scoped durable receipts for atomic agent runs.
  *

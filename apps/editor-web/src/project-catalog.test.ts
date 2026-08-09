@@ -3,6 +3,7 @@ import {
   clearActiveProjectId,
   getCatalogProject,
   listCatalogProjects,
+  listTrashedCatalogProjects,
   loadActiveProjectId,
   removeCatalogProject,
   saveActiveProjectId,
@@ -74,5 +75,28 @@ describe('project catalog library gate', () => {
     saveActiveProjectId(storage, 'missing');
     clearActiveProjectId(storage);
     expect(loadActiveProjectId(storage)).toBeNull();
+  });
+
+  it('migrates a v1 catalog to v2 and keeps legacy projects active', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      'joy-media.project-catalog.v1',
+      JSON.stringify({
+        version: 1,
+        projects: {
+          legacy: {
+            id: 'legacy',
+            title: 'Legacy',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            timelineProjectId: 'legacy',
+            visualProjectId: 'legacy',
+          },
+        },
+      }),
+    );
+    expect(listCatalogProjects(storage).map((entry) => entry.id)).toEqual(['legacy']);
+    expect(listTrashedCatalogProjects(storage)).toEqual([]);
+    expect(JSON.parse(storage.getItem('joy-media.project-catalog.v1')!).version).toBe(2);
   });
 });

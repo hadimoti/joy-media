@@ -17,6 +17,9 @@ import {
   type LocalGpuWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
+  type ProjectLifecycleMetadata,
+  type ProjectDuplicateResult,
+  type ProjectDeletionResult,
   type WorkerPairingOffer,
   type WorkerRecord,
   type WorkerSession,
@@ -37,6 +40,7 @@ interface ProjectRow {
   readonly title: string;
   readonly revision: number;
   readonly asset_sync_enabled: boolean;
+  readonly trashed_at: Date | null;
 }
 
 interface WorkerRow {
@@ -167,6 +171,224 @@ export class PostgresControlPlane implements ControlPlane {
       'REVISION_CONFLICT',
       `expected ${baseRevision}, found ${current.revision}`,
     );
+  }
+
+  async getProject(actor: Actor, id: string): Promise<ProjectLifecycleMetadata> {
+    const project = await this.projectAllowTrashed(actor, id);
+    const result = await this.pool.query<{ readonly count: string }>(
+      `SELECT COUNT(*)::text AS count FROM jobs
+       WHERE project_id = $1 AND state IN ('queued', 'leased')`,
+      [id],
+    );
+    return { ...project, activeJobCount: Number(result.rows[0]?.count ?? 0) };
+  }
+
+  async duplicateProject(
+    actor: Actor,
+    sourceId: string,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): Promise<ProjectDuplicateResult> {
+    return this.transaction(async (client) => {
+      const source = await this.project(actor, sourceId, client);
+      if (source.revision !== baseRevision)
+        throw new ControlPlaneError(
+          'REVISION_CONFLICT',
+          `expected ${baseRevision}, found ${source.revision}`,
+        );
+      const sourceAssets = await client.query<MediaAssetRow>(
+        'SELECT * FROM media_assets WHERE project_id = $1 ORDER BY id',
+        [sourceId],
+      );
+      if (
+        sourceAssets.rows.some((asset) => privateRefsFromLocations(asset.locations).length === 0)
+      ) {
+        throw new ControlPlaneError('PROJECT_MEDIA_NOT_DURABLE', sourceId);
+      }
+      let created: ProjectRow;
+      try {
+        const result = await client.query<ProjectRow>(
+          `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, trashed_at)
+           VALUES ($1, $2, $3, 0, true, NULL) RETURNING *`,
+          [id, actor.id, title],
+        );
+        created = requiredRow(result.rows[0], 'PROJECT_CREATE_FAILED');
+      } catch (error) {
+        throw databaseError(error, 'PROJECT_EXISTS', id);
+      }
+      const assetIdMap: Record<string, string> = {};
+      const derivativeIdMap: Record<string, string> = {};
+      for (const asset of sourceAssets.rows) {
+        const nextId = randomOpaqueId('asset');
+        assetIdMap[asset.id] = nextId;
+        await client.query(
+          `INSERT INTO media_assets
+             (id, project_id, kind, display_name, sha256, byte_length, descriptor, locations, created_at, tags, sort_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11)`,
+          [
+            nextId,
+            id,
+            asset.kind,
+            asset.display_name,
+            asset.sha256,
+            asset.byte_length,
+            JSON.stringify(asset.descriptor),
+            JSON.stringify(
+              jsonArray(asset.locations).filter(
+                (location) =>
+                  location !== null &&
+                  typeof location === 'object' &&
+                  !Array.isArray(location) &&
+                  (location as Record<string, unknown>).kind === 'private-object',
+              ),
+            ),
+            asset.created_at,
+            JSON.stringify(asset.tags ?? []),
+            asset.sort_name ?? '',
+          ],
+        );
+      }
+      const sourceDerivatives = await client.query<MediaDerivativeRow>(
+        'SELECT * FROM media_derivatives WHERE project_id = $1 ORDER BY id',
+        [sourceId],
+      );
+      for (const derivative of sourceDerivatives.rows) {
+        if (privateRefsFromLocations(derivative.locations).length === 0) continue;
+        const nextId = randomOpaqueId('derivative');
+        derivativeIdMap[derivative.id] = nextId;
+        await client.query(
+          `INSERT INTO media_derivatives
+             (id, project_id, asset_id, kind, profile, sha256, byte_length, descriptor, availability, locations, verified_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'available-cloud', $9::jsonb, $10)`,
+          [
+            nextId,
+            id,
+            assetIdMap[derivative.asset_id] ?? derivative.asset_id,
+            derivative.kind,
+            derivative.profile,
+            derivative.sha256,
+            derivative.byte_length,
+            JSON.stringify(derivative.descriptor),
+            JSON.stringify(
+              jsonArray(derivative.locations).filter(
+                (location) =>
+                  location !== null &&
+                  typeof location === 'object' &&
+                  !Array.isArray(location) &&
+                  (location as Record<string, unknown>).kind === 'private-object',
+              ),
+            ),
+            derivative.verified_at,
+          ],
+        );
+      }
+      return { project: projectOf(created), assetIdMap, derivativeIdMap };
+    });
+  }
+
+  async trashProject(
+    actor: Actor,
+    id: string,
+    baseRevision: number,
+    now = Date.now(),
+  ): Promise<ProjectMetadata> {
+    return this.transaction(async (client) => {
+      const current = await this.project(actor, id, client);
+      if (current.revision !== baseRevision)
+        throw new ControlPlaneError(
+          'REVISION_CONFLICT',
+          `expected ${baseRevision}, found ${current.revision}`,
+        );
+      const queued = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET state = 'canceled', cancel_requested = true
+         WHERE project_id = $1 AND state = 'queued' RETURNING id`,
+        [id],
+      );
+      for (const job of queued.rows) await this.event(client, job.id, 'canceled', now);
+      const leased = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET cancel_requested = true
+         WHERE project_id = $1 AND state = 'leased' AND cancel_requested = false RETURNING id`,
+        [id],
+      );
+      for (const job of leased.rows) await this.event(client, job.id, 'cancel-requested', now);
+      const result = await client.query<ProjectRow>(
+        `UPDATE projects SET trashed_at = $3, revision = revision + 1
+         WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+        [id, actor.id, new Date(now), baseRevision],
+      );
+      return projectOf(requiredRow(result.rows[0], 'PROJECT_TRASH_FAILED'));
+    });
+  }
+
+  async restoreProject(actor: Actor, id: string, baseRevision: number): Promise<ProjectMetadata> {
+    return this.transaction(async (client) => {
+      const current = await this.projectAllowTrashed(actor, id, client);
+      if (current.trashedAt === undefined) throw new ControlPlaneError('PROJECT_NOT_TRASHED', id);
+      if (current.revision !== baseRevision)
+        throw new ControlPlaneError(
+          'REVISION_CONFLICT',
+          `expected ${baseRevision}, found ${current.revision}`,
+        );
+      const result = await client.query<ProjectRow>(
+        `UPDATE projects SET trashed_at = NULL, revision = revision + 1
+         WHERE id = $1 AND owner_id = $2 AND revision = $3 AND trashed_at IS NOT NULL RETURNING *`,
+        [id, actor.id, baseRevision],
+      );
+      return projectOf(requiredRow(result.rows[0], 'PROJECT_RESTORE_FAILED'));
+    });
+  }
+
+  async deleteProject(actor: Actor, id: string): Promise<ProjectDeletionResult> {
+    return this.transaction(async (client) => {
+      const current = await this.projectAllowTrashed(actor, id, client);
+      if (current.trashedAt === undefined) throw new ControlPlaneError('PROJECT_NOT_TRASHED', id);
+      const active = await client.query<{ readonly count: string }>(
+        `SELECT COUNT(*)::text AS count FROM jobs
+         WHERE project_id = $1 AND state IN ('queued', 'leased')`,
+        [id],
+      );
+      if (Number(active.rows[0]?.count ?? 0) > 0) throw new ControlPlaneError('PROJECT_BUSY', id);
+      const assets = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_assets WHERE project_id = $1',
+        [id],
+      );
+      const derivatives = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_derivatives WHERE project_id = $1',
+        [id],
+      );
+      const candidates = new Set<string>([
+        ...assets.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+        ...derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+      ]);
+      const jobs = await client.query<{ readonly id: string }>(
+        'SELECT id FROM jobs WHERE project_id = $1',
+        [id],
+      );
+      const jobIds = jobs.rows.map((job) => job.id);
+      if (jobIds.length > 0) {
+        await client.query('DELETE FROM job_events WHERE job_id = ANY($1::text[])', [jobIds]);
+        await client.query('DELETE FROM job_attempts WHERE job_id = ANY($1::text[])', [jobIds]);
+        await client.query('DELETE FROM jobs WHERE project_id = $1', [id]);
+      }
+      await client.query('DELETE FROM media_derivatives WHERE project_id = $1', [id]);
+      await client.query('DELETE FROM media_assets WHERE project_id = $1', [id]);
+      await client.query('DELETE FROM projects WHERE id = $1 AND owner_id = $2', [id, actor.id]);
+      const remainingAssets = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_assets',
+      );
+      const remainingDerivatives = await client.query<{ readonly locations: unknown }>(
+        'SELECT locations FROM media_derivatives',
+      );
+      const remaining = new Set<string>([
+        ...remainingAssets.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+        ...remainingDerivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+      ]);
+      return {
+        id,
+        orphanedPrivateObjectRefs: [...candidates].filter((ref) => !remaining.has(ref)),
+      };
+    });
   }
 
   async setAssetSync(actor: Actor, projectId: string, enabled: boolean): Promise<ProjectMetadata> {
@@ -872,7 +1094,7 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   async jobsForProject(actor: Actor, projectId: string): Promise<readonly Job[]> {
-    await this.project(actor, projectId);
+    await this.projectAllowTrashed(actor, projectId);
     const result = await this.pool.query<JobRow>(
       'SELECT * FROM jobs WHERE project_id = $1 ORDER BY id',
       [projectId],
@@ -890,7 +1112,7 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   async eventsAfter(actor: Actor, projectId: string, cursor: number): Promise<readonly JobEvent[]> {
-    await this.project(actor, projectId);
+    await this.projectAllowTrashed(actor, projectId);
     const result = await this.pool.query<EventRow>(
       `SELECT event.cursor, event.job_id, event.type, event.created_at
        FROM job_events AS event JOIN jobs ON jobs.id = event.job_id
@@ -906,6 +1128,16 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   private async project(
+    actor: Actor,
+    id: string,
+    client: Pool | PoolClient = this.pool,
+  ): Promise<ProjectMetadata> {
+    const project = await this.projectAllowTrashed(actor, id, client);
+    if (project.trashedAt !== undefined) throw new ControlPlaneError('PROJECT_TRASHED', id);
+    return project;
+  }
+
+  private async projectAllowTrashed(
     actor: Actor,
     id: string,
     client: Pool | PoolClient = this.pool,
@@ -974,6 +1206,7 @@ function projectOf(row: ProjectRow): ProjectMetadata {
     title: row.title,
     revision: row.revision,
     assetSyncEnabled: row.asset_sync_enabled,
+    ...(row.trashed_at === null ? {} : { trashedAt: row.trashed_at.getTime() }),
   };
 }
 
@@ -1125,6 +1358,14 @@ function privateRefsFromLocations(value: unknown): string[] {
       ? [location.ref]
       : [];
   });
+}
+
+function randomOpaqueId(prefix: string): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}-${random}`;
 }
 
 function isFixtureReceipt(

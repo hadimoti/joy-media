@@ -12,6 +12,17 @@ export interface ProjectMetadata {
   readonly ownerId: string;
   /** Always true: originals and eligible derivatives use private durable storage. */
   readonly assetSyncEnabled: boolean;
+  readonly trashedAt?: number;
+}
+
+export interface ProjectLifecycleMetadata extends ProjectMetadata {
+  readonly activeJobCount: number;
+}
+
+export interface ProjectDuplicateResult {
+  readonly project: ProjectMetadata;
+  readonly assetIdMap: Readonly<Record<string, string>>;
+  readonly derivativeIdMap: Readonly<Record<string, string>>;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
 export type DerivativeKind = 'thumbnail' | 'proxy';
@@ -75,6 +86,11 @@ export interface AssetRegistration {
 export interface AssetDeletionResult {
   readonly id: string;
   /** Internal opaque refs that no remaining asset or derivative still uses. */
+  readonly orphanedPrivateObjectRefs: readonly string[];
+}
+
+export interface ProjectDeletionResult {
+  readonly id: string;
   readonly orphanedPrivateObjectRefs: readonly string[];
 }
 
@@ -193,6 +209,29 @@ export interface ControlPlane {
     title: string,
     baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
+  getProject(
+    actor: Actor,
+    id: string,
+  ): ProjectLifecycleMetadata | Promise<ProjectLifecycleMetadata>;
+  duplicateProject(
+    actor: Actor,
+    sourceId: string,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): ProjectDuplicateResult | Promise<ProjectDuplicateResult>;
+  trashProject(
+    actor: Actor,
+    id: string,
+    baseRevision: number,
+    now?: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  restoreProject(
+    actor: Actor,
+    id: string,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  deleteProject(actor: Actor, id: string): ProjectDeletionResult | Promise<ProjectDeletionResult>;
   setAssetSync(
     actor: Actor,
     projectId: string,
@@ -393,6 +432,132 @@ export class LocalControlPlane implements ControlPlane {
     const next = { ...current, title, revision: current.revision + 1 };
     this.#projects.set(id, next);
     return next;
+  }
+  getProject(actor: Actor, id: string): ProjectLifecycleMetadata {
+    const project = this.projectAllowTrashed(actor, id);
+    return { ...project, activeJobCount: this.activeJobCount(id) };
+  }
+  duplicateProject(
+    actor: Actor,
+    sourceId: string,
+    id: string,
+    title: string,
+    baseRevision: number,
+  ): ProjectDuplicateResult {
+    const source = this.project(actor, sourceId);
+    if (source.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${source.revision}`,
+      );
+    if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
+    const sourceAssets = [...this.#assets.values()].filter((asset) => asset.projectId === sourceId);
+    if (
+      sourceAssets.some(
+        (asset) => !asset.locations.some((location) => location.kind === 'private-object'),
+      )
+    )
+      throw new ControlPlaneError('PROJECT_MEDIA_NOT_DURABLE', sourceId);
+    const result = this.createProject(actor, id, title);
+    const assetIdMap: Record<string, string> = {};
+    const derivativeIdMap: Record<string, string> = {};
+    for (const asset of sourceAssets) {
+      const nextId = randomOpaqueId('asset');
+      assetIdMap[asset.id] = nextId;
+      this.#assets.set(nextId, {
+        ...cloneAsset(asset),
+        id: nextId,
+        projectId: id,
+        locations: cloneLocations(
+          asset.locations.filter((location) => location.kind === 'private-object'),
+        ),
+      });
+    }
+    for (const derivative of [...this.#derivatives.values()].filter(
+      (item) => item.projectId === sourceId,
+    )) {
+      if (!derivative.locations.some((location) => location.kind === 'private-object')) continue;
+      const nextId = randomOpaqueId('derivative');
+      derivativeIdMap[derivative.id] = nextId;
+      this.#derivatives.set(nextId, {
+        ...cloneDerivative(derivative),
+        id: nextId,
+        projectId: id,
+        assetId: assetIdMap[derivative.assetId] ?? derivative.assetId,
+        locations: cloneLocations(
+          derivative.locations.filter((location) => location.kind === 'private-object'),
+        ),
+      });
+    }
+    return { project: result, assetIdMap, derivativeIdMap };
+  }
+  trashProject(actor: Actor, id: string, baseRevision: number, now = Date.now()): ProjectMetadata {
+    const current = this.project(actor, id);
+    if (current.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${current.revision}`,
+      );
+    for (const [jobId, job] of this.#jobs.entries()) {
+      if (job.projectId !== id) continue;
+      if (job.state === 'queued') {
+        this.#jobs.set(jobId, { ...job, state: 'canceled', cancelRequested: true });
+        this.event(jobId, 'canceled', now);
+      } else if (job.state === 'leased' && !job.cancelRequested) {
+        this.#jobs.set(jobId, { ...job, cancelRequested: true });
+        this.event(jobId, 'cancel-requested', now);
+      }
+    }
+    const next = { ...current, revision: current.revision + 1, trashedAt: now };
+    this.#projects.set(id, next);
+    return next;
+  }
+  restoreProject(actor: Actor, id: string, baseRevision: number): ProjectMetadata {
+    const current = this.projectAllowTrashed(actor, id);
+    if (current.trashedAt === undefined) throw new ControlPlaneError('PROJECT_NOT_TRASHED', id);
+    if (current.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${current.revision}`,
+      );
+    const { trashedAt, ...active } = current;
+    void trashedAt;
+    const next = { ...active, revision: current.revision + 1 };
+    this.#projects.set(id, next);
+    return next;
+  }
+  deleteProject(actor: Actor, id: string): ProjectDeletionResult {
+    const current = this.projectAllowTrashed(actor, id);
+    if (current.trashedAt === undefined) throw new ControlPlaneError('PROJECT_NOT_TRASHED', id);
+    if (this.activeJobCount(id) > 0) throw new ControlPlaneError('PROJECT_BUSY', id);
+    const assetIds = new Set(
+      [...this.#assets.values()].filter((asset) => asset.projectId === id).map((asset) => asset.id),
+    );
+    const candidates = new Set<string>();
+    for (const asset of [...this.#assets.values()].filter((item) => item.projectId === id)) {
+      for (const ref of privateRefs(asset.locations)) candidates.add(ref);
+    }
+    for (const derivative of [...this.#derivatives.values()].filter(
+      (item) => item.projectId === id,
+    )) {
+      for (const ref of privateRefs(derivative.locations)) candidates.add(ref);
+    }
+    for (const [jobId, job] of this.#jobs.entries()) {
+      if (job.projectId === id) this.#jobs.delete(jobId);
+    }
+    for (let index = this.#events.length - 1; index >= 0; index -= 1) {
+      if (!this.#jobs.has(this.#events[index]!.jobId)) this.#events.splice(index, 1);
+    }
+    for (const assetId of assetIds) this.#assets.delete(assetId);
+    for (const [derivativeId, derivative] of this.#derivatives.entries()) {
+      if (derivative.projectId === id) this.#derivatives.delete(derivativeId);
+    }
+    this.#projects.delete(id);
+    const remaining = new Set<string>([
+      ...[...this.#assets.values()].flatMap((asset) => privateRefs(asset.locations)),
+      ...[...this.#derivatives.values()].flatMap((derivative) => privateRefs(derivative.locations)),
+    ]);
+    return { id, orphanedPrivateObjectRefs: [...candidates].filter((ref) => !remaining.has(ref)) };
   }
   setAssetSync(actor: Actor, projectId: string, enabled: boolean): ProjectMetadata {
     if (enabled !== true)
@@ -906,7 +1071,7 @@ export class LocalControlPlane implements ControlPlane {
     return retried;
   }
   jobsForProject(actor: Actor, projectId: string): readonly Job[] {
-    this.project(actor, projectId);
+    this.projectAllowTrashed(actor, projectId);
     return [...this.#jobs.values()].filter((job) => job.projectId === projectId);
   }
   workersForOwner(actor: Actor): readonly WorkerRecord[] {
@@ -914,18 +1079,28 @@ export class LocalControlPlane implements ControlPlane {
     return [...this.#workers.values()].filter((worker) => worker.ownerId === actor.id);
   }
   eventsAfter(actor: Actor, projectId: string, cursor: number): readonly JobEvent[] {
-    this.project(actor, projectId);
+    this.projectAllowTrashed(actor, projectId);
     const ids = new Set(
       [...this.#jobs.values()].filter((job) => job.projectId === projectId).map((job) => job.id),
     );
     return this.#events.filter((event) => event.cursor > cursor && ids.has(event.jobId));
   }
   private project(actor: Actor, id: string): ProjectMetadata {
+    const project = this.projectAllowTrashed(actor, id);
+    if (project.trashedAt !== undefined) throw new ControlPlaneError('PROJECT_TRASHED', id);
+    return project;
+  }
+  private projectAllowTrashed(actor: Actor, id: string): ProjectMetadata {
     this.auth(actor);
     const project = this.#projects.get(id);
     if (project === undefined || project.ownerId !== actor.id)
       throw new ControlPlaneError('PROJECT_NOT_FOUND', id);
     return project;
+  }
+  private activeJobCount(projectId: string): number {
+    return [...this.#jobs.values()].filter(
+      (job) => job.projectId === projectId && (job.state === 'queued' || job.state === 'leased'),
+    ).length;
   }
   private ownedLease(workerId: string, jobId: string, now: number): Job {
     const job = this.#jobs.get(jobId);
@@ -952,6 +1127,14 @@ function privateRefs(locations: readonly AssetLocationRecord[]): string[] {
   return locations
     .filter((location) => location.kind === 'private-object')
     .map((location) => location.ref);
+}
+
+function randomOpaqueId(prefix: string): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}-${random}`;
 }
 
 function isFixtureReceipt(

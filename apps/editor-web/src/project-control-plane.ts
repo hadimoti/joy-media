@@ -9,6 +9,10 @@ export interface ControlPlaneProjectBinding {
   /** Opaque owner-scoped record identifier used by the control-plane API. */
   readonly controlPlaneProjectId: string;
   readonly title: string;
+  /** Last server lifecycle revision observed for this owner-scoped binding. */
+  readonly revision?: number;
+  /** Server trash timestamp, when the bound project is in Trash. */
+  readonly trashedAt?: number;
 }
 
 interface BindingDatabaseV2 {
@@ -32,6 +36,52 @@ export interface ControlPlaneBindingOptions {
    * account's control-plane project id (which surfaces as Jobs 409).
    */
   readonly ownerKey?: string;
+}
+
+export function getControlPlaneProjectBinding(
+  storage: BrowserKeyValueStore,
+  editorProjectId: string,
+  ownerKey = 'local',
+): ControlPlaneProjectBinding | undefined {
+  return readDatabase(storage).bindingsByOwner[ownerKey]?.[editorProjectId];
+}
+
+export function upsertControlPlaneProjectBinding(
+  storage: BrowserKeyValueStore,
+  binding: ControlPlaneProjectBinding,
+  ownerKey = 'local',
+): void {
+  const database = readDatabase(storage);
+  const ownerBindings = database.bindingsByOwner[ownerKey] ?? {};
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 2,
+      bindingsByOwner: {
+        ...database.bindingsByOwner,
+        [ownerKey]: { ...ownerBindings, [binding.editorProjectId]: binding },
+      },
+    } satisfies BindingDatabaseV2),
+  );
+}
+
+export function removeControlPlaneProjectBinding(
+  storage: BrowserKeyValueStore,
+  editorProjectId: string,
+  ownerKey = 'local',
+): void {
+  const database = readDatabase(storage);
+  const ownerBindings = database.bindingsByOwner[ownerKey];
+  if (ownerBindings?.[editorProjectId] === undefined) return;
+  const nextOwnerBindings = { ...ownerBindings };
+  delete nextOwnerBindings[editorProjectId];
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 2,
+      bindingsByOwner: { ...database.bindingsByOwner, [ownerKey]: nextOwnerBindings },
+    } satisfies BindingDatabaseV2),
+  );
 }
 
 /**
@@ -61,16 +111,7 @@ export function getOrCreateControlPlaneProjectBinding(
     controlPlaneProjectId: `project-${createId()}`,
     title: project.title,
   };
-  storage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      version: 2,
-      bindingsByOwner: {
-        ...database.bindingsByOwner,
-        [ownerKey]: { ...ownerBindings, [project.id]: binding },
-      },
-    } satisfies BindingDatabaseV2),
-  );
+  upsertControlPlaneProjectBinding(storage, binding, ownerKey);
   return binding;
 }
 
@@ -128,7 +169,9 @@ function isDatabaseV2(value: unknown): value is BindingDatabaseV2 {
           isRecord(binding) &&
           binding.editorProjectId === editorProjectId &&
           isNonBlank(binding.controlPlaneProjectId) &&
-          isNonBlank(binding.title),
+          isNonBlank(binding.title) &&
+          (binding.revision === undefined || isNonNegativeInteger(binding.revision)) &&
+          (binding.trashedAt === undefined || isNonNegativeInteger(binding.trashedAt)),
       ),
   );
 }
@@ -150,4 +193,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }

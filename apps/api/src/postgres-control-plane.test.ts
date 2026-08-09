@@ -148,6 +148,46 @@ describe('PostgresControlPlane', () => {
     });
     await pool.end();
   });
+
+  it('duplicates durable media and enforces the trash lifecycle transactionally', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'owner-lifecycle' };
+    await controlPlane.createProject(owner, 'source', 'Source');
+    await controlPlane.createProject(owner, 'other', 'Other');
+    await controlPlane.registerAsset(owner, 'source', cloudAsset('source-asset', 'shared-ref'));
+    await controlPlane.registerAsset(owner, 'other', cloudAsset('other-asset', 'shared-ref'));
+    await controlPlane.enqueue(owner, 'source-job', 'source', 'render', 100);
+
+    const copy = await controlPlane.duplicateProject(owner, 'source', 'copy', 'Copy', 0);
+    expect(copy.project).toMatchObject({ id: 'copy', title: 'Copy' });
+    expect(copy.assetIdMap['source-asset']).toEqual(expect.any(String));
+    await expect(controlPlane.assetsForProject(owner, 'copy')).resolves.toHaveLength(1);
+
+    await expect(controlPlane.trashProject(owner, 'source', 0, 200)).resolves.toMatchObject({
+      revision: 1,
+      trashedAt: 200,
+    });
+    await expect(controlPlane.jobsForProject(owner, 'source')).resolves.toMatchObject([
+      { id: 'source-job', state: 'canceled' },
+    ]);
+    await expect(controlPlane.restoreProject(owner, 'source', 1)).resolves.toMatchObject({
+      revision: 2,
+    });
+    await controlPlane.trashProject(owner, 'source', 2, 300);
+    await expect(controlPlane.deleteProject(owner, 'source')).resolves.toMatchObject({
+      id: 'source',
+      orphanedPrivateObjectRefs: [],
+    });
+    await expect(controlPlane.getProject(owner, 'source')).rejects.toMatchObject({
+      code: 'PROJECT_NOT_FOUND',
+    });
+    await expect(controlPlane.assetsForProject(owner, 'copy')).resolves.toHaveLength(1);
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {

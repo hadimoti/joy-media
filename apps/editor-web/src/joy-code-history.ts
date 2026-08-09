@@ -96,6 +96,13 @@ export function saveJoyCodeThreads(
   storage.setItem(joyCodeHistoryKey(projectId), JSON.stringify(sortAndLimit(threads)));
 }
 
+export function removeJoyCodeThreads(
+  storage: JoyCodeHistoryStorage & { removeItem?: (key: string) => void },
+  projectId: string,
+): void {
+  storage.removeItem?.(joyCodeHistoryKey(projectId));
+}
+
 export function matchJoyCodeIntentId(prompt: string): string | undefined {
   const normalized = prompt.toLowerCase().trim().replace(/\s+/g, ' ');
   const slashCommand = normalized.split(' ')[0];

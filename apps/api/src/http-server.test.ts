@@ -16,6 +16,7 @@ import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistra
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
 const servers: Server[] = [];
+const SHA256 = 'a'.repeat(64);
 
 afterEach(async () => {
   await Promise.all(
@@ -52,6 +53,66 @@ describe('control-plane HTTP transport', () => {
     ).toMatchObject({
       status: 401,
       body: { error: { code: 'AUTH_REQUIRED' } },
+    });
+  });
+
+  it('exposes the owner-authorized project lifecycle routes with revision and trash guards', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'POST', '/v1/projects', { id: 'source', title: 'Source' }),
+    ).toMatchObject({ status: 201, body: { data: { revision: 0, title: 'Source' } } });
+    expect(
+      await request(origin, 'POST', '/v1/projects/source/assets', {
+        id: 'source-asset',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        sha256: SHA256,
+        bytes: 12,
+        descriptor: { mimeType: 'video/mp4' },
+        locations: [{ kind: 'private-object', ref: 'source-object' }],
+      }),
+    ).toMatchObject({ status: 201 });
+    expect(
+      await request(origin, 'PATCH', '/v1/projects/source', {
+        title: 'Renamed',
+        baseRevision: 0,
+      }),
+    ).toMatchObject({ status: 200, body: { data: { revision: 1, title: 'Renamed' } } });
+    expect(
+      await request(origin, 'POST', '/v1/projects/source/duplicate', {
+        id: 'copy',
+        title: 'Renamed copy',
+        baseRevision: 1,
+      }),
+    ).toMatchObject({
+      status: 201,
+      body: {
+        data: { project: { id: 'copy' }, assetIdMap: { 'source-asset': expect.any(String) } },
+      },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/source/trash', { baseRevision: 1 }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { trashedAt: expect.any(Number), revision: 2 } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/source')).toMatchObject({
+      status: 200,
+      body: { data: { trashedAt: expect.any(Number) } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/source/restore', { baseRevision: 2 }),
+    ).toMatchObject({ status: 200, body: { data: { revision: 3 } } });
+    expect(
+      await request(origin, 'POST', '/v1/projects/source/trash', { baseRevision: 3 }),
+    ).toMatchObject({ status: 200, body: { data: { revision: 4 } } });
+    expect(await request(origin, 'DELETE', '/v1/projects/source')).toMatchObject({
+      status: 200,
+      body: { data: { id: 'source' } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/source')).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
     });
   });
 

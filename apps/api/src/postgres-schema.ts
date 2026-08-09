@@ -1,7 +1,8 @@
 /** Idempotent PostgreSQL schema for the durable metadata and job queue. */
 export const POSTGRES_SCHEMA = `
-CREATE TABLE IF NOT EXISTS projects (id text primary key, owner_id text not null, title text not null, revision integer not null);
+CREATE TABLE IF NOT EXISTS projects (id text primary key, owner_id text not null, title text not null, revision integer not null, trashed_at timestamptz NULL);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS asset_sync_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS trashed_at timestamptz NULL;
 UPDATE projects SET asset_sync_enabled = true WHERE asset_sync_enabled = false;
 CREATE TABLE IF NOT EXISTS workers (id text primary key, owner_id text not null, revoked_at timestamptz);
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS session_token_hash text;

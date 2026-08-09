@@ -187,6 +187,36 @@ describe('local control plane', () => {
     expect(api.assetsForOwner(owner)).toMatchObject([{ id: 'chrome-img' }]);
     expect(api.assetsForProject(owner, 'project-cursor')).toHaveLength(0);
   });
+
+  it('duplicates durable media, cancels queued work on Trash, restores, and purges safely', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-lifecycle' };
+    api.createProject(owner, 'source-project', 'Source');
+    api.registerAsset(owner, 'source-project', {
+      ...assetRegistration(),
+      id: 'source-asset',
+      locations: [{ kind: 'private-object', ref: 'orig-shared-content' }],
+    });
+    api.enqueue(owner, 'source-job', 'source-project', 'render', 100);
+    const copied = api.duplicateProject(owner, 'source-project', 'copy-project', 'Copy', 0);
+    expect(copied.project.title).toBe('Copy');
+    expect(copied.assetIdMap['source-asset']).toBeDefined();
+    expect(api.assetsForProject(owner, 'copy-project')).toHaveLength(1);
+
+    const trashed = api.trashProject(owner, 'source-project', 0, 200);
+    expect(trashed.trashedAt).toBe(200);
+    expect(api.jobsForProject(owner, 'source-project')[0]).toMatchObject({ state: 'canceled' });
+    expect(api.getProject(owner, 'source-project')).toMatchObject({ activeJobCount: 0 });
+    const restored = api.restoreProject(owner, 'source-project', 1);
+    expect(restored.trashedAt).toBeUndefined();
+    api.trashProject(owner, 'source-project', 2, 300);
+    const deleted = api.deleteProject(owner, 'source-project');
+    expect(deleted.orphanedPrivateObjectRefs).toEqual([]);
+    expect(() => api.getProject(owner, 'source-project')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
+    );
+    expect(api.assetsForProject(owner, 'copy-project')).toHaveLength(1);
+  });
 });
 
 const SHA256 = 'a'.repeat(64);

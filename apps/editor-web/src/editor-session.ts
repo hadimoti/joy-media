@@ -71,6 +71,15 @@ interface PersistedArtifactDocument {
   readonly store: ArtifactStore;
 }
 
+export const WORKFLOW_GRAPH_LOG_KEY = 'joy-media.workflow-graph-log.v1';
+export const CREATIVE_ARTIFACT_LOG_KEY = 'joy-media.creative-artifact-log.v1';
+
+/** Optional current-state seeds used when materializing a duplicated project. */
+export interface EditorSessionSeed {
+  readonly graph?: WorkflowGraphV2;
+  readonly artifacts?: ArtifactStore;
+}
+
 /**
  * One user-visible history step.
  *
@@ -165,6 +174,7 @@ export class EditorSession {
     storage: BrowserKeyValueStore,
     initialTimeline: SpikeProject,
     initialVisualProject: JoyProjectV1,
+    initialSeed: EditorSessionSeed = {},
   ) {
     this.#timelinePersistence = new LocalProjectPersistence(
       new BrowserProjectStore(storage, 'joy-media.timeline-project-log.v1'),
@@ -188,11 +198,11 @@ export class EditorSession {
     this.graphEnabled = readDualLensFlags(storage).graphEnabled;
     const emptyGraphDocument: PersistedGraphDocument = {
       id: initialTimeline.id,
-      graph: EMPTY_WORKFLOW_GRAPH,
+      graph: initialSeed.graph ?? EMPTY_WORKFLOW_GRAPH,
     };
     if (this.graphEnabled) {
       this.#graphPersistence = new LocalProjectPersistence(
-        new BrowserProjectStore(storage, 'joy-media.workflow-graph-log.v1'),
+        new BrowserProjectStore(storage, WORKFLOW_GRAPH_LOG_KEY),
         graphAdapter,
       );
       const recovered = recoverOrInitialize(this.#graphPersistence, emptyGraphDocument);
@@ -209,11 +219,11 @@ export class EditorSession {
     const emptyArtifactDocument: PersistedArtifactDocument = {
       id: initialTimeline.id,
       schemaVersion: 1,
-      store: EMPTY_ARTIFACT_STORE,
+      store: initialSeed.artifacts ?? EMPTY_ARTIFACT_STORE,
     };
     if (this.graphEnabled) {
       this.#artifactPersistence = new LocalProjectPersistence(
-        new BrowserProjectStore(storage, 'joy-media.creative-artifact-log.v1'),
+        new BrowserProjectStore(storage, CREATIVE_ARTIFACT_LOG_KEY),
         artifactAdapter,
       );
       const recovered = recoverOrInitialize(this.#artifactPersistence, emptyArtifactDocument);
@@ -475,6 +485,15 @@ export class EditorSession {
     this.#snapshotRedo.length = 0;
     this.#record('document-snapshot', 'Replace project document', 0);
     return project;
+  }
+
+  /** Persist project metadata without adding a creative undo entry. */
+  renameProjectTitle(title: string): JoyProjectV1 {
+    const next = { ...this.#visualObjects.present, title, updatedAt: new Date().toISOString() };
+    this.#visualObjects.replacePresent(next);
+    this.#visualObjectPersistence.saveSnapshot(next, false);
+    this.#visualObjectRevision += 1;
+    return next;
   }
 
   undo(): void {

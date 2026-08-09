@@ -56,6 +56,14 @@ export class JsonFileProjectStore<P, T> implements ProjectStore<P, T> {
     return Object.keys(this.read().projects).sort();
   }
 
+  deleteProject(projectId: string): void {
+    const database = this.read();
+    if (database.projects[projectId] === undefined) return;
+    const projects = { ...database.projects };
+    delete projects[projectId];
+    this.write({ projects });
+  }
+
   private read(): FileDatabase<P, T> {
     if (!existsSync(this.filePath)) return { projects: {} };
     return JSON.parse(readFileSync(this.filePath, 'utf8')) as FileDatabase<P, T>;

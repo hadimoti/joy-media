@@ -401,6 +401,74 @@ async function route(
     return;
   }
 
+  const projectLifecycleMatch = /^\/v1\/projects\/([^/]+)$/.exec(url.pathname);
+  if (projectLifecycleMatch !== null) {
+    const projectId = decodeURIComponent(projectLifecycleMatch[1]!);
+    if (request.method === 'GET') {
+      respondJson(response, 200, { data: await options.controlPlane.getProject(actor, projectId) });
+      return;
+    }
+    if (request.method === 'PATCH') {
+      const body = await readJson(request);
+      respondJson(response, 200, {
+        data: await options.controlPlane.updateProject(
+          actor,
+          projectId,
+          requiredString(body, 'title'),
+          requiredNonNegativeInteger(body, 'baseRevision'),
+        ),
+      });
+      return;
+    }
+    if (request.method === 'DELETE') {
+      const deleted = await options.controlPlane.deleteProject(actor, projectId);
+      let cloudObjectsPurged = 0;
+      let cloudObjectPurgeFailures = 0;
+      for (const ref of deleted.orphanedPrivateObjectRefs) {
+        try {
+          if (options.privateObjectStore === undefined)
+            throw new Error('private store unavailable');
+          await options.privateObjectStore.remove(ref);
+          cloudObjectsPurged += 1;
+        } catch {
+          cloudObjectPurgeFailures += 1;
+        }
+      }
+      respondJson(response, 200, {
+        data: { id: deleted.id, cloudObjectsPurged, cloudObjectPurgeFailures },
+      });
+      return;
+    }
+  }
+
+  const duplicateProjectMatch = /^\/v1\/projects\/([^/]+)\/duplicate$/.exec(url.pathname);
+  if (request.method === 'POST' && duplicateProjectMatch !== null) {
+    const body = await readJson(request);
+    respondJson(response, 201, {
+      data: await options.controlPlane.duplicateProject(
+        actor,
+        decodeURIComponent(duplicateProjectMatch[1]!),
+        requiredString(body, 'id'),
+        requiredString(body, 'title'),
+        requiredNonNegativeInteger(body, 'baseRevision'),
+      ),
+    });
+    return;
+  }
+
+  const projectStateMatch = /^\/v1\/projects\/([^/]+)\/(trash|restore)$/.exec(url.pathname);
+  if (request.method === 'POST' && projectStateMatch !== null) {
+    const body = await readJson(request);
+    const projectId = decodeURIComponent(projectStateMatch[1]!);
+    const baseRevision = requiredNonNegativeInteger(body, 'baseRevision');
+    const data =
+      projectStateMatch[2] === 'trash'
+        ? await options.controlPlane.trashProject(actor, projectId, baseRevision)
+        : await options.controlPlane.restoreProject(actor, projectId, baseRevision);
+    respondJson(response, 200, { data });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/transcribe') {
     const { runWhisperOnReferenceAsset, runWhisperTranscription } =
       await import('./whisper-transcribe.js');
@@ -1209,6 +1277,13 @@ function requiredSha256(body: Record<string, unknown>, field: string): string {
 function requiredPositiveInteger(body: Record<string, unknown>, field: string): number {
   const value = optionalPositiveInteger(body, field);
   if (value === undefined) throw new ControlPlaneError('REQUEST_INVALID', `${field} is required`);
+  return value;
+}
+
+function requiredNonNegativeInteger(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-negative integer`);
   return value;
 }
 

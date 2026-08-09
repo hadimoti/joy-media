@@ -473,6 +473,16 @@ export function DuplicateIcon() {
   );
 }
 
+export function MoreVerticalIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function SpeedIcon() {
   return (
     <Svg>
