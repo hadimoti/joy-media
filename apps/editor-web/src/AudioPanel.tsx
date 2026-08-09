@@ -7,21 +7,22 @@ import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import {
   AudioIcon,
+  AudioWorkerIcon,
   CheckIcon,
   CloudIcon,
+  DeviceProcessorIcon,
   DownloadIcon,
   FadeInIcon,
   FadeOutIcon,
   GainIcon,
   MasterBusIcon,
-  MicIcon,
   MuteIcon,
   PanIcon,
   PlayIcon,
-  SettingsGearIcon,
   SlidersIcon,
   SoloIcon,
   SpeakerOnIcon,
+  StorageFolderIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
@@ -212,7 +213,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
             <div className="audio-runtime-grid">
               <div className="audio-runtime-cell" data-state="pairing">
                 <span className="icon-tool" aria-hidden="true">
-                  <MicIcon />
+                  <AudioWorkerIcon />
                 </span>
                 <strong>Local Worker</strong>
                 <span>Pairing</span>
@@ -226,7 +227,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
               </div>
               <label className="audio-runtime-cell audio-runtime-control">
                 <span className="icon-tool" aria-hidden="true">
-                  <SettingsGearIcon />
+                  <DeviceProcessorIcon />
                 </span>
                 <strong>Device</strong>
                 <select
@@ -241,19 +242,17 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 </select>
               </label>
             </div>
-            <div className="audio-readiness" role="status" aria-live="polite">
-              <span className="audio-status-dot" aria-hidden="true" />
-              <strong>Run readiness</strong>
-              <span>Pair local worker to run</span>
-            </div>
             <details className="audio-runtime-settings">
               <summary>
-                <SettingsGearIcon />
+                <StorageFolderIcon />
                 <strong>Runtime settings</strong>
                 <span>Local model cache</span>
               </summary>
               <label className="audio-runtime-path">
-                <span>Model Cache</span>
+                <span className="audio-runtime-path-label">
+                  <StorageFolderIcon />
+                  Model Cache
+                </span>
                 <input
                   type="text"
                   value={modelCachePath}

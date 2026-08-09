@@ -18,6 +18,8 @@ describe('AudioPanel Studio surface', () => {
     expect(markup).toContain('title="Pair local worker to run"');
     expect(markup).toContain('aria-describedby="audio-podcast-quality-run-readiness"');
     expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain('mic_24x24.png');
+    expect(markup).not.toContain('setting-gear_24x24.png');
   });
 
   it('keeps the capability library collapsed, filterable, and discoverable', () => {

@@ -73,7 +73,10 @@ with zero unbacked personal videos. WP-24 is complete.
 **WP-25 in progress (2026-08-09, working tree only).** Audio Studio is being
 repolished action-first inside the existing PanelShell: compact honest runtime
 status, selected workflow/run surface, and a collapsed filtered Capability
-Library. Models, Master, and Clips remain in scope unchanged. The orchestrator
+Library. Models, Master, and Clips remain in scope unchanged. The corrective
+pass removes the duplicate readiness row, tightens the first-viewport runtime
+and workflow rhythm, and replaces the mic/gear masks with distinct waveform,
+processor, and storage SVG icons. The orchestrator
 independently verified, outside the restricted Codex sandbox:
 
 - `pnpm typecheck`

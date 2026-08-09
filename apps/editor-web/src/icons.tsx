@@ -327,6 +327,37 @@ export function AudioIcon() {
   return <SpeakerOnIcon />;
 }
 
+/** Framed waveform/processor — used for the local audio Worker status. */
+export function AudioWorkerIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="2.5" width="12.5" height="11" rx="1.25" />
+      <path d="M3.25 8h1.3l1.1-2.7L7 11.4l1.45-6.7 1.4 5 1-1.7h1.55" />
+    </Svg>
+  );
+}
+
+/** Pin-connected processor — used for the editable runtime device. */
+export function DeviceProcessorIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="4" y="4" width="8" height="8" rx="1" />
+      <path d="M6.5 1.75V4M9.5 1.75V4M6.5 12v2.25M9.5 12v2.25M1.75 6.5H4M1.75 9.5H4M12 6.5h2.25M12 9.5h2.25" />
+      <rect x="6.5" y="6.5" width="3" height="3" rx="0.35" />
+    </Svg>
+  );
+}
+
+/** Open folder/storage — used for runtime settings and the model cache. */
+export function StorageFolderIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M2 5.5V4h4l1.4 1.5H14v8.5H2Z" />
+      <path d="M2 6.25h12" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon() {
   return (
     <Svg>

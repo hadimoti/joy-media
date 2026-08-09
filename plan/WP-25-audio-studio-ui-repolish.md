@@ -12,6 +12,17 @@ The Studio tab put a tall runtime/model-cache block and a 16-tile Atomic APIs ca
 - Baseline behavior: Local Worker rendered `Pairing`, Cloud Brain rendered `Online`, Device and Model Cache were always in the main scan path, and Atomic APIs rendered expanded by default.
 - The existing PanelShell contract requires header → tabs → one scrolling body; this work keeps that contract and the existing Studio / Models / Master / Clips subtabs.
 
+## Corrective pass — 2026-08-09
+
+The first live review measured the improved stack at 646 px, but the disabled
+Run action still ended at 710 px—116 px below the 433 px initial body viewport.
+The runtime was 155 px and the workflow was 394 px, including a duplicate
+27 px readiness row. This corrective pass removes that duplicate row, compacts
+the runtime/settings and workflow rhythm, and uses a three-column preset grid
+above 22rem so the Run action can remain in the first viewport without sticky,
+fixed, absolute, or hidden required content. It also replaces the disliked mic
+and gear masks with distinct shared waveform/processor/storage SVG icons.
+
 ## Acceptance criteria
 
 - [x] Studio reads as runtime/readiness → workflow preset → selected workflow path/estimate → run action inside the existing PanelShell.
@@ -31,6 +42,8 @@ The Studio tab put a tall runtime/model-cache block and a 16-tile Atomic APIs ca
 - [x] Compatible CSS density, focus, status-token, and narrow-container rules.
 - [x] Preserve Models, Master, Clips, and PanelShell tab behavior.
 - [x] Add focused `AudioPanel.test.tsx` server-render coverage.
+- [x] Add the corrective render assertions for the removed mic/gear masks.
+- [x] Compact the first-viewport runtime/workflow rhythm and add distinct shared audio icons.
 - [x] Run Prettier on touched source, test, CSS, and documentation files.
 
 ## Verification notes
@@ -40,5 +53,6 @@ The Studio tab put a tall runtime/model-cache block and a 16-tile Atomic APIs ca
 - Independent orchestrator verification passed `pnpm format:check`.
 - Independent orchestrator verification passed `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests).
 - Independent orchestrator verification passed `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed).
+- Corrective-pass verification with installed local binaries also passed the focused Vitest suite (3 files, 10 tests), `tsc -b`, `eslint .`, `prettier --check .`, `git diff --check`, and the editor Vite build (1,268 modules transformed).
 - No deploy, commit, push, runtime-data, or secret mutation was performed.
 - Browser/live visual verification was not run in this implementation session; the unchecked responsive acceptance item is intentionally left for review.
