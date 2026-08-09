@@ -1,6 +1,6 @@
 # WP-25 — Audio Studio UI repolish
 
-Status: `gate-review` (implementation and automated verification complete; live browser verification remains a follow-up)
+Status: `gate-review` (implementation and automated verification complete; third visual/density correction awaiting live remeasurement)
 
 ## Problem
 
@@ -23,6 +23,21 @@ above 22rem so the Run action can remain in the first viewport without sticky,
 fixed, absolute, or hidden required content. It also replaces the disliked mic
 and gear masks with distinct shared waveform/processor/storage SVG icons.
 
+## Third visual/density correction — 2026-08-09
+
+The owner’s close-up of deployed `da28589` confirmed that the first-viewport
+gate was still open: at 440×512 the 433 px body contained a 498 px Studio
+stack, with the collapsed Capability Library at 583–659 px. The six workflow
+steps occupied 69 px, the library summary occupied 76 px because its purpose
+wrapped, the PlayIcon implied a false disclosure, the small DeviceProcessorIcon
+still read as a gear, and the workflow footer split resources and readiness
+awkwardly. This pass targets a stack no taller than the 433 px body without
+hiding required content, sticky/fixed/absolute positioning, clipping, scaling,
+or sub-11 px text. It makes the desktop path a compact connected row, keeps
+narrow containers wrapped, makes the library summary one line above 22rem,
+replaces the false-affordance and device glyphs with shared SVGs, and aligns
+the footer’s resources, readiness, and action.
+
 ## Acceptance criteria
 
 - [x] Studio reads as runtime/readiness → workflow preset → selected workflow path/estimate → run action inside the existing PanelShell.
@@ -44,6 +59,10 @@ and gear masks with distinct shared waveform/processor/storage SVG icons.
 - [x] Add focused `AudioPanel.test.tsx` server-render coverage.
 - [x] Add the corrective render assertions for the removed mic/gear masks.
 - [x] Compact the first-viewport runtime/workflow rhythm and add distinct shared audio icons.
+- [x] Convert the ordered workflow path to a connected single-row pipeline above 22rem with narrow wrapping fallbacks.
+- [x] Compact the collapsed Capability Library summary to one line above 22rem while retaining its purpose text.
+- [x] Replace the false PlayIcon heading affordance and redraw the device icon as a rectangular compute card.
+- [x] Rebalance the workflow footer so resources, readiness, and the disabled action align coherently.
 - [x] Run Prettier on touched source, test, CSS, and documentation files.
 
 ## Verification notes
@@ -53,6 +72,7 @@ and gear masks with distinct shared waveform/processor/storage SVG icons.
 - Independent orchestrator verification passed `pnpm format:check`.
 - Independent orchestrator verification passed `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests).
 - Independent orchestrator verification passed `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed).
-- Corrective-pass verification with installed local binaries also passed the focused Vitest suite (3 files, 10 tests), `tsc -b`, `eslint .`, `prettier --check .`, `git diff --check`, and the editor Vite build (1,268 modules transformed).
+- Third-correction verification with installed local binaries passed the focused Vitest suite (3 files, 10 tests), `tsc -b`, `eslint .`, `prettier --check .`, `git diff --check`, and the editor Vite build (1,268 modules transformed).
+- The prior independent live review on `https://joyst.ir/` at deployed commit `da2858958ca7303726201fc874dc539116a4415d`, release `/opt/joy-media/releases/editor-web-20260809-114501-da28589-audio-studio`, exposed this third correction. Its exact evidence was 440×512, body top 161 / bottom 594, clientHeight 433, width 424, scrollHeight 498, scrollTop 0, and no horizontal overflow; Runtime was 102 px (grid 72, closed settings 29), Workflow was 299 px (heading 44, preset grid 69, selected card 186, steps 69, footer 48), Run was top 535 / bottom 566, and Capability Library began at 583.
+- The third correction is not live-verified. The orchestrator must remeasure the 440×512 default state and the narrow responsive fallbacks before this WP can close.
 - No deploy, commit, push, runtime-data, or secret mutation was performed.
-- Browser/live visual verification was not run in this implementation session; the unchecked responsive acceptance item is intentionally left for review.

@@ -337,13 +337,27 @@ export function AudioWorkerIcon() {
   );
 }
 
-/** Pin-connected processor — used for the editable runtime device. */
+/** Connected path nodes — used for choosing an ordered workflow. */
+export function WorkflowPathIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="3" cy="8" r="1.5" />
+      <circle cx="8" cy="8" r="1.5" />
+      <circle cx="13" cy="8" r="1.5" />
+      <path d="M4.5 8h2M9.5 8h2M8 3.25v3.25M8 9.5v3.25" />
+    </Svg>
+  );
+}
+
+/** Rectangular compute card — used for the editable runtime device. */
 export function DeviceProcessorIcon() {
   return (
     <Svg size={16}>
-      <rect x="4" y="4" width="8" height="8" rx="1" />
-      <path d="M6.5 1.75V4M9.5 1.75V4M6.5 12v2.25M9.5 12v2.25M1.75 6.5H4M1.75 9.5H4M12 6.5h2.25M12 9.5h2.25" />
-      <rect x="6.5" y="6.5" width="3" height="3" rx="0.35" />
+      <rect x="2.5" y="2.75" width="11" height="10.5" rx="1.25" />
+      <path d="M5 2.75V1.5M8 2.75V1.5M11 2.75V1.5M5 13.25v1.25M8 13.25v1.25M11 13.25v1.25" />
+      <rect x="4.25" y="5" width="4.5" height="4.5" rx="0.6" />
+      <path d="M10.25 5.25H12M10.25 7.25H12M10.25 9.25H12M4.25 11.25h4.5" />
+      <circle cx="10.75" cy="11.25" r="0.55" fill="currentColor" stroke="none" />
     </Svg>
   );
 }

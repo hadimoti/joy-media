@@ -11831,8 +11831,8 @@ label {
 .audio-runtime-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.2rem;
-  padding: 0.25rem;
+  gap: 0.1rem;
+  padding: 0.15rem;
 }
 .audio-runtime-cell {
   min-width: 0;
@@ -11840,8 +11840,8 @@ label {
   grid-template-columns: 1rem minmax(0, 1fr);
   gap: 0.05rem 0.25rem;
   align-items: center;
-  min-height: 2.15rem;
-  padding: 0.2rem 0.25rem;
+  min-height: 1.75rem;
+  padding: 0.1rem 0.2rem;
   border-radius: var(--radius-sm);
   background: var(--joy-bg-raised);
 }
@@ -11891,7 +11891,7 @@ label {
 .audio-runtime-control select {
   grid-column: 2;
   grid-row: 2;
-  height: 1.25rem;
+  height: 1.2rem;
   padding-inline: 0.25rem;
 }
 .audio-runtime-path {
@@ -11956,6 +11956,13 @@ label {
   min-height: 1.4rem;
   padding: 0.1rem 0.05rem;
 }
+.audio-section-heading {
+  min-height: 1.2rem;
+  padding-block: 0;
+}
+.audio-section-heading > div {
+  line-height: 1.05;
+}
 .audio-workflow-pickers {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -11964,8 +11971,8 @@ label {
 }
 .audio-workflow-button {
   min-width: 0;
-  min-height: 1.9rem;
-  padding: 0.15rem 0.3rem;
+  min-height: 1.7rem;
+  padding: 0.1rem 0.3rem;
   border: 1px solid var(--joy-border);
   border-radius: var(--radius-xs);
   background: var(--joy-bg-control);
@@ -12165,7 +12172,7 @@ label {
 }
 .audio-workflow-card {
   min-width: 0;
-  padding: 0.4rem;
+  padding: 0.3rem;
   border: 1px solid var(--joy-border-strong);
   border-inline-start: 2px solid var(--joy-accent);
   border-radius: var(--joy-radius-inner);
@@ -12173,14 +12180,14 @@ label {
 }
 .audio-workflow-card-heading {
   display: grid;
-  gap: 0.1rem;
+  gap: 0.05rem;
   min-width: 0;
 }
 .audio-workflow-card-heading > div {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 .audio-workflow-card-heading strong {
   color: var(--joy-text);
@@ -12194,37 +12201,40 @@ label {
   margin: 0;
   color: var(--joy-text-muted);
   font-size: var(--joy-type-xs);
-  line-height: 1.25;
+  line-height: 1.15;
 }
 .audio-workflow-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.2rem;
-  margin: 0.35rem 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.1rem;
+  margin: 0.25rem 0;
   padding: 0;
   list-style: none;
 }
 .audio-workflow-steps li {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
   gap: 0.25rem;
   min-width: 0;
-  min-height: 1.75rem;
-  padding: 0.15rem 0.3rem;
+  min-height: 1.65rem;
+  padding: 0.1rem 0.15rem;
+  border: 1px solid var(--joy-border-subtle);
   border-radius: var(--radius-sm);
   background: var(--joy-bg-control);
   color: var(--joy-text);
   font-size: var(--joy-type-2xs);
   line-height: 1.1;
 }
-.audio-workflow-steps li > span:last-child {
+.audio-workflow-step-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .audio-workflow-step-number {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   flex: none;
@@ -12236,10 +12246,16 @@ label {
   font-size: var(--joy-type-2xs);
   font-weight: 700;
 }
+.audio-workflow-step-connector {
+  flex: none;
+  color: var(--joy-accent);
+  font-size: var(--joy-type-xs);
+  line-height: 1;
+}
 .audio-workflow-footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
   gap: 0.3rem;
 }
 .audio-workflow-resources {
@@ -12253,20 +12269,23 @@ label {
   padding-inline: 0.35rem;
 }
 .audio-run-action {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.15rem;
-  min-width: 7rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
 }
 .audio-run-readiness {
+  min-width: 0;
+  overflow: hidden;
   color: var(--joy-accent);
   font-size: var(--joy-type-2xs);
   text-align: end;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .audio-run-button {
-  min-height: 1.9rem;
+  min-height: 1.8rem;
   padding: 0 0.5rem;
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-sm);
@@ -12288,10 +12307,10 @@ label {
 .audio-capability-library > summary {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.35rem;
-  min-height: 2.5rem;
-  padding: 0.4rem 0.55rem;
+  min-height: 1.7rem;
+  padding: 0.15rem 0.45rem;
   color: var(--joy-text);
   cursor: pointer;
   list-style-position: inside;
@@ -12300,17 +12319,25 @@ label {
   color: var(--joy-text-muted);
 }
 .audio-capability-library > summary strong {
+  flex: none;
+  white-space: nowrap;
   font-size: var(--joy-type-sm);
 }
 .audio-capability-library > summary > span:not(.icon-tool) {
+  flex: none;
+  white-space: nowrap;
   color: var(--joy-text-muted);
   font-size: var(--joy-type-2xs);
 }
 .audio-capability-library > summary small {
-  flex: 1 1 100%;
-  padding-inline-start: 1.35rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding-inline-start: 0;
   color: var(--joy-text-faint);
   font-size: var(--joy-type-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .audio-capability-library[open] > summary {
   border-bottom: 1px solid var(--joy-border-subtle);
@@ -12369,6 +12396,20 @@ label {
   .audio-runtime-cell {
     min-height: 2.15rem;
   }
+  .audio-workflow-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.2rem;
+  }
+  .audio-workflow-steps li {
+    flex: none;
+    justify-content: flex-start;
+    min-height: 1.7rem;
+    padding: 0.15rem 0.3rem;
+  }
+  .audio-workflow-step-number {
+    display: inline-flex;
+  }
   .audio-workflow-footer {
     grid-template-columns: 1fr;
   }
@@ -12384,7 +12425,17 @@ label {
   }
   .audio-run-button {
     flex: none;
-    width: 100%;
+    width: auto;
+  }
+  .audio-capability-library > summary {
+    flex-wrap: wrap;
+    min-height: 2.35rem;
+    padding: 0.35rem 0.5rem;
+  }
+  .audio-capability-library > summary small {
+    flex: 1 1 100%;
+    padding-inline-start: 1.35rem;
+    white-space: normal;
   }
   .audio-capability-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));

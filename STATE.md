@@ -42,7 +42,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-21 baseline hygiene           | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                    |
 | WP-22 silence/loudness/gate      | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                         |
 | WP-23 live provider residuals    | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                 |
-| WP-25 audio Studio UI            | gate-review | —        | 2026-08-09   | Action-first Studio repolish in working tree; exact pnpm checks pass, live browser review remains           |
+| WP-25 audio Studio UI            | gate-review | —        | 2026-08-09   | Third visual/density correction in working tree; remeasure live before closure                              |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced             |
 
 ## Production hardening handoff (2026-08-08)
@@ -70,14 +70,20 @@ three personal assets are cloud-backed. Post-upload reconciliation is exact at 1
 database refs and 1,274 ParsPack objects totaling 1,495,383,536 bytes on each side,
 with zero unbacked personal videos. WP-24 is complete.
 
-**WP-25 in progress (2026-08-09, working tree only).** Audio Studio is being
-repolished action-first inside the existing PanelShell: compact honest runtime
+**WP-25 in progress (third visual/density correction, 2026-08-09).** Audio
+Studio remains action-first inside the existing PanelShell with honest runtime
 status, selected workflow/run surface, and a collapsed filtered Capability
-Library. Models, Master, and Clips remain in scope unchanged. The corrective
-pass removes the duplicate readiness row, tightens the first-viewport runtime
-and workflow rhythm, and replaces the mic/gear masks with distinct waveform,
-processor, and storage SVG icons. The orchestrator
-independently verified, outside the restricted Codex sandbox:
+Library. The owner’s close-up of deployed `da28589` found the collapsed library
+below the initial body viewport (440×512 panel; body clientHeight 433; Studio
+stack scrollHeight 498; library top 583 / bottom 659), bulky 69 px workflow
+steps, a 76 px wrapped library summary, a false PlayIcon disclosure metaphor,
+a gear-like small DeviceProcessorIcon, and an unbalanced workflow footer. The
+working-tree correction makes the desktop path a connected single row, keeps
+narrow wrapping fallbacks, compacts the summary, replaces both glyphs with
+shared SVGs, and rebalances the footer. Live acceptance remains open.
+
+The orchestrator independently verified, outside the restricted Codex sandbox,
+the prior corrective source:
 
 - `pnpm typecheck`
 - `pnpm lint`
@@ -85,8 +91,22 @@ independently verified, outside the restricted Codex sandbox:
 - `pnpm exec vitest run apps/editor-web/src/AudioPanel.test.tsx apps/editor-web/src/PanelShell.test.tsx apps/editor-web/src/audio-studio-runtime.test.ts` (3 files, 10 tests)
 - `pnpm --filter @joy-media/editor-web build` (1,268 modules transformed)
 
-All passed. Live browser measurement remains for review. No deploy, commit, push,
-runtime-data, or secret mutation was performed.
+All passed. That prior live review on `https://joyst.ir/` was at commit
+`da2858958ca7303726201fc874dc539116a4415d`, release
+`/opt/joy-media/releases/editor-web-20260809-114501-da28589-audio-studio`.
+It measured the exact 440×512 panel with body top 161 / bottom 594,
+clientHeight 433, width 424, scrollHeight 498, scrollTop 0, and no horizontal
+overflow; Runtime 102 px (grid 72, settings 29); Workflow 299 px (heading 44,
+preset grid 69, selected card 186, steps 69, footer 48); Run top 535 / bottom
+566 / height 30 with 28 px to the body bottom; and the collapsed library began
+at 583. It also verified settings open/close with the editable cache path,
+YouTube Master selection and reset, filters at 9/6/1 for Local Worker/Browser
+DSP/Cloud Brain, all four tabs, distinct waveform/processor/folder icons,
+matching `index.html`/CSS hashes (`7c7765bd...c75f60d` /
+`bbaab187...68ec19`), `nginx -t`, API health `{ok:true, service:joy-media-api,
+controlPlane:true}`, and rollback releases `e4860c7` and `88340d5`. That live
+evidence is now the baseline for the open third correction; it is not a close
+of the current working-tree change.
 
 **Verification.** `pnpm run verify:ci` passed at the committed SHA: TypeScript,
 strict ESLint, formatting, 38/39 workspace builds, 222 test files passed and one

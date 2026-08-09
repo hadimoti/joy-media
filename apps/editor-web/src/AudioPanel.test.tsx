@@ -18,8 +18,13 @@ describe('AudioPanel Studio surface', () => {
     expect(markup).toContain('title="Pair local worker to run"');
     expect(markup).toContain('aria-describedby="audio-podcast-quality-run-readiness"');
     expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain('audio-readiness');
     expect(markup).not.toContain('mic_24x24.png');
     expect(markup).not.toContain('setting-gear_24x24.png');
+    expect(markup).toContain('audio-workflow-icon');
+    expect(markup).toContain('audio-workflow-step-connector');
+    expect(markup).not.toContain('M4 2.5 13 8 4 13.5Z');
+    expect(markup).toMatch(/class="icon-tool audio-device-icon"[^>]*><svg/);
   });
 
   it('keeps the capability library collapsed, filterable, and discoverable', () => {

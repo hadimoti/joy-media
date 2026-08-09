@@ -18,11 +18,11 @@ import {
   MasterBusIcon,
   MuteIcon,
   PanIcon,
-  PlayIcon,
   SlidersIcon,
   SoloIcon,
   SpeakerOnIcon,
   StorageFolderIcon,
+  WorkflowPathIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
@@ -226,7 +226,7 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 <span>Online</span>
               </div>
               <label className="audio-runtime-cell audio-runtime-control">
-                <span className="icon-tool" aria-hidden="true">
+                <span className="icon-tool audio-device-icon" aria-hidden="true">
                   <DeviceProcessorIcon />
                 </span>
                 <strong>Device</strong>
@@ -265,8 +265,8 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
 
           <section className="audio-workflow-section" aria-label="Audio AI workflows">
             <div className="audio-section-heading">
-              <span className="icon-tool" aria-hidden="true">
-                <PlayIcon />
+              <span className="icon-tool audio-workflow-icon" aria-hidden="true">
+                <WorkflowPathIcon />
               </span>
               <div>
                 <strong>Choose a workflow</strong>
@@ -308,7 +308,12 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                     <span className="audio-workflow-step-number" aria-hidden="true">
                       {index + 1}
                     </span>
-                    <span>{node.label}</span>
+                    <span className="audio-workflow-step-label">{node.label}</span>
+                    {index < workflowGraph.nodes.length - 1 && (
+                      <span className="audio-workflow-step-connector" aria-hidden="true">
+                        →
+                      </span>
+                    )}
                   </li>
                 ))}
               </ol>
