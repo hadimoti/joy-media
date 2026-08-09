@@ -161,7 +161,16 @@ export async function purgeProject(
   entry: ProjectCatalogEntry,
 ): Promise<void> {
   const remote = await openRemoteProject(storage, entry);
-  if (remote !== undefined) await remote.client.deleteProject(remote.binding.controlPlaneProjectId);
+  if (remote !== undefined) {
+    const remoteProject =
+      remote.project.trashedAt === undefined
+        ? await remote.client.trashProject(
+            remote.binding.controlPlaneProjectId,
+            remote.project.revision,
+          )
+        : remote.project;
+    await remote.client.deleteProject(remoteProject.id);
+  }
   purgeLocalProject(storage, entry);
   if (remote !== undefined) removeControlPlaneProjectBinding(storage, entry.id, remote.ownerKey);
 }
