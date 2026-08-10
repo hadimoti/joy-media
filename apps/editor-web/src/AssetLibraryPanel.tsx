@@ -5,7 +5,7 @@ import {
   type BrowserAsset,
   type BrowserDerivative,
 } from './control-plane-client.js';
-import { importMediaFile } from './media-import.js';
+import { describeMedia, importMediaFile } from './media-import.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
@@ -359,6 +359,41 @@ export function AssetLibraryPanel({
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
+  );
+  const addAssetToTimeline = useCallback(
+    async (asset: {
+      readonly assetId: string;
+      readonly kind: 'image' | 'video' | 'audio';
+      readonly displayName: string;
+      readonly descriptor: BrowserAsset['descriptor'];
+    }) => {
+      let descriptor = asset.descriptor;
+      if (
+        (asset.kind === 'video' || asset.kind === 'audio') &&
+        descriptor.durationUs === undefined
+      ) {
+        setStatus(`Reading ${asset.displayName} duration…`);
+        try {
+          const cache = await originalAssetCache;
+          let blob = await cache.get(asset.assetId);
+          if (blob === undefined) {
+            try {
+              blob = await client.originalBytes(projectId, asset.assetId);
+            } catch {
+              blob = await client.sharedCloudOriginalBytes(asset.assetId);
+            }
+          }
+          const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
+          descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
+        } catch (error) {
+          setStatus(
+            `Could not read ${asset.displayName} duration; using the default timeline segment.`,
+          );
+        }
+      }
+      onAddToTimeline?.({ ...asset, descriptor });
+    },
+    [client, onAddToTimeline, originalAssetCache, projectId],
   );
 
   const openPreview = useCallback(
@@ -1088,7 +1123,7 @@ export function AssetLibraryPanel({
                             data-guide="Add to timeline"
                             onClick={(event) => {
                               event.stopPropagation();
-                              onAddToTimeline({
+                              addAssetToTimeline({
                                 assetId: asset.id,
                                 kind: asset.kind,
                                 displayName: asset.displayName,

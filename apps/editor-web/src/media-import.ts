@@ -161,7 +161,7 @@ async function registerOrResume(
   }
 }
 
-async function describeMedia(
+export async function describeMedia(
   file: File,
   kind: BrowserAsset['kind'],
   mimeType: string,
