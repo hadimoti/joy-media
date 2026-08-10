@@ -65,6 +65,12 @@ insertion, browser ffprobe download proof, controlled playback metrics, and the
 historical 37 NOT-RUN Chrome cases still require a live signed-in run. The
 browser export attempt currently hits repeated 1080×1920 GPU readback stalls
 before a download is emitted.
+The closeout candidate `ccdb031` is pushed to `origin/main` and deployed as
+immutable API release `/opt/joy-media/releases/ccdb031-wp29-closeout-api` and
+editor release `/opt/joy-media/releases/editor-web-20260810-ccdb031-wp29-closeout`.
+The prior `e02f646` releases remain rollback targets; the pre-cutover database
+backup is `/opt/joy-media/data/backups/joymedia-pre-ccdb031-20260810T052857Z.sql.gz`.
+VPS/local health, public index hash parity, and `nginx -t` passed after cutover.
 The exact follow-up is recorded in
 [`docs/qa/gpt-chrome-usage-audit-20260810-wp29.md`](docs/qa/gpt-chrome-usage-audit-20260810-wp29.md)
 and [`plan/WP-29-first-project-golden-path-reliability.md`](plan/WP-29-first-project-golden-path-reliability.md).

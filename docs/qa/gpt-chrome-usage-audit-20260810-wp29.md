@@ -44,6 +44,12 @@ client and scroll widths were equal. Audio Studio measured three equal
 `40.9018px` runtime cards at the primary and minimum viewports; the live tab
 reported no warning or error logs. No destructive project action was submitted.
 
+Deployment verification for candidate `ccdb031` completed on the Sweden VPS.
+The active immutable releases are `ccdb031-wp29-closeout-api` and
+`editor-web-20260810-ccdb031-wp29-closeout`; the previous `e02f646` releases
+remain available for rollback. A pre-cutover database backup was created, and
+local/public health plus index-hash parity passed after the switch.
+
 ## Implemented WP-29 findings
 
 - Imported-media resolution remains project-scoped and OPFS-first, with
