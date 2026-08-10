@@ -81,3 +81,18 @@ Using the user-enabled Chrome file bridge and a disposable project:
 
 The other R5 outcomes remain unchanged pending their dedicated fixture,
 worker, pointer, or consent flows.
+
+
+## Browser bridge follow-up (2026-08-10)
+
+A Chrome file-upload continuation was attempted only after the user enabled
+local-file access. Before any fixture was selected or transmitted, the Chrome
+DevTools attachment detached from the claimed JOY tab. The retry confirmed the
+same detached state, so no import case was changed and no user asset was
+uploaded. This is **BLOCKED-INTEGRATION**, not an app import failure.
+
+A disposable in-app-browser project, `WP-29 remaining audit 1786378792577`,
+was created before the file-bridge continuation switched to Chrome. Its
+in-app tab was no longer available to the audit session for cleanup. It must
+be moved to Trash and permanently deleted in that in-app browser before R6
+can close.
