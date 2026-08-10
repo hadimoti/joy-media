@@ -1187,7 +1187,7 @@ function EditorWorkspace({
         else scheduler.current.driveTick(clock, true, Math.max(1, sourceTimeUs - previous));
         playbackDiagnostics.current.recordFrame(
           frameInfo?.metadata,
-          clock.timeUs,
+          sourceTimeUs,
           frameInfo?.observedAtMs,
         );
         void captureTransitionPartnerFrames(compositionTimeUs).catch(() => undefined);
@@ -2473,13 +2473,13 @@ function EditorWorkspace({
           browserExportResult.blob,
           frameRate,
         );
-        const exportResult: BrowserExportResult = {
+        const exportResult: BrowserExportResult & { readonly blob: Blob } = {
           ...browserExportResult,
           blob: remuxedBlob,
           mimeType: remuxedBlob.type || 'video/mp4',
           totalBytes: remuxedBlob.size,
         };
-        triggerBrowserDownload(remuxedBlob, exportResult.filename);
+        triggerBrowserDownload(exportResult.blob, exportResult.filename);
         session.replaceVisualProject({
           ...session.visualProject,
           exportPreset,

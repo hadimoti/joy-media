@@ -62,3 +62,22 @@ BLOCKED-INTEGRATION outcomes are the acceptance blockers.
 - The next valid closure run must use a disposable authenticated browser
   project, Playwright with system Chrome and file fixtures, and explicit
   confirmation before destructive/cloud actions. Until then R5 is not closed.
+
+## Chrome fixture rerun (2026-08-10)
+
+Using the user-enabled Chrome file bridge and a disposable project:
+
+- Case 16 and 25: **PASS/PASS** — `video.mp4` uploaded, was placed on the
+  timeline automatically, and played through Program Monitor without console
+  errors.
+- Case 53: **PASS/PASS** — imported caption deletion removed the cue and Undo
+  restored it.
+- Case 54: **PASS/PASS** — Karaoke and RTL templates selected correctly; Clean
+  was restored afterward.
+- Case 55: **PASS/PASS** — `captions-en.srt` imported into an editable cue.
+- Case 57: **BLOCKED-INTEGRATION/PASS** — SRT export was invoked but Chrome's
+  browser bridge did not emit a downloadable-file event within 10 seconds;
+  no application console error was produced.
+
+The other R5 outcomes remain unchanged pending their dedicated fixture,
+worker, pointer, or consent flows.
