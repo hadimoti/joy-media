@@ -117,3 +117,11 @@ temporary-file-safe API remux route and triggers only the final H.264/AAC
 download. Three new authenticated 1080x1920 runs passed the browser gate and
 independent FFprobe gate (3/3). Evidence is recorded in
 `WP-29-step-03-ffprobe-audio-20260810-0621.md`.
+
+## R4 playback probe - 2026-08-10
+
+The first continuous 10-second probe is recorded as BLOCKED-INTEGRATION:
+30 decoded frames and 57 presentation drops were observed, while the
+Diagnostics panel snapshot was not captured reliably. Earlier single-clip
+probes were excluded because the 3-second content ended before the window.
+No performance PASS is claimed; R2 real Worker insertion also remains open.

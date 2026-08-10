@@ -215,3 +215,11 @@ Next step: NOT STARTED
 - Three fresh authenticated 1080x1920 journeys completed; independent FFprobe
   confirms H.264/AAC, one video plus one audio stream, at 30 fps, in all 3.
 - No production deployment or live project mutation was performed.
+
+## R4 probe review - 2026-08-10
+
+The corrected continuous playback probe was run once and recorded 30 decoded /
+57 presentation-dropped frames. The run is BLOCKED-INTEGRATION because the
+Diagnostics panel was not selected through a stable locator and drift/stall
+fields were absent; no performance PASS is claimed. R2 verification tests pass,
+but a real connected Worker review/apply remains unrun.
