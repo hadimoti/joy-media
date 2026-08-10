@@ -228,3 +228,11 @@ but a real connected Worker review/apply remains unrun.
 ## R2 Worker result review - 2026-08-10
 
 Licensed `audio.ml-denoise` runtime, source guard, daemon receipt/upload contract, browser result verification, and API authorization focused tests pass (16 tests in the combined run). The signed-in browser review/apply sequence was not run because no disposable connected Worker session was provisioned; R2 remains `BLOCKED-INTEGRATION`, not PASS. No production or live account mutation occurred.
+
+## R2 core browser result path - 2026-08-10
+
+One real connected disposable Worker completed audio.ml-denoise on a selected
+WAV and uploaded a verified derivative. Chrome reviewed the result, kept the
+generated asset, confirmed persistence after reload, and revoked the Worker.
+Receipt evidence is mode 0600 at wp29-r2-worker-1.json. UI pairing entry and
+undo/redo remain unrun; R2 is core-path PASS but not full-gate closeout.
