@@ -31,25 +31,41 @@ status: in-progress
 - Audio Studio reports actual worker/provider availability and exposes the
   worker-independent Browser DSP path only when it can execute honestly.
 - Worker audio jobs fail closed when the selected asset is unavailable; runtime
-  errors become terminal failures and keepalive presence is refreshed.
+  errors become terminal failures, keepalive presence is refreshed, and pairing
+  polling no longer requires a manual Worker restart.
+- A project-scoped operation ledger now records logical IDs, fingerprints,
+  revisions, attempts, terminal status, and result/error references; purge
+  removes the project's records. Snapshot recovery warnings are surfaced to
+  the user.
+- Generated browser fixtures now include PNG/JPEG, H.264/AAC MP4, WAV, MP3,
+  SRT, WebVTT, invalid, and corrupt inputs with checksum and descriptor
+  metadata.
+- Playwright/Axe smoke now runs at all three required viewports and passes the
+  login safety envelope with no page errors, console errors, horizontal
+  overflow, or Axe violations.
 
 ## Verification
 
 - `pnpm typecheck`: pass
 - `pnpm lint`: pass
-- focused export/resolver/audio tests: pass (14 tests)
-- full suite: 231 test files; 1,720 tests passed; two expected environment-gated
+- focused export/resolver/audio tests: pass (19 tests; one expected environment-gated
+  skip for the unprovisioned RNNoise model)
+- full suite: 232 test files; 1,722 tests passed; two expected environment-gated
   skips for provisioned RNNoise/Whisper integrations
 - `pnpm build` and production audit: pass
+- `pnpm test:e2e`: pass (three Playwright projects at 1639×1066, 1366×768,
+  and 1024×768)
 - The repository-wide Prettier check still reports the existing formatting
   baseline in untouched files; no bulk reformat was applied.
 
 ## Remaining gate
 
-WP-29 remains in progress. The next gate is a test-only Playwright/axe harness
-at 1639×1066, 1366×768, and 1024×768, followed by the 37 previously un-run
-Chrome scenarios. Real Worker audio result upload, operation idempotency,
-post-encode verification, and live disposable-project evidence remain open.
+WP-29 remains in progress. The next gate is the authenticated golden path and
+the 37 previously un-run Chrome scenarios. Real Worker audio result insertion
+after approval, browser-level post-encode verification, controlled playback
+metrics, and live disposable-project evidence remain open. The exact outcome is
+recorded in `gpt-chrome-usage-audit-20260810-wp29.md`; no open item is silently
+reported as a pass.
 
 ## Safety and deployment
 
