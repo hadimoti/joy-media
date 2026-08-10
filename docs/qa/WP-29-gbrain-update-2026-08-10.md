@@ -43,6 +43,10 @@ status: in-progress
 - Playwright/Axe smoke now runs at all three required viewports and passes the
   login safety envelope with no page errors, console errors, horizontal
   overflow, or Axe violations.
+- The signed-in live JOY tab was checked after deployment: the project action
+  menu is visible and keyboard-dismissible at all three viewports, and Audio
+  Studio runtime cards remain equal at `40.9018px` with no horizontal overflow
+  or warning/error logs. No destructive live action was submitted.
 
 ## Verification
 

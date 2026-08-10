@@ -78,6 +78,12 @@ observed and recorded.
   `pnpm audit:prod`, full Vitest (`232 files; 1,722 passed; 2 skipped`), and
   `pnpm test:e2e` (`3 passed`). The repository-wide Prettier check still reports
   81 pre-existing files outside this slice; changed files are formatted.
+- Signed-in live smoke after deployment verified the project action menu
+  (Rename, Duplicate, Move to Trash, Escape dismissal) and Audio Studio at
+  1639×1066, 1366×768, and 1024×768. Project selector widths had no overflow;
+  Audio runtime cards measured equal `40.9018px` heights at primary/minimum
+  widths; the live browser emitted no warning/error logs. No destructive action
+  was submitted.
 
 ## Success metric
 

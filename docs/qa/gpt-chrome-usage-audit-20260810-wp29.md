@@ -18,21 +18,31 @@ report and are not silently converted to PASS here.
 
 ### Automated evidence
 
-| Check                        | Result   | Evidence                                                                                                    |
-| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| TypeScript                   | PASS     | `pnpm typecheck`                                                                                            |
-| ESLint                       | PASS     | `pnpm lint`                                                                                                 |
-| Production build             | PASS     | `pnpm build` (38/39 buildable workspaces)                                                                   |
-| Unit/integration tests       | PASS     | 232 files; 1,722 passed; 2 skipped                                                                          |
-| Production dependency audit  | PASS     | `pnpm audit:prod`; no known vulnerabilities                                                                 |
-| Browser safety smoke         | PASS     | `pnpm test:e2e`; 3 projects: 1639×1066, 1366×768, 1024×768                                                  |
-| Axe login gate               | PASS     | No Axe violations at the three viewport checkpoints                                                         |
-| Full repository format check | BASELINE | 81 pre-existing files outside this slice remain unformatted; all changed files pass targeted Prettier check |
+| Check                        | Result   | Evidence                                                                                                                                            |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript                   | PASS     | `pnpm typecheck`                                                                                                                                    |
+| ESLint                       | PASS     | `pnpm lint`                                                                                                                                         |
+| Production build             | PASS     | `pnpm build` (38/39 buildable workspaces)                                                                                                           |
+| Unit/integration tests       | PASS     | 232 files; 1,722 passed; 2 skipped                                                                                                                  |
+| Production dependency audit  | PASS     | `pnpm audit:prod`; no known vulnerabilities                                                                                                         |
+| Browser safety smoke         | PASS     | `pnpm test:e2e`; 3 projects: 1639×1066, 1366×768, 1024×768                                                                                          |
+| Axe login gate               | PASS     | No Axe violations at the three viewport checkpoints                                                                                                 |
+| Live project selector        | PASS     | Signed-in JOY tab: visible 32px action button, Rename/Duplicate/Move to Trash menu, Escape dismissal, no horizontal overflow at all three viewports |
+| Live Audio Studio            | PASS     | Signed-in JOY tab: three equal `40.9018px` runtime cards at 1639×1066 and 1024×768; no horizontal overflow; no warning/error logs                   |
+| Full repository format check | BASELINE | 81 pre-existing files outside this slice remain unformatted; all changed files pass targeted Prettier check                                         |
 
 The browser smoke records page errors, console errors, failed requests,
 horizontal overflow, and Axe violations. It runs against a test-local Vite
 server and does not add a production authentication bypass or committed
 credentials.
+
+The signed-in live JOY tab was also checked after deployment. The project card
+exposed an always-visible 32px action trigger; its anchored menu exposed Rename,
+Duplicate, and Move to Trash, and Escape closed the menu with
+`aria-expanded="false"`. At 1639×1066, 1366×768, and 1024×768 the document
+client and scroll widths were equal. Audio Studio measured three equal
+`40.9018px` runtime cards at the primary and minimum viewports; the live tab
+reported no warning or error logs. No destructive project action was submitted.
 
 ## Implemented WP-29 findings
 
