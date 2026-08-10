@@ -236,3 +236,9 @@ WAV and uploaded a verified derivative. Chrome reviewed the result, kept the
 generated asset, confirmed persistence after reload, and revoked the Worker.
 Receipt evidence is mode 0600 at wp29-r2-worker-1.json. UI pairing entry and
 undo/redo remain unrun; R2 is core-path PASS but not full-gate closeout.
+
+## R2 final UI pairing probe - 2026-08-10
+
+The Pair form still failed to create a disposable worker after the status-role
+repair and input-settle delay. Core Worker result review/apply remains verified;
+UI pairing entry is a reproducible integration blocker.
