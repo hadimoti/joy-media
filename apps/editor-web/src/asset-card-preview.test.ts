@@ -102,6 +102,26 @@ describe('resolveAssetThumb fallback chain', () => {
     expect(result.source).toBe('cloud');
   });
 
+  it('keeps a GIF image descriptor when cloud storage reports a generic MIME type', async () => {
+    const gif = {
+      ...IMAGE,
+      id: 'gif-1',
+      displayName: 'animated.gif',
+      descriptor: { mimeType: 'image/gif' },
+    };
+    const result = await resolveAssetThumb({
+      asset: gif,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      fetchCloudOriginal: vi
+        .fn()
+        .mockResolvedValue(new Blob([], { type: 'application/octet-stream' })),
+    });
+    expect(result).toMatchObject({ source: 'cloud', mimeType: 'image/gif' });
+  });
+
   it('falls back to the shared cloud original for videos when nothing local exists', async () => {
     const result = await resolveAssetThumb({
       asset: VIDEO,

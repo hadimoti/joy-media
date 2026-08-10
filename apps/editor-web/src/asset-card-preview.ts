@@ -15,6 +15,17 @@ export interface AssetThumbResult {
 }
 
 /**
+ * Storage gateways can return an otherwise valid original as
+ * `application/octet-stream`. Preserve a verified media descriptor in that
+ * case so cards render the correct element (not a checkerboard fallback).
+ */
+function previewMimeType(asset: BrowserAsset, blob: Blob): string {
+  const blobType = blob.type.trim().toLowerCase();
+  const expectedPrefix = `${asset.kind}/`;
+  return blobType.startsWith(expectedPrefix) ? blobType : asset.descriptor.mimeType;
+}
+
+/**
  * Resolve a card preview URL:
  * preferredDerivative -> OPFS original -> authorized cloud original -> none.
  */
@@ -63,7 +74,7 @@ export async function resolveAssetThumb(options: {
       const url = URL.createObjectURL(local);
       return {
         url,
-        mimeType: local.type || asset.descriptor.mimeType,
+        mimeType: previewMimeType(asset, local),
         source: 'opfs',
         revoke: () => URL.revokeObjectURL(url),
         hasOpfsOriginal,
@@ -78,7 +89,7 @@ export async function resolveAssetThumb(options: {
     const url = URL.createObjectURL(cloud);
     return {
       url,
-      mimeType: cloud.type || asset.descriptor.mimeType,
+      mimeType: previewMimeType(asset, cloud),
       source: 'cloud',
       revoke: () => URL.revokeObjectURL(url),
       hasOpfsOriginal,
