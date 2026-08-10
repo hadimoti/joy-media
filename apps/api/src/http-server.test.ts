@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,6 +15,7 @@ import {
 } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
+import { renderFixture, verifyExport } from '@joy-media/export-core';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
@@ -597,6 +601,57 @@ describe('control-plane HTTP transport', () => {
     });
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
+  });
+
+  it('remuxes an authenticated browser MP4 to verified H.264/AAC', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'POST', '/v1/projects', {
+        id: 'remux-project',
+        title: 'Remux project',
+      }),
+    ).toMatchObject({ status: 201 });
+    const directory = mkdtempSync(join(tmpdir(), 'joy-api-remux-test-'));
+    const inputPath = join(directory, 'browser.mp4');
+    try {
+      renderFixture(
+        {
+          projectId: 'remux-project',
+          revision: 0,
+          width: 64,
+          height: 36,
+          frameRate: 30,
+          durationUs: 100_000,
+          preset: 'social-h264-aac',
+        },
+        inputPath,
+      );
+      const response = await fetch(origin + '/v1/projects/remux-project/export/remux', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner',
+          'content-type': 'video/mp4',
+          'x-joy-frame-rate': '30',
+        },
+        body: readFileSync(inputPath),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('video/mp4');
+      expect(response.headers.get('x-joy-video-codec')).toBe('h264');
+      expect(response.headers.get('x-joy-audio-codec')).toBe('aac');
+      const outputPath = join(directory, 'output.mp4');
+      const output = new Uint8Array(await response.arrayBuffer());
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(outputPath, output);
+      expect(verifyExport(outputPath)).toMatchObject({
+        videoCodec: 'h264',
+        audioCodec: 'aac',
+        videoStreamCount: 1,
+        audioStreamCount: 1,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

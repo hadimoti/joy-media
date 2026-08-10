@@ -205,3 +205,13 @@ Next step: NOT STARTED
 - Remaining risk inside this step: H.264/AAC browser export or verified remux
   remains required.
 - Worktree status: clean after commit
+
+## STEP-03 implementation closeout - 2026-08-10
+
+- Added server-side browser-MP4 remux handoff and wired App to download only the
+  verified result.
+- Focused unit/API/renderer/editor checks pass (32 tests in the final focused
+  run); API and editor production builds pass.
+- Three fresh authenticated 1080x1920 journeys completed; independent FFprobe
+  confirms H.264/AAC, one video plus one audio stream, at 30 fps, in all 3.
+- No production deployment or live project mutation was performed.

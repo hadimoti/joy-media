@@ -145,6 +145,29 @@ export class BrowserControlPlaneClient {
     if (!response.ok) throw new Error(`cloud original request failed (${response.status})`);
     return response.blob();
   }
+  async remuxBrowserMp4(projectId: string, file: Blob, frameRate = 30): Promise<Blob> {
+    const token = await this.assertion();
+    const endpoint =
+      this.apiUrl.replace(/\/$/, '') +
+      '/v1/projects/' +
+      encodeURIComponent(projectId) +
+      '/export/remux';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token,
+        'content-type': 'video/mp4',
+        'x-joy-frame-rate': String(frameRate),
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const body = await responseBody(response);
+      throw new Error(errorMessage(body, response.status));
+    }
+    return response.blob();
+  }
+
   async ensureProject(id: string, title: string): Promise<void> {
     try {
       await this.createProject(id, title);

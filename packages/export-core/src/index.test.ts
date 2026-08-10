@@ -6,6 +6,7 @@ import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
   ffmpegArgs,
   freezeManifest,
+  remuxBrowserMp4,
   renderFixture,
   renderRgbaFrames,
   verifyExport,
@@ -75,5 +76,18 @@ describe('deterministic export contract', () => {
       );
       expect(verifyExport(output)).toMatchObject(format);
     }
+  });
+  it('remuxes browser MP4 to h264/aac with exactly one video and audio stream at 30 fps', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-'));
+    const fixturePath = join(directory, 'browser.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    renderFixture(manifest, fixturePath);
+    const probe = remuxBrowserMp4(fixturePath, outputPath);
+    expect(probe.videoCodec).toBe('h264');
+    expect(probe.audioCodec).toBe('aac');
+    expect(probe.videoStreamCount).toBe(1);
+    expect(probe.audioStreamCount).toBe(1);
+    expect(probe.frameRate).toBe(30);
+    expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
   });
 });

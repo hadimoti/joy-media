@@ -22,6 +22,7 @@ import {
   type MistralProviderRegistry,
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
+import { remuxBrowserMp4Bytes } from './export-remux.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -291,6 +292,34 @@ async function route(
 
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  const browserRemuxMatch = /^\/v1\/projects\/([^/]+)\/export\/remux$/.exec(url.pathname);
+  if (request.method === 'POST' && browserRemuxMatch !== null) {
+    const projectId = decodeURIComponent(browserRemuxMatch[1]!);
+    await options.controlPlane.getProject(actor, projectId);
+    const contentType = request.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().startsWith('video/mp4'))
+      throw new ControlPlaneError('REQUEST_INVALID', 'browser export must be video/mp4');
+    const bytes = await readBytes(request, 512 * 1024 * 1024);
+    const requestedFrameRate = Number(request.headers['x-joy-frame-rate'] ?? 30);
+    let result: ReturnType<typeof remuxBrowserMp4Bytes>;
+    try {
+      result = remuxBrowserMp4Bytes(bytes, requestedFrameRate);
+    } catch {
+      throw new ControlPlaneError('PROVIDER_FAILED', 'browser export remux failed');
+    }
+    response.writeHead(200, {
+      'content-type': 'video/mp4',
+      'content-length': String(result.bytes.byteLength),
+      'cache-control': 'private, no-store',
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+      'x-joy-video-codec': result.probe.videoCodec,
+      'x-joy-audio-codec': result.probe.audioCodec,
+    });
+    response.end(Buffer.from(result.bytes));
+    return;
+  }
 
   if (request.method === 'GET' && url.pathname === '/v1/providers/reasoning') {
     respondJson(response, 200, { data: { providers: [options.mistral.summary()] } });

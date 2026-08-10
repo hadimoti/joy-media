@@ -115,6 +115,8 @@ export interface BrowserMp4ExportSource {
   /** Runs immediately after recording starts, for synchronized media starts. */
   readonly onRecordingStart?: () => void;
   readonly filename?: string;
+  /** When false, the caller owns the final download (for server remux). */
+  readonly autoDownload?: boolean;
   readonly onProgress?: (completedFrames: number, totalFrames: number) => void;
   /** Cancels the realtime recorder and releases all media resources. */
   readonly signal?: AbortSignal;
@@ -242,7 +244,7 @@ export async function downloadBrowserMp4(
     if (blob.size === 0)
       throw new Error(`browser MP4 recorder produced an empty file (${recorderMimeType})`);
     const filename = source.filename ?? `joy-media-export-${Date.now()}.mp4`;
-    triggerBrowserDownload(blob, filename);
+    if (source.autoDownload !== false) triggerBrowserDownload(blob, filename);
     return {
       frameCount,
       totalBytes: blob.size,

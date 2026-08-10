@@ -26,7 +26,7 @@ describe('App MP4 export negotiation contract', () => {
   it('persists the export preset only after preload consumers and a successful download', () => {
     const preload = exportCallback.indexOf("'fetching authored audio bytes'");
     const download = exportCallback.indexOf(
-      'const exportResult: BrowserExportResult = await downloadBrowserMp4',
+      'const browserExportResult: BrowserExportResult = await downloadBrowserMp4',
     );
     const persistPreset = exportCallback.indexOf('session.replaceVisualProject({');
     const progress = exportCallback.indexOf('setExportProgress(1)', persistPreset);
@@ -36,8 +36,11 @@ describe('App MP4 export negotiation contract', () => {
     expect(persistPreset).toBeGreaterThan(download);
     expect(progress).toBeGreaterThan(persistPreset);
     expect(exportCallback.slice(0, persistPreset)).not.toContain('session.replaceVisualProject({');
-    expect(exportCallback.slice(download, persistPreset)).toMatch(
-      /signal: abortController\.signal,\s*}\);\s*$/,
+    expect(exportCallback.slice(download, persistPreset)).toContain(
+      'mediaControlPlaneClient.remuxBrowserMp4',
+    );
+    expect(exportCallback.slice(download, persistPreset)).toContain(
+      'triggerBrowserDownload(exportResult.blob, exportResult.filename)',
     );
     expect(exportCallback.slice(persistPreset, progress)).toContain('exportPreset,');
   });

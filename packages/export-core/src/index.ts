@@ -245,3 +245,42 @@ function parseFrameRate(value: string | undefined): number {
     throw new Error(`export frame rate is invalid: ${value}`);
   return numerator / denominator;
 }
+
+export function remuxBrowserMp4(
+  inputPath: string,
+  outputPath: string,
+  frameRate = 30,
+): ExportProbe {
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
+  );
+  try {
+    const result = spawnSync(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        inputPath,
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-r',
+        String(frameRate),
+        '-movflags',
+        '+faststart',
+        temporaryPath,
+      ],
+      { shell: false, encoding: 'utf8' },
+    );
+    if (result.status !== 0) throw new Error(`ffmpeg remux failed: ${result.stderr}`);
+    renameSync(temporaryPath, outputPath);
+    return verifyExport(outputPath);
+  } catch (error) {
+    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}

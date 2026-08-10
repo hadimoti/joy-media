@@ -50,6 +50,9 @@ importers:
       '@joy-media/adapter-mistral':
         specifier: workspace:*
         version: link:../../packages/adapter-mistral
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../../packages/export-core
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk

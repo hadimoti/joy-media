@@ -77,6 +77,7 @@ import {
 import {
   downloadBrowserMp4,
   selectBrowserMp4MimeType,
+  triggerBrowserDownload,
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
@@ -2358,7 +2359,7 @@ function EditorWorkspace({
         }
         await audioContext.resume();
         setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
-        const exportResult: BrowserExportResult = await downloadBrowserMp4({
+        const browserExportResult: BrowserExportResult = await downloadBrowserMp4({
           manifest,
           frameCount: totalFrames,
           canvas: renderer.canvas,
@@ -2461,8 +2462,24 @@ function EditorWorkspace({
               );
           },
           filename: exportFilename,
+          autoDownload: false,
           signal: abortController.signal,
         });
+        if (browserExportResult.blob === undefined)
+          throw new Error('Browser export did not produce a downloadable MP4');
+        setExportStatus('Finalizing H.264/AAC export&');
+        const remuxedBlob = await mediaControlPlaneClient.remuxBrowserMp4(
+          controlPlaneProject.controlPlaneProjectId,
+          browserExportResult.blob,
+          frameRate,
+        );
+        const exportResult: BrowserExportResult = {
+          ...browserExportResult,
+          blob: remuxedBlob,
+          mimeType: remuxedBlob.type || 'video/mp4',
+          totalBytes: remuxedBlob.size,
+        };
+        triggerBrowserDownload(exportResult.blob, exportResult.filename);
         session.replaceVisualProject({
           ...session.visualProject,
           exportPreset,

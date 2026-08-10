@@ -1,8 +1,8 @@
 # WP-29 — GPT Chrome Reliability Rerun
 
-Run ID: `20260810-wp29`  
-Run date: 2026-08-10  
-Target: [https://joyst.ir/](https://joyst.ir/)  
+Run ID: `20260810-wp29`
+Run date: 2026-08-10
+Target: [https://joyst.ir/](https://joyst.ir/)
 Scope: WP-29 implementation verification and browser safety smoke. This is a
 follow-up to the historical 100-scenario report
 [`gpt-chrome-usage-audit-20260809.md`](gpt-chrome-usage-audit-20260809.md).
@@ -108,3 +108,12 @@ all three are 1080x1920, 30 fps, one VP9 video stream plus one Opus audio stream
 The required H.264/AAC assertion is 0/3. Generic `video/mp4` was advertised,
 but the exact H.264/AAC candidate is unsupported in this Chrome. Do not report
 this as an H.264/AAC PASS; a compatible remux/handoff is required.
+
+## WP-29 STEP-03 codec closeout - 2026-08-10
+
+The original three browser downloads were VP9/Opus despite an MP4 extension.
+The implementation now sends the browser blob through an owner-authorized,
+temporary-file-safe API remux route and triggers only the final H.264/AAC
+download. Three new authenticated 1080x1920 runs passed the browser gate and
+independent FFprobe gate (3/3). Evidence is recorded in
+`WP-29-step-03-ffprobe-audio-20260810-0621.md`.
