@@ -223,3 +223,8 @@ The corrected continuous playback probe was run once and recorded 30 decoded /
 Diagnostics panel was not selected through a stable locator and drift/stall
 fields were absent; no performance PASS is claimed. R2 verification tests pass,
 but a real connected Worker review/apply remains unrun.
+
+
+## R2 Worker result review - 2026-08-10
+
+Licensed `audio.ml-denoise` runtime, source guard, daemon receipt/upload contract, browser result verification, and API authorization focused tests pass (16 tests in the combined run). The signed-in browser review/apply sequence was not run because no disposable connected Worker session was provisioned; R2 remains `BLOCKED-INTEGRATION`, not PASS. No production or live account mutation occurred.
