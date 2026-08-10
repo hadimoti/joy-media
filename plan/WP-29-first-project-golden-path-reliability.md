@@ -3,6 +3,7 @@
 **Status:** In progress — reliability hardening and browser safety smoke implemented; signed-in 100-case closure pending
 **Priority:** P1 product reliability  
 **Depends on:** WP-27 audit remediation and WP-28 project lifecycle, both live  
+**Closeout plan:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
 **Primary result:** A fresh signed-in user can create a project, import their own
 media, make a basic edit, add captions, apply worker-independent audio cleanup,
 export a verified MP4, refresh, and re-download it in under five minutes.
