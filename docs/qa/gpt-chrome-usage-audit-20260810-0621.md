@@ -56,14 +56,14 @@ was omitted.
 ## Results skeleton
 
 Allowed verdicts: `PASS`, `FAIL`, `FLAKY`, `BLOCKED-CONSENT`,
-`BLOCKED-INTEGRATION`, `NOT-RUN`.
+`BLOCKED-INTEGRATION`, `BLOCKED-CAPABILITY`, `NOT-RUN`.
 
-| Surface  | Verdict | 1639x1066 | 1366x768 | 1024x768 | Evidence / notes               |
-| -------- | ------- | --------- | -------- | -------- | ------------------------------ |
-| Export   | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | STEP-01 or later required      |
-| Worker   | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Later step required            |
-| Playback | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Reference host pending         |
-| 37 cases | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Later batch execution required |
+| Surface  | Verdict | 1639x1066 | 1366x768 | 1024x768 | Evidence / notes                          |
+| -------- | ------- | --------- | -------- | -------- | ----------------------------------------- |
+| Export   | FAIL    | NOT-RUN   | NOT-RUN  | NOT-RUN  | STEP-01 consistent 0/3 capability failure |
+| Worker   | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Later step required                       |
+| Playback | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Reference host pending                    |
+| 37 cases | NOT-RUN | NOT-RUN   | NOT-RUN  | NOT-RUN  | Later batch execution required            |
 
 ## 37-case batch skeleton
 
@@ -85,3 +85,34 @@ Allowed verdicts: `PASS`, `FAIL`, `FLAKY`, `BLOCKED-CONSENT`,
 | Projects, jobs, Workers, assets, and exports | unchanged; no STEP-00 mutation                            |
 | Browser-local state                          | unchanged; read-only catalog/current-project capture only |
 | Restore state                                | unchanged; sanitized restore labels retained              |
+
+## STEP-01 — Export audit
+
+- Status: **READY-FOR-REVIEW**
+- Export verdict: **FAIL**
+- Product code changes: **none**
+- STEP-02: **NOT STARTED**
+
+For 1080x1920 runs 1-3, timeline/profile/exact export click passed. Exact combined H264/AAC MIME support was false in all three; initiation was false; `captureStream`, recorder events, and export frames were each 0; download was false. The bounded durations were 10135 ms, 10144 ms, and 10107 ms. Each run purged its local project and closed its browser. Ratio: **0/3 pass, 3/3 consistent FAIL, not FLAKY**.
+
+Accepted failure-evidence basenames are `wp29-step01-1080x1920-setup-only-1786350131655-sanitized.json`, `wp29-step01-1080x1920-setup-only-1786350324166-sanitized.json`, and `wp29-step01-1080x1920-setup-only-1786350347167-sanitized.json`. Their `setup-only` filename text is historical, but these three artifacts are accepted failure evidence. Earlier refused-navigation, selector, fake-lower-snapshot, overlapping, and generic-export attempts are excluded setup-only attempts and never enter the ratio.
+
+| Capability                        | Default | Feature flag |
+| --------------------------------- | ------- | ------------ |
+| MediaRecorder                     | true    | true         |
+| `video/mp4`                       | true    | true         |
+| AVC1-only MP4                     | true    | true         |
+| Exact `avc1.42E01E` + `mp4a.40.2` | false   | false        |
+| `h264,aac`                        | false   | false        |
+| VP8 + Opus                        | true    | true         |
+| VP9 + Opus                        | true    | true         |
+
+The default and feature-flag capability matrices are identical. Lower-profile comparisons for 320x180 and 720x1280 are **BLOCKED-CAPABILITY**: the common MIME guard fails before dimension-dependent renderer/readback, so no fake comparison is reported.
+
+Measured root cause: the App's exact combined MIME preflight exits before renderer creation and `captureStream`. The historical `readPixels` stall was not reached in these runs.
+
+The STEP-02 seam is capability negotiation at the browser-export MIME/MediaRecorder boundary and App preflight. Authored audio, progress, cancel, and cleanup must remain intact. Risks are container/codec mismatch or audio loss. Validation requires 3x 1080x1920, lower profiles, and independent FFprobe/audio verification. Rollback is limited to the eventual STEP-02 product commit.
+
+Security: basenames only; no paths, URLs, contacts, IDs, tokens, or private references. Local projects were purged, browsers closed, and no production mutation occurred. Worker, playback, and 37 cases remain later gates.
+
+Next step: NOT STARTED

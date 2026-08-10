@@ -79,6 +79,51 @@
 | Project list/current project | client-local Projects catalog count is `1`; pre-existing current project captured; identity/title omitted |
 | STEP-00 mutation             | none: no project, job, Worker, asset, database, production, or browser state changed                      |
 
-STEP-01 and every later gate remain `NOT STARTED` / `NOT-RUN`. The reports retain
+At the STEP-00 snapshot, STEP-01 and later gates had not started; the appended sections below supersede that snapshot. The reports retain
 only sanitized release labels, run metadata, versions, hashes, aggregate counts,
 and restore status.
+
+## STEP-01 — Export profile diagnostic
+
+- Status: **READY-FOR-REVIEW**
+- Diagnostic functional result: **FAIL**
+- Product code changes: **none**
+- STEP-02: **NOT STARTED**
+
+### Accepted result
+
+Three bounded 1080x1920 runs reached the intended timeline/profile and exact export click (**PASS** for each). In every run, exact combined H264/AAC MIME support was false, initiation was false, `captureStream` was 0, recorder events were 0, export frames were 0, and download was false. Durations were 10135 ms, 10144 ms, and 10107 ms. Each run ended with the local project purged and the browser closed.
+
+Ratio: **0/3 pass; 3/3 consistent FAIL; not FLAKY**.
+
+Accepted failure-evidence basenames:
+
+- `wp29-step01-1080x1920-setup-only-1786350131655-sanitized.json`
+- `wp29-step01-1080x1920-setup-only-1786350324166-sanitized.json`
+- `wp29-step01-1080x1920-setup-only-1786350347167-sanitized.json`
+
+Their `setup-only` filename text is historical; these three files are accepted failure evidence. Earlier refused-navigation, selector, fake-lower-snapshot, overlapping, and generic-export attempts are excluded setup-only attempts and are never included in the ratio.
+
+### Capability result
+
+| Capability                        | Default | Feature flag |
+| --------------------------------- | ------- | ------------ |
+| MediaRecorder                     | true    | true         |
+| `video/mp4`                       | true    | true         |
+| AVC1-only MP4                     | true    | true         |
+| Exact `avc1.42E01E` + `mp4a.40.2` | false   | false        |
+| `h264,aac`                        | false   | false        |
+| VP8 + Opus                        | true    | true         |
+| VP9 + Opus                        | true    | true         |
+
+The default and feature-flag matrices are identical. The 320x180 and 720x1280 profiles are **BLOCKED-CAPABILITY** because the shared MIME guard fails before dimension-dependent renderer/readback. No fake comparison is claimed.
+
+### Root cause and STEP-02 seam
+
+Measured root cause: the App's exact combined MIME preflight exits before renderer creation and `captureStream`; the historical `readPixels` stall was not reached in these runs.
+
+The STEP-02 seam is capability negotiation at the browser-export MIME/MediaRecorder boundary and App preflight, while preserving authored audio, progress, cancel, and cleanup. Risks are container/codec mismatch or audio loss. Validation must include 3x 1080x1920, lower profiles, and independent FFprobe/audio verification. Rollback applies only to the eventual STEP-02 product commit.
+
+Security: evidence is named by basename only, with no paths, URLs, contacts, IDs, tokens, or private references. Local projects were purged, browsers were closed, and no production mutation occurred. Remaining later gates are Worker, playback, and 37 cases.
+
+Next step: NOT STARTED
