@@ -164,7 +164,7 @@ verdicts. This audit is report-only: it does not fix application code.
 97. Select/validate export preset — resolution, orientation, format, and validation match.
 98. Export MP4/re-download — one job, accurate progress, playable output, working recent-process download.
 99. Refresh/reopen workspace — edits, layout, history, and process records recover correctly.
-100. Reload during queued/running operation — no duplicate jobs, lost data, or permanently stuck UI.
+100.  Reload during queued/running operation — no duplicate jobs, lost data, or permanently stuck UI.
 
 ## Reporting
 

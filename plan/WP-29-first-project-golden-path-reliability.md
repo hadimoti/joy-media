@@ -107,21 +107,21 @@ and `1024×768`.
 
 ## Current evidence and risks
 
-| Area                 | Current evidence                                                     | Risk                                                                                                            |
-| -------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| WP-27 audit          | 57 PASS, six fixed P1 defects, 37 NOT-RUN                            | Large parts of the product remain manually unverified                                                           |
-| Browser automation   | 231 Vitest files run in Node; no application Playwright suite        | Upload, OPFS, download, focus, layout, fullscreen, and media behavior are outside CI                            |
-| Imported media       | Resolver now prefers verified OPFS bytes and owner-authorized private originals | Image holds, Worker result delivery, and browser-level reload evidence remain open                              |
-| Timeline empty state | Valid files and JOY asset payloads are consumed directly               | Batch progress/cancel, touch browser evidence, and Getting Started guidance remain open                        |
-| Library placement    | Cards expose Add to timeline and carry safe descriptor metadata         | Bulk placement, selection/focus handoff, and browser coverage remain open                                      |
-| Captions             | Selected media is resolved and sent to transcription                    | Full SRT/VTT/EN/FA browser rerun and progress/cancel UI remain open                                             |
-| Audio Studio         | Worker/provider state is queried and Browser DSP has an honest enabled route | Canonical audio migration, audible golden-path proof, and real Worker execution remain open                |
-| Worker audio         | `audio.ml-denoise` exists                                            | Missing local source may cause a synthetic noise fixture to be processed; long blocking jobs can outlive leases |
-| Export duration      | Content bounds drive the default range                               | Explicit preflight/range choice and verified duration gates remain open                                        |
-| Export mix           | One authored offline mix is started; raw sources are not recorded     | Image/audio-only frame coverage and audible browser evidence remain open                                      |
-| Export recovery      | Completed blobs are staged in a bounded OPFS cache; running entries become retryable and the UI offers cancel/retry | Post-encode verification and project-scoped operation fingerprints remain open |
-| Playback diagnostics | Decode/drop/drift counters exist                                     | Metrics accumulate, ignore presented-frame metadata, and report proxy mode without selecting a proxy            |
-| Full suite           | RNNoise is now an explicit provisioned-model integration test           | Playwright/axe coverage and the remaining browser audit are not yet wired                                      |
+| Area                 | Current evidence                                                                                                    | Risk                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| WP-27 audit          | 57 PASS, six fixed P1 defects, 37 NOT-RUN                                                                           | Large parts of the product remain manually unverified                                                           |
+| Browser automation   | 231 Vitest files run in Node; no application Playwright suite                                                       | Upload, OPFS, download, focus, layout, fullscreen, and media behavior are outside CI                            |
+| Imported media       | Resolver now prefers verified OPFS bytes and owner-authorized private originals                                     | Image holds, Worker result delivery, and browser-level reload evidence remain open                              |
+| Timeline empty state | Valid files and JOY asset payloads are consumed directly                                                            | Batch progress/cancel, touch browser evidence, and Getting Started guidance remain open                         |
+| Library placement    | Cards expose Add to timeline and carry safe descriptor metadata                                                     | Bulk placement, selection/focus handoff, and browser coverage remain open                                       |
+| Captions             | Selected media is resolved and sent to transcription                                                                | Full SRT/VTT/EN/FA browser rerun and progress/cancel UI remain open                                             |
+| Audio Studio         | Worker/provider state is queried and Browser DSP has an honest enabled route                                        | Canonical audio migration, audible golden-path proof, and real Worker execution remain open                     |
+| Worker audio         | `audio.ml-denoise` exists                                                                                           | Missing local source may cause a synthetic noise fixture to be processed; long blocking jobs can outlive leases |
+| Export duration      | Content bounds drive the default range                                                                              | Explicit preflight/range choice and verified duration gates remain open                                         |
+| Export mix           | One authored offline mix is started; raw sources are not recorded                                                   | Image/audio-only frame coverage and audible browser evidence remain open                                        |
+| Export recovery      | Completed blobs are staged in a bounded OPFS cache; running entries become retryable and the UI offers cancel/retry | Post-encode verification and project-scoped operation fingerprints remain open                                  |
+| Playback diagnostics | Decode/drop/drift counters exist                                                                                    | Metrics accumulate, ignore presented-frame metadata, and report proxy mode without selecting a proxy            |
+| Full suite           | RNNoise is now an explicit provisioned-model integration test                                                       | Playwright/axe coverage and the remaining browser audit are not yet wired                                       |
 
 ## Product and architecture decisions
 
