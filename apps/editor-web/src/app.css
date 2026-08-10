@@ -1413,7 +1413,17 @@ h2 {
   height: 1.75rem;
 }
 .playback-media {
-  display: none;
+  /*
+   * Keep the decode source rendered: Chromium may throttle a display:none video
+   * to a frozen clock while the timeline transport is running.
+   */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 .monitor-error {
   color: #ff8080;
