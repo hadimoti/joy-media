@@ -33,6 +33,12 @@ export type { HtmlMediaDecoder, HtmlVideoElementLike } from './html-decoder.js';
 export { createHtmlMediaDecoder } from './html-decoder.js';
 export { sourceTimeAtPlayhead } from './source-time.js';
 export {
+  PlaybackDiagnosticsSession,
+  type PlaybackDiagnosticsSnapshot,
+  type PlaybackSourceQuality,
+  type VideoFramePresentationMetadata,
+} from './diagnostics.js';
+export {
   importedClipToMediaSource,
   videoFrameNodeFromDecoded,
   withVideoFrameNode,

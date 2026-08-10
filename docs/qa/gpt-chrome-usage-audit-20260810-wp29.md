@@ -11,25 +11,25 @@ follow-up to the historical 100-scenario report
 
 The reliability slice is verified in the canonical repository and the local
 browser harness is green. The full signed-in 100-scenario closure is **not yet
-claimed**: the 37 cases that required a real authenticated file bridge, a
+claimed**: the 37 cases that require a real authenticated file bridge, a
 disposable Worker, or destructive live operations remain open until they are
 run with evidence. Carry-forward outcomes and defects remain in the historical
 report and are not silently converted to PASS here.
 
 ### Automated evidence
 
-| Check                        | Result   | Evidence                                                                                                                                            |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| TypeScript                   | PASS     | `pnpm typecheck`                                                                                                                                    |
-| ESLint                       | PASS     | `pnpm lint`                                                                                                                                         |
-| Production build             | PASS     | `pnpm build` (38/39 buildable workspaces)                                                                                                           |
-| Unit/integration tests       | PASS     | 232 files; 1,722 passed; 2 skipped                                                                                                                  |
-| Production dependency audit  | PASS     | `pnpm audit:prod`; no known vulnerabilities                                                                                                         |
-| Browser safety smoke         | PASS     | `pnpm test:e2e`; 3 projects: 1639×1066, 1366×768, 1024×768                                                                                          |
-| Axe login gate               | PASS     | No Axe violations at the three viewport checkpoints                                                                                                 |
-| Live project selector        | PASS     | Signed-in JOY tab: visible 32px action button, Rename/Duplicate/Move to Trash menu, Escape dismissal, no horizontal overflow at all three viewports |
-| Live Audio Studio            | PASS     | Signed-in JOY tab: three equal `40.9018px` runtime cards at 1639×1066 and 1024×768; no horizontal overflow; no warning/error logs                   |
-| Full repository format check | BASELINE | 81 pre-existing files outside this slice remain unformatted; all changed files pass targeted Prettier check                                         |
+| Check                        | Result | Evidence                                                                                                                                            |
+| ---------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript                   | PASS   | `pnpm typecheck`                                                                                                                                    |
+| ESLint                       | PASS   | `pnpm lint`                                                                                                                                         |
+| Production build             | PASS   | `pnpm build` (38/39 buildable workspaces)                                                                                                           |
+| Unit/integration tests       | PASS   | 235 files; 1,727 passed; 2 skipped                                                                                                                  |
+| Production dependency audit  | PASS   | `pnpm audit:prod`; no known vulnerabilities                                                                                                         |
+| Browser safety smoke         | PASS   | `pnpm test:e2e`; 3 projects: 1639×1066, 1366×768, 1024×768                                                                                          |
+| Axe login gate               | PASS   | No Axe violations at the three viewport checkpoints                                                                                                 |
+| Live project selector        | PASS   | Signed-in JOY tab: visible 32px action button, Rename/Duplicate/Move to Trash menu, Escape dismissal, no horizontal overflow at all three viewports |
+| Live Audio Studio            | PASS   | Signed-in JOY tab: three equal `40.9018px` runtime cards at 1639×1066 and 1024×768; no horizontal overflow; no warning/error logs                   |
+| Full repository format check | PASS   | `pnpm format:check` passes after the isolated formatting-baseline commit                                                                            |
 
 The browser smoke records page errors, console errors, failed requests,
 horizontal overflow, and Axe violations. It runs against a test-local Vite
@@ -63,6 +63,14 @@ reported no warning or error logs. No destructive project action was submitted.
   unsupported text, and corrupt media with checksum and descriptor metadata.
 - The login gate now uses a main landmark and decorative method icons do not
   duplicate button labels; Axe reports no violations in the smoke.
+- The authenticated disposable harness now proves project selector lifecycle
+  actions (create, rename, duplicate, Trash, restore, and typed purge) and
+  registers/uploads/reloads an MP4 whose authorized bytes match the fixture
+  SHA-256 after reload at each configured viewport.
+- Playback diagnostics are now session/clip-scoped and consume
+  `requestVideoFrameCallback` presentation metadata; Worker audio review uses
+  owner-authorized derivative bytes, integrity checks, and a durable
+  queue/review/applied operation record before mutating creative state.
 
 ## Open closeout items
 
@@ -77,8 +85,10 @@ These are intentionally **NOT-RUN / OPEN**, not failures hidden by this report:
 - Worker result insertion into the selected project after approval, including
   one-job/one-result behavior on cancel/retry/reload.
 - Browser-level MP4 verification with ffprobe for codec, dimensions, duration,
-  and authored audio; the repository has Node export verification, but a live
-  browser download must still be captured.
+  and authored audio; a real Chrome attempt reached encoding but timed out
+  without a download because repeated 1080×1920 GPU `ReadPixels` stalls blocked
+  the recorder. Node-side FFprobe verification is green; browser proof remains
+  an explicit performance/product blocker.
 - Controlled playback performance runs using `requestVideoFrameCallback`
   metadata on the named Chrome/GPU host.
 

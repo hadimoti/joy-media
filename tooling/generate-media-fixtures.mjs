@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { TextEncoder } from 'node:util';
 
 const root = join(process.cwd(), 'packages', 'test-fixtures', 'media');
 mkdirSync(root, { recursive: true });
@@ -69,9 +70,10 @@ run([
 ]);
 const manifest = {};
 const descriptors = {
-  'image.png': { mime: 'image/png', width: 320, height: 180 },
-  'image.jpg': { mime: 'image/jpeg', width: 320, height: 180 },
+  'image.png': { kind: 'image', mime: 'image/png', width: 320, height: 180 },
+  'image.jpg': { kind: 'image', mime: 'image/jpeg', width: 320, height: 180 },
   'video.mp4': {
+    kind: 'video',
     mime: 'video/mp4',
     durationUs: 3_000_000,
     width: 320,
@@ -79,13 +81,36 @@ const descriptors = {
     sampleRate: 48_000,
     channels: 1,
   },
-  'audio.wav': { mime: 'audio/wav', durationUs: 3_000_000, sampleRate: 48_000, channels: 1 },
-  'audio.mp3': { mime: 'audio/mpeg', durationUs: 3_000_000, sampleRate: 48_000, channels: 1 },
-  'captions-en.srt': { mime: 'application/x-subrip' },
-  'captions-fa.vtt': { mime: 'text/vtt' },
-  'invalid.txt': { mime: 'text/plain' },
-  'corrupt.mp4': { mime: 'video/mp4' },
+  'audio.wav': {
+    kind: 'audio',
+    mime: 'audio/wav',
+    durationUs: 3_000_000,
+    sampleRate: 48_000,
+    channels: 1,
+  },
+  'audio.mp3': {
+    kind: 'audio',
+    mime: 'audio/mpeg',
+    durationUs: 3_000_000,
+    sampleRate: 48_000,
+    channels: 1,
+  },
+  'captions-en.srt': { kind: 'caption', mime: 'application/x-subrip' },
+  'captions-fa.vtt': { kind: 'caption', mime: 'text/vtt' },
+  'invalid.txt': { kind: 'invalid', mime: 'text/plain' },
+  'corrupt.mp4': { kind: 'invalid', mime: 'video/mp4' },
+  'empty.bin': { kind: 'invalid', mime: 'application/octet-stream' },
+  'joycode-attachment.md': { kind: 'attachment', mime: 'text/markdown' },
 };
+writeFileSync(join(root, 'captions-en.srt'), '1\n00:00:00,000 --> 00:00:01,500\nJOY Media\n');
+writeFileSync(
+  join(root, 'captions-fa.vtt'),
+  'WEBVTT\n\n00:00.000 --> 00:01.500\nاین یک آزمون است\n',
+);
+writeFileSync(join(root, 'invalid.txt'), 'This is not a media file.\n');
+writeFileSync(join(root, 'corrupt.mp4'), new TextEncoder().encode('not an MP4 container\n'));
+writeFileSync(join(root, 'empty.bin'), new Uint8Array());
+writeFileSync(join(root, 'joycode-attachment.md'), '# WP-29\n\nFixture attachment.\n');
 for (const name of [
   'image.png',
   'image.jpg',
@@ -96,11 +121,16 @@ for (const name of [
   'captions-fa.vtt',
   'invalid.txt',
   'corrupt.mp4',
+  'empty.bin',
+  'joycode-attachment.md',
 ]) {
   const bytes = readFileSync(join(root, name));
   manifest[name] = {
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
+    name,
+    kind: descriptors[name].kind,
+    mimeType: descriptors[name].mime,
     ...descriptors[name],
   };
 }

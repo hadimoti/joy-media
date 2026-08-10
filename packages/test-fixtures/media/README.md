@@ -1,13 +1,15 @@
-# Redistributable browser-audit media fixtures
+# Browser media fixtures
 
-These files are deterministic, synthetic fixtures generated locally by
-`tooling/generate-media-fixtures.mjs`. They contain no personal media and are
-released under the repository's existing test-fixture terms. Regenerate with:
+This directory contains small, redistributable fixtures for the WP-29 browser
+golden path. They are generated locally with the repository's
+`tooling/generate-media-fixtures.mjs` script using FFmpeg's built-in generators; no personal media,
+provider output, or credentials are included.
+
+Run:
 
 ```text
 node tooling/generate-media-fixtures.mjs
 ```
 
-`manifest.json` records SHA-256, byte length, MIME, duration, dimensions, and
-audio properties. The corrupt/invalid fixtures are intentionally invalid and
-must be rejected before catalog mutation.
+The generated `manifest.json` records byte length, SHA-256, media kind, MIME,
+duration, and dimensions. Browser tests must verify the manifest before upload.

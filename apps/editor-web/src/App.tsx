@@ -17,12 +17,15 @@ import { panelIdFromMenuAction, type AppMenuActionId } from './app-menu.js';
 import {
   createHtmlMediaDecoder,
   createHtmlVideoMediaClock,
+  PlaybackDiagnosticsSession,
   PlaybackScheduler,
   videoFrameNodeFromDecoded,
   withVideoFrameNode,
   type HtmlMediaDecoder,
   type ImageDataLike,
   type MediaClock,
+  type PlaybackDiagnosticsSnapshot,
+  type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
@@ -114,6 +117,7 @@ import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
+import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { importMediaFile } from './media-import.js';
@@ -510,7 +514,7 @@ interface EditorPanelContextValue {
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
   readonly controlPlaneProject: ControlPlaneProjectBinding;
-  readonly playback: PlaybackScheduler['metrics'];
+  readonly playback: PlaybackDiagnosticsSnapshot;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly historyEntries: readonly HistoryEntry[];
@@ -544,6 +548,7 @@ interface EditorPanelContextValue {
   ) => void;
   readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
   readonly replaceVisualProject: (next: JoyProjectV1) => void;
+  readonly replaceVisualProjectAndAudio: (next: JoyProjectV1, audio: AudioState) => void;
   readonly addStickerFromAsset: (asset: {
     readonly assetId: string;
     readonly displayName?: string;
@@ -798,6 +803,7 @@ function EditorWorkspace({
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
+  const playbackDiagnostics = useRef(new PlaybackDiagnosticsSession());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
@@ -918,6 +924,7 @@ function EditorWorkspace({
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
+  const lastDiagnosticsObservedUsRef = useRef<number | undefined>(undefined);
   const freezeWallStartRef = useRef<{ wallMs: number; playheadUs: number } | undefined>(undefined);
   const playbackFrameRef = useRef<number | undefined>(undefined);
 
@@ -1018,6 +1025,7 @@ function EditorWorkspace({
       )
         return false;
       const source = await mediaResolver.resolve(clip.assetId);
+      playbackDiagnostics.current.start(clip.id, 'full');
       const sourceUrl = new URL(source.url, window.location.href).href;
       if (video.src !== sourceUrl) {
         video.src = sourceUrl;
@@ -1044,6 +1052,7 @@ function EditorWorkspace({
       video.playbackRate = rate === 0 ? 1 : rate;
       scheduler.current.seek(sourceTimeUs);
       lastMediaTimeUsRef.current = undefined;
+      lastDiagnosticsObservedUsRef.current = undefined;
       if (play) {
         video.muted = false;
         if (rate === 0) {
@@ -1093,7 +1102,9 @@ function EditorWorkspace({
   const seek = useCallback(
     (timeUs: number) => {
       scheduler.current.seek(timeUs);
+      playbackDiagnostics.current.reset();
       lastMediaTimeUsRef.current = undefined;
+      lastDiagnosticsObservedUsRef.current = undefined;
       setState((current) => ({ ...current, playheadUs: timeUs }));
       void syncMediaToPlayhead(timeUs, stateRef.current.playing).catch(() => {
         setState((current) => ({ ...current, playing: false }));
@@ -1108,7 +1119,10 @@ function EditorWorkspace({
     const clock = clockRef.current;
     if (video === null || decoder === null || clock === null) return;
     let cancelled = false;
-    const capture = (): void => {
+    const capture = (frameInfo?: {
+      readonly metadata?: VideoFramePresentationMetadata;
+      readonly observedAtMs?: number;
+    }): void => {
       if (cancelled || !stateRef.current.playing) return;
       const clip = activeVideoClipAt(
         session.timelineProject,
@@ -1160,6 +1174,13 @@ function EditorWorkspace({
       }
       const token = scheduler.current.requestToken();
       const frame = decoder.captureCurrentFrame(token);
+      const observedAtUs = Math.round((frameInfo?.observedAtMs ?? performance.now()) * 1_000);
+      const previousObservedAtUs = lastDiagnosticsObservedUsRef.current;
+      if (previousObservedAtUs !== undefined && observedAtUs - previousObservedAtUs > 250_000) {
+        playbackDiagnostics.current.beginStall(previousObservedAtUs);
+        playbackDiagnostics.current.endStall(observedAtUs);
+      }
+      lastDiagnosticsObservedUsRef.current = observedAtUs;
       const visualComposition =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
       const clipSpec = videoClipSpecAt(
@@ -1172,13 +1193,20 @@ function EditorWorkspace({
         width: video.videoWidth,
         height: video.videoHeight,
       });
-      if (frame.bitmap === undefined) scheduler.current.recordDecodedFrame(token, false, false);
-      else {
+      if (frame.bitmap === undefined) {
+        scheduler.current.recordDecodedFrame(token, false, false);
+        playbackDiagnostics.current.recordDecodeMiss();
+      } else {
         rememberClipFrame(clip.id, frame.bitmap);
         setPreviewVideoFrame({ node, bitmap: frame.bitmap });
         const previous = lastMediaTimeUsRef.current;
         if (previous === undefined) scheduler.current.recordDecodedFrame(token, true, true);
         else scheduler.current.driveTick(clock, true, Math.max(1, sourceTimeUs - previous));
+        playbackDiagnostics.current.recordFrame(
+          frameInfo?.metadata,
+          clock.timeUs,
+          frameInfo?.observedAtMs,
+        );
         void captureTransitionPartnerFrames(compositionTimeUs).catch(() => undefined);
       }
       lastMediaTimeUsRef.current = sourceTimeUs;
@@ -1191,8 +1219,20 @@ function EditorWorkspace({
       const clip = activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
       const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
       if (!freeze && typeof video.requestVideoFrameCallback === 'function')
-        playbackFrameRef.current = video.requestVideoFrameCallback(() => capture());
-      else playbackFrameRef.current = window.requestAnimationFrame(capture);
+        playbackFrameRef.current = video.requestVideoFrameCallback((now, metadata) =>
+          capture({
+            observedAtMs: now,
+            metadata: {
+              mediaTime: metadata.mediaTime,
+              presentedFrames: metadata.presentedFrames,
+              expectedDisplayTime: metadata.expectedDisplayTime,
+            },
+          }),
+        );
+      else
+        playbackFrameRef.current = window.requestAnimationFrame((now) =>
+          capture({ observedAtMs: now }),
+        );
     };
     requestFrame();
     return () => {
@@ -1319,6 +1359,14 @@ function EditorWorkspace({
   const replaceVisualProject = useCallback(
     (next: JoyProjectV1) => {
       session.replaceVisualProject(next);
+      setRevision((revision) => revision + 1);
+    },
+    [session],
+  );
+  const replaceVisualProjectAndAudio = useCallback(
+    (next: JoyProjectV1, nextAudio: AudioState) => {
+      setAudioStateRaw(nextAudio);
+      session.replaceVisualProject(withProjectAudio(next, nextAudio));
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2158,7 +2206,16 @@ function EditorWorkspace({
         const audioDestination = audioContext.createMediaStreamDestination();
         const exportMedia = await Promise.all(
           exportClips.map(async (clip) => {
+            const clipAudioConfig = audioState.clips[clip.id] ?? {
+              gain: 1,
+              pan: 0,
+              mute: false,
+              solo: false,
+            };
+            const audioAssetId = clipAudioConfig.sourceAssetId ?? clip.assetId;
             const source = await mediaResolver.resolve(clip.assetId);
+            const audioSource =
+              audioAssetId === clip.assetId ? source : await mediaResolver.resolve(audioAssetId);
             const assetKind = session.visualProject.assets[clip.assetId]?.kind ?? 'video';
             let video: HTMLVideoElement | undefined;
             let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
@@ -2176,18 +2233,12 @@ function EditorWorkspace({
                 decoder = createHtmlMediaDecoder(video, captureCanvas);
               }
             }
-            const clipAudioConfig = audioState.clips[clip.id] ?? {
-              gain: 1,
-              pan: 0,
-              mute: false,
-              solo: false,
-            };
             let sampleRate = 48_000;
             let fullSamples: Float32Array | undefined;
             try {
-              const audioResponse = await fetch(source.url);
+              const audioResponse = await fetch(audioSource.url);
               if (!audioResponse.ok)
-                throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
+                throw new Error(`Unable to fetch export audio for ${audioAssetId}`);
               const audioBuffer = await audioContext.decodeAudioData(
                 await audioResponse.arrayBuffer(),
               );
@@ -2751,6 +2802,59 @@ function EditorWorkspace({
         ),
       );
     };
+    const applyWorkerAudioResult = async (
+      result: VerifiedWorkerAudioResult,
+      mode: 'replace' | 'keep',
+    ): Promise<void> => {
+      if (operationLedger.get(result.jobId)?.status === 'applied') {
+        context.showToast('This Worker result is already applied.', 'info');
+        return;
+      }
+      if (mode === 'replace' && state.selectedIds[0] === undefined)
+        throw new Error('Select a timeline clip before replacing audio');
+      const generated = result.generatedAsset;
+      const cache = await originalAssetCachePromise;
+      await cache.put(
+        {
+          assetId: generated.id,
+          sha256: generated.sha256!,
+          bytes: generated.bytes!,
+          mimeType: generated.descriptor!.mimeType,
+        },
+        result.blob,
+      );
+      const nextProject = projectWithImportedAsset(context.visualProject, {
+        id: generated.id,
+        kind: 'audio',
+        displayName: generated.displayName,
+        ...(generated.sha256 === undefined ? {} : { sha256: generated.sha256 }),
+        ...(generated.bytes === undefined ? {} : { bytes: generated.bytes }),
+        ...(generated.descriptor === undefined ? {} : { descriptor: generated.descriptor }),
+      });
+      if (mode === 'replace') {
+        const clipId = state.selectedIds[0]!;
+        const current = context.audioState.clips[clipId] ?? {
+          gain: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+        };
+        const nextAudio = {
+          ...context.audioState,
+          clips: {
+            ...context.audioState.clips,
+            [clipId]: { ...current, sourceAssetId: generated.id },
+          },
+        };
+        context.replaceVisualProjectAndAudio(nextProject, nextAudio);
+      } else {
+        context.replaceVisualProject(nextProject);
+      }
+      context.showToast(
+        mode === 'replace' ? 'Processed audio applied.' : 'Processed audio kept in the project.',
+        'success',
+      );
+    };
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
@@ -3128,13 +3232,25 @@ function EditorWorkspace({
               })}
         />
       );
-    if (api.id === 'jobs')
+    if (api.id === 'jobs') {
+      const selectedAudioAssetId = state.selectedIds
+        .map((clipId) =>
+          context.timelineProject.compositions.root?.tracks
+            .flatMap((track) => track.clips)
+            .find((clip) => clip.id === clipId),
+        )
+        .find((clip): clip is VideoClip => clip?.kind === 'video')?.assetId;
       return (
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
+          {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
+          onApplyWorkerAudioResult={applyWorkerAudioResult}
+          operationLedger={operationLedger}
+          operationRevision={session.historyCursorSequence}
         />
       );
+    }
     if (api.id === 'media')
       return (
         <AssetLibraryPanel
@@ -3177,12 +3293,19 @@ function EditorWorkspace({
           iconUrl={panelTabIconUrl('diagnostics')}
           className="diagnostics-panel"
         >
-          <p>Proxy preview at quality {context.playback.quality}</p>
+          <p>Preview source: {context.playback.sourceQuality}</p>
           <p>
             {context.playback.decodedFrames} frames decoded / {context.playback.droppedFrames}{' '}
             frames dropped
           </p>
-          <p>Max media drift: {context.playback.maxDriftUs} µs</p>
+          <p>
+            Presentation drops: {context.playback.presentationDrops}; decode misses:{' '}
+            {context.playback.decodeMisses}
+          </p>
+          <p>
+            A/V drift p95: {context.playback.p95DriftUs} µs; max: {context.playback.maxDriftUs} µs
+          </p>
+          <p>Longest stall: {context.playback.maxStallUs} µs</p>
         </PanelShell>
       );
     if (api.id === 'monitor') return <MonitorPanel />;
@@ -3603,7 +3726,7 @@ function EditorWorkspace({
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
           controlPlaneProject,
-          playback: scheduler.current.metrics,
+          playback: playbackDiagnostics.current.snapshot(),
           canUndo: session.canUndo,
           canRedo: session.canRedo,
           historyEntries: session.historyEntries,
@@ -3630,6 +3753,7 @@ function EditorWorkspace({
           updateVisualProperty,
           dispatchProject,
           replaceVisualProject,
+          replaceVisualProjectAndAudio,
           addStickerFromAsset,
           addHtmlSceneToSelectedClip,
           stickerTick,

@@ -55,7 +55,7 @@ export interface BrowserDerivative {
   readonly id: string;
   readonly projectId: string;
   readonly assetId: string;
-  readonly kind: 'thumbnail' | 'proxy';
+  readonly kind: 'thumbnail' | 'proxy' | 'audio';
   readonly profile: string;
   readonly sha256: string;
   readonly bytes: number;

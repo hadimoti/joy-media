@@ -2850,6 +2850,43 @@ label {
 .job-derivative {
   color: #9fd8b3;
 }
+.jobs-review-button {
+  justify-self: start;
+  margin-top: 0.15rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #4e4e55;
+  border-radius: 0.25rem;
+  background: #242428;
+  color: #e4c466;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.jobs-review-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.jobs-review {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  padding: 0.6rem;
+  border: 1px solid #4e4e55;
+  border-radius: 0.35rem;
+  background: #1c1c20;
+}
+.jobs-review p {
+  margin: 0;
+  color: #9d9da1;
+  font-size: 0.72rem;
+}
+.jobs-review audio {
+  width: 100%;
+  min-width: 0;
+}
+.jobs-review .jobs-inline-actions {
+  flex-wrap: wrap;
+}
 .jobs-error {
   color: #f1a0a0;
 }

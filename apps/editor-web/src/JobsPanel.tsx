@@ -8,6 +8,8 @@ import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-st
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import type { ProjectOperationLedger } from './project-operation-ledger.js';
+import { verifyWorkerAudioDerivative, type VerifiedWorkerAudioResult } from './worker-result.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
 
@@ -20,9 +22,20 @@ const TABS: readonly PanelTabSpec[] = [
 export function JobsPanel({
   projectId,
   projectTitle,
+  audioAssetId,
+  onApplyWorkerAudioResult,
+  operationLedger,
+  operationRevision = 0,
 }: {
   projectId: string;
   projectTitle: string;
+  readonly audioAssetId?: string;
+  readonly onApplyWorkerAudioResult?: (
+    result: VerifiedWorkerAudioResult,
+    mode: 'replace' | 'keep',
+  ) => Promise<void> | void;
+  readonly operationLedger?: Pick<ProjectOperationLedger, 'begin' | 'finish' | 'get'>;
+  readonly operationRevision?: number;
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
@@ -34,7 +47,21 @@ export function JobsPanel({
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
+  const [review, setReview] = useState<VerifiedWorkerAudioResult | undefined>();
+  const [reviewUrl, setReviewUrl] = useState<string | undefined>();
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const refreshSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (review === undefined) {
+      setReviewUrl(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(review.blob);
+    setReviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [review]);
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
@@ -113,13 +140,138 @@ export function JobsPanel({
       setStatus('Initialize this project before queueing a derivative job.');
       return;
     }
+    let operationId: string | undefined;
+    let operationStarted = false;
     try {
-      await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
-      setStatus('Thumbnail job queued for the paired local Worker.');
+      setSubmitting(true);
+      if (audioAssetId !== undefined) {
+        const worker = workers.find(
+          (candidate) =>
+            workerPresence(candidate) === 'connected' &&
+            candidate.capabilities.includes('audio.ml-denoise'),
+        );
+        if (worker === undefined)
+          throw new Error('No connected Worker advertises audio.ml-denoise');
+        const jobId = `audio-denoise-${audioAssetId}`;
+        operationId = jobId;
+        const existing = operationLedger?.get(jobId);
+        if (existing?.status === 'applied' || existing?.status === 'completed') {
+          setStatus('This Worker result has already been applied to the project.');
+          return;
+        }
+        if (existing?.status === 'review') {
+          setStatus('This Worker result is waiting in the review surface.');
+          return;
+        }
+        if (existing?.status === 'running') {
+          setStatus('This Worker operation is already running. Refresh Queue to reattach.');
+          return;
+        }
+        operationLedger?.begin({
+          id: jobId,
+          type: 'worker-job',
+          fingerprint: `${audioAssetId}:audio.ml-denoise:v1`,
+          revision: operationRevision,
+        });
+        operationStarted = true;
+        await client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId);
+        setStatus(
+          'Audio denoise job queued. The Worker result will require review before insertion.',
+        );
+      } else {
+        await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
+        setStatus('Thumbnail job queued for the paired local Worker.');
+      }
       await refresh();
     } catch (error) {
+      if (operationStarted && operationId !== undefined) {
+        try {
+          operationLedger?.finish(operationId, 'failed', { error: message(error) });
+        } catch {
+          /* Keep the API error visible even if an older ledger is corrupt. */
+        }
+      }
       setStatus(`Failed to queue job: ${message(error)}`);
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  const reviewAudioResult = async (job: BrowserJob): Promise<void> => {
+    if (job.assetId === undefined || job.derivative === undefined) return;
+    try {
+      setReviewBusy(true);
+      const derivatives = await client.derivatives(projectId, job.assetId);
+      const derivative = derivatives.find(
+        (candidate) => candidate.kind === 'audio' && candidate.sha256 === job.derivative?.sha256,
+      );
+      if (derivative === undefined) throw new Error('Verified audio derivative is unavailable');
+      const blob = await client.derivativeBytes(projectId, job.assetId, derivative.id);
+      const sourceAsset = (await client.assets(projectId)).find(
+        (asset) => asset.id === job.assetId,
+      );
+      setReview(
+        await verifyWorkerAudioDerivative({
+          jobId: job.id,
+          sourceAssetId: job.assetId,
+          ...(sourceAsset === undefined ? {} : { sourceAssetSha256: sourceAsset.sha256 }),
+          derivative,
+          blob,
+        }),
+      );
+      try {
+        operationLedger?.finish(`audio-denoise-${job.assetId}`, 'review', {
+          resultRef: derivative.id,
+        });
+      } catch {
+        /* Jobs created before the ledger migration remain reviewable. */
+      }
+      setStatus('Worker result verified. Choose how to apply it to the project.');
+    } catch (error) {
+      setStatus(`Could not verify Worker result: ${message(error)}`);
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const applyReview = async (mode: 'replace' | 'keep'): Promise<void> => {
+    if (review === undefined) return;
+    if (onApplyWorkerAudioResult === undefined) {
+      setStatus('Worker result review is ready, but no project insertion target is selected.');
+      return;
+    }
+    try {
+      setReviewBusy(true);
+      await onApplyWorkerAudioResult(review, mode);
+      try {
+        operationLedger?.finish(`audio-denoise-${review.sourceAssetId}`, 'applied', {
+          resultRef: review.generatedAsset.id,
+        });
+      } catch {
+        /* The creative transaction is still authoritative for legacy jobs. */
+      }
+      setReview(undefined);
+      setStatus(
+        mode === 'replace'
+          ? 'Processed audio applied to the selected clip.'
+          : 'Processed audio kept in the project.',
+      );
+    } catch (error) {
+      setStatus(`Could not apply Worker result: ${message(error)}`);
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const discardReview = (): void => {
+    if (review !== undefined) {
+      try {
+        operationLedger?.finish(`audio-denoise-${review.sourceAssetId}`, 'cancelled');
+      } catch {
+        /* Legacy jobs have no ledger record to remove. */
+      }
+    }
+    setReview(undefined);
   };
 
   return (
@@ -148,10 +300,12 @@ export function JobsPanel({
           <button
             type="button"
             className="icon-button"
-            aria-label="Queue thumbnail derivative"
-            title="Queue thumbnail"
-            data-guide="Queue thumbnail"
-            disabled={!projectInitialized}
+            aria-label={
+              audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise'
+            }
+            title={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
+            data-guide={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
+            disabled={!projectInitialized || submitting}
             onClick={() => void submit()}
           >
             <ImageIcon />
@@ -294,6 +448,18 @@ export function JobsPanel({
                           …
                         </p>
                       )}
+                      {job.state === 'completed' &&
+                        job.type === 'audio.ml-denoise' &&
+                        job.derivative !== undefined && (
+                          <button
+                            type="button"
+                            className="jobs-review-button"
+                            disabled={reviewBusy}
+                            onClick={() => void reviewAudioResult(job)}
+                          >
+                            {reviewBusy ? 'Verifying…' : 'Review result'}
+                          </button>
+                        )}
                       {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
                     </div>
                     <div className="jobs-inline-actions">
@@ -332,6 +498,45 @@ export function JobsPanel({
                 </li>
               ))}
             </ul>
+          )}
+          {review !== undefined && (
+            <section className="jobs-review" role="dialog" aria-label="Review processed audio">
+              <div className="jobs-section-head">
+                <h3>Review processed audio</h3>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Close result review"
+                  onClick={() => setReview(undefined)}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <p>
+                Verified {review.bytes} bytes · {review.descriptor.mimeType} · source{' '}
+                {shortId(review.sourceAssetId)}
+              </p>
+              {reviewUrl !== undefined && <audio controls src={reviewUrl} preload="metadata" />}
+              <div className="jobs-inline-actions">
+                <button
+                  type="button"
+                  disabled={reviewBusy}
+                  onClick={() => void applyReview('replace')}
+                >
+                  Replace selected clip audio
+                </button>
+                <button
+                  type="button"
+                  disabled={reviewBusy}
+                  onClick={() => void applyReview('keep')}
+                >
+                  Keep generated asset
+                </button>
+                <button type="button" disabled={reviewBusy} onClick={discardReview}>
+                  Discard
+                </button>
+              </div>
+            </section>
           )}
         </section>
       )}

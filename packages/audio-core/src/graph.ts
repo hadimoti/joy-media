@@ -1,4 +1,6 @@
 export interface AudioClipConfig {
+  /** Optional processed/generated source replacing the clip's authored audio. */
+  readonly sourceAssetId?: string;
   readonly gain: number;
   readonly pan: number;
   readonly mute: boolean;

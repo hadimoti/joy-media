@@ -59,9 +59,12 @@ skipped), production dependency audit, and the three browser safety smoke
 projects. The repository-wide Prettier check remains a known baseline failure
 in 81 untouched files; all candidate files pass targeted formatting.
 
-WP-29 is not marked complete: the authenticated golden path, disposable Worker
-result insertion, browser ffprobe download proof, controlled playback metrics,
-and the historical 37 NOT-RUN Chrome cases still require a live signed-in run.
+WP-29 is not marked complete: the authenticated harness now covers project
+lifecycle and authorized MP4 round-trip checks, but disposable Worker result
+insertion, browser ffprobe download proof, controlled playback metrics, and the
+historical 37 NOT-RUN Chrome cases still require a live signed-in run. The
+browser export attempt currently hits repeated 1080×1920 GPU readback stalls
+before a download is emitted.
 The exact follow-up is recorded in
 [`docs/qa/gpt-chrome-usage-audit-20260810-wp29.md`](docs/qa/gpt-chrome-usage-audit-20260810-wp29.md)
 and [`plan/WP-29-first-project-golden-path-reliability.md`](plan/WP-29-first-project-golden-path-reliability.md).

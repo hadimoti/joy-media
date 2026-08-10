@@ -158,6 +158,10 @@ export interface ExportProbe {
   readonly audioCodec: string;
   readonly width: number;
   readonly height: number;
+  readonly durationUs: number;
+  readonly frameRate: number;
+  readonly videoStreamCount: number;
+  readonly audioStreamCount: number;
 }
 export function verifyExport(outputPath: string): ExportProbe {
   const result = spawnSync(
@@ -166,7 +170,7 @@ export function verifyExport(outputPath: string): ExportProbe {
       '-v',
       'error',
       '-show_entries',
-      'stream=codec_type,codec_name,width,height',
+      'stream=codec_type,codec_name,width,height,r_frame_rate:format=duration',
       '-of',
       'json',
       outputPath,
@@ -175,7 +179,14 @@ export function verifyExport(outputPath: string): ExportProbe {
   );
   if (result.status !== 0) throw new Error(`ffprobe verification failed: ${result.stderr}`);
   const parsed = JSON.parse(result.stdout) as {
-    streams: { codec_type: string; codec_name: string; width?: number; height?: number }[];
+    streams: {
+      codec_type: string;
+      codec_name: string;
+      width?: number;
+      height?: number;
+      r_frame_rate?: string;
+    }[];
+    format?: { duration?: string };
   };
   const video = parsed.streams.find((stream) => stream.codec_type === 'video');
   const audio = parsed.streams.find((stream) => stream.codec_type === 'audio');
@@ -188,10 +199,49 @@ export function verifyExport(outputPath: string): ExportProbe {
     throw new Error('export is missing required H.264/AAC streams');
   if (video.codec_name !== 'h264' || audio.codec_name !== 'aac')
     throw new Error(`export codecs must be h264/aac, got ${video.codec_name}/${audio.codec_name}`);
+  const durationSeconds = Number(parsed.format?.duration);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0)
+    throw new Error('export duration is missing or invalid');
+  const frameRate = parseFrameRate(video.r_frame_rate);
   return {
     videoCodec: video.codec_name,
     audioCodec: audio.codec_name,
     width: video.width,
     height: video.height,
+    durationUs: Math.round(durationSeconds * 1_000_000),
+    frameRate,
+    videoStreamCount: parsed.streams.filter((stream) => stream.codec_type === 'video').length,
+    audioStreamCount: parsed.streams.filter((stream) => stream.codec_type === 'audio').length,
   };
+}
+
+/** Validate a completed export against the immutable render manifest. */
+export function verifyExportAgainstManifest(
+  outputPath: string,
+  manifest: RenderManifest,
+  durationToleranceUs = Math.ceil(1_000_000 / manifest.frameRate),
+): ExportProbe {
+  const expected = freezeManifest(manifest);
+  const probe = verifyExport(outputPath);
+  if (probe.width !== expected.width || probe.height !== expected.height)
+    throw new Error(`export dimensions differ from manifest: ${probe.width}x${probe.height}`);
+  if (Math.abs(probe.durationUs - expected.durationUs) > durationToleranceUs)
+    throw new Error(
+      `export duration differs from manifest by ${Math.abs(probe.durationUs - expected.durationUs)} µs`,
+    );
+  if (Math.abs(probe.frameRate - expected.frameRate) > 0.01)
+    throw new Error(`export frame rate differs from manifest: ${probe.frameRate}`);
+  if (probe.videoStreamCount !== 1 || probe.audioStreamCount !== 1)
+    throw new Error('export must contain exactly one video and one audio stream');
+  return probe;
+}
+
+function parseFrameRate(value: string | undefined): number {
+  if (value === undefined) throw new Error('export frame rate is missing');
+  const parts = value.split('/').map(Number);
+  const numerator = parts[0] ?? Number.NaN;
+  const denominator = parts[1] ?? 1;
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0)
+    throw new Error(`export frame rate is invalid: ${value}`);
+  return numerator / denominator;
 }

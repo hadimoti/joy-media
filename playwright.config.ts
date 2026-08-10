@@ -31,11 +31,19 @@ export default defineConfig({
   ],
   webServer:
     process.env.PLAYWRIGHT_BASE_URL === undefined
-      ? {
-          command: 'pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port 4173',
-          url: 'http://127.0.0.1:4173',
-          reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
-        }
+      ? [
+          {
+            command: 'pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts',
+            url: 'http://127.0.0.1:4174/health',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+          {
+            command: 'pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port 4173',
+            url: 'http://127.0.0.1:4173',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+        ]
       : undefined,
 });

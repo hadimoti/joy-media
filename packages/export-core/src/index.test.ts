@@ -9,6 +9,7 @@ import {
   renderFixture,
   renderRgbaFrames,
   verifyExport,
+  verifyExportAgainstManifest,
 } from './index.js';
 describe('deterministic export contract', () => {
   const manifest = {
@@ -33,6 +34,14 @@ describe('deterministic export contract', () => {
     expect(verifyExport(output)).toMatchObject({
       videoCodec: 'h264',
       audioCodec: 'aac',
+      width: 64,
+      height: 36,
+      durationUs: 100_000,
+      frameRate: 30,
+      videoStreamCount: 1,
+      audioStreamCount: 1,
+    });
+    expect(verifyExportAgainstManifest(output, manifest)).toMatchObject({
       width: 64,
       height: 36,
     });

@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:audit": "playwright test tests/e2e --project=desktop-primary --project=desktop-compact --project=desktop-minimum",
+    "test:fixtures:media": "node tooling/generate-media-fixtures.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

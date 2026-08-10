@@ -46,10 +46,12 @@ describe('ProjectOperationLedger', () => {
     const store = storage();
     const first = new ProjectOperationLedger(store, 'project-a');
     first.begin({ id: 'audio-1', type: 'audio', fingerprint: 'x', revision: 0 });
-    first.finish('audio-1', 'completed', { resultRef: 'asset-a' });
+    first.finish('audio-1', 'review', { resultRef: 'asset-a' });
     const second = new ProjectOperationLedger(store, 'project-b');
     expect(second.list()).toEqual([]);
-    expect(first.get('audio-1')).toMatchObject({ status: 'completed', resultRef: 'asset-a' });
+    expect(first.get('audio-1')).toMatchObject({ status: 'review', resultRef: 'asset-a' });
+    first.finish('audio-1', 'applied', { resultRef: 'asset-a' });
+    expect(first.get('audio-1')).toMatchObject({ status: 'applied', resultRef: 'asset-a' });
     first.removeAll();
     expect(first.list()).toEqual([]);
   });

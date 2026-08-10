@@ -104,6 +104,14 @@ function bundlePolicy(): Plugin {
 
 export default defineConfig({
   plugins: [react(), bundlePolicy()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.JOY_MEDIA_E2E_API_URL ?? 'http://127.0.0.1:4174',
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@joy-media/workflow-engine': pkg('workflow-engine/dist/index.js'),

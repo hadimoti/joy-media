@@ -6,7 +6,7 @@
  */
 export type ProjectOperationType = 'import' | 'audio' | 'worker-job' | 'export';
 export type ProjectOperationStatus =
-  'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted-retryable';
+  'running' | 'review' | 'applied' | 'completed' | 'failed' | 'cancelled' | 'interrupted-retryable';
 
 export interface ProjectOperationRecord {
   readonly id: string;
@@ -151,6 +151,8 @@ function isRecord(value: unknown): value is ProjectOperationRecord {
     typeof record.fingerprint === 'string' &&
     Number.isSafeInteger(record.revision) &&
     (record.status === 'running' ||
+      record.status === 'review' ||
+      record.status === 'applied' ||
       record.status === 'completed' ||
       record.status === 'failed' ||
       record.status === 'cancelled' ||

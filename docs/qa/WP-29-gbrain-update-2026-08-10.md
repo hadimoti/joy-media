@@ -41,7 +41,8 @@ status: in-progress
   SRT, WebVTT, invalid, and corrupt inputs with checksum and descriptor
   metadata.
 - Playwright/Axe smoke now runs at all three required viewports and passes the
-  login safety envelope with no page errors, console errors, horizontal
+  authenticated project lifecycle and authorized MP4 round-trip checks, plus
+  the login safety envelope with no page errors, console errors, horizontal
   overflow, or Axe violations.
 - The signed-in live JOY tab was checked after deployment: the project action
   menu is visible and keyboard-dismissible at all three viewports, and Audio
@@ -52,24 +53,25 @@ status: in-progress
 
 - `pnpm typecheck`: pass
 - `pnpm lint`: pass
+- `pnpm format:check`: pass after the isolated 81-file baseline commit
 - focused export/resolver/audio tests: pass (19 tests; one expected environment-gated
   skip for the unprovisioned RNNoise model)
-- full suite: 232 test files; 1,722 tests passed; two expected environment-gated
+- full suite: 235 test files; 1,727 tests passed; two expected environment-gated
   skips for provisioned RNNoise/Whisper integrations
 - `pnpm build` and production audit: pass
 - `pnpm test:e2e`: pass (three Playwright projects at 1639×1066, 1366×768,
   and 1024×768)
-- The repository-wide Prettier check still reports the existing formatting
-  baseline in untouched files; no bulk reformat was applied.
+- The repository-wide Prettier check is green; formatting is isolated in its
+  own mechanical commit.
 
 ## Remaining gate
 
 WP-29 remains in progress. The next gate is the authenticated golden path and
 the 37 previously un-run Chrome scenarios. Real Worker audio result insertion
 after approval, browser-level post-encode verification, controlled playback
-metrics, and live disposable-project evidence remain open. The exact outcome is
-recorded in `gpt-chrome-usage-audit-20260810-wp29.md`; no open item is silently
-reported as a pass.
+metrics, and live disposable-project evidence remain open. The browser export
+attempt currently blocks on 1080×1920 GPU readback stalls; no open item is
+silently reported as a pass.
 
 ## Safety and deployment
 

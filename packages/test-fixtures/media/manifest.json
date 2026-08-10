@@ -5,6 +5,9 @@
     "image.png": {
       "sha256": "8f24a572b2b05c02eee94666f40d87134c67abd637e2e0c2b74079566d75052b",
       "bytes": 629,
+      "name": "image.png",
+      "kind": "image",
+      "mimeType": "image/png",
       "mime": "image/png",
       "width": 320,
       "height": 180
@@ -12,6 +15,9 @@
     "image.jpg": {
       "sha256": "1d12aff30b6c9ae19d3635c5ed24c2edc6ffe8122eb799bd58fe7af07e221015",
       "bytes": 584,
+      "name": "image.jpg",
+      "kind": "image",
+      "mimeType": "image/jpeg",
       "mime": "image/jpeg",
       "width": 320,
       "height": 180
@@ -19,6 +25,9 @@
     "video.mp4": {
       "sha256": "f4879ec24ebac10f94e5e7273f146444d8b4fb26528c7fc1e22f82d1dfa0c0ee",
       "bytes": 43912,
+      "name": "video.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
       "mime": "video/mp4",
       "durationUs": 3000000,
       "width": 320,
@@ -29,6 +38,9 @@
     "audio.wav": {
       "sha256": "66708fb217f7944cc68e6000a1d07d73d7fd87a8ee6786660df36a5d3c0b45af",
       "bytes": 288078,
+      "name": "audio.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
       "mime": "audio/wav",
       "durationUs": 3000000,
       "sampleRate": 48000,
@@ -37,30 +49,61 @@
     "audio.mp3": {
       "sha256": "faab26af6a2cc7740b3f360c502e881bffca7633df56c858bae8fc6d12e01b27",
       "bytes": 24429,
+      "name": "audio.mp3",
+      "kind": "audio",
+      "mimeType": "audio/mpeg",
       "mime": "audio/mpeg",
       "durationUs": 3000000,
       "sampleRate": 48000,
       "channels": 1
     },
     "captions-en.srt": {
-      "sha256": "49de6b390dd1927f00e203fe6b004a8181a44e6f7c0c9884713df0a0ca340ab0",
-      "bytes": 126,
+      "sha256": "8bda1b0f83d160144b52c9a42c5e799aa3db52ac0bcc946b5019dffb598c42b9",
+      "bytes": 42,
+      "name": "captions-en.srt",
+      "kind": "caption",
+      "mimeType": "application/x-subrip",
       "mime": "application/x-subrip"
     },
     "captions-fa.vtt": {
-      "sha256": "8984c4ebd79f5fcd78aa8474059718f07e815199a2076dcffe0050c6d361a59d",
-      "bytes": 161,
+      "sha256": "2f491de115bb3e83c3260923adc2bdcde41cd3009e7fedf9676609e833dca0ef",
+      "bytes": 62,
+      "name": "captions-fa.vtt",
+      "kind": "caption",
+      "mimeType": "text/vtt",
       "mime": "text/vtt"
     },
     "invalid.txt": {
-      "sha256": "c83040356d8b04cd7e09e633fe51963da2af986719d53fea4161f64f54601dd5",
-      "bytes": 80,
+      "sha256": "e2c5076bcc1bf5b0c8c375d5ee8bfbde111d7a699cdeed6d1787b53c1e8b3181",
+      "bytes": 26,
+      "name": "invalid.txt",
+      "kind": "invalid",
+      "mimeType": "text/plain",
       "mime": "text/plain"
     },
     "corrupt.mp4": {
       "sha256": "b471233970c5b1a63b56c16179dcbbf561a4924d1117a0880f936f47301033c6",
       "bytes": 21,
+      "name": "corrupt.mp4",
+      "kind": "invalid",
+      "mimeType": "video/mp4",
       "mime": "video/mp4"
+    },
+    "empty.bin": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "name": "empty.bin",
+      "kind": "invalid",
+      "mimeType": "application/octet-stream",
+      "mime": "application/octet-stream"
+    },
+    "joycode-attachment.md": {
+      "sha256": "a2b57ab1dce16d6e7ce7c6952222e52835cd5ec33eafe1e0fe3ccdd6ab4bf856",
+      "bytes": 29,
+      "name": "joycode-attachment.md",
+      "kind": "attachment",
+      "mimeType": "text/markdown",
+      "mime": "text/markdown"
     }
   }
 }

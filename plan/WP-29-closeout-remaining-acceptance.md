@@ -1,8 +1,8 @@
 # WP-29 Closeout — Remaining Acceptance Gates
 
-**Status:** Planned
+**Status:** In progress — reliability slices implemented; live closeout gates remain
 **Parent:** [`WP-29-first-project-golden-path-reliability.md`](WP-29-first-project-golden-path-reliability.md)
-**Baseline:** product release `e02f646`; documentation head `4d8d95a`
+**Baseline:** product release `e02f646`; closeout candidate is the current `main` tip
 **Target:** close WP-29 without converting unavailable or unobserved behavior into PASS
 
 ## Outcome
@@ -23,17 +23,17 @@ must not be called PASS.
 
 ## Current verified baseline
 
-- Repository worktree is clean at `4d8d95a`; production API/editor artifacts
-  were built from `e02f646`.
-- Typecheck, ESLint, build, production audit, 1,722 tests, and the three-viewport
+- The closeout candidate has a clean verification worktree after commit; production
+  API/editor artifacts are built from the candidate commit.
+- Typecheck, ESLint, build, production audit, 1,727 tests, and the three-viewport
   Playwright/Axe login smoke pass.
 - Project media resolution, metadata-preserving placement, content-range export,
   authored audio mix, export cancel/retry, OPFS output cache, Worker derivative
   upload, Worker keepalive, and fail-closed ML capability advertisement exist.
 - The signed-in live selector and Audio Studio smoke passed at `1639×1066`,
   `1366×768`, and `1024×768` with no browser warning/error logs.
-- `pnpm verify:ci` fails only at `prettier --check .`. The frozen baseline is
-  exactly 81 files: 52 TSX, 21 CSS, four Markdown, two HTML, and two MTS.
+- The isolated 81-file formatting baseline has been normalized; `pnpm verify:ci`
+  now exits zero (235 test files, one expected file skip, two expected test skips).
 - The current Playwright suite proves only the login safety envelope. It does
   not yet provide a test identity or drive the signed-in golden path.
 
@@ -201,6 +201,17 @@ bypass, fixture-only result, or committed credential.
 - A revoked Worker cannot lease or upload another result.
 
 ## R3 — Browser MP4 download and independent FFprobe proof
+
+### Implementation checkpoint — 2026-08-10
+
+The independent FFprobe verifier and manifest contract are implemented in
+`packages/export-core`. A real authenticated Chrome smoke imported the committed
+three-second H.264/AAC fixture and reached the timeline, but the browser export
+did not produce a download within the two-minute reference run. Chrome reported
+repeated 1080×1920 GPU `ReadPixels` stalls while the preview-equivalent recorder
+was rendering. This is recorded as an open R3 performance/product blocker, not a
+PASS; the browser-originated file, SHA, duration, audio loudness, and reload
+re-download evidence must be rerun after the export readback path is optimized.
 
 ### R3.1 Golden-path export spec
 
