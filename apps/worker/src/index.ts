@@ -29,13 +29,19 @@ if (apiUrl !== undefined) {
       store.savePendingPairing(pairingCode, expiresAt);
     }
     console.log(`Approve this Worker in JOY Media with pairing code: ${pairingCode}`);
-    if (await client.claimPairing(pairingCode)) {
-      store.clearPendingPairing();
-    } else {
-      console.log(
-        'Waiting for approval; restart after the signed-in JOY user approves the pairing code.',
-      );
-      process.exitCode = 2;
+    while (store.loadWorkerSession() === undefined) {
+      if (await client.claimPairing(pairingCode)) {
+        store.clearPendingPairing();
+        break;
+      }
+      if (Date.now() >= (store.loadPendingPairing()?.expiresAt ?? 0)) {
+        const refreshedCode = WorkerControlPlaneClient.createPairingCode();
+        const expiresAt = await client.publishPairingOffer(refreshedCode);
+        store.savePendingPairing(refreshedCode, expiresAt);
+        console.log(`Pairing code expired; new code: ${refreshedCode}`);
+      }
+      console.log('Waiting for approval; polling again in 5 seconds.');
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
   }
   if (store.loadWorkerSession() !== undefined) {

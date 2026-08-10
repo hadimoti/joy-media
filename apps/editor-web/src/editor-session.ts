@@ -144,6 +144,8 @@ export class EditorSession {
   readonly #undo: HistoryStackEntry[] = [];
   readonly #redo: HistoryStackEntry[] = [];
   readonly agentIdempotency: BrowserAgentIdempotencyStore;
+  /** Recovery diagnostics surfaced to the workspace instead of discarded. */
+  readonly recoveryWarnings: readonly string[];
   /** Dual Lens graph editing (ADR-0023). Off unless the flag says otherwise. */
   readonly graphEnabled: boolean;
   readonly #graphPersistence?: LocalProjectPersistence<PersistedGraphDocument, GraphTransaction>;
@@ -187,6 +189,7 @@ export class EditorSession {
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
     // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
     const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
+    const recoveryWarnings = [...timeline.warnings, ...visualObjects.warnings];
     this.#timelineRevision = timeline.revision;
     this.#visualObjectRevision = visualObjects.revision;
     this.#timeline = new EditorCommandController(timeline.project);
@@ -208,6 +211,7 @@ export class EditorSession {
       const recovered = recoverOrInitialize(this.#graphPersistence, emptyGraphDocument);
       this.#graphDocument = recovered.project;
       this.#graphRevision = recovered.revision;
+      recoveryWarnings.push(...recovered.warnings);
     } else {
       // No log is opened when the feature is off, so a disabled Dual Lens adds
       // no storage key and no recovery path — the flag's off state stays a
@@ -229,10 +233,12 @@ export class EditorSession {
       const recovered = recoverOrInitialize(this.#artifactPersistence, emptyArtifactDocument);
       this.#artifactDocument = recovered.project;
       this.#artifactRevision = recovered.revision;
+      recoveryWarnings.push(...recovered.warnings);
     } else {
       this.#artifactDocument = emptyArtifactDocument;
       this.#artifactRevision = 0;
     }
+    this.recoveryWarnings = recoveryWarnings;
   }
 
   get timelineProject(): SpikeProject {
@@ -663,14 +669,18 @@ export class EditorSession {
 function recoverOrInitialize<P, T>(
   persistence: LocalProjectPersistence<P, T>,
   initial: P,
-): { readonly project: P; readonly revision: number } {
+): { readonly project: P; readonly revision: number; readonly warnings: readonly string[] } {
   try {
     const recovered = persistence.recover(persistenceProjectId(initial));
-    return { project: recovered.project, revision: recovered.revision };
+    return {
+      project: recovered.project,
+      revision: recovered.revision,
+      warnings: recovered.warnings,
+    };
   } catch (error) {
     if (!(error instanceof PersistenceError) || error.code !== 'PERSISTENCE_NOT_FOUND') throw error;
     persistence.initialize(initial);
-    return { project: initial, revision: 0 };
+    return { project: initial, revision: 0, warnings: [] };
   }
 }
 

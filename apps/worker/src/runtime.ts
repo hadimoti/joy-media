@@ -243,7 +243,7 @@ export class WorkerRuntime {
     const capabilities: WorkerCapability[] = [];
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.comfy) capabilities.push('image.comfy');
-    if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');
+    if (this.tools.mlDenoise && mlDenoiseRunnable()) capabilities.push('audio.ml-denoise');
     if (this.tools.aiProviders.includes('lm-studio')) capabilities.push('text.lm-studio');
     if (this.tools.aiProviders.includes('openrouter')) capabilities.push('text.openrouter');
     if (this.tools.aiProviders.includes('runway')) capabilities.push('video.runway');
@@ -481,6 +481,14 @@ export class WorkerRuntime {
       throw new Error('retained derivative integrity check failed');
     return bytes;
   }
+}
+
+function mlDenoiseRunnable(): boolean {
+  if ((process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() !== '1') return false;
+  if ((process.env.JOY_MEDIA_ML_DENOISE_CMD ?? '').trim().length > 0) return true;
+  const model =
+    process.env.JOY_MEDIA_RNNOISE_MODEL?.trim() || '/opt/joy-media/data/rnnoise/cb.rnnn';
+  return existsSync(model);
 }
 
 export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt;

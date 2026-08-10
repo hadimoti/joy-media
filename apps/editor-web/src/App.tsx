@@ -208,6 +208,7 @@ import {
   type ExportProcessEntry,
 } from './export-history.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
+import { ProjectOperationLedger } from './project-operation-ledger.js';
 import { createMonoAudioBuffer } from './export-audio.js';
 import { nextVideoClipAtOrAfter, playbackStartAtOrAfter } from './timeline-playback.js';
 import './app.css';
@@ -713,6 +714,10 @@ function EditorWorkspace({
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
   const [exportHistory, setExportHistory] = useState<readonly ExportProcessEntry[]>(() =>
     loadExportHistory(window.localStorage),
+  );
+  const operationLedger = useMemo(
+    () => new ProjectOperationLedger(window.localStorage, projectId),
+    [projectId],
   );
   const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
@@ -1694,6 +1699,13 @@ function EditorWorkspace({
     }, 4000);
     toastTimersRef.current.set(id, timer);
   }, []);
+  useEffect(() => {
+    if (session.recoveryWarnings.length === 0) return;
+    showToast(
+      `Recovered with ${session.recoveryWarnings.length} warning${session.recoveryWarnings.length === 1 ? '' : 's'}. Check persistence diagnostics before continuing.`,
+      'error',
+    );
+  }, [session, showToast]);
   const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
     setKiloCodeAttachedAssets((current) => {
       if (current.some((entry) => entry.assetId === asset.assetId)) return current;
@@ -2084,6 +2096,12 @@ function EditorWorkspace({
           frameRate,
           durationUs,
         });
+        operationLedger.begin({
+          id: entryId,
+          type: 'export',
+          fingerprint: `${session.projectRevisionId}:${exportPreset}:${width}x${height}:${durationUs}`,
+          revision: session.historyCursorSequence,
+        });
         session.replaceVisualProject({
           ...session.visualProject,
           exportPreset,
@@ -2399,6 +2417,7 @@ function EditorWorkspace({
             totalBytes: exportResult.totalBytes,
             frameCount: exportResult.frameCount,
           });
+          operationLedger.finish(entryId, 'completed', { resultRef: entryId });
           // File has already downloaded via the browser save prompt — drop the
           // toast immediately and clear the full bar after a short settle so the
           // processes menu (not the icon row) remains the durable record.
@@ -2431,6 +2450,7 @@ function EditorWorkspace({
           finishedAt: new Date().toISOString(),
           error: cancelled ? 'cancelled by user' : message,
         });
+        operationLedger.finish(entryId, cancelled ? 'cancelled' : 'failed', { error: message });
         setExportProgress(undefined);
         exportToastTimerRef.current = window.setTimeout(() => {
           setExportStatus(undefined);
@@ -2447,6 +2467,7 @@ function EditorWorkspace({
       exportPreset,
       exporting,
       mediaResolver,
+      operationLedger,
       recordExportEntry,
       session,
       syncStickerBitmaps,

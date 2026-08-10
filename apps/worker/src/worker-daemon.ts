@@ -36,13 +36,37 @@ export class WorkerDaemon {
         }
         leasedJobId = job.id;
         let cancelRequested = false;
-        const result = await this.runtime.run(job, {
-          cancelled: () => options.stopped() || cancelRequested,
-          progress: async (progress) => {
-            const heartbeat = await this.client.heartbeat(job.id, progress);
+        let currentProgress = 0;
+        let heartbeatInFlight = false;
+        const sendHeartbeat = async (): Promise<void> => {
+          if (heartbeatInFlight) return;
+          heartbeatInFlight = true;
+          try {
+            const heartbeat = await this.client.heartbeat(job.id, currentProgress);
             cancelRequested ||= heartbeat.cancelRequested;
-          },
-        });
+          } finally {
+            heartbeatInFlight = false;
+          }
+        };
+        const heartbeatTimer = setInterval(() => {
+          void sendHeartbeat().catch((error: unknown) => {
+            this.runtime.log.write(
+              `heartbeat failed: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
+            );
+          });
+        }, 10_000);
+        let result: Awaited<ReturnType<WorkerRuntime['run']>>;
+        try {
+          result = await this.runtime.run(job, {
+            cancelled: () => options.stopped() || cancelRequested,
+            progress: async (progress) => {
+              currentProgress = progress;
+              await sendHeartbeat();
+            },
+          });
+        } finally {
+          clearInterval(heartbeatTimer);
+        }
         if (result.state === 'completed') {
           // Upload verified bytes for browser-consumable derivatives. Fixture and
           // provider receipts remain Worker-local until their own contracts land.

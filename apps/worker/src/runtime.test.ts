@@ -215,14 +215,24 @@ describe('Worker runtime', () => {
   });
 
   it('advertises GPU capabilities only when local env is set', () => {
+    const previous = process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+    const previousModel = process.env.JOY_MEDIA_RNNOISE_MODEL;
+    delete process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+    delete process.env.JOY_MEDIA_RNNOISE_MODEL;
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
       { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true, aiProviders: [] },
     );
-    expect(runtime.hello('linux', 'x64').capabilities).toEqual([
-      'asset.thumbnail',
-      'image.comfy',
-      'audio.ml-denoise',
-    ]);
+    try {
+      expect(runtime.hello('linux', 'x64').capabilities).toEqual([
+        'asset.thumbnail',
+        'image.comfy',
+      ]);
+    } finally {
+      if (previous === undefined) delete process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+      else process.env.JOY_MEDIA_LOCAL_ML_DENOISE = previous;
+      if (previousModel === undefined) delete process.env.JOY_MEDIA_RNNOISE_MODEL;
+      else process.env.JOY_MEDIA_RNNOISE_MODEL = previousModel;
+    }
   });
 });

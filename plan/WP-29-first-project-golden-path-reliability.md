@@ -1,6 +1,6 @@
 # WP-29 — First Project Golden Path and Real-Media Reliability
 
-**Status:** In progress — first reliability slice implemented  
+**Status:** In progress — reliability hardening and browser safety smoke implemented; signed-in 100-case closure pending
 **Priority:** P1 product reliability  
 **Depends on:** WP-27 audit remediation and WP-28 project lifecycle, both live  
 **Primary result:** A fresh signed-in user can create a project, import their own
@@ -49,10 +49,35 @@ The first vertical slice is implemented in the working tree:
   available. The RNNoise integration test is explicitly skipped unless a
   provisioned model exists, so normal CI is hermetic.
 
-Remaining work is intentionally not marked complete: real Worker audio
-execution/result upload, operation-ledger/idempotency, post-encode verification,
-Playwright/axe browser coverage, and the 37-case Chrome rerun still require
-implementation and live evidence.
+The first reliability hardening slice is now implemented in the working tree.
+The remaining closeout work is live evidence rather than an unverified claim:
+the authenticated 37-case rerun, real Worker pairing/result insertion, and
+browser-level post-encode ffprobe evidence still require a disposable signed-in
+run. The implementation deliberately keeps those rows open until they are
+observed and recorded.
+
+## 2026-08-10 implementation evidence
+
+- Added project-scoped logical operation records with fingerprint conflict
+  detection, attempt/retry tracking, terminal status, and purge cleanup. Export
+  records now reuse the same logical ID on explicit retry.
+- Recovery warnings are retained by `EditorSession` and surfaced as an
+  actionable toast instead of being discarded during snapshot recovery.
+- Added generated, checksum-pinned PNG/JPEG, H.264/AAC MP4, WAV, MP3, SRT,
+  WebVTT, invalid, and corrupt fixtures with MIME/duration/dimensions/audio
+  metadata in `packages/test-fixtures/media/`.
+- Added Playwright projects for 1639×1066, 1366×768, and 1024×768 with
+  console/pageerror/request-failure, overflow, and Axe assertions. The login
+  safety smoke passes at all three viewports; it does not impersonate a
+  production identity.
+- Worker ML capability advertisement is now fail-closed on an actually
+  runnable custom command or reviewed RNNoise model. Long-running ML commands
+  are cancellable and the daemon sends independent keepalives and terminal
+  failure reports. Pairing now polls until approval/expiry.
+- Verification on this candidate: `pnpm typecheck`, `pnpm lint`, `pnpm build`,
+  `pnpm audit:prod`, full Vitest (`232 files; 1,722 passed; 2 skipped`), and
+  `pnpm test:e2e` (`3 passed`). The repository-wide Prettier check still reports
+  81 pre-existing files outside this slice; changed files are formatted.
 
 ## Success metric
 

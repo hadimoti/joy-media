@@ -32,7 +32,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/bin/**/*.{mjs,cjs,js}'],
+    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/generate-media-fixtures.mjs'],
     languageOptions: {
       globals: {
         process: 'readonly',

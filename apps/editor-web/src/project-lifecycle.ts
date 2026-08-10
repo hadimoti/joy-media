@@ -9,6 +9,7 @@ import {
 } from './editor-session.js';
 import { loadAudioStateFrom, removeAudioState, saveAudioStateTo } from './audio-session.js';
 import { removeAgentIdempotencyRecords } from './agent-idempotency-store.js';
+import { ProjectOperationLedger } from './project-operation-ledger.js';
 import {
   purgeCatalogProject,
   restoreCatalogProject,
@@ -280,6 +281,7 @@ export function purgeLocalProject(storage: BrowserKeyValueStore, entry: ProjectC
   new BrowserProjectStore(storage, CREATIVE_ARTIFACT_LOG_KEY).deleteProject(entry.id);
   removeAudioState(storage, entry.id);
   removeAgentIdempotencyRecords(storage, entry.id);
+  new ProjectOperationLedger(storage, entry.id).removeAll();
   removeJoyCodeThreads(storage, entry.id);
   purgeCatalogProject(storage, entry.id);
 }

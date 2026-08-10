@@ -10,6 +10,9 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:audit": "playwright test tests/e2e --project=desktop-primary --project=desktop-compact --project=desktop-minimum",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -18,7 +21,9 @@
     "verify:ci": "pnpm check && pnpm build && pnpm audit:prod"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.31.0",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.16.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

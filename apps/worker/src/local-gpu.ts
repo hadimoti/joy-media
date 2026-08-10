@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export interface LocalGpuReceipt {
   readonly kind: 'image.comfy' | 'audio.ml-denoise';
@@ -251,24 +251,28 @@ export async function runAudioMlDenoiseJob(options: LocalGpuRunOptions): Promise
     const inputWav = join(tempDir, 'input.wav');
     const outputWav = join(tempDir, 'output.wav');
     if (options.sourcePath !== undefined) {
-      const convert = spawnSync(
+      const convert = await runCancellableProcess(
         'ffmpeg',
         ['-y', '-i', options.sourcePath, '-ac', '1', '-ar', '48000', inputWav],
-        { encoding: 'utf8' },
+        options.cancelled,
       );
       if (convert.status !== 0 || !existsSync(inputWav))
-        throw new Error(`ffmpeg source→wav failed: ${(convert.stderr || '').slice(0, 200)}`);
+        throw new Error(`ffmpeg source→wav failed: ${convert.stderr.slice(0, 200)}`);
     } else writeNoisyFixtureWav(inputWav);
     await options.progress(25);
     if (options.cancelled()) throw new Error('canceled');
 
     const customCmd = (process.env.JOY_MEDIA_ML_DENOISE_CMD ?? '').trim();
     if (customCmd.length > 0) {
-      const result = spawnSync(customCmd, [inputWav, outputWav], {
-        encoding: 'utf8',
-        shell: true,
-        timeout: Number(process.env.JOY_MEDIA_ML_DENOISE_TIMEOUT_MS ?? 120_000),
-      });
+      const result = await runCancellableProcess(
+        customCmd,
+        [inputWav, outputWav],
+        options.cancelled,
+        {
+          shell: true,
+          timeoutMs: Number(process.env.JOY_MEDIA_ML_DENOISE_TIMEOUT_MS ?? 120_000),
+        },
+      );
       if (result.status !== 0 || !existsSync(outputWav))
         throw new Error(
           `ML denoise command failed: ${(result.stderr || result.stdout || '').slice(0, 300)}`,
@@ -277,13 +281,13 @@ export async function runAudioMlDenoiseJob(options: LocalGpuRunOptions): Promise
       const model =
         process.env.JOY_MEDIA_RNNOISE_MODEL?.trim() || '/opt/joy-media/data/rnnoise/cb.rnnn';
       if (!existsSync(model)) throw new Error(`RNNoise model missing: ${model}`);
-      const result = spawnSync(
+      const result = await runCancellableProcess(
         'ffmpeg',
         ['-y', '-i', inputWav, '-af', `arnndn=m=${model}`, outputWav],
-        { encoding: 'utf8' },
+        options.cancelled,
       );
       if (result.status !== 0 || !existsSync(outputWav))
-        throw new Error(`ffmpeg arnndn failed: ${(result.stderr || '').slice(0, 300)}`);
+        throw new Error(`ffmpeg arnndn failed: ${result.stderr.slice(0, 300)}`);
     }
     await options.progress(85);
     const bytes = readFileSync(outputWav);
@@ -320,4 +324,70 @@ export function readGpuDerivative(
   )
     throw new Error('retained GPU derivative integrity check failed');
   return bytes;
+}
+
+interface CancellableProcessResult {
+  readonly status: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Async subprocess boundary used by long ML work; cancellation never blocks the poll loop. */
+function runCancellableProcess(
+  command: string,
+  args: readonly string[],
+  cancelled: () => boolean,
+  options: { readonly shell?: boolean; readonly timeoutMs?: number } = {},
+): Promise<CancellableProcessResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [...args], {
+      shell: options.shell ?? false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const startedAt = Date.now();
+    const finish = (result: CancellableProcessResult): void => {
+      if (settled) return;
+      settled = true;
+      clearInterval(cancelTimer);
+      clearTimeout(timeoutTimer);
+      resolve(result);
+    };
+    const cancelTimer = setInterval(() => {
+      if (
+        !cancelled() &&
+        (options.timeoutMs === undefined || Date.now() - startedAt < options.timeoutMs)
+      )
+        return;
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (!settled) child.kill('SIGKILL');
+      }, 1_000).unref();
+      finish({ status: 130, stdout, stderr: cancelled() ? 'canceled' : 'process timeout' });
+    }, 250);
+    const timeoutTimer = setTimeout(
+      () => {
+        child.kill('SIGTERM');
+        finish({ status: 124, stdout, stderr: 'process timeout' });
+      },
+      options.timeoutMs ?? 10 * 60_000,
+    );
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', (error) => {
+      if (!settled) {
+        settled = true;
+        clearInterval(cancelTimer);
+        clearTimeout(timeoutTimer);
+        reject(error);
+      }
+    });
+    child.once('close', (status) => finish({ status: status ?? 1, stdout, stderr }));
+  });
 }

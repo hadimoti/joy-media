@@ -267,7 +267,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
         {children}
       </div>
       {locked && step !== 'checking' && (
-        <div className="login-screen">
+        <main className="login-screen">
           <div
             className={`login-card rotating-glow${successGlow ? ' login-success-glow' : ''}${failBuzz ? ' login-fail-buzz' : ''}`}
             onAnimationEnd={() => setFailBuzz(false)}
@@ -321,7 +321,12 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                 onClick={() => switchMethod('gmail')}
                 disabled={step === 'otp'}
               >
-                <img src="/assets/icons-login/gmail-64.png" className="lmethod-icon" alt="Gmail" />
+                <img
+                  src="/assets/icons-login/gmail-64.png"
+                  className="lmethod-icon"
+                  alt=""
+                  aria-hidden="true"
+                />
                 <span>Gmail</span>
               </button>
               <button
@@ -333,7 +338,8 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                 <img
                   src="/assets/icons-login/telegram-64.png"
                   className="lmethod-icon"
-                  alt="Telegram"
+                  alt=""
+                  aria-hidden="true"
                 />
                 <span>Telegram</span>
               </button>
@@ -464,7 +470,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
 
             {error !== undefined && <p className="login-error">{error}</p>}
           </div>
-        </div>
+        </main>
       )}
     </>
   );

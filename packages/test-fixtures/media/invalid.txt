@@ -1,0 +1,1 @@
+This is intentionally unsupported media and must never enter the asset catalog.
