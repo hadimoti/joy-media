@@ -204,7 +204,7 @@ export function PanelShell({
       )}
 
       {note !== undefined && (
-        <p className="joy-panel-note" lang={noteLanguage} aria-live="polite">
+        <p className="joy-panel-note" lang={noteLanguage} role="status" aria-live="polite">
           {note}
         </p>
       )}

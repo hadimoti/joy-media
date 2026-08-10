@@ -2479,7 +2479,7 @@ function EditorWorkspace({
           mimeType: remuxedBlob.type || 'video/mp4',
           totalBytes: remuxedBlob.size,
         };
-        triggerBrowserDownload(exportResult.blob, exportResult.filename);
+        triggerBrowserDownload(remuxedBlob, exportResult.filename);
         session.replaceVisualProject({
           ...session.visualProject,
           exportPreset,
