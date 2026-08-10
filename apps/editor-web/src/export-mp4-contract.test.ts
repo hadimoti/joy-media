@@ -45,6 +45,17 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback.slice(persistPreset, progress)).toContain('exportPreset,');
   });
 
+  it('records callback-time media drift before decode and canvas work', () => {
+    const sourceTime = appSource.indexOf('sourceTimeUs = clock.timeUs');
+    const record = appSource.indexOf('playbackDiagnostics.current.recordFrame(', sourceTime);
+    const suppliedTime = appSource.indexOf('sourceTimeUs,', record);
+
+    expect(sourceTime).toBeGreaterThanOrEqual(0);
+    expect(record).toBeGreaterThan(sourceTime);
+    expect(suppliedTime).toBeGreaterThan(record);
+    expect(appSource.slice(record, record + 240)).not.toContain('clock.timeUs,');
+  });
+
   it('keeps App ownership for authored audio, renderer, timers, and partial output cleanup', () => {
     expect(exportCallback).toContain('activeMixedAudioSource?.stop()');
     expect(exportCallback).toContain('activeAudioContext.close()');
