@@ -6,10 +6,50 @@ export type AssetCollectionId = 'browse' | `category:${string}`;
 export type AssetAvailability = 'all' | BrowserDerivative['availability'] | 'none';
 export type AssetSort = 'recent' | 'name' | 'size' | 'tags';
 export type AssetViewMode = 'large' | 'medium' | 'list';
+export const ASSET_RENDER_PAGE_SIZE = 120;
 
 export interface AssetLibraryItem {
   readonly asset: BrowserAsset;
   readonly derivatives: readonly BrowserDerivative[];
+}
+
+export function importedAssetRevealState(asset: BrowserAsset): {
+  readonly assetSource: 'user';
+  readonly category: AssetCategory;
+  readonly collection: 'browse';
+  readonly query: '';
+  readonly availability: 'all';
+  readonly sort: 'recent';
+  readonly renderLimit: typeof ASSET_RENDER_PAGE_SIZE;
+} {
+  return {
+    assetSource: 'user',
+    category: asset.kind,
+    collection: 'browse',
+    query: '',
+    availability: 'all',
+    sort: 'recent',
+    renderLimit: ASSET_RENDER_PAGE_SIZE,
+  };
+}
+
+export function includeOwnedAsset(
+  items: readonly AssetLibraryItem[],
+  ownedAssetIds: ReadonlySet<string>,
+  asset: BrowserAsset,
+): {
+  readonly items: readonly AssetLibraryItem[];
+  readonly ownedAssetIds: ReadonlySet<string>;
+} {
+  const existing = items.findIndex((item) => item.asset.id === asset.id);
+  const nextItems =
+    existing === -1
+      ? [...items, { asset, derivatives: [] }]
+      : items.map((item, index) => (index === existing ? { ...item, asset } : item));
+  return {
+    items: nextItems,
+    ownedAssetIds: new Set([...ownedAssetIds, asset.id]),
+  };
 }
 
 export interface AssetLibraryCollection {

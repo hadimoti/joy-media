@@ -47,8 +47,52 @@ export interface BrowserExportResult {
   readonly encoded: boolean;
 }
 
-/** Native MP4 profile accepted by Chromium's H.264/AAC MediaRecorder. */
+/** Preferred native MP4 profile for Chromium's H.264/AAC MediaRecorder. */
 export const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+
+/**
+ * MP4 candidates are ordered to preserve authored audio whenever the browser
+ * can advertise it explicitly, then accept the browser's MP4 muxer default,
+ * and only then fall back to an H.264-only declaration. WebM is deliberately
+ * absent because the editor promises an MP4 download.
+ */
+export const BROWSER_MP4_MIME_CANDIDATES = [
+  BROWSER_MP4_MIME_TYPE,
+  'video/mp4',
+  'video/mp4;codecs=avc1.42E01E',
+] as const;
+
+export type BrowserMp4MimeType = (typeof BROWSER_MP4_MIME_CANDIDATES)[number];
+export type BrowserMp4MimeSupport = (mimeType: BrowserMp4MimeType) => boolean;
+
+/** Actionable capability failure raised before browser capture is mutated. */
+export class UnsupportedBrowserMp4Error extends Error {
+  readonly candidates = BROWSER_MP4_MIME_CANDIDATES;
+
+  constructor() {
+    super(
+      `This browser cannot encode an MP4 export. Update to the latest Chrome or use a browser with MediaRecorder MP4 support. Tried: ${BROWSER_MP4_MIME_CANDIDATES.join(', ')}`,
+    );
+    this.name = 'UnsupportedBrowserMp4Error';
+  }
+}
+
+/** Selects the first supported MP4 recorder type in deterministic preference order. */
+export function selectBrowserMp4MimeType(
+  isTypeSupported?: BrowserMp4MimeSupport,
+): BrowserMp4MimeType {
+  const supports =
+    isTypeSupported ??
+    (typeof MediaRecorder === 'undefined'
+      ? undefined
+      : (mimeType: BrowserMp4MimeType) => MediaRecorder.isTypeSupported(mimeType));
+  if (supports !== undefined) {
+    for (const candidate of BROWSER_MP4_MIME_CANDIDATES) {
+      if (supports(candidate)) return candidate;
+    }
+  }
+  throw new UnsupportedBrowserMp4Error();
+}
 
 /**
  * Streaming source for a real browser MP4 export. Keeping rendering lazy is
@@ -66,6 +110,8 @@ export interface BrowserMp4ExportSource {
   readonly canvas?: HTMLCanvasElement;
   /** Authored/program audio supplied by the caller, when available. */
   readonly audioTrack?: MediaStreamTrack;
+  /** MP4 MIME selected by `selectBrowserMp4MimeType`; selected here when omitted. */
+  readonly mimeType?: BrowserMp4MimeType;
   /** Runs immediately after recording starts, for synchronized media starts. */
   readonly onRecordingStart?: () => void;
   readonly filename?: string;
@@ -76,9 +122,9 @@ export interface BrowserMp4ExportSource {
 
 /**
  * Renders frames at the requested cadence into a canvas capture stream and
- * records a downloadable H.264/AAC MP4. The nearly-silent oscillator is
- * deliberate: it keeps a real AAC stream in the container until project
- * audio mixing lands, without inventing audible program audio.
+ * records a downloadable MP4. When the caller has no authored audio, a
+ * nearly-silent oscillator keeps an audio stream available to MP4 muxers
+ * without inventing audible program audio.
  */
 export async function downloadBrowserMp4(
   source: BrowserMp4ExportSource,
@@ -98,58 +144,74 @@ export async function downloadBrowserMp4(
   if (source.paintFrame !== undefined && source.renderFrame !== undefined)
     throw new TypeError('provide either paintFrame or renderFrame, not both');
   if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
-  if (
-    typeof MediaRecorder === 'undefined' ||
-    !MediaRecorder.isTypeSupported(BROWSER_MP4_MIME_TYPE)
-  ) {
-    throw new Error(`H.264/AAC MP4 recording is unavailable (${BROWSER_MP4_MIME_TYPE})`);
-  }
+  const selectedMimeType = source.mimeType ?? selectBrowserMp4MimeType();
 
+  const ownsCanvas = source.canvas === undefined;
   const canvas = source.canvas ?? document.createElement('canvas');
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
   }
-  const context = source.renderFrame === undefined ? undefined : canvas.getContext('2d');
-  if (source.renderFrame !== undefined && context === null)
-    throw new Error('2D canvas is unavailable for browser MP4 export');
-  const stream = canvas.captureStream(frameRate);
-  const videoTrack = stream.getVideoTracks()[0] as
-    (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
-  if (videoTrack === undefined) throw new Error('canvas capture did not produce a video track');
-
-  const fallbackAudio = source.audioTrack === undefined ? new AudioContext() : undefined;
-  const audioDestination = fallbackAudio?.createMediaStreamDestination();
-  const oscillator = fallbackAudio?.createOscillator();
-  const gain = fallbackAudio?.createGain();
-  if (oscillator !== undefined && gain !== undefined && audioDestination !== undefined) {
-    gain.gain.value = 0.00001;
-    oscillator.connect(gain).connect(audioDestination);
-  }
-  const audioTrack = source.audioTrack ?? audioDestination?.stream.getAudioTracks()[0];
-  if (audioTrack === undefined)
-    throw new Error('audio capture did not produce an AAC source track');
-  stream.addTrack(audioTrack);
-
-  const chunks: BlobPart[] = [];
-  const recorder = new MediaRecorder(stream, {
-    mimeType: BROWSER_MP4_MIME_TYPE,
-    videoBitsPerSecond: Math.max(2_000_000, width * height * frameRate),
-    audioBitsPerSecond: 128_000,
-  });
-  const stopped = new Promise<void>((resolve, reject) => {
-    recorder.addEventListener('dataavailable', (event) => chunks.push(event.data));
-    recorder.addEventListener('stop', () => resolve(), { once: true });
-    recorder.addEventListener('error', () => reject(new Error('browser MP4 recorder failed')), {
-      once: true,
-    });
-  });
-
+  let stream: MediaStream | undefined;
+  let videoTrack: (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+  let fallbackAudio: AudioContext | undefined;
+  let fallbackAudioTrack: MediaStreamTrack | undefined;
+  let oscillator: OscillatorNode | undefined;
+  let oscillatorStarted = false;
+  let recorder: MediaRecorder | undefined;
+  let stopped: Promise<void> | undefined;
   const bytesPerFrame = width * height * 4;
   const frameDurationMs = 1_000 / frameRate;
   try {
+    const context = source.renderFrame === undefined ? undefined : canvas.getContext('2d');
+    if (source.renderFrame !== undefined && context === null)
+      throw new Error('2D canvas is unavailable for browser MP4 export');
+    stream = canvas.captureStream(frameRate);
+    videoTrack = stream.getVideoTracks()[0] as
+      (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+    if (videoTrack === undefined) throw new Error('canvas capture did not produce a video track');
+
+    fallbackAudio = source.audioTrack === undefined ? new AudioContext() : undefined;
+    const audioDestination = fallbackAudio?.createMediaStreamDestination();
+    oscillator = fallbackAudio?.createOscillator();
+    const gain = fallbackAudio?.createGain();
+    if (oscillator !== undefined && gain !== undefined && audioDestination !== undefined) {
+      gain.gain.value = 0.00001;
+      oscillator.connect(gain).connect(audioDestination);
+    }
+    fallbackAudioTrack = audioDestination?.stream.getAudioTracks()[0];
+    const audioTrack = source.audioTrack ?? fallbackAudioTrack;
+    if (audioTrack === undefined)
+      throw new Error('audio capture did not produce an AAC source track');
+    stream.addTrack(audioTrack);
+
+    const chunks: BlobPart[] = [];
+    recorder = new MediaRecorder(stream, {
+      mimeType: selectedMimeType,
+      videoBitsPerSecond: Math.max(2_000_000, width * height * frameRate),
+      audioBitsPerSecond: 128_000,
+    });
+    const recorderMimeType = recorder.mimeType || selectedMimeType;
+    if (!recorderMimeType.toLowerCase().startsWith('video/mp4')) {
+      throw new Error(
+        `browser recorder reported a non-MP4 MIME (${recorderMimeType}) for selected MP4 MIME (${selectedMimeType})`,
+      );
+    }
+    stopped = new Promise<void>((resolve, reject) => {
+      recorder!.addEventListener('dataavailable', (event) => chunks.push(event.data));
+      recorder!.addEventListener('stop', () => resolve(), { once: true });
+      recorder!.addEventListener(
+        'error',
+        () => reject(new Error(`browser MP4 recorder failed (${recorderMimeType})`)),
+        { once: true },
+      );
+    });
+
     if (fallbackAudio !== undefined) await fallbackAudio.resume();
-    oscillator?.start();
+    if (oscillator !== undefined) {
+      oscillator.start();
+      oscillatorStarted = true;
+    }
     recorder.start();
     source.onRecordingStart?.();
     let nextFrameAt = performance.now();
@@ -170,36 +232,80 @@ export async function downloadBrowserMp4(
       videoTrack.requestFrame?.();
       source.onProgress?.(index + 1, frameCount);
       nextFrameAt += frameDurationMs;
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, Math.max(0, nextFrameAt - performance.now())),
-      );
+      await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
       if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
     }
     recorder.stop();
     await stopped;
+
+    const blob = new Blob(chunks, { type: recorderMimeType });
+    if (blob.size === 0)
+      throw new Error(`browser MP4 recorder produced an empty file (${recorderMimeType})`);
+    const filename = source.filename ?? `joy-media-export-${Date.now()}.mp4`;
+    triggerBrowserDownload(blob, filename);
+    return {
+      frameCount,
+      totalBytes: blob.size,
+      mimeType: blob.type,
+      filename,
+      blob,
+      encoded: true,
+    };
   } catch (error) {
-    if (recorder.state !== 'inactive') recorder.stop();
-    await stopped.catch(() => undefined);
+    if (recorder !== undefined && recorder.state !== 'inactive') {
+      recorder.stop();
+      await stopped?.catch(() => undefined);
+    }
     throw error;
   } finally {
-    if (oscillator !== undefined && oscillator.context.state !== 'closed') oscillator.stop();
-    videoTrack.stop();
-    if (source.audioTrack === undefined) audioTrack.stop();
-    if (fallbackAudio !== undefined) await fallbackAudio.close();
+    if (oscillatorStarted && oscillator !== undefined && oscillator.context.state !== 'closed') {
+      try {
+        oscillator.stop();
+      } catch {
+        // Continue releasing tracks and the context if the oscillator already ended.
+      }
+    }
+    try {
+      videoTrack?.stop();
+    } catch {
+      // Continue cleanup if the capture implementation already stopped this track.
+    }
+    try {
+      fallbackAudioTrack?.stop();
+    } catch {
+      // Closing the owned AudioContext below remains the final fallback.
+    }
+    if (source.audioTrack !== undefined) {
+      try {
+        stream?.removeTrack(source.audioTrack);
+      } catch {
+        // The caller still owns and releases its authored track.
+      }
+    }
+    if (fallbackAudio !== undefined && fallbackAudio.state !== 'closed')
+      await fallbackAudio.close().catch(() => undefined);
+    if (ownsCanvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
+}
 
-  const blob = new Blob(chunks, { type: BROWSER_MP4_MIME_TYPE });
-  if (blob.size === 0) throw new Error('browser MP4 recorder produced an empty file');
-  const filename = source.filename ?? `joy-media-export-${Date.now()}.mp4`;
-  triggerBrowserDownload(blob, filename);
-  return {
-    frameCount,
-    totalBytes: blob.size,
-    mimeType: blob.type,
-    filename,
-    blob,
-    encoded: true,
-  };
+function waitForBrowserExportFrame(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Export cancelled', 'AbortError'));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new DOMException('Export cancelled', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 /**

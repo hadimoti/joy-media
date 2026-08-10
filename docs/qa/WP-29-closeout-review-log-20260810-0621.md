@@ -127,3 +127,56 @@ The STEP-02 seam is capability negotiation at the browser-export MIME/MediaRecor
 Security: evidence is named by basename only, with no paths, URLs, contacts, IDs, tokens, or private references. Local projects were purged, browsers were closed, and no production mutation occurred. Remaining later gates are Worker, playback, and 37 cases.
 
 Next step: NOT STARTED
+
+## STEP-02 — Export repair
+
+## STEP-02 report
+
+- Status: READY-FOR-REVIEW
+- Starting commit: `732af0b95b66176719e40c35ca526f5b8d6f917e`
+- Result commit: this STEP-02 commit
+- Branch: `codex/wp29-closeout-20260810-0621`
+- Files changed:
+  - `apps/editor-web/src/App.tsx`
+  - `apps/editor-web/src/AssetLibraryPanel.tsx`
+  - `apps/editor-web/src/asset-library-state.ts`
+  - `apps/editor-web/src/asset-library-state.test.ts`
+  - `apps/editor-web/src/asset-library-panel-contract.test.ts`
+  - `apps/editor-web/src/export-history.ts`
+  - `apps/editor-web/src/export-history.test.ts`
+  - `apps/editor-web/src/export-preload.ts`
+  - `apps/editor-web/src/export-preload.test.ts`
+  - `apps/editor-web/src/export-mp4-contract.test.ts`
+  - `packages/renderer-pixi/src/browser-export.ts`
+  - `packages/renderer-pixi/src/browser-export.test.ts`
+  - `docs/qa/WP-29-step-02-export-repair-20260810-0621.md`
+  - `docs/qa/WP-29-closeout-review-log-20260810-0621.md`
+  - `docs/qa/gpt-chrome-usage-audit-20260810-wp29.md`
+- Behavior implemented: browser MP4 MIME selection now prefers exact H.264/AAC,
+  then generic MP4, then H.264-only MP4; recorder-reported MIME is retained.
+  Successful imports are revealed immediately, export preload stages are bounded
+  and abort-aware, and export-preset persistence occurs only after the browser
+  download succeeds so project rerenders cannot revoke resolver URLs mid-export.
+- Defects found/fixed: exact combined MIME was unavailable in the VPS Chrome;
+  imported assets could remain hidden in a large catalog; an early
+  `replaceVisualProject` call cleared the project media resolver and revoked the
+  authored-audio Blob URL during preload.
+- Tests run and exact outcomes: 24 focused export/preload/history/renderer tests
+  passed; renderer and editor builds passed; the editor production build passed
+  with 1277 transformed modules; scoped formatting and `git diff --check` passed.
+- Browser/VPS evidence paths: sanitized basenames
+  `wp29-step02-1080x1920-run-1-1786358706184-sanitized.json`,
+  `wp29-step02-1080x1920-run-1-1786358746353-sanitized.json`, and
+  `wp29-step02-1080x1920-run-1-1786358786631-sanitized.json`.
+- Console/network observations: three consecutive fresh-state 1080x1920 runs
+  emitted genuine downloads within the reference timeout. Same-server
+  duplicate-card strict-locator blocks are excluded as harness contamination.
+- Security/privacy checks: evidence uses basenames only; no secrets, contacts,
+  private references, or absolute paths enter the repository.
+- Rollback or recovery note: revert this STEP-02 commit; production was not
+  changed.
+- Deviations from the step: independent FFprobe and authored-audio validation are
+  intentionally deferred to STEP-03.
+- Remaining risk inside this step: no open STEP-02 blocker.
+- Worktree status: clean after commit
+- Next step: NOT STARTED

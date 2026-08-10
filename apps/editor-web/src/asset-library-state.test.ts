@@ -1,11 +1,83 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASSET_RENDER_PAGE_SIZE,
   assetCollectionId,
   assetCollectionsForCategory,
   filterAssetLibrary,
+  includeOwnedAsset,
+  importedAssetRevealState,
   preferredDerivative,
   type AssetLibraryItem,
 } from './asset-library-state.js';
+
+describe('includeOwnedAsset', () => {
+  const imported = {
+    id: 'imported-1',
+    projectId: 'project-1',
+    kind: 'video' as const,
+    displayName: 'fixture.mp4',
+    sha256: 'f'.repeat(64),
+    bytes: 42,
+    descriptor: { mimeType: 'video/mp4' },
+    createdAt: 30,
+    cloudBacked: true,
+  };
+
+  it('includes a successful import in the user catalog immediately', () => {
+    const result = includeOwnedAsset([], new Set(), imported);
+    expect(result.ownedAssetIds.has(imported.id)).toBe(true);
+    expect(result.items).toEqual([{ asset: imported, derivatives: [] }]);
+  });
+
+  it('preserves refreshed ownership while replacing the optimistic asset', () => {
+    const immediate = includeOwnedAsset([], new Set(), { ...imported, tags: [] });
+    const refreshed = includeOwnedAsset(immediate.items, immediate.ownedAssetIds, {
+      ...imported,
+      tags: ['category-clips'],
+    });
+    expect(refreshed.ownedAssetIds.has(imported.id)).toBe(true);
+    expect(refreshed.items).toHaveLength(1);
+    expect(refreshed.items[0]?.asset.tags).toEqual(['category-clips']);
+  });
+
+  it('reveals an actionable import on the first page despite earlier alphabetical pages', () => {
+    const earlier = Array.from({ length: ASSET_RENDER_PAGE_SIZE + 1 }, (_, index) => ({
+      asset: {
+        ...imported,
+        id: `earlier-${index}`,
+        displayName: `A ${String(index).padStart(3, '0')}.mp4`,
+        createdAt: index,
+      },
+      derivatives: [],
+    }));
+    const included = includeOwnedAsset(earlier, new Set(earlier.map(({ asset }) => asset.id)), {
+      ...imported,
+      displayName: 'Z imported.mp4',
+      createdAt: ASSET_RENDER_PAGE_SIZE + 2,
+    });
+    const reveal = importedAssetRevealState(imported);
+    const rendered = filterAssetLibrary(
+      included.items.filter(({ asset }) => included.ownedAssetIds.has(asset.id)),
+      reveal.category,
+      reveal.collection,
+      reveal.query,
+      reveal.availability,
+      reveal.sort,
+    ).slice(0, reveal.renderLimit);
+
+    expect(reveal).toEqual({
+      assetSource: 'user',
+      category: 'video',
+      collection: 'browse',
+      query: '',
+      availability: 'all',
+      sort: 'recent',
+      renderLimit: ASSET_RENDER_PAGE_SIZE,
+    });
+    expect(included.ownedAssetIds.has(imported.id)).toBe(true);
+    expect(rendered[0]?.asset.id).toBe(imported.id);
+  });
+});
 
 const items: readonly AssetLibraryItem[] = [
   {

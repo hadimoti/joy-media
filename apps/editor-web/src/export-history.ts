@@ -10,6 +10,7 @@ export interface ExportProcessEntry {
   readonly status: 'running' | 'completed' | 'failed' | 'interrupted-retryable';
   readonly startedAt: string;
   readonly finishedAt?: string;
+  readonly mimeType?: string;
   readonly totalBytes?: number;
   readonly frameCount?: number;
   readonly error?: string;
@@ -61,7 +62,8 @@ function isEntry(value: unknown): value is ExportProcessEntry {
       entry.status === 'completed' ||
       entry.status === 'failed' ||
       entry.status === 'interrupted-retryable') &&
-    typeof entry.startedAt === 'string'
+    typeof entry.startedAt === 'string' &&
+    (entry.mimeType === undefined || typeof entry.mimeType === 'string')
   );
 }
 

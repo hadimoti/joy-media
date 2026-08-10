@@ -91,10 +91,10 @@ These are intentionally **NOT-RUN / OPEN**, not failures hidden by this report:
 - Worker result insertion into the selected project after approval, including
   one-job/one-result behavior on cancel/retry/reload.
 - Browser-level MP4 verification with ffprobe for codec, dimensions, duration,
-  and authored audio; a real Chrome attempt reached encoding but timed out
-  without a download because repeated 1080×1920 GPU `ReadPixels` stalls blocked
-  the recorder. Node-side FFprobe verification is green; browser proof remains
-  an explicit performance/product blocker.
+  and authored audio. Node-side FFprobe verification is green. Browser export
+  capability restored via MIME fallback exact then generic MP4 then H264-only,
+  actual MIME history, import reveal, abort-aware preload, and moving exportPreset
+  persistence after successful download to prevent resolver blob revocation.
 - Controlled playback performance runs using `requestVideoFrameCallback`
   metadata on the named Chrome/GPU host.
 

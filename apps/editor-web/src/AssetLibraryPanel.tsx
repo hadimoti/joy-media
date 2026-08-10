@@ -11,7 +11,10 @@ import {
   assetCollectionId,
   assetCollectionLabel,
   assetCollectionsForCategory,
+  ASSET_RENDER_PAGE_SIZE,
   filterAssetLibrary,
+  includeOwnedAsset,
+  importedAssetRevealState,
   preferredDerivative,
   type AssetAvailability,
   type AssetCategory,
@@ -46,7 +49,6 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 
-const ASSET_RENDER_PAGE_SIZE = 120;
 type AssetSource = 'cloud' | 'user';
 
 const categories: readonly {
@@ -319,7 +321,7 @@ export function AssetLibraryPanel({
       return;
     }
     try {
-      await importMediaFile({
+      const imported = await importMediaFile({
         projectId,
         projectTitle,
         file: selectedFile,
@@ -330,6 +332,16 @@ export function AssetLibraryPanel({
           setStatus(progressMessage);
         },
       });
+      setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
+      setOwnedAssetIds((current) => includeOwnedAsset([], current, imported).ownedAssetIds);
+      const reveal = importedAssetRevealState(imported);
+      setAssetSource(reveal.assetSource);
+      setCategory(reveal.category);
+      setCollection(reveal.collection);
+      setQuery(reveal.query);
+      setAvailability(reveal.availability);
+      setSort(reveal.sort);
+      setRenderLimit(reveal.renderLimit);
       setStatus(
         `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
       );

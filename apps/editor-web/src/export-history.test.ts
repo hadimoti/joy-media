@@ -20,6 +20,7 @@ const entry = (id: string, status: ExportProcessEntry['status']): ExportProcessE
   filename: `${id}.mp4`,
   status,
   startedAt: '2026-07-23T00:00:00.000Z',
+  mimeType: 'video/mp4',
 });
 
 describe('export history', () => {
@@ -36,6 +37,22 @@ describe('export history', () => {
     entries = upsertEntry(entries, { ...entry('a', 'completed'), totalBytes: 9 });
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ id: 'a', status: 'completed', totalBytes: 9 });
+  });
+
+  it('persists selected and recorder-reported MP4 MIME metadata for every status', () => {
+    const storage = memoryStorage();
+    saveExportHistory(storage, [
+      entry('running', 'running'),
+      { ...entry('completed', 'completed'), mimeType: 'video/mp4;codecs=avc1.640028,mp4a.40.2' },
+      { ...entry('failed', 'failed'), mimeType: 'video/mp4;codecs=avc1.42E01E' },
+    ]);
+    expect(
+      loadExportHistory(storage).map(({ status, mimeType }) => ({ status, mimeType })),
+    ).toEqual([
+      { status: 'interrupted-retryable', mimeType: 'video/mp4' },
+      { status: 'completed', mimeType: 'video/mp4;codecs=avc1.640028,mp4a.40.2' },
+      { status: 'failed', mimeType: 'video/mp4;codecs=avc1.42E01E' },
+    ]);
   });
 
   it('marks stale running entries as retryable on load', () => {
