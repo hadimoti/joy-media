@@ -83,6 +83,9 @@ silently reported as a pass.
 - Database backup: `/opt/joy-media/data/backups/joymedia-pre-ccdb031-20260810T052857Z.sql.gz`.
 - Post-cutover local health, public index hash parity, and `nginx -t` passed;
   authenticated API health remains protected as expected.
+- GBrain pages `joy-media-state` and
+  `joy-media-wp29-first-project-golden-path` were refreshed and verified;
+  the companion `hadimoti/gbrain` commit is `760972a`.
 
 ## Safety and deployment
 
