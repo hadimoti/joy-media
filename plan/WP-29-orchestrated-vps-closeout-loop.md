@@ -1,10 +1,10 @@
 # WP-29 — Orchestrated VPS Closeout Loop
 
-**Status:** Ready to execute  
-**Parent:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)  
-**Execution model:** Codex orchestrator reviews; one persistent Codex agent on the Sweden VPS implements  
-**Repository:** `/opt/joy-media/repo`  
-**Live application:** [https://joyst.ir/](https://joyst.ir/)  
+**Status:** Ready to execute
+**Parent:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
+**Execution model:** Codex orchestrator reviews; one persistent Codex agent on the Sweden VPS implements
+**Repository:** `/opt/joy-media/repo`
+**Live application:** [https://joyst.ir/](https://joyst.ir/)
 **Target:** close every remaining WP-29 gate through a review-controlled loop without skipping evidence
 
 ## 1. Outcome
