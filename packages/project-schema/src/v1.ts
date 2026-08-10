@@ -308,8 +308,19 @@ export interface AssetRecordV1 {
   readonly id: string;
   readonly kind: 'video' | 'audio' | 'image' | 'other';
   readonly displayName: string;
+  /** Safe integrity metadata copied from the owner catalog when available. */
+  readonly sha256?: string;
+  readonly bytes?: number;
+  readonly descriptor?: AssetDescriptorV1;
   /** Reproducibility record for provider/Worker-generated media. */
   readonly generationProvenance?: GenerationProvenanceV1;
+}
+
+export interface AssetDescriptorV1 {
+  readonly mimeType: string;
+  readonly durationUs?: number;
+  readonly width?: number;
+  readonly height?: number;
 }
 
 export interface GenerationProvenanceV1 {
@@ -522,6 +533,48 @@ function validateAsset(
       ),
     );
     return;
+  }
+  if (value.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(String(value.sha256))) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_ASSET_METADATA',
+        'asset sha256 must be lowercase hex',
+        `${path}.sha256`,
+      ),
+    );
+  }
+  if (
+    value.bytes !== undefined &&
+    (!Number.isSafeInteger(value.bytes) || Number(value.bytes) < 1)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_ASSET_METADATA',
+        'asset bytes must be a positive integer',
+        `${path}.bytes`,
+      ),
+    );
+  }
+  if (value.descriptor !== undefined) {
+    const descriptor = value.descriptor;
+    if (
+      !isRecord(descriptor) ||
+      !isNonEmptyString(descriptor.mimeType) ||
+      (descriptor.durationUs !== undefined &&
+        (!Number.isSafeInteger(descriptor.durationUs) || Number(descriptor.durationUs) <= 0)) ||
+      (descriptor.width !== undefined &&
+        (!Number.isSafeInteger(descriptor.width) || Number(descriptor.width) <= 0)) ||
+      (descriptor.height !== undefined &&
+        (!Number.isSafeInteger(descriptor.height) || Number(descriptor.height) <= 0))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_ASSET_METADATA',
+          'asset descriptor metadata is invalid',
+          `${path}.descriptor`,
+        ),
+      );
+    }
   }
   if (value.generationProvenance === undefined) return;
   const provenance = value.generationProvenance;

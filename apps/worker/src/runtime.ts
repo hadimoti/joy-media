@@ -269,6 +269,7 @@ export class WorkerRuntime {
         readonly model?: string;
         readonly negativePrompt?: string;
         readonly imageAssetId?: string;
+        readonly fixture?: boolean;
         readonly params?: Record<string, unknown>;
       };
     },
@@ -319,6 +320,10 @@ export class WorkerRuntime {
       try {
         const sourcePath =
           job.assetId === undefined ? undefined : this.options.sources?.resolve(job.assetId);
+        if (job.assetId !== undefined && sourcePath === undefined)
+          throw new Error(`local source unavailable for asset ${job.assetId}`);
+        if (job.assetId === undefined && job.payload?.fixture !== true)
+          throw new Error('audio.ml-denoise requires a selected local asset');
         const result = await runAudioMlDenoiseJob({
           jobId: job.id,
           ...(job.assetId === undefined ? {} : { assetId: job.assetId }),

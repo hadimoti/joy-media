@@ -74,6 +74,7 @@ export function AssetLibraryPanel({
   projectId,
   projectTitle = 'Editor project',
   onAddSticker: _onAddSticker,
+  onAddToTimeline,
   onEditWithAi,
 }: {
   readonly projectId: string;
@@ -82,6 +83,12 @@ export function AssetLibraryPanel({
     readonly assetId: string;
     readonly displayName?: string;
     readonly blob?: Blob;
+  }) => void;
+  readonly onAddToTimeline?: (asset: {
+    readonly assetId: string;
+    readonly kind: 'image' | 'video' | 'audio';
+    readonly displayName: string;
+    readonly descriptor: BrowserAsset['descriptor'];
   }) => void;
   /** Attach image/video to KiloCode for further editing automations. */
   readonly onEditWithAi?: (asset: {
@@ -121,7 +128,6 @@ export function AssetLibraryPanel({
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
-  const [assetId, setAssetId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [assetSource, setAssetSource] = useState<AssetSource>('cloud');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -130,8 +136,7 @@ export function AssetLibraryPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
-  const canImport =
-    selectedFile !== undefined && assetId.trim().length > 0 && importProgress === undefined;
+  const canImport = selectedFile !== undefined && importProgress === undefined;
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -245,7 +250,7 @@ export function AssetLibraryPanel({
       const root = toolbarRef.current;
       if (root === null || root.contains(event.target as Node)) return;
       setFilterOpen(false);
-      if (selectedFile === undefined && assetId.trim().length === 0) setImportOpen(false);
+      if (selectedFile === undefined) setImportOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -258,7 +263,7 @@ export function AssetLibraryPanel({
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [filterOpen, importOpen, selectedFile, assetId]);
+  }, [filterOpen, importOpen, selectedFile]);
 
   const editWithAi = useCallback(
     (asset: BrowserAsset) => {
@@ -313,17 +318,11 @@ export function AssetLibraryPanel({
       setStatus('Choose a media file to register.');
       return;
     }
-    const normalizedId = assetId.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(normalizedId)) {
-      setStatus('Asset ID may only contain Latin letters, digits, dots, underscores, or hyphens.');
-      return;
-    }
     try {
       await importMediaFile({
         projectId,
         projectTitle,
         file: selectedFile,
-        assetId: normalizedId,
         client,
         originalAssetCache,
         onProgress: ({ ratio, message: progressMessage }) => {
@@ -336,7 +335,6 @@ export function AssetLibraryPanel({
       );
       setImportProgress(1);
       setSelectedFile(undefined);
-      setAssetId('');
       if (fileInputRef.current !== null) fileInputRef.current.value = '';
       setImportOpen(false);
       await refresh();
@@ -345,7 +343,7 @@ export function AssetLibraryPanel({
       setImportProgress(undefined);
       setStatus(`Failed to register media: ${message(error)}`);
     }
-  }, [assetId, client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
+  }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
   const fetchCloudOriginal = useCallback(
     (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
     [client, cloudPreviewQueue],
@@ -750,8 +748,8 @@ export function AssetLibraryPanel({
                 </button>
               </div>
               <p className="asset-import-hint">
-                The file is hashed and stored in this browser. Use an opaque Asset ID aligned with
-                the Worker; paths stay local.
+                The file is verified, stored in this browser, and backed up to private cloud
+                storage. JOY generates the opaque asset ID automatically.
               </p>
               <div className="asset-import-row">
                 <input
@@ -777,14 +775,6 @@ export function AssetLibraryPanel({
                 <span className="asset-import-file" title={selectedFile?.name}>
                   {selectedFile?.name ?? 'Choose file'}
                 </span>
-                <input
-                  className="asset-import-id"
-                  value={assetId}
-                  onChange={(event) => setAssetId(event.target.value)}
-                  placeholder="Asset ID"
-                  aria-label="Asset ID"
-                  disabled={importProgress !== undefined}
-                />
                 <button
                   type="button"
                   className="icon-button"
@@ -1017,6 +1007,7 @@ export function AssetLibraryPanel({
                             assetId: asset.id,
                             kind: asset.kind,
                             displayName: asset.displayName,
+                            descriptor: asset.descriptor,
                           }),
                         );
                         event.dataTransfer.effectAllowed = 'copy';
@@ -1075,6 +1066,26 @@ export function AssetLibraryPanel({
                             originalCachePromise={originalAssetCache}
                             onShare={() => void shareToCloud(asset)}
                           />
+                        )}
+                        {onAddToTimeline !== undefined && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Add ${asset.displayName} to timeline`}
+                            title="Add to timeline"
+                            data-guide="Add to timeline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAddToTimeline({
+                                assetId: asset.id,
+                                kind: asset.kind,
+                                displayName: asset.displayName,
+                                descriptor: asset.descriptor,
+                              });
+                            }}
+                          >
+                            <PlusIcon />
+                          </button>
                         )}
                         {assetSource === 'user' &&
                           !cloudBacked &&

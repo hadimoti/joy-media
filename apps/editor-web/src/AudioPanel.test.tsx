@@ -12,10 +12,10 @@ describe('AudioPanel Studio surface', () => {
     expect(markup.indexOf('Local Worker')).toBeLessThan(markup.indexOf('Choose a workflow'));
     expect(markup.indexOf('Choose a workflow')).toBeLessThan(markup.indexOf('Podcast Quality'));
     expect(markup.indexOf('Podcast Quality')).toBeLessThan(markup.indexOf('Run locally'));
-    expect(markup).toContain('Local Worker</strong><span>Pairing</span>');
-    expect(markup).toContain('Cloud Brain</strong><span>Online</span>');
-    expect(markup).toContain('Pair local worker to run');
-    expect(markup).toContain('title="Pair local worker to run"');
+    expect(markup).toContain('Local Worker</strong><span>Disconnected</span>');
+    expect(markup).toContain('Cloud Brain</strong><span>Unavailable</span>');
+    expect(markup).toContain('Place clips to run');
+    expect(markup).toContain('title="Place clips to run"');
     expect(markup).toContain('aria-describedby="audio-podcast-quality-run-readiness"');
     expect(markup).toContain('disabled=""');
     expect(markup).not.toContain('audio-readiness');

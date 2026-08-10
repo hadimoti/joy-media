@@ -9,6 +9,8 @@
 export interface MixerClipSource {
   readonly clipId: string;
   readonly samples: Float32Array;
+  /** Composition-relative placement. Omitted means the clip starts at zero. */
+  readonly startUs?: number;
 }
 
 function applyFade(
@@ -84,13 +86,11 @@ export function buildMixerBuffer(
     const config = clips[source.clipId];
     if (config === undefined || config.mute) continue;
     if (anySolo && config.solo !== true) continue;
-    let clipBuffer = source.samples;
-    if (clipBuffer.length !== totalSamples) {
-      const padded = new Float32Array(totalSamples);
-      const copyLength = Math.min(clipBuffer.length, totalSamples);
-      for (let i = 0; i < copyLength; i++) padded[i] = clipBuffer[i]!;
-      clipBuffer = padded;
-    }
+    const startSample = Math.max(0, Math.floor(((source.startUs ?? 0) * sampleRate) / 1_000_000));
+    const available = Math.max(0, totalSamples - startSample);
+    let clipBuffer: Float32Array<ArrayBufferLike> = new Float32Array(totalSamples);
+    const copyLength = Math.min(source.samples.length, available);
+    for (let i = 0; i < copyLength; i++) clipBuffer[startSample + i] = source.samples[i]!;
     clipBuffer = applyFade(clipBuffer, config.fadeInUs ?? 0, config.fadeOutUs ?? 0, sampleRate);
     clipBuffer = applyGain(clipBuffer, config.gain);
     const target = busBuffers.get(buses[0]?.id ?? 'master');

@@ -167,7 +167,11 @@ describe('Worker runtime', () => {
     );
   });
 
-  it('runs audio.ml-denoise via ffmpeg arnndn when locally enabled', async () => {
+  it.runIf(
+    existsSync(
+      process.env.JOY_MEDIA_RNNOISE_MODEL?.trim() || '/opt/joy-media/data/rnnoise/cb.rnnn',
+    ),
+  )('runs audio.ml-denoise via ffmpeg arnndn when the licensed model is provisioned', async () => {
     const previous = process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
     const previousModel = process.env.JOY_MEDIA_RNNOISE_MODEL;
     process.env.JOY_MEDIA_LOCAL_ML_DENOISE = '1';
@@ -180,7 +184,7 @@ describe('Worker runtime', () => {
     );
     try {
       const result = await runtime.run(
-        { id: 'job-ml', type: 'audio.ml-denoise' },
+        { id: 'job-ml', type: 'audio.ml-denoise', payload: { fixture: true } },
         { cancelled: () => false, progress: async () => undefined },
       );
       expect(result.state).toBe('completed');
@@ -195,6 +199,19 @@ describe('Worker runtime', () => {
       if (previousModel === undefined) delete process.env.JOY_MEDIA_RNNOISE_MODEL;
       else process.env.JOY_MEDIA_RNNOISE_MODEL = previousModel;
     }
+  });
+
+  it('fails closed instead of synthesizing audio when a selected source is unavailable', async () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-audio-source', createdAt: '2026-07-24T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiProviders: [] },
+    );
+    await expect(
+      runtime.run(
+        { id: 'job-missing-source', type: 'audio.ml-denoise', assetId: 'asset-private' },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toThrow('local source unavailable');
   });
 
   it('advertises GPU capabilities only when local env is set', () => {

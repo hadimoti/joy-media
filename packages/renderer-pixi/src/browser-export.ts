@@ -70,6 +70,8 @@ export interface BrowserMp4ExportSource {
   readonly onRecordingStart?: () => void;
   readonly filename?: string;
   readonly onProgress?: (completedFrames: number, totalFrames: number) => void;
+  /** Cancels the realtime recorder and releases all media resources. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -95,6 +97,7 @@ export async function downloadBrowserMp4(
     throw new TypeError('paintFrame or renderFrame is required for browser MP4 export');
   if (source.paintFrame !== undefined && source.renderFrame !== undefined)
     throw new TypeError('provide either paintFrame or renderFrame, not both');
+  if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
   if (
     typeof MediaRecorder === 'undefined' ||
     !MediaRecorder.isTypeSupported(BROWSER_MP4_MIME_TYPE)
@@ -151,6 +154,7 @@ export async function downloadBrowserMp4(
     source.onRecordingStart?.();
     let nextFrameAt = performance.now();
     for (let index = 0; index < frameCount; index++) {
+      if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (source.paintFrame !== undefined) await source.paintFrame(index);
       else {
         const frame = await source.renderFrame!(index);
@@ -169,6 +173,7 @@ export async function downloadBrowserMp4(
       await new Promise<void>((resolve) =>
         setTimeout(resolve, Math.max(0, nextFrameAt - performance.now())),
       );
+      if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
     }
     recorder.stop();
     await stopped;

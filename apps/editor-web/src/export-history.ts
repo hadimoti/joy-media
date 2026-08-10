@@ -1,14 +1,13 @@
 /**
  * Session export history for the header processes menu. Metadata persists in
- * localStorage; only the most recent export's bytes are retained in memory
- * (as an object URL owned by the App) so re-download stays possible without
- * unbounded blob growth.
+ * localStorage; completed bytes are staged in the bounded OPFS export cache and
+ * exposed through an object URL only while the workspace is open.
  */
 
 export interface ExportProcessEntry {
   readonly id: string;
   readonly filename: string;
-  readonly status: 'running' | 'completed' | 'failed';
+  readonly status: 'running' | 'completed' | 'failed' | 'interrupted-retryable';
   readonly startedAt: string;
   readonly finishedAt?: string;
   readonly totalBytes?: number;
@@ -58,7 +57,10 @@ function isEntry(value: unknown): value is ExportProcessEntry {
   return (
     typeof entry.id === 'string' &&
     typeof entry.filename === 'string' &&
-    (entry.status === 'running' || entry.status === 'completed' || entry.status === 'failed') &&
+    (entry.status === 'running' ||
+      entry.status === 'completed' ||
+      entry.status === 'failed' ||
+      entry.status === 'interrupted-retryable') &&
     typeof entry.startedAt === 'string'
   );
 }
@@ -66,5 +68,5 @@ function isEntry(value: unknown): value is ExportProcessEntry {
 /** An entry still 'running' from a previous page load can never finish. */
 function normalizeInterrupted(entry: ExportProcessEntry): ExportProcessEntry {
   if (entry.status !== 'running') return entry;
-  return { ...entry, status: 'failed', error: 'interrupted by page reload' };
+  return { ...entry, status: 'interrupted-retryable', error: 'interrupted by page reload' };
 }

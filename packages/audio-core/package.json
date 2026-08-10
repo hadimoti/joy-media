@@ -22,6 +22,10 @@
     "./effects": {
       "types": "./dist/effects.d.ts",
       "default": "./dist/effects.js"
+    },
+    "./offline": {
+      "types": "./dist/offline.d.ts",
+      "default": "./dist/offline.js"
     }
   },
   "scripts": {

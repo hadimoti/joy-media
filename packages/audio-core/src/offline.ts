@@ -122,9 +122,11 @@ export function renderOfflineAudio(
   for (const bus of buses) {
     busBuffers.set(bus.id, new Float32Array(totalSamples));
   }
+  const anySolo = clips.some((clip) => clip.config.solo);
 
   for (const clip of clips) {
     if (clip.config.mute) continue;
+    if (anySolo && !clip.config.solo) continue;
 
     const clipOffsetUs = clip.startUs - config.startUs;
     if (clipOffsetUs < 0 || clipOffsetUs >= durationUs) continue;

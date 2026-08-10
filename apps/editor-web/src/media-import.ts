@@ -180,7 +180,7 @@ async function describeImage(file: File, mimeType: string): Promise<BrowserMedia
       bitmap.close();
     }
   } catch {
-    return { mimeType };
+    throw new Error(`unable to decode ${file.name} as ${mimeType}`);
   }
 }
 
@@ -211,6 +211,7 @@ async function describeTimedMedia(
     const durationUs = Math.round(element.duration * 1_000_000);
     const duration =
       Number.isSafeInteger(durationUs) && durationUs > 0 ? { durationUs } : undefined;
+    if (duration === undefined) throw new Error('metadata duration is unavailable');
     if (kind === 'video') {
       const video = element as HTMLVideoElement;
       return {
@@ -221,8 +222,10 @@ async function describeTimedMedia(
       };
     }
     return { mimeType: normalizedMimeType(file), ...duration };
-  } catch {
-    return { mimeType: normalizedMimeType(file) };
+  } catch (error) {
+    throw new Error(
+      `unable to read ${file.name} metadata: ${error instanceof Error ? error.message : String(error)}`,
+    );
   } finally {
     element.onloadedmetadata = null;
     element.onerror = null;

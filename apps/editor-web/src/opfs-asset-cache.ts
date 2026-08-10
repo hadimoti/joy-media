@@ -23,6 +23,8 @@ export interface OpfsDirectoryHandle {
   ): Promise<OpfsDirectoryHandle>;
   getFileHandle(name: string, options?: { readonly create?: boolean }): Promise<OpfsFileHandle>;
   removeEntry(name: string): Promise<void>;
+  /** Chromium exposes this on FileSystemDirectoryHandle; optional for tests. */
+  entries?(): AsyncIterableIterator<[string, OpfsFileHandle]>;
 }
 
 export interface ObjectUrlApi {

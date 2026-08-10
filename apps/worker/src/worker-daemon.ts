@@ -18,13 +18,23 @@ export class WorkerDaemon {
       this.runtime.hello(process.platform, process.arch).capabilities,
       this.runtime.localAssetIds(),
     );
+    let lastHelloAt = Date.now();
+    let leasedJobId: string | undefined;
     while (!options.stopped()) {
       try {
+        if (Date.now() - lastHelloAt >= 15_000) {
+          await this.client.hello(
+            this.runtime.hello(process.platform, process.arch).capabilities,
+            this.runtime.localAssetIds(),
+          );
+          lastHelloAt = Date.now();
+        }
         const job = await this.client.lease();
         if (job === undefined) {
           await sleep(pollIntervalMs);
           continue;
         }
+        leasedJobId = job.id;
         let cancelRequested = false;
         const result = await this.runtime.run(job, {
           cancelled: () => options.stopped() || cancelRequested,
@@ -34,9 +44,12 @@ export class WorkerDaemon {
           },
         });
         if (result.state === 'completed') {
-          // Cloud derivative upload remains thumbnail-only (requires job.assetId).
-          // GPU receipts complete with a verified localRef; no VPS private-object upload.
-          if (result.result.kind === 'asset.thumbnail') {
+          // Upload verified bytes for browser-consumable derivatives. Fixture and
+          // provider receipts remain Worker-local until their own contracts land.
+          if (
+            result.result.kind === 'asset.thumbnail' ||
+            result.result.kind === 'audio.ml-denoise'
+          ) {
             await this.client.uploadDerivative(
               job.id,
               result.result,
@@ -45,8 +58,22 @@ export class WorkerDaemon {
           }
           await this.client.complete(job.id, result.result);
         } else await this.client.fail(job.id, 'canceled');
+        leasedJobId = undefined;
       } catch (error) {
-        this.runtime.log.write(`control-plane ${error instanceof Error ? error.message : 'error'}`);
+        const message = error instanceof Error ? error.message : 'unknown Worker failure';
+        this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);
+        if (leasedJobId !== undefined) {
+          try {
+            await this.client.fail(leasedJobId, message.slice(0, 240));
+          } catch (failError) {
+            this.runtime.log.write(
+              `Unable to mark ${leasedJobId} failed: ${
+                failError instanceof Error ? failError.message : 'unknown error'
+              }`,
+            );
+          }
+          leasedJobId = undefined;
+        }
         await sleep(pollIntervalMs);
       }
     }

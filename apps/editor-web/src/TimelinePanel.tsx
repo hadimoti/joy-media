@@ -411,6 +411,15 @@ function TimelineClip({
 
 export const JOY_MEDIA_ASSET_DND = 'application/x-joy-media-asset';
 
+function safeAssetDuration(asset: {
+  readonly descriptor?: { readonly durationUs?: number };
+}): number {
+  const durationUs = asset.descriptor?.durationUs;
+  return durationUs !== undefined && Number.isSafeInteger(durationUs) && durationUs > 0
+    ? durationUs
+    : 5_000_000;
+}
+
 export function TimelinePanel({
   project,
   playheadUs,
@@ -438,6 +447,8 @@ export function TimelinePanel({
   onDispatchArtifacts,
   onOpenAssetLibrary,
   onImportMedia,
+  onImportFiles,
+  onMediaPlaced,
   showToast,
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
@@ -486,6 +497,8 @@ export function TimelinePanel({
   readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
   readonly onOpenAssetLibrary?: () => void;
   readonly onImportMedia?: (file: File) => Promise<TimelineMediaAsset>;
+  readonly onImportFiles?: (files: readonly File[]) => void;
+  readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
   /** Shared with Dual Lens so lock/visibility/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
@@ -701,12 +714,17 @@ export function TimelinePanel({
   const insertAssetOnTrack = useCallback(
     (
       trackId: string,
-      asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+      asset: {
+        readonly assetId: string;
+        readonly kind: string;
+        readonly displayName?: string;
+        readonly descriptor?: { readonly durationUs?: number };
+      },
       dropUs: number,
     ) => {
       const source = composition.tracks.find((t) => t.id === trackId);
       if (source === undefined) return;
-      const durationUs = 5_000_000;
+      const durationUs = safeAssetDuration(asset);
       const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
       let startUs = Math.max(0, snapped);
       const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
@@ -715,6 +733,16 @@ export function TimelinePanel({
         if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
       }
       const isAudio = asset.kind === 'audio';
+      const clipId = `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
+      onMediaPlaced?.(
+        {
+          id: asset.assetId,
+          kind: isAudio ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
+          displayName: asset.displayName ?? asset.assetId,
+          descriptor: asset.descriptor ?? {},
+        },
+        clipId,
+      );
       onDispatch({
         label: `Insert ${asset.displayName ?? asset.assetId}`,
         commands: [
@@ -724,7 +752,7 @@ export function TimelinePanel({
               compositionId: composition.id,
               trackId,
               clip: {
-                id: `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`,
+                id: clipId,
                 kind: 'video',
                 assetId: asset.assetId,
                 startUs,
@@ -736,21 +764,36 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, onDispatch],
+    [composition.id, composition.tracks, onDispatch, onMediaPlaced],
   );
 
   /** Create a NEW real track for a dropped asset and place the clip on it. */
   const createTrackFromAssetDrop = useCallback(
     (
-      asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+      asset: {
+        readonly assetId: string;
+        readonly kind: string;
+        readonly displayName?: string;
+        readonly descriptor?: { readonly durationUs?: number };
+      },
       dropUs: number,
     ) => {
       const order = composition.tracks.length;
       // The shared schema only models video tracks; audio clips are classified by
       // their asset (isVoiceClip) rather than by a separate audio track kind.
       const trackId = `V${order + 1}`;
-      const durationUs = 5_000_000;
+      const durationUs = safeAssetDuration(asset);
       const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+      const clipId = `clip-${asset.assetId}-${Date.now()}`;
+      onMediaPlaced?.(
+        {
+          id: asset.assetId,
+          kind: asset.kind === 'audio' ? 'audio' : asset.kind === 'image' ? 'image' : 'video',
+          displayName: asset.displayName ?? asset.assetId,
+          descriptor: asset.descriptor ?? {},
+        },
+        clipId,
+      );
       onDispatch({
         label: `Add ${asset.displayName ?? asset.assetId}`,
         commands: [
@@ -765,7 +808,7 @@ export function TimelinePanel({
                 enabled: true,
                 clips: [
                   {
-                    id: `clip-${asset.assetId}-${Date.now()}`,
+                    id: clipId,
                     kind: 'video',
                     assetId: asset.assetId,
                     startUs,
@@ -779,7 +822,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks.length, onDispatch],
+    [composition.id, composition.tracks.length, onDispatch, onMediaPlaced],
   );
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -1005,14 +1048,20 @@ export function TimelinePanel({
             const lockedTrackIds = new Set(
               tracksRef.current.filter((track) => track.locked).map((track) => track.id),
             );
-            onDispatch(
-              buildTimelineMediaImportTransaction(
-                compositionRef.current,
-                imported,
-                playheadUs,
-                lockedTrackIds,
-              ),
+            const batchToken = Date.now();
+            const clipIds = imported.map(
+              (asset, index) =>
+                `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${batchToken}-${index}`,
             );
+            const transaction = buildTimelineMediaImportTransaction(
+              compositionRef.current,
+              imported,
+              playheadUs,
+              lockedTrackIds,
+              (_asset, index) => clipIds[index]!,
+            );
+            imported.forEach((asset, index) => onMediaPlaced?.(asset, clipIds[index]!));
+            onDispatch(transaction);
           }
           if (failures.length > 0) {
             showToast?.(
@@ -1037,7 +1086,48 @@ export function TimelinePanel({
       })();
     };
     input.click();
-  }, [onDispatch, onImportMedia, onOpenAssetLibrary, playheadUs, showToast]);
+  }, [onDispatch, onImportMedia, onMediaPlaced, onOpenAssetLibrary, playheadUs, showToast]);
+
+  const handleFilesDrop = useCallback(
+    (files: readonly File[]) => {
+      if (files.length === 0) return;
+      if (onImportFiles !== undefined) {
+        onImportFiles(files);
+        return;
+      }
+      showToast?.('File import is unavailable in this workspace.', 'error');
+    },
+    [onImportFiles, showToast],
+  );
+
+  const handleAssetDrop = useCallback(
+    (asset: {
+      readonly assetId: string;
+      readonly kind: string;
+      readonly displayName?: string;
+      readonly descriptor?: TimelineMediaAsset['descriptor'];
+    }) => {
+      const kind = asset.kind === 'audio' || asset.kind === 'image' ? asset.kind : 'video';
+      const timelineAsset: TimelineMediaAsset = {
+        id: asset.assetId,
+        kind,
+        displayName: asset.displayName ?? asset.assetId,
+        descriptor: asset.descriptor ?? {},
+      };
+      const clipId = `${kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
+      onMediaPlaced?.(timelineAsset, clipId);
+      onDispatch(
+        buildTimelineMediaImportTransaction(
+          composition,
+          [timelineAsset],
+          playheadUs,
+          new Set(tracksRef.current.filter((track) => track.locked).map((track) => track.id)),
+          () => clipId,
+        ),
+      );
+    },
+    [composition, onDispatch, onMediaPlaced, playheadUs],
+  );
 
   const handleAddFromLibrary = useCallback(() => {
     if (onOpenAssetLibrary !== undefined) {
@@ -1300,6 +1390,8 @@ export function TimelinePanel({
         onSeek={onSeek}
         onImportClick={handleImportClick}
         onAddFromLibrary={handleAddFromLibrary}
+        onFilesDrop={handleFilesDrop}
+        onAssetDrop={handleAssetDrop}
         onContextMenu={(x, y) => {
           const items = buildEmptyCanvasContextMenu(handleImportClick, handleAddFromLibrary);
           setMenu({ x, y, items });
@@ -1643,6 +1735,7 @@ export function TimelinePanel({
                         assetId: string;
                         kind: string;
                         displayName?: string;
+                        descriptor?: { readonly durationUs?: number };
                       };
                       const rect = event.currentTarget.getBoundingClientRect();
                       const dropUs = pixelToTime(event.clientX - rect.left, {
@@ -1756,6 +1849,7 @@ export function TimelinePanel({
                     assetId: string;
                     kind: string;
                     displayName?: string;
+                    descriptor?: { readonly durationUs?: number };
                   };
                   const rect = event.currentTarget.getBoundingClientRect();
                   const dropUs = pixelToTime(event.clientX - rect.left, {

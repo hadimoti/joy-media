@@ -25,7 +25,7 @@ export interface ProjectDuplicateResult {
   readonly derivativeIdMap: Readonly<Record<string, string>>;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
-export type DerivativeKind = 'thumbnail' | 'proxy';
+export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio';
 export type DerivativeAvailability =
   'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
 
@@ -1253,7 +1253,7 @@ function validateDerivativeRegistration(
 ): void {
   validateOpaqueId(value.id, 'derivative id');
   validateOpaqueId(value.assetId, 'asset id');
-  if (!['thumbnail', 'proxy'].includes(value.kind))
+  if (!['thumbnail', 'proxy', 'audio'].includes(value.kind))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
   if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');

@@ -9785,6 +9785,32 @@ label {
   font-weight: 500;
 }
 
+.timeline-empty-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.timeline-empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--color-border-2);
+  border-radius: 6px;
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.timeline-empty-action:hover,
+.timeline-empty-action:focus-visible {
+  border-color: var(--color-joy);
+  color: var(--color-joy);
+}
+
 /* ===== VIRTUAL EMPTY LANES ===== */
 .timeline-virtual-lane {
   border-top: 1px solid color-mix(in srgb, var(--joy-border) 55%, transparent);

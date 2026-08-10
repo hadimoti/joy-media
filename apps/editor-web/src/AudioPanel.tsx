@@ -2,7 +2,7 @@
  * Audio Studio: local-worker-first architecture surface plus Fairlight-lite mixer.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import {
@@ -26,6 +26,11 @@ import {
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserReasoningProvider,
+  type BrowserWorker,
+} from './control-plane-client.js';
 import {
   AUDIO_ATOMIC_CAPABILITIES,
   AUDIO_MODEL_CATALOG,
@@ -62,6 +67,7 @@ interface AudioPanelProps {
   readonly clipIds: readonly string[];
   readonly audioState: AudioState;
   readonly onAudioChange: (next: AudioState, label: string) => void;
+  readonly onRunBrowserDsp?: (workflowId: string) => void;
 }
 
 function targetLabel(target: AudioAtomicCapability['target']): string {
@@ -154,12 +160,38 @@ function ModelRow({ model }: { readonly model: AudioModelSpec }) {
   );
 }
 
-export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelProps) {
+export function AudioPanel({
+  clipIds,
+  audioState,
+  onAudioChange,
+  onRunBrowserDsp,
+}: AudioPanelProps) {
   const [tab, setTab] = useState('studio');
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
   const [capabilityFilter, setCapabilityFilter] = useState<CapabilityFilter>('all');
+  const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
+  const [providers, setProviders] = useState<readonly BrowserReasoningProvider[]>([]);
+  const client = useMemo(() => new BrowserControlPlaneClient(), []);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshRuntime = async () => {
+      const [workerResult, providerResult] = await Promise.allSettled([
+        client.workers(),
+        client.reasoningProviders(),
+      ]);
+      if (cancelled) return;
+      if (workerResult.status === 'fulfilled') setWorkers(workerResult.value);
+      if (providerResult.status === 'fulfilled') setProviders(providerResult.value);
+    };
+    void refreshRuntime();
+    const timer = window.setInterval(() => void refreshRuntime(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client]);
   const dispatch = (command: AudioCommand, label: string) => {
     try {
       const { state } = applyAudioCommand(audioState, command);
@@ -189,7 +221,21 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
   const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
   const noClips = clipIds.length === 0;
   const clipsInactive = tab === 'clips' && noClips;
-  const localWorkerReady = false;
+  const now = Date.now();
+  const connectedWorker = workers.find(
+    (worker) =>
+      worker.paired &&
+      !worker.revoked &&
+      worker.lastSeenAt !== undefined &&
+      now - worker.lastSeenAt < 35_000,
+  );
+  const localWorkerReady = connectedWorker !== undefined;
+  const localWorkerLabel = connectedWorker === undefined ? 'Disconnected' : 'Connected';
+  const cloudProvider = providers.find(
+    (provider) => provider.state === 'healthy' || provider.state === 'configured',
+  );
+  const cloudLabel = cloudProvider === undefined ? 'Unavailable' : 'Online';
+  const browserDspReady = clipIds.length > 0 && onRunBrowserDsp !== undefined;
   const runReadinessId = `audio-${selectedWorkflow.id}-run-readiness`;
 
   return (
@@ -211,19 +257,25 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
         <div className="audio-studio-stack">
           <section className="audio-runtime-section" aria-label="Audio runtime status">
             <div className="audio-runtime-grid">
-              <div className="audio-runtime-cell" data-state="pairing">
+              <div
+                className="audio-runtime-cell"
+                data-state={localWorkerReady ? 'online' : 'pairing'}
+              >
                 <span className="icon-tool" aria-hidden="true">
                   <AudioWorkerIcon />
                 </span>
                 <strong>Local Worker</strong>
-                <span>Pairing</span>
+                <span>{localWorkerLabel}</span>
               </div>
-              <div className="audio-runtime-cell" data-state="online">
+              <div
+                className="audio-runtime-cell"
+                data-state={cloudProvider === undefined ? 'offline' : 'online'}
+              >
                 <span className="icon-tool" aria-hidden="true">
                   <CloudIcon />
                 </span>
                 <strong>Cloud Brain</strong>
-                <span>Online</span>
+                <span>{cloudLabel}</span>
               </div>
               <label className="audio-runtime-cell audio-runtime-control">
                 <span className="icon-tool audio-device-icon" aria-hidden="true">
@@ -326,17 +378,20 @@ export function AudioPanel({ clipIds, audioState, onAudioChange }: AudioPanelPro
                 </div>
                 <div className="audio-run-action">
                   <span className="audio-run-readiness" id={runReadinessId}>
-                    Pair local worker to run
+                    {browserDspReady ? 'Browser DSP ready' : 'Place clips to run'}
                   </span>
                   <button
                     type="button"
                     className="audio-run-button"
-                    aria-label={`Run ${selectedWorkflow.label} locally`}
+                    aria-label={`Run ${selectedWorkflow.label} with Browser DSP`}
                     aria-describedby={runReadinessId}
-                    title={localWorkerReady ? 'Run on local worker' : 'Pair local worker to run'}
-                    disabled={!localWorkerReady}
+                    title={browserDspReady ? 'Run with Browser DSP' : 'Place clips to run'}
+                    disabled={!browserDspReady}
+                    onClick={() => {
+                      if (browserDspReady) onRunBrowserDsp?.(selectedWorkflow.id);
+                    }}
                   >
-                    Run locally
+                    {browserDspReady ? 'Run Browser DSP' : 'Run locally'}
                   </button>
                 </div>
               </div>

@@ -190,14 +190,14 @@ async function route(
           'PRIVATE_STORE_UNAVAILABLE',
           'private media storage is unavailable',
         );
-      const bytes = await readBytes(request, 2 * 1024 * 1024);
-      const receipt = workerThumbnailHeaders(request);
+      const bytes = await readBytes(request, 512 * 1024 * 1024);
+      const receipt = workerDerivativeHeaders(request);
       if (bytes.byteLength !== receipt.bytes)
         throw new ControlPlaneError(
           'REQUEST_INVALID',
           'derivative byte length does not match receipt',
         );
-      const ref = `thumb-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}-${receipt.sha256.slice(0, 16)}`;
+      const ref = `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}-${receipt.sha256.slice(0, 16)}`;
       await store.put(
         {
           ref,
@@ -213,8 +213,8 @@ async function route(
         {
           id: `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}`,
           assetId: receipt.assetId,
-          kind: 'thumbnail',
-          profile: 'jpeg-640',
+          kind: receipt.kind,
+          profile: receipt.kind === 'thumbnail' ? 'jpeg-640' : 'audio-processed',
           sha256: receipt.sha256,
           bytes: receipt.bytes,
           descriptor: receipt.descriptor,
@@ -647,6 +647,36 @@ async function route(
   const assetOriginalMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original$/.exec(
     url.pathname,
   );
+  if (request.method === 'GET' && assetOriginalMatch !== null) {
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const projectId = decodeURIComponent(assetOriginalMatch[1]!);
+    const assetId = decodeURIComponent(assetOriginalMatch[2]!);
+    const assets = await options.controlPlane.assetsForProject(actor, projectId);
+    const asset = assets.find((entry) => entry.id === assetId);
+    if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const location = asset.locations.find((candidate) => candidate.kind === 'private-object');
+    if (location === undefined) throw new ControlPlaneError('ASSET_UNAVAILABLE', assetId);
+    const bytes = await store.get({
+      ref: location.ref,
+      sha256: asset.sha256,
+      bytes: asset.bytes,
+      mimeType: asset.descriptor.mimeType,
+    });
+    response.writeHead(200, {
+      'content-type': asset.descriptor.mimeType,
+      'content-length': String(bytes.byteLength),
+      'cache-control': 'private, no-store',
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(Buffer.from(bytes));
+    return;
+  }
   if (request.method === 'POST' && assetOriginalMatch !== null) {
     const store = options.privateObjectStore;
     if (store === undefined)
@@ -1075,35 +1105,52 @@ function optionalWorkerResult(body: Record<string, unknown>):
   };
 }
 
-function workerThumbnailHeaders(request: IncomingMessage): {
+function workerDerivativeHeaders(request: IncomingMessage): {
   readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly kind: 'thumbnail' | 'audio';
   readonly descriptor: {
-    readonly mimeType: 'image/jpeg';
-    readonly width: number;
-    readonly height: number;
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
   };
 } {
   const assetId = requiredHeader(request, 'x-joy-asset-id');
   const sha256 = requiredHeader(request, 'x-joy-sha256');
   const bytes = Number(requiredHeader(request, 'x-joy-bytes'));
-  const width = Number(requiredHeader(request, 'x-joy-width'));
-  const height = Number(requiredHeader(request, 'x-joy-height'));
   const mimeType = requiredHeader(request, 'content-type');
+  const widthHeader = request.headers['x-joy-width'];
+  const heightHeader = request.headers['x-joy-height'];
+  const width = widthHeader === undefined ? undefined : Number(widthHeader);
+  const height = heightHeader === undefined ? undefined : Number(heightHeader);
+  const isThumbnail = mimeType === 'image/jpeg';
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId) ||
     !/^[a-f0-9]{64}$/.test(sha256) ||
     !Number.isSafeInteger(bytes) ||
     bytes <= 0 ||
-    !Number.isSafeInteger(width) ||
-    width <= 0 ||
-    !Number.isSafeInteger(height) ||
-    height <= 0 ||
-    mimeType !== 'image/jpeg'
+    (isThumbnail &&
+      (width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0)) ||
+    (!isThumbnail && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType))
   )
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
-  return { assetId, sha256, bytes, descriptor: { mimeType: 'image/jpeg', width, height } };
+  return {
+    assetId,
+    sha256,
+    bytes,
+    kind: isThumbnail ? 'thumbnail' : 'audio',
+    descriptor: {
+      mimeType,
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+    },
+  };
 }
 
 function requiredHeader(request: IncomingMessage, name: string): string {
@@ -1211,7 +1258,7 @@ function localDerivativeRegistration(body: Record<string, unknown>): LocalDeriva
       'availability must be pending or available-local',
     );
   const kind = body.kind;
-  if (kind !== 'thumbnail' && kind !== 'proxy')
+  if (kind !== 'thumbnail' && kind !== 'proxy' && kind !== 'audio')
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative kind is invalid');
   return {
     id: requiredString(body, 'id'),

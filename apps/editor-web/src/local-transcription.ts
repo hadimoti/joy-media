@@ -114,7 +114,15 @@ function fixtureProvider(language: 'fa-IR' | 'en-US') {
 async function tryLiveTranscription(
   language: 'fa-IR' | 'en-US',
   client: BrowserControlPlaneClient,
+  media?: Blob,
+  mediaType?: string,
 ) {
+  if (media !== undefined) {
+    return client.transcribeSpeech(
+      language,
+      mediaType === undefined ? { media } : { media, mediaType },
+    );
+  }
   return client.transcribeSpeech(language, {
     referenceAssetId: REFERENCE_ASSET_BY_LANGUAGE[language],
   });
@@ -128,9 +136,10 @@ export async function transcribeReferenceCaption(
   documentId: string,
   language: 'fa-IR' | 'en-US',
   client: BrowserControlPlaneClient = new BrowserControlPlaneClient(),
+  options: { readonly media?: Blob; readonly mediaType?: string } = {},
 ): Promise<CaptionDocumentV1> {
   try {
-    const live = await tryLiveTranscription(language, client);
+    const live = await tryLiveTranscription(language, client, options.media, options.mediaType);
     return captionDocumentFromTranscription(documentId, {
       language: live.language,
       words: live.words,
@@ -138,6 +147,9 @@ export async function transcribeReferenceCaption(
       provenance: live.provenance,
     });
   } catch {
+    if (options.media !== undefined) {
+      throw new Error('Live transcription could not process the selected media.');
+    }
     const provider = fixtureProvider(language);
     return captionDocumentFromTranscription(
       documentId,

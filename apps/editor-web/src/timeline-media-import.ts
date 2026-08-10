@@ -9,7 +9,12 @@ export interface TimelineMediaAsset {
   readonly id: string;
   readonly kind: 'video' | 'audio' | 'image';
   readonly displayName: string;
-  readonly descriptor: { readonly durationUs?: number };
+  readonly descriptor: {
+    readonly mimeType?: string;
+    readonly durationUs?: number;
+    readonly width?: number;
+    readonly height?: number;
+  };
 }
 
 /**

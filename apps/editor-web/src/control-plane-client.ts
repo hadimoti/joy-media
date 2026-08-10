@@ -206,6 +206,18 @@ export class BrowserControlPlaneClient {
     onProgress?.(1);
     return body.data.asset as unknown as BrowserAsset;
   }
+  /** Fetches an owner-authorized original from private object storage. */
+  async originalBytes(projectId: string, assetId: string): Promise<Blob> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/original`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    );
+    if (response.status === 401 || response.status === 403)
+      throw new DerivativeAuthorityRevokedError();
+    if (!response.ok) throw new Error(`private original request failed (${response.status})`);
+    return response.blob();
+  }
   async retagAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
     return this.post(
       `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/retag`,

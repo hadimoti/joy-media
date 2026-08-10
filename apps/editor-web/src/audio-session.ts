@@ -36,6 +36,28 @@ export function loadAudioStateFrom(storage: BrowserKeyValueStore, projectId: str
   }
 }
 
+/** Reads the canonical creative-document audio graph, migrating the legacy
+ * project-local storage key only when older projects have no embedded graph. */
+export function loadAudioStateFromProject(
+  storage: BrowserKeyValueStore,
+  projectId: string,
+  project: Pick<JoyProjectV1, 'audio'>,
+): AudioState {
+  const audio = project.audio;
+  if (audio !== undefined && typeof audio === 'object') {
+    return {
+      clips: audio.clips,
+      buses: audio.buses.length > 0 ? audio.buses : EMPTY_AUDIO_STATE.buses,
+      effects: audio.effects.map((effect) => ({
+        id: effect.id,
+        targetId: effect.targetId,
+        effect: effect.effect as unknown as AudioState['effects'][number]['effect'],
+      })),
+    };
+  }
+  return loadAudioStateFrom(storage, projectId);
+}
+
 export function saveAudioState(projectId: string, state: AudioState): void {
   saveAudioStateTo(window.localStorage, projectId, state);
 }

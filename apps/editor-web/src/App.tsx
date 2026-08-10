@@ -72,6 +72,7 @@ import {
   type BrowserPixiRenderer,
 } from '@joy-media/renderer-pixi/browser';
 import {
+  BROWSER_MP4_MIME_TYPE,
   downloadBrowserMp4,
   type BrowserExportManifest,
   type BrowserExportResult,
@@ -80,6 +81,7 @@ import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
 import {
@@ -130,11 +132,11 @@ import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import {
   ensureClipAudio,
   loadAudioState,
-  saveAudioState,
+  loadAudioStateFromProject,
   withProjectAudio,
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
-import { buildMixerBuffer } from './mixer-buffer.js';
+import { renderOfflineAudio } from '@joy-media/audio-core/offline';
 import type { ExportPresetId, WorkflowGraphV2 } from '@joy-media/project-schema';
 import {
   AgentPanel,
@@ -158,6 +160,7 @@ import {
   type ControlPlaneProjectBinding,
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
+import { ProjectMediaResolver } from './project-media-resolver.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -204,6 +207,7 @@ import {
   upsertEntry,
   type ExportProcessEntry,
 } from './export-history.js';
+import { openOpfsExportCache } from './opfs-export-cache.js';
 import { createMonoAudioBuffer } from './export-audio.js';
 import { nextVideoClipAtOrAfter, playbackStartAtOrAfter } from './timeline-playback.js';
 import './app.css';
@@ -241,6 +245,7 @@ function renderFrameOptions(
 
 const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
+const exportCachePromise = openOpfsExportCache();
 const mediaControlPlaneClient = new BrowserControlPlaneClient();
 
 async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> {
@@ -263,44 +268,101 @@ function imageSizesFromCache(): Readonly<
  * URL for HTMLVideoElement decode. The reference intro/product/outro clips
  * each have a committed 30 s H.264/AAC fixture under `public/media/reference`.
  */
-function resolveReferenceMediaUrl(assetId: string): string {
-  return `/media/reference/${assetId}.mp4`;
-}
-
-function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
+function activeVideoClipAt(
+  project: SpikeProject,
+  playheadUs: number,
+  preferredClipIds: readonly string[] = [],
+) {
   const composition = project.compositions.root;
-  return composition?.tracks
+  const active = composition?.tracks
     .flatMap((track) => track.clips)
-    .find(
+    .filter(
       (clip) =>
         clip.kind === 'video' &&
         playheadUs >= clip.startUs &&
         playheadUs < clip.startUs + clip.durationUs,
     );
+  if (active === undefined || active.length === 0) return undefined;
+  return (
+    preferredClipIds.map((id) => active.find((clip) => clip.id === id)).find(Boolean) ?? active[0]
+  );
+}
+
+function resampleMonoSamples(
+  samples: Float32Array,
+  fromRate: number,
+  toRate: number,
+): Float32Array {
+  if (fromRate === toRate || samples.length <= 1) return samples;
+  const outputLength = Math.max(1, Math.round((samples.length * toRate) / fromRate));
+  const output = new Float32Array(outputLength);
+  const ratio = fromRate / toRate;
+  for (let index = 0; index < output.length; index++) {
+    const sourcePosition = index * ratio;
+    const left = Math.min(samples.length - 1, Math.floor(sourcePosition));
+    const right = Math.min(samples.length - 1, left + 1);
+    const fraction = sourcePosition - left;
+    output[index] = samples[left]! + (samples[right]! - samples[left]!) * fraction;
+  }
+  return output;
 }
 
 /** Resolve the currently playing timeline clip from the live media URL. */
-function activeVideoClipForSource(project: SpikeProject, sourceUrl: string) {
-  const composition = project.compositions.root;
-  return composition?.tracks
-    .flatMap((track) => track.clips)
-    .find(
-      (clip) => clip.kind === 'video' && sourceUrl.endsWith(`/media/reference/${clip.assetId}.mp4`),
-    );
-}
-
-function videoClipSpec(clip: VideoClip): VideoClipSpec {
+function videoClipSpec(
+  clip: VideoClip,
+  transform: {
+    readonly translateX: number;
+    readonly translateY: number;
+    readonly scaleX: number;
+    readonly scaleY: number;
+  } = {
+    translateX: 0,
+    translateY: 0,
+    scaleX: 1,
+    scaleY: 1,
+  },
+  opacity = 1,
+): VideoClipSpec {
   return {
     // IR / bitmap map key — must match TransitionV1 left/right clip ids.
     id: clip.id,
-    originalToken: resolveReferenceMediaUrl(clip.assetId),
+    originalToken: clip.assetId,
     startUs: clip.startUs,
     durationUs: clip.durationUs,
     sourceInUs: clip.sourceInUs,
-    transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
-    opacity: 1,
+    transform,
+    opacity,
     zIndex: 0,
   };
+}
+
+function videoClipSpecAt(
+  project: JoyProjectV1,
+  clip: VideoClip,
+  timeUs: number,
+  height: number,
+): VideoClipSpec {
+  const objectId = resolveObjectIdForSelection(project, [clip.id]);
+  const object = objectId === undefined ? undefined : project.visualObjects[objectId];
+  if (object === undefined) return videoClipSpec(clip);
+  const composition = project.compositions[project.rootCompositionId];
+  const evaluated = evaluateCameraExpressionTransform(
+    object.id,
+    composition?.activeCameraId,
+    project.visualObjects,
+    timeUs,
+    height,
+  ).transform;
+  return videoClipSpec(
+    clip,
+    {
+      translateX: evaluated.x,
+      translateY: evaluated.y,
+      scaleX: evaluated.scaleX,
+      scaleY: evaluated.scaleY,
+    },
+    evaluated.opacity,
+  );
 }
 
 /** Active transition (if any) at composition time. */
@@ -407,6 +469,23 @@ function seekDetachedVideo(video: HTMLVideoElement, timeUs: number): Promise<voi
     video.addEventListener('error', onError, { once: true });
     video.currentTime = seconds;
   });
+}
+
+async function decodeStillFrame(sourceUrl: string): Promise<ImageDataLike> {
+  const response = await fetch(sourceUrl);
+  if (!response.ok) throw new Error(`Unable to fetch export image ${sourceUrl}`);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (context === null) throw new Error('2D canvas is unavailable for image export');
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, bitmap.width, bitmap.height);
+  } finally {
+    bitmap.close();
+  }
 }
 
 interface EditorRuntimeState {
@@ -670,6 +749,7 @@ function EditorWorkspace({
     };
   }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   const toastTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
@@ -678,8 +758,28 @@ function EditorWorkspace({
       window.clearTimeout(exportToastTimerRef.current);
       for (const timer of toastTimers.values()) window.clearTimeout(timer);
       toastTimers.clear();
+      exportAbortRef.current?.abort();
+      exportAbortRef.current = null;
+      if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
     };
   }, []);
+  useEffect(() => {
+    if (lastExportRef.current !== null) return;
+    const entry = exportHistory.find((candidate) => candidate.status === 'completed');
+    if (entry === undefined) return;
+    let cancelled = false;
+    void exportCachePromise
+      .then((cache) => cache.get(entry.id))
+      .then((blob) => {
+        if (cancelled || blob === undefined || lastExportRef.current !== null) return;
+        lastExportRef.current = { entryId: entry.id, url: URL.createObjectURL(blob) };
+        setExportHistory((current) => [...current]);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [exportHistory]);
   useEffect(() => {
     saveAgentSettings(window.localStorage, agentSettings);
   }, [agentSettings]);
@@ -747,6 +847,20 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  const audioMigrationRef = useRef(false);
+  useEffect(() => {
+    if (audioMigrationRef.current) return;
+    audioMigrationRef.current = true;
+    const canonical = loadAudioStateFromProject(
+      window.localStorage,
+      projectId,
+      session.visualProject,
+    );
+    if (session.visualProject.audio === undefined) {
+      session.replaceVisualProject(withProjectAudio(session.visualProject, canonical));
+      setRevision((revision) => revision + 1);
+    } else setAudioStateRaw(canonical);
+  }, [projectId, session]);
   const controlPlaneOwnerKey =
     joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
   const controlPlaneProject = useMemo(
@@ -756,6 +870,19 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject],
   );
+  const mediaResolver = useMemo(
+    () =>
+      new ProjectMediaResolver({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        project: session.visualProject,
+        client: mediaControlPlaneClient,
+        originalCache: {
+          get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
+        },
+      }),
+    [controlPlaneProject.controlPlaneProjectId, session.visualProject],
+  );
+  useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -834,8 +961,8 @@ function EditorWorkspace({
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
         const clip = findVideoClipById(session.timelineProject, clipId);
         if (clip === undefined) continue;
-        const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href)
-          .href;
+        const source = await mediaResolver.resolve(clip.assetId);
+        const sourceUrl = new URL(source.url, window.location.href).href;
         if (video.src !== sourceUrl) {
           video.src = sourceUrl;
           await new Promise<void>((resolve, reject) => {
@@ -862,7 +989,7 @@ function EditorWorkspace({
         if (frame.bitmap !== undefined) rememberClipFrame(clip.id, frame.bitmap);
       }
     },
-    [ensurePartnerDecoder, rememberClipFrame, session],
+    [ensurePartnerDecoder, mediaResolver, rememberClipFrame, session],
   );
 
   const syncMediaToPlayhead = useCallback(
@@ -873,7 +1000,7 @@ function EditorWorkspace({
       const composition = session.timelineProject.compositions.root;
       const transition = activeTransitionAt(session.visualProject, playheadUs);
       const clip =
-        activeVideoClipAt(session.timelineProject, playheadUs) ??
+        activeVideoClipAt(session.timelineProject, playheadUs, stateRef.current.selectedIds) ??
         (transition !== undefined
           ? findVideoClipById(session.timelineProject, transition.leftClipId)
           : undefined);
@@ -885,7 +1012,8 @@ function EditorWorkspace({
         clip.kind !== 'video'
       )
         return false;
-      const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href).href;
+      const source = await mediaResolver.resolve(clip.assetId);
+      const sourceUrl = new URL(source.url, window.location.href).href;
       if (video.src !== sourceUrl) {
         video.src = sourceUrl;
         await new Promise<void>((resolve, reject) => {
@@ -931,10 +1059,21 @@ function EditorWorkspace({
           const token = scheduler.current.requestToken();
           const frame = decoder.captureCurrentFrame(token);
           if (frame.bitmap !== undefined) {
-            const node = videoFrameNodeFromDecoded(videoClipSpec(clip), frame, {
-              width: video.videoWidth,
-              height: video.videoHeight,
-            });
+            const visualComposition =
+              session.visualProject.compositions[session.visualProject.rootCompositionId];
+            const node = videoFrameNodeFromDecoded(
+              videoClipSpecAt(
+                session.visualProject,
+                clip,
+                playheadUs,
+                visualComposition?.height ?? 1920,
+              ),
+              frame,
+              {
+                width: video.videoWidth,
+                height: video.videoHeight,
+              },
+            );
             rememberClipFrame(clip.id, frame.bitmap);
             setPreviewVideoFrame({ node, bitmap: frame.bitmap });
           }
@@ -943,7 +1082,7 @@ function EditorWorkspace({
       }
       return true;
     },
-    [captureTransitionPartnerFrames, rememberClipFrame, session],
+    [captureTransitionPartnerFrames, mediaResolver, rememberClipFrame, session],
   );
 
   const seek = useCallback(
@@ -966,9 +1105,11 @@ function EditorWorkspace({
     let cancelled = false;
     const capture = (): void => {
       if (cancelled || !stateRef.current.playing) return;
-      const clip =
-        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
-        activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      const clip = activeVideoClipAt(
+        session.timelineProject,
+        stateRef.current.playheadUs,
+        stateRef.current.selectedIds,
+      );
       if (clip === undefined || clip.kind !== 'video') return;
       const rate = normalizePlaybackRate(clip.playbackRate);
       let compositionTimeUs: number;
@@ -1014,7 +1155,14 @@ function EditorWorkspace({
       }
       const token = scheduler.current.requestToken();
       const frame = decoder.captureCurrentFrame(token);
-      const clipSpec = videoClipSpec(clip);
+      const visualComposition =
+        session.visualProject.compositions[session.visualProject.rootCompositionId];
+      const clipSpec = videoClipSpecAt(
+        session.visualProject,
+        clip,
+        compositionTimeUs,
+        visualComposition?.height ?? 1920,
+      );
       const node = videoFrameNodeFromDecoded(clipSpec, frame, {
         width: video.videoWidth,
         height: video.videoHeight,
@@ -1035,9 +1183,7 @@ function EditorWorkspace({
     };
     const requestFrame = (): void => {
       // Freeze holds a still frame — drive with rAF. Otherwise follow media cadence.
-      const clip =
-        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
-        activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      const clip = activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
       const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
       if (!freeze && typeof video.requestVideoFrameCallback === 'function')
         playbackFrameRef.current = video.requestVideoFrameCallback(() => capture());
@@ -1074,8 +1220,14 @@ function EditorWorkspace({
     const decoder = createHtmlMediaDecoder(video, captureCanvas);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
     const firstClip = activeVideoClipAt(session.timelineProject, 0);
-    if (firstClip !== undefined && firstClip.kind === 'video')
-      video.src = resolveReferenceMediaUrl(firstClip.assetId);
+    if (firstClip !== undefined && firstClip.kind === 'video') {
+      void mediaResolver
+        .resolve(firstClip.assetId)
+        .then((source) => {
+          if (videoRef.current === video) video.src = source.url;
+        })
+        .catch(() => undefined);
+    }
     return () => {
       video.pause();
       decoderRef.current = null;
@@ -1083,7 +1235,7 @@ function EditorWorkspace({
       video.removeAttribute('src');
       video.load();
     };
-  }, [handleMediaReady, session]);
+  }, [handleMediaReady, mediaResolver, session]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
     if (current.playing) {
@@ -1383,11 +1535,10 @@ function EditorWorkspace({
   const setAudioState = useCallback(
     (next: AudioState) => {
       setAudioStateRaw(next);
-      saveAudioState(projectId, next);
       session.replaceVisualProject(withProjectAudio(session.visualProject, next));
       setRevision((revision) => revision + 1);
     },
-    [projectId, session],
+    [session],
   );
 
   const timelineClipIds = useMemo(
@@ -1398,13 +1549,34 @@ function EditorWorkspace({
     [session.timelineProject],
   );
   useEffect(() => {
-    setAudioStateRaw((current) => ensureClipAudio(current, timelineClipIds));
-  }, [timelineClipIds]);
+    setAudioStateRaw((current) => {
+      const next = ensureClipAudio(current, timelineClipIds);
+      if (next !== current)
+        session.replaceVisualProject(withProjectAudio(session.visualProject, next));
+      return next;
+    });
+  }, [session, timelineClipIds]);
 
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
       try {
-        const document = await transcribeReferenceCaption(documentId, language);
+        const clip = activeVideoClipAt(
+          session.timelineProject,
+          state.playheadUs,
+          state.selectedIds,
+        );
+        if (clip === undefined || clip.kind !== 'video')
+          throw new Error('Place a media clip before transcribing.');
+        const source = await mediaResolver.resolve(clip.assetId);
+        const response = await fetch(source.url);
+        if (!response.ok) throw new Error(`Unable to read ${clip.assetId} for transcription.`);
+        const media = await response.blob();
+        const document = await transcribeReferenceCaption(
+          documentId,
+          language,
+          mediaControlPlaneClient,
+          { media, mediaType: source.mimeType },
+        );
         session.dispatchVisualObjects({
           label: `Transcribe ${language}`,
           commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
@@ -1417,7 +1589,7 @@ function EditorWorkspace({
         );
       }
     },
-    [session],
+    [mediaResolver, session, state.playheadUs, state.selectedIds],
   );
   const undo = useCallback(() => {
     session.undo();
@@ -1849,339 +2021,440 @@ function EditorWorkspace({
     [dispatchTimeline, session],
   );
 
-  const handleExport = useCallback(async () => {
-    if (exporting) return;
-    setExporting(true);
-    window.clearTimeout(exportToastTimerRef.current);
-    setExportStatus('Building render manifest…');
-    setExportProgress(0.02);
-    const entryId = `export-${Date.now()}`;
-    const startedAt = new Date().toISOString();
-    const exportFilename = `joy-media-export-${Date.now()}.mp4`;
-    recordExportEntry({ id: entryId, filename: exportFilename, status: 'running', startedAt });
-    try {
-      await syncStickerBitmaps();
-      const compositionV1 =
-        session.visualProject.compositions[session.visualProject.rootCompositionId];
-      const baseWidth = compositionV1?.width ?? 1080;
-      const baseHeight = compositionV1?.height ?? 1920;
-      const { width, height } = (() => {
-        switch (exportPreset) {
-          case 'reels-1080':
-          case 'shorts-1080':
-            return { width: 1080, height: 1920 };
-          case 'youtube-1080':
-            return { width: 1920, height: 1080 };
-          case 'high-bitrate':
-            return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
-          default:
-            return { width: baseWidth, height: baseHeight };
-        }
-      })();
-      const compositionTimeline = session.timelineProject.compositions.root;
-      const durationUs = compositionTimeline?.durationUs ?? 30_000_000;
-      const frameRate = 30;
-      const totalFrames = Math.max(1, Math.round((durationUs / 1_000_000) * frameRate));
-      const manifest: BrowserExportManifest = Object.freeze({
-        width,
-        height,
-        frameRate,
-        durationUs,
-      });
-      session.replaceVisualProject({
-        ...session.visualProject,
-        exportPreset,
-        updatedAt: new Date().toISOString(),
-      });
-      const cameraId = compositionV1?.activeCameraId;
-      const objectsById = session.visualProject.visualObjects as Readonly<
-        Record<string, VisualObjectV1>
-      >;
-      const buildFrame = (timeUs: number) => {
-        const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
-          (object) => ({
-            object,
-            transform: evaluateCameraExpressionTransform(
-              object.id,
-              cameraId,
-              objectsById,
-              timeUs,
-              height,
-            ).transform,
-          }),
-        );
-        return withCaptionBurnInNodes(
-          buildRenderFrameIR(
-            compositionV1?.id ?? 'root',
-            timeUs,
-            width,
-            height,
-            resolved,
-            renderFrameOptions(session.visualProject, imageSizesFromCache()),
-          ),
-          session.visualProject,
-        );
-      };
-      const transitionTimes = Array.from(
-        new Set(
-          (compositionTimeline?.tracks.flatMap((track) => track.clips) ?? []).flatMap((clip) => [
-            clip.startUs,
-            clip.startUs + clip.durationUs,
-          ]),
-        ),
-      ).sort((left, right) => left - right);
-      const clipsByBoundary = transitionTimes
-        .map((timeUs) => activeVideoClipAt(session.timelineProject, timeUs))
-        .filter((clip): clip is VideoClip => clip?.kind === 'video');
-      const transitionPartnerClips = (session.visualProject.transitions ?? []).flatMap(
-        (transition) =>
-          [transition.leftClipId, transition.rightClipId]
-            .map((clipId) => findVideoClipById(session.timelineProject, clipId))
-            .filter((clip): clip is VideoClip => clip !== undefined),
-      );
-      const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
-        (clip, index, clips) => clips.findIndex((candidate) => candidate.id === clip.id) === index,
-      );
-      if (exportClips.length === 0)
-        throw new Error('No playable video clips are available for export');
-
-      setExportStatus('Preloading preview-equivalent video and audio…');
-      setExportProgress(0.05);
-      const audioContext = new AudioContext();
-      const audioDestination = audioContext.createMediaStreamDestination();
-      const exportMedia = await Promise.all(
-        exportClips.map(async (clip) => {
-          const video = document.createElement('video');
-          await loadDetachedVideo(video, resolveReferenceMediaUrl(clip.assetId));
-          await seekDetachedVideo(video, clip.sourceInUs);
-          const captureCanvas = document.createElement('canvas');
-          captureCanvas.width = 0;
-          captureCanvas.height = 0;
-          const audioResponse = await fetch(resolveReferenceMediaUrl(clip.assetId));
-          if (!audioResponse.ok)
-            throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
-          const audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
-          if (audioBuffer === null)
-            throw new Error(`Unable to decode export audio for ${clip.assetId}`);
-          const clipAudioConfig = audioState.clips[clip.id] ?? {
-            gain: 1,
-            pan: 0,
-            mute: false,
-            solo: false,
-          };
-          const channels = audioBuffer.numberOfChannels;
-          const length = audioBuffer.length;
-          const samples = new Float32Array(length);
-          const monoChannel = new Float32Array(length);
-          for (let channel = 0; channel < channels; channel++) {
-            audioBuffer.copyFromChannel(monoChannel, channel);
-            let index = 0;
-            for (const value of monoChannel) {
-              samples[index] = samples[index]! + value / channels;
-              index++;
-            }
-          }
-          return {
-            clip,
-            video,
-            decoder: createHtmlMediaDecoder(video, captureCanvas),
-            audio: {
-              samples,
-              sampleRate: audioBuffer.sampleRate,
-              config: clipAudioConfig,
-            },
-          };
-        }),
-      );
-      const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
-      const mixedAudio = buildMixerBuffer(
-        exportMedia.map((media) => ({ clipId: media.clip.id, samples: media.audio.samples })),
-        audioState.clips,
-        audioState.buses,
-        durationUs,
-        exportMedia[0]?.audio.sampleRate ?? 48000,
-      );
-      const mixedAudioBuffer = createMonoAudioBuffer(
-        audioContext,
-        mixedAudio,
-        exportMedia[0]?.audio.sampleRate ?? 48000,
-      );
-      const mixedChannel = mixedAudioBuffer.getChannelData(0);
-      for (let i = 0; i < mixedAudio.length; i++) mixedChannel[i] = mixedAudio[i]!;
-      const mixedAudioSource = audioContext.createBufferSource();
-      mixedAudioSource.buffer = mixedAudioBuffer;
-      mixedAudioSource.connect(audioDestination);
-      const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
-      if (exportAudioTrack === undefined)
-        throw new Error('Export audio mix did not produce a track');
-      const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
-      const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
-        (object) => object.kind === 'html-scene',
-      );
-      const sceneFrames = new Map<
-        number,
-        Map<string, { width: number; height: number; data: Uint8ClampedArray }>
-      >();
-      if (hasHtmlScenes) {
-        setExportStatus('Capturing HTML scene frames…');
-        const sceneCache = new HtmlSceneSurfaceCache();
-        try {
-          for (let index = 0; index < totalFrames; index++) {
-            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-            await sceneCache.sync(session.visualProject.visualObjects, timeUs);
-            sceneFrames.set(index, new Map(sceneCache.bitmaps()));
-            if (index % frameRate === 0)
-              setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
-          }
-        } finally {
-          sceneCache.destroy();
-        }
-      }
-      const startTimers: number[] = [];
-      const audioSources: AudioBufferSourceNode[] = [];
+  const handleExport = useCallback(
+    async (retryEntry?: ExportProcessEntry) => {
+      if (exporting) return;
+      const abortController = new AbortController();
+      exportAbortRef.current = abortController;
+      setExporting(true);
+      window.clearTimeout(exportToastTimerRef.current);
+      setExportStatus('Building render manifest…');
+      setExportProgress(0.02);
+      const entryId = retryEntry?.id ?? `export-${Date.now()}`;
+      const startedAt = new Date().toISOString();
+      const exportFilename = retryEntry?.filename ?? `joy-media-export-${Date.now()}.mp4`;
+      recordExportEntry({ id: entryId, filename: exportFilename, status: 'running', startedAt });
       try {
-        await audioContext.resume();
-        setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
-        const exportResult: BrowserExportResult = await downloadBrowserMp4({
-          manifest,
-          frameCount: totalFrames,
-          canvas: renderer.canvas,
-          audioTrack: exportAudioTrack,
-          onRecordingStart: () => {
-            const startAt = audioContext.currentTime;
-            for (const media of exportMedia) {
-              const audioSource = audioContext.createBufferSource();
-              const playbackBuffer = createMonoAudioBuffer(
-                audioContext,
-                media.audio.samples,
-                media.audio.sampleRate,
-              );
-              playbackBuffer.copyToChannel(media.audio.samples, 0);
-              audioSource.buffer = playbackBuffer;
-              audioSource.connect(audioDestination);
-              audioSource.start(
-                startAt + media.clip.startUs / 1_000_000,
-                media.clip.sourceInUs / 1_000_000,
-                media.clip.durationUs / 1_000_000,
-              );
-              audioSources.push(audioSource);
-              const startVideo = () => void media.video.play();
-              if (media.clip.startUs === 0) startVideo();
-              else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
-            }
-          },
-          paintFrame: async (index) => {
-            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-            const transition = activeTransitionAt(session.visualProject, timeUs);
-            const clip =
-              activeVideoClipAt(session.timelineProject, timeUs) ??
-              (transition !== undefined
-                ? findVideoClipById(session.timelineProject, transition.leftClipId)
-                : undefined);
-            const bitmaps = new Map<string, ImageDataLike>();
-            const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
-              const media = mediaForClip.get(target.id);
-              if (media === undefined)
-                throw new Error(`Export media for ${target.id} was not prepared`);
-              const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
-              await seekDetachedVideo(media.video, sourceUs);
-              const token = index + 1;
-              const decoded = media.decoder.captureCurrentFrame(token);
-              if (decoded.bitmap === undefined)
-                throw new Error(
-                  `Export media frame ${index} for ${target.assetId} is not drawable`,
-                );
-              bitmaps.set(target.id, decoded.bitmap);
-              return videoFrameNodeFromDecoded(videoClipSpec(target), decoded, {
-                width: media.video.videoWidth,
-                height: media.video.videoHeight,
-              });
-            };
-            let node: VideoFrameNode | undefined;
-            if (clip !== undefined && clip.kind === 'video') {
-              node = await captureExportClip(clip);
-            }
-            if (transition !== undefined && node !== undefined) {
-              for (const clipId of [transition.leftClipId, transition.rightClipId]) {
-                if (bitmaps.has(clipId)) continue;
-                const partner = findVideoClipById(session.timelineProject, clipId);
-                if (partner !== undefined) await captureExportClip(partner);
+        if (
+          typeof MediaRecorder === 'undefined' ||
+          !MediaRecorder.isTypeSupported(BROWSER_MP4_MIME_TYPE)
+        ) {
+          throw new Error('This browser cannot encode H.264/AAC MP4. Use the latest Chrome.');
+        }
+        const estimate = await navigator.storage?.estimate?.();
+        if (
+          estimate?.quota !== undefined &&
+          estimate.usage !== undefined &&
+          estimate.quota > 0 &&
+          estimate.usage / estimate.quota > 0.95
+        ) {
+          throw new Error('Browser storage is almost full. Free space before exporting.');
+        }
+        await syncStickerBitmaps();
+        const compositionV1 =
+          session.visualProject.compositions[session.visualProject.rootCompositionId];
+        const baseWidth = compositionV1?.width ?? 1080;
+        const baseHeight = compositionV1?.height ?? 1920;
+        const { width, height } = (() => {
+          switch (exportPreset) {
+            case 'reels-1080':
+            case 'shorts-1080':
+              return { width: 1080, height: 1920 };
+            case 'youtube-1080':
+              return { width: 1920, height: 1080 };
+            case 'high-bitrate':
+              return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
+            default:
+              return { width: baseWidth, height: baseHeight };
+          }
+        })();
+        const compositionTimeline = session.timelineProject.compositions.root;
+        const allTimelineClips = compositionTimeline?.tracks.flatMap((track) => track.clips) ?? [];
+        const contentEndUs = allTimelineClips.reduce(
+          (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
+          0,
+        );
+        const durationUs =
+          contentEndUs > 0 ? contentEndUs : (compositionTimeline?.durationUs ?? 30_000_000);
+        const frameRate = 30;
+        const totalFrames = Math.max(1, Math.round((durationUs / 1_000_000) * frameRate));
+        const manifest: BrowserExportManifest = Object.freeze({
+          width,
+          height,
+          frameRate,
+          durationUs,
+        });
+        session.replaceVisualProject({
+          ...session.visualProject,
+          exportPreset,
+          updatedAt: new Date().toISOString(),
+        });
+        const cameraId = compositionV1?.activeCameraId;
+        const objectsById = session.visualProject.visualObjects as Readonly<
+          Record<string, VisualObjectV1>
+        >;
+        const buildFrame = (timeUs: number) => {
+          const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
+            (object) => ({
+              object,
+              transform: evaluateCameraExpressionTransform(
+                object.id,
+                cameraId,
+                objectsById,
+                timeUs,
+                height,
+              ).transform,
+            }),
+          );
+          return withCaptionBurnInNodes(
+            buildRenderFrameIR(
+              compositionV1?.id ?? 'root',
+              timeUs,
+              width,
+              height,
+              resolved,
+              renderFrameOptions(session.visualProject, imageSizesFromCache()),
+            ),
+            session.visualProject,
+          );
+        };
+        const clipsByBoundary = allTimelineClips.filter(
+          (clip): clip is VideoClip => clip.kind === 'video',
+        );
+        const transitionPartnerClips = (session.visualProject.transitions ?? []).flatMap(
+          (transition) =>
+            [transition.leftClipId, transition.rightClipId]
+              .map((clipId) => findVideoClipById(session.timelineProject, clipId))
+              .filter((clip): clip is VideoClip => clip !== undefined),
+        );
+        const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
+          (clip, index, clips) =>
+            clips.findIndex((candidate) => candidate.id === clip.id) === index,
+        );
+        if (exportClips.length === 0)
+          throw new Error('No playable video clips are available for export');
+
+        setExportStatus('Preloading preview-equivalent video and audio…');
+        setExportProgress(0.05);
+        const audioContext = new AudioContext();
+        const audioDestination = audioContext.createMediaStreamDestination();
+        const exportMedia = await Promise.all(
+          exportClips.map(async (clip) => {
+            const source = await mediaResolver.resolve(clip.assetId);
+            const assetKind = session.visualProject.assets[clip.assetId]?.kind ?? 'video';
+            let video: HTMLVideoElement | undefined;
+            let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+            let stillFrame: ImageDataLike | undefined;
+            if (assetKind !== 'audio') {
+              if (assetKind === 'image') {
+                stillFrame = await decodeStillFrame(source.url);
+              } else {
+                video = document.createElement('video');
+                await loadDetachedVideo(video, source.url);
+                await seekDetachedVideo(video, clip.sourceInUs);
+                const captureCanvas = document.createElement('canvas');
+                captureCanvas.width = 0;
+                captureCanvas.height = 0;
+                decoder = createHtmlMediaDecoder(video, captureCanvas);
               }
             }
-            const scenes = sceneFrames.get(index);
-            if (scenes !== undefined) {
-              for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
-            }
-            for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
-            const frame = buildFrame(timeUs);
-            renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
-          },
-          onProgress: (completed, total) => {
-            setExportProgress(0.05 + 0.93 * (completed / total));
-            if (completed === total || completed % frameRate === 0)
-              setExportStatus(
-                `Encoding preview-equivalent H.264/AAC… ${completed}/${total} frames`,
+            const clipAudioConfig = audioState.clips[clip.id] ?? {
+              gain: 1,
+              pan: 0,
+              mute: false,
+              solo: false,
+            };
+            let sampleRate = 48_000;
+            let fullSamples: Float32Array | undefined;
+            try {
+              const audioResponse = await fetch(source.url);
+              if (!audioResponse.ok)
+                throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
+              const audioBuffer = await audioContext.decodeAudioData(
+                await audioResponse.arrayBuffer(),
               );
-          },
-          filename: exportFilename,
-        });
-        setExportProgress(1);
-        // Retain only the newest export's bytes for re-download.
-        if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
-        lastExportRef.current =
-          exportResult.blob !== undefined
-            ? { entryId, url: URL.createObjectURL(exportResult.blob) }
-            : null;
+              sampleRate = audioBuffer.sampleRate;
+              const channels = audioBuffer.numberOfChannels;
+              fullSamples = new Float32Array(audioBuffer.length);
+              const monoChannel = new Float32Array(audioBuffer.length);
+              for (let channel = 0; channel < channels; channel++) {
+                audioBuffer.copyFromChannel(monoChannel, channel);
+                for (let index = 0; index < monoChannel.length; index++)
+                  fullSamples[index] = fullSamples[index]! + monoChannel[index]! / channels;
+              }
+            } catch (error) {
+              if (assetKind !== 'image' && assetKind !== 'audio') throw error;
+            }
+            const sourceStartSample = Math.max(
+              0,
+              Math.floor((clip.sourceInUs * sampleRate) / 1_000_000),
+            );
+            const sourceLength = Math.max(1, Math.ceil((clip.durationUs * sampleRate) / 1_000_000));
+            const samples =
+              fullSamples?.slice(
+                sourceStartSample,
+                Math.min(fullSamples.length, sourceStartSample + sourceLength),
+              ) ?? new Float32Array(sourceLength);
+            return {
+              clip,
+              video,
+              decoder,
+              stillFrame,
+              audio: {
+                samples,
+                sampleRate,
+                config: clipAudioConfig,
+              },
+            };
+          }),
+        );
+        const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
+        const audioSampleRate = exportMedia[0]?.audio.sampleRate ?? 48000;
+        const offlineAudio = renderOfflineAudio(
+          exportMedia.map((media) => ({
+            clipId: media.clip.id,
+            samples: resampleMonoSamples(
+              media.audio.samples,
+              media.audio.sampleRate,
+              audioSampleRate,
+            ),
+            startUs: media.clip.startUs,
+            config: audioState.clips[media.clip.id] ?? {
+              gain: 1,
+              pan: 0,
+              mute: false,
+              solo: false,
+            },
+            effects: audioState.effects
+              .filter((effect) => effect.targetId === media.clip.id)
+              .map((effect) => effect.effect),
+          })),
+          audioState.buses,
+          { sampleRate: audioSampleRate, channels: 1, startUs: 0, endUs: durationUs },
+        );
+        const mixedAudio = offlineAudio.samples;
+        const mixedAudioBuffer = createMonoAudioBuffer(audioContext, mixedAudio, audioSampleRate);
+        const mixedChannel = mixedAudioBuffer.getChannelData(0);
+        for (let i = 0; i < mixedAudio.length; i++) mixedChannel[i] = mixedAudio[i]!;
+        const mixedAudioSource = audioContext.createBufferSource();
+        mixedAudioSource.buffer = mixedAudioBuffer;
+        mixedAudioSource.connect(audioDestination);
+        const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
+        if (exportAudioTrack === undefined)
+          throw new Error('Export audio mix did not produce a track');
+        const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
+        const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
+          (object) => object.kind === 'html-scene',
+        );
+        const sceneFrames = new Map<
+          number,
+          Map<string, { width: number; height: number; data: Uint8ClampedArray }>
+        >();
+        if (hasHtmlScenes) {
+          setExportStatus('Capturing HTML scene frames…');
+          const sceneCache = new HtmlSceneSurfaceCache();
+          try {
+            for (let index = 0; index < totalFrames; index++) {
+              const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+              await sceneCache.sync(session.visualProject.visualObjects, timeUs);
+              sceneFrames.set(index, new Map(sceneCache.bitmaps()));
+              if (index % frameRate === 0)
+                setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
+            }
+          } finally {
+            sceneCache.destroy();
+          }
+        }
+        const startTimers: number[] = [];
+        let mixedAudioStarted = false;
+        try {
+          await audioContext.resume();
+          mixedAudioSource.start(0);
+          mixedAudioStarted = true;
+          setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
+          const exportResult: BrowserExportResult = await downloadBrowserMp4({
+            manifest,
+            frameCount: totalFrames,
+            canvas: renderer.canvas,
+            audioTrack: exportAudioTrack,
+            onRecordingStart: () => {
+              for (const media of exportMedia) {
+                if (media.video === undefined) continue;
+                const startVideo = () => void media.video?.play();
+                if (media.clip.startUs === 0) startVideo();
+                else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
+              }
+            },
+            paintFrame: async (index) => {
+              const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+              const transition = activeTransitionAt(session.visualProject, timeUs);
+              const activeClip = activeVideoClipAt(session.timelineProject, timeUs);
+              const clip =
+                (activeClip !== undefined && mediaForClip.get(activeClip.id)?.video !== undefined
+                  ? activeClip
+                  : undefined) ??
+                (transition !== undefined
+                  ? (() => {
+                      const partner = findVideoClipById(
+                        session.timelineProject,
+                        transition.leftClipId,
+                      );
+                      return partner !== undefined &&
+                        mediaForClip.get(partner.id)?.video !== undefined
+                        ? partner
+                        : undefined;
+                    })()
+                  : undefined);
+              const bitmaps = new Map<string, ImageDataLike>();
+              const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
+                const media = mediaForClip.get(target.id);
+                if (media === undefined)
+                  throw new Error(`Export media for ${target.id} was not prepared`);
+                if (media.stillFrame !== undefined) {
+                  bitmaps.set(target.id, media.stillFrame);
+                  return videoFrameNodeFromDecoded(
+                    videoClipSpecAt(session.visualProject, target, timeUs, height),
+                    {
+                      assetId: target.assetId,
+                      bitmap: media.stillFrame,
+                      sourceTimeUs: target.sourceInUs,
+                      token: `still:${target.assetId}`,
+                    },
+                    { width: media.stillFrame.width, height: media.stillFrame.height },
+                  );
+                }
+                if (media.video === undefined || media.decoder === undefined)
+                  throw new Error(`Export media for ${target.id} was not prepared`);
+                const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
+                await seekDetachedVideo(media.video, sourceUs);
+                const token = index + 1;
+                const decoded = media.decoder.captureCurrentFrame(token);
+                if (decoded.bitmap === undefined)
+                  throw new Error(
+                    `Export media frame ${index} for ${target.assetId} is not drawable`,
+                  );
+                bitmaps.set(target.id, decoded.bitmap);
+                return videoFrameNodeFromDecoded(
+                  videoClipSpecAt(session.visualProject, target, timeUs, height),
+                  decoded,
+                  {
+                    width: media.video.videoWidth,
+                    height: media.video.videoHeight,
+                  },
+                );
+              };
+              let node: VideoFrameNode | undefined;
+              if (clip !== undefined && clip.kind === 'video') {
+                node = await captureExportClip(clip);
+              }
+              if (transition !== undefined && node !== undefined) {
+                for (const clipId of [transition.leftClipId, transition.rightClipId]) {
+                  if (bitmaps.has(clipId)) continue;
+                  const partner = findVideoClipById(session.timelineProject, clipId);
+                  if (partner !== undefined && mediaForClip.get(partner.id)?.video !== undefined)
+                    await captureExportClip(partner);
+                }
+              }
+              const scenes = sceneFrames.get(index);
+              if (scenes !== undefined) {
+                for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
+              }
+              for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
+              const frame = buildFrame(timeUs);
+              renderer.render(
+                node === undefined ? frame : withVideoFrameNode(frame, node),
+                bitmaps,
+              );
+            },
+            onProgress: (completed, total) => {
+              setExportProgress(0.05 + 0.93 * (completed / total));
+              if (completed === total || completed % frameRate === 0)
+                setExportStatus(
+                  `Encoding preview-equivalent H.264/AAC… ${completed}/${total} frames`,
+                );
+            },
+            filename: exportFilename,
+            signal: abortController.signal,
+          });
+          setExportProgress(1);
+          // Retain only the newest export's bytes for re-download.
+          if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
+          if (exportResult.blob !== undefined)
+            await exportCachePromise
+              .then(async (cache) => {
+                await cache.put(entryId, exportResult.blob!);
+                await cache.prune(undefined, [entryId]);
+              })
+              .catch(() => undefined);
+          lastExportRef.current =
+            exportResult.blob !== undefined
+              ? { entryId, url: URL.createObjectURL(exportResult.blob) }
+              : null;
+          recordExportEntry({
+            id: entryId,
+            filename: exportResult.filename,
+            status: 'completed',
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            totalBytes: exportResult.totalBytes,
+            frameCount: exportResult.frameCount,
+          });
+          // File has already downloaded via the browser save prompt — drop the
+          // toast immediately and clear the full bar after a short settle so the
+          // processes menu (not the icon row) remains the durable record.
+          setExportStatus(undefined);
+          exportToastTimerRef.current = window.setTimeout(() => {
+            setExportProgress(undefined);
+          }, 450);
+        } finally {
+          for (const timer of startTimers) window.clearTimeout(timer);
+          if (mixedAudioStarted) mixedAudioSource.stop();
+          for (const media of exportMedia) media.video?.pause();
+          renderer.destroy();
+          await audioContext.close();
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const cancelled =
+          abortController.signal.aborted ||
+          (error instanceof DOMException && error.name === 'AbortError');
+        setExportStatus(
+          cancelled
+            ? 'Export cancelled. You can retry from Recent processes.'
+            : `Export failed: ${message}`,
+        );
         recordExportEntry({
           id: entryId,
-          filename: exportResult.filename,
-          status: 'completed',
+          filename: exportFilename,
+          status: cancelled ? 'interrupted-retryable' : 'failed',
           startedAt,
           finishedAt: new Date().toISOString(),
-          totalBytes: exportResult.totalBytes,
-          frameCount: exportResult.frameCount,
+          error: cancelled ? 'cancelled by user' : message,
         });
-        // File has already downloaded via the browser save prompt — drop the
-        // toast immediately and clear the full bar after a short settle so the
-        // processes menu (not the icon row) remains the durable record.
-        setExportStatus(undefined);
+        setExportProgress(undefined);
         exportToastTimerRef.current = window.setTimeout(() => {
-          setExportProgress(undefined);
-        }, 450);
+          setExportStatus(undefined);
+        }, 8_000);
       } finally {
-        for (const timer of startTimers) window.clearTimeout(timer);
-        for (const source of audioSources) source.stop();
-        for (const media of exportMedia) media.video.pause();
-        renderer.destroy();
-        await audioContext.close();
+        if (exportAbortRef.current === abortController) exportAbortRef.current = null;
+        setExporting(false);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setExportStatus(`Export failed: ${message}`);
-      recordExportEntry({
-        id: entryId,
-        filename: exportFilename,
-        status: 'failed',
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        error: message,
-      });
-      setExportProgress(undefined);
-      exportToastTimerRef.current = window.setTimeout(() => {
-        setExportStatus(undefined);
-      }, 8_000);
-    } finally {
-      setExporting(false);
-    }
-  }, [
-    audioState.buses,
-    audioState.clips,
-    exportPreset,
-    exporting,
-    recordExportEntry,
-    session,
-    syncStickerBitmaps,
-  ]);
+    },
+    [
+      audioState.buses,
+      audioState.clips,
+      audioState.effects,
+      exportPreset,
+      exporting,
+      mediaResolver,
+      recordExportEntry,
+      session,
+      syncStickerBitmaps,
+    ],
+  );
+  const cancelExport = useCallback(() => {
+    exportAbortRef.current?.abort();
+  }, []);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
     setAgentPanelCommand((current) => ({
       serial: (current?.serial ?? 0) + 1,
@@ -2289,6 +2562,174 @@ function EditorWorkspace({
     const context = useContext(EditorPanelContext);
     if (context === undefined) throw new Error('editor panel context is unavailable');
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const projectWithImportedAsset = (
+      project: typeof context.visualProject,
+      asset: {
+        readonly id: string;
+        readonly kind: 'video' | 'audio' | 'image';
+        readonly displayName: string;
+        readonly sha256?: string;
+        readonly bytes?: number;
+        readonly descriptor?: {
+          readonly mimeType?: string;
+          readonly durationUs?: number;
+          readonly width?: number;
+          readonly height?: number;
+        };
+      },
+    ) => ({
+      ...project,
+      assets: {
+        ...project.assets,
+        [asset.id]: {
+          ...project.assets[asset.id],
+          id: asset.id,
+          kind: asset.kind,
+          displayName: asset.displayName,
+          ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
+          ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
+          ...(asset.descriptor === undefined
+            ? {}
+            : {
+                descriptor: {
+                  mimeType: asset.descriptor.mimeType ?? 'application/octet-stream',
+                  ...(asset.descriptor.durationUs === undefined
+                    ? {}
+                    : { durationUs: asset.descriptor.durationUs }),
+                  ...(asset.descriptor.width === undefined
+                    ? {}
+                    : { width: asset.descriptor.width }),
+                  ...(asset.descriptor.height === undefined
+                    ? {}
+                    : { height: asset.descriptor.height }),
+                },
+              }),
+        },
+      },
+    });
+    const rememberImportedAsset = (asset: {
+      readonly id: string;
+      readonly kind: 'video' | 'audio' | 'image';
+      readonly displayName: string;
+      readonly sha256?: string;
+      readonly bytes?: number;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly durationUs?: number;
+        readonly width?: number;
+        readonly height?: number;
+      };
+    }) => {
+      context.replaceVisualProject(projectWithImportedAsset(context.visualProject, asset));
+    };
+    const addAssetToTimeline = (asset: {
+      readonly assetId: string;
+      readonly kind: 'video' | 'audio' | 'image';
+      readonly displayName: string;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly durationUs?: number;
+        readonly width?: number;
+        readonly height?: number;
+      };
+    }) => {
+      const composition = context.timelineProject.compositions.root;
+      if (composition === undefined) return;
+      const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
+      const controllerId = `media-controller-${clipId}`;
+      context.replaceVisualProject(
+        bindClipToObject(
+          {
+            ...projectWithImportedAsset(context.visualProject, {
+              id: asset.assetId,
+              kind: asset.kind,
+              displayName: asset.displayName,
+              descriptor: asset.descriptor,
+            }),
+            visualObjects: {
+              ...context.visualProject.visualObjects,
+              [controllerId]: {
+                id: controllerId,
+                kind: 'null',
+                assetId: asset.assetId,
+                transform: {
+                  x: 0,
+                  y: 0,
+                  scaleX: 1,
+                  scaleY: 1,
+                  rotationDeg: 0,
+                  opacity: 1,
+                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                },
+              },
+            },
+          },
+          clipId,
+          controllerId,
+        ),
+      );
+      context.dispatchTimeline(
+        buildTimelineMediaImportTransaction(
+          composition,
+          [{ id: asset.assetId, ...asset }],
+          state.playheadUs,
+          new Set(),
+          () => clipId,
+        ),
+      );
+    };
+    const bindMediaClip = (
+      asset: {
+        readonly id: string;
+        readonly kind: 'video' | 'audio' | 'image';
+        readonly displayName?: string;
+        readonly sha256?: string;
+        readonly bytes?: number;
+        readonly descriptor?: {
+          readonly mimeType?: string;
+          readonly durationUs?: number;
+          readonly width?: number;
+          readonly height?: number;
+        };
+      },
+      clipId: string,
+    ) => {
+      const controllerId = `media-controller-${clipId}`;
+      if (context.visualProject.visualObjects[controllerId] !== undefined) return;
+      context.replaceVisualProject(
+        bindClipToObject(
+          {
+            ...projectWithImportedAsset(context.visualProject, {
+              id: asset.id,
+              kind: asset.kind,
+              displayName: asset.displayName ?? asset.id,
+              ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
+              ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
+              ...(asset.descriptor === undefined ? {} : { descriptor: asset.descriptor }),
+            }),
+            visualObjects: {
+              ...context.visualProject.visualObjects,
+              [controllerId]: {
+                id: controllerId,
+                kind: 'null',
+                assetId: asset.id,
+                transform: {
+                  x: 0,
+                  y: 0,
+                  scaleX: 1,
+                  scaleY: 1,
+                  rotationDeg: 0,
+                  opacity: 1,
+                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                },
+              },
+            },
+          },
+          clipId,
+          controllerId,
+        ),
+      );
+    };
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
@@ -2343,7 +2784,44 @@ function EditorWorkspace({
         <AudioPanel
           clipIds={clipIds}
           audioState={context.audioState}
-          onAudioChange={(next) => context.setAudioState(next)}
+          onAudioChange={(next, label) => context.setAudioState(next, label)}
+          onRunBrowserDsp={(workflowId) => {
+            const effectKinds = [
+              {
+                kind: 'eq' as const,
+                bands: [
+                  { frequency: 120, gain: -2, q: 0.7, type: 'highpass' as const },
+                  { frequency: 3_000, gain: 2, q: 0.8, type: 'peaking' as const },
+                ],
+              },
+              {
+                kind: 'compressor' as const,
+                threshold: -18,
+                ratio: 3,
+                attackUs: 10_000,
+                releaseUs: 120_000,
+                knee: 6,
+              },
+              { kind: 'limiter' as const, ceiling: -1, releaseUs: 80_000 },
+            ];
+            const nextEffects = context.timelineProject.compositions.root?.tracks
+              .flatMap((track) => track.clips.map((clip) => clip.id))
+              .flatMap((clipId) =>
+                effectKinds.map((effect, index) => ({
+                  id: `browser-polish-${clipId}-${index}`,
+                  targetId: clipId,
+                  effect,
+                })),
+              );
+            context.setAudioState(
+              {
+                ...context.audioState,
+                effects: nextEffects ?? context.audioState.effects,
+              },
+              `Run ${workflowId} with Browser DSP`,
+            );
+            context.showToast('Browser Voice Polish applied to the project.', 'success');
+          }}
         />
       );
     }
@@ -2442,15 +2920,53 @@ function EditorWorkspace({
                 onDispatchArtifacts: context.dispatchArtifacts,
               })}
           onOpenAssetLibrary={() => context.activatePanel('media')}
-          onImportMedia={(file) =>
-            importMediaFile({
+          onImportMedia={async (file) => {
+            const asset = await importMediaFile({
               projectId: controlPlaneProject.controlPlaneProjectId,
               projectTitle: controlPlaneProject.title,
               file,
               client: mediaControlPlaneClient,
               originalAssetCache: originalAssetCachePromise,
-            })
-          }
+            });
+            rememberImportedAsset(asset);
+            return asset;
+          }}
+          onImportFiles={(files) => {
+            for (const file of files) {
+              void importMediaFile({
+                projectId: controlPlaneProject.controlPlaneProjectId,
+                projectTitle: controlPlaneProject.title,
+                file,
+                client: mediaControlPlaneClient,
+                originalAssetCache: originalAssetCachePromise,
+              })
+                .then((asset) => {
+                  rememberImportedAsset(asset);
+                  const composition = context.timelineProject.compositions.root;
+                  if (composition !== undefined) {
+                    const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
+                    bindMediaClip(asset, clipId);
+                    context.dispatchTimeline(
+                      buildTimelineMediaImportTransaction(
+                        composition,
+                        [asset],
+                        state.playheadUs,
+                        new Set(),
+                        () => clipId,
+                      ),
+                    );
+                  }
+                  context.showToast(`${file.name} added to the timeline.`, 'success');
+                })
+                .catch((error) => {
+                  context.showToast(
+                    `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+                    'error',
+                  );
+                });
+            }
+          }}
+          onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
           onSeek={context.seek}
           onToggleSelection={context.toggleSelection}
@@ -2604,6 +3120,7 @@ function EditorWorkspace({
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
+          onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {
             context.attachKiloCodeAsset(asset);
             context.activatePanel('agent');
@@ -2866,7 +3383,7 @@ function EditorWorkspace({
           <button
             type="button"
             className="header-export-btn"
-            onClick={handleExport}
+            onClick={() => void handleExport()}
             disabled={exporting}
             aria-label={exporting ? 'Exporting…' : 'Export MP4'}
             data-guide={exporting ? 'Exporting…' : 'Export MP4'}
@@ -2874,6 +3391,17 @@ function EditorWorkspace({
           >
             <ExportIcon />
           </button>
+          {exporting && (
+            <button
+              type="button"
+              className="icon-button"
+              onClick={cancelExport}
+              aria-label="Cancel export"
+              title="Cancel export"
+            >
+              <CloseIcon />
+            </button>
+          )}
           <div className="header-menu">
             <button
               className="icon-button"
@@ -2904,7 +3432,7 @@ function EditorWorkspace({
                         <span className="process-meta">
                           {entry.status === 'completed' && entry.totalBytes !== undefined
                             ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
-                            : entry.status === 'failed'
+                            : entry.status === 'failed' || entry.status === 'interrupted-retryable'
                               ? (entry.error ?? 'failed')
                               : 'encoding…'}
                         </span>
@@ -2918,6 +3446,18 @@ function EditorWorkspace({
                           >
                             <DownloadIcon />
                           </a>
+                        )}
+                        {(entry.status === 'failed' ||
+                          entry.status === 'interrupted-retryable') && (
+                          <button
+                            type="button"
+                            className="process-retry"
+                            onClick={() => void handleExport(entry)}
+                            disabled={exporting}
+                            aria-label={`Retry ${entry.filename}`}
+                          >
+                            Retry
+                          </button>
                         )}
                       </li>
                     ))}

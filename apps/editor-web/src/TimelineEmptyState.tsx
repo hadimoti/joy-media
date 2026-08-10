@@ -10,6 +10,13 @@ export interface TimelineEmptyStateProps {
   readonly onSeek: (timeUs: number) => void;
   readonly onImportClick: () => void;
   readonly onAddFromLibrary: () => void;
+  readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly onAssetDrop?: (asset: {
+    readonly assetId: string;
+    readonly kind: string;
+    readonly displayName?: string;
+    readonly descriptor?: { readonly durationUs?: number; readonly mimeType?: string };
+  }) => void;
   readonly onContextMenu: (x: number, y: number) => void;
   readonly onToast?: (message: string) => void;
 }
@@ -23,6 +30,9 @@ export function TimelineEmptyState({
   project,
   _playheadUs,
   onImportClick,
+  onAddFromLibrary,
+  onFilesDrop,
+  onAssetDrop,
   onContextMenu,
   onToast,
 }: TimelineEmptyStateProps) {
@@ -59,9 +69,37 @@ export function TimelineEmptyState({
         onToast?.('Add media to the timeline first, then drag the effect onto a clip.');
         return;
       }
+      if (event.dataTransfer.files.length > 0) {
+        onFilesDrop?.(Array.from(event.dataTransfer.files));
+        return;
+      }
+      const raw = event.dataTransfer.getData('application/x-joy-media-asset');
+      if (raw.length > 0) {
+        try {
+          const value: unknown = JSON.parse(raw);
+          if (
+            value === null ||
+            typeof value !== 'object' ||
+            typeof (value as { readonly assetId?: unknown }).assetId !== 'string' ||
+            typeof (value as { readonly kind?: unknown }).kind !== 'string'
+          )
+            throw new Error('invalid media reference');
+          onAssetDrop?.(
+            value as {
+              assetId: string;
+              kind: string;
+              displayName?: string;
+              descriptor?: { readonly durationUs?: number; readonly mimeType?: string };
+            },
+          );
+        } catch {
+          onToast?.('The dropped media reference is invalid.');
+        }
+        return;
+      }
       onImportClick();
     },
-    [onImportClick, onToast],
+    [onAssetDrop, onFilesDrop, onImportClick, onToast],
   );
 
   const handleContextMenu = useCallback(
@@ -98,8 +136,7 @@ export function TimelineEmptyState({
       onDrop={handleDrop}
       onContextMenu={handleContextMenu}
       onClick={handleClick}
-      role="button"
-      tabIndex={0}
+      role="region"
       aria-label="Empty timeline — drop media to start editing"
     >
       <div className="timeline-empty-strip-icon" aria-hidden="true">
@@ -108,6 +145,15 @@ export function TimelineEmptyState({
       <p className="timeline-empty-text">
         {dragActive ? 'Release to import media' : 'Drag media here and start creating'}
       </p>
+      <div className="timeline-empty-actions">
+        <button type="button" className="timeline-empty-action" onClick={onImportClick}>
+          <UploadIcon />
+          Import media
+        </button>
+        <button type="button" className="timeline-empty-action" onClick={onAddFromLibrary}>
+          Browse library
+        </button>
+      </div>
     </div>
   );
 }

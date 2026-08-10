@@ -38,11 +38,14 @@ describe('export history', () => {
     expect(entries[0]).toMatchObject({ id: 'a', status: 'completed', totalBytes: 9 });
   });
 
-  it('marks stale running entries as failed on load', () => {
+  it('marks stale running entries as retryable on load', () => {
     const storage = memoryStorage();
     saveExportHistory(storage, [entry('a', 'running')]);
     const loaded = loadExportHistory(storage);
-    expect(loaded[0]).toMatchObject({ status: 'failed', error: 'interrupted by page reload' });
+    expect(loaded[0]).toMatchObject({
+      status: 'interrupted-retryable',
+      error: 'interrupted by page reload',
+    });
   });
 
   it('ignores malformed persisted payloads', () => {

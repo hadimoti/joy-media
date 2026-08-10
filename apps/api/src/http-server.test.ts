@@ -428,6 +428,12 @@ describe('control-plane HTTP transport', () => {
       bytes: bytes.byteLength,
     });
 
+    const original = await fetch(`${origin}/v1/projects/p/assets/video-1/original`);
+    expect(original.status).toBe(200);
+    expect(original.headers.get('content-type')).toBe('video/mp4');
+    expect(original.headers.get('cache-control')).toBe('private, no-store');
+    expect(new Uint8Array(await original.arrayBuffer())).toEqual(bytes);
+
     const content = await fetch(`${origin}/v1/library/cloud-assets/video-1/content`);
     expect(content.status).toBe(200);
     expect(content.headers.get('content-type')).toBe('video/mp4');
@@ -558,6 +564,37 @@ describe('control-plane HTTP transport', () => {
     expect(content.headers.get('content-type')).toBe('image/jpeg');
     expect(content.headers.get('cache-control')).toBe('private, no-store');
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(thumbnail);
+
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: ['asset.thumbnail', 'audio.ml-denoise'], assetIds: ['asset-1'] },
+      workerToken,
+    );
+    await request(origin, 'POST', '/v1/projects/p/jobs', {
+      id: 'audio-job',
+      type: 'audio.ml-denoise',
+      assetId: 'asset-1',
+    });
+    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const audio = new Uint8Array([1, 2, 3, 4]);
+    const audioSha256 = createHash('sha256').update(audio).digest('hex');
+    const audioUpload = await fetch(`${origin}/v1/workers/w/jobs/audio-job/derivative`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${workerToken}`,
+        'content-type': 'audio/wav',
+        'x-joy-asset-id': 'asset-1',
+        'x-joy-sha256': audioSha256,
+        'x-joy-bytes': String(audio.byteLength),
+      },
+      body: audio,
+    });
+    expect(audioUpload.status).toBe(201);
+    expect(await audioUpload.json()).toMatchObject({
+      data: { id: 'derivative-audio-job', kind: 'audio', assetId: 'asset-1' },
+    });
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
   });
