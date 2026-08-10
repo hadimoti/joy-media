@@ -11,11 +11,21 @@ export interface ProjectMediaSource {
 export interface ProjectMediaResolverOptions {
   readonly projectId: string;
   readonly project?: JoyProjectV1;
-  readonly client: Pick<BrowserControlPlaneClient, 'assets' | 'originalBytes'>;
+  readonly client: Pick<
+    BrowserControlPlaneClient,
+    'assets' | 'originalBytes' | 'sharedCloudOriginalBytes'
+  >;
   readonly originalCache: Pick<OpfsOriginalAssetCache, 'get'>;
 }
 
 const REFERENCE_ASSET_IDS = new Set(['asset-intro', 'asset-product', 'asset-outro']);
+
+function mediaMimeType(asset: BrowserAsset | undefined, blob: Blob): string {
+  const blobType = blob.type.trim().toLowerCase();
+  const expectedPrefix = asset === undefined ? undefined : `${asset.kind}/`;
+  if (expectedPrefix !== undefined && blobType.startsWith(expectedPrefix)) return blobType;
+  return asset?.descriptor.mimeType || blobType || 'application/octet-stream';
+}
 
 /**
  * Resolves project media without exposing storage locations to creative data.
@@ -55,19 +65,26 @@ export class ProjectMediaResolver {
     if (local !== undefined && (await matchesDescriptor(local, descriptor))) {
       const source = this.#remember(assetId, {
         url: URL.createObjectURL(local),
-        mimeType: local.type || descriptor?.descriptor.mimeType || 'application/octet-stream',
+        mimeType: mediaMimeType(descriptor, local),
         source: 'opfs',
       });
       return source;
     }
 
     try {
-      const cloud = await this.#options.client.originalBytes(this.#options.projectId, assetId);
+      let cloud: Blob;
+      try {
+        cloud = await this.#options.client.originalBytes(this.#options.projectId, assetId);
+      } catch {
+        // User-library assets can be placed on another project's timeline.
+        // They remain owner-authorized through the shared library endpoint.
+        cloud = await this.#options.client.sharedCloudOriginalBytes(assetId);
+      }
       if (!(await matchesDescriptor(cloud, descriptor)))
         throw new Error(`owner media integrity check failed for ${assetId}`);
       return this.#remember(assetId, {
         url: URL.createObjectURL(cloud),
-        mimeType: cloud.type || descriptor?.descriptor.mimeType || 'application/octet-stream',
+        mimeType: mediaMimeType(descriptor, cloud),
         source: 'cloud',
       });
     } catch (error) {

@@ -13,6 +13,9 @@ describe('ProjectMediaResolver', () => {
         originalBytes: vi.fn(async () => {
           throw new Error('cloud should not be requested');
         }),
+        sharedCloudOriginalBytes: vi.fn(async () => {
+          throw new Error('shared cloud should not be requested');
+        }),
       },
       originalCache: { get: vi.fn(async () => blob) },
     });
@@ -40,6 +43,9 @@ describe('ProjectMediaResolver', () => {
           if (assetId === 'media-1') return cloud;
           throw new Error('not stored');
         }),
+        sharedCloudOriginalBytes: vi.fn(async () => {
+          throw new Error('not stored');
+        }),
       },
       originalCache: { get: vi.fn(async () => undefined) },
     });
@@ -54,6 +60,40 @@ describe('ProjectMediaResolver', () => {
       source: 'reference',
     });
     await expect(resolver.resolve('media-missing')).rejects.toThrow('unavailable');
+    create.mockRestore();
+  });
+
+  it('uses an integrity-checked shared-library original when project ownership is absent', async () => {
+    const cloud = new Blob(['shared'], { type: 'application/octet-stream' });
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:shared');
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      project: {
+        assets: {
+          'shared-video': {
+            id: 'shared-video',
+            kind: 'video',
+            displayName: 'Shared clip',
+            bytes: cloud.size,
+            descriptor: { mimeType: 'video/mp4' },
+          },
+        },
+      } as never,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(async () => {
+          throw new Error('not a project-owned asset');
+        }),
+        sharedCloudOriginalBytes: vi.fn(async () => cloud),
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(resolver.resolve('shared-video')).resolves.toMatchObject({
+      source: 'cloud',
+      url: 'blob:shared',
+      mimeType: 'video/mp4',
+    });
     create.mockRestore();
   });
 
@@ -80,6 +120,7 @@ describe('ProjectMediaResolver', () => {
       client: {
         assets: vi.fn(async () => []),
         originalBytes: vi.fn(async () => cloud),
+        sharedCloudOriginalBytes: vi.fn(async () => cloud),
       },
       originalCache: { get: vi.fn(async () => new Blob(['stale'], { type: 'video/mp4' })) },
     });
