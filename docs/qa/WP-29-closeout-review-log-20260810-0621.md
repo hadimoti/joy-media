@@ -180,3 +180,28 @@ Next step: NOT STARTED
 - Remaining risk inside this step: no open STEP-02 blocker.
 - Worktree status: clean after commit
 - Next step: NOT STARTED
+
+## STEP-03 report
+
+- Status: BLOCKED
+- Starting commit: `f436acd78e9a`
+- Result commit: this STEP-03 evidence commit
+- Branch: `codex/wp29-closeout-20260810-0621`
+- Files changed: STEP-03 report and this review log.
+- Behavior implemented: none; this step independently validated the STEP-02
+  browser artifact.
+- Defects found/fixed: generic `video/mp4` output is VP9/Opus rather than the
+  required H.264/AAC pair.
+- Tests run and exact outcomes: three fresh 1080x1920 downloads passed the
+  download gate; independent FFprobe failed the H.264/AAC assertion 3/3.
+  FFmpeg volume detection reported -21.1 dB mean and -17.6 dB max on each.
+- Browser/VPS evidence paths: sanitized MP4 basenames and the STEP-03 report
+  basename only.
+- Security/privacy checks: mode 0600 evidence, basename-only references, and
+  no secret-like values.
+- Rollback or recovery note: no product or production mutation occurred.
+- Deviations from the step: mute and gain-direction checks were deferred because
+  the required codec gate failed first.
+- Remaining risk inside this step: H.264/AAC browser export or verified remux
+  remains required.
+- Worktree status: clean after commit

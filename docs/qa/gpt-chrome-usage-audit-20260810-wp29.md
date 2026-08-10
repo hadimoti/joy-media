@@ -100,3 +100,11 @@ These are intentionally **NOT-RUN / OPEN**, not failures hidden by this report:
 
 No passwords, tokens, personal file paths, or secret configuration values are
 included. No public API or production configuration was changed by this audit.
+
+## STEP-03 current result
+
+Independent FFprobe of three fresh browser downloads is **BLOCKED-CAPABILITY**:
+all three are 1080x1920, 30 fps, one VP9 video stream plus one Opus audio stream.
+The required H.264/AAC assertion is 0/3. Generic `video/mp4` was advertised,
+but the exact H.264/AAC candidate is unsupported in this Chrome. Do not report
+this as an H.264/AAC PASS; a compatible remux/handoff is required.
