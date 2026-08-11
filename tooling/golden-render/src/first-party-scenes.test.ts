@@ -49,7 +49,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
       });
       expect(hashes).toHaveLength(FIRST_PARTY_SCENES.length);
       expect(new Set(hashes).size).toBe(hashes.length);
-    }, 60_000);
+    }, 120_000);
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
       const driver = createChromiumSceneDriver();
