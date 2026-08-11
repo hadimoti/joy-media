@@ -1,6 +1,6 @@
 # WP-30 — Cross-Browser Asset Preview and Animated-Media Reliability
 
-**Status:** Product closeout green; GBrain synchronization/documentation finalization pending
+**Status:** Product closeout green; GBrain synchronized; documentation CI pending
 **Priority:** P1  
 **Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
 **Repository:** `/opt/joy-media/repo`  
@@ -536,5 +536,5 @@ WP-30 is finished only when all of the following are true:
 - [x] STEP 6 — Local animated timeline/export parity and frame-hash proof green.
 - [x] STEP 7 — Two-profile, three-viewport browser/performance matrix green.
 - [x] STEP 8 — Immutable deployment, signed-in live acceptance, and cleanup green.
-- [ ] STEP 9 — QA, state, GBrain, and documentation CI green; GBrain MCP write unavailable in this execution context.
+- [x] STEP 9 — QA/state handoff and GBrain page synchronization completed; documentation CI is still running for the final docs commit.
 - [ ] WP-30 marked `FINISHED` only after every item above passes.

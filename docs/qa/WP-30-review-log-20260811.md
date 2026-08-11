@@ -1,6 +1,6 @@
 # WP-30 Review Log — 2026-08-11
 
-**Status:** Closeout evidence recorded; GBrain synchronization remains pending
+**Status:** GBrain handoff recorded; final documentation CI remains pending
 **Candidate/deployed product:** `43c5521`
 **API release:** `wp30-api-20260811T171706Z-43c5521`
 **Editor release:** `editor-web-20260811T171706Z-43c5521-wp30`
@@ -198,12 +198,24 @@ the signed-in smoke below.
   the authoritative byte-level download proof; this is recorded as a browser
   harness limitation, not a product failure.
 
-### Closeout limitations
+### GBrain handoff
 
-- GBrain MCP write tools were not available in this execution context, so the
-  two authoritative GBrain pages were not modified. The documentation commit
-  records this explicitly; WP-30 must not be described as fully synchronized
-  until those pages are updated and hash-verified.
+- The installed GBrain CLI has no `push` subcommand. Its page-write command is
+  `gbrain put <slug> [< file.md]`; because the live `gbrain serve` process owns
+  the PGLite lock, the equivalent authenticated MCP `put_page` route was used.
+- Both authoritative pages were fetched twice before each write and the
+  `content_hash` values matched. Only a terminal WP-30 closeout section was
+  appended; no unrelated page was changed.
+- `joy-media-state` was re-read with hash
+  `58529a9e67529c4bb0369ac2ddbe15b9d66758f9bcdad5083058dd3da5116ab3` at
+  `2026-08-11T17:50:31.653Z`.
+- `joy-media-wp29-first-project-golden-path` was re-read with hash
+  `4eb728cc4430c42af294582fb06558a7a2e81f581dee3c5640e12beb1844dc3e` at
+  `2026-08-11T17:51:22.147Z`.
+- GBrain doctor completed with status `warnings` and health score `90`. The
+  warnings are pre-existing coverage/link-resolution opportunities
+  (`contextual_retrieval_coverage`, `link_resolution_opportunity`); there was
+  no write or connectivity failure.
 
 ## Safety and cleanup
 
@@ -213,12 +225,15 @@ the signed-in smoke below.
 - Product deployment changed only the managed immutable release pointers; the
   previous API/editor releases and the database backup remain available for
   rollback.
-- No GBrain page was changed because the required MCP write capability was not
-  present.
+- The GBrain pages now contain the WP-30 candidate, immutable releases, live
+  smoke, Chrome smoke, backup hash, and cleanup handoff. No token or secret was
+  printed.
 
 ## Verdict
 
-WP-30 product implementation, candidate CI, immutable deployment, signed-in
-animated import/timeline/export smoke, and disposable-state cleanup are green.
-The package remains **OPEN FOR GBrain SYNCHRONIZATION** until the two GBrain
-pages are updated and hash-verified. The deployed product SHA is `43c5521`.
+WP-30 product implementation, immutable deployment, signed-in animated
+import/timeline/export smoke, Chrome verification, disposable-state cleanup,
+and GBrain page synchronization are green. The documentation workflow for
+`67e51a1` was still running its browser-e2e job at the time of this handoff;
+refresh the final verdict after that job concludes. The deployed product SHA
+is `43c5521`.
