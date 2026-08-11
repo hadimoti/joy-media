@@ -87,30 +87,32 @@ test.describe('WP-30 animated timeline export', () => {
         ]),
       );
       expect(Number(probe.format?.duration)).toBeGreaterThan(0);
-      const frameHashes = [0, 0.3].map((seconds) =>
-        execFileSync(
-          'ffmpeg',
-          [
-            '-v',
-            'error',
-            '-ss',
-            String(seconds),
-            '-i',
-            path!,
-            '-frames:v',
-            '1',
-            '-f',
-            'framemd5',
-            '-',
-          ],
-          { encoding: 'utf8' },
-        )
-          .split(/\r?\n/)
-          .find((line) => /^0,/.test(line.trim()))
-          ?.split(',')
-          .at(-1)
-          ?.trim(),
-      );
+      const frameHashes = execFileSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-i',
+          path!,
+          '-map',
+          '0:v:0',
+          '-an',
+          '-vf',
+          'select=eq(n\\,0)+eq(n\\,9)',
+          '-vsync',
+          '0',
+          '-frames:v',
+          '2',
+          '-f',
+          'framemd5',
+          '-',
+        ],
+        { encoding: 'utf8' },
+      )
+        .split(/\r?\n/)
+        .filter((line) => /^\s*0,/.test(line))
+        .map((line) => line.split(',').at(-1)?.trim())
+        .filter((hash): hash is string => hash !== undefined);
       expect(frameHashes[0]).toBeDefined();
       expect(frameHashes[1]).toBeDefined();
       expect(frameHashes[0]).not.toBe(frameHashes[1]);

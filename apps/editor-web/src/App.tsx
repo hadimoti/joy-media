@@ -66,6 +66,7 @@ import {
   type AnimatedImageFrameSource,
 } from './animated-image-decoder.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
+import { hasRenderableExportMedia } from './export-media-readiness.js';
 
 registerBuiltins();
 
@@ -3062,14 +3063,15 @@ function EditorWorkspace({
             const transition = activeTransitionAt(exportVisualProject, timeUs);
             const activeClip = activeVideoClipAt(exportTimelineProject, timeUs);
             const clip =
-              (activeClip !== undefined && mediaForClip.get(activeClip.id)?.video !== undefined
+              (activeClip !== undefined &&
+              hasRenderableExportMedia(mediaForClip.get(activeClip.id) ?? {})
                 ? activeClip
                 : undefined) ??
               (transition !== undefined
                 ? (() => {
                     const partner = findVideoClipById(exportTimelineProject, transition.leftClipId);
                     return partner !== undefined &&
-                      mediaForClip.get(partner.id)?.video !== undefined
+                      hasRenderableExportMedia(mediaForClip.get(partner.id) ?? {})
                       ? partner
                       : undefined;
                   })()
@@ -3139,7 +3141,10 @@ function EditorWorkspace({
               for (const clipId of [transition.leftClipId, transition.rightClipId]) {
                 if (bitmaps.has(clipId)) continue;
                 const partner = findVideoClipById(exportTimelineProject, clipId);
-                if (partner !== undefined && mediaForClip.get(partner.id)?.video !== undefined)
+                if (
+                  partner !== undefined &&
+                  hasRenderableExportMedia(mediaForClip.get(partner.id) ?? {})
+                )
                   await captureExportClip(partner);
               }
             }
