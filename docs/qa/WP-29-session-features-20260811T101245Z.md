@@ -91,3 +91,14 @@ No paid Cloud operation or licensed Worker run was created during this closeout.
 - `joy-media-wp29-first-project-golden-path` content hash: `d9f4bd7a4e988b3c3718fa0798730995d92186ec50f90de79adc51953ef66546`.
 - Both pages were fetched twice with matching pre-write hashes, written through the MCP page API, re-fetched, and verified with `WP-29 FINISHED`.
 - GBrain doctor completed with status `warnings`, health score `90/100`, and no warning checks in the final response. Existing contextual-retrieval and link-resolution advisories are unrelated to this closeout.
+
+## Final documentation workflow rerun
+
+- The first documentation workflow (`31482690590`) passed `check` but exposed
+  one strict Playwright locator in the shared R5 harness; no product test or
+  live release failed.
+- The additive harness repair is `39a52816ba88d561ad7f79e9af5d167e16ff6825`.
+  The final workflow `31485527770` passed both `check` and `browser-e2e`:
+  135 tests passed and 3 expected tests were skipped across 138 browser cases.
+- This test-only repair did not change the deployed product artifacts; the
+  deployed product SHA remains `8756325dc1c336385008332f5200c706c0c09954`.

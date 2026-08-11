@@ -88,11 +88,12 @@ working tree based on `10751b1`:
   CASE-66 run contributes three reconciled instances, for 111/111 total with no
   blocked, failed, or flaky result.
 
-WP-29 is not yet finished. The final candidate SHA, immutable API/editor and
-rollback release labels, fresh backup, public hashes, signed-in live cleanup,
-and final GBrain commit are still pending. Historical handoff sections below
-remain evidence snapshots and are superseded where they describe R2, export
-recovery, R4, or R5 as open.
+Historical pre-closeout snapshot: WP-29 was not yet finished at that point.
+The final candidate SHA, immutable API/editor and rollback release labels,
+fresh backup, public hashes, signed-in live cleanup, and final GBrain update are
+recorded in the final Luna closeout above; the handoff sections below remain
+evidence snapshots and are superseded where they describe any WP-29 gate as
+open.
 
 ## WP-29 reliability handoff (2026-08-10)
 
