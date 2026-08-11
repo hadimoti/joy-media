@@ -1,9 +1,10 @@
 # WP-30 Review Log — 2026-08-11
 
-**Status:** In progress  
-**Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
-**Live product observed:** WP-29 final release from the signed-in JOY Media session  
-**Scope:** Step 0 reproduction and Step 1 animated-image metadata/decoder slice
+**Status:** Closeout evidence recorded; GBrain synchronization remains pending
+**Candidate/deployed product:** `43c5521`
+**API release:** `wp30-api-20260811T171706Z-43c5521`
+**Editor release:** `editor-web-20260811T171706Z-43c5521-wp30`
+**Scope:** WP-30 animated-media implementation, candidate gates, deployment, and signed-in smoke
 
 ## STEP 0 — Cross-browser reproduction
 
@@ -142,7 +143,9 @@ run combined with the cross-profile suite completed `9/9 PASS` in `23.8s`:
 - the test cleanup purged the disposable project and fixture asset.
 
 This is isolated local authenticated-stack evidence. Signed-in production
-deployment, OPFS corruption/recovery, and public-byte verification remain open.
+deployment and cleanup are now covered below; OPFS corruption injection remains
+covered by the focused cache/recovery contracts rather than a destructive live
+mutation.
 
 ### Candidate gate
 
@@ -155,27 +158,67 @@ deployment, OPFS corruption/recovery, and public-byte verification remain open.
 - production dependency audit reported no known vulnerabilities.
 
 The combined WP-30 browser suite is `9/9 PASS` across the three configured
-desktop viewports. This evidence is still pre-deployment; no production release
-pointer or user project has been changed.
+desktop viewports. The candidate was then deployed immutably and verified by
+the signed-in smoke below.
 
-### Remaining Step-3/Step-4 work
+### Deployment and signed-in production smoke
 
-- Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.
-- Complete deterministic animated-WebP proof. The current frame source uses a Chromium
-  `ImageDecoder` capability adapter and fails closed when unavailable; it is not yet
-  accepted as cross-browser parity evidence.
-- Run signed-in disposable-project acceptance, deployment, cleanup, and GBrain closeout.
-- Add cache-budget/cancellation tests and full browser Monitor/export frame-hash evidence.
-- Run signed-in production acceptance after the immutable release switch.
+- VPS repository was fast-forwarded to `43c5521`; the worktree and all three refs
+  (`HEAD`, `origin/main`, and `vps-local/main`) were clean and equal before the
+  switch.
+- PostgreSQL backup: `/opt/joy-media/data/backups/joymedia-pre-wp30-20260811T171614Z.sql.gz`.
+  SHA-256: `b0778b6befdfb2a217f39261a6efa991247d779ba14309c1ab4cc5e3ba3a6d26`.
+  The backup was readable and the schema-only dump check passed.
+- Staged API health passed on the isolated port, then the managed API/editor
+  pointers were switched atomically. `joy-media@api.service`, nginx syntax,
+  direct health, and public health all passed.
+- Public `index.html` SHA-256 matched the immutable editor release:
+  `45fc985794d117f1dfbde8ccb67e55afd872bbaf6207a2bd1aa451c50f198f50`.
+  Public entry `/assets/index-jToF84lE.js` matched release SHA-256
+  `68e001b2fabb424ebf9bdbd612b38b4e04de328561516b4d1d3a36895d7d8fe6`.
+- In the signed-in in-app browser, the existing owner project was inspected
+  read-only with zero warning/error logs. Aspect-ratio options exposed Fit,
+  16:9, 4:3, 3:2, 21:9, 1:1, 9:16, 4:5, 3:4, and 2:3; Speed was present;
+  the timeline context menu exposed Reverse and Set playback rate.
+- Disposable project `WP-30 live 20260811-1722` was created only after the
+  release reload. `animated.gif` imported with visible `Animated` metadata,
+  placed at the authored `1.0s` cycle, exported successfully, and appeared in
+  Recent processes with a retained MP4 download link. The project was moved to
+  Trash and permanently deleted; Trash was verified empty. No surviving project
+  or manually uploaded asset was changed. Final live console/error log count:
+  `0`.
+- A fresh Chrome-only pass was then run through the existing signed-in Chrome
+  session. Chrome switched to **User assets**, listed the owner GIF
+  `3648c8ffd2.gif`, opened its verified local-copy preview, and closed the
+  preview cleanly. No Chrome warning/error logs were captured. The surviving
+  project was not opened or mutated in this pass.
+- The in-app browser download-event hook did not observe the later blob-link
+  click within 15 seconds, although the retained link had the correct MP4
+  filename and `download` attribute. Local Playwright/ffprobe evidence remains
+  the authoritative byte-level download proof; this is recorded as a browser
+  harness limitation, not a product failure.
+
+### Closeout limitations
+
+- GBrain MCP write tools were not available in this execution context, so the
+  two authoritative GBrain pages were not modified. The documentation commit
+  records this explicitly; WP-30 must not be described as fully synchronized
+  until those pages are updated and hash-verified.
 
 ## Safety and cleanup
 
 - The surviving project and manually uploaded file were not changed.
-- No temporary project or asset was created by this review.
-- No production files, release pointers, database rows, or GBrain pages were changed.
-- The candidate changes are ready for the deployment/closeout commit; production
-  files, release pointers, database rows, and GBrain pages remain unchanged.
+- Two disposable smoke projects were created during the live verification; both
+  were permanently deleted, and Trash was empty at the end.
+- Product deployment changed only the managed immutable release pointers; the
+  previous API/editor releases and the database backup remain available for
+  rollback.
+- No GBrain page was changed because the required MCP write capability was not
+  present.
 
 ## Verdict
 
-WP-30 remains **IN PROGRESS**. Step 0 is closed as a non-reproduced current-release symptom; the metadata/GIF implementation slice is green; animated WebP parity, fixture/browser proof, deployment, cleanup, and closeout documentation remain open.
+WP-30 product implementation, candidate CI, immutable deployment, signed-in
+animated import/timeline/export smoke, and disposable-state cleanup are green.
+The package remains **OPEN FOR GBrain SYNCHRONIZATION** until the two GBrain
+pages are updated and hash-verified. The deployed product SHA is `43c5521`.
