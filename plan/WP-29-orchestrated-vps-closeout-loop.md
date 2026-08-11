@@ -676,10 +676,10 @@ STEP-XX report contract, and stop. Do not continue.
 - [x] STEP-17 destructive/recovery cases approved.
 - [x] Every `JOY-QA-*` defect loop is closed or explicitly owner-blocked.
 - [x] STEP-18 exact candidate gate approved.
-- [ ] STEP-19 immutable deployment approved.
-- [ ] STEP-20 signed-in live rerun and cleanup approved.
-- [ ] STEP-21 documentation/GBrain closeout approved.
-- [ ] Review log ends with `WP-29 FINISHED`.
+- [x] STEP-19 immutable deployment approved.
+- [x] STEP-20 signed-in live rerun and cleanup approved.
+- [x] STEP-21 documentation/GBrain closeout approved.
+- [x] Review log ends with `WP-29 FINISHED`.
 
 ## 12. Definition of finished
 
