@@ -1,6 +1,6 @@
 # WP-30 — Cross-Browser Asset Preview and Animated-Media Reliability
 
-**Status:** In progress — Steps 0–1 fixture/metadata gate green; decoder/browser parity open  
+**Status:** In progress — Steps 0–1 green; Step 2 local cross-profile smoke green; decoder/browser parity open
 **Priority:** P1  
 **Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
 **Repository:** `/opt/joy-media/repo`  

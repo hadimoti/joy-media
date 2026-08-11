@@ -68,6 +68,25 @@ Implemented in the working tree:
 `PASS — fixture, signature, metadata, schema, server validation, and bounded
 GIF decode foundations are green.`
 
+## STEP 2 — Cross-profile catalog and original recovery smoke
+
+Added `tests/e2e/wp30-cross-browser-assets.spec.ts`. With the isolated test API
+and a fresh second browser context, the three configured desktop viewports each
+passed (`3/3`, `10.4s`):
+
+- GIF and animated WebP imported through the real media file input;
+- Asset cards retained the `Animated` descriptor state and decoded previews;
+- the second context discovered both owner assets from `/v1/library/my-assets`;
+- animation metadata survived cloud upload/catalog refresh;
+- authorized original bytes were fetched from the second context and matched
+  the fixture SHA-256 and byte lengths;
+- the disposable project was purged by the test cleanup path.
+
+This is local authenticated-stack evidence, not signed-in production evidence.
+The card uses the existing poster/thumbnail optimization; animated frame parity
+is intentionally validated by the deterministic decoder and remains open for
+Monitor/export browser proof.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.
