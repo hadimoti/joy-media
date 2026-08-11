@@ -87,6 +87,14 @@ The card uses the existing poster/thumbnail optimization; animated frame parity
 is intentionally validated by the deterministic decoder and remains open for
 Monitor/export browser proof.
 
+### Chromium decoder proof
+
+The same suite also exercised the browser `ImageDecoder` capability adapter at
+all three viewports (`3/3 PASS`). Chromium reported four WebP frames and four
+distinct RGBA frame hashes. The production adapter now awaits
+`decoder.tracks.ready` before reading the selected track; this prevents a cold
+decoder race where `selectedTrack` was temporarily undefined.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.

@@ -81,6 +81,7 @@ async function decodeWebpFrameSource(
   const decoder = new Decoder({ data: bytes, type: 'image/webp' });
   try {
     await decoder.completed;
+    if (decoder.tracks.ready !== undefined) await decoder.tracks.ready;
     const track = decoder.tracks.selectedTrack;
     if (track === undefined || track.frameCount !== descriptor.frameCount) {
       throw new Error('animated WebP metadata does not match decoded frames');
@@ -124,6 +125,7 @@ interface ImageDecoderConstructor {
 interface ImageDecoderLike {
   readonly completed: Promise<void>;
   readonly tracks: {
+    readonly ready?: Promise<void>;
     readonly selectedTrack?: {
       readonly frameCount: number;
       readonly codedWidth: number;
