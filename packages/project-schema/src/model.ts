@@ -53,7 +53,10 @@ interface ClipBase {
  * `sourceInUs`); otherwise `0.1…8`. Missing/`undefined` means `1`.
  *
  * Timeline duration stays `durationUs`. Source advance over the clip is
- * `durationUs * playbackRate` (freeze advances 0).
+ * `durationUs * playbackRate` (freeze advances 0). Direction is deliberately
+ * represented separately by {@link VideoClip.reversed}: a positive rate keeps
+ * the audio/video scheduler APIs simple while the source-time mapper applies
+ * the sign in one typed place.
  */
 export const MIN_PLAYBACK_RATE = 0.1;
 export const MAX_PLAYBACK_RATE = 8;
@@ -72,12 +75,32 @@ export interface VideoClip extends ClipBase {
   readonly kind: 'video';
   readonly assetId: AssetId;
   /**
-   * Source in-point. Composition time t maps to
-   * `sourceInUs + (t - startUs) * playbackRate` (rate 0 → locked frame).
+   * Source time at the visual clip's timeline start. Composition time `t`
+   * maps to `sourceInUs ± (t - startUs) * playbackRate`; the minus direction
+   * is used when {@link reversed} is true (rate 0 remains a locked frame).
+   *
+   * Keeping this as the source time at the *timeline* start makes trim, split,
+   * and reverse commands deterministic: toggling reverse adjusts `sourceInUs`
+   * so the same source window remains visible in the opposite order.
    */
   readonly sourceInUs: TimeUs;
   /** See {@link normalizePlaybackRate}. Omit for 1×. */
   readonly playbackRate?: number;
+  /** When true, source time runs backwards while `playbackRate` stays positive. */
+  readonly reversed?: boolean;
+}
+
+/**
+ * Resolve a video clip's source position at a composition time. This is the
+ * canonical mapping for preview, render, and command code. Callers normally
+ * pass a time inside the clip; values outside are still useful for deterministic
+ * boundary calculations.
+ */
+export function sourceTimeAtVideoClipTime(clip: VideoClip, compositionTimeUs: TimeUs): TimeUs {
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) return clip.sourceInUs;
+  const deltaUs = Math.round((compositionTimeUs - clip.startUs) * rate);
+  return clip.reversed === true ? clip.sourceInUs - deltaUs : clip.sourceInUs + deltaUs;
 }
 
 export interface CompositionClip extends ClipBase {

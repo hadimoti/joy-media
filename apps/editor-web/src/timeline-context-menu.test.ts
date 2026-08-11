@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildClipContextMenu,
   buildEmptyCanvasContextMenu,
   buildRulerContextMenu,
   buildTrackHeaderContextMenu,
 } from './commands/timeline-commands.js';
+import { emptySpikeProject, makeVideoClip, SECOND_US, withClips } from '@joy-media/test-fixtures';
 
 describe('timeline context menu commands', () => {
   it('executes the empty-canvas media actions', () => {
@@ -50,5 +52,52 @@ describe('timeline context menu commands', () => {
 
     expect(item?.label).toContain('00:00:02:15');
     expect(onAddMarker).toHaveBeenCalledWith(2_500_000);
+  });
+
+  it('offers an executable reverse action for a non-frozen video clip', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    const track = project.compositions.root!.tracks[0]!;
+    const clip = track.clips[0]!;
+    const execute = vi.fn();
+    const items = buildClipContextMenu(
+      {
+        project,
+        compositionId: 'root',
+        playheadUs: SECOND_US,
+        selectedClip: { track, clip },
+        selectedTrackIds: ['track-0'],
+      },
+      execute,
+    );
+
+    const reverse = items.find((item) => item.label === 'Reverse clip');
+    reverse?.action?.();
+
+    expect(execute).toHaveBeenCalledWith({
+      type: 'timeline.toggleClipReverse',
+      payload: { compositionId: 'root', trackId: 'track-0', clipId: 'clip-a' },
+    });
+  });
+
+  it('does not offer a rate mutation for a frozen clip that cannot undo to motion', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      { ...makeVideoClip('freeze-a', 0, 2 * SECOND_US), playbackRate: 0 },
+    ]);
+    const track = project.compositions.root!.tracks[0]!;
+    const clip = track.clips[0]!;
+    const items = buildClipContextMenu(
+      {
+        project,
+        compositionId: 'root',
+        playheadUs: SECOND_US,
+        selectedClip: { track, clip },
+        selectedTrackIds: ['track-0'],
+      },
+      vi.fn(),
+    );
+
+    expect(items.some((item) => item.label === 'Set playback rate…')).toBe(false);
   });
 });

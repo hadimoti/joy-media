@@ -319,6 +319,44 @@ export function freezeFrameCommand(
   };
 }
 
+/** Reverse is a semantic direction toggle, not a negative browser playback rate. */
+export function toggleClipReverseCommand(
+  compositionId: string,
+  trackId: string,
+  clipId: string,
+): SpikeCommand {
+  return {
+    type: 'timeline.toggleClipReverse',
+    payload: { compositionId, trackId, clipId },
+  };
+}
+
+/**
+ * Build the replayable intent for an editable compound clip. The command layer
+ * validates that the ids form a contiguous selection and derives the child
+ * composition from the actual clips at execution time.
+ */
+export function createCompoundCommand(
+  compositionId: string,
+  trackId: string,
+  clipIds: readonly string[],
+  compoundCompositionId: string,
+  compoundClipId: string,
+  name?: string,
+): SpikeCommand {
+  return {
+    type: 'timeline.createCompound',
+    payload: {
+      compositionId,
+      trackId,
+      clipIds,
+      compoundCompositionId,
+      compoundClipId,
+      ...(name === undefined ? {} : { name }),
+    },
+  };
+}
+
 export interface TimelineTrackView {
   readonly id: string;
   readonly heightPx: number;
@@ -349,8 +387,8 @@ export function toggleTrackFlag(
 export function clipRateLabel(clip: Clip): string | undefined {
   if (clip.kind !== 'video') return undefined;
   const rate = clip.playbackRate;
-  if (rate === undefined || rate === 1) return undefined;
+  if (rate === undefined || rate === 1) return clip.reversed === true ? '↺' : undefined;
   if (rate === 0) return '❄';
   const rounded = Number.isInteger(rate) ? String(rate) : rate.toFixed(2).replace(/\.?0+$/, '');
-  return `${rounded}×`;
+  return `${clip.reversed === true ? '↺ ' : ''}${rounded}×`;
 }

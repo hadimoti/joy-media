@@ -46,6 +46,7 @@ describe('applyCommand', () => {
     expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
       'property.setTrackEnabled',
       'timeline.addTrack',
+      'timeline.createCompound',
       'timeline.duplicateClip',
       'timeline.freezeFrame',
       'timeline.insertClip',
@@ -53,9 +54,12 @@ describe('applyCommand', () => {
       'timeline.moveClip',
       'timeline.removeClip',
       'timeline.removeTrack',
+      'timeline.restoreCompound',
       'timeline.restoreTrackClips',
       'timeline.setClipRate',
+      'timeline.setCompositionDimensions',
       'timeline.splitClip',
+      'timeline.toggleClipReverse',
       'timeline.trimClipEnd',
       'timeline.trimClipStart',
     ]);
@@ -339,6 +343,28 @@ describe('applyCommand', () => {
     );
   });
 
+  it('rejects duplicating a compound clip until it has an independent child composition', () => {
+    const base = emptySpikeProject();
+    const child = { ...base.compositions.root!, id: 'child', name: 'Child', tracks: [] };
+    const project = withClips(
+      {
+        ...base,
+        compositions: { ...base.compositions, child },
+      },
+      'track-0',
+      [makeCompositionClip('compound-a', 0, 2 * SECOND_US, 'child')],
+    );
+
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.duplicateClip',
+          payload: { ...TARGET, clipId: 'compound-a', newClipId: 'compound-copy' },
+        }),
+      'COMMAND_VALIDATION_UNSUPPORTED',
+    );
+  });
+
   it('sets clip rate and preserves source range by rescaling duration', () => {
     const project = withClips(emptySpikeProject(), 'track-0', [
       makeVideoClip('clip-a', 0, 2 * SECOND_US),
@@ -385,6 +411,122 @@ describe('applyCommand', () => {
     );
     expect(freeze?.kind === 'video' && freeze.playbackRate === 0).toBe(true);
     expect(inverse.type).toBe('timeline.restoreTrackClips');
+    expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('reverses a video clip with its source window intact and toggles back exactly', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US, { sourceInUs: 5 * SECOND_US }),
+    ]);
+    const command: SpikeCommand = {
+      type: 'timeline.toggleClipReverse',
+      payload: { ...TARGET, clipId: 'clip-a' },
+    };
+    const { project: reversed, inverse } = applyCommand(project, command);
+    const clip = reversed.compositions.root!.tracks[0]!.clips[0]!;
+    expect(clip).toMatchObject({ kind: 'video', reversed: true, sourceInUs: 7 * SECOND_US - 1 });
+    expect(applyCommand(reversed, inverse).project).toEqual(project);
+  });
+
+  it('rejects reverse on a frozen clip because a locked frame has no direction', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, SECOND_US, { playbackRate: 0 }),
+    ]);
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.toggleClipReverse',
+          payload: { ...TARGET, clipId: 'clip-a' },
+        }),
+      'COMMAND_VALIDATION_UNSUPPORTED',
+    );
+  });
+
+  it('keeps fractional-rate reverse endpoints on the canonical last source frame', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 3, { sourceInUs: 100, playbackRate: 0.5 }),
+    ]);
+    const { project: reversed } = applyCommand(project, {
+      type: 'timeline.toggleClipReverse',
+      payload: { ...TARGET, clipId: 'clip-a' },
+    });
+    const clip = reversed.compositions.root!.tracks[0]!.clips[0]!;
+    expect(clip.kind === 'video' && clip.sourceInUs).toBe(101);
+  });
+
+  it('merges contiguous clips into an editable child composition and undo restores every byte', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, SECOND_US),
+      makeVideoClip('clip-b', SECOND_US, SECOND_US),
+      makeVideoClip('clip-c', 3 * SECOND_US, SECOND_US),
+    ]);
+    const command: SpikeCommand = {
+      type: 'timeline.createCompound',
+      payload: {
+        ...TARGET,
+        clipIds: ['clip-a', 'clip-b'],
+        compoundCompositionId: 'compound-1',
+        compoundClipId: 'compound-clip-1',
+        name: 'Opening montage',
+      },
+    };
+    const { project: merged, inverse } = applyCommand(project, command);
+    const parentClips = merged.compositions.root!.tracks[0]!.clips;
+    expect(parentClips).toMatchObject([
+      {
+        id: 'compound-clip-1',
+        kind: 'composition',
+        startUs: 0,
+        durationUs: 2 * SECOND_US,
+        compositionId: 'compound-1',
+      },
+      { id: 'clip-c' },
+    ]);
+    expect(merged.compositions['compound-1']).toMatchObject({
+      name: 'Opening montage',
+      durationUs: 2 * SECOND_US,
+      tracks: [
+        {
+          clips: [
+            { id: 'clip-a', startUs: 0 },
+            { id: 'clip-b', startUs: SECOND_US },
+          ],
+        },
+      ],
+    });
+    expect(inverse.type).toBe('timeline.restoreCompound');
+    expect(applyCommand(merged, inverse).project).toEqual(project);
+  });
+
+  it('refuses to merge a non-contiguous selection instead of overlapping an intervening clip', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, SECOND_US),
+      makeVideoClip('clip-b', SECOND_US, SECOND_US),
+      makeVideoClip('clip-c', 2 * SECOND_US, SECOND_US),
+    ]);
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.createCompound',
+          payload: {
+            ...TARGET,
+            clipIds: ['clip-a', 'clip-c'],
+            compoundCompositionId: 'compound-1',
+            compoundClipId: 'compound-clip-1',
+          },
+        }),
+      'COMMAND_VALIDATION_COMPOUND_NON_CONTIGUOUS',
+    );
+  });
+
+  it('changes composition dimensions as one reversible command without changing clips', () => {
+    const project = baseProject();
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setCompositionDimensions',
+      payload: { compositionId: 'root', width: 1080, height: 1080 },
+    });
+    expect(next.compositions.root).toMatchObject({ width: 1080, height: 1080 });
+    expect(next.compositions.root!.tracks).toEqual(project.compositions.root!.tracks);
     expect(applyCommand(next, inverse).project).toEqual(project);
   });
 });

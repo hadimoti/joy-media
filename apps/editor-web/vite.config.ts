@@ -32,6 +32,11 @@ function editorChunk(id: string): string | undefined {
     return 'pixi';
   }
 
+  // The timeline is a self-contained Dockview panel with its own interaction
+  // and editing-command surface. Keeping it independently cacheable avoids
+  // making every editor-shell release invalidate the main entry chunk.
+  if (moduleId.includes('/apps/editor-web/src/TimelinePanel')) return 'joy-timeline';
+
   const packageMatch = moduleId.match(/\/packages\/([^/]+)\//);
   const packageName = packageMatch?.[1];
   if (packageName === undefined) return undefined;

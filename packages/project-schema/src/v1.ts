@@ -231,6 +231,8 @@ export interface VideoClipV1 extends ClipV1Base {
   readonly sourceInUs: TimeUs;
   /** Optional; omit = 1×. `0` = freeze/hold. Otherwise `0.1…8`. */
   readonly playbackRate?: number;
+  /** Source time runs backward from `sourceInUs` while rate remains positive. */
+  readonly reversed?: boolean;
 }
 
 export interface CompositionClipV1 extends ClipV1Base {
@@ -1204,6 +1206,19 @@ function validateTrack(
         diagnostic(
           'PROJECT_SCHEMA_V1_CLIP',
           `playbackRate must be 0 (freeze) or in [${MIN_PLAYBACK_RATE}, ${MAX_PLAYBACK_RATE}]`,
+          `${path}.${value.id}.clips.${clip.id}`,
+        ),
+      );
+    }
+    if (
+      clip.kind === 'video' &&
+      clip.reversed !== undefined &&
+      typeof clip.reversed !== 'boolean'
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CLIP',
+          'reversed must be a boolean when present',
           `${path}.${value.id}.clips.${clip.id}`,
         ),
       );

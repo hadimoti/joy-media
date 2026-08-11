@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
+import { ContextMenu } from './ContextMenu.js';
 import { TimelinePanel } from './TimelinePanel.js';
 
 describe('TimelinePanel clip interaction semantics', () => {
@@ -31,5 +32,93 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain(
       'aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"',
     );
+  });
+
+  it('renders an explicit Back control while drilling into a merged composition', () => {
+    const base = buildReferenceSpikeProject();
+    const root = base.compositions.root!;
+    const child = {
+      ...root,
+      id: 'compound-1',
+      name: 'Merged intro',
+      durationUs: 20_000_000,
+      tracks: [
+        {
+          ...root.tracks[0]!,
+          clips: root.tracks[0]!.clips.slice(0, 2).map((clip) => ({
+            ...clip,
+            startUs: clip.startUs,
+          })),
+        },
+      ],
+    };
+    const project = {
+      ...base,
+      compositions: {
+        ...base.compositions,
+        root: {
+          ...root,
+          tracks: [
+            {
+              ...root.tracks[0]!,
+              clips: [
+                {
+                  kind: 'composition' as const,
+                  id: 'compound-clip',
+                  startUs: 0,
+                  durationUs: 20_000_000,
+                  compositionId: 'compound-1',
+                  childOffsetUs: 0,
+                },
+                root.tracks[0]!.clips[2]!,
+              ],
+            },
+            root.tracks[1]!,
+          ],
+        },
+        'compound-1': child,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <TimelinePanel
+        project={project}
+        activeCompositionId="compound-1"
+        playheadUs={0}
+        playing={false}
+        selectedIds={[]}
+        viewport={{ originUs: 0, pixelsPerSecond: 20 }}
+        onViewportChange={() => undefined}
+        autoFit={false}
+        onAutoFitChange={() => undefined}
+        onTogglePlayback={() => undefined}
+        onSeek={() => undefined}
+        onToggleSelection={() => undefined}
+        onClearSelection={() => undefined}
+        onDispatch={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('Back to parent timeline');
+    expect(markup).toContain('Merged intro');
+  });
+
+  it('renders merge and open-compound actions after their separator instead of dropping them', () => {
+    const markup = renderToStaticMarkup(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => undefined}
+        items={[
+          { label: '', action: () => undefined, dividerBefore: true },
+          { label: 'Merge 2 selected clips', action: () => undefined },
+          { label: 'Open merged timeline', action: () => undefined },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('role="separator"');
+    expect(markup).toContain('Merge 2 selected clips');
+    expect(markup).toContain('Open merged timeline');
+    expect(markup).toContain('role="menuitem"');
   });
 });

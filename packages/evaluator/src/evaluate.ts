@@ -15,7 +15,11 @@ import type {
   SpikeProject,
   TimeUs,
 } from '@joy-media/project-schema';
-import { frameIndexAtUs, rangeContainsUs } from '@joy-media/project-schema';
+import {
+  frameIndexAtUs,
+  rangeContainsUs,
+  sourceTimeAtVideoClipTime,
+} from '@joy-media/project-schema';
 
 export interface EvaluatedVideoFrame {
   /** Clip IDs from the root composition down to the leaf video clip — stable identity across nesting. */
@@ -83,7 +87,7 @@ function collectFrames(
         frames.push({
           clipPath: [...pathPrefix, clip.id],
           assetId: clip.assetId,
-          sourceTimeUs: clip.sourceInUs + clipLocalUs,
+          sourceTimeUs: sourceTimeAtVideoClipTime(clip, clip.startUs + clipLocalUs),
         });
       } else {
         if (visiting.has(clip.compositionId)) {

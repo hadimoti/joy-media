@@ -40,7 +40,55 @@ const TABS: readonly PanelTabSpec[] = [
   { id: 'transform', label: 'Transform' },
   { id: 'effects', label: 'Effects' },
   { id: 'audio', label: 'Audio' },
+  { id: 'speed', label: 'Speed' },
 ];
+
+/**
+ * The curve is intentionally a compact UI contract. The timeline/controller
+ * owns how a supported clip stores or renders the ramp; keeping that concern
+ * out of the Inspector lets audio, still, and video selections share the
+ * same panel without pretending every format supports ramps.
+ */
+export type SpeedRampPreset = 'ease-in' | 'ease-out' | 'ease-in-out';
+
+/** The playback capabilities and current value of the selected timeline clip. */
+export interface InspectorClipSpeed {
+  /** A signed multiplier. Negative values represent reverse playback. */
+  readonly rate: number;
+  /** Reverse is exposed only when the timeline/media pipeline supports it. */
+  readonly supportsReverse?: boolean | undefined;
+  /** Ramps are exposed only when the timeline/media pipeline supports them. */
+  readonly supportsRamps?: boolean | undefined;
+  /** Omit to use a constant rate. */
+  readonly ramp?: SpeedRampPreset | undefined;
+}
+
+/** A small, controller-facing change request emitted by the Speed tab. */
+export interface InspectorSpeedChange {
+  /** When set, replace the selected clip's constant playback multiplier. */
+  readonly rate?: number | undefined;
+  /** Apply the selected source-continuous three-segment ramp. */
+  readonly ramp?: SpeedRampPreset | undefined;
+}
+
+export const SPEED_RATE_PRESETS = [0.25, 0.5, 1, 1.25, 1.5, 2] as const;
+export const MIN_INSPECTOR_SPEED_RATE = 0.1;
+export const MAX_INSPECTOR_SPEED_RATE = 8;
+
+/**
+ * Reject invalid manual input before it reaches the timeline controller.
+ * Freeze frames remain a separate timeline operation: zero is never a speed
+ * value, which avoids silently turning a typed rate into a different edit.
+ */
+export function validInspectorSpeedRate(
+  value: number,
+  supportsReverse = false,
+): number | undefined {
+  if (!Number.isFinite(value) || Math.abs(value) < MIN_INSPECTOR_SPEED_RATE) return undefined;
+  if (Math.abs(value) > MAX_INSPECTOR_SPEED_RATE) return undefined;
+  if (!supportsReverse && value < 0) return undefined;
+  return value;
+}
 
 /**
  * Stand-in the rows bind to when nothing is selected (§3c). Values are the
@@ -64,6 +112,10 @@ const IDLE_OBJECT: VisualObjectV1 = {
 interface InspectorPanelProps {
   readonly object: VisualObjectV1 | undefined;
   readonly selectedClipId?: string;
+  /** Present only for a selected clip whose controller can change speed. */
+  readonly clipSpeed?: InspectorClipSpeed | undefined;
+  /** Optional so Inspector remains usable in non-timeline surfaces. */
+  readonly onSpeedChange?: ((change: InspectorSpeedChange, label: string) => void) | undefined;
   readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
   readonly playheadUs: number;
   readonly audioState?: AudioState;
@@ -97,6 +149,8 @@ function formatPercent(value: number): string {
 export function InspectorPanel({
   object,
   selectedClipId,
+  clipSpeed,
+  onSpeedChange,
   allObjects,
   playheadUs,
   audioState,
@@ -113,12 +167,16 @@ export function InspectorPanel({
   const [transformOpen, setTransformOpen] = useState(true);
   const [effectsOpen, setEffectsOpen] = useState(true);
   const [audioOpen, setAudioOpen] = useState(true);
+  const [speedOpen, setSpeedOpen] = useState(true);
   const [tab, setTab] = useState('transform');
 
   // §3c — no early returns. `target` is the real selection or a neutral
   // stand-in; `idle` drives the disabled state, not the presence of markup.
   const target = object ?? IDLE_OBJECT;
   const idle = object === undefined;
+  // A timeline controller may supply speed for a selected video before it has
+  // a visual-object counterpart. Transform remains disabled through `idle`.
+  const inspectorInactive = idle && clipSpeed === undefined;
 
   const timeUs = Math.max(0, Math.round(playheadUs));
   const title =
@@ -225,7 +283,7 @@ export function InspectorPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      inactive={idle}
+      inactive={inspectorInactive}
     >
       <div className="inspector-selection-row">
         <h2 className="inspector-selected-name" dir="ltr">
@@ -446,6 +504,19 @@ export function InspectorPanel({
           />
         ) : (
           <p className="empty-hint">Select a clip to mix its audio.</p>
+        ))}
+
+      {tab === 'speed' &&
+        (clipSpeed !== undefined && selectedClipId !== undefined ? (
+          <SpeedSection
+            open={speedOpen}
+            onToggle={() => setSpeedOpen((value) => !value)}
+            clipId={selectedClipId}
+            speed={clipSpeed}
+            onChange={onSpeedChange}
+          />
+        ) : (
+          <p className="empty-hint">Select a supported video clip to change its speed.</p>
         ))}
     </PanelShell>
   );
@@ -738,6 +809,178 @@ function EffectParamControl({
   }
 
   return null;
+}
+
+export const SPEED_RAMP_PRESETS: readonly {
+  readonly id: SpeedRampPreset;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  { id: 'ease-in', label: 'Ease In', description: 'Gradually accelerate' },
+  { id: 'ease-out', label: 'Ease Out', description: 'Gradually decelerate' },
+  { id: 'ease-in-out', label: 'Ease In/Out', description: 'Ease at both ends' },
+];
+
+export function formatInspectorSpeedRate(rate: number): string {
+  const magnitude = Math.abs(rate);
+  const rounded = Math.round(magnitude * 100) / 100;
+  return `${rate < 0 ? '−' : ''}${rounded}×`;
+}
+
+/**
+ * Selected-clip speed controls. The Inspector deliberately requests semantic
+ * changes through `onChange`; the timeline integration decides how a rate or
+ * ramp becomes an undoable command for the current clip kind.
+ */
+export function SpeedSection({
+  open,
+  onToggle,
+  clipId,
+  speed,
+  onChange,
+}: {
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly clipId: string;
+  readonly speed: InspectorClipSpeed;
+  readonly onChange?: ((change: InspectorSpeedChange, label: string) => void) | undefined;
+}) {
+  const frozen = speed.rate === 0;
+  const canChange = onChange !== undefined && !frozen;
+  const supportsReverse = speed.supportsReverse === true;
+  const supportsRamps = speed.supportsRamps === true;
+  const rate = frozen ? 0 : (validInspectorSpeedRate(speed.rate, supportsReverse) ?? 1);
+  const rateInputMin = supportsReverse ? -MAX_INSPECTOR_SPEED_RATE : MIN_INSPECTOR_SPEED_RATE;
+  const rateInputMax = MAX_INSPECTOR_SPEED_RATE;
+  const rateControlId = `insp-speed-rate-${clipId}`;
+  const rateOutputId = `${rateControlId}-value`;
+  const rampHintId = `insp-speed-ramp-support-${clipId}`;
+
+  const requestRate = (next: number) => {
+    const valid = validInspectorSpeedRate(next, supportsReverse);
+    if (valid === undefined) return;
+    onChange?.({ rate: valid }, `Speed ${clipId} → ${formatInspectorSpeedRate(valid)}`);
+  };
+
+  const requestRamp = (ramp: SpeedRampPreset) => {
+    const label = `Speed ramp ${clipId} → ${
+      SPEED_RAMP_PRESETS.find((preset) => preset.id === ramp)?.label ?? ramp
+    }`;
+    onChange?.({ ramp }, label);
+  };
+
+  return (
+    <section className="inspector-section inspector-speed-section" aria-label="Speed">
+      <button
+        type="button"
+        className="inspector-section-toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <h3>Speed</h3>
+      </button>
+      {open &&
+        (frozen ? (
+          <p className="inspector-speed-support-note" role="status">
+            This is a freeze frame. Speed changes are unavailable; use Undo to restore its source
+            motion.
+          </p>
+        ) : (
+          <>
+            <div className="inspector-prop inspector-speed-rate">
+              <label htmlFor={rateControlId}>Rate</label>
+              <div className="inspector-prop-row">
+                <input
+                  id={rateControlId}
+                  type="number"
+                  min={rateInputMin}
+                  max={rateInputMax}
+                  step={0.05}
+                  inputMode="decimal"
+                  value={rate}
+                  disabled={!canChange}
+                  aria-describedby={rateOutputId}
+                  onChange={(event) => requestRate(event.currentTarget.valueAsNumber)}
+                />
+                <output id={rateOutputId} className="inspector-speed-value" aria-live="polite">
+                  {formatInspectorSpeedRate(rate)}
+                </output>
+              </div>
+            </div>
+
+            <div className="inspector-speed-control">
+              <span className="inspector-speed-label">Speed presets</span>
+              <div className="inspector-speed-presets" role="group" aria-label="Speed presets">
+                {SPEED_RATE_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className="inspector-speed-preset"
+                    aria-label={`Set speed to ${formatInspectorSpeedRate(preset)}`}
+                    aria-pressed={rate === preset}
+                    disabled={!canChange}
+                    onClick={() => requestRate(preset)}
+                  >
+                    {formatInspectorSpeedRate(preset)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="inspector-speed-preset inspector-speed-reverse"
+                  aria-label="Set speed to reverse"
+                  aria-pressed={rate < 0}
+                  aria-description={
+                    supportsReverse
+                      ? 'Play the selected video backwards at one times speed. Program Monitor reverse preview is silent; export reverses audio.'
+                      : undefined
+                  }
+                  disabled={!canChange || !supportsReverse}
+                  title={supportsReverse ? 'Reverse at 1×' : 'Reverse is unavailable for this clip'}
+                  onClick={() => requestRate(-1)}
+                >
+                  Reverse
+                </button>
+              </div>
+            </div>
+
+            <div className="inspector-speed-control">
+              <span className="inspector-speed-label">Speed ramp</span>
+              <div
+                className="inspector-speed-presets"
+                role="group"
+                aria-label="Speed ramp presets"
+                aria-describedby={supportsRamps ? undefined : rampHintId}
+              >
+                {SPEED_RAMP_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className="inspector-speed-preset"
+                    aria-label={preset.label}
+                    aria-description={preset.description}
+                    aria-pressed={speed.ramp === preset.id}
+                    disabled={!canChange || !supportsRamps}
+                    onClick={() => requestRamp(preset.id)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              {supportsRamps ? (
+                <p className="inspector-speed-support-note">
+                  Applying a ramp creates three source-continuous speed segments. Undo restores the
+                  original clip.
+                </p>
+              ) : (
+                <p id={rampHintId} className="inspector-speed-support-note">
+                  Speed ramps are unavailable for this clip.
+                </p>
+              )}
+            </div>
+          </>
+        ))}
+    </section>
+  );
 }
 
 function AudioSection({

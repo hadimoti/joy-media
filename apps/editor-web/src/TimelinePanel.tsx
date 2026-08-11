@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
   clipRateLabel,
+  createCompoundCommand,
   duplicateClipCommand,
   fitPixelsPerSecond,
   freezeFrameCommand,
@@ -11,6 +12,7 @@ import {
   rippleDelete,
   timeToPixel,
   toggleTrackFlag,
+  toggleClipReverseCommand,
   trimCommand,
   virtualTracks,
   type TimelineViewport,
@@ -43,6 +45,8 @@ import {
   TimelineVideoTrackIcon,
   SelectIcon,
   TrackAddIcon,
+  LayersIcon,
+  ChevronLeftIcon,
 } from './icons.js';
 import {
   buildClipContextMenu,
@@ -182,6 +186,7 @@ function TimelineClip({
   onMove,
   onTrim,
   onContextMenu,
+  onOpenComposition,
   onSplitHover,
   onSplitAt,
 }: {
@@ -199,6 +204,7 @@ function TimelineClip({
   readonly onMove: (clipId: string, newStartUs: number, targetTrackId?: string) => boolean;
   readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   readonly onContextMenu: (clipId: string, clientX: number, clientY: number) => void;
+  readonly onOpenComposition?: (compositionId: string) => void;
   readonly onSplitHover: (atUs: number | undefined) => void;
   readonly onSplitAt: (atUs: number) => void;
 }) {
@@ -208,6 +214,7 @@ function TimelineClip({
   >(undefined);
   const dragRef = useRef<{ originX: number; moved: boolean } | null>(null);
   const trimRef = useRef<{ edge: 'start' | 'end'; originX: number } | null>(null);
+  const lastCompoundOpenAtRef = useRef(0);
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
   const voice = isVoiceClip(clip);
@@ -237,6 +244,18 @@ function TimelineClip({
     const snapped = Math.round(raw / SNAP_US) * SNAP_US;
     const minEnd = clip.startUs + SNAP_US;
     return Math.max(minEnd, snapped);
+  };
+
+  const openComposition = () => {
+    if (clip.kind !== 'composition') return;
+    // Mouse down on the second click is more reliable than the browser's
+    // synthetic dblclick event when a timeline clip is also pointer-captured
+    // for drag gestures. The timestamp keeps the subsequent dblclick event
+    // idempotent.
+    const now = Date.now();
+    if (now - lastCompoundOpenAtRef.current < 500) return;
+    lastCompoundOpenAtRef.current = now;
+    onOpenComposition?.(clip.compositionId);
   };
 
   const displayStartUs =
@@ -279,12 +298,22 @@ function TimelineClip({
       aria-pressed={selected}
       aria-label={`${label}, ${durationLabel}`}
       data-clip-id={clip.id}
-      title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
+      title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`}
       style={{
         left: `${timeToPixel(displayStartUs, viewport)}px`,
         width: `${layoutWidthPx}px`,
       }}
       onClick={(event) => {
+        // Selecting a clip can remount the Dockview panel between the two
+        // physical clicks. Treat the second click on an already selected
+        // compound as the double-click intent, so the gesture stays reliable
+        // even when the browser cannot synthesize one native dblclick event.
+        if (clip.kind === 'composition' && !splitToolActive && (selected || event.detail >= 2)) {
+          event.preventDefault();
+          event.stopPropagation();
+          openComposition();
+          return;
+        }
         if (splitToolActive) {
           const atUs = splitTimeFromClientX(event.clientX, event.currentTarget as HTMLElement);
           if (atUs !== undefined) {
@@ -312,6 +341,18 @@ function TimelineClip({
         event.preventDefault();
         event.stopPropagation();
         onContextMenu(clip.id, event.clientX, event.clientY);
+      }}
+      onDoubleClick={(event) => {
+        if (clip.kind !== 'composition') return;
+        event.preventDefault();
+        event.stopPropagation();
+        openComposition();
+      }}
+      onMouseDown={(event) => {
+        if (clip.kind !== 'composition' || event.detail < 2) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openComposition();
       }}
       onPointerDown={(event) => {
         if (event.button !== 0 || locked) return;
@@ -344,6 +385,12 @@ function TimelineClip({
         if (drag.moved) setDragPx(deltaPx);
       }}
       onPointerUp={(event) => {
+        // Always release capture, including ordinary clicks and trim gestures.
+        // Leaving a completed click captured can stop the browser from
+        // synthesising the following click/dblclick on the same clip.
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
         const trim = trimRef.current;
         if (trim !== null) {
           const timeUs = trimTimeUs(trim.edge, event.clientX, trim.originX);
@@ -355,7 +402,6 @@ function TimelineClip({
         const drag = dragRef.current;
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
-        event.currentTarget.releasePointerCapture(event.pointerId);
         const targetTrackId = document
           .elementFromPoint(event.clientX, event.clientY)
           ?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId;
@@ -484,6 +530,16 @@ function safeAssetDuration(asset: {
     : 5_000_000;
 }
 
+function parentCompositionFor(project: SpikeProject, compositionId: string): string | undefined {
+  return Object.values(project.compositions).find((composition) =>
+    composition.tracks.some((track) =>
+      track.clips.some(
+        (clip) => clip.kind === 'composition' && clip.compositionId === compositionId,
+      ),
+    ),
+  )?.id;
+}
+
 export function TimelinePanel({
   project,
   playheadUs,
@@ -517,6 +573,8 @@ export function TimelinePanel({
   showToast,
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
+  activeCompositionId: activeCompositionIdProp,
+  onActiveCompositionChange,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -570,8 +628,18 @@ export function TimelinePanel({
   /** Shared with Dual Lens so lock/visibility/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
   readonly onTrackFlagsChange?: (next: readonly TimelineTrackView[]) => void;
+  /** Optional controlled compound-timeline view. Omit for internal drill-in state. */
+  readonly activeCompositionId?: string;
+  /** Called after double-clicking a merged clip or using the toolbar Back button. */
+  readonly onActiveCompositionChange?: (compositionId: string) => void;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
+  const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
+    project.rootCompositionId,
+  );
+  const [compositionPath, setCompositionPath] = useState<readonly string[]>([
+    project.rootCompositionId,
+  ]);
   const trackFlags = trackFlagsProp ?? localTrackFlags;
   const setTrackFlags = onTrackFlagsChange ?? setLocalTrackFlags;
   const [selectToolActive, setSelectToolActive] = useState(true);
@@ -593,8 +661,62 @@ export function TimelinePanel({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
 
-  const composition = project.compositions[project.rootCompositionId];
+  const requestedCompositionId = activeCompositionIdProp ?? localActiveCompositionId;
+  const activeCompositionId =
+    project.compositions[requestedCompositionId] === undefined
+      ? project.rootCompositionId
+      : requestedCompositionId;
+  const composition = project.compositions[activeCompositionId];
   if (composition === undefined) throw new Error('timeline root composition is unavailable');
+  const isCompoundView = activeCompositionId !== project.rootCompositionId;
+
+  useEffect(() => {
+    if (activeCompositionIdProp !== undefined) return;
+    if (project.compositions[localActiveCompositionId] !== undefined) return;
+    setLocalActiveCompositionId(project.rootCompositionId);
+    setCompositionPath([project.rootCompositionId]);
+  }, [activeCompositionIdProp, localActiveCompositionId, project]);
+
+  const setActiveComposition = useCallback(
+    (compositionId: string) => {
+      if (project.compositions[compositionId] === undefined) return;
+      if (activeCompositionIdProp === undefined) setLocalActiveCompositionId(compositionId);
+      onActiveCompositionChange?.(compositionId);
+    },
+    [activeCompositionIdProp, onActiveCompositionChange, project.compositions],
+  );
+
+  const openCompoundComposition = useCallback(
+    (compositionId: string) => {
+      if (project.compositions[compositionId] === undefined) return;
+      setCompositionPath((path) => {
+        const current = path[path.length - 1];
+        return current === compositionId ? path : [...path, compositionId];
+      });
+      onClearSelection();
+      setActiveComposition(compositionId);
+    },
+    [onClearSelection, project.compositions, setActiveComposition],
+  );
+
+  const closeCompoundComposition = useCallback(() => {
+    if (!isCompoundView) return;
+    const indexedParent = compositionPath.length > 1 ? compositionPath.at(-2) : undefined;
+    const parent =
+      indexedParent !== undefined && project.compositions[indexedParent] !== undefined
+        ? indexedParent
+        : (parentCompositionFor(project, activeCompositionId) ?? project.rootCompositionId);
+    setCompositionPath((path) => (path.length > 1 ? path.slice(0, -1) : [parent]));
+    onClearSelection();
+    setActiveComposition(parent);
+  }, [
+    activeCompositionId,
+    compositionPath,
+    isCompoundView,
+    onClearSelection,
+    project,
+    setActiveComposition,
+  ]);
   const timelineDurationUs = timelineEffectiveDurationUs(
     composition,
     markers.map((marker) => marker.timeUs),
@@ -739,6 +861,49 @@ export function TimelinePanel({
         .find((item) => item.clip.id === id),
     )
     .find((item) => item !== undefined);
+
+  const mergeSelection = useMemo(() => {
+    const selectedIdSet = new Set(selectedIds);
+    const entries = composition.tracks.flatMap((track) =>
+      track.clips.filter((clip) => selectedIdSet.has(clip.id)).map((clip) => ({ track, clip })),
+    );
+    if (entries.length < 2) {
+      return { eligible: false as const, reason: 'Select two or more clips to merge.' };
+    }
+    const trackId = entries[0]?.track.id;
+    if (trackId === undefined || entries.some((entry) => entry.track.id !== trackId)) {
+      return {
+        eligible: false as const,
+        reason: 'Merge clips must be selected on one track.',
+      };
+    }
+    if (tracks.find((track) => track.id === trackId)?.locked === true) {
+      return { eligible: false as const, reason: 'Unlock the track before merging clips.' };
+    }
+    const sourceTrack = composition.tracks.find((track) => track.id === trackId);
+    if (sourceTrack === undefined) {
+      return { eligible: false as const, reason: 'The selected track is unavailable.' };
+    }
+    const ordered = [...sourceTrack.clips].sort((a, b) => a.startUs - b.startUs);
+    const selectedIndexes = ordered
+      .map((clip, index) => (selectedIdSet.has(clip.id) ? index : -1))
+      .filter((index) => index >= 0);
+    const firstIndex = selectedIndexes[0];
+    if (
+      firstIndex === undefined ||
+      selectedIndexes.some((index, offset) => index !== firstIndex + offset)
+    ) {
+      return {
+        eligible: false as const,
+        reason: 'Merge requires a contiguous run without unselected clips between it.',
+      };
+    }
+    return {
+      eligible: true as const,
+      trackId,
+      clipIds: selectedIndexes.map((index) => ordered[index]!.id),
+    };
+  }, [composition.tracks, selectedIds, tracks]);
 
   const selectedTrackView =
     selected === undefined ? undefined : tracks.find((t) => t.id === selected.track.id);
@@ -965,6 +1130,13 @@ export function TimelinePanel({
   };
 
   const dispatchFreeze = (trackId: string, clipId: string) => {
+    if (isCompoundView) {
+      showToast?.(
+        'Freeze is unavailable inside a merged timeline because its parent timing is fixed.',
+        'info',
+      );
+      return;
+    }
     onDispatch({
       label: `Freeze ${clipId}`,
       commands: [
@@ -980,7 +1152,50 @@ export function TimelinePanel({
     });
   };
 
+  const dispatchReverse = (trackId: string, clipId: string) => {
+    onDispatch({
+      label: `Reverse ${clipId}`,
+      commands: [toggleClipReverseCommand(composition.id, trackId, clipId)],
+    });
+    showToast?.(
+      'Reverse video applied. The Program Monitor previews it silently; export reverses its audio.',
+      'info',
+    );
+  };
+
+  const dispatchMerge = () => {
+    if (!mergeSelection.eligible) {
+      showToast?.(mergeSelection.reason, 'info');
+      return;
+    }
+    const token = Date.now();
+    const compoundCompositionId = `${composition.id}-compound-${token}`;
+    const compoundClipId = `compound-${token}`;
+    onDispatch({
+      label: `Merge ${mergeSelection.clipIds.length} clips`,
+      commands: [
+        createCompoundCommand(
+          composition.id,
+          mergeSelection.trackId,
+          mergeSelection.clipIds,
+          compoundCompositionId,
+          compoundClipId,
+          `Merged ${mergeSelection.clipIds.length} clips`,
+        ),
+      ],
+    });
+    onClearSelection();
+    showToast?.('Merged clips. Double-click the merged clip to edit its timeline.', 'success');
+  };
+
   const dispatchRate = (trackId: string, clipId: string, playbackRate: number) => {
+    if (isCompoundView) {
+      showToast?.(
+        'Constant speed changes are unavailable inside a merged timeline because its parent timing is fixed.',
+        'info',
+      );
+      return;
+    }
     const track = composition.tracks.find((t) => t.id === trackId);
     const clip = track?.clips.find((c) => c.id === clipId);
     const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
@@ -1070,7 +1285,7 @@ export function TimelinePanel({
 
     const ctx: CommandContext = {
       project,
-      compositionId: project.rootCompositionId,
+      compositionId: composition.id,
       playheadUs,
       selectedClip: fullTrack ? { track: fullTrack, clip } : undefined,
       selectedTrackIds: [trackId],
@@ -1091,20 +1306,72 @@ export function TimelinePanel({
           case 'timeline.freezeFrame':
             dispatchFreeze(cmd.payload.trackId, cmd.payload.clipId);
             break;
+          case 'timeline.toggleClipReverse':
+            dispatchReverse(cmd.payload.trackId, cmd.payload.clipId);
+            break;
           case 'timeline.setClipRate':
             dispatchRate(cmd.payload.trackId, cmd.payload.clipId, cmd.payload.playbackRate);
             break;
         }
       }
     });
+    const trackIsLocked = tracks.find((candidate) => candidate.id === trackId)?.locked === true;
+    // A locked lane must reject every timeline mutation, including mutations
+    // reached through a context menu rather than pointer drag/trim. Keep the
+    // choices visible with disabled semantics so the reason is discoverable.
+    const mutationItems = trackIsLocked
+      ? items.map((item) => (item.action === undefined ? item : { ...item, disabled: true }))
+      : items;
+    // A compound's parent clip defines its root-visible duration. Until a
+    // nested ripple/parent-resize command exists, reject actions which can
+    // lengthen the child and make its tail silently unplayable in the monitor
+    // or export. Reverse remains safe because it preserves duration.
+    const fixedWindowItems = isCompoundView
+      ? mutationItems.map((item) =>
+          item.label === 'Freeze frame at playhead' || item.label === 'Set playback rate…'
+            ? { ...item, disabled: true }
+            : item,
+        )
+      : mutationItems;
 
-    // A `dividerBefore` entry is itself the separator here — it is not rendered
-    // as an item — so the rule goes in as its own entry ahead of the action.
+    // ContextMenu renders a divider entry as a separator only. Keep it as a
+    // distinct item so the following action stays visible and keyboardable.
+    const mergeItem: ContextMenuItem =
+      mergeSelection.eligible && mergeSelection.clipIds.includes(clip.id)
+        ? {
+            label: `Merge ${mergeSelection.clipIds.length} selected clips`,
+            icon: LayersIcon,
+            action: dispatchMerge,
+          }
+        : {
+            label:
+              mergeSelection.reason ?? 'Select contiguous clips on one unlocked track to merge.',
+            icon: LayersIcon,
+            action: () => undefined,
+            disabled: true,
+          };
+    const withCompound =
+      clip.kind !== 'composition'
+        ? [
+            ...fixedWindowItems,
+            { label: '', action: () => undefined, dividerBefore: true },
+            mergeItem,
+          ]
+        : [
+            ...fixedWindowItems,
+            { label: '', action: () => undefined, dividerBefore: true },
+            {
+              label: 'Open merged timeline',
+              icon: LayersIcon,
+              action: () => openCompoundComposition(clip.compositionId),
+            },
+            mergeItem,
+          ];
     const withReveal =
       onRevealInFlow === undefined
-        ? items
+        ? withCompound
         : [
-            ...items,
+            ...withCompound,
             { label: '', action: () => {}, dividerBefore: true },
             { label: 'Reveal in Flow', action: () => onRevealInFlow(clip.id) },
           ];
@@ -1253,6 +1520,27 @@ export function TimelinePanel({
       }
     >
       <div className="timeline-toolbar">
+        {isCompoundView && (
+          <>
+            <div className="timeline-toolbar-group" aria-label="Merged timeline navigation">
+              <button
+                type="button"
+                className="timeline-data-lanes-toggle"
+                onClick={closeCompoundComposition}
+                aria-label="Back to parent timeline"
+                title="Back to parent timeline"
+              >
+                <ChevronLeftIcon />
+                Back
+              </button>
+              <span className="timeline-timecode-label" title={composition.name}>
+                <LayersIcon />
+                {composition.name}
+              </span>
+            </div>
+            <span className="timeline-toolbar-sep" aria-hidden="true" />
+          </>
+        )}
         <div className="timeline-toolbar-group">
           <button
             className="icon-button"
@@ -1924,6 +2212,7 @@ export function TimelinePanel({
                         if (target === undefined) return;
                         openClipMenu(track.id, target, x, y);
                       }}
+                      onOpenComposition={openCompoundComposition}
                       onSplitHover={(atUs) => {
                         if (splitToolActive) setSplitGuideUs(atUs);
                       }}

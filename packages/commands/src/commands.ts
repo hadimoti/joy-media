@@ -13,6 +13,7 @@
 
 import type {
   Clip,
+  Composition,
   CompositionId,
   SpikeProject,
   TimeUs,
@@ -96,8 +97,35 @@ export interface FreezeFramePayload extends TrackTarget {
   readonly freezeClipId: string;
   readonly rightClipId: string;
 }
+/** Toggle a video clip's direction while preserving its source window. */
+export interface ToggleClipReversePayload extends TrackTarget {
+  readonly clipId: string;
+}
+/**
+ * Turn a contiguous run of clips on one track into a nested composition clip.
+ * IDs are supplied by the caller so the command can be persisted and replayed
+ * exactly; the child composition itself is derived from the selected clips.
+ */
+export interface CreateCompoundPayload extends TrackTarget {
+  readonly clipIds: readonly string[];
+  readonly compoundCompositionId: CompositionId;
+  readonly compoundClipId: string;
+  readonly name?: string;
+}
+/** Exact inverse of {@link CreateCompoundPayload}. */
+export interface RestoreCompoundPayload extends TrackTarget {
+  readonly compoundCompositionId: CompositionId;
+  readonly compoundClipId: string;
+  readonly clips: readonly Clip[];
+}
 export interface RestoreTrackClipsPayload extends TrackTarget {
   readonly clips: readonly Clip[];
+}
+/** Update a composition canvas while preserving all timeline content. */
+export interface SetCompositionDimensionsPayload {
+  readonly compositionId: CompositionId;
+  readonly width: number;
+  readonly height: number;
 }
 export interface AddTrackPayload {
   readonly compositionId: CompositionId;
@@ -119,7 +147,14 @@ export type SpikeCommand =
   | { readonly type: 'timeline.duplicateClip'; readonly payload: DuplicateClipPayload }
   | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
   | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
+  | { readonly type: 'timeline.toggleClipReverse'; readonly payload: ToggleClipReversePayload }
+  | { readonly type: 'timeline.createCompound'; readonly payload: CreateCompoundPayload }
+  | { readonly type: 'timeline.restoreCompound'; readonly payload: RestoreCompoundPayload }
   | { readonly type: 'timeline.restoreTrackClips'; readonly payload: RestoreTrackClipsPayload }
+  | {
+      readonly type: 'timeline.setCompositionDimensions';
+      readonly payload: SetCompositionDimensionsPayload;
+    }
   | { readonly type: 'timeline.addTrack'; readonly payload: AddTrackPayload }
   | { readonly type: 'timeline.removeTrack'; readonly payload: RemoveTrackPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
@@ -144,8 +179,20 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.freezeFrame': {
     description: 'Insert a freeze/hold segment at a time inside a video clip.',
   },
+  'timeline.toggleClipReverse': {
+    description: 'Reverse or restore a video clip while preserving its source window.',
+  },
+  'timeline.createCompound': {
+    description: 'Merge a contiguous run of clips into an editable nested composition.',
+  },
+  'timeline.restoreCompound': {
+    description: 'Restore the original clips and remove a nested compound composition.',
+  },
   'timeline.restoreTrackClips': {
     description: 'Replace a track clip list (undo for compound edits).',
+  },
+  'timeline.setCompositionDimensions': {
+    description: 'Set a composition canvas width and height.',
   },
   'timeline.addTrack': { description: 'Add a track to a composition.' },
   'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
@@ -193,8 +240,16 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applySetClipRate(project, command.payload);
     case 'timeline.freezeFrame':
       return applyFreezeFrame(project, command.payload);
+    case 'timeline.toggleClipReverse':
+      return applyToggleClipReverse(project, command.payload);
+    case 'timeline.createCompound':
+      return applyCreateCompound(project, command.payload);
+    case 'timeline.restoreCompound':
+      return applyRestoreCompound(project, command.payload);
     case 'timeline.restoreTrackClips':
       return applyRestoreTrackClips(project, command.payload);
+    case 'timeline.setCompositionDimensions':
+      return applySetCompositionDimensions(project, command.payload);
     case 'timeline.addTrack':
       return applyAddTrack(project, command.payload);
     case 'timeline.removeTrack':
@@ -291,7 +346,8 @@ function assertNoOverlap(
 function shiftSourceForStartTrim(clip: Clip, deltaUs: number): Clip {
   if (clip.kind === 'video') {
     const rate = normalizePlaybackRate(clip.playbackRate);
-    const sourceInUs = clip.sourceInUs + Math.round(deltaUs * rate);
+    const direction = clip.reversed === true ? -1 : 1;
+    const sourceInUs = clip.sourceInUs + Math.round(deltaUs * rate) * direction;
     if (sourceInUs < 0) {
       throw new CommandError(
         'COMMAND_VALIDATION_SOURCE_UNDERFLOW',
@@ -312,21 +368,17 @@ function shiftSourceForStartTrim(clip: Clip, deltaUs: number): Clip {
 
 function sourceAdvanceUs(clip: Clip): number {
   if (clip.kind === 'video') {
-    return Math.round(clip.durationUs * normalizePlaybackRate(clip.playbackRate));
+    const advanceUs = Math.round(clip.durationUs * normalizePlaybackRate(clip.playbackRate));
+    return clip.reversed === true ? -advanceUs : advanceUs;
   }
   return clip.durationUs;
 }
 
 function withPlaybackRate(clip: VideoClip, playbackRate: number): VideoClip {
   if (playbackRate === 1) {
-    return {
-      kind: 'video',
-      id: clip.id,
-      startUs: clip.startUs,
-      durationUs: clip.durationUs,
-      assetId: clip.assetId,
-      sourceInUs: clip.sourceInUs,
-    };
+    const withoutRate = { ...clip };
+    Reflect.deleteProperty(withoutRate, 'playbackRate');
+    return withoutRate;
   }
   return { ...clip, playbackRate };
 }
@@ -521,6 +573,7 @@ function sourceContinuous(first: Clip, second: Clip): boolean {
     return (
       a.assetId === b.assetId &&
       normalizePlaybackRate(a.playbackRate) === normalizePlaybackRate(b.playbackRate) &&
+      a.reversed === b.reversed &&
       b.sourceInUs === a.sourceInUs + sourceAdvanceUs(a)
     );
   }
@@ -536,6 +589,12 @@ function sourceContinuous(first: Clip, second: Clip): boolean {
 function applyDuplicateClip(project: SpikeProject, payload: DuplicateClipPayload): ApplyResult {
   const track = getTrack(project, payload);
   const clip = getClip(track, payload.clipId);
+  if (clip.kind === 'composition') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      'duplicateClip: duplicate a nested composition only after creating an independent copy',
+    );
+  }
   if (track.clips.some((c) => c.id === payload.newClipId)) {
     throw new CommandError(
       'COMMAND_VALIDATION_DUPLICATE_ID',
@@ -643,7 +702,8 @@ function applyFreezeFrame(project: SpikeProject, payload: FreezeFramePayload): A
   const previousClips = track.clips;
   const localUs = payload.atUs - clip.startUs;
   const rate = normalizePlaybackRate(clip.playbackRate);
-  const sourceAtCut = clip.sourceInUs + Math.round(localUs * rate);
+  const sourceAtCut =
+    clip.sourceInUs + Math.round(localUs * rate) * (clip.reversed === true ? -1 : 1);
   const left: VideoClip = { ...clip, durationUs: localUs };
   const freeze: VideoClip = withPlaybackRate(
     {
@@ -691,6 +751,293 @@ function applyFreezeFrame(project: SpikeProject, payload: FreezeFramePayload): A
         compositionId: payload.compositionId,
         trackId: payload.trackId,
         clips: previousClips,
+      },
+    },
+  };
+}
+
+/**
+ * Flip direction without storing a signed playback rate. `sourceInUs` always
+ * names the source frame at the timeline start, so swapping direction moves it
+ * to the opposite end of the existing source window. The `-1` is the same
+ * end-exclusive boundary convention used by preview sampling.
+ */
+function applyToggleClipReverse(
+  project: SpikeProject,
+  payload: ToggleClipReversePayload,
+): ApplyResult {
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (clip.kind !== 'video') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `toggleClipReverse: only video clips support reverse (got "${clip.kind}")`,
+    );
+  }
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      'toggleClipReverse: a frozen clip has no playback direction',
+    );
+  }
+  const sourceSpanUs = Math.max(0, Math.round((clip.durationUs - 1) * rate));
+  const sourceInUs =
+    clip.reversed === true ? clip.sourceInUs - sourceSpanUs : clip.sourceInUs + sourceSpanUs;
+  if (sourceInUs < 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_SOURCE_UNDERFLOW',
+      `toggleClipReverse: reversing "${clip.id}" would read before source time 0`,
+    );
+  }
+  const updated: VideoClip =
+    clip.reversed === true
+      ? (() => {
+          const forward = { ...clip };
+          Reflect.deleteProperty(forward, 'reversed');
+          return { ...forward, sourceInUs };
+        })()
+      : { ...clip, sourceInUs, reversed: true };
+  return {
+    project: withTrackClips(project, payload, [
+      ...track.clips.filter((item) => item.id !== clip.id),
+      updated,
+    ]),
+    inverse: { type: 'timeline.toggleClipReverse', payload },
+  };
+}
+
+function assertCompoundSelection(track: Track, payload: CreateCompoundPayload): readonly Clip[] {
+  const uniqueClipIds = [...new Set(payload.clipIds)];
+  if (uniqueClipIds.length < 2 || uniqueClipIds.length !== payload.clipIds.length) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_SELECTION',
+      'createCompound: select two or more distinct clips',
+    );
+  }
+  const selected = uniqueClipIds.map((clipId) => getClip(track, clipId));
+  const sortedTrack = [...track.clips].sort((a, b) => a.startUs - b.startUs);
+  const selectedIds = new Set(uniqueClipIds);
+  const selectedIndexes = sortedTrack
+    .map((clip, index) => (selectedIds.has(clip.id) ? index : -1))
+    .filter((index) => index >= 0);
+  const firstIndex = selectedIndexes[0];
+  if (
+    firstIndex === undefined ||
+    selectedIndexes.length !== uniqueClipIds.length ||
+    selectedIndexes.some((index, offset) => index !== firstIndex + offset)
+  ) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_NON_CONTIGUOUS',
+      'createCompound: selected clips must be contiguous on one track',
+    );
+  }
+  return selected.sort((a, b) => a.startUs - b.startUs);
+}
+
+function assertClipListHasNoOverlap(clips: readonly Clip[], context: string): void {
+  const sorted = [...clips].sort((a, b) => a.startUs - b.startUs);
+  for (let index = 1; index < sorted.length; index++) {
+    const previous = sorted[index - 1]!;
+    const current = sorted[index]!;
+    if (current.startUs < previous.startUs + previous.durationUs) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_OVERLAP',
+        `${context}: "${current.id}" overlaps "${previous.id}"`,
+      );
+    }
+  }
+}
+
+function compoundCompositionFromSelection(
+  parent: Composition,
+  sourceTrack: Track,
+  selected: readonly Clip[],
+  payload: CreateCompoundPayload,
+): { readonly composition: Composition; readonly compoundClip: Clip } {
+  const startUs = selected[0]!.startUs;
+  const endUs = Math.max(...selected.map((clip) => clip.startUs + clip.durationUs));
+  const durationUs = endUs - startUs;
+  assertClipRange(startUs, durationUs, 'createCompound');
+  const composition: Composition = {
+    id: payload.compoundCompositionId,
+    name: payload.name?.trim() || `Merged ${selected.length} clips`,
+    width: parent.width,
+    height: parent.height,
+    frameRate: parent.frameRate,
+    durationUs,
+    tracks: [
+      {
+        id: `${sourceTrack.id}__compound`,
+        kind: 'video',
+        order: 0,
+        enabled: sourceTrack.enabled,
+        clips: selected.map((clip) => ({ ...clip, startUs: clip.startUs - startUs })),
+      },
+    ],
+  };
+  return {
+    composition,
+    compoundClip: {
+      id: payload.compoundClipId,
+      kind: 'composition',
+      startUs,
+      durationUs,
+      compositionId: payload.compoundCompositionId,
+      childOffsetUs: 0,
+    },
+  };
+}
+
+function applyCreateCompound(project: SpikeProject, payload: CreateCompoundPayload): ApplyResult {
+  const parent = project.compositions[payload.compositionId];
+  if (parent === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+  const track = getTrack(project, payload);
+  if (payload.compoundCompositionId === payload.compositionId) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_CYCLE',
+      'createCompound: a composition cannot contain itself',
+    );
+  }
+  if (project.compositions[payload.compoundCompositionId] !== undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_DUPLICATE_ID',
+      `createCompound: composition id "${payload.compoundCompositionId}" already exists`,
+    );
+  }
+  if (track.clips.some((clip) => clip.id === payload.compoundClipId)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_DUPLICATE_ID',
+      `createCompound: clip id "${payload.compoundClipId}" already exists on track "${track.id}"`,
+    );
+  }
+  const selected = assertCompoundSelection(track, payload);
+  const { composition: child, compoundClip } = compoundCompositionFromSelection(
+    parent,
+    track,
+    selected,
+    payload,
+  );
+  const selectedIds = new Set(selected.map((clip) => clip.id));
+  const nextTrackClips = [...track.clips.filter((clip) => !selectedIds.has(clip.id)), compoundClip];
+  assertClipListHasNoOverlap(nextTrackClips, 'createCompound');
+  const nextProject = withTrackClips(project, payload, nextTrackClips);
+  return {
+    project: {
+      ...nextProject,
+      compositions: { ...nextProject.compositions, [child.id]: child },
+    },
+    inverse: {
+      type: 'timeline.restoreCompound',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        compoundCompositionId: payload.compoundCompositionId,
+        compoundClipId: payload.compoundClipId,
+        clips: selected,
+      },
+    },
+  };
+}
+
+function clipsMatchCompound(
+  child: Composition,
+  compoundClip: Extract<Clip, { readonly kind: 'composition' }>,
+  originalClips: readonly Clip[],
+): boolean {
+  if (child.tracks.length !== 1 || child.durationUs !== compoundClip.durationUs) return false;
+  const childClips = [...child.tracks[0]!.clips].sort((a, b) => a.startUs - b.startUs);
+  const originals = [...originalClips].sort((a, b) => a.startUs - b.startUs);
+  if (childClips.length !== originals.length) return false;
+  return childClips.every((clip, index) => {
+    const source = originals[index];
+    if (source === undefined) return false;
+    const expected = { ...source, startUs: source.startUs - compoundClip.startUs };
+    return JSON.stringify(clip) === JSON.stringify(expected);
+  });
+}
+
+function applyRestoreCompound(project: SpikeProject, payload: RestoreCompoundPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const compound = getClip(track, payload.compoundClipId);
+  if (compound.kind !== 'composition' || compound.compositionId !== payload.compoundCompositionId) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_MISMATCH',
+      `restoreCompound: "${payload.compoundClipId}" does not reference "${payload.compoundCompositionId}"`,
+    );
+  }
+  if (payload.compoundCompositionId === project.rootCompositionId) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_MISMATCH',
+      'restoreCompound: the root composition cannot be removed',
+    );
+  }
+  const child = project.compositions[payload.compoundCompositionId];
+  if (child === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `restoreCompound: child composition "${payload.compoundCompositionId}" is unavailable`,
+    );
+  }
+  const references = Object.values(project.compositions).flatMap((composition) =>
+    composition.tracks.flatMap((item) =>
+      item.clips.filter(
+        (clip) =>
+          clip.kind === 'composition' && clip.compositionId === payload.compoundCompositionId,
+      ),
+    ),
+  );
+  if (references.length !== 1 || references[0]?.id !== compound.id) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_SHARED',
+      'restoreCompound: the child composition is referenced by another clip',
+    );
+  }
+  const restoredIds = new Set<string>();
+  for (const clip of payload.clips) {
+    if (restoredIds.has(clip.id)) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_DUPLICATE_ID',
+        `restoreCompound: duplicate clip id "${clip.id}"`,
+      );
+    }
+    restoredIds.add(clip.id);
+    assertClipRange(clip.startUs, clip.durationUs, 'restoreCompound');
+  }
+  if (payload.clips.length < 2 || !clipsMatchCompound(child, compound, payload.clips)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_COMPOUND_MISMATCH',
+      'restoreCompound: the child timeline no longer matches the original merged clips',
+    );
+  }
+  const remaining = track.clips.filter((clip) => clip.id !== compound.id);
+  if (remaining.some((clip) => restoredIds.has(clip.id))) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_DUPLICATE_ID',
+      'restoreCompound: a restored clip id already exists on the parent track',
+    );
+  }
+  const nextTrackClips = [...remaining, ...payload.clips];
+  assertClipListHasNoOverlap(nextTrackClips, 'restoreCompound');
+  const withRestoredTrack = withTrackClips(project, payload, nextTrackClips);
+  const remainingCompositions = { ...withRestoredTrack.compositions };
+  Reflect.deleteProperty(remainingCompositions, payload.compoundCompositionId);
+  return {
+    project: { ...withRestoredTrack, compositions: remainingCompositions },
+    inverse: {
+      type: 'timeline.createCompound',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clipIds: payload.clips.map((clip) => clip.id),
+        compoundCompositionId: payload.compoundCompositionId,
+        compoundClipId: payload.compoundClipId,
+        name: child.name,
       },
     },
   };
@@ -751,6 +1098,49 @@ function applySetTrackEnabled(project: SpikeProject, payload: SetTrackEnabledPay
     inverse: {
       type: 'property.setTrackEnabled',
       payload: { ...payload, enabled: track.enabled },
+    },
+  };
+}
+
+function isCanvasDimension(value: number): boolean {
+  // Renderer and browser canvas limits vary, but 32K is a conservative durable
+  // document bound. The UI may choose any common portrait, square, or wide ratio
+  // inside it; commands never silently clamp a requested canvas.
+  return Number.isSafeInteger(value) && value > 0 && value <= 32_768;
+}
+
+function applySetCompositionDimensions(
+  project: SpikeProject,
+  payload: SetCompositionDimensionsPayload,
+): ApplyResult {
+  const composition = project.compositions[payload.compositionId];
+  if (composition === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+  if (!isCanvasDimension(payload.width) || !isCanvasDimension(payload.height)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'setCompositionDimensions: width and height must be whole pixels in [1, 32768]',
+    );
+  }
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [composition.id]: { ...composition, width: payload.width, height: payload.height },
+      },
+    },
+    inverse: {
+      type: 'timeline.setCompositionDimensions',
+      payload: {
+        compositionId: payload.compositionId,
+        width: composition.width,
+        height: composition.height,
+      },
     },
   };
 }

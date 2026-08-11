@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SpikeProject } from './model.js';
-import { validateSpikeProject } from './model.js';
+import { sourceTimeAtVideoClipTime, validateSpikeProject } from './model.js';
 import { rational } from './time.js';
 
 function baseProject(): SpikeProject {
@@ -42,6 +42,20 @@ function baseProject(): SpikeProject {
 describe('validateSpikeProject', () => {
   it('accepts a valid project', () => {
     expect(validateSpikeProject(baseProject())).toEqual([]);
+  });
+
+  it('maps reversed clips from their timeline-start source time', () => {
+    const clip = {
+      kind: 'video' as const,
+      id: 'reverse',
+      startUs: 1_000_000,
+      durationUs: 2_000_000,
+      assetId: 'asset-a',
+      sourceInUs: 9_000_000,
+      reversed: true,
+    };
+    expect(sourceTimeAtVideoClipTime(clip, 1_000_000)).toBe(9_000_000);
+    expect(sourceTimeAtVideoClipTime(clip, 1_500_000)).toBe(8_500_000);
   });
 
   it('flags a missing root composition', () => {

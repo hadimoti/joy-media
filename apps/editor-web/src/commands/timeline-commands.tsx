@@ -3,7 +3,12 @@
  * Central registry driving toolbar, shortcuts, and context menus.
  */
 
-import type { SpikeProject, Clip, Track } from '@joy-media/project-schema';
+import {
+  normalizePlaybackRate,
+  type SpikeProject,
+  type Clip,
+  type Track,
+} from '@joy-media/project-schema';
 import type { SpikeCommand } from '@joy-media/commands';
 
 export interface CommandContext {
@@ -130,6 +135,24 @@ export function DuplicateIcon({ className }: { className?: string }) {
     >
       <rect x="9" y="9" width="13" height="13" rx="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+export function ReverseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="16"
+      height="16"
+    >
+      <path d="M7 7h10l-3-3" />
+      <path d="M17 17H7l3 3" />
+      <path d="M17 7a7 7 0 0 0-7 7" />
+      <path d="M7 17a7 7 0 0 0 7-7" />
     </svg>
   );
 }
@@ -342,7 +365,14 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     icon: ScissorsIcon,
     shortcut: 'F',
     group: 'edit',
-    canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+    canExecute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      return (
+        clip?.kind === 'video' &&
+        ctx.playheadUs > clip.startUs &&
+        ctx.playheadUs < clip.startUs + clip.durationUs
+      );
+    },
     execute: (ctx) => {
       const clip = ctx.selectedClip?.clip;
       const track = ctx.selectedClip?.track;
@@ -363,16 +393,54 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
+    id: 'clip.reverse',
+    label: 'Reverse clip',
+    icon: ReverseIcon,
+    group: 'edit',
+    canExecute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      return clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) !== 0;
+    },
+    execute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      const track = ctx.selectedClip?.track;
+      if (
+        !clip ||
+        !track ||
+        clip.kind !== 'video' ||
+        normalizePlaybackRate(clip.playbackRate) === 0
+      )
+        return null;
+      return {
+        type: 'timeline.toggleClipReverse',
+        payload: {
+          compositionId: ctx.compositionId,
+          trackId: track.id,
+          clipId: clip.id,
+        },
+      };
+    },
+  },
+  {
     id: 'clip.setRate',
     label: 'Set playback rate',
     icon: ZoomInIcon,
     shortcut: 'R',
     group: 'edit',
-    canExecute: (ctx) => !!ctx.selectedClip && ctx.selectedClip.clip.kind === 'video',
+    canExecute: (ctx) => {
+      const clip = ctx.selectedClip?.clip;
+      return clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) !== 0;
+    },
     execute: (ctx) => {
       const clip = ctx.selectedClip?.clip;
       const track = ctx.selectedClip?.track;
-      if (!clip || !track || clip.kind !== 'video') return null;
+      if (
+        !clip ||
+        !track ||
+        clip.kind !== 'video' ||
+        normalizePlaybackRate(clip.playbackRate) === 0
+      )
+        return null;
       // Return a rate of 0.5x as example - actual rate chosen via submenu
       return {
         type: 'timeline.setClipRate',
@@ -478,6 +546,24 @@ export function buildClipContextMenu(
         label: 'Freeze frame at playhead',
         icon: ScissorsIcon,
         shortcut: 'F',
+        action: () => onExecute(result),
+      });
+    }
+  }
+
+  // Reverse / restore forward direction. Freeze clips deliberately omit this:
+  // a locked frame has no direction and the command layer rejects it too.
+  const reverseCmd = TIMELINE_COMMANDS.find((c) => c.id === 'clip.reverse')!;
+  if (reverseCmd.canExecute(ctx)) {
+    const result = reverseCmd.execute(ctx);
+    if (result) {
+      const clip = ctx.selectedClip?.clip;
+      items.push({
+        label:
+          clip?.kind === 'video' && clip.reversed === true
+            ? 'Restore forward playback'
+            : 'Reverse clip',
+        icon: ReverseIcon,
         action: () => onExecute(result),
       });
     }

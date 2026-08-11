@@ -49,7 +49,7 @@ import type {
   VideoClip,
   VisualObjectV1,
 } from '@joy-media/project-schema';
-import { normalizePlaybackRate } from '@joy-media/project-schema';
+import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import {
@@ -115,7 +115,13 @@ import {
 } from './project-lifecycle.js';
 import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
-import { InspectorPanel } from './InspectorPanel.js';
+import { InspectorPanel, type InspectorSpeedChange } from './InspectorPanel.js';
+import {
+  MonitorAspectRatioSelector,
+  monitorAspectRatioDimensions,
+  monitorAspectRatioForDimensions,
+  type MonitorAspectRatio,
+} from './MonitorAspectRatioSelector.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel, workerAudioDenoiseOperationId } from './JobsPanel.js';
@@ -226,6 +232,21 @@ import { createMonoAudioBuffer } from './export-audio.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
 import { timelineEffectiveDurationUs } from './timeline-layout.js';
+import {
+  buildDerivedClipPresentation,
+  buildSpeedRampPresentation,
+  buildSpeedRampTransaction,
+} from './speed-ramp.js';
+import {
+  flattenRootTimelineVideoClips,
+  rootTimelineVideoClipById,
+  withFlattenedRootTimeline,
+} from './timeline-nested-playback.js';
+import {
+  timelineCompositionView,
+  timelineViewLocalTime,
+  timelineViewRootTime,
+} from './timeline-composition-view.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -289,16 +310,10 @@ function activeVideoClipAt(
   playheadUs: number,
   preferredClipIds: readonly string[] = [],
 ) {
-  const composition = project.compositions[project.rootCompositionId];
-  const active = composition?.tracks
-    .flatMap((track) => track.clips)
-    .filter(
-      (clip) =>
-        clip.kind === 'video' &&
-        playheadUs >= clip.startUs &&
-        playheadUs < clip.startUs + clip.durationUs,
-    );
-  if (active === undefined || active.length === 0) return undefined;
+  const active = flattenRootTimelineVideoClips(project).filter(
+    (clip) => playheadUs >= clip.startUs && playheadUs < clip.startUs + clip.durationUs,
+  );
+  if (active.length === 0) return undefined;
   return (
     preferredClipIds.map((id) => active.find((clip) => clip.id === id)).find(Boolean) ?? active[0]
   );
@@ -392,17 +407,40 @@ function activeTransitionAt(project: JoyProjectV1, playheadUs: number): Transiti
 }
 
 function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
-  const clip = project.compositions[project.rootCompositionId]?.tracks
-    .flatMap((track) => track.clips)
-    .find((item) => item.id === clipId);
-  return clip?.kind === 'video' ? clip : undefined;
+  return rootTimelineVideoClipById(project, clipId);
+}
+
+/** Timeline edits that create additional clips must retain their presentation state. */
+function derivedClipPresentationTarget(
+  transaction: CommandTransaction,
+): { readonly originalClipId: string; readonly derivedClipIds: readonly string[] } | undefined {
+  if (transaction.commands.length !== 1) return undefined;
+  const [command] = transaction.commands;
+  if (command === undefined) return undefined;
+  switch (command.type) {
+    case 'timeline.freezeFrame':
+      return {
+        originalClipId: command.payload.clipId,
+        derivedClipIds: [command.payload.freezeClipId, command.payload.rightClipId],
+      };
+    case 'timeline.splitClip':
+      return {
+        originalClipId: command.payload.clipId,
+        derivedClipIds: [command.payload.newClipId],
+      };
+    case 'timeline.duplicateClip':
+      return {
+        originalClipId: command.payload.clipId,
+        derivedClipIds: [command.payload.newClipId],
+      };
+    default:
+      return undefined;
+  }
 }
 
 /** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
 function sourceTimeForPlayhead(clip: VideoClip, playheadUs: number): number {
-  const rate = normalizePlaybackRate(clip.playbackRate);
-  if (rate === 0) return clip.sourceInUs;
-  return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
+  return sourceTimeAtVideoClipTime(clip, playheadUs);
 }
 
 /**
@@ -419,13 +457,15 @@ function sourceTimeForTransitionSample(
     const rate = normalizePlaybackRate(clip.playbackRate);
     if (rate === 0) return clip.sourceInUs;
     const windowStart = clip.startUs - transition.durationUs;
-    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate;
+    const direction = clip.reversed === true ? -1 : 1;
+    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate * direction;
   }
   if (playheadUs < clip.startUs) return clip.sourceInUs;
   if (playheadUs >= clip.startUs + clip.durationUs) {
     const rate = normalizePlaybackRate(clip.playbackRate);
     if (rate === 0) return clip.sourceInUs;
-    return clip.sourceInUs + Math.max(0, clip.durationUs * rate - 1);
+    const direction = clip.reversed === true ? -1 : 1;
+    return clip.sourceInUs + Math.max(0, Math.round((clip.durationUs - 1) * rate)) * direction;
   }
   return sourceTimeForPlayhead(clip, playheadUs);
 }
@@ -438,7 +478,8 @@ function playheadForSourceTime(
 ): number {
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return freezePlayheadUs;
-  return clip.startUs + (sourceTimeUs - clip.sourceInUs) / rate;
+  const direction = clip.reversed === true ? -1 : 1;
+  return clip.startUs + ((sourceTimeUs - clip.sourceInUs) * direction) / rate;
 }
 
 function seekDetachedVideo(video: HTMLVideoElement, timeUs: number): Promise<void> {
@@ -528,6 +569,13 @@ interface EditorPanelContextValue {
   readonly selectClips: (clipIds: readonly string[]) => void;
   readonly clearSelection: () => void;
   readonly dispatchTimeline: (transaction: CommandTransaction) => void;
+  /** Persists a visual/audio snapshot with a timeline transaction as one Undo step. */
+  readonly dispatchTimelineAndProjectAudio: (
+    label: string,
+    timeline: CommandTransaction,
+    visualProject: JoyProjectV1,
+    audioState: AudioState,
+  ) => void;
   readonly updateVisualProperty: (
     objectId: string,
     key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
@@ -579,6 +627,9 @@ interface EditorPanelContextValue {
   readonly onTimelineTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
   readonly timelineAutoFit: boolean;
   readonly onTimelineAutoFitChange: (next: boolean) => void;
+  /** Current editable composition shown by Timeline; context survives Dockview's cached panel renderer. */
+  readonly activeTimelineCompositionId: string;
+  readonly onActiveTimelineCompositionChange: (compositionId: string) => void;
 }
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
@@ -949,6 +1000,16 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  // Dockview keeps panel instances independently from this workspace render.
+  // Keep compound drill-in state here, rather than inside the panel component,
+  // so opening a child timeline survives the project update that created it.
+  const [activeTimelineCompositionId, setActiveTimelineCompositionId] = useState(
+    () => session.timelineProject.rootCompositionId,
+  );
+  useEffect(() => {
+    if (session.timelineProject.compositions[activeTimelineCompositionId] !== undefined) return;
+    setActiveTimelineCompositionId(session.timelineProject.rootCompositionId);
+  }, [activeTimelineCompositionId, session.timelineProject]);
   useEffect(() => {
     ensurePreviewAudioGraph();
     const videoGain = previewGainNodeRef.current;
@@ -1050,6 +1111,13 @@ function EditorWorkspace({
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
   const lastDiagnosticsObservedUsRef = useRef<number | undefined>(undefined);
   const freezeWallStartRef = useRef<{ wallMs: number; playheadUs: number } | undefined>(undefined);
+  /** Reverse playback is browser-seek driven because HTMLMediaElement has no portable negative rate. */
+  const reverseWallStartRef = useRef<
+    { readonly wallMs: number; readonly playheadUs: number; readonly epoch: number } | undefined
+  >(undefined);
+  const reverseFrameInFlightRef = useRef(false);
+  /** The playing effect publishes its current capture tick for async media loads. */
+  const playbackTickRef = useRef<(() => void) | undefined>(undefined);
   const playbackFrameRef = useRef<number | undefined>(undefined);
   const playbackOperationRef = useRef(new PlaybackOperationGate());
 
@@ -1229,8 +1297,8 @@ function EditorWorkspace({
       lastMediaTimeUsRef.current = undefined;
       lastDiagnosticsObservedUsRef.current = undefined;
       if (play) {
-        video.muted = replacementSource !== undefined;
-        replacementAudio.muted = false;
+        video.muted = replacementSource !== undefined || clip.reversed === true;
+        replacementAudio.muted = clip.reversed === true;
         if (rate === 0) {
           video.pause();
           replacementAudio.pause();
@@ -1238,8 +1306,24 @@ function EditorWorkspace({
             wallMs: performance.now(),
             playheadUs,
           };
+          reverseWallStartRef.current = undefined;
+        } else if (clip.reversed === true) {
+          // Browsers do not support negative HTMLMediaElement playback rates.
+          // Keep decode paused and advance the root playhead on rAF while
+          // seeking each visual frame to the canonical reverse source time.
+          video.pause();
+          replacementAudio.pause();
+          freezeWallStartRef.current = undefined;
+          reverseWallStartRef.current = { wallMs: performance.now(), playheadUs, epoch };
+          // The playing effect may have already consumed its initial rAF
+          // while a cold source was loading. Wake its capture loop after the
+          // reverse wall clock is installed.
+          window.requestAnimationFrame(() => {
+            if (operation.isCurrent(epoch) && operation.intendsToPlay) playbackTickRef.current?.();
+          });
         } else {
           freezeWallStartRef.current = undefined;
+          reverseWallStartRef.current = undefined;
           const started = await playMediaWhenCurrent(
             operation,
             epoch,
@@ -1258,6 +1342,7 @@ function EditorWorkspace({
         }
       } else {
         freezeWallStartRef.current = undefined;
+        reverseWallStartRef.current = undefined;
         video.pause();
         replacementAudio.pause();
         await seekDetachedVideo(video, sourceTimeUs);
@@ -1312,6 +1397,42 @@ function EditorWorkspace({
     },
     [syncMediaToPlayhead],
   );
+  const resyncTimelineMedia = useCallback(() => {
+    const current = stateRef.current;
+    const operation = playbackOperationRef.current;
+    const shouldPlay = operation.intendsToPlay;
+    const epoch = operation.begin(shouldPlay);
+    reverseFrameInFlightRef.current = false;
+    void syncMediaToPlayhead(current.playheadUs, shouldPlay, epoch)
+      .then((ready) => {
+        if (!operation.isCurrent(epoch)) return;
+        if (!ready) {
+          operation.begin(false);
+          videoRef.current?.pause();
+          replacementAudioRef.current?.pause();
+          freezeWallStartRef.current = undefined;
+          reverseWallStartRef.current = undefined;
+          stateRef.current = { ...stateRef.current, playing: false };
+          setState((active) => ({ ...active, playing: false }));
+          return;
+        }
+        if (shouldPlay && operation.intendsToPlay) {
+          window.requestAnimationFrame(() => {
+            if (operation.isCurrent(epoch) && operation.intendsToPlay) playbackTickRef.current?.();
+          });
+        }
+      })
+      .catch(() => {
+        if (!operation.isCurrent(epoch)) return;
+        operation.begin(false);
+        videoRef.current?.pause();
+        replacementAudioRef.current?.pause();
+        freezeWallStartRef.current = undefined;
+        reverseWallStartRef.current = undefined;
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      });
+  }, [syncMediaToPlayhead]);
   useEffect(() => {
     if (!state.playing) return;
     const video = videoRef.current;
@@ -1327,6 +1448,7 @@ function EditorWorkspace({
       video.pause();
       replacementAudioRef.current?.pause();
       freezeWallStartRef.current = undefined;
+      reverseWallStartRef.current = undefined;
       stateRef.current = { ...stateRef.current, playing: false };
       setState((active) => ({ ...active, playing: false }));
     };
@@ -1340,12 +1462,16 @@ function EditorWorkspace({
       // Advance across gaps and wrap the final playable clip back to the
       // first. Move the authoritative playhead before loading the next media
       // so the next frame cannot resolve the clip that just finished.
-      const nextPlayheadUs = playbackTargetAfterClip(session.timelineProject, clipEndUs);
+      const nextPlayheadUs = playbackTargetAfterClip(
+        withFlattenedRootTimeline(session.timelineProject),
+        clipEndUs,
+      );
       if (nextPlayheadUs === undefined) {
         operation.begin(false);
         video.pause();
         replacementAudioRef.current?.pause();
         freezeWallStartRef.current = undefined;
+        reverseWallStartRef.current = undefined;
         stateRef.current = {
           ...stateRef.current,
           playheadUs: durationUs,
@@ -1378,6 +1504,70 @@ function EditorWorkspace({
           stopPlaybackForEpoch(epoch);
         });
     };
+    const captureReverseFrame = (
+      clip: VideoClip,
+      reverse: { readonly wallMs: number; readonly playheadUs: number; readonly epoch: number },
+    ): void => {
+      const operation = playbackOperationRef.current;
+      if (
+        reverseFrameInFlightRef.current ||
+        !operation.isCurrent(reverse.epoch) ||
+        !operation.intendsToPlay ||
+        reverseWallStartRef.current !== reverse
+      )
+        return;
+      const compositionTimeUs =
+        reverse.playheadUs + Math.floor((performance.now() - reverse.wallMs) * 1_000);
+      if (compositionTimeUs >= clip.startUs + clip.durationUs) {
+        advancePlaybackAfterClip(clip.startUs + clip.durationUs);
+        return;
+      }
+      const sourceTimeUs = sourceTimeForPlayhead(clip, compositionTimeUs);
+      reverseFrameInFlightRef.current = true;
+      void seekDetachedVideo(video, sourceTimeUs)
+        .then(() => {
+          if (
+            !operation.isCurrent(reverse.epoch) ||
+            !operation.intendsToPlay ||
+            reverseWallStartRef.current !== reverse ||
+            cancelled
+          )
+            return;
+          scheduler.current.seek(sourceTimeUs);
+          const token = scheduler.current.requestToken();
+          const frame = decoder.captureCurrentFrame(token);
+          const visualComposition =
+            session.visualProject.compositions[session.visualProject.rootCompositionId];
+          const node = videoFrameNodeFromDecoded(
+            videoClipSpecAt(
+              session.visualProject,
+              clip,
+              compositionTimeUs,
+              visualComposition?.height ?? 1920,
+            ),
+            frame,
+            { width: video.videoWidth, height: video.videoHeight },
+          );
+          if (frame.bitmap === undefined) {
+            scheduler.current.recordDecodedFrame(token, false, false);
+            playbackDiagnostics.current.recordDecodeMiss();
+          } else {
+            rememberClipFrame(clip.id, frame.bitmap);
+            setPreviewVideoFrame({ node, bitmap: frame.bitmap });
+            scheduler.current.recordDecodedFrame(token, true, true);
+            playbackDiagnostics.current.recordFrame(undefined, sourceTimeUs, performance.now());
+            void captureTransitionPartnerFrames(compositionTimeUs).catch(() => undefined);
+          }
+          lastMediaTimeUsRef.current = sourceTimeUs;
+          stateRef.current = { ...stateRef.current, playheadUs: compositionTimeUs };
+          setState((active) => ({ ...active, playheadUs: compositionTimeUs }));
+          requestFrame();
+        })
+        .catch(() => stopPlaybackForEpoch(reverse.epoch))
+        .finally(() => {
+          reverseFrameInFlightRef.current = false;
+        });
+    };
     const capture = (frameInfo?: {
       readonly metadata?: VideoFramePresentationMetadata;
       readonly observedAtMs?: number;
@@ -1389,6 +1579,19 @@ function EditorWorkspace({
         stateRef.current.selectedIds,
       );
       if (clip === undefined || clip.kind !== 'video') return;
+      if (clip.reversed === true) {
+        const reverse = reverseWallStartRef.current;
+        // A cold OPFS/cloud source can still be loading when the first rAF
+        // arrives. Keep the manual decoder cadence alive until sync installs
+        // the reverse wall clock; otherwise a single early frame would leave
+        // playback visibly "playing" but permanently stalled.
+        if (reverse === undefined) {
+          playbackFrameRef.current = window.requestAnimationFrame(() => capture());
+          return;
+        }
+        captureReverseFrame(clip, reverse);
+        return;
+      }
       const rate = normalizePlaybackRate(clip.playbackRate);
       let compositionTimeUs: number;
       let sourceTimeUs: number;
@@ -1460,8 +1663,9 @@ function EditorWorkspace({
     const requestFrame = (): void => {
       // Freeze holds a still frame — drive with rAF. Otherwise follow media cadence.
       const clip = activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      const manualReverse = clip?.kind === 'video' && clip.reversed === true;
       const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
-      if (!freeze && typeof video.requestVideoFrameCallback === 'function')
+      if (!freeze && !manualReverse && typeof video.requestVideoFrameCallback === 'function')
         playbackFrameRef.current = video.requestVideoFrameCallback((now, metadata) =>
           capture({
             observedAtMs: now,
@@ -1477,6 +1681,7 @@ function EditorWorkspace({
           capture({ observedAtMs: now }),
         );
     };
+    playbackTickRef.current = () => capture();
     const onEnded = (): void => {
       const clip = activeVideoClipAt(
         session.timelineProject,
@@ -1490,6 +1695,7 @@ function EditorWorkspace({
     requestFrame();
     return () => {
       cancelled = true;
+      if (playbackTickRef.current !== undefined) playbackTickRef.current = undefined;
       video.removeEventListener('ended', onEnded);
       if (playbackFrameRef.current !== undefined) {
         if (typeof video.cancelVideoFrameCallback === 'function')
@@ -1549,13 +1755,18 @@ function EditorWorkspace({
       videoRef.current?.pause();
       replacementAudioRef.current?.pause();
       freezeWallStartRef.current = undefined;
+      reverseWallStartRef.current = undefined;
+      reverseFrameInFlightRef.current = false;
       stateRef.current = { ...current, playing: false };
       setState((active) => ({ ...active, playing: false }));
       return;
     }
     ensurePreviewAudioGraph();
     void audioContextRef.current?.resume();
-    const startUs = playbackStartAtOrAfter(session.timelineProject, current.playheadUs);
+    const startUs = playbackStartAtOrAfter(
+      withFlattenedRootTimeline(session.timelineProject),
+      current.playheadUs,
+    );
     if (startUs === undefined) {
       operation.begin(false);
       stateRef.current = { ...current, playing: false };
@@ -1586,10 +1797,43 @@ function EditorWorkspace({
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
-      session.dispatchTimeline(transaction);
+      const presentationTarget = derivedClipPresentationTarget(transaction);
+      if (presentationTarget === undefined) {
+        session.dispatchTimeline(transaction);
+      } else {
+        const presentation = buildDerivedClipPresentation(
+          session.visualProject,
+          audioState,
+          presentationTarget.originalClipId,
+          presentationTarget.derivedClipIds,
+        );
+        session.dispatchCompound(transaction.label, {
+          timeline: transaction,
+          document: presentation.project,
+        });
+        setAudioStateRaw(presentation.audio);
+      }
+      resyncTimelineMedia();
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [audioState, resyncTimelineMedia, session],
+  );
+  const dispatchTimelineAndProjectAudio = useCallback(
+    (
+      label: string,
+      timeline: CommandTransaction,
+      nextVisualProject: JoyProjectV1,
+      nextAudioState: AudioState,
+    ) => {
+      session.dispatchCompound(label, {
+        timeline,
+        document: withProjectAudio(nextVisualProject, nextAudioState),
+      });
+      setAudioStateRaw(nextAudioState);
+      resyncTimelineMedia();
+      setRevision((revision) => revision + 1);
+    },
+    [resyncTimelineMedia, session],
   );
   const dispatchGraph = useCallback(
     (transaction: GraphTransaction) => {
@@ -2498,7 +2742,7 @@ function EditorWorkspace({
         })();
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
-        const allTimelineClips = compositionTimeline?.tracks.flatMap((track) => track.clips) ?? [];
+        const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
         const contentEndUs = allTimelineClips.reduce(
           (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
           0,
@@ -2572,9 +2816,7 @@ function EditorWorkspace({
             exportVisualProject,
           );
         };
-        const clipsByBoundary = allTimelineClips.filter(
-          (clip): clip is VideoClip => clip.kind === 'video',
-        );
+        const clipsByBoundary = allTimelineClips;
         const transitionPartnerClips = (exportVisualProject.transitions ?? []).flatMap(
           (transition) =>
             [transition.leftClipId, transition.rightClipId]
@@ -2665,16 +2907,32 @@ function EditorWorkspace({
                 }
               }
             }
+            const rate = normalizePlaybackRate(clip.playbackRate);
+            const sourceSpanUs = Math.max(1, Math.round(clip.durationUs * rate));
+            const sourceStartUs =
+              clip.reversed === true
+                ? Math.max(0, clip.sourceInUs - sourceSpanUs + 1)
+                : clip.sourceInUs;
             const sourceStartSample = Math.max(
               0,
-              Math.floor((clip.sourceInUs * sampleRate) / 1_000_000),
+              Math.floor((sourceStartUs * sampleRate) / 1_000_000),
             );
-            const sourceLength = Math.max(1, Math.ceil((clip.durationUs * sampleRate) / 1_000_000));
-            const samples =
+            const sourceLength = Math.max(1, Math.ceil((sourceSpanUs * sampleRate) / 1_000_000));
+            let samples: Float32Array<ArrayBufferLike> =
               fullSamples?.slice(
                 sourceStartSample,
                 Math.min(fullSamples.length, sourceStartSample + sourceLength),
               ) ?? new Float32Array(sourceLength);
+            if (clip.reversed === true) {
+              const reversed = new Float32Array(samples.length);
+              for (let index = 0; index < samples.length; index++)
+                reversed[index] = samples[samples.length - 1 - index]!;
+              samples = reversed;
+            }
+            // The offline mixer uses the clip's timeline duration. Resample
+            // the selected source window to that duration so rate edits and
+            // reverse export stay synchronized with the rendered frames.
+            if (rate !== 1) samples = resampleMonoSamples(samples, sampleRate, sampleRate / rate);
             return {
               clip,
               video,
@@ -3143,6 +3401,29 @@ function EditorWorkspace({
     const context = useContext(EditorPanelContext);
     if (context === undefined) throw new Error('editor panel context is unavailable');
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const activeTimelineView =
+      timelineCompositionView(context.timelineProject, context.activeTimelineCompositionId) ??
+      timelineCompositionView(context.timelineProject, context.timelineProject.rootCompositionId);
+    if (activeTimelineView === undefined)
+      throw new Error('timeline root composition is unavailable');
+    const activeTimelinePlayheadUs = timelineViewLocalTime(activeTimelineView, state.playheadUs);
+    const activeTimelineDurationUs = timelineEffectiveDurationUs(activeTimelineView.composition);
+    const activeTimelineMarkers = visualProject.markers
+      .filter(
+        (marker) =>
+          marker.timeUs >= activeTimelineView.rootOffsetUs &&
+          marker.timeUs <= activeTimelineView.rootOffsetUs + activeTimelineDurationUs,
+      )
+      .map((marker) => ({ ...marker, timeUs: marker.timeUs - activeTimelineView.rootOffsetUs }));
+    const setActiveTimelineComposition = (compositionId: string) => {
+      const nextView = timelineCompositionView(context.timelineProject, compositionId);
+      if (nextView === undefined) return;
+      context.onActiveTimelineCompositionChange(compositionId);
+      const localTimeUs = state.playheadUs - nextView.rootOffsetUs;
+      if (localTimeUs < 0 || localTimeUs > timelineEffectiveDurationUs(nextView.composition)) {
+        context.seek(timelineViewRootTime(nextView, 0));
+      }
+    };
     const projectWithImportedAsset = (
       project: typeof context.visualProject,
       asset: {
@@ -3393,6 +3674,109 @@ function EditorWorkspace({
         'success',
       );
     };
+    const selectedTimelineEntry = state.selectedIds
+      .map((clipId) =>
+        Object.values(context.timelineProject.compositions)
+          .flatMap((composition) =>
+            composition.tracks.map((track) => ({
+              composition,
+              track,
+              clip: track.clips.find((candidate) => candidate.id === clipId),
+            })),
+          )
+          .find((entry) => entry.clip !== undefined),
+      )
+      .find((entry) => entry !== undefined);
+    const selectedTimelineVideo =
+      selectedTimelineEntry?.clip?.kind === 'video'
+        ? { ...selectedTimelineEntry, clip: selectedTimelineEntry.clip }
+        : undefined;
+    const changeSelectedClipSpeed = (change: InspectorSpeedChange, label: string) => {
+      if (selectedTimelineVideo === undefined) return;
+      const { composition, track, clip } = selectedTimelineVideo;
+      try {
+        if (Object.hasOwn(change, 'ramp')) {
+          if (change.ramp === undefined) {
+            context.showToast('Undo the ramp to restore the original constant-speed clip.', 'info');
+            return;
+          }
+          if (composition.id !== context.timelineProject.rootCompositionId) {
+            context.showToast(
+              'Speed ramps are unavailable inside a merged timeline because its parent timing is fixed.',
+              'info',
+            );
+            return;
+          }
+          const result = buildSpeedRampTransaction({
+            compositionId: composition.id,
+            track,
+            clip,
+            preset: change.ramp,
+          });
+          const presentation = buildSpeedRampPresentation(
+            context.visualProject,
+            context.audioState,
+            clip.id,
+            result.segmentIds,
+          );
+          context.dispatchTimelineAndProjectAudio(
+            result.transaction.label,
+            result.transaction,
+            presentation.project,
+            presentation.audio,
+          );
+          context.selectClips([result.segmentIds[0]]);
+          context.showToast(`${label}. The clip is now three editable speed segments.`, 'success');
+          return;
+        }
+        if (change.rate === undefined) return;
+        const requestedRate = Math.abs(change.rate);
+        const currentRate = normalizePlaybackRate(clip.playbackRate);
+        const requestedReverse = change.rate < 0;
+        if (
+          composition.id !== context.timelineProject.rootCompositionId &&
+          requestedRate !== currentRate
+        ) {
+          context.showToast(
+            'Constant speed changes are unavailable inside a merged timeline because its parent timing is fixed.',
+            'info',
+          );
+          return;
+        }
+        const commands: CommandTransaction['commands'][number][] = [];
+        if (requestedReverse !== (clip.reversed === true)) {
+          commands.push({
+            type: 'timeline.toggleClipReverse',
+            payload: { compositionId: composition.id, trackId: track.id, clipId: clip.id },
+          });
+        }
+        if (requestedRate !== currentRate) {
+          commands.push({
+            type: 'timeline.setClipRate',
+            payload: {
+              compositionId: composition.id,
+              trackId: track.id,
+              clipId: clip.id,
+              playbackRate: requestedRate,
+              preserveSourceRange: currentRate !== 0,
+            },
+          });
+        }
+        if (commands.length === 0) return;
+        context.dispatchTimeline({ label, commands });
+        context.showToast(
+          requestedReverse !== (clip.reversed === true)
+            ? `${label}. Program Monitor reverse preview is silent; export reverses audio.`
+            : label,
+          'success',
+        );
+      } catch (reason) {
+        context.showToast(
+          `Could not change clip speed: ${reason instanceof Error ? reason.message : String(reason)}`,
+          'error',
+        );
+      }
+    };
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
@@ -3400,6 +3784,22 @@ function EditorWorkspace({
         <InspectorPanel
           object={object}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
+          {...(selectedTimelineVideo === undefined
+            ? {}
+            : {
+                clipSpeed: {
+                  rate:
+                    (selectedTimelineVideo.clip.reversed === true ? -1 : 1) *
+                    normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate),
+                  supportsReverse:
+                    normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate) !== 0,
+                  supportsRamps:
+                    selectedTimelineVideo.clip.reversed !== true &&
+                    normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate) * 0.75 >= 0.1 &&
+                    normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate) * 2 <= 8,
+                },
+                onSpeedChange: changeSelectedClipSpeed,
+              })}
           allObjects={visualProject.visualObjects}
           playheadUs={state.playheadUs}
           audioState={context.audioState}
@@ -3791,7 +4191,9 @@ function EditorWorkspace({
       return (
         <TimelinePanel
           project={context.timelineProject}
-          playheadUs={state.playheadUs}
+          activeCompositionId={activeTimelineView.composition.id}
+          onActiveCompositionChange={setActiveTimelineComposition}
+          playheadUs={activeTimelinePlayheadUs}
           playing={state.playing}
           selectedIds={state.selectedIds}
           viewport={context.timelineViewport}
@@ -3800,7 +4202,7 @@ function EditorWorkspace({
           onTrackFlagsChange={context.onTimelineTrackFlagsChange}
           autoFit={context.timelineAutoFit}
           onAutoFitChange={context.onTimelineAutoFitChange}
-          markers={visualProject.markers}
+          markers={activeTimelineMarkers}
           provenance={
             state.selectedIds[0] === undefined
               ? []
@@ -3841,8 +4243,7 @@ function EditorWorkspace({
               })
                 .then((asset) => {
                   rememberImportedAsset(asset);
-                  const composition =
-                    context.timelineProject.compositions[context.timelineProject.rootCompositionId];
+                  const composition = activeTimelineView.composition;
                   if (composition !== undefined) {
                     const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
                     bindMediaClip(asset, clipId);
@@ -3850,7 +4251,7 @@ function EditorWorkspace({
                       buildTimelineMediaImportTransaction(
                         composition,
                         [asset],
-                        state.playheadUs,
+                        activeTimelinePlayheadUs,
                         new Set(),
                         () => clipId,
                       ),
@@ -3868,7 +4269,7 @@ function EditorWorkspace({
           }}
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
-          onSeek={context.seek}
+          onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
           onToggleSelection={context.toggleSelection}
           onClearSelection={context.clearSelection}
           onDispatch={context.dispatchTimeline}
@@ -3881,7 +4282,7 @@ function EditorWorkspace({
                   payload: {
                     marker: {
                       id: `marker-${timeUs}`,
-                      timeUs,
+                      timeUs: timelineViewRootTime(activeTimelineView, timeUs),
                       label,
                       kind: 'marker',
                       color: JOY_COLORS.accent,
@@ -4531,6 +4932,7 @@ function EditorWorkspace({
           selectClips,
           clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
           dispatchTimeline,
+          dispatchTimelineAndProjectAudio,
           updateVisualProperty,
           dispatchProject,
           replaceVisualProject,
@@ -4573,6 +4975,8 @@ function EditorWorkspace({
           onTimelineTrackFlagsChange: setTimelineTrackFlags,
           timelineAutoFit,
           onTimelineAutoFitChange: setTimelineAutoFit,
+          activeTimelineCompositionId,
+          onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
         }}
       >
         <DockviewReact
@@ -4731,6 +5135,8 @@ function MonitorPanel() {
     togglePlayback,
     seek,
     dispatchProject,
+    session,
+    bumpProjectRevision,
     showToast,
   } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -4743,6 +5149,10 @@ function MonitorPanel() {
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
   const [viewerZoom, setViewerZoom] = useState<'fit' | '50' | '100' | '200'>('fit');
+  // Fit is a monitor-only choice. Named presets are always derived from the
+  // persisted root composition so Undo/Redo and reload cannot leave the
+  // footer claiming a canvas ratio that no longer exists.
+  const [monitorFitView, setMonitorFitView] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -4920,6 +5330,9 @@ function MonitorPanel() {
   const composition = visualProject.compositions[visualProject.rootCompositionId];
   const width = composition?.width ?? 1080;
   const height = composition?.height ?? 1920;
+  const monitorAspectRatio: MonitorAspectRatio = monitorFitView
+    ? 'fit'
+    : monitorAspectRatioForDimensions(width, height);
   const timelineComposition = timelineProject.compositions[timelineProject.rootCompositionId];
   const durationUs =
     timelineComposition === undefined
@@ -4949,6 +5362,74 @@ function MonitorPanel() {
       .requestFullscreen()
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
+
+  const changeMonitorAspectRatio = useCallback(
+    (nextAspectRatio: MonitorAspectRatio) => {
+      const dimensions = monitorAspectRatioDimensions(nextAspectRatio);
+      // Fit is intentionally a monitor view choice: it keeps the project's
+      // authored canvas unchanged while the canvas uses its existing contain
+      // behavior. Every named ratio below is a real, undoable project change.
+      if (dimensions === undefined) {
+        setMonitorFitView(true);
+        return;
+      }
+      const visualComposition = visualProject.compositions[visualProject.rootCompositionId];
+      const timelineComposition = timelineProject.compositions[timelineProject.rootCompositionId];
+      if (visualComposition === undefined || timelineComposition === undefined) {
+        showToast('The root composition is unavailable for this aspect-ratio change.', 'error');
+        return;
+      }
+      if (
+        visualComposition.width === dimensions.width &&
+        visualComposition.height === dimensions.height &&
+        timelineComposition.width === dimensions.width &&
+        timelineComposition.height === dimensions.height
+      ) {
+        setMonitorFitView(false);
+        return;
+      }
+      try {
+        session.dispatchCompound(`Change canvas aspect ratio to ${nextAspectRatio}`, {
+          document: {
+            ...visualProject,
+            updatedAt: new Date().toISOString(),
+            compositions: {
+              ...visualProject.compositions,
+              [visualComposition.id]: {
+                ...visualComposition,
+                width: dimensions.width,
+                height: dimensions.height,
+              },
+            },
+          },
+          timeline: {
+            label: `Change canvas aspect ratio to ${nextAspectRatio}`,
+            commands: [
+              {
+                type: 'timeline.setCompositionDimensions',
+                payload: {
+                  compositionId: timelineComposition.id,
+                  width: dimensions.width,
+                  height: dimensions.height,
+                },
+              },
+            ],
+          },
+        });
+        setMonitorFitView(false);
+        bumpProjectRevision();
+        showToast(`Canvas changed to ${nextAspectRatio}.`, 'success');
+      } catch (reason) {
+        showToast(
+          `Could not change canvas aspect ratio: ${
+            reason instanceof Error ? reason.message : String(reason)
+          }`,
+          'error',
+        );
+      }
+    },
+    [bumpProjectRevision, session, showToast, timelineProject, visualProject],
+  );
 
   const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
     if (!event.dataTransfer.types.includes('application/x-joy-effect')) return;
@@ -5118,6 +5599,10 @@ function MonitorPanel() {
           >
             <ZoomInIcon />
           </button>
+          <MonitorAspectRatioSelector
+            selectedAspectRatio={monitorAspectRatio}
+            onAspectRatioChange={changeMonitorAspectRatio}
+          />
         </div>
       </div>
     </article>

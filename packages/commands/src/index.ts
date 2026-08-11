@@ -22,7 +22,11 @@ export type {
   DuplicateClipPayload,
   SetClipRatePayload,
   FreezeFramePayload,
+  ToggleClipReversePayload,
+  CreateCompoundPayload,
+  RestoreCompoundPayload,
   RestoreTrackClipsPayload,
+  SetCompositionDimensionsPayload,
   SetTrackEnabledPayload,
 } from './commands.js';
 export { applyCommand, CommandError, COMMAND_REGISTRY } from './commands.js';

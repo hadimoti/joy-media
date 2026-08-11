@@ -89,6 +89,32 @@ describe('ProjectHistory', () => {
     expect(history.canRedo).toBe(false);
   });
 
+  it('undoes and redoes a compound merge as one history step', () => {
+    const initial = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('a', 0, SECOND_US),
+      makeVideoClip('b', SECOND_US, SECOND_US),
+    ]);
+    const history = new ProjectHistory(initial);
+    history.apply({
+      label: 'Merge 2 clips',
+      commands: [
+        {
+          type: 'timeline.createCompound',
+          payload: {
+            ...TARGET,
+            clipIds: ['a', 'b'],
+            compoundCompositionId: 'compound',
+            compoundClipId: 'compound-clip',
+          },
+        },
+      ],
+    });
+    const merged = history.present;
+    expect(merged.compositions.compound).toBeDefined();
+    expect(history.undo()).toEqual(initial);
+    expect(history.redo()).toEqual(merged);
+  });
+
   it('coalesces matching continuous interactions into one semantic undo step', () => {
     const history = new ProjectHistory(emptySpikeProject());
     history.apply({

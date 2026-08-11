@@ -129,6 +129,40 @@ describe('evaluateFrame', () => {
     ]);
   });
 
+  it('honors reversed video source mapping', () => {
+    const project = fixture();
+    const root = project.compositions.root!;
+    const clip = root.tracks[0]!.clips[0]!;
+    if (clip.kind !== 'video') throw new Error('fixture clip must be video');
+    const reversed: SpikeProject = {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        root: {
+          ...root,
+          tracks: [
+            {
+              ...root.tracks[0]!,
+              clips: [
+                {
+                  ...clip,
+                  // Source time at root t=0; the following frame walks back.
+                  sourceInUs: 12 * SECOND - 1,
+                  reversed: true,
+                },
+                ...root.tracks[0]!.clips.slice(1),
+              ],
+            },
+            ...root.tracks.slice(1),
+          ],
+        },
+      },
+    };
+    expect(evaluateFrame(reversed, 'root', SECOND / 2).frames[0]?.sourceTimeUs).toBe(
+      11.5 * SECOND - 1,
+    );
+  });
+
   it('evaluates at exact NTSC frame timestamps with matching frame index', () => {
     // Frames 0..59 all fall inside clip-a's [0 s, 2 s): frame 59 starts at
     // ceil(59 * 1001e6 / 30000) = 1_968_634 µs; frame 60 (2_002_000 µs) would not.

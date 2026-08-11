@@ -40,6 +40,7 @@ export {
   validateSpikeProject,
   normalizePlaybackRate,
   isValidPlaybackRate,
+  sourceTimeAtVideoClipTime,
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
 } from './model.js';

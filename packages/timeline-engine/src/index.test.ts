@@ -4,6 +4,7 @@ import {
   clampPixelsPerSecond,
   clipRateLabel,
   commitMove,
+  createCompoundCommand,
   fitPixelsPerSecond,
   formatRulerLabel,
   placeDuplicateAfter,
@@ -14,6 +15,7 @@ import {
   splitCommand,
   timeToPixel,
   toggleSelection,
+  toggleClipReverseCommand,
   trimCommand,
   toggleTrackFlag,
   virtualTracks,
@@ -42,6 +44,13 @@ describe('timeline coordinates', () => {
       type: 'timeline.trimClipEnd',
     });
     expect(splitCommand('root', 't', 'a', 5, 'a-2')).toMatchObject({ type: 'timeline.splitClip' });
+    expect(toggleClipReverseCommand('root', 't', 'a')).toMatchObject({
+      type: 'timeline.toggleClipReverse',
+    });
+    expect(createCompoundCommand('root', 't', ['a', 'b'], 'nested', 'compound')).toMatchObject({
+      type: 'timeline.createCompound',
+      payload: { clipIds: ['a', 'b'], compoundCompositionId: 'nested' },
+    });
     expect(
       rippleDelete(
         'root',
@@ -100,6 +109,17 @@ describe('timeline coordinates', () => {
         playbackRate: 0,
       }),
     ).toBe('❄');
+    expect(
+      clipRateLabel({
+        kind: 'video',
+        id: 'reverse',
+        startUs: 0,
+        durationUs: 1,
+        assetId: 'a',
+        sourceInUs: 0,
+        reversed: true,
+      }),
+    ).toBe('↺');
   });
 });
 
