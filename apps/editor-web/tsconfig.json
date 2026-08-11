@@ -75,6 +75,9 @@
       "path": "../../packages/transition-shaders"
     },
     {
+      "path": "../../packages/visual-effects"
+    },
+    {
       "path": "../../packages/renderer-pixi"
     }
   ]
