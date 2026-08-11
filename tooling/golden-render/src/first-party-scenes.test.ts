@@ -24,7 +24,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
 
     it.each(FIRST_PARTY_SCENES)(
       'pins $id Chromium RGBA frames and proves preview/export pixel parity',
-      (scene) => {
+      async (scene) => {
         const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
@@ -49,6 +49,9 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         expect(typeof preview.sha256).toBe('string');
         expect(preview.sha256.length).toBe(64);
         hashes.set(scene.id, preview.sha256);
+        // Each capture is synchronous by design. Yield between scene cases so
+        // Vitest's worker RPC can publish progress on slower CI hosts.
+        await new Promise<void>((resolve) => setImmediate(resolve));
       },
       90_000,
     );
