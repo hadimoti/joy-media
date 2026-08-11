@@ -1194,7 +1194,9 @@ function EditorWorkspace({
       }
       lastMediaTimeUsRef.current = sourceTimeUs;
       setState((active) => ({ ...active, playheadUs: compositionTimeUs }));
-      setRevision((revision) => revision + 1);
+      // setState above already schedules the frame render. Bumping the global
+      // revision here redraws the entire workspace a second time per video
+      // frame and can turn ordinary compositor jitter into presentation drops.
       requestFrame();
     };
     const requestFrame = (): void => {
