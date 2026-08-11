@@ -35,7 +35,6 @@ import {
 import type { JoyProjectV1, SpikeProject, WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { ProjectRevisionId } from '@joy-media/agent-tools';
 import { EditorCommandController } from './command-controller.js';
-import { withDefaultPortraitComposition } from './editor-project.js';
 import { BrowserAgentIdempotencyStore } from './agent-idempotency-store.js';
 
 export interface HistoryEntry {
@@ -214,15 +213,15 @@ export class EditorSession {
       visualObjectAdapter,
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
-    // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
+    // Never normalize persisted canvas dimensions on open. A 1920×1080 canvas
+    // may be an intentional user-selected 16:9 aspect ratio; rewriting it to
+    // portrait here would make aspect-ratio changes disappear after refresh.
     const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
     const recoveryWarnings = [...timeline.warnings, ...visualObjects.warnings];
     this.#timelineRevision = timeline.revision;
     this.#visualObjectRevision = visualObjects.revision;
     this.#timeline = new EditorCommandController(timeline.project);
-    this.#visualObjects = new VisualObjectProjectHistory(
-      withDefaultPortraitComposition(visualObjects.project),
-    );
+    this.#visualObjects = new VisualObjectProjectHistory(visualObjects.project);
     this.agentIdempotency = new BrowserAgentIdempotencyStore(storage, initialTimeline.id);
 
     this.graphEnabled = readDualLensFlags(storage).graphEnabled;

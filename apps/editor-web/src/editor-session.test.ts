@@ -58,6 +58,30 @@ describe('EditorSession', () => {
     expect(reopened.projectRevisionId).toBe(completeDocumentRevision);
   });
 
+  it('preserves an intentional 16:9 canvas across a fresh session', () => {
+    const storage = memoryStorage();
+    const initialTimeline = buildReferenceSpikeProject();
+    const initialVisual = {
+      ...INITIAL_EDITOR_PROJECT,
+      compositions: {
+        ...INITIAL_EDITOR_PROJECT.compositions,
+        root: {
+          ...INITIAL_EDITOR_PROJECT.compositions.root!,
+          width: 1920,
+          height: 1080,
+        },
+      },
+    };
+    const session = new EditorSession(storage, initialTimeline, initialVisual);
+    expect(session.visualProject.compositions.root).toMatchObject({ width: 1920, height: 1080 });
+
+    const reopened = new EditorSession(storage, initialTimeline, initialVisual);
+    expect(reopened.visualProject.compositions.root).toMatchObject({
+      width: 1920,
+      height: 1080,
+    });
+  });
+
   it('persists timeline and inspector commands, including undo and redo', () => {
     const storage = memoryStorage();
     const session = new EditorSession(
