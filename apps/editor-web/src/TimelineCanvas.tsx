@@ -30,6 +30,7 @@ import {
   TimelineVideoTrackIcon,
 } from './icons.js';
 import {
+  TIMELINE_END_PADDING_PX,
   timelineContentWidthPx,
   timelineMinWidthStyle,
   timelineOriginStyle,
@@ -311,7 +312,10 @@ export function TimelineCanvas({
   });
   const safeDurationUs = Math.max(1, durationUs);
 
-  const laneWidthPx = Math.max(64, timeToPixel(safeDurationUs, { ...viewport, originUs: 0 }));
+  const laneWidthPx = Math.max(
+    64,
+    timeToPixel(safeDurationUs, { ...viewport, originUs: 0 }) + TIMELINE_END_PADDING_PX,
+  );
   const rulerTicks = useMemo(
     () =>
       buildRulerTicks({

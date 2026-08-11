@@ -70,6 +70,7 @@ describe('timeline coordinates', () => {
   });
   it('fits zoom to width and places duplicates after gaps', () => {
     expect(fitPixelsPerSecond(10_000_000, 224, 24)).toBe(20);
+    expect(fitPixelsPerSecond(7_200_000_000, 1_024, 24)).toBeCloseTo(1_000 / 7_200);
     expect(clampPixelsPerSecond(1000)).toBe(200);
     expect(
       placeDuplicateAfter({ id: 'a', startUs: 0, durationUs: 10 }, [

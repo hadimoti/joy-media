@@ -1926,6 +1926,9 @@ label {
   border-bottom: 1px solid var(--joy-border, #2e2e32);
 }
 .timeline-scrub-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 4;
   display: flex;
   flex: none;
   align-items: center;
@@ -1934,6 +1937,7 @@ label {
   min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
+  background: color-mix(in srgb, var(--joy-bg-panel) 92%, #fff 8%);
 }
 .timeline-playhead-slider {
   flex: none;
@@ -2315,8 +2319,9 @@ label {
   box-sizing: border-box;
   padding-inline-end: var(--space-1);
   background: var(--joy-bg-panel);
-  position: relative;
-  z-index: 2;
+  position: sticky;
+  left: 0;
+  z-index: 4;
 }
 .timeline-track-label {
   display: flex;

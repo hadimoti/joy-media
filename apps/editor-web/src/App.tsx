@@ -223,6 +223,7 @@ import { ProjectOperationLedger } from './project-operation-ledger.js';
 import { createMonoAudioBuffer } from './export-audio.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
+import { timelineEffectiveDurationUs } from './timeline-layout.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -995,7 +996,8 @@ function EditorWorkspace({
       const clock = clockRef.current;
       const decoder = decoderRef.current;
       const operation = playbackOperationRef.current;
-      const composition = session.timelineProject.compositions.root;
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
       const transition = activeTransitionAt(session.visualProject, playheadUs);
       const clip =
         activeVideoClipAt(session.timelineProject, playheadUs, stateRef.current.selectedIds) ??
@@ -1133,7 +1135,10 @@ function EditorWorkspace({
     const advancePlaybackAfterClip = (clipEndUs: number): void => {
       const operation = playbackOperationRef.current;
       if (cancelled || boundaryTransitionInFlight || !operation.intendsToPlay) return;
-      const durationUs = session.timelineProject.compositions.root?.durationUs ?? clipEndUs;
+      const rootComposition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      const durationUs =
+        rootComposition === undefined ? clipEndUs : timelineEffectiveDurationUs(rootComposition);
       // Advance across gaps and wrap the final playable clip back to the
       // first. Move the authoritative playhead before loading the next media
       // so the next frame cannot resolve the clip that just finished.
@@ -1473,7 +1478,8 @@ function EditorWorkspace({
       if (asset.blob !== undefined) stickerImageCache.rememberBlob(asset.assetId, asset.blob);
       const objectId = `sticker-${asset.assetId}-${Date.now().toString(36)}`;
       const clipId = `clip-${objectId}`;
-      const composition = session.timelineProject.compositions.root;
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
       if (composition === undefined) return;
       const track =
         composition.tracks.find((item) => item.kind === 'video' && item.enabled) ??
@@ -1543,7 +1549,8 @@ function EditorWorkspace({
 
   const addHtmlSceneToSelectedClip = useCallback(
     (scenePackageId: string) => {
-      const composition = session.timelineProject.compositions.root;
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
       if (composition === undefined) return;
       const selectedClipId = state.selectedIds[0];
       if (selectedClipId === undefined) return;
@@ -1979,8 +1986,9 @@ function EditorWorkspace({
         return;
       }
       const current = stateRef.current;
-      const composition = session.timelineProject.compositions.root;
-      const durationUs = composition?.durationUs ?? 0;
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      const durationUs = composition === undefined ? 0 : timelineEffectiveDurationUs(composition);
       const selection = composition?.tracks
         .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
         .find((item) => current.selectedIds.includes(item.clip.id));
@@ -2094,7 +2102,8 @@ function EditorWorkspace({
   const runSelectedClipAction = useCallback(
     (kind: 'split' | 'duplicate' | 'delete') => {
       const current = stateRef.current;
-      const composition = session.timelineProject.compositions.root;
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
       if (composition === undefined) return;
       const selection = composition.tracks
         .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
@@ -2872,7 +2881,8 @@ function EditorWorkspace({
         readonly height?: number;
       };
     }) => {
-      const composition = context.timelineProject.compositions.root;
+      const composition =
+        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       if (composition === undefined) return;
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       const controllerId = `media-controller-${clipId}`;
@@ -3041,12 +3051,16 @@ function EditorWorkspace({
     if (api.id === 'motion') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      const motionTimelineComposition =
+        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       return (
         <MotionPanel
           object={object}
           allObjects={visualProject.visualObjects}
           compositionDurationUs={
-            context.timelineProject.compositions.root?.durationUs ?? 30_000_000
+            motionTimelineComposition === undefined
+              ? 30_000_000
+              : timelineEffectiveDurationUs(motionTimelineComposition)
           }
           playheadUs={state.playheadUs}
           onSeek={context.seek}
@@ -3234,7 +3248,8 @@ function EditorWorkspace({
               })
                 .then((asset) => {
                   rememberImportedAsset(asset);
-                  const composition = context.timelineProject.compositions.root;
+                  const composition =
+                    context.timelineProject.compositions[context.timelineProject.rootCompositionId];
                   if (composition !== undefined) {
                     const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
                     bindMediaClip(asset, clipId);
@@ -4282,7 +4297,11 @@ function MonitorPanel() {
   const composition = visualProject.compositions[visualProject.rootCompositionId];
   const width = composition?.width ?? 1080;
   const height = composition?.height ?? 1920;
-  const durationUs = composition?.durationUs ?? 30_000_000;
+  const timelineComposition = timelineProject.compositions[timelineProject.rootCompositionId];
+  const durationUs =
+    timelineComposition === undefined
+      ? (composition?.durationUs ?? 30_000_000)
+      : timelineEffectiveDurationUs(timelineComposition);
   const zoomScale =
     viewerZoom === 'fit' ? 1 : viewerZoom === '50' ? 0.5 : viewerZoom === '200' ? 2 : 1;
   const zoomLabel =

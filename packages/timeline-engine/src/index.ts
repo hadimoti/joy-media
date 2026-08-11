@@ -24,7 +24,9 @@ export function fitPixelsPerSecond(durationUs: number, widthPx: number, paddingP
   const usable = Math.max(1, widthPx - paddingPx);
   const seconds = Math.max(1 / 1_000_000, durationUs / 1_000_000);
   const fitted = usable / seconds;
-  return Math.min(MAX_PIXELS_PER_SECOND, Math.max(MIN_PIXELS_PER_SECOND, fitted));
+  // Fit is allowed below the manual zoom-slider minimum. Otherwise a long
+  // video (for example 2h) can never fit in the viewport despite Fit being on.
+  return Math.min(MAX_PIXELS_PER_SECOND, Math.max(1e-9, fitted));
 }
 
 export function clampPixelsPerSecond(value: number): number {
@@ -49,6 +51,10 @@ const RULER_MAJOR_US = [
   600_000_000,
   1_800_000_000, // 30m
   3_600_000_000, // 1h
+  7_200_000_000, // 2h
+  21_600_000_000, // 6h
+  43_200_000_000, // 12h
+  86_400_000_000, // 24h
 ] as const;
 
 export interface RulerTick {
@@ -66,7 +72,7 @@ export interface BuildRulerTicksInput {
 }
 
 function pickMajorUs(pixelsPerSecond: number, minMajorPx: number): number {
-  const pps = Math.max(1e-6, pixelsPerSecond);
+  const pps = Math.max(1e-9, pixelsPerSecond);
   for (const majorUs of RULER_MAJOR_US) {
     const px = (majorUs / 1_000_000) * pps;
     if (px >= minMajorPx) return majorUs;
@@ -86,7 +92,7 @@ export function buildRulerTicks(input: BuildRulerTicksInput): readonly RulerTick
   const durationUs = Math.max(0, input.durationUs);
   const originUs = input.originUs ?? 0;
   const minMajorPx = input.minMajorPx ?? 80;
-  const pps = clampPixelsPerSecond(input.pixelsPerSecond);
+  const pps = Math.min(MAX_PIXELS_PER_SECOND, Math.max(1e-9, input.pixelsPerSecond));
   const viewport: TimelineViewport = { originUs, pixelsPerSecond: pps };
   const majorUs = pickMajorUs(pps, minMajorPx);
   const minorUs = Math.max(1, Math.round(majorUs / minorDivisor(majorUs)));

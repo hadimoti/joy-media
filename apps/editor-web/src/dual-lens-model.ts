@@ -8,6 +8,7 @@ import {
   timelineTrackKind,
 } from './timeline-track-kind.js';
 import { formatTime } from './format-time.js';
+import { timelineEffectiveDurationUs } from './timeline-layout.js';
 
 export { formatTime } from './format-time.js';
 
@@ -91,7 +92,7 @@ export function buildDualLensProjection(
   history: readonly HistoryEntry[],
 ): DualLensProjection {
   const composition = timeline.compositions[timeline.rootCompositionId];
-  const durationUs = composition?.durationUs ?? 0;
+  const durationUs = composition === undefined ? 0 : timelineEffectiveDurationUs(composition);
   const clips: readonly TimelineClipProjection[] =
     composition?.tracks.flatMap((track) =>
       track.clips.map((clip) => ({

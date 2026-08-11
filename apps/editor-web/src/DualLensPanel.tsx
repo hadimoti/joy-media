@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import {
-  clampPixelsPerSecond,
   fitPixelsPerSecond,
   MIN_PIXELS_PER_SECOND,
   MAX_PIXELS_PER_SECOND,
@@ -373,7 +372,19 @@ function TimeProjection({
   }, [lanes, advancedOpen, trackFlags, compositionId, onDispatch, onTrackFlagsChange]);
 
   const applyZoom = (nextPps: number) => {
-    onViewportChange({ ...viewport, pixelsPerSecond: clampPixelsPerSecond(nextPps) });
+    const scroll = rootRef.current?.querySelector('.timeline-tracks');
+    const lane = rootRef.current?.querySelector('.timeline-lane');
+    const scrollClientW = scroll instanceof HTMLElement ? scroll.clientWidth : 0;
+    const laneW = lane instanceof HTMLElement ? lane.clientWidth : 0;
+    const width = timelineContentWidthPx(scrollClientW) || laneW || scrollClientW;
+    const fitFloor =
+      width > 0
+        ? fitPixelsPerSecond(durationUs, width)
+        : Math.min(MIN_PIXELS_PER_SECOND, viewport.pixelsPerSecond);
+    onViewportChange({
+      ...viewport,
+      pixelsPerSecond: Math.min(MAX_PIXELS_PER_SECOND, Math.max(fitFloor, nextPps)),
+    });
   };
 
   const fitToWidth = () => {
@@ -387,6 +398,7 @@ function TimeProjection({
       ...viewport,
       pixelsPerSecond: fitPixelsPerSecond(durationUs, width),
     });
+    if (scroll instanceof HTMLElement) scroll.scrollLeft = 0;
   };
 
   return (
@@ -467,10 +479,10 @@ function TimeProjection({
               aria-label="Timeline zoom"
               className="timeline-zoom-slider"
               type="range"
-              min={MIN_PIXELS_PER_SECOND}
+              min={Math.min(MIN_PIXELS_PER_SECOND, viewport.pixelsPerSecond)}
               max={MAX_PIXELS_PER_SECOND}
-              step={1}
-              value={Math.round(viewport.pixelsPerSecond)}
+              step={viewport.pixelsPerSecond < MIN_PIXELS_PER_SECOND ? 0.01 : 1}
+              value={viewport.pixelsPerSecond}
               onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
             />
             <button

@@ -5,6 +5,33 @@ import { buildDualLensProjection } from './dual-lens-model.js';
 import type { HistoryEntry } from './editor-session.js';
 
 describe('Dual Lens Creative Document projections', () => {
+  it('extends Time view through the actual end of long authored media', () => {
+    const project = buildReferenceSpikeProject();
+    const root = project.compositions[project.rootCompositionId]!;
+    const firstTrack = root.tracks[0]!;
+    const firstClip = firstTrack.clips[0]!;
+    const longProject = {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [project.rootCompositionId]: {
+          ...root,
+          durationUs: 60_000_000,
+          tracks: [
+            {
+              ...firstTrack,
+              clips: [{ ...firstClip, startUs: 0, durationUs: 116_000_000 }],
+            },
+          ],
+        },
+      },
+    };
+
+    expect(buildDualLensProjection(longProject, INITIAL_EDITOR_PROJECT, 0, []).durationUs).toBe(
+      116_000_000,
+    );
+  });
+
   it('traces only the media chain active at the current frame', () => {
     const project = buildReferenceSpikeProject();
     const atFive = buildDualLensProjection(project, INITIAL_EDITOR_PROJECT, 5_000_000, []);

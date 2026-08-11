@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
-  clampPixelsPerSecond,
   clipRateLabel,
   duplicateClipCommand,
   fitPixelsPerSecond,
@@ -64,7 +63,11 @@ import {
   type TimelineTrackKind,
 } from './timeline-track-kind.js';
 import {
+  TIMELINE_END_PADDING_PX,
+  TIMELINE_TRACK_GUTTER_WIDTH_PX,
   timelineContentWidthPx,
+  timelineEffectiveDurationUs,
+  timelineFollowScrollLeft,
   timelineMinWidthStyle,
   timelineOriginStyle,
 } from './timeline-layout.js';
@@ -528,6 +531,10 @@ export function TimelinePanel({
 
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('timeline root composition is unavailable');
+  const timelineDurationUs = timelineEffectiveDurationUs(
+    composition,
+    markers.map((marker) => marker.timeUs),
+  );
 
   const tracks = composition.tracks.map((track, index) => {
     const saved = trackFlags.find((item) => item.id === track.id);
@@ -587,14 +594,14 @@ export function TimelinePanel({
       if (autoFit && width > 0) {
         onViewportChange({
           ...viewport,
-          pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
+          pixelsPerSecond: fitPixelsPerSecond(timelineDurationUs, width),
         });
       }
     });
     observer.observe(root);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer; viewport is output
-  }, [autoFit, composition.durationUs, onViewportChange]);
+  }, [autoFit, timelineDurationUs, onViewportChange]);
 
   useEffect(() => {
     if (!autoFit) return;
@@ -603,10 +610,28 @@ export function TimelinePanel({
     if (width <= 0) return;
     onViewportChange({
       ...viewport,
-      pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
+      pixelsPerSecond: fitPixelsPerSecond(timelineDurationUs, width),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
-  }, [autoFit, composition.durationUs, onViewportChange]);
+  }, [autoFit, timelineDurationUs, onViewportChange]);
+
+  useEffect(() => {
+    if (!playing || autoFit) return;
+    const root = scrollRef.current;
+    if (root === null) return;
+    const next = timelineFollowScrollLeft({
+      scrollLeft: root.scrollLeft,
+      clientWidth: root.clientWidth,
+      scrollWidth: root.scrollWidth,
+      playheadContentX:
+        TIMELINE_TRACK_GUTTER_WIDTH_PX +
+        timeToPixel(Math.min(playheadUs, timelineDurationUs), {
+          originUs: 0,
+          pixelsPerSecond: viewport.pixelsPerSecond,
+        }),
+    });
+    if (Math.abs(next - root.scrollLeft) >= 1) root.scrollLeft = next;
+  }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
   const toggle = (id: string, flag: 'locked' | 'solo') => {
     const next = tracks
@@ -906,17 +931,17 @@ export function TimelinePanel({
 
   const laneWidthPx = Math.max(
     64,
-    timeToPixel(composition.durationUs, { ...viewport, originUs: 0 }),
+    timeToPixel(timelineDurationUs, { ...viewport, originUs: 0 }) + TIMELINE_END_PADDING_PX,
   );
 
   const rulerTicks = useMemo(
     () =>
       buildRulerTicks({
-        durationUs: composition.durationUs,
+        durationUs: timelineDurationUs,
         pixelsPerSecond: viewport.pixelsPerSecond,
         originUs: 0,
       }),
-    [composition.durationUs, viewport.pixelsPerSecond],
+    [timelineDurationUs, viewport.pixelsPerSecond],
   );
 
   const seekFromLane = (event: React.PointerEvent<HTMLElement>) => {
@@ -924,12 +949,19 @@ export function TimelinePanel({
     const localX = event.clientX - rect.left;
     const timeUs =
       Math.round(pixelToTime(localX, { ...viewport, originUs: 0 }) / SNAP_US) * SNAP_US;
-    onSeek(Math.min(composition.durationUs, Math.max(0, timeUs)));
+    onSeek(Math.min(timelineDurationUs, Math.max(0, timeUs)));
   };
 
   const applyZoom = (nextPps: number, anchorClientX?: number) => {
     onAutoFitChange(false);
-    const clamped = clampPixelsPerSecond(nextPps);
+    const scrollClientW = scrollRef.current?.clientWidth ?? 0;
+    const laneW = laneMeasureRef.current?.clientWidth ?? 0;
+    const fitWidth = timelineContentWidthPx(scrollClientW) || laneW || scrollClientW;
+    const fitFloor =
+      fitWidth > 0
+        ? fitPixelsPerSecond(timelineDurationUs, fitWidth)
+        : Math.min(MIN_PIXELS_PER_SECOND, viewport.pixelsPerSecond);
+    const clamped = Math.min(MAX_PIXELS_PER_SECOND, Math.max(fitFloor, nextPps));
     const lane = laneMeasureRef.current;
     if (lane !== null && anchorClientX !== undefined) {
       const rect = lane.getBoundingClientRect();
@@ -951,13 +983,14 @@ export function TimelinePanel({
     onAutoFitChange(true);
     const scrollClientW = scrollRef.current?.clientWidth ?? 0;
     const laneW = laneMeasureRef.current?.clientWidth ?? 0;
-    const width = Math.max(0, scrollClientW - 152) || laneW || scrollClientW;
+    const width = timelineContentWidthPx(scrollClientW) || laneW || scrollClientW;
     if (width > 0) {
       onViewportChange({
         ...viewport,
-        pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
+        pixelsPerSecond: fitPixelsPerSecond(timelineDurationUs, width),
       });
     }
+    if (scrollRef.current !== null) scrollRef.current.scrollLeft = 0;
   };
 
   const openClipMenu = (trackId: string, clip: Clip, clientX: number, clientY: number) => {
@@ -1167,7 +1200,7 @@ export function TimelinePanel({
           </button>
           <button
             className="icon-button"
-            onClick={() => onSeek(Math.min(composition.durationUs, playheadUs + 1_000_000))}
+            onClick={() => onSeek(Math.min(timelineDurationUs, playheadUs + 1_000_000))}
             aria-label="Forward one second"
             title="Forward 1s (→)"
           >
@@ -1309,10 +1342,10 @@ export function TimelinePanel({
             aria-label="Timeline zoom"
             className="timeline-zoom-slider"
             type="range"
-            min={MIN_PIXELS_PER_SECOND}
+            min={Math.min(MIN_PIXELS_PER_SECOND, viewport.pixelsPerSecond)}
             max={MAX_PIXELS_PER_SECOND}
-            step={1}
-            value={Math.round(viewport.pixelsPerSecond)}
+            step={viewport.pixelsPerSecond < MIN_PIXELS_PER_SECOND ? 0.01 : 1}
+            value={viewport.pixelsPerSecond}
             onChange={(event) => applyZoom(event.currentTarget.valueAsNumber)}
           />
           <button
@@ -1385,7 +1418,7 @@ export function TimelinePanel({
       <TimelineEmptyState
         project={project}
         _playheadUs={playheadUs}
-        compositionDurationUs={composition.durationUs}
+        compositionDurationUs={timelineDurationUs}
         viewportPixelsPerSecond={viewport.pixelsPerSecond}
         onSeek={onSeek}
         onImportClick={handleImportClick}
@@ -1419,7 +1452,7 @@ export function TimelinePanel({
             </output>
           </div>
           <TimelineRuler
-            durationUs={composition.durationUs}
+            durationUs={timelineDurationUs}
             playheadUs={playheadUs}
             viewport={{ ...viewport, originUs: 0 }}
             widthPx={laneWidthPx}
@@ -1799,7 +1832,7 @@ export function TimelinePanel({
                       clip={clip}
                       selected={selectedIds.includes(clip.id)}
                       isDragOver={dragEffectOverClipId === clip.id}
-                      maxStartUs={composition.durationUs - clip.durationUs}
+                      maxStartUs={timelineDurationUs - clip.durationUs}
                       viewport={{ ...viewport, originUs: 0 }}
                       locked={track.locked}
                       laneIndex={index}
