@@ -141,7 +141,7 @@ export async function openReferenceWorkspace(page: Page): Promise<void> {
     .getByRole('button', { name: /Local editor project/ })
     .first()
     .click();
-  await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
   await activateTimeline(page);
 }
 
@@ -150,7 +150,7 @@ export async function openDisposableWorkspace(page: Page, title: string): Promis
   await page.getByRole('button', { name: 'New project' }).click();
   await page.getByPlaceholder('Project name').fill(title);
   await page.getByRole('button', { name: 'Create project' }).click();
-  await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
   await activateTimeline(page);
 }
 
