@@ -60,6 +60,11 @@ import {
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
+import {
+  createAnimatedImageFrameSource,
+  type AnimatedImageFrameSource,
+} from './animated-image-decoder.js';
+import { inspectImageAnimation } from './animated-image-metadata.js';
 
 registerBuiltins();
 
@@ -290,11 +295,11 @@ async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> 
   return cache.get(assetId);
 }
 
-function imageSizesFromCache(): Readonly<
-  Record<string, { readonly width: number; readonly height: number }>
-> {
+function imageSizesFromCache(
+  timeUs = 0,
+): Readonly<Record<string, { readonly width: number; readonly height: number }>> {
   const sizes: Record<string, { width: number; height: number }> = {};
-  for (const [id, bitmap] of stickerImageCache.bitmaps()) {
+  for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) {
     sizes[id] = { width: bitmap.width, height: bitmap.height };
   }
   return sizes;
@@ -1910,11 +1915,18 @@ function EditorWorkspace({
       await Promise.all(
         Object.values(project.visualObjects).map(async (object) => {
           if (object.kind !== 'image' || object.assetId === undefined) return;
+          const assetRecord = project.assets[object.assetId];
           await stickerImageCache.syncObject({
             objectId: object.id,
             assetId: object.assetId,
             ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
             crop: object.transform.crop,
+            ...(assetRecord?.descriptor?.animation !== undefined
+              ? { animation: assetRecord.descriptor.animation }
+              : {}),
+            ...(assetRecord?.descriptor?.mimeType !== undefined
+              ? { mimeType: assetRecord.descriptor.mimeType }
+              : {}),
             loadBlob: loadStickerAssetBlob,
           });
         }),
@@ -2707,7 +2719,10 @@ function EditorWorkspace({
       let activeMixedAudioSource: AudioBufferSourceNode | undefined;
       let mixedAudioStarted = false;
       let activeRenderer: BrowserPixiRenderer | undefined;
-      const exportMediaCleanup: { readonly video: HTMLVideoElement | undefined }[] = [];
+      const exportMediaCleanup: Array<{
+        readonly video?: HTMLVideoElement;
+        readonly animated?: AnimatedImageFrameSource;
+      }> = [];
       let activeExportAudioTrack: MediaStreamTrack | undefined;
       let operationStarted = false;
       let exportCompleted = false;
@@ -2862,10 +2877,25 @@ function EditorWorkspace({
             let video: HTMLVideoElement | undefined;
             let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
             let stillFrame: ImageDataLike | undefined;
+            let animatedFrameSource: AnimatedImageFrameSource | undefined;
             if (assetKind !== 'audio') {
               if (assetKind === 'image') {
                 abortController.signal.throwIfAborted();
-                stillFrame = await decodeStillFrame(source.url);
+                const declaredAnimation =
+                  exportVisualProject.assets[clip.assetId]?.descriptor?.animation;
+                const imageResponse = await fetch(source.url, { signal: abortController.signal });
+                if (!imageResponse.ok)
+                  throw new Error(`Unable to fetch export image ${clip.assetId}`);
+                const imageBlob = await imageResponse.blob();
+                const animation =
+                  declaredAnimation ?? inspectImageAnimation(await imageBlob.arrayBuffer());
+                if (animation !== undefined) {
+                  setExportStatus('Decoding animated image…');
+                  animatedFrameSource = await createAnimatedImageFrameSource(imageBlob, animation);
+                  exportMediaCleanup.push({ animated: animatedFrameSource });
+                } else {
+                  stillFrame = await decodeStillFrame(source.url);
+                }
                 abortController.signal.throwIfAborted();
               } else {
                 video = document.createElement('video');
@@ -2938,6 +2968,7 @@ function EditorWorkspace({
               video,
               decoder,
               stillFrame,
+              animatedFrameSource,
               audio: {
                 samples,
                 sampleRate,
@@ -3060,6 +3091,24 @@ function EditorWorkspace({
                   { width: media.stillFrame.width, height: media.stillFrame.height },
                 );
               }
+              if (media.animatedFrameSource !== undefined) {
+                const sourceTimeUs = sourceTimeForTransitionSample(target, timeUs, transition);
+                const frame = media.animatedFrameSource.frameAt(sourceTimeUs - target.sourceInUs);
+                bitmaps.set(target.id, frame.bitmap);
+                return videoFrameNodeFromDecoded(
+                  videoClipSpecAt(exportVisualProject, target, timeUs, height),
+                  {
+                    assetId: target.assetId,
+                    bitmap: frame.bitmap,
+                    sourceTimeUs,
+                    token: `animated:${target.assetId}:${frame.startUs}`,
+                  },
+                  {
+                    width: media.animatedFrameSource.width,
+                    height: media.animatedFrameSource.height,
+                  },
+                );
+              }
               if (media.video === undefined || media.decoder === undefined)
                 throw new Error(`Export media for ${target.id} was not prepared`);
               const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
@@ -3097,7 +3146,7 @@ function EditorWorkspace({
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
-            for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
+            for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
             const frame = buildFrame(timeUs);
             renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
           },
@@ -3249,6 +3298,7 @@ function EditorWorkspace({
             media.video?.pause();
             media.video?.removeAttribute('src');
             media.video?.load();
+            media.animated?.dispose();
           } catch {
             // Continue releasing renderer and audio resources.
           }
@@ -5241,7 +5291,7 @@ function MonitorPanel() {
         composition.width,
         composition.height,
         resolved,
-        renderFrameOptions(visualProject, imageSizesFromCache()),
+        renderFrameOptions(visualProject, imageSizesFromCache(state.playheadUs)),
       ),
       visualProject,
     );
@@ -5256,7 +5306,7 @@ function MonitorPanel() {
     for (const [id, bitmap] of sceneCacheRef.current.bitmaps()) {
       videoBitmaps.set(id, bitmap);
     }
-    for (const [id, bitmap] of stickerImageCache.bitmaps()) {
+    for (const [id, bitmap] of stickerImageCache.bitmaps(state.playheadUs)) {
       videoBitmaps.set(id, bitmap);
     }
     renderer.render(frame, videoBitmaps);

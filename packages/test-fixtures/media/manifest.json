@@ -22,6 +22,48 @@
       "width": 320,
       "height": 180
     },
+    "image.webp": {
+      "sha256": "b7d7aa6a0c8ce446cbfb35bd99fd00154655da9bb489c007179013992213b8c4",
+      "bytes": 44,
+      "name": "image.webp",
+      "kind": "image",
+      "mimeType": "image/webp",
+      "mime": "image/webp",
+      "width": 160,
+      "height": 96
+    },
+    "animated.gif": {
+      "sha256": "13e3ab7ffca3c711566277c6b39a1be3a301d969acf1581eab0ab6c2cd17a57e",
+      "bytes": 12552,
+      "name": "animated.gif",
+      "kind": "image",
+      "mimeType": "image/gif",
+      "mime": "image/gif",
+      "width": 160,
+      "height": 96,
+      "animation": {
+        "frameCount": 4,
+        "cycleDurationUs": 1000000,
+        "loopCount": 0,
+        "hasAlpha": true
+      }
+    },
+    "animated.webp": {
+      "sha256": "024a69d6f49eda04b289b9d4d3265e1408a52fd6a1f62ff8afabd17d9013d5c8",
+      "bytes": 21620,
+      "name": "animated.webp",
+      "kind": "image",
+      "mimeType": "image/webp",
+      "mime": "image/webp",
+      "width": 160,
+      "height": 96,
+      "animation": {
+        "frameCount": 4,
+        "cycleDurationUs": 1000000,
+        "loopCount": 0,
+        "hasAlpha": true
+      }
+    },
     "video.mp4": {
       "sha256": "f4879ec24ebac10f94e5e7273f146444d8b4fb26528c7fc1e22f82d1dfa0c0ee",
       "bytes": 43912,
@@ -88,6 +130,22 @@
       "kind": "invalid",
       "mimeType": "video/mp4",
       "mime": "video/mp4"
+    },
+    "corrupt.gif": {
+      "sha256": "a7a3eda6441d137cccef9700fa378c0099d647146be9167def705bf86bb634ec",
+      "bytes": 8,
+      "name": "corrupt.gif",
+      "kind": "invalid",
+      "mimeType": "image/gif",
+      "mime": "image/gif"
+    },
+    "corrupt.webp": {
+      "sha256": "abcfd24c53563908873014d12d9c2edc860a1811af4f4cb6cdfb767dca18c2b3",
+      "bytes": 16,
+      "name": "corrupt.webp",
+      "kind": "invalid",
+      "mimeType": "image/webp",
+      "mime": "image/webp"
     },
     "empty.bin": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

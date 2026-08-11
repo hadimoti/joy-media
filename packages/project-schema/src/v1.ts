@@ -323,6 +323,15 @@ export interface AssetDescriptorV1 {
   readonly durationUs?: number;
   readonly width?: number;
   readonly height?: number;
+  readonly animation?: AnimationDescriptorV1;
+}
+
+export interface AnimationDescriptorV1 {
+  readonly frameCount: number;
+  readonly cycleDurationUs: number;
+  /** Zero means the source declares infinite looping. */
+  readonly loopCount: number;
+  readonly hasAlpha: boolean;
 }
 
 export interface GenerationProvenanceV1 {

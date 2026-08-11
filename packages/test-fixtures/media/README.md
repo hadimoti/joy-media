@@ -12,4 +12,7 @@ node tooling/generate-media-fixtures.mjs
 ```
 
 The generated `manifest.json` records byte length, SHA-256, media kind, MIME,
-duration, and dimensions. Browser tests must verify the manifest before upload.
+duration, dimensions, and animation timing/alpha metadata where applicable.
+It includes static WebP, animated GIF/WebP, and truncated GIF/WebP inputs for
+cross-browser preview and decoder tests. Browser tests must verify the manifest
+before upload.

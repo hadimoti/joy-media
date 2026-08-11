@@ -1373,12 +1373,40 @@ function mediaDescriptor(body: Record<string, unknown>): AssetRegistration['desc
   const durationUs = optionalPositiveInteger(value, 'durationUs');
   const width = optionalPositiveInteger(value, 'width');
   const height = optionalPositiveInteger(value, 'height');
+  const animation =
+    value.animation === undefined ? undefined : animationDescriptor(value.animation);
   return {
     ...descriptor,
     ...(durationUs === undefined ? {} : { durationUs }),
     ...(width === undefined ? {} : { width }),
     ...(height === undefined ? {} : { height }),
+    ...(animation === undefined ? {} : { animation }),
   };
+}
+
+function animationDescriptor(
+  value: unknown,
+): NonNullable<AssetRegistration['descriptor']['animation']> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'descriptor.animation must be an object');
+  }
+  const animation = value as Record<string, unknown>;
+  const frameCount = requiredPositiveInteger(animation, 'frameCount');
+  const cycleDurationUs = requiredPositiveInteger(animation, 'cycleDurationUs');
+  const loopCount = requiredNonNegativeInteger(animation, 'loopCount');
+  if (frameCount < 2 || frameCount > 10_000)
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'descriptor.animation.frameCount is out of range',
+    );
+  if (cycleDurationUs > 86_400_000_000)
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'descriptor.animation.cycleDurationUs is out of range',
+    );
+  if (typeof animation.hasAlpha !== 'boolean')
+    throw new ControlPlaneError('REQUEST_INVALID', 'descriptor.animation.hasAlpha must be boolean');
+  return { frameCount, cycleDurationUs, loopCount, hasAlpha: animation.hasAlpha };
 }
 
 function assetLocations(body: Record<string, unknown>): AssetRegistration['locations'] {

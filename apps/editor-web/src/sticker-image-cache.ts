@@ -1,3 +1,9 @@
+import {
+  createAnimatedImageFrameSource,
+  type AnimatedImageFrameSource,
+} from './animated-image-decoder.js';
+import { inspectImageAnimation, type ImageAnimationDescriptor } from './animated-image-metadata.js';
+
 /**
  * Loads sticker / image VisualObject pixels from OPFS originals (or File blobs)
  * into BrowserVideoFrameBitmap-compatible RGBA buffers for Monitor/export.
@@ -21,6 +27,9 @@ type CacheEntry = {
   readonly matteAssetId?: string;
   readonly cropKey: string;
   readonly bitmap: StickerBitmap;
+  readonly crop: CropInsets;
+  readonly matte?: StickerBitmap;
+  readonly animated?: AnimatedImageFrameSource;
 };
 
 /** In-memory RGBA cache keyed by visual object id. */
@@ -40,13 +49,22 @@ export class StickerImageCache {
     return this.byObjectId.get(objectId)?.bitmap;
   }
 
-  bitmaps(): ReadonlyMap<string, StickerBitmap> {
+  bitmaps(timeUs = 0): ReadonlyMap<string, StickerBitmap> {
     const out = new Map<string, StickerBitmap>();
-    for (const [id, entry] of this.byObjectId) out.set(id, entry.bitmap);
+    for (const [id, entry] of this.byObjectId) {
+      if (entry.animated === undefined) {
+        out.set(id, entry.bitmap);
+        continue;
+      }
+      let bitmap = entry.animated.frameAt(timeUs).bitmap;
+      if (entry.matte !== undefined) bitmap = applyMatteAlpha(bitmap, entry.matte);
+      out.set(id, applyCrop(bitmap, entry.crop));
+    }
     return out;
   }
 
   clear(): void {
+    for (const entry of this.byObjectId.values()) entry.animated?.dispose();
     this.byObjectId.clear();
     this.assetBlobs.clear();
   }
@@ -56,6 +74,8 @@ export class StickerImageCache {
     readonly assetId: string;
     readonly matteAssetId?: string;
     readonly crop: CropInsets;
+    readonly animation?: ImageAnimationDescriptor;
+    readonly mimeType?: string;
     readonly loadBlob: (assetId: string) => Promise<Blob | undefined>;
   }): Promise<StickerBitmap | undefined> {
     const cropKey = cropSignature(options.crop);
@@ -76,7 +96,29 @@ export class StickerImageCache {
       this.assetBlobs.set(options.assetId, blob);
     }
 
-    let rgba = await decodeBlobToRgba(blob);
+    let animation = options.animation;
+    if (
+      animation === undefined &&
+      (options.mimeType === 'image/gif' || options.mimeType === 'image/webp')
+    ) {
+      try {
+        animation = inspectImageAnimation(await blob.arrayBuffer());
+      } catch {
+        animation = undefined;
+      }
+    }
+    let animated: AnimatedImageFrameSource | undefined;
+    if (animation !== undefined) {
+      try {
+        animated = await createAnimatedImageFrameSource(blob, animation);
+      } catch {
+        // A browser may understand the native animated image but lack the
+        // deterministic decoder. Keep the poster usable and let the caller
+        // surface the parity limitation rather than crashing the workspace.
+      }
+    }
+    let rgba = animated?.frameAt(0).bitmap ?? (await decodeBlobToRgba(blob));
+    let matte: StickerBitmap | undefined;
     if (options.matteAssetId !== undefined) {
       let matteBlob = this.assetBlobs.get(options.matteAssetId);
       if (matteBlob === undefined) {
@@ -84,7 +126,7 @@ export class StickerImageCache {
         if (matteBlob !== undefined) this.assetBlobs.set(options.matteAssetId, matteBlob);
       }
       if (matteBlob !== undefined) {
-        const matte = await decodeBlobToRgba(matteBlob);
+        matte = await decodeBlobToRgba(matteBlob);
         rgba = applyMatteAlpha(rgba, matte);
       }
     }
@@ -94,12 +136,16 @@ export class StickerImageCache {
       ...(options.matteAssetId !== undefined ? { matteAssetId: options.matteAssetId } : {}),
       cropKey,
       bitmap: rgba,
+      crop: options.crop,
+      ...(matte !== undefined ? { matte } : {}),
+      ...(animated !== undefined ? { animated } : {}),
     });
     this.pruneUnusedAssetBlobs();
     return rgba;
   }
 
   clearObject(objectId: string): void {
+    this.byObjectId.get(objectId)?.animated?.dispose();
     this.byObjectId.delete(objectId);
     this.pruneUnusedAssetBlobs();
   }
@@ -107,6 +153,7 @@ export class StickerImageCache {
   clearMissing(objectIds: ReadonlySet<string>): void {
     for (const objectId of [...this.byObjectId.keys()]) {
       if (!objectIds.has(objectId)) {
+        this.byObjectId.get(objectId)?.animated?.dispose();
         this.byObjectId.delete(objectId);
       }
     }

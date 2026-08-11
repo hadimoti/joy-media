@@ -41,6 +41,15 @@ export interface MediaDescriptor {
   readonly durationUs?: number;
   readonly width?: number;
   readonly height?: number;
+  readonly animation?: MediaAnimationDescriptor;
+}
+
+export interface MediaAnimationDescriptor {
+  readonly frameCount: number;
+  readonly cycleDurationUs: number;
+  /** Zero means the source declares infinite looping. */
+  readonly loopCount: number;
+  readonly hasAlpha: boolean;
 }
 
 export interface MediaAssetRecord {

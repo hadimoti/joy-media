@@ -49,6 +49,15 @@ export interface BrowserMediaDescriptor {
   readonly durationUs?: number;
   readonly width?: number;
   readonly height?: number;
+  readonly animation?: BrowserAnimationDescriptor;
+}
+
+export interface BrowserAnimationDescriptor {
+  readonly frameCount: number;
+  readonly cycleDurationUs: number;
+  /** Zero means the source declares infinite looping. */
+  readonly loopCount: number;
+  readonly hasAlpha: boolean;
 }
 
 export interface BrowserDerivative {

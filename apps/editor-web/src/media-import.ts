@@ -8,6 +8,7 @@ import {
   openOpfsOriginalAssetCache,
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
+import { inspectImageAnimation, validateImageAnimationBudget } from './animated-image-metadata.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
@@ -72,14 +73,15 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     throw new Error('selected media file name is invalid');
   }
 
-  const mimeType = normalizedMimeType(file);
-  const kind = assetKind(mimeType);
+  const declaredMimeType = normalizedMimeType(file);
   report(options, 0.02, `Reading ${file.name}...`);
   const buffer = await readFileWithProgress(file, (ratio) => {
     report(options, 0.02 + 0.38 * ratio, `Reading ${file.name}...`);
   });
   report(options, 0.42, `Hashing ${file.name}...`);
   const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
+  const mimeType = sniffMediaMimeType(new Uint8Array(buffer), declaredMimeType);
+  const kind = assetKind(mimeType);
   const id = options.assetId?.trim() || (options.createAssetId ?? createImportedAssetId)();
   validateAssetId(id);
 
@@ -138,6 +140,14 @@ export function normalizedMimeType(file: Pick<File, 'name' | 'type'>): string {
   throw new Error('selected file must be a supported video, audio, or image');
 }
 
+export function sniffMediaMimeType(bytes: Uint8Array, declaredMimeType: string): string {
+  if (ascii(bytes, 0, 6) === 'GIF87a' || ascii(bytes, 0, 6) === 'GIF89a') return 'image/gif';
+  if (ascii(bytes, 0, 4) === '\x89PNG') return 'image/png';
+  if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WEBP') return 'image/webp';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  return declaredMimeType;
+}
+
 async function registerOrResume(
   client: Pick<BrowserControlPlaneClient, 'registerAsset' | 'assets'>,
   projectId: string,
@@ -175,7 +185,16 @@ async function describeImage(file: File, mimeType: string): Promise<BrowserMedia
   try {
     const bitmap = await createImageBitmap(file);
     try {
-      return { mimeType, width: bitmap.width, height: bitmap.height };
+      const animation = inspectImageAnimation(await file.arrayBuffer());
+      if (animation !== undefined) {
+        validateImageAnimationBudget(animation, bitmap.width, bitmap.height);
+      }
+      return {
+        mimeType,
+        width: bitmap.width,
+        height: bitmap.height,
+        ...(animation === undefined ? {} : { animation, durationUs: animation.cycleDurationUs }),
+      };
     } finally {
       bitmap.close();
     }
@@ -259,6 +278,11 @@ function message(error: unknown): string {
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number): string {
+  if (offset + length > bytes.length) return '';
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
 }
 
 async function readFileWithProgress(

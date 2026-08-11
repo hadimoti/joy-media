@@ -34,6 +34,7 @@
     "@joy-media/workflow-engine": "workspace:*",
     "ag-psd": "^31.0.2",
     "dockview": "^4.13.1",
+    "gifuct-js": "2.1.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.185.1"

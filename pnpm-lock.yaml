@@ -153,6 +153,9 @@ importers:
       dockview:
         specifier: ^4.13.1
         version: 4.13.1(react@19.2.8)
+      gifuct-js:
+        specifier: 2.1.2
+        version: 2.1.2
       react:
         specifier: ^19.2.8
         version: 19.2.8

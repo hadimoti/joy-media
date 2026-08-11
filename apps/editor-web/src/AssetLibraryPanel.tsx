@@ -1094,7 +1094,10 @@ export function AssetLibraryPanel({
                       <span className="asset-card-collection" title={assetCollection}>
                         {assetCollection}
                       </span>
-                      <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
+                      <span className="asset-card-meta">
+                        {formatBytes(asset.bytes)}
+                        {asset.descriptor.animation !== undefined ? ' · Animated' : ''}
+                      </span>
                       <div className="asset-card-actions">
                         {(asset.kind === 'image' || asset.kind === 'video') && (
                           <button

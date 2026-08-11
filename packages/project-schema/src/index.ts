@@ -58,6 +58,8 @@ export type {
   CaptionSpeakerV1,
   CaptionDocumentV1,
   AssetRecordV1,
+  AssetDescriptorV1,
+  AnimationDescriptorV1,
   GenerationProvenanceV1,
   MarkerV1,
   ProjectAudioV1,

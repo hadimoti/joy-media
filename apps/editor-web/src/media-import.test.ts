@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BrowserAsset, BrowserAssetRegistration } from './control-plane-client.js';
-import { importMediaFile, normalizedMimeType, type MediaImportOptions } from './media-import.js';
+import {
+  importMediaFile,
+  normalizedMimeType,
+  sniffMediaMimeType,
+  type MediaImportOptions,
+} from './media-import.js';
 
 describe('importMediaFile', () => {
   it('verifies, registers, caches, and cloud-uploads the same original', async () => {
@@ -138,6 +143,16 @@ describe('importMediaFile', () => {
         originalAssetCache: { put: vi.fn(async () => undefined) },
       }),
     ).rejects.toThrow('empty');
+  });
+
+  it('sniffs image signatures before trusting a declared MIME type', () => {
+    expect(sniffMediaMimeType(new TextEncoder().encode('GIF89a'), 'image/png')).toBe('image/gif');
+    expect(
+      sniffMediaMimeType(
+        Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
+        'image/png',
+      ),
+    ).toBe('image/webp');
   });
 });
 
