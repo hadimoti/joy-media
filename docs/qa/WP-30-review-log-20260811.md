@@ -76,6 +76,7 @@ passed (`3/3`, `10.4s`):
 
 - GIF and animated WebP imported through the real media file input;
 - Asset cards retained the `Animated` descriptor state and decoded previews;
+- the verified preview modal opened and closed for both formats at each viewport;
 - the second context discovered both owner assets from `/v1/library/my-assets`;
 - animation metadata survived cloud upload/catalog refresh;
 - authorized original bytes were fetched from the second context and matched
