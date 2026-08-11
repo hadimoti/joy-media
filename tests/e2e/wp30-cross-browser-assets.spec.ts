@@ -86,6 +86,18 @@ test.describe('WP-30 cross-browser animated assets', () => {
         await preview.getByRole('button', { name: 'Close preview' }).click();
       }
 
+      // The public library action must carry the imported descriptor into the
+      // timeline, not just display an animated badge in the catalog. A single
+      // GIF cycle is one second in the committed fixture, so this also guards
+      // against the old five-second still-image fallback.
+      const gifCard = page.locator('.asset-card', { hasText: gifName });
+      await gifCard.getByRole('button', { name: `Add ${gifName} to timeline` }).click();
+      await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
+      await expect(page.locator('.timeline-panel')).toBeVisible();
+      const gifClip = page.locator('.timeline-clip[data-clip-id]').last();
+      await expect(gifClip).toBeVisible();
+      await expect(gifClip).toHaveAttribute('aria-label', new RegExp(`${gifName}, 1\\.0s`));
+
       const secondContext = await browser.newContext({
         viewport: test.info().project.use.viewport,
       });

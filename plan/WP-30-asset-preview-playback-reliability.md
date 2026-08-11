@@ -1,6 +1,6 @@
 # WP-30 — Cross-Browser Asset Preview and Animated-Media Reliability
 
-**Status:** In progress — Steps 0–1 green; Step 2 local cross-profile smoke green; decoder/browser parity open
+**Status:** In progress — Steps 0–2 green; decoder/cache, Monitor/export parity, deployment, and closeout remain open
 **Priority:** P1  
 **Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
 **Repository:** `/opt/joy-media/repo`  
@@ -294,6 +294,15 @@ Implement signature sniffing, metadata extraction, schema migration, server vali
 
 An asset imported and cloud-confirmed in profile A appears and previews in a clean profile B after refresh, with zero dependence on profile A’s OPFS/localStorage.
 
+### Step-2 execution result
+
+PASS on the isolated authenticated stack. The three-viewport suite now also
+places the imported animated GIF through the public Asset Library **Add to
+timeline** action and verifies its one-second authored cycle in the timeline,
+so the animation descriptor is retained when the asset moves from catalog into
+project JSON. The stronger OPFS-delete/corruption recovery and signed-in live
+deployment gates remain part of Steps 7–9.
+
 ## STEP 3 — Animated Decoder and Cache
 
 - Implement the worker-owned decoder abstraction and normalized manifest.
@@ -520,7 +529,7 @@ WP-30 is finished only when all of the following are true:
 
 - [x] STEP 0 — Existing failure classified in two browser profiles.
 - [x] STEP 1 — Fixtures, sniffing, metadata, migration, and validation green.
-- [ ] STEP 2 — Cross-browser catalog and cloud recovery green.
+- [x] STEP 2 — Cross-browser catalog and cloud recovery green.
 - [ ] STEP 3 — Deterministic decoder/cache green.
 - [ ] STEP 4 — Asset Library preview UX green.
 - [ ] STEP 5 — Timeline and Program Monitor parity green.

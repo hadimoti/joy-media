@@ -41,6 +41,7 @@ import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
+  AnimationDescriptorV1,
   AssetRecordV1,
   EffectInstanceV1,
   JoyProjectV1,
@@ -3487,6 +3488,7 @@ function EditorWorkspace({
           readonly durationUs?: number;
           readonly width?: number;
           readonly height?: number;
+          readonly animation?: AnimationDescriptorV1;
         };
         readonly generationProvenance?: AssetRecordV1['generationProvenance'];
       },
@@ -3515,6 +3517,9 @@ function EditorWorkspace({
                   ...(asset.descriptor.height === undefined
                     ? {}
                     : { height: asset.descriptor.height }),
+                  ...(asset.descriptor.animation === undefined
+                    ? {}
+                    : { animation: asset.descriptor.animation }),
                 },
               }),
           ...(asset.generationProvenance === undefined
@@ -3534,6 +3539,7 @@ function EditorWorkspace({
         readonly durationUs?: number;
         readonly width?: number;
         readonly height?: number;
+        readonly animation?: AnimationDescriptorV1;
       };
     }) => {
       context.replaceVisualProject(projectWithImportedAsset(context.visualProject, asset));
@@ -3547,6 +3553,7 @@ function EditorWorkspace({
         readonly durationUs?: number;
         readonly width?: number;
         readonly height?: number;
+        readonly animation?: AnimationDescriptorV1;
       };
     }) => {
       const composition =
@@ -3607,6 +3614,7 @@ function EditorWorkspace({
           readonly durationUs?: number;
           readonly width?: number;
           readonly height?: number;
+          readonly animation?: AnimationDescriptorV1;
         };
       },
       clipId: string,

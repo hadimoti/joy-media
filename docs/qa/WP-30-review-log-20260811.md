@@ -99,6 +99,19 @@ The decoder also revalidates frame-count, cycle-duration, and decoded-memory
 budgets immediately before parsing/allocating frames; the over-budget contract
 test passes (`4/4` decoder tests).
 
+### Timeline placement regression
+
+The Assets-panel path previously accepted an animated descriptor from the
+catalog but reconstructed the project asset descriptor without its
+`animation` field. That caused a placed GIF/WebP to lose its intrinsic cycle
+and fall back to the five-second still-image duration. The project-import
+bridge now preserves the descriptor end to end. The browser suite places the
+run-unique animated GIF through the public **Add to timeline** button and
+asserts the resulting clip advertises the fixture’s `1.0s` cycle at all three
+viewports. The full matrix completed `6/6 PASS` in `14.2s` with no retained
+page-error or same-origin-request failure. Disposable projects and their
+fixture assets were purged by the test cleanup path.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.
