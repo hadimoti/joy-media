@@ -138,6 +138,36 @@ describe('BrowserControlPlaneClient', () => {
     ]);
     expect(JSON.stringify(requests)).not.toContain('C:\\');
   });
+
+  it('passes the caller abort signal through browser export remux', async () => {
+    const abortController = new AbortController();
+    let requestSignal: AbortSignal | null | undefined;
+    const original = globalThis.fetch;
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal;
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { 'content-type': 'video/mp4' },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(
+        client.remuxBrowserMp4(
+          'project-1',
+          new Blob(['browser mp4'], { type: 'video/mp4' }),
+          30,
+          abortController.signal,
+        ),
+      ).resolves.toMatchObject({ size: 3, type: 'video/mp4' });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requestSignal).toBe(abortController.signal);
+  });
 });
 
 function json(status: number, value: unknown): Response {

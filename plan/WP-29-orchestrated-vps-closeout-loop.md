@@ -1,6 +1,6 @@
 # WP-29 — Orchestrated VPS Closeout Loop
 
-**Status:** Ready to execute
+**Status:** STEP-00 through STEP-18 approved; STEP-19 through STEP-21 pending
 **Parent:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
 **Execution model:** Codex orchestrator reviews; one persistent Codex agent on the Sweden VPS implements
 **Repository:** `/opt/joy-media/repo`
@@ -9,12 +9,32 @@
 
 ## 1. Outcome
 
-Complete the four open acceptance areas:
+The four acceptance areas that originally opened this loop were:
 
 1. Browser-originated MP4 export with independent FFprobe and audio proof.
 2. A real Local Worker result reviewed and inserted exactly once.
 3. Controlled playback performance evidence on the named Chrome/GPU host.
 4. All 37 previously NOT-RUN Chrome cases, including defect repair, rerun, and cleanup.
+
+All four are now closed in the pre-deploy candidate. The exact accepted
+checkpoint is:
+
+- `pnpm verify:ci`: PASS — 259 test files and 1,851 tests passed; one file and
+  two tests skipped as named integration gates; builds and production audit
+  passed.
+- R2 Worker insertion: 3/3 in installed Google Chrome, combined with the
+  retained licensed real-Worker DSP proof.
+- R3 export/audio proof: 3/3 authenticated browser exports passed H.264/AAC
+  FFprobe; deterministic duration was 3.013 s for a 3.000 s source (13,000 µs
+  delta, below the 33,334 µs tolerance), with audible/gain/mute means of
+  -21.1/-33.2/-91.0 dB and the expected 12.1 dB gain-direction change.
+- Export recovery: 3/3 in installed Google Chrome.
+- R5: 108 direct installed-Chrome instances plus three reconciled R2 CASE-66
+  instances, for 111/111 across all 37 cases and three required viewports.
+
+The final candidate SHA, immutable deployment releases, signed-in live cleanup,
+and final GBrain update are intentionally pending STEP-19 through STEP-21. This
+document does not claim that the current working tree has been deployed.
 
 The orchestrator sends exactly one bounded step to the VPS Codex agent. The
 agent implements and reports that step, then stops. The orchestrator independently
@@ -636,26 +656,26 @@ STEP-XX report contract, and stop. Do not continue.
 
 ## 11. Completion checklist
 
-- [ ] STEP-00 preflight approved.
-- [ ] STEP-01 export reproduction/profile approved.
-- [ ] STEP-02 export repair approved.
-- [ ] STEP-03 browser FFprobe/audio proof approved.
-- [ ] STEP-04 export recovery approved.
-- [ ] STEP-05 Worker preflight approved.
-- [ ] STEP-06 real Worker review approved.
-- [ ] STEP-07 exactly-once insertion approved.
-- [ ] STEP-08 Worker recovery/revoke approved.
-- [ ] STEP-09 diagnostics semantics approved.
-- [ ] STEP-10 reference-host matrix approved.
-- [ ] STEP-11 file bridge cases approved.
-- [ ] STEP-12 pointer/gesture cases approved.
-- [ ] STEP-13 caption cases approved.
-- [ ] STEP-14 Worker/audio cases approved.
-- [ ] STEP-15 effects/color cases approved.
-- [ ] STEP-16 motion/camera/template cases approved.
-- [ ] STEP-17 destructive/recovery cases approved.
-- [ ] Every `JOY-QA-*` defect loop is closed or explicitly owner-blocked.
-- [ ] STEP-18 exact candidate gate approved.
+- [x] STEP-00 preflight approved.
+- [x] STEP-01 export reproduction/profile approved.
+- [x] STEP-02 export repair approved.
+- [x] STEP-03 browser FFprobe/audio proof approved.
+- [x] STEP-04 export recovery approved.
+- [x] STEP-05 Worker preflight approved.
+- [x] STEP-06 real Worker review approved.
+- [x] STEP-07 exactly-once insertion approved.
+- [x] STEP-08 Worker recovery/revoke approved.
+- [x] STEP-09 diagnostics semantics approved.
+- [x] STEP-10 reference-host matrix approved.
+- [x] STEP-11 file bridge cases approved.
+- [x] STEP-12 pointer/gesture cases approved.
+- [x] STEP-13 caption cases approved.
+- [x] STEP-14 Worker/audio cases approved.
+- [x] STEP-15 effects/color cases approved.
+- [x] STEP-16 motion/camera/template cases approved.
+- [x] STEP-17 destructive/recovery cases approved.
+- [x] Every `JOY-QA-*` defect loop is closed or explicitly owner-blocked.
+- [x] STEP-18 exact candidate gate approved.
 - [ ] STEP-19 immutable deployment approved.
 - [ ] STEP-20 signed-in live rerun and cleanup approved.
 - [ ] STEP-21 documentation/GBrain closeout approved.

@@ -158,4 +158,309 @@ describe('EditorSession', () => {
     expect(() => session.jumpToHistory(0)).not.toThrow();
     expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
   });
+
+  it('does not let derived metadata consume the undo entry for a timeline edit', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const initialCount =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips.length;
+    session.dispatchTimeline({
+      label: 'Split product',
+      commands: [
+        {
+          type: 'timeline.splitClip',
+          payload: {
+            compositionId: session.timelineProject.rootCompositionId,
+            trackId: 'track-0',
+            clipId: 'product',
+            atUs: 15_000_000,
+            newClipId: 'product-b',
+          },
+        },
+      ],
+    });
+    session.synchronizeVisualProject({
+      ...session.visualProject,
+      exportPreset: 'youtube-1080',
+    });
+
+    expect(session.historyEntries.at(-1)?.label).toBe('Split product');
+    session.undo();
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialCount);
+    session.redo();
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialCount + 1);
+  });
+
+  it('keeps the live document and revision unchanged when metadata persistence fails', () => {
+    const values = new Map<string, string>();
+    let rejectWrites = false;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (rejectWrites) throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+        values.set(key, value);
+      },
+    };
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const before = session.visualProject;
+    const revision = session.projectRevisionId;
+    rejectWrites = true;
+
+    expect(() =>
+      session.synchronizeVisualProject({
+        ...before,
+        exportPreset: 'youtube-1080',
+      }),
+    ).toThrow('Storage quota exceeded');
+    expect(session.visualProject).toBe(before);
+    expect(session.projectRevisionId).toBe(revision);
+  });
+
+  it('does not advance replacement, Undo, or Redo state when snapshot persistence fails', () => {
+    const values = new Map<string, string>();
+    let rejectWrites = false;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (rejectWrites) throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+        values.set(key, value);
+      },
+    };
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const original = session.visualProject;
+    const originalRevision = session.projectRevisionId;
+    rejectWrites = true;
+    expect(() => session.replaceVisualProject({ ...original, title: 'Must not appear' })).toThrow(
+      'Storage quota exceeded',
+    );
+    expect(session.visualProject).toBe(original);
+    expect(session.projectRevisionId).toBe(originalRevision);
+    expect(session.canUndo).toBe(false);
+
+    rejectWrites = false;
+    session.replaceVisualProject({ ...original, title: 'Durable replacement' });
+    const replacementRevision = session.projectRevisionId;
+    const replacementCursor = session.historyCursorSequence;
+    rejectWrites = true;
+    expect(() => session.undo()).toThrow('Storage quota exceeded');
+    expect(session.visualProject.title).toBe('Durable replacement');
+    expect(session.projectRevisionId).toBe(replacementRevision);
+    expect(session.historyCursorSequence).toBe(replacementCursor);
+
+    rejectWrites = false;
+    session.undo();
+    expect(session.visualProject.title).toBe(original.title);
+    rejectWrites = true;
+    expect(() => session.redo()).toThrow('Storage quota exceeded');
+    expect(session.visualProject.title).toBe(original.title);
+    expect(session.historyCursorSequence).toBe(0);
+
+    rejectWrites = false;
+    session.redo();
+    expect(session.visualProject.title).toBe('Durable replacement');
+  });
+
+  it('rolls back every compound log and live history when apply, Undo, or Redo persistence fails', () => {
+    const values = new Map<string, string>();
+    let writes = 0;
+    let rejectWrite = Number.POSITIVE_INFINITY;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        writes += 1;
+        if (writes === rejectWrite)
+          throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+        values.set(key, value);
+      },
+      removeItem: (key: string) => values.delete(key),
+    };
+    const initialTimeline = buildReferenceSpikeProject();
+    const session = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    const initialRevision = session.projectRevisionId;
+    const initialClipCount =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips.length;
+    const compound = () =>
+      session.dispatchCompound('Split and rename', {
+        timeline: {
+          label: 'Split product',
+          commands: [
+            {
+              type: 'timeline.splitClip',
+              payload: {
+                compositionId: session.timelineProject.rootCompositionId,
+                trackId: 'track-0',
+                clipId: 'product',
+                atUs: 15_000_000,
+                newClipId: 'product-compound-b',
+              },
+            },
+          ],
+        },
+        document: { ...session.visualProject, title: 'Compound title' },
+      });
+
+    // Journal, first domain append, then reject the second domain append.
+    rejectWrite = writes + 3;
+    expect(compound).toThrow('Storage quota exceeded');
+    expect(session.projectRevisionId).toBe(initialRevision);
+    expect(session.historyCursorSequence).toBe(0);
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount);
+    const reopenedAfterApplyFailure = new EditorSession(
+      storage,
+      initialTimeline,
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(reopenedAfterApplyFailure.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      reopenedAfterApplyFailure.timelineProject.compositions[
+        reopenedAfterApplyFailure.timelineProject.rootCompositionId
+      ]!.tracks[0]!.clips,
+    ).toHaveLength(initialClipCount);
+
+    rejectWrite = Number.POSITIVE_INFINITY;
+    compound();
+    const appliedRevision = session.projectRevisionId;
+    const appliedCursor = session.historyCursorSequence;
+    expect(session.visualProject.title).toBe('Compound title');
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount + 1);
+
+    // Undo persists document then timeline. Reject timeline and prove neither
+    // the live session nor a newly recovered session observes a half-undo.
+    rejectWrite = writes + 3;
+    expect(() => session.undo()).toThrow('Storage quota exceeded');
+    expect(session.projectRevisionId).toBe(appliedRevision);
+    expect(session.historyCursorSequence).toBe(appliedCursor);
+    expect(session.visualProject.title).toBe('Compound title');
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount + 1);
+    const reopenedAfterUndoFailure = new EditorSession(
+      storage,
+      initialTimeline,
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(reopenedAfterUndoFailure.visualProject.title).toBe('Compound title');
+    expect(
+      reopenedAfterUndoFailure.timelineProject.compositions[
+        reopenedAfterUndoFailure.timelineProject.rootCompositionId
+      ]!.tracks[0]!.clips,
+    ).toHaveLength(initialClipCount + 1);
+
+    rejectWrite = Number.POSITIVE_INFINITY;
+    session.undo();
+    expect(session.historyCursorSequence).toBe(0);
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+
+    // Redo persists timeline then document. Reject document and preserve the
+    // fully-undone state in memory and on reopen.
+    rejectWrite = writes + 3;
+    expect(() => session.redo()).toThrow('Storage quota exceeded');
+    expect(session.historyCursorSequence).toBe(0);
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount);
+    const reopenedAfterRedoFailure = new EditorSession(
+      storage,
+      initialTimeline,
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(reopenedAfterRedoFailure.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      reopenedAfterRedoFailure.timelineProject.compositions[
+        reopenedAfterRedoFailure.timelineProject.rootCompositionId
+      ]!.tracks[0]!.clips,
+    ).toHaveLength(initialClipCount);
+
+    rejectWrite = Number.POSITIVE_INFINITY;
+    session.redo();
+    expect(session.visualProject.title).toBe('Compound title');
+    expect(session.historyCursorSequence).toBe(appliedCursor);
+  });
+
+  it('repairs a prepared compound journal on reopen when immediate rollback storage is unavailable', () => {
+    const values = new Map<string, string>();
+    let writes = 0;
+    let rejectFromWrite = Number.POSITIVE_INFINITY;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        writes += 1;
+        if (writes >= rejectFromWrite)
+          throw new DOMException('Storage unavailable', 'QuotaExceededError');
+        values.set(key, value);
+      },
+      removeItem: (key: string) => values.delete(key),
+    };
+    const initialTimeline = buildReferenceSpikeProject();
+    const session = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    const initialClipCount =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips.length;
+
+    // Prepared journal and timeline append succeed; the document append and
+    // every immediate rollback write fail, leaving recovery for the next open.
+    rejectFromWrite = writes + 3;
+    expect(() =>
+      session.dispatchCompound('Interrupted compound', {
+        timeline: {
+          label: 'Split product',
+          commands: [
+            {
+              type: 'timeline.splitClip',
+              payload: {
+                compositionId: session.timelineProject.rootCompositionId,
+                trackId: 'track-0',
+                clipId: 'product',
+                atUs: 15_000_000,
+                newClipId: 'product-interrupted-b',
+              },
+            },
+          ],
+        },
+        document: { ...session.visualProject, title: 'Must roll back on reopen' },
+      }),
+    ).toThrow('requires reload recovery');
+    expect(session.historyCursorSequence).toBe(0);
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+
+    rejectFromWrite = Number.POSITIVE_INFINITY;
+    const reopened = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    expect(reopened.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      reopened.timelineProject.compositions[reopened.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount);
+    expect(
+      [...values.keys()].some((key) => key.startsWith('joy-media.editor-compound-write.v1:')),
+    ).toBe(false);
+  });
 });

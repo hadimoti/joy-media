@@ -8,7 +8,7 @@ import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-st
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import type { ProjectOperationLedger } from './project-operation-ledger.js';
+import type { ProjectOperationLedger, ProjectOperationStatus } from './project-operation-ledger.js';
 import { verifyWorkerAudioDerivative, type VerifiedWorkerAudioResult } from './worker-result.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
@@ -18,6 +18,15 @@ const TABS: readonly PanelTabSpec[] = [
   { id: 'queue', label: 'Queue' },
   { id: 'pair', label: 'Pair' },
 ];
+
+export function workerResultWasApplied(status: ProjectOperationStatus | undefined): boolean {
+  return status === 'applied' || status === 'completed';
+}
+
+/** Stable globally unique job/ledger key for one project's selected source. */
+export function workerAudioDenoiseOperationId(projectId: string, assetId: string): string {
+  return `audio-denoise-${projectId}-${assetId}`;
+}
 
 export function JobsPanel({
   projectId,
@@ -43,13 +52,18 @@ export function JobsPanel({
   const [workerId, setWorkerId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [projectInitialized, setProjectInitialized] = useState(false);
-  const [status, setStatus] = useState('Checking JOY Media connection…');
+  const [connectionStatus, setConnectionStatus] = useState('Checking JOY Media connection…');
+  const [status, setStatus] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
   const [review, setReview] = useState<VerifiedWorkerAudioResult | undefined>();
   const [reviewUrl, setReviewUrl] = useState<string | undefined>();
   const [reviewBusy, setReviewBusy] = useState(false);
+  const reviewBusyRef = useRef(false);
+  const [pairBusy, setPairBusy] = useState(false);
+  const pairBusyRef = useRef(false);
+  const [pendingPairWorkerId, setPendingPairWorkerId] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const refreshSeqRef = useRef(0);
 
@@ -79,10 +93,10 @@ export function JobsPanel({
       setWorkers(nextWorkers);
       setJobs(nextJobs);
       setProjectInitialized(!projectMissing);
-      setStatus(projectJobStatus(projectMissing, nextWorkers));
+      setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
-      setStatus(`Not connected or not signed in: ${message(error)}`);
+      setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
     }
   }, [client, projectId]);
 
@@ -109,14 +123,31 @@ export function JobsPanel({
   const visibleWorkers = showRevoked ? sortedWorkers : activeWorkers;
   const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
 
+  useEffect(() => {
+    if (pendingPairWorkerId === undefined) return;
+    const paired = workers.find((worker) => worker.id === pendingPairWorkerId);
+    if (paired === undefined || workerPresence(paired) !== 'connected') return;
+    setStatus(`Worker ${shortId(paired.id)} connected successfully.`);
+    setPendingPairWorkerId(undefined);
+  }, [pendingPairWorkerId, workers]);
+
   const pair = async () => {
+    if (pairBusyRef.current) return;
+    pairBusyRef.current = true;
+    setPairBusy(true);
     try {
-      await client.pairWorker(workerId.trim(), pairingCode.trim());
+      const approved = await client.pairWorker(workerId.trim(), pairingCode.trim());
       setPairingCode('');
-      setStatus('Pairing approved; restart the Worker to receive its session.');
+      setPendingPairWorkerId(approved.id);
+      setStatus(
+        `Pairing approved for ${shortId(approved.id)}; waiting for the Worker to claim automatically.`,
+      );
       await refresh();
     } catch (error) {
       setStatus(`Pairing failed: ${message(error)}`);
+    } finally {
+      pairBusyRef.current = false;
+      setPairBusy(false);
     }
   };
 
@@ -152,7 +183,7 @@ export function JobsPanel({
         );
         if (worker === undefined)
           throw new Error('No connected Worker advertises audio.ml-denoise');
-        const jobId = `audio-denoise-${audioAssetId}`;
+        const jobId = workerAudioDenoiseOperationId(projectId, audioAssetId);
         operationId = jobId;
         const existing = operationLedger?.get(jobId);
         if (existing?.status === 'applied' || existing?.status === 'completed') {
@@ -199,6 +230,12 @@ export function JobsPanel({
 
   const reviewAudioResult = async (job: BrowserJob): Promise<void> => {
     if (job.assetId === undefined || job.derivative === undefined) return;
+    if (workerResultWasApplied(operationLedger?.get(job.id)?.status)) {
+      setStatus('This Worker result is already applied to the project.');
+      return;
+    }
+    if (reviewBusyRef.current) return;
+    reviewBusyRef.current = true;
     try {
       setReviewBusy(true);
       const derivatives = await client.derivatives(projectId, job.assetId);
@@ -210,26 +247,34 @@ export function JobsPanel({
       const sourceAsset = (await client.assets(projectId)).find(
         (asset) => asset.id === job.assetId,
       );
-      setReview(
-        await verifyWorkerAudioDerivative({
-          jobId: job.id,
-          sourceAssetId: job.assetId,
-          ...(sourceAsset === undefined ? {} : { sourceAssetSha256: sourceAsset.sha256 }),
-          derivative,
-          blob,
-        }),
-      );
-      try {
-        operationLedger?.finish(`audio-denoise-${job.assetId}`, 'review', {
+      if (sourceAsset === undefined)
+        throw new Error('The Worker result source asset is no longer available');
+      const verified = await verifyWorkerAudioDerivative({
+        jobId: job.id,
+        sourceAssetId: job.assetId,
+        sourceAssetSha256: sourceAsset.sha256,
+        derivative,
+        blob,
+      });
+      if (operationLedger !== undefined) {
+        if (operationLedger.get(job.id) === undefined) {
+          operationLedger.begin({
+            id: job.id,
+            type: 'worker-job',
+            fingerprint: `${job.assetId}:audio.ml-denoise:v1`,
+            revision: operationRevision,
+          });
+        }
+        operationLedger.finish(job.id, 'review', {
           resultRef: derivative.id,
         });
-      } catch {
-        /* Jobs created before the ledger migration remain reviewable. */
       }
+      setReview(verified);
       setStatus('Worker result verified. Choose how to apply it to the project.');
     } catch (error) {
       setStatus(`Could not verify Worker result: ${message(error)}`);
     } finally {
+      reviewBusyRef.current = false;
       setReviewBusy(false);
     }
   };
@@ -240,11 +285,18 @@ export function JobsPanel({
       setStatus('Worker result review is ready, but no project insertion target is selected.');
       return;
     }
+    if (workerResultWasApplied(operationLedger?.get(review.jobId)?.status)) {
+      setReview(undefined);
+      setStatus('This Worker result is already applied to the project.');
+      return;
+    }
+    if (reviewBusyRef.current) return;
+    reviewBusyRef.current = true;
     try {
       setReviewBusy(true);
       await onApplyWorkerAudioResult(review, mode);
       try {
-        operationLedger?.finish(`audio-denoise-${review.sourceAssetId}`, 'applied', {
+        operationLedger?.finish(review.jobId, 'applied', {
           resultRef: review.generatedAsset.id,
         });
       } catch {
@@ -259,6 +311,7 @@ export function JobsPanel({
     } catch (error) {
       setStatus(`Could not apply Worker result: ${message(error)}`);
     } finally {
+      reviewBusyRef.current = false;
       setReviewBusy(false);
     }
   };
@@ -266,7 +319,7 @@ export function JobsPanel({
   const discardReview = (): void => {
     if (review !== undefined) {
       try {
-        operationLedger?.finish(`audio-denoise-${review.sourceAssetId}`, 'cancelled');
+        operationLedger?.finish(review.jobId, 'cancelled');
       } catch {
         /* Legacy jobs have no ledger record to remove. */
       }
@@ -282,7 +335,7 @@ export function JobsPanel({
       tabs={TABS}
       activeTab={tab}
       onTabChange={setTab}
-      note={status}
+      note={status ?? connectionStatus}
       actions={
         <>
           {!projectInitialized && (
@@ -324,7 +377,14 @@ export function JobsPanel({
       }
     >
       {tab === 'pair' && (
-        <section className="jobs-pair" aria-label="Pair local Worker">
+        <form
+          className="jobs-pair"
+          aria-label="Pair local Worker"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void pair();
+          }}
+        >
           <label className="jobs-field">
             <span>Worker ID</span>
             <input
@@ -351,15 +411,14 @@ export function JobsPanel({
               &nbsp;
             </span>
             <button
-              type="button"
+              type="submit"
               className="jobs-pair-submit"
-              disabled={!workerId.trim() || !pairingCode.trim()}
-              onClick={() => void pair()}
+              disabled={pairBusy || !workerId.trim() || !pairingCode.trim()}
             >
-              Approve
+              {pairBusy ? 'Approving…' : 'Approve'}
             </button>
           </div>
-        </section>
+        </form>
       )}
 
       {tab === 'workers' && (
@@ -395,9 +454,10 @@ export function JobsPanel({
                           aria-label={`Revoke Worker ${worker.id}`}
                           title="Revoke"
                           data-guide="Revoke"
-                          onClick={() =>
-                            void client.revokeWorker(worker.id).then(refresh).catch(report)
-                          }
+                          onClick={() => {
+                            if (!window.confirm(`Revoke Worker ${worker.id}?`)) return;
+                            void client.revokeWorker(worker.id).then(refresh).catch(report);
+                          }}
                         >
                           <CloseIcon />
                         </button>
@@ -432,7 +492,12 @@ export function JobsPanel({
           ) : (
             <ul className="jobs-list">
               {jobs.map((job) => (
-                <li key={job.id} className={`job-${job.state}`}>
+                <li
+                  key={job.id}
+                  className={`job-${job.state}`}
+                  data-job-id={job.id}
+                  data-job-state={job.state}
+                >
                   <div className="jobs-worker-row">
                     <div className="jobs-worker-copy">
                       <div className="jobs-row-main">
@@ -454,10 +519,17 @@ export function JobsPanel({
                           <button
                             type="button"
                             className="jobs-review-button"
-                            disabled={reviewBusy}
+                            disabled={
+                              reviewBusy ||
+                              workerResultWasApplied(operationLedger?.get(job.id)?.status)
+                            }
                             onClick={() => void reviewAudioResult(job)}
                           >
-                            {reviewBusy ? 'Verifying…' : 'Review result'}
+                            {reviewBusy
+                              ? 'Verifying…'
+                              : workerResultWasApplied(operationLedger?.get(job.id)?.status)
+                                ? 'Applied'
+                                : 'Review result'}
                           </button>
                         )}
                       {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
@@ -470,29 +542,34 @@ export function JobsPanel({
                           aria-label={`Cancel job ${job.id}`}
                           title="Cancel"
                           data-guide="Cancel"
-                          onClick={() =>
-                            void client.cancel(projectId, job.id).then(refresh).catch(report)
-                          }
+                          onClick={() => {
+                            if (!window.confirm(`Cancel job ${job.id}?`)) return;
+                            void client.cancel(projectId, job.id).then(refresh).catch(report);
+                          }}
                         >
                           <CloseIcon />
                         </button>
                       )}
                       {(job.state === 'canceled' ||
                         job.state === 'failed' ||
-                        job.state === 'completed') && (
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Retry job ${job.id}`}
-                          title="Retry"
-                          data-guide="Retry"
-                          onClick={() =>
-                            void client.retry(projectId, job.id).then(refresh).catch(report)
-                          }
-                        >
-                          <RefreshIcon />
-                        </button>
-                      )}
+                        job.state === 'completed') &&
+                        !(
+                          job.type === 'audio.ml-denoise' &&
+                          workerResultWasApplied(operationLedger?.get(job.id)?.status)
+                        ) && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Retry job ${job.id}`}
+                            title="Retry"
+                            data-guide="Retry"
+                            onClick={() =>
+                              void client.retry(projectId, job.id).then(refresh).catch(report)
+                            }
+                          >
+                            <RefreshIcon />
+                          </button>
+                        )}
                     </div>
                   </div>
                 </li>
@@ -561,7 +638,8 @@ export function JobsPanel({
               <li>
                 <strong>Pairing code</strong> — the Worker terminal shows{' '}
                 <code>Approve this Worker in JOY Media with pairing code: …</code>. Codes are valid
-                for about five minutes; restart the Worker for a fresh offer.
+                for about five minutes; the running Worker prints a fresh code automatically after
+                expiry.
               </li>
               <li>
                 <strong>Worker ID</strong> — copy <code>workerId</code> from the Worker startup JSON
@@ -569,9 +647,9 @@ export function JobsPanel({
                 <code>JOY_MEDIA_WORKER_STATE_PATH</code>).
               </li>
               <li>
-                Enter both values above, click <strong>Approve</strong>, then{' '}
-                <strong>restart the Worker</strong> so it receives the session. The connection
-                should appear within a few seconds.
+                Enter both values above and click <strong>Approve</strong>. The running Worker polls
+                for approval and should appear as connected within a few seconds; no restart is
+                required.
               </li>
               <li>
                 GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>, or{' '}

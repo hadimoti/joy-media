@@ -1,14 +1,36 @@
 # WP-27 — GPT Chrome 100-Scenario JOY Media Audit
 
-**Status:** Planned  
+**Status:** Completed through WP-29 remediation; final WP-29 deployment pending
+
 **Target:** live https://joyst.ir/ in Google Chrome through the ChatGPT browser extension  
-**Results:** \`docs/qa/gpt-chrome-usage-audit-<run-id>.md\`
+**Results:** historical audit
+[`docs/qa/gpt-chrome-usage-audit-20260809.md`](../docs/qa/gpt-chrome-usage-audit-20260809.md);
+remediation closure
+[`docs/qa/WP-29-r5-browser-closure-20260810-0621.md`](../docs/qa/WP-29-r5-browser-closure-20260810-0621.md)
 
 ## Summary
 
 Run 100 numbered end-user scenarios against the current live account and
 project. Record separate functional, UI, accessibility, and persistence
 verdicts. This audit is report-only: it does not fix application code.
+
+## Remediation closure
+
+The original live audit exercised 63 scenarios and left 37 as `NOT-RUN` where
+safe completion required fixtures, authenticated file bridges, a Worker or
+provider boundary, pointer/fullscreen automation, or controlled destructive
+state. WP-29 subsequently closed those former 37 cases at all three required
+viewports in installed Google Chrome:
+
+- 108 direct R5 browser instances passed;
+- three complementary R2 CASE-66 Worker instances passed;
+- the reconciled matrix is 111/111, with 37/37 functional and UI/accessibility
+  closure.
+
+Fixture-backed cases remain explicitly labelled `PASS-FIXTURE`; this closure
+does not relabel deterministic external-boundary evidence as a paid-provider or
+production-live run. The final WP-29 commit, immutable deployment, live cleanup,
+and GBrain reconciliation remain pending and are not claimed by this plan.
 
 ## Execution protocol
 

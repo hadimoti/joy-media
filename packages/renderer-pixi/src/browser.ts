@@ -476,7 +476,11 @@ export async function createBrowserPixiRenderer(
       if (disposed) return;
       disposed = true;
       spriteMap.clear();
-      app.destroy(true, { children: true, texture: true });
+      // Pixi's boolean `true` destroy shorthand also releases its process-wide
+      // resource pools. Multiple preview renderers can briefly coexist while
+      // React replaces a panel, so clearing those shared pools here invalidates
+      // CanvasText textures that still belong to the surviving renderer.
+      app.destroy({ removeView: true }, { children: true, texture: true });
     },
   };
 }

@@ -752,8 +752,12 @@ export class LocalControlPlane implements ControlPlane {
     const asset = this.#assets.get(derivative.assetId);
     if (asset === undefined || asset.projectId !== job.projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
-    if (this.#derivatives.has(derivative.id))
+    const existing = this.#derivatives.get(derivative.id);
+    if (existing !== undefined) {
+      if (matchesCloudDerivativeRegistration(existing, job.projectId, derivative))
+        return cloneDerivative(existing);
       throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+    }
     const record: MediaDerivativeRecord = {
       ...cloneDerivativeRegistration(derivative),
       projectId: job.projectId,
@@ -1246,6 +1250,34 @@ export function validateCloudDerivativeRegistration(value: CloudDerivativeRegist
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative state is invalid');
   if (!value.locations.some((location) => location.kind === 'private-object'))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative requires a private object');
+}
+
+/** Exact retry identity for a Worker upload whose first success response was lost. */
+export function matchesCloudDerivativeRegistration(
+  existing: MediaDerivativeRecord,
+  projectId: string,
+  candidate: CloudDerivativeRegistration,
+): boolean {
+  return (
+    existing.projectId === projectId &&
+    existing.id === candidate.id &&
+    existing.assetId === candidate.assetId &&
+    existing.kind === candidate.kind &&
+    existing.profile === candidate.profile &&
+    existing.sha256 === candidate.sha256 &&
+    existing.bytes === candidate.bytes &&
+    existing.availability === candidate.availability &&
+    existing.descriptor.mimeType === candidate.descriptor.mimeType &&
+    existing.descriptor.durationUs === candidate.descriptor.durationUs &&
+    existing.descriptor.width === candidate.descriptor.width &&
+    existing.descriptor.height === candidate.descriptor.height &&
+    existing.locations.length === candidate.locations.length &&
+    existing.locations.every(
+      (location, index) =>
+        location.kind === candidate.locations[index]?.kind &&
+        location.ref === candidate.locations[index]?.ref,
+    )
+  );
 }
 
 function validateDerivativeRegistration(

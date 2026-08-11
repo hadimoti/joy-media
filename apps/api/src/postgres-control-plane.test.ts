@@ -45,6 +45,31 @@ describe('PostgresControlPlane', () => {
     ).resolves.toMatchObject([
       { id: 'derivative-1', availability: 'available-local', verifiedAt: 100 },
     ]);
+    const workerDerivative = {
+      id: 'derivative-job-1',
+      assetId: 'asset-1',
+      kind: 'thumbnail' as const,
+      profile: 'jpeg-640',
+      sha256: 'b'.repeat(64),
+      bytes: 1024,
+      descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
+      availability: 'available-cloud' as const,
+      locations: [{ kind: 'private-object' as const, ref: 'worker-object-1' }],
+    };
+    await expect(
+      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 101),
+    ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
+    await expect(
+      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 102),
+    ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
+    await expect(
+      restarted.registerWorkerCloudDerivative(
+        'worker-1',
+        'job-1',
+        { ...workerDerivative, profile: 'different-profile' },
+        102,
+      ),
+    ).rejects.toMatchObject({ code: 'DERIVATIVE_EXISTS' });
     await expect(
       restarted.complete('worker-1', 'job-1', 102, realThumbnailReceipt()),
     ).resolves.toMatchObject({

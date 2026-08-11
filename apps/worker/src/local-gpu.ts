@@ -165,6 +165,11 @@ function retainDerivative(
   return finalOutput;
 }
 
+export function gpuDerivativeLocalRef(jobId: string, sha256: string): string {
+  const jobDigest = createHash('sha256').update(jobId).digest('hex').slice(0, 32);
+  return `gpu-${jobDigest}-${sha256.slice(0, 16)}`;
+}
+
 export async function runImageComfyJob(options: LocalGpuRunOptions): Promise<LocalGpuReceipt> {
   const base = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim().replace(/\/$/, '');
   if (base.length === 0) throw new Error('JOY_MEDIA_LOCAL_COMFY_URL is not set');
@@ -199,7 +204,7 @@ export async function runImageComfyJob(options: LocalGpuRunOptions): Promise<Loc
     if (bytes.length < 1) throw new Error('ComfyUI output is empty');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const assetId = options.assetId ?? `comfy-${options.jobId}`;
-    const localRef = `gpu-${options.jobId}-${sha256.slice(0, 16)}`;
+    const localRef = gpuDerivativeLocalRef(options.jobId, sha256);
     retainDerivative(options.derivativeDirectory, localRef, 'png', bytes);
     await options.progress(100);
     return {
@@ -294,7 +299,7 @@ export async function runAudioMlDenoiseJob(options: LocalGpuRunOptions): Promise
     if (bytes.length < 1) throw new Error('ML denoise output is empty');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const assetId = options.assetId ?? `mldenoise-${options.jobId}`;
-    const localRef = `gpu-${options.jobId}-${sha256.slice(0, 16)}`;
+    const localRef = gpuDerivativeLocalRef(options.jobId, sha256);
     retainDerivative(options.derivativeDirectory, localRef, 'wav', bytes);
     await options.progress(100);
     return {

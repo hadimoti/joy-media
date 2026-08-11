@@ -34,6 +34,7 @@ import {
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { effectReorderTransaction } from './effect-reorder.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'transform', label: 'Transform' },
@@ -450,7 +451,7 @@ export function InspectorPanel({
   );
 }
 
-function EffectsSection({
+export function EffectsSection({
   object,
   open,
   onToggle,
@@ -462,6 +463,7 @@ function EffectsSection({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const effects = object.effects ?? [];
+  const [draggedEffectId, setDraggedEffectId] = useState<string | null>(null);
 
   if (effects.length === 0) return null;
 
@@ -477,11 +479,36 @@ function EffectsSection({
       </button>
       {open && (
         <ul className="inspector-effects-list">
-          {effects.map((effect) => {
+          {effects.map((effect, index) => {
             const descriptor = effectRegistry.getEffect(effect.effectId);
             const label = descriptor?.label ?? effect.effectId;
             return (
-              <li key={effect.id} className="inspector-effect-item">
+              <li
+                key={effect.id}
+                className="inspector-effect-item"
+                data-effect-instance-id={effect.id}
+                onDragOver={(event) => {
+                  if (draggedEffectId !== null && draggedEffectId !== effect.id) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const effectInstanceId =
+                    draggedEffectId ??
+                    event.dataTransfer.getData('application/x-joy-effect-instance');
+                  if (effectInstanceId === '' || effectInstanceId === effect.id) return;
+                  const movedEffect = effects.find((item) => item.id === effectInstanceId);
+                  if (movedEffect === undefined) return;
+                  const movedLabel =
+                    effectRegistry.getEffect(movedEffect.effectId)?.label ?? movedEffect.effectId;
+                  onDispatch(
+                    effectReorderTransaction(object.id, effectInstanceId, index, movedLabel),
+                  );
+                  setDraggedEffectId(null);
+                }}
+              >
                 <div className="inspector-effect-header">
                   <button
                     type="button"
@@ -489,6 +516,13 @@ function EffectsSection({
                     aria-label={`Reorder ${label}`}
                     title="Drag to reorder"
                     data-drag-handle
+                    draggable
+                    onDragStart={(event) => {
+                      setDraggedEffectId(effect.id);
+                      event.dataTransfer.setData('application/x-joy-effect-instance', effect.id);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => setDraggedEffectId(null)}
                   >
                     ⠿
                   </button>
@@ -496,6 +530,34 @@ function EffectsSection({
                     {label}
                   </span>
                   <div className="inspector-effect-actions">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Move ${label} up`}
+                      title="Move up"
+                      disabled={index === 0}
+                      onClick={() => {
+                        onDispatch(
+                          effectReorderTransaction(object.id, effect.id, index - 1, label),
+                        );
+                      }}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Move ${label} down`}
+                      title="Move down"
+                      disabled={index === effects.length - 1}
+                      onClick={() => {
+                        onDispatch(
+                          effectReorderTransaction(object.id, effect.id, index + 1, label),
+                        );
+                      }}
+                    >
+                      ↓
+                    </button>
                     <button
                       type="button"
                       className="icon-button icon-button-labeled"

@@ -11,12 +11,16 @@ describe('AudioPanel Studio surface', () => {
 
     expect(markup.indexOf('Local Worker')).toBeLessThan(markup.indexOf('Choose a workflow'));
     expect(markup.indexOf('Choose a workflow')).toBeLessThan(markup.indexOf('Podcast Quality'));
-    expect(markup.indexOf('Podcast Quality')).toBeLessThan(markup.indexOf('Run locally'));
+    expect(markup.indexOf('Podcast Quality')).toBeLessThan(markup.indexOf('Browser DSP'));
     expect(markup).toContain('Local Worker</strong><span>Disconnected</span>');
     expect(markup).toContain('Cloud Brain</strong><span>Unavailable</span>');
     expect(markup).toContain('Place clips to run');
     expect(markup).toContain('title="Place clips to run"');
     expect(markup).toContain('aria-describedby="audio-podcast-quality-run-readiness"');
+    expect(markup).toContain('data-audio-route="browser-dsp"');
+    expect(markup).toContain('data-audio-route="local-worker"');
+    expect(markup).toContain('data-audio-route="vps-orchestrated"');
+    expect(markup).toContain('aria-label="Execution target"');
     expect(markup).toContain('disabled=""');
     expect(markup).not.toContain('audio-readiness');
     expect(markup).not.toContain('mic_24x24.png');

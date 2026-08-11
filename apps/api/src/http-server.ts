@@ -23,6 +23,11 @@ import {
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import { remuxBrowserMp4Bytes } from './export-remux.js';
+import { MAX_DENOISE_JSON_BYTES } from './spectral-denoise.js';
+import {
+  MemorySpectralDenoiseInvocationLedger,
+  SpectralDenoiseService,
+} from './spectral-denoise-service.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -35,6 +40,8 @@ export interface ControlPlaneHttpServerOptions {
   readonly privateObjectStore?: PrivateObjectStore;
   /** Server-only provider registry; it never serializes a credential. */
   readonly mistral?: MistralProviderRegistry;
+  /** Durable in production; injectable so transport tests never need ffmpeg. */
+  readonly audioDenoise?: SpectralDenoiseService;
 }
 
 /**
@@ -47,6 +54,9 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     ...options,
     mediaAuth: options.mediaAuth ?? new DisabledMediaAuth(),
     mistral: options.mistral ?? createRuntimeMistralProviderRegistry(),
+    audioDenoise:
+      options.audioDenoise ??
+      new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
   };
   return createServer(async (request, response) => {
     try {
@@ -61,6 +71,7 @@ async function route(
   options: ControlPlaneHttpServerOptions & {
     readonly mistral: MistralProviderRegistry;
     readonly mediaAuth: MediaAuthApi;
+    readonly audioDenoise: SpectralDenoiseService;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -198,7 +209,14 @@ async function route(
           'REQUEST_INVALID',
           'derivative byte length does not match receipt',
         );
-      const ref = `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}-${receipt.sha256.slice(0, 16)}`;
+      const jobId = decodeURIComponent(workerDerivativeUploadMatch[2]!);
+      // Job ids are project-scoped and may already approach the opaque-id
+      // limit. Hash the job id for the private-object key so adding the
+      // derivative prefix and content digest can never create an invalid
+      // location, while the public derivative record still retains the exact
+      // job id below.
+      const jobDigest = createHash('sha256').update(jobId).digest('hex').slice(0, 32);
+      const ref = `derivative-${jobDigest}-${receipt.sha256.slice(0, 16)}`;
       await store.put(
         {
           ref,
@@ -210,9 +228,9 @@ async function route(
       );
       const derivative = await options.controlPlane.registerWorkerCloudDerivative(
         decodeURIComponent(workerId),
-        decodeURIComponent(workerDerivativeUploadMatch[2]!),
+        jobId,
         {
-          id: `derivative-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}`,
+          id: `derivative-${jobId}`,
           assetId: receipt.assetId,
           kind: receipt.kind,
           profile: receipt.kind === 'thumbnail' ? 'jpeg-640' : 'audio-processed',
@@ -568,20 +586,43 @@ async function route(
     return;
   }
 
+  if (request.method === 'GET' && url.pathname === '/v1/providers/audio/denoise') {
+    const projectId = requiredQuery(url, 'projectId');
+    const operationId = requiredQuery(url, 'operationId');
+    await options.controlPlane.getProject(actor, projectId);
+    const operation = await options.audioDenoise.find(actor.id, projectId, operationId);
+    if (operation === undefined)
+      throw new ControlPlaneError('PROVIDER_OPERATION_NOT_FOUND', operationId);
+    response.setHeader('cache-control', 'private, no-store');
+    respondJson(response, 200, { data: operation });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/providers/audio/denoise') {
-    const { runSpectralDenoise } = await import('./spectral-denoise.js');
-    const body = await readJson(request);
+    const body = await readJson(request, MAX_DENOISE_JSON_BYTES);
+    const projectId = requiredString(body, 'projectId');
+    const operationId = requiredString(body, 'operationId');
+    const project = await options.controlPlane.getProject(actor, projectId);
+    if (project.trashedAt !== undefined) throw new ControlPlaneError('PROJECT_TRASHED', projectId);
     const assetId = requiredString(body, 'assetId');
     const mediaBase64 = requiredString(body, 'mediaBase64');
     const sampleRate = typeof body.sampleRate === 'number' ? body.sampleRate : undefined;
     const strength = typeof body.strength === 'number' ? body.strength : undefined;
-    const denoised = runSpectralDenoise({
+    const operation = await options.audioDenoise.run(actor.id, {
+      projectId,
+      operationId,
       assetId,
       mediaBase64,
       ...(sampleRate !== undefined ? { sampleRate } : {}),
       ...(strength !== undefined ? { strength } : {}),
     });
-    respondJson(response, 200, { data: denoised });
+    if (operation.result === undefined)
+      throw new ControlPlaneError(
+        'PROVIDER_FAILED',
+        'Cloud denoise completed without a recoverable result',
+      );
+    response.setHeader('cache-control', 'private, no-store');
+    respondJson(response, 200, { data: operation.result });
     return;
   }
 
@@ -923,9 +964,24 @@ async function route(
   respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+  request: IncomingMessage,
+  maximumBytes = Number.POSITIVE_INFINITY,
+): Promise<Record<string, unknown>> {
+  const declaredLength = Number(request.headers['content-length'] ?? NaN);
+  if (Number.isFinite(maximumBytes) && declaredLength > maximumBytes) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
+  }
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.byteLength;
+    if (length > maximumBytes) {
+      throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
+    }
+    chunks.push(bytes);
+  }
   if (chunks.length === 0) return {};
   try {
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -962,6 +1018,13 @@ function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || value.length === 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
+  return value;
+}
+
+function requiredQuery(url: URL, field: string): string {
+  const value = url.searchParams.get(field);
+  if (value === null || value.length === 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} query parameter is required`);
   return value;
 }
 
@@ -1398,13 +1461,17 @@ function respondError(response: ServerResponse, error: unknown): void {
     const status =
       error.code === 'AUTH_REQUIRED' || error.code === 'WORKER_SESSION_REQUIRED'
         ? 401
-        : error.code === 'REQUEST_INVALID'
-          ? 400
-          : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
-            ? 503
-            : error.code.startsWith('PAIRING_')
-              ? 403
-              : 409;
+        : error.code === 'PROVIDER_BUSY'
+          ? 429
+          : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
+            ? 404
+            : error.code === 'REQUEST_INVALID'
+              ? 400
+              : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
+                ? 503
+                : error.code.startsWith('PAIRING_')
+                  ? 403
+                  : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

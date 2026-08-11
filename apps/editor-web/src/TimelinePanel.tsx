@@ -83,6 +83,10 @@ import {
   buildTimelineMediaImportTransaction,
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
+import {
+  buildTimelineClipMoveTransaction,
+  keyboardTrimTimeUs,
+} from './timeline-clip-interaction.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -165,6 +169,7 @@ function isVoiceClip(clip: Clip): boolean {
 
 function TimelineClip({
   clip,
+  displayName,
   selected,
   isDragOver,
   maxStartUs,
@@ -181,6 +186,7 @@ function TimelineClip({
   onSplitAt,
 }: {
   readonly clip: Clip;
+  readonly displayName?: string;
   readonly selected: boolean;
   readonly isDragOver: boolean;
   readonly maxStartUs: number;
@@ -190,7 +196,7 @@ function TimelineClip({
   readonly splitToolActive: boolean;
   readonly frameUs: number;
   readonly onToggleSelection: (id: string) => void;
-  readonly onMove: (clipId: string, newStartUs: number) => boolean;
+  readonly onMove: (clipId: string, newStartUs: number, targetTrackId?: string) => boolean;
   readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   readonly onContextMenu: (clipId: string, clientX: number, clientY: number) => void;
   readonly onSplitHover: (atUs: number | undefined) => void;
@@ -252,7 +258,8 @@ function TimelineClip({
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
   const cellCount = filmstripCellCount(layoutWidthPx);
   const waveCount = waveformBarCount(layoutWidthPx, viewport.pixelsPerSecond);
-  const label = clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
+  const label =
+    displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const showChrome = layoutWidthPx >= 48;
   const showDuration = layoutWidthPx >= 100;
@@ -265,9 +272,13 @@ function TimelineClip({
   const laneClass = `timeline-clip--lane-${Math.min(laneIndex, 3)}`;
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
+      aria-label={`${label}, ${durationLabel}`}
+      data-clip-id={clip.id}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`}
       style={{
         left: `${timeToPixel(displayStartUs, viewport)}px`,
@@ -283,6 +294,19 @@ function TimelineClip({
         }
         if (dragRef.current?.moved !== true && trimRef.current === null) onToggleSelection(clip.id);
         dragRef.current = null;
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onToggleSelection(clip.id);
+          return;
+        }
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onContextMenu(clip.id, rect.left + 12, rect.top + 12);
+        }
       }}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -332,7 +356,10 @@ function TimelineClip({
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
         event.currentTarget.releasePointerCapture(event.pointerId);
-        onMove(clip.id, dropTimeUs(event.clientX - drag.originX));
+        const targetTrackId = document
+          .elementFromPoint(event.clientX, event.clientY)
+          ?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId;
+        onMove(clip.id, dropTimeUs(event.clientX - drag.originX), targetTrackId);
       }}
       onPointerCancel={() => {
         setDragPx(undefined);
@@ -343,26 +370,60 @@ function TimelineClip({
     >
       {!locked && (
         <>
-          <span
+          <button
+            type="button"
             className="timeline-clip-trim timeline-clip-trim-start"
             data-trim-edge="start"
             aria-label={`Trim start of ${clip.id}`}
+            aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
+            title="Trim start · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
               event.stopPropagation();
               event.preventDefault();
               (event.currentTarget.parentElement as HTMLElement).setPointerCapture(event.pointerId);
               trimRef.current = { edge: 'start', originX: event.clientX };
             }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              const timeUs = keyboardTrimTimeUs({
+                clip,
+                edge: 'start',
+                key: event.key,
+                shiftKey: event.shiftKey,
+                timelineDurationUs: maxStartUs + clip.durationUs,
+              });
+              if (timeUs === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onTrim(clip.id, 'start', timeUs);
+            }}
           />
-          <span
+          <button
+            type="button"
             className="timeline-clip-trim timeline-clip-trim-end"
             data-trim-edge="end"
             aria-label={`Trim end of ${clip.id}`}
+            aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"
+            title="Trim end · Arrow keys nudge 0.1s; Shift nudges 1s"
             onPointerDown={(event) => {
               event.stopPropagation();
               event.preventDefault();
               (event.currentTarget.parentElement as HTMLElement).setPointerCapture(event.pointerId);
               trimRef.current = { edge: 'end', originX: event.clientX };
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              const timeUs = keyboardTrimTimeUs({
+                clip,
+                edge: 'end',
+                key: event.key,
+                shiftKey: event.shiftKey,
+                timelineDurationUs: maxStartUs + clip.durationUs,
+              });
+              if (timeUs === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onTrim(clip.id, 'end', timeUs);
             }}
           />
         </>
@@ -408,7 +469,7 @@ function TimelineClip({
           {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
         </span>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -452,6 +513,7 @@ export function TimelinePanel({
   onImportMedia,
   onImportFiles,
   onMediaPlaced,
+  assetDisplayNames,
   showToast,
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
@@ -502,6 +564,8 @@ export function TimelinePanel({
   readonly onImportMedia?: (file: File) => Promise<TimelineMediaAsset>;
   readonly onImportFiles?: (files: readonly File[]) => void;
   readonly onMediaPlaced?: (asset: TimelineMediaAsset, clipId: string) => void;
+  /** Human labels from the creative asset catalog, keyed by opaque asset id. */
+  readonly assetDisplayNames?: Readonly<Record<string, string>>;
   readonly showToast?: (message: string, kind: 'info' | 'success' | 'error') => void;
   /** Shared with Dual Lens so lock/visibility/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
@@ -705,22 +769,30 @@ export function TimelinePanel({
     [composition.id, onDispatch],
   );
 
-  const moveClip = (trackId: string) => (clipId: string, newStartUs: number) => {
-    try {
-      onDispatch({
-        label: `Move ${clipId}`,
-        commands: [
-          {
-            type: 'timeline.moveClip',
-            payload: { compositionId: composition.id, trackId, clipId, newStartUs },
-          },
-        ],
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const moveClip =
+    (trackId: string) =>
+    (clipId: string, newStartUs: number, targetTrackId = trackId): boolean => {
+      try {
+        const source = composition.tracks.find((candidate) => candidate.id === trackId);
+        const clip = source?.clips.find((candidate) => candidate.id === clipId);
+        const target = composition.tracks.find((candidate) => candidate.id === targetTrackId);
+        const targetView = tracks.find((candidate) => candidate.id === targetTrackId);
+        if (clip === undefined || target === undefined || targetView?.locked === true) return false;
+        const transaction = buildTimelineClipMoveTransaction({
+          compositionId: composition.id,
+          sourceTrackId: trackId,
+          targetTrackId,
+          clip,
+          targetClips: target.clips,
+          newStartUs,
+        });
+        if (transaction === undefined) return false;
+        onDispatch(transaction);
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
   const trimClip =
     (trackId: string) =>
@@ -1507,10 +1579,12 @@ export function TimelinePanel({
                     : 'timeline-track'
                 }
                 key={track.id}
+                data-track-id={track.id}
                 style={{ height: track.heightPx }}
               >
                 <div
                   className="timeline-track-header"
+                  data-track-id={track.id}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1620,6 +1694,7 @@ export function TimelinePanel({
                 </div>
                 <span
                   className="timeline-lane"
+                  data-track-id={track.id}
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onPointerDown={(event) => {
                     if (event.target !== event.currentTarget) return;
@@ -1830,6 +1905,9 @@ export function TimelinePanel({
                     <TimelineClip
                       key={clip.id}
                       clip={clip}
+                      {...(clip.kind === 'video' && assetDisplayNames?.[clip.assetId] !== undefined
+                        ? { displayName: assetDisplayNames[clip.assetId] }
+                        : {})}
                       selected={selectedIds.includes(clip.id)}
                       isDragOver={dragEffectOverClipId === clip.id}
                       maxStartUs={timelineDurationUs - clip.durationUs}

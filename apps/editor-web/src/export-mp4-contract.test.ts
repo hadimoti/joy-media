@@ -23,26 +23,33 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback).not.toMatch(/webm/i);
   });
 
-  it('persists the export preset only after preload consumers and a successful download', () => {
+  it('persists the export preset only after preload, remux, and verified durable caching', () => {
     const preload = exportCallback.indexOf("'fetching authored audio bytes'");
     const download = exportCallback.indexOf(
       'const browserExportResult: BrowserExportResult = await downloadBrowserMp4',
     );
-    const persistPreset = exportCallback.indexOf('session.replaceVisualProject({');
+    const persistPreset = exportCallback.indexOf('session.synchronizeVisualProject({');
     const progress = exportCallback.indexOf('setExportProgress(1)', persistPreset);
+    const durableCache = exportCallback.indexOf('cache.putVerified(entryId, exportResult.blob)');
+    const autoDownload = exportCallback.indexOf(
+      'triggerBrowserDownload(durableBlob, exportResult.filename)',
+    );
 
     expect(preload).toBeGreaterThanOrEqual(0);
     expect(download).toBeGreaterThan(preload);
     expect(persistPreset).toBeGreaterThan(download);
+    expect(persistPreset).toBeGreaterThan(durableCache);
+    expect(autoDownload).toBeGreaterThan(persistPreset);
     expect(progress).toBeGreaterThan(persistPreset);
-    expect(exportCallback.slice(0, persistPreset)).not.toContain('session.replaceVisualProject({');
+    expect(exportCallback.slice(0, persistPreset)).not.toContain(
+      'session.synchronizeVisualProject({',
+    );
     expect(exportCallback.slice(download, persistPreset)).toContain(
       'mediaControlPlaneClient.remuxBrowserMp4',
     );
-    expect(exportCallback.slice(download, persistPreset)).toContain(
-      'triggerBrowserDownload(exportResult.blob, exportResult.filename)',
+    expect(exportCallback.slice(persistPreset, progress)).toContain(
+      'exportPreset: activeExportPreset',
     );
-    expect(exportCallback.slice(persistPreset, progress)).toContain('exportPreset,');
   });
 
   it('records callback-time media drift before decode and canvas work', () => {
@@ -61,6 +68,7 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback).toContain('activeAudioContext.close()');
     expect(exportCallback).toContain('activeRenderer?.destroy()');
     expect(exportCallback).toContain('window.clearTimeout(timer)');
-    expect(exportCallback).toContain('cache.remove(entryId)');
+    expect(exportCallback).toContain('cache.removeVerified(entryId)');
+    expect(exportCallback).toContain('activeExportAudioTrack?.stop()');
   });
 });

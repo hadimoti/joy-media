@@ -28,6 +28,7 @@ import {
   validateCloudDerivativeRegistration,
   validateLocalDerivativeRegistration,
   validateSortName,
+  matchesCloudDerivativeRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
@@ -637,7 +638,9 @@ export class PostgresControlPlane implements ControlPlane {
         const result = await client.query<MediaDerivativeRow>(
           `INSERT INTO media_derivatives
              (id, project_id, asset_id, kind, profile, sha256, byte_length, descriptor, availability, locations, verified_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11) RETURNING *`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11)
+           ${cloud ? 'ON CONFLICT (id) DO NOTHING' : ''}
+           RETURNING *`,
           [
             derivative.id,
             projectId,
@@ -652,7 +655,40 @@ export class PostgresControlPlane implements ControlPlane {
             new Date(now),
           ],
         );
-        return mediaDerivativeOf(requiredRow(result.rows[0], 'DERIVATIVE_CREATE_FAILED'));
+        if (result.rows[0] !== undefined) {
+          const stored = mediaDerivativeOf(result.rows[0]);
+          if (
+            !cloud ||
+            matchesCloudDerivativeRegistration(
+              stored,
+              projectId,
+              derivative as CloudDerivativeRegistration,
+            )
+          )
+            return stored;
+          // pg-mem returns the conflicting row for DO NOTHING whereas real
+          // PostgreSQL returns no row. Enforce the same exact-match contract.
+          throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+        }
+        if (cloud) {
+          const found = await client.query<MediaDerivativeRow>(
+            'SELECT * FROM media_derivatives WHERE id = $1',
+            [derivative.id],
+          );
+          const existing =
+            found.rows[0] === undefined ? undefined : mediaDerivativeOf(found.rows[0]);
+          if (
+            existing !== undefined &&
+            matchesCloudDerivativeRegistration(
+              existing,
+              projectId,
+              derivative as CloudDerivativeRegistration,
+            )
+          )
+            return existing;
+          throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+        }
+        throw new ControlPlaneError('DERIVATIVE_CREATE_FAILED', derivative.id);
       } catch (error) {
         throw databaseError(error, 'DERIVATIVE_EXISTS', derivative.id);
       }

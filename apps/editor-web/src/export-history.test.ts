@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXPORT_HISTORY_KEY,
+  PROJECT_EXPORT_HISTORY_KEY,
+  loadLegacyExportHistory,
   loadExportHistory,
+  loadProjectExportHistory,
+  migrateLegacyExportHistory,
+  recoverInterruptedProjectExports,
   saveExportHistory,
+  saveProjectExportHistory,
   upsertEntry,
+  upsertProjectEntry,
   type ExportProcessEntry,
+  type ProjectExportProcessEntry,
 } from './export-history.js';
 
 function memoryStorage() {
@@ -22,6 +30,24 @@ const entry = (id: string, status: ExportProcessEntry['status']): ExportProcessE
   startedAt: '2026-07-23T00:00:00.000Z',
   mimeType: 'video/mp4',
 });
+
+const projectEntry = (
+  projectId: string,
+  id: string,
+  status: ProjectExportProcessEntry['status'],
+): ProjectExportProcessEntry => {
+  const base = {
+    ...entry(id, status),
+    projectId,
+    fingerprint: `${projectId}:revision-1:reels`,
+    revision: 1,
+    presetId: 'reels-1080',
+    manifest: { width: 1080, height: 1920, durationUs: 3_000_000, frameRate: 30 },
+  };
+  return status === 'completed'
+    ? { ...base, status, cacheState: 'ready', sha256: 'a'.repeat(64), totalBytes: 4 }
+    : { ...base, status, cacheState: 'none' };
+};
 
 describe('export history', () => {
   it('round-trips entries and keeps newest first on upsert', () => {
@@ -78,5 +104,108 @@ describe('export history', () => {
     for (let i = 0; i < 25; i++) entries = upsertEntry(entries, entry(`e${i}`, 'completed'));
     expect(entries).toHaveLength(20);
     expect(entries[0]?.id).toBe('e24');
+  });
+
+  it('migrates v1 rows as read-only legacy data without assigning a project', () => {
+    const storage = memoryStorage();
+    saveExportHistory(storage, [entry('legacy-running', 'running')]);
+
+    expect(migrateLegacyExportHistory(storage)).toEqual({ migrated: true, legacyCount: 1 });
+    expect(migrateLegacyExportHistory(storage)).toEqual({ migrated: false, legacyCount: 1 });
+    expect(loadProjectExportHistory(storage, 'project-a')).toEqual([]);
+    expect(loadLegacyExportHistory(storage)).toEqual([
+      expect.objectContaining({
+        id: 'legacy-running',
+        status: 'interrupted-retryable',
+        error: 'interrupted by page reload',
+      }),
+    ]);
+    expect(storage.getItem(EXPORT_HISTORY_KEY)).not.toBeNull();
+    expect(storage.getItem(PROJECT_EXPORT_HISTORY_KEY)).toContain('"version":2');
+  });
+
+  it('keeps project histories isolated while preserving other project rows', () => {
+    const storage = memoryStorage();
+    saveProjectExportHistory(storage, 'project-a', [projectEntry('project-a', 'a-1', 'completed')]);
+    saveProjectExportHistory(storage, 'project-b', [projectEntry('project-b', 'b-1', 'failed')]);
+    saveProjectExportHistory(storage, 'project-a', [projectEntry('project-a', 'a-2', 'completed')]);
+
+    expect(loadProjectExportHistory(storage, 'project-a').map(({ id }) => id)).toEqual(['a-2']);
+    expect(loadProjectExportHistory(storage, 'project-b').map(({ id }) => id)).toEqual(['b-1']);
+  });
+
+  it('upserts only the matching project and logical id', () => {
+    const a = projectEntry('project-a', 'same-id', 'running');
+    const b = projectEntry('project-b', 'same-id', 'failed');
+    const completed: ProjectExportProcessEntry = {
+      ...a,
+      status: 'completed',
+      cacheState: 'ready',
+      sha256: 'b'.repeat(64),
+      totalBytes: 4,
+    };
+
+    const result = upsertProjectEntry(upsertProjectEntry([a], b), completed);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ projectId: 'project-a', status: 'completed' });
+    expect(result[1]).toMatchObject({ projectId: 'project-b', status: 'failed' });
+  });
+
+  it('persists stale running exports as interrupted-retryable for one project', () => {
+    const storage = memoryStorage();
+    saveProjectExportHistory(storage, 'project-a', [
+      projectEntry('project-a', 'running', 'running'),
+      projectEntry('project-a', 'done', 'completed'),
+    ]);
+    saveProjectExportHistory(storage, 'project-b', [
+      projectEntry('project-b', 'other-running', 'running'),
+    ]);
+
+    expect(recoverInterruptedProjectExports(storage, 'project-a')).toEqual([
+      expect.objectContaining({
+        id: 'running',
+        status: 'interrupted-retryable',
+        cacheState: 'none',
+        error: 'interrupted by page reload',
+      }),
+      expect.objectContaining({ id: 'done', status: 'completed', cacheState: 'ready' }),
+    ]);
+    const persisted = JSON.parse(storage.getItem(PROJECT_EXPORT_HISTORY_KEY)!) as {
+      entries: ProjectExportProcessEntry[];
+    };
+    expect(
+      persisted.entries.find(({ projectId, id }) => projectId === 'project-a' && id === 'running'),
+    ).toMatchObject({ status: 'interrupted-retryable', cacheState: 'none' });
+    expect(
+      persisted.entries.find(
+        ({ projectId, id }) => projectId === 'project-b' && id === 'other-running',
+      ),
+    ).toMatchObject({ status: 'running' });
+  });
+
+  it('rejects an empty project id instead of creating an unscoped v2 bucket', () => {
+    expect(() => loadProjectExportHistory(memoryStorage(), '   ')).toThrow(
+      'projectId must not be empty',
+    );
+  });
+
+  it('drops v2 rows whose persisted retry manifest is incomplete or invalid', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      PROJECT_EXPORT_HISTORY_KEY,
+      JSON.stringify({
+        version: 2,
+        legacy: [],
+        entries: [
+          projectEntry('project-a', 'valid', 'failed'),
+          {
+            ...projectEntry('project-a', 'invalid', 'failed'),
+            manifest: { width: 1080, height: 1920, durationUs: 0, frameRate: 30 },
+          },
+        ],
+      }),
+    );
+
+    expect(loadProjectExportHistory(storage, 'project-a').map(({ id }) => id)).toEqual(['valid']);
   });
 });

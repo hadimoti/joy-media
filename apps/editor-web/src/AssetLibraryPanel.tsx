@@ -385,7 +385,7 @@ export function AssetLibraryPanel({
           }
           const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
           descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
-        } catch (error) {
+        } catch {
           setStatus(
             `Could not read ${asset.displayName} duration; using the default timeline segment.`,
           );
@@ -470,8 +470,8 @@ export function AssetLibraryPanel({
         }
         setStatus(`Uploading ${asset.displayName} to private cloud storage…`);
         await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        setStatus(`${asset.displayName} backed up to private cloud storage.`);
         await refresh();
+        setStatus(`${asset.displayName} backed up to private cloud storage.`);
       } catch (error) {
         setStatus(`Cloud backup failed: ${message(error)}`);
       }
@@ -487,8 +487,8 @@ export function AssetLibraryPanel({
         await verifyOriginalRecoveryCandidate(asset, file);
         setStatus(`Uploading the verified original for ${asset.displayName}…`);
         await client.uploadAssetOriginal(asset.projectId || projectId, asset, file);
-        setStatus(`${asset.displayName} is backed up to private cloud storage.`);
         await refresh();
+        setStatus(`${asset.displayName} is backed up to private cloud storage.`);
       } catch (error) {
         setStatus(`Original recovery stopped: ${message(error)}`);
       }
@@ -508,12 +508,12 @@ export function AssetLibraryPanel({
           next.delete(asset.id);
           return next;
         });
+        await refresh();
         setStatus(
           deleted.cloudObjectPurgeFailures === 0
             ? `${asset.displayName} deleted.`
             : `${asset.displayName} deleted; cloud cleanup will need an operational retry.`,
         );
-        await refresh();
       } catch (error) {
         setStatus(`Failed to delete media: ${message(error)}`);
       }
@@ -540,8 +540,8 @@ export function AssetLibraryPanel({
         /* continue remaining */
       }
     }
-    setStatus(`Backed up ${shared} of ${targets.length} selected media item(s) to the cloud.`);
     await refresh();
+    setStatus(`Backed up ${shared} of ${targets.length} selected media item(s) to the cloud.`);
   }, [client, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
 
   const bulkEditWithAi = useCallback(() => {
@@ -584,12 +584,12 @@ export function AssetLibraryPanel({
       }
     }
     setSelectedAssetIds(new Set());
+    await refresh();
     setStatus(
       `Deleted ${deleted} of ${targets.length} selected media items.${
         cloudObjectPurgeFailures > 0 ? ' Some cloud objects need an operational cleanup retry.' : ''
       }`,
     );
-    await refresh();
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);
@@ -1044,6 +1044,7 @@ export function AssetLibraryPanel({
                   return (
                     <li
                       key={asset.id}
+                      data-asset-id={asset.id}
                       className={`asset-card${selected ? ' is-selected' : ''}`}
                       draggable
                       title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}

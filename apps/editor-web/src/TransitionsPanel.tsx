@@ -1,16 +1,22 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import type { JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject, TransitionV1 } from '@joy-media/project-schema';
 import { listTransitionShaders } from '@joy-media/transition-shaders';
 import type { TransitionDragPayload } from '@joy-media/visual-effects';
 import { TransitionPreviewCard } from './TransitionPreviewCard.js';
 import { StarFilledIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import {
+  readTransitionFavorites,
+  toggleTransitionFavorite,
+  transitionAtJunction,
+} from './transition-panel-state.js';
 
 const SHADER_CATALOG = listTransitionShaders();
 
 interface TransitionsPanelProps {
   readonly project: JoyProjectV1;
+  readonly timelineProject: SpikeProject;
   readonly selectedClipIds: readonly string[];
   readonly onAddTransition: (transition: Omit<TransitionV1, 'id'>) => void;
   readonly onRemoveTransition: (transitionId: string) => void;
@@ -52,9 +58,20 @@ function TransitionCard({
     <div
       ref={cardRef}
       className={`transition-card${isActive ? ' is-active' : ''}`}
+      data-transition-type={entry.id}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isActive}
+      aria-label={`${isActive ? 'Selected' : 'Apply'} ${entry.label} transition`}
       draggable
       onDragStart={onDragStart}
       onClick={onAdd}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onAdd();
+      }}
       title={entry.label}
     >
       <div className="transition-card-thumb">
@@ -96,27 +113,32 @@ function TransitionCard({
 
 export function TransitionsPanel({
   project,
+  timelineProject,
   selectedClipIds,
   onAddTransition,
-  onRemoveTransition: _onRemoveTransition,
-  onUpdateTransition: _onUpdateTransition,
+  onRemoveTransition,
+  onUpdateTransition,
   showToast,
 }: TransitionsPanelProps) {
-  const rootComp = project.compositions[project.rootCompositionId];
+  const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
   const [pendingType, setPendingType] = useState('dissolve');
-  const [selectedTransition] = useState<string | null>(null);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [favorites, setFavorites] = useState<Set<string>>(() =>
+    typeof window === 'undefined' ? new Set() : readTransitionFavorites(window.localStorage),
+  );
   const [query, setQuery] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
 
-  const toggleFavorite = useCallback((id: string) => {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleFavorite = useCallback(
+    (id: string) => {
+      if (typeof window === 'undefined') return;
+      try {
+        setFavorites(toggleTransitionFavorite(window.localStorage, favorites, id));
+      } catch {
+        showToast('Could not save transition favorites in this browser.', 'error');
+      }
+    },
+    [favorites, showToast],
+  );
 
   const availableJunctions = useMemo(() => {
     if (!rootComp || selectedClipIds.length === 0) return [];
@@ -140,9 +162,15 @@ export function TransitionsPanel({
         // the drag-to-timeline tolerance so click-add and drag agree.
         const gapUs = right.startUs - (left.startUs + left.durationUs);
         if (gapUs <= 1_000) {
+          const selected = new Set(selectedClipIds);
+          const isRelevant =
+            selected.size === 1
+              ? selected.has(left.id) || selected.has(right.id)
+              : selected.has(left.id) && selected.has(right.id);
+          if (!isRelevant) continue;
           junctions.push({
             trackId: track.id,
-            trackName: track.name,
+            trackName: track.id,
             leftClipId: left.id,
             rightClipId: right.id,
           });
@@ -153,6 +181,7 @@ export function TransitionsPanel({
   }, [rootComp, selectedClipIds]);
 
   const selectedJunction = availableJunctions[0] ?? null;
+  const selectedTransition = transitionAtJunction(project.transitions ?? [], selectedJunction);
 
   const handleAddTransition = useCallback(
     (type: string) => {
@@ -175,17 +204,33 @@ export function TransitionsPanel({
           if (typeof value === 'number') params[key] = value;
         }
       }
-      onAddTransition({
-        trackId: selectedJunction.trackId,
-        leftClipId: selectedJunction.leftClipId,
-        rightClipId: selectedJunction.rightClipId,
-        type,
-        durationUs: 500_000,
-        ...(Object.keys(params).length > 0 ? { params } : {}),
-      });
+      if (selectedTransition === undefined) {
+        onAddTransition({
+          trackId: selectedJunction.trackId,
+          leftClipId: selectedJunction.leftClipId,
+          rightClipId: selectedJunction.rightClipId,
+          type,
+          durationUs: 500_000,
+          ...(Object.keys(params).length > 0 ? { params } : {}),
+        });
+        showToast(`Added ${entry?.label ?? type}`, 'success');
+      } else {
+        onUpdateTransition(selectedTransition.id, {
+          type,
+          ...(Object.keys(params).length > 0 ? { params } : { params: {} }),
+        });
+        showToast(`Replaced with ${entry?.label ?? type}`, 'success');
+      }
       setPendingType(type);
     },
-    [selectedJunction, selectedClipIds, onAddTransition, showToast],
+    [
+      selectedJunction,
+      selectedTransition,
+      selectedClipIds,
+      onAddTransition,
+      onUpdateTransition,
+      showToast,
+    ],
   );
 
   const handleDragStart = useCallback((type: string, event: React.DragEvent) => {
@@ -220,16 +265,33 @@ export function TransitionsPanel({
           }
         : {})}
       actions={
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
-          title={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
-          aria-pressed={favoritesOnly}
-          onClick={() => setFavoritesOnly((v) => !v)}
-        >
-          <StarFilledIcon />
-        </button>
+        <>
+          {selectedTransition !== undefined && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Remove selected transition"
+              title="Remove transition"
+              data-transition-id={selectedTransition.id}
+              onClick={() => {
+                onRemoveTransition(selectedTransition.id);
+                showToast('Transition removed', 'info');
+              }}
+            >
+              ×
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
+            title={favoritesOnly ? 'Show all transitions' : 'Show favorites only'}
+            aria-pressed={favoritesOnly}
+            onClick={() => setFavoritesOnly((v) => !v)}
+          >
+            <StarFilledIcon />
+          </button>
+        </>
       }
     >
       <>
@@ -243,7 +305,10 @@ export function TransitionsPanel({
                 <TransitionCard
                   key={entry.id}
                   entry={entry}
-                  isActive={selectedTransition === entry.id || pendingType === entry.id}
+                  isActive={
+                    selectedTransition?.type === entry.id ||
+                    (selectedTransition === undefined && pendingType === entry.id)
+                  }
                   isFavorite={true}
                   onAdd={() => handleAddTransition(entry.id)}
                   onToggleFavorite={() => toggleFavorite(entry.id)}
@@ -263,7 +328,10 @@ export function TransitionsPanel({
               <TransitionCard
                 key={entry.id}
                 entry={entry}
-                isActive={selectedTransition === entry.id || pendingType === entry.id}
+                isActive={
+                  selectedTransition?.type === entry.id ||
+                  (selectedTransition === undefined && pendingType === entry.id)
+                }
                 isFavorite={favorites.has(entry.id)}
                 onAdd={() => handleAddTransition(entry.id)}
                 onToggleFavorite={() => toggleFavorite(entry.id)}

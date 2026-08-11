@@ -224,7 +224,6 @@ Diagnostics panel was not selected through a stable locator and drift/stall
 fields were absent; no performance PASS is claimed. R2 verification tests pass,
 but a real connected Worker review/apply remains unrun.
 
-
 ## R2 Worker result review - 2026-08-10
 
 Licensed `audio.ml-denoise` runtime, source guard, daemon receipt/upload contract, browser result verification, and API authorization focused tests pass (16 tests in the combined run). The signed-in browser review/apply sequence was not run because no disposable connected Worker session was provisioned; R2 remains `BLOCKED-INTEGRATION`, not PASS. No production or live account mutation occurred.
@@ -242,3 +241,35 @@ undo/redo remain unrun; R2 is core-path PASS but not full-gate closeout.
 The Pair form still failed to create a disposable worker after the status-role
 repair and input-settle delay. Core Worker result review/apply remains verified;
 UI pairing entry is a reproducible integration blocker.
+
+## Consolidated pre-deploy review — 2026-08-11
+
+The historical blockers above are superseded by the accepted reports linked
+below. STEP-04 through STEP-18 are **APPROVED**. STEP-19 through STEP-21 remain
+pending and no final production deployment or GBrain completion is claimed.
+
+| Gate                                      | Verdict | Accepted evidence                                                                                                                                                                               |
+| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R0/R1 candidate and authenticated harness | PASS    | `pnpm verify:ci`: 259 files / 1,851 tests passed; one file and two tests explicitly skipped; typecheck, lint, formatting, builds, production audit, and authenticated browser harness green     |
+| R2 Worker insertion                       | PASS    | Installed Google Chrome 3/3; Pair/Approve, claim/hello/lease/upload/complete, Review/Replace, one-step Undo/Redo, reload/no duplicate, revoke/401; combined with licensed real-Worker DSP proof |
+| R3 export/FFprobe                         | PASS    | Three authenticated browser downloads independently verified H.264/AAC; retained proof has 13,000 µs duration delta, -21.1 dB audible mean, -91 dB muted mean, and 12.1 dB gain-direction delta |
+| R4 playback                               | PASS    | Controlled reference-host thresholds, native EOF loop, Space pause/resume, arbitrary-duration Fit, and paged follow accepted                                                                    |
+| Export recovery                           | PASS    | Installed Google Chrome 3/3: interruption → same-operation retry, verified OPFS commit, reload re-download digest parity, cancel cleanup, stale-revision rejection                              |
+| R5 former NOT-RUN closure                 | PASS    | 108/108 direct installed-Chrome instances plus three complementary R2 CASE-66 instances = 111/111; zero blocked, failed, or flaky                                                               |
+
+Accepted reports:
+
+- `docs/qa/WP-29-r2-worker-result-20260810-0621.md`
+- `docs/qa/WP-29-step-03-ffprobe-audio-20260810-0621.md`
+- `docs/qa/WP-29-r4-playback-20260810-0621.md`
+- `docs/qa/WP-29-export-recovery-20260811.md`
+- `docs/qa/WP-29-r5-browser-closure-20260810-0621.md`
+
+## Next gate
+
+STEP-19 must record the reviewed final SHA, GitHub/VPS ref parity, fresh verified
+backup, immutable API/editor and rollback releases, health and public hashes.
+STEP-20 must record signed-in live verification and exact cleanup. STEP-21 must
+then reconcile STATE, both plans, reports, WP-27 remediation, and GBrain. Until
+those records exist, the status is **READY-FOR-DEPLOYMENT**, not `WP-29
+FINISHED`.

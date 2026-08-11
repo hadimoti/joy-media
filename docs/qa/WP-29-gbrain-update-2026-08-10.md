@@ -8,7 +8,7 @@ tags:
   - reliability
   - export
   - browser
-status: in-progress
+status: ready-for-deployment
 ---
 
 # JOY Media WP-29 — 2026-08-10 update
@@ -64,7 +64,7 @@ status: in-progress
 - The repository-wide Prettier check is green; formatting is isolated in its
   own mechanical commit.
 
-## Remaining gate
+## Historical remaining gate (superseded)
 
 WP-29 remains in progress. The next gate is the authenticated golden path and
 the 37 previously un-run Chrome scenarios. Real Worker audio result insertion
@@ -73,7 +73,7 @@ metrics, and live disposable-project evidence remain open. The browser export
 attempt currently blocks on 1080×1920 GPU readback stalls; no open item is
 silently reported as a pass.
 
-## Deployment evidence
+## Historical slice deployment evidence
 
 - Candidate: `ccdb031` pushed to `origin/main`.
 - API release: `/opt/joy-media/releases/ccdb031-wp29-closeout-api`.
@@ -114,3 +114,31 @@ rollback target.
 WP-29 remains `in-progress`. The accepted playback/Fit work does not replace
 the still-open R2 UI pairing/undo-redo, export-recovery, and R5 browser-case
 evidence gates.
+
+## Pre-deploy closeout checkpoint — 2026-08-11
+
+The remaining-gate statements above describe earlier slices and are now
+superseded. The reviewed pre-deploy candidate has the following accepted
+evidence:
+
+- `pnpm verify:ci`: PASS — 259 test files and 1,851 tests passed; one file and
+  two named integration tests skipped; builds and production audit passed.
+- R2 Worker insertion: 3/3 in installed Google Chrome, with complementary
+  retained licensed real-Worker DSP bytes.
+- R3 export/audio: 3/3 authenticated H.264/AAC browser exports. The retained
+  duration/audio proof measured 3.013 s for a 3.000 s source (13,000 µs below
+  the 33,334 µs tolerance), audible/gain-0.25/mute means of
+  -21.1/-33.2/-91.0 dB, and a 12.1 dB gain-direction change.
+- R4 playback: three accepted performance runs at 0.79%, 0.37%, and 1.33% drops,
+  plus accepted EOF loop, Space pause/resume, Fit, and paged-follow behavior.
+- Export recovery: 3/3 in installed Google Chrome for interruption, retry,
+  cancel, reload, and durable re-download.
+- R5: 108 direct installed-Chrome instances plus three reconciled R2 CASE-66
+  instances, for 111/111 and all 37 former `NOT-RUN` cases closed.
+
+The releases listed in the historical deployment section remain the currently
+recorded live baseline. The final closeout SHA, immutable API/editor release
+names, signed-in live cleanup evidence, and companion GBrain commit are
+**PENDING**. This file is prepared as the GBrain handoff source; it does not
+claim that the final candidate has been deployed or that GBrain has already
+been updated.

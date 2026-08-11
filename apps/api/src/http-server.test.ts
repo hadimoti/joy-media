@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ControlPlaneError,
   LocalControlPlane,
@@ -18,6 +18,11 @@ import { DisabledMediaAuth } from './media-auth.js';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
+import { MAX_DENOISE_JSON_BYTES, type SpectralDenoiseResult } from './spectral-denoise.js';
+import {
+  MemorySpectralDenoiseInvocationLedger,
+  SpectralDenoiseService,
+} from './spectral-denoise-service.js';
 
 const servers: Server[] = [];
 const SHA256 = 'a'.repeat(64);
@@ -191,6 +196,140 @@ describe('control-plane HTTP transport', () => {
     expect(calls).toBe(1);
     expect(JSON.stringify(first.body)).not.toContain('test-only-mistral-secret');
     expect(JSON.stringify(first.body)).not.toContain('Do not persist this prompt.');
+  });
+
+  it('rejects an oversized Cloud denoise JSON body before decoding or spawning ffmpeg', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    const response = await request(origin, 'POST', '/v1/providers/audio/denoise', {
+      assetId: 'oversized-audio',
+      mediaBase64: 'A'.repeat(MAX_DENOISE_JSON_BYTES),
+    });
+
+    expect(response).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID', message: 'request body exceeds the size limit' } },
+    });
+  });
+
+  it('atomically replays and recovers a project-scoped Cloud denoise result', async () => {
+    const run = vi.fn(async () => ({
+      assetId: 'audio-clean',
+      mimeType: 'audio/wav',
+      bytesBase64: 'Y2xlYW4=',
+      method: 'ffmpeg-afftdn' as const,
+      strength: 0.8,
+    }));
+    const audioDenoise = new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger(), {
+      run,
+    });
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      new LocalControlPlane(),
+      audioDenoise,
+    );
+    await request(origin, 'POST', '/v1/projects', { id: 'project-1', title: 'Project' });
+    expect(
+      await request(
+        origin,
+        'GET',
+        '/v1/providers/audio/denoise?projectId=project-1&operationId=not-claimed',
+      ),
+    ).toMatchObject({
+      status: 404,
+      body: { error: { code: 'PROVIDER_OPERATION_NOT_FOUND' } },
+    });
+    const input = {
+      projectId: 'project-1',
+      operationId: 'cloud-audio-operation-1',
+      assetId: 'audio-source',
+      mediaBase64: 'bm9pc2U=',
+      strength: 0.8,
+    };
+
+    const first = await request(origin, 'POST', '/v1/providers/audio/denoise', input);
+    expect(first).toMatchObject({
+      status: 200,
+      body: { data: { assetId: 'audio-clean', bytesBase64: 'Y2xlYW4=' } },
+    });
+    await expect(request(origin, 'POST', '/v1/providers/audio/denoise', input)).resolves.toEqual(
+      first,
+    );
+    expect(
+      await request(
+        origin,
+        'GET',
+        '/v1/providers/audio/denoise?projectId=project-1&operationId=cloud-audio-operation-1',
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          projectId: 'project-1',
+          operationId: 'cloud-audio-operation-1',
+          status: 'succeeded',
+          result: { assetId: 'audio-clean', bytesBase64: 'Y2xlYW4=' },
+        },
+      },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an actionable 429 when the Cloud denoise concurrency gate is full', async () => {
+    let finish: ((result: SpectralDenoiseResult) => void) | undefined;
+    const run = vi.fn(
+      () =>
+        new Promise<SpectralDenoiseResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const audioDenoise = new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger(), {
+      run,
+      maxGlobalConcurrency: 1,
+      maxPerOwnerConcurrency: 1,
+    });
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      new LocalControlPlane(),
+      audioDenoise,
+    );
+    await request(origin, 'POST', '/v1/projects', { id: 'project-1', title: 'Project' });
+    const first = request(origin, 'POST', '/v1/providers/audio/denoise', {
+      projectId: 'project-1',
+      operationId: 'operation-1',
+      assetId: 'audio-1',
+      mediaBase64: 'bm9pc2U=',
+    });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    expect(
+      await request(origin, 'POST', '/v1/providers/audio/denoise', {
+        projectId: 'project-1',
+        operationId: 'operation-2',
+        assetId: 'audio-2',
+        mediaBase64: 'bm9pc2U=',
+      }),
+    ).toMatchObject({
+      status: 429,
+      body: {
+        error: {
+          code: 'PROVIDER_BUSY',
+          message: 'Cloud denoise is busy for this account; retry in a moment.',
+        },
+      },
+    });
+
+    finish?.({
+      assetId: 'audio-clean',
+      mimeType: 'audio/wav',
+      bytesBase64: 'Y2xlYW4=',
+      method: 'ffmpeg-afftdn',
+      strength: 0.8,
+    });
+    await expect(first).resolves.toMatchObject({ status: 200 });
   });
 
   it('preserves project, Worker lease, completion, and cursor event semantics over v1', async () => {
@@ -576,29 +715,82 @@ describe('control-plane HTTP transport', () => {
       { capabilities: ['asset.thumbnail', 'audio.ml-denoise'], assetIds: ['asset-1'] },
       workerToken,
     );
+    const projectScopedAudioJobId =
+      'audio-denoise-project-12345678-1234-1234-1234-123456789012-media-12345678-1234-1234-1234-123456789012';
     await request(origin, 'POST', '/v1/projects/p/jobs', {
-      id: 'audio-job',
+      id: projectScopedAudioJobId,
       type: 'audio.ml-denoise',
       assetId: 'asset-1',
     });
     await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
     const audio = new Uint8Array([1, 2, 3, 4]);
     const audioSha256 = createHash('sha256').update(audio).digest('hex');
-    const audioUpload = await fetch(`${origin}/v1/workers/w/jobs/audio-job/derivative`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${workerToken}`,
-        'content-type': 'audio/wav',
-        'x-joy-asset-id': 'asset-1',
-        'x-joy-sha256': audioSha256,
-        'x-joy-bytes': String(audio.byteLength),
-      },
-      body: audio,
-    });
+    const uploadAudio = (mimeType = 'audio/wav') =>
+      fetch(
+        `${origin}/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/derivative`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${workerToken}`,
+            'content-type': mimeType,
+            'x-joy-asset-id': 'asset-1',
+            'x-joy-sha256': audioSha256,
+            'x-joy-bytes': String(audio.byteLength),
+          },
+          body: audio,
+        },
+      );
+    const audioUpload = await uploadAudio();
     expect(audioUpload.status).toBe(201);
     expect(await audioUpload.json()).toMatchObject({
-      data: { id: 'derivative-audio-job', kind: 'audio', assetId: 'asset-1' },
+      data: {
+        id: `derivative-${projectScopedAudioJobId}`,
+        kind: 'audio',
+        assetId: 'asset-1',
+      },
     });
+    // Simulate a lost 201: an exact retry is idempotent, retains one private
+    // object, and still lets the Worker complete the lease exactly once.
+    const audioRetry = await uploadAudio();
+    expect(audioRetry.status).toBe(201);
+    expect(await audioRetry.json()).toMatchObject({
+      data: { id: `derivative-${projectScopedAudioJobId}`, sha256: audioSha256 },
+    });
+    expect(store.objects).toHaveLength(2);
+    const mismatchedRetry = await uploadAudio('audio/mpeg');
+    expect(mismatchedRetry.status).toBe(409);
+    expect(await mismatchedRetry.json()).toMatchObject({
+      error: { code: 'DERIVATIVE_EXISTS' },
+    });
+    expect(store.objects).toHaveLength(2);
+
+    const localRef = `gpu-${createHash('sha256')
+      .update(projectScopedAudioJobId)
+      .digest('hex')
+      .slice(0, 32)}-${audioSha256.slice(0, 16)}`;
+    const completed = await request(
+      origin,
+      'POST',
+      `/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/complete`,
+      {
+        result: {
+          kind: 'audio.ml-denoise',
+          assetId: 'asset-1',
+          sha256: audioSha256,
+          bytes: audio.byteLength,
+          localRef,
+          descriptor: { mimeType: 'audio/wav' },
+        },
+      },
+      workerToken,
+    );
+    expect(completed).toMatchObject({ status: 200, body: { data: { state: 'completed' } } });
+    const audioEvents = await request(origin, 'GET', '/v1/projects/p/events?cursor=0');
+    expect(
+      (audioEvents.body as { data: readonly { jobId: string; type: string }[] }).data.filter(
+        (event) => event.jobId === projectScopedAudioJobId && event.type === 'completed',
+      ),
+    ).toHaveLength(1);
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
   });
@@ -660,6 +852,7 @@ async function start(
   privateObjectStore?: PrivateObjectStore,
   mistral?: MistralProviderRegistry,
   controlPlane: ControlPlane = new LocalControlPlane(),
+  audioDenoise?: SpectralDenoiseService,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -667,6 +860,7 @@ async function start(
     mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(mistral === undefined ? {} : { mistral }),
+    ...(audioDenoise === undefined ? {} : { audioDenoise }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

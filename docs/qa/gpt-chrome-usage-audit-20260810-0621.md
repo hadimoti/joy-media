@@ -1,5 +1,14 @@
 # GPT Chrome Usage Audit
 
+> **Historical checkpoint:** This STEP-00/STEP-01 skeleton records the original
+> closeout baseline and failure reproduction. Its `NOT-RUN` and export-failure
+> rows are superseded by
+> [`WP-29-r5-browser-closure-20260810-0621.md`](WP-29-r5-browser-closure-20260810-0621.md),
+> [`WP-29-step-03-ffprobe-audio-20260810-0621.md`](WP-29-step-03-ffprobe-audio-20260810-0621.md),
+> and [`WP-29-export-recovery-20260811.md`](WP-29-export-recovery-20260811.md).
+> The final candidate SHA, deployment, live cleanup, and GBrain closeout remain
+> pending.
+
 ## STEP-00 report
 
 - Status: READY-FOR-REVIEW

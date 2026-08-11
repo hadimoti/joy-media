@@ -41,6 +41,7 @@ import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
+  AssetRecordV1,
   EffectInstanceV1,
   JoyProjectV1,
   SpikeProject,
@@ -117,7 +118,7 @@ import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
-import { JobsPanel } from './JobsPanel.js';
+import { JobsPanel, workerAudioDenoiseOperationId } from './JobsPanel.js';
 import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
@@ -207,10 +208,11 @@ import {
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import {
-  loadExportHistory,
-  saveExportHistory,
-  upsertEntry,
-  type ExportProcessEntry,
+  recoverInterruptedProjectExports,
+  saveProjectExportHistory,
+  upsertProjectEntry,
+  type ExportRetryManifest,
+  type ProjectExportProcessEntry,
 } from './export-history.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
 import {
@@ -287,7 +289,7 @@ function activeVideoClipAt(
   playheadUs: number,
   preferredClipIds: readonly string[] = [],
 ) {
-  const composition = project.compositions.root;
+  const composition = project.compositions[project.rootCompositionId];
   const active = composition?.tracks
     .flatMap((track) => track.clips)
     .filter(
@@ -390,7 +392,7 @@ function activeTransitionAt(project: JoyProjectV1, playheadUs: number): Transiti
 }
 
 function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
-  const clip = project.compositions.root?.tracks
+  const clip = project.compositions[project.rootCompositionId]?.tracks
     .flatMap((track) => track.clips)
     .find((item) => item.id === clipId);
   return clip?.kind === 'video' ? clip : undefined;
@@ -702,15 +704,31 @@ function EditorWorkspace({
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
-  const [exportHistory, setExportHistory] = useState<readonly ExportProcessEntry[]>(() =>
-    loadExportHistory(window.localStorage),
+  const [exportHistory, setExportHistory] = useState<readonly ProjectExportProcessEntry[]>(() =>
+    recoverInterruptedProjectExports(window.localStorage, projectId),
   );
+  const exportHistoryRef = useRef(exportHistory);
+  exportHistoryRef.current = exportHistory;
   const operationLedger = useMemo(
     () => new ProjectOperationLedger(window.localStorage, projectId),
     [projectId],
   );
+  useEffect(() => {
+    operationLedger.recoverInterrupted('export');
+    operationLedger.recoverUncertain('cloud-audio');
+  }, [operationLedger]);
+  useEffect(() => {
+    const interruptedIds = exportHistory
+      .filter((entry) => entry.status === 'interrupted-retryable')
+      .map((entry) => entry.id);
+    if (interruptedIds.length === 0) return;
+    void exportCachePromise
+      .then((cache) => Promise.all(interruptedIds.map((id) => cache.removeVerified(id))))
+      .catch(() => undefined);
+  }, [exportHistory]);
   const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
+  const [audioHydrated, setAudioHydrated] = useState(false);
   const [processesOpen, setProcessesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
@@ -745,6 +763,7 @@ function EditorWorkspace({
   }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
+  const exportInFlightRef = useRef(false);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
   const toastTimersRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
@@ -758,6 +777,15 @@ function EditorWorkspace({
       if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
     };
   }, []);
+  const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { id, message, kind }]);
+    const timer = window.setTimeout(() => {
+      toastTimersRef.current.delete(id);
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 4000);
+    toastTimersRef.current.set(id, timer);
+  }, []);
   useEffect(() => {
     if (lastExportRef.current !== null) return;
     const entry = exportHistory.find((candidate) => candidate.status === 'completed');
@@ -765,16 +793,40 @@ function EditorWorkspace({
     let cancelled = false;
     void exportCachePromise
       .then((cache) => cache.get(entry.id))
-      .then((blob) => {
-        if (cancelled || blob === undefined || lastExportRef.current !== null) return;
-        lastExportRef.current = { entryId: entry.id, url: URL.createObjectURL(blob) };
+      .then(async (blob) => {
+        if (cancelled || lastExportRef.current !== null) return;
+        const valid =
+          blob !== undefined &&
+          blob.size === entry.totalBytes &&
+          (await sha256Hex(new Uint8Array(await blob.arrayBuffer()))) === entry.sha256;
+        if (!valid) {
+          await exportCachePromise
+            .then((cache) => cache.removeVerified(entry.id))
+            .catch(() => undefined);
+          setExportHistory((current) => {
+            const next = current.map((candidate): ProjectExportProcessEntry =>
+              candidate.id === entry.id
+                ? {
+                    ...candidate,
+                    status: 'failed',
+                    cacheState: 'none',
+                    error: 'durable export bytes are unavailable',
+                  }
+                : candidate,
+            );
+            saveProjectExportHistory(window.localStorage, projectId, next);
+            return next;
+          });
+          return;
+        }
+        lastExportRef.current = { entryId: entry.id, url: URL.createObjectURL(blob!) };
         setExportHistory((current) => [...current]);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [exportHistory]);
+  }, [exportHistory, projectId]);
   useEffect(() => {
     saveAgentSettings(window.localStorage, agentSettings);
   }, [agentSettings]);
@@ -790,6 +842,7 @@ function EditorWorkspace({
   const scheduler = useRef(new PlaybackScheduler());
   const playbackDiagnostics = useRef(new PlaybackDiagnosticsSession());
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
   /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
@@ -800,12 +853,17 @@ function EditorWorkspace({
   const partnerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const replacementAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
+  const replacementGainNodeRef = useRef<GainNode | null>(null);
+  const replacementPanNodeRef = useRef<StereoPannerNode | null>(null);
+  const previewAudioDisposeTimerRef = useRef<number | undefined>(undefined);
 
   const ensurePreviewAudioGraph = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return;
+    const replacementAudio = replacementAudioRef.current;
+    if (!video || !replacementAudio) return;
     if (audioContextRef.current === null) {
       audioContextRef.current = new AudioContext();
     }
@@ -819,20 +877,68 @@ function EditorWorkspace({
         .connect(previewPanNodeRef.current)
         .connect(audioContext.destination);
     }
+    if (replacementAudioSourceRef.current === null) {
+      replacementAudioSourceRef.current = audioContext.createMediaElementSource(replacementAudio);
+      replacementGainNodeRef.current = audioContext.createGain();
+      replacementPanNodeRef.current = audioContext.createStereoPanner();
+      replacementAudioSourceRef.current
+        .connect(replacementGainNodeRef.current)
+        .connect(replacementPanNodeRef.current)
+        .connect(audioContext.destination);
+    }
   }, []);
+  const disposePreviewAudioGraph = useCallback(() => {
+    previewAudioSourceRef.current?.disconnect();
+    replacementAudioSourceRef.current?.disconnect();
+    previewGainNodeRef.current?.disconnect();
+    replacementGainNodeRef.current?.disconnect();
+    previewPanNodeRef.current?.disconnect();
+    replacementPanNodeRef.current?.disconnect();
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    previewAudioSourceRef.current = null;
+    replacementAudioSourceRef.current = null;
+    previewGainNodeRef.current = null;
+    replacementGainNodeRef.current = null;
+    previewPanNodeRef.current = null;
+    replacementPanNodeRef.current = null;
+    if (audioContext !== null && audioContext.state !== 'closed')
+      void audioContext.close().catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (previewAudioDisposeTimerRef.current !== undefined) {
+      window.clearTimeout(previewAudioDisposeTimerRef.current);
+      previewAudioDisposeTimerRef.current = undefined;
+    }
+    return () => {
+      // React StrictMode intentionally tears effects down and recreates them
+      // while preserving the same media elements. A MediaElementSource can
+      // only ever be created once for an element, even after its AudioContext
+      // closes, so defer disposal long enough for the matching setup to cancel
+      // it. A genuine unmount has no matching setup and still closes the graph.
+      previewAudioDisposeTimerRef.current = window.setTimeout(() => {
+        previewAudioDisposeTimerRef.current = undefined;
+        disposePreviewAudioGraph();
+      }, 0);
+    };
+  }, [disposePreviewAudioGraph]);
 
   // Sync live preview mixer to audioState (mute/solo/gain/pan) — P14.1
   useEffect(() => {
     ensurePreviewAudioGraph();
     const gainNode = previewGainNodeRef.current;
     const panNode = previewPanNodeRef.current;
-    if (!gainNode || !panNode) return;
+    const replacementGainNode = replacementGainNodeRef.current;
+    const replacementPanNode = replacementPanNodeRef.current;
+    if (!gainNode || !panNode || !replacementGainNode || !replacementPanNode) return;
 
     // Master gain from master bus
     const masterBus = audioState.buses.find((b) => b.id === 'master') ?? audioState.buses[0];
     if (masterBus) {
       gainNode.gain.value = masterBus.mute ? 0 : masterBus.gain;
       panNode.pan.value = masterBus.pan;
+      replacementGainNode.gain.value = masterBus.mute ? 0 : masterBus.gain;
+      replacementPanNode.pan.value = masterBus.pan;
     }
   }, [audioState, ensurePreviewAudioGraph]);
 
@@ -843,6 +949,37 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  useEffect(() => {
+    ensurePreviewAudioGraph();
+    const videoGain = previewGainNodeRef.current;
+    const videoPan = previewPanNodeRef.current;
+    const replacementGain = replacementGainNodeRef.current;
+    const replacementPan = replacementPanNodeRef.current;
+    if (!videoGain || !videoPan || !replacementGain || !replacementPan) return;
+    const activeClip = activeVideoClipAt(
+      session.timelineProject,
+      state.playheadUs,
+      state.selectedIds,
+    );
+    const activeVideoClip = activeClip?.kind === 'video' ? activeClip : undefined;
+    const clipConfig =
+      activeVideoClip === undefined ? undefined : audioState.clips[activeVideoClip.id];
+    const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
+    const hasSolo = Object.values(audioState.clips).some((clip) => clip.solo);
+    const clipAudible =
+      clipConfig === undefined || (!clipConfig.mute && (!hasSolo || clipConfig.solo));
+    const gain =
+      (master?.mute ? 0 : (master?.gain ?? 1)) * (clipAudible ? (clipConfig?.gain ?? 1) : 0);
+    const pan = Math.max(-1, Math.min(1, (master?.pan ?? 0) + (clipConfig?.pan ?? 0)));
+    const replacementActive =
+      activeVideoClip !== undefined &&
+      clipConfig?.sourceAssetId !== undefined &&
+      clipConfig.sourceAssetId !== activeVideoClip.assetId;
+    videoGain.gain.value = replacementActive ? 0 : gain;
+    replacementGain.gain.value = replacementActive ? gain : 0;
+    videoPan.pan.value = pan;
+    replacementPan.pan.value = pan;
+  }, [audioState, ensurePreviewAudioGraph, session, state.playheadUs, state.selectedIds]);
   const audioMigrationRef = useRef(false);
   useEffect(() => {
     if (audioMigrationRef.current) return;
@@ -853,9 +990,11 @@ function EditorWorkspace({
       session.visualProject,
     );
     if (session.visualProject.audio === undefined) {
-      session.replaceVisualProject(withProjectAudio(session.visualProject, canonical));
+      session.synchronizeVisualProject(withProjectAudio(session.visualProject, canonical));
+      setAudioStateRaw(canonical);
       setRevision((revision) => revision + 1);
     } else setAudioStateRaw(canonical);
+    setAudioHydrated(true);
   }, [projectId, session]);
   const controlPlaneOwnerKey =
     joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
@@ -993,6 +1132,7 @@ function EditorWorkspace({
   const syncMediaToPlayhead = useCallback(
     async (playheadUs: number, play: boolean, epoch: number): Promise<boolean> => {
       const video = videoRef.current;
+      const replacementAudio = replacementAudioRef.current;
       const clock = clockRef.current;
       const decoder = decoderRef.current;
       const operation = playbackOperationRef.current;
@@ -1006,6 +1146,7 @@ function EditorWorkspace({
           : undefined);
       if (
         video === null ||
+        replacementAudio === null ||
         clock === null ||
         composition === undefined ||
         clip === undefined ||
@@ -1013,6 +1154,17 @@ function EditorWorkspace({
       )
         return false;
       const source = await mediaResolver.resolve(clip.assetId);
+      if (!operation.isCurrent(epoch)) return false;
+      const clipAudioConfig = audioState.clips[clip.id];
+      const replacementAssetId =
+        clipAudioConfig?.sourceAssetId !== undefined &&
+        clipAudioConfig.sourceAssetId !== clip.assetId
+          ? clipAudioConfig.sourceAssetId
+          : undefined;
+      const replacementSource =
+        replacementAssetId === undefined
+          ? undefined
+          : await mediaResolver.resolve(replacementAssetId);
       if (!operation.isCurrent(epoch)) return false;
       playbackDiagnostics.current.start(clip.id, 'full');
       const sourceUrl = new URL(source.url, window.location.href).href;
@@ -1036,17 +1188,52 @@ function EditorWorkspace({
         });
         if (!operation.isCurrent(epoch)) return false;
       }
+      if (replacementSource === undefined) {
+        replacementAudio.pause();
+        if (replacementAudio.hasAttribute('src')) {
+          replacementAudio.removeAttribute('src');
+          replacementAudio.load();
+        }
+      } else {
+        const replacementUrl = new URL(replacementSource.url, window.location.href).href;
+        if (replacementAudio.src !== replacementUrl) {
+          replacementAudio.src = replacementUrl;
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+              replacementAudio.removeEventListener('loadeddata', onLoaded);
+              replacementAudio.removeEventListener('error', onError);
+            };
+            const onLoaded = () => {
+              cleanup();
+              resolve();
+            };
+            const onError = () => {
+              cleanup();
+              reject(new Error(`Unable to load ${replacementAssetId} for live playback`));
+            };
+            replacementAudio.addEventListener('loadeddata', onLoaded, { once: true });
+            replacementAudio.addEventListener('error', onError, { once: true });
+          });
+          if (!operation.isCurrent(epoch)) return false;
+        }
+      }
       const rate = normalizePlaybackRate(clip.playbackRate);
       const sourceTimeUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
       video.currentTime = sourceTimeUs / 1_000_000;
       video.playbackRate = rate === 0 ? 1 : rate;
+      if (replacementSource !== undefined) {
+        replacementAudio.currentTime = sourceTimeUs / 1_000_000;
+        replacementAudio.playbackRate = rate === 0 ? 1 : rate;
+      }
       scheduler.current.seek(sourceTimeUs);
       lastMediaTimeUsRef.current = undefined;
       lastDiagnosticsObservedUsRef.current = undefined;
       if (play) {
-        video.muted = false;
+        video.muted = replacementSource !== undefined;
+        replacementAudio.muted = false;
         if (rate === 0) {
           video.pause();
+          replacementAudio.pause();
           freezeWallStartRef.current = {
             wallMs: performance.now(),
             playheadUs,
@@ -1056,14 +1243,23 @@ function EditorWorkspace({
           const started = await playMediaWhenCurrent(
             operation,
             epoch,
-            () => video.play(),
-            () => video.pause(),
+            async () => {
+              await Promise.all([
+                video.play(),
+                ...(replacementSource === undefined ? [] : [replacementAudio.play()]),
+              ]);
+            },
+            () => {
+              video.pause();
+              replacementAudio.pause();
+            },
           );
           if (!started) return false;
         }
       } else {
         freezeWallStartRef.current = undefined;
         video.pause();
+        replacementAudio.pause();
         await seekDetachedVideo(video, sourceTimeUs);
         if (decoder !== null) {
           const token = scheduler.current.requestToken();
@@ -1092,7 +1288,7 @@ function EditorWorkspace({
       }
       return true;
     },
-    [captureTransitionPartnerFrames, mediaResolver, rememberClipFrame, session],
+    [audioState.clips, captureTransitionPartnerFrames, mediaResolver, rememberClipFrame, session],
   );
 
   const seek = useCallback(
@@ -1109,6 +1305,7 @@ function EditorWorkspace({
         if (!operation.isCurrent(epoch)) return;
         operation.begin(false);
         videoRef.current?.pause();
+        replacementAudioRef.current?.pause();
         stateRef.current = { ...stateRef.current, playing: false };
         setState((current) => ({ ...current, playing: false }));
       });
@@ -1128,6 +1325,7 @@ function EditorWorkspace({
       if (!operation.isCurrent(epoch)) return;
       operation.begin(false);
       video.pause();
+      replacementAudioRef.current?.pause();
       freezeWallStartRef.current = undefined;
       stateRef.current = { ...stateRef.current, playing: false };
       setState((active) => ({ ...active, playing: false }));
@@ -1146,6 +1344,7 @@ function EditorWorkspace({
       if (nextPlayheadUs === undefined) {
         operation.begin(false);
         video.pause();
+        replacementAudioRef.current?.pause();
         freezeWallStartRef.current = undefined;
         stateRef.current = {
           ...stateRef.current,
@@ -1311,6 +1510,8 @@ function EditorWorkspace({
   }, []);
   useEffect(() => {
     const video = videoRef.current;
+    const replacementAudio = replacementAudioRef.current;
+    const playbackOperation = playbackOperationRef.current;
     if (video === null) return;
     const captureCanvas = document.createElement('canvas');
     // A zero-sized canvas asks the decoder to size it to the decoded media on
@@ -1329,12 +1530,15 @@ function EditorWorkspace({
         .catch(() => undefined);
     }
     return () => {
-      playbackOperationRef.current.begin(false);
+      playbackOperation.begin(false);
       video.pause();
+      replacementAudio?.pause();
       decoderRef.current = null;
       clockRef.current = null;
       video.removeAttribute('src');
       video.load();
+      replacementAudio?.removeAttribute('src');
+      replacementAudio?.load();
     };
   }, [handleMediaReady, mediaResolver, session]);
   const togglePlayback = useCallback(() => {
@@ -1343,12 +1547,14 @@ function EditorWorkspace({
     if (operation.intendsToPlay) {
       operation.begin(false);
       videoRef.current?.pause();
+      replacementAudioRef.current?.pause();
       freezeWallStartRef.current = undefined;
       stateRef.current = { ...current, playing: false };
       setState((active) => ({ ...active, playing: false }));
       return;
     }
     ensurePreviewAudioGraph();
+    void audioContextRef.current?.resume();
     const startUs = playbackStartAtOrAfter(session.timelineProject, current.playheadUs);
     if (startUs === undefined) {
       operation.begin(false);
@@ -1365,6 +1571,7 @@ function EditorWorkspace({
         if (ready || !operation.isCurrent(epoch)) return;
         operation.begin(false);
         videoRef.current?.pause();
+        replacementAudioRef.current?.pause();
         stateRef.current = { ...stateRef.current, playing: false };
         setState((active) => ({ ...active, playing: false }));
       })
@@ -1372,6 +1579,7 @@ function EditorWorkspace({
         if (!operation.isCurrent(epoch)) return;
         operation.begin(false);
         videoRef.current?.pause();
+        replacementAudioRef.current?.pause();
         stateRef.current = { ...stateRef.current, playing: false };
         setState((active) => ({ ...active, playing: false }));
       });
@@ -1439,35 +1647,38 @@ function EditorWorkspace({
   );
   const replaceVisualProjectAndAudio = useCallback(
     (next: JoyProjectV1, nextAudio: AudioState) => {
-      setAudioStateRaw(nextAudio);
       session.replaceVisualProject(withProjectAudio(next, nextAudio));
+      setAudioStateRaw(nextAudio);
       setRevision((revision) => revision + 1);
     },
     [session],
   );
 
-  const syncStickerBitmaps = useCallback(async () => {
-    const mattes = readImageMatteMap(session.visualProject);
-    const activeStickerIds = new Set(
-      Object.values(session.visualProject.visualObjects)
-        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
-        .map((object) => object.id),
-    );
-    stickerImageCache.clearMissing(activeStickerIds);
-    await Promise.all(
-      Object.values(session.visualProject.visualObjects).map(async (object) => {
-        if (object.kind !== 'image' || object.assetId === undefined) return;
-        await stickerImageCache.syncObject({
-          objectId: object.id,
-          assetId: object.assetId,
-          ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
-          crop: object.transform.crop,
-          loadBlob: loadStickerAssetBlob,
-        });
-      }),
-    );
-    setStickerTick((tick) => tick + 1);
-  }, [session]);
+  const syncStickerBitmaps = useCallback(
+    async (project = session.visualProject) => {
+      const mattes = readImageMatteMap(project);
+      const activeStickerIds = new Set(
+        Object.values(project.visualObjects)
+          .filter((object) => object.kind === 'image' && object.assetId !== undefined)
+          .map((object) => object.id),
+      );
+      stickerImageCache.clearMissing(activeStickerIds);
+      await Promise.all(
+        Object.values(project.visualObjects).map(async (object) => {
+          if (object.kind !== 'image' || object.assetId === undefined) return;
+          await stickerImageCache.syncObject({
+            objectId: object.id,
+            assetId: object.assetId,
+            ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
+            crop: object.transform.crop,
+            loadBlob: loadStickerAssetBlob,
+          });
+        }),
+      );
+      setStickerTick((tick) => tick + 1);
+    },
+    [session],
+  );
 
   const addStickerFromAsset = useCallback(
     async (asset: {
@@ -1663,8 +1874,8 @@ function EditorWorkspace({
 
   const setAudioState = useCallback(
     (next: AudioState) => {
-      setAudioStateRaw(next);
       session.replaceVisualProject(withProjectAudio(session.visualProject, next));
+      setAudioStateRaw(next);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -1672,19 +1883,30 @@ function EditorWorkspace({
 
   const timelineClipIds = useMemo(
     () =>
-      session.timelineProject.compositions.root?.tracks.flatMap((track) =>
-        track.clips.map((clip) => clip.id),
-      ) ?? [],
+      session.timelineProject.compositions[
+        session.timelineProject.rootCompositionId
+      ]?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? [],
     [session.timelineProject],
   );
   useEffect(() => {
-    setAudioStateRaw((current) => {
-      const next = ensureClipAudio(current, timelineClipIds);
-      if (next !== current)
-        session.replaceVisualProject(withProjectAudio(session.visualProject, next));
-      return next;
-    });
-  }, [session, timelineClipIds]);
+    // The initial state comes from the legacy key because the EditorSession is
+    // created later in this component. Wait until canonical project audio has
+    // hydrated before deriving clip rows; otherwise StrictMode can persist the
+    // same stale migration twice during reload and invalidate an interrupted
+    // export's immutable retry fingerprint.
+    if (!audioHydrated) return;
+    const next = ensureClipAudio(audioState, timelineClipIds);
+    if (next === audioState) return;
+    try {
+      session.synchronizeVisualProject(withProjectAudio(session.visualProject, next));
+      setAudioStateRaw(next);
+    } catch (error) {
+      showToast(
+        `Audio metadata could not be saved: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
+    }
+  }, [audioHydrated, audioState, session, showToast, timelineClipIds]);
 
   const transcribe = useCallback(
     async (documentId: string, language: 'fa-IR' | 'en-US') => {
@@ -1720,20 +1942,47 @@ function EditorWorkspace({
     },
     [mediaResolver, session, state.playheadUs, state.selectedIds],
   );
+  const reconcileWorkerResultOperations = useCallback(() => {
+    for (const record of operationLedger.list()) {
+      if (record.type !== 'worker-job' || record.resultRef === undefined) continue;
+      const asset = session.visualProject.assets[record.resultRef];
+      const parameters = asset?.generationProvenance?.parameters;
+      const parameterRecord = recordValue(parameters);
+      const isApplied =
+        asset?.generationProvenance?.providerId === 'local-worker' &&
+        parameterRecord?.jobId === record.id;
+      if (isApplied && record.status === 'review')
+        operationLedger.finish(record.id, 'applied', { resultRef: record.resultRef });
+      if (!isApplied && record.status === 'applied')
+        operationLedger.finish(record.id, 'review', { resultRef: record.resultRef });
+    }
+  }, [operationLedger, session]);
   const undo = useCallback(() => {
     session.undo();
+    setAudioStateRaw(
+      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
+    );
+    reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [session]);
+  }, [projectId, reconcileWorkerResultOperations, session]);
   const redo = useCallback(() => {
     session.redo();
+    setAudioStateRaw(
+      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
+    );
+    reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [session]);
+  }, [projectId, reconcileWorkerResultOperations, session]);
   const jumpToHistory = useCallback(
     (sequence: number) => {
       session.jumpToHistory(sequence);
+      setAudioStateRaw(
+        loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
+      );
+      reconcileWorkerResultOperations();
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [projectId, reconcileWorkerResultOperations, session],
   );
   const executeAction = useCallback(
     (id: string) => {
@@ -1813,15 +2062,6 @@ function EditorWorkspace({
         });
       })
       .catch(() => undefined);
-  }, []);
-  const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev, { id, message, kind }]);
-    const timer = window.setTimeout(() => {
-      toastTimersRef.current.delete(id);
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-    toastTimersRef.current.set(id, timer);
   }, []);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
@@ -1959,17 +2199,21 @@ function EditorWorkspace({
     refreshJoySession();
   }, [refreshJoySession]);
   const signOut = useCallback(async () => {
+    if (!window.confirm('Sign out of JOY Studio? Your local project will remain on this device.'))
+      return;
     setAccountOpen(false);
     await logoutJoySession(window.localStorage);
     refreshJoySession();
   }, [refreshJoySession]);
-  const recordExportEntry = useCallback((entry: ExportProcessEntry) => {
-    setExportHistory((entries) => {
-      const next = upsertEntry(entries, entry);
-      saveExportHistory(window.localStorage, next);
-      return next;
-    });
-  }, []);
+  const recordExportEntry = useCallback(
+    (entry: ProjectExportProcessEntry) => {
+      const next = upsertProjectEntry(exportHistoryRef.current, entry);
+      saveProjectExportHistory(window.localStorage, projectId, next);
+      exportHistoryRef.current = next;
+      setExportHistory(next);
+    },
+    [projectId],
+  );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -2169,8 +2413,25 @@ function EditorWorkspace({
   );
 
   const handleExport = useCallback(
-    async (retryEntry?: ExportProcessEntry) => {
-      if (exporting) return;
+    async (retryEntry?: ProjectExportProcessEntry) => {
+      if (exportInFlightRef.current) return;
+      const retryPreset = retryEntry?.presetId;
+      if (
+        retryPreset !== undefined &&
+        retryPreset !== 'reels-1080' &&
+        retryPreset !== 'shorts-1080' &&
+        retryPreset !== 'youtube-1080' &&
+        retryPreset !== 'high-bitrate'
+      ) {
+        setExportStatus('Export retry failed: the saved preset is no longer supported.');
+        return;
+      }
+      const activeExportPreset = retryPreset ?? exportPreset;
+      const exportTimelineProject = structuredClone(session.timelineProject);
+      const exportVisualProject = structuredClone(session.visualProject);
+      const exportAudioState = structuredClone(audioState);
+      const sourceProjectRevisionId = session.projectRevisionId;
+      const sourceRevision = session.historyCursorSequence;
       let selectedMimeType: ReturnType<typeof selectBrowserMp4MimeType>;
       try {
         selectedMimeType = selectBrowserMp4MimeType();
@@ -2184,6 +2445,7 @@ function EditorWorkspace({
         }, 8_000);
         return;
       }
+      exportInFlightRef.current = true;
       const abortController = new AbortController();
       exportAbortRef.current = abortController;
       setExporting(true);
@@ -2191,23 +2453,21 @@ function EditorWorkspace({
       setExportStatus('Building render manifest…');
       setExportProgress(0.02);
       const entryId = retryEntry?.id ?? `export-${Date.now()}`;
-      const startedAt = new Date().toISOString();
+      const startedAt = retryEntry?.startedAt ?? new Date().toISOString();
       const exportFilename = retryEntry?.filename ?? `joy-media-export-${Date.now()}.mp4`;
-      recordExportEntry({
-        id: entryId,
-        filename: exportFilename,
-        status: 'running',
-        startedAt,
-        mimeType: selectedMimeType,
-      });
+      let retryManifest: ExportRetryManifest | undefined;
+      let exportFingerprint: string | undefined;
+      let retryInputsAccepted = retryEntry === undefined;
       const startTimers: number[] = [];
       let activeAudioContext: AudioContext | undefined;
       let activeMixedAudioSource: AudioBufferSourceNode | undefined;
       let mixedAudioStarted = false;
       let activeRenderer: BrowserPixiRenderer | undefined;
-      let exportMediaCleanup: readonly { readonly video: HTMLVideoElement | undefined }[] = [];
+      const exportMediaCleanup: { readonly video: HTMLVideoElement | undefined }[] = [];
+      let activeExportAudioTrack: MediaStreamTrack | undefined;
       let operationStarted = false;
       let exportCompleted = false;
+      let pendingExportUrl: string | undefined;
       try {
         const estimate = await navigator.storage?.estimate?.();
         if (
@@ -2218,13 +2478,13 @@ function EditorWorkspace({
         ) {
           throw new Error('Browser storage is almost full. Free space before exporting.');
         }
-        await syncStickerBitmaps();
+        await syncStickerBitmaps(exportVisualProject);
         const compositionV1 =
-          session.visualProject.compositions[session.visualProject.rootCompositionId];
+          exportVisualProject.compositions[exportVisualProject.rootCompositionId];
         const baseWidth = compositionV1?.width ?? 1080;
         const baseHeight = compositionV1?.height ?? 1920;
         const { width, height } = (() => {
-          switch (exportPreset) {
+          switch (activeExportPreset) {
             case 'reels-1080':
             case 'shorts-1080':
               return { width: 1080, height: 1920 };
@@ -2236,7 +2496,8 @@ function EditorWorkspace({
               return { width: baseWidth, height: baseHeight };
           }
         })();
-        const compositionTimeline = session.timelineProject.compositions.root;
+        const compositionTimeline =
+          exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = compositionTimeline?.tracks.flatMap((track) => track.clips) ?? [];
         const contentEndUs = allTimelineClips.reduce(
           (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
@@ -2252,19 +2513,42 @@ function EditorWorkspace({
           frameRate,
           durationUs,
         });
+        retryManifest = manifest;
+        exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}`;
+        if (
+          retryEntry !== undefined &&
+          (retryEntry.projectId !== projectId ||
+            retryEntry.fingerprint !== exportFingerprint ||
+            JSON.stringify(retryEntry.manifest) !== JSON.stringify(retryManifest))
+        )
+          throw new Error('The project changed since this export attempt. Start a new export.');
+        retryInputsAccepted = true;
+        recordExportEntry({
+          id: entryId,
+          projectId,
+          filename: exportFilename,
+          status: 'running',
+          cacheState: 'none',
+          startedAt,
+          mimeType: selectedMimeType,
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
+          presetId: activeExportPreset,
+          manifest: retryManifest,
+        });
         operationLedger.begin({
           id: entryId,
           type: 'export',
-          fingerprint: `${session.projectRevisionId}:${exportPreset}:${width}x${height}:${durationUs}`,
-          revision: session.historyCursorSequence,
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
         });
         operationStarted = true;
         const cameraId = compositionV1?.activeCameraId;
-        const objectsById = session.visualProject.visualObjects as Readonly<
+        const objectsById = exportVisualProject.visualObjects as Readonly<
           Record<string, VisualObjectV1>
         >;
         const buildFrame = (timeUs: number) => {
-          const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
+          const resolved: ResolvedObject[] = Object.values(exportVisualProject.visualObjects).map(
             (object) => ({
               object,
               transform: evaluateCameraExpressionTransform(
@@ -2283,18 +2567,18 @@ function EditorWorkspace({
               width,
               height,
               resolved,
-              renderFrameOptions(session.visualProject, imageSizesFromCache()),
+              renderFrameOptions(exportVisualProject, imageSizesFromCache()),
             ),
-            session.visualProject,
+            exportVisualProject,
           );
         };
         const clipsByBoundary = allTimelineClips.filter(
           (clip): clip is VideoClip => clip.kind === 'video',
         );
-        const transitionPartnerClips = (session.visualProject.transitions ?? []).flatMap(
+        const transitionPartnerClips = (exportVisualProject.transitions ?? []).flatMap(
           (transition) =>
             [transition.leftClipId, transition.rightClipId]
-              .map((clipId) => findVideoClipById(session.timelineProject, clipId))
+              .map((clipId) => findVideoClipById(exportTimelineProject, clipId))
               .filter((clip): clip is VideoClip => clip !== undefined),
         );
         const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
@@ -2318,7 +2602,7 @@ function EditorWorkspace({
         };
         const exportMedia = await Promise.all(
           exportClips.map(async (clip) => {
-            const clipAudioConfig = audioState.clips[clip.id] ?? {
+            const clipAudioConfig = exportAudioState.clips[clip.id] ?? {
               gain: 1,
               pan: 0,
               mute: false,
@@ -2332,15 +2616,18 @@ function EditorWorkspace({
               audioAssetId === clip.assetId
                 ? source
                 : await preloadStage('resolving source', () => mediaResolver.resolve(audioAssetId));
-            const assetKind = session.visualProject.assets[clip.assetId]?.kind ?? 'video';
+            const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
             let video: HTMLVideoElement | undefined;
             let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
             let stillFrame: ImageDataLike | undefined;
             if (assetKind !== 'audio') {
               if (assetKind === 'image') {
+                abortController.signal.throwIfAborted();
                 stillFrame = await decodeStillFrame(source.url);
+                abortController.signal.throwIfAborted();
               } else {
                 video = document.createElement('video');
+                exportMediaCleanup.push({ video });
                 setExportStatus('Loading detached video…');
                 await loadDetachedVideo(video, source.url, abortController.signal);
                 setExportStatus('Seeking video…');
@@ -2401,7 +2688,6 @@ function EditorWorkspace({
             };
           }),
         );
-        exportMediaCleanup = exportMedia;
         const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
         const audioSampleRate = exportMedia[0]?.audio.sampleRate ?? 48000;
         const offlineAudio = renderOfflineAudio(
@@ -2413,17 +2699,17 @@ function EditorWorkspace({
               audioSampleRate,
             ),
             startUs: media.clip.startUs,
-            config: audioState.clips[media.clip.id] ?? {
+            config: exportAudioState.clips[media.clip.id] ?? {
               gain: 1,
               pan: 0,
               mute: false,
               solo: false,
             },
-            effects: audioState.effects
+            effects: exportAudioState.effects
               .filter((effect) => effect.targetId === media.clip.id)
               .map((effect) => effect.effect),
           })),
-          audioState.buses,
+          exportAudioState.buses,
           { sampleRate: audioSampleRate, channels: 1, startUs: 0, endUs: durationUs },
         );
         const mixedAudio = offlineAudio.samples;
@@ -2437,9 +2723,10 @@ function EditorWorkspace({
         const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
         if (exportAudioTrack === undefined)
           throw new Error('Export audio mix did not produce a track');
+        activeExportAudioTrack = exportAudioTrack;
         const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
         activeRenderer = renderer;
-        const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
+        const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
         const sceneFrames = new Map<
@@ -2452,7 +2739,8 @@ function EditorWorkspace({
           try {
             for (let index = 0; index < totalFrames; index++) {
               const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-              await sceneCache.sync(session.visualProject.visualObjects, timeUs);
+              abortController.signal.throwIfAborted();
+              await sceneCache.sync(exportVisualProject.visualObjects, timeUs);
               sceneFrames.set(index, new Map(sceneCache.bitmaps()));
               if (index % frameRate === 0)
                 setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
@@ -2481,18 +2769,15 @@ function EditorWorkspace({
           },
           paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-            const transition = activeTransitionAt(session.visualProject, timeUs);
-            const activeClip = activeVideoClipAt(session.timelineProject, timeUs);
+            const transition = activeTransitionAt(exportVisualProject, timeUs);
+            const activeClip = activeVideoClipAt(exportTimelineProject, timeUs);
             const clip =
               (activeClip !== undefined && mediaForClip.get(activeClip.id)?.video !== undefined
                 ? activeClip
                 : undefined) ??
               (transition !== undefined
                 ? (() => {
-                    const partner = findVideoClipById(
-                      session.timelineProject,
-                      transition.leftClipId,
-                    );
+                    const partner = findVideoClipById(exportTimelineProject, transition.leftClipId);
                     return partner !== undefined &&
                       mediaForClip.get(partner.id)?.video !== undefined
                       ? partner
@@ -2507,7 +2792,7 @@ function EditorWorkspace({
               if (media.stillFrame !== undefined) {
                 bitmaps.set(target.id, media.stillFrame);
                 return videoFrameNodeFromDecoded(
-                  videoClipSpecAt(session.visualProject, target, timeUs, height),
+                  videoClipSpecAt(exportVisualProject, target, timeUs, height),
                   {
                     assetId: target.assetId,
                     bitmap: media.stillFrame,
@@ -2530,7 +2815,7 @@ function EditorWorkspace({
                 );
               bitmaps.set(target.id, decoded.bitmap);
               return videoFrameNodeFromDecoded(
-                videoClipSpecAt(session.visualProject, target, timeUs, height),
+                videoClipSpecAt(exportVisualProject, target, timeUs, height),
                 decoded,
                 {
                   width: media.video.videoWidth,
@@ -2545,7 +2830,7 @@ function EditorWorkspace({
             if (transition !== undefined && node !== undefined) {
               for (const clipId of [transition.leftClipId, transition.rightClipId]) {
                 if (bitmaps.has(clipId)) continue;
-                const partner = findVideoClipById(session.timelineProject, clipId);
+                const partner = findVideoClipById(exportTimelineProject, clipId);
                 if (partner !== undefined && mediaForClip.get(partner.id)?.video !== undefined)
                   await captureExportClip(partner);
               }
@@ -2571,57 +2856,83 @@ function EditorWorkspace({
         });
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
-        setExportStatus('Finalizing H.264/AAC export&');
+        setExportStatus('Finalizing H.264/AAC export…');
         const remuxedBlob = await mediaControlPlaneClient.remuxBrowserMp4(
           controlPlaneProject.controlPlaneProjectId,
           browserExportResult.blob,
           frameRate,
+          abortController.signal,
         );
+        abortController.signal.throwIfAborted();
+        if (
+          session.projectRevisionId !== sourceProjectRevisionId ||
+          session.historyCursorSequence !== sourceRevision
+        )
+          throw new Error('The project changed during export. Start a new export.');
         const exportResult: BrowserExportResult & { readonly blob: Blob } = {
           ...browserExportResult,
           blob: remuxedBlob,
           mimeType: remuxedBlob.type || 'video/mp4',
           totalBytes: remuxedBlob.size,
         };
-        triggerBrowserDownload(exportResult.blob, exportResult.filename);
-        session.replaceVisualProject({
+        const durableBlob = await exportCachePromise.then((cache) =>
+          cache.putVerified(entryId, exportResult.blob),
+        );
+        abortController.signal.throwIfAborted();
+        const exportSha256 = await sha256Hex(new Uint8Array(await durableBlob.arrayBuffer()));
+        abortController.signal.throwIfAborted();
+        if (
+          session.projectRevisionId !== sourceProjectRevisionId ||
+          session.historyCursorSequence !== sourceRevision
+        )
+          throw new Error(
+            'The project changed while the export was being finalized. Start a new export.',
+          );
+        pendingExportUrl = URL.createObjectURL(durableBlob);
+        session.synchronizeVisualProject({
           ...session.visualProject,
-          exportPreset,
+          exportPreset: activeExportPreset,
           updatedAt: new Date().toISOString(),
         });
-        setExportProgress(1);
-        // Retain only the newest export's bytes for re-download.
-        if (lastExportRef.current !== null) {
-          URL.revokeObjectURL(lastExportRef.current.url);
-          lastExportRef.current = null;
-        }
-        if (exportResult.blob !== undefined)
-          await exportCachePromise
-            .then(async (cache) => {
-              await cache.put(entryId, exportResult.blob!);
-              await cache.prune(undefined, [entryId]);
-            })
-            .catch(() => undefined);
-        lastExportRef.current =
-          exportResult.blob !== undefined
-            ? { entryId, url: URL.createObjectURL(exportResult.blob) }
-            : null;
         recordExportEntry({
           id: entryId,
+          projectId,
           filename: exportResult.filename,
           status: 'completed',
+          cacheState: 'ready',
           startedAt,
           finishedAt: new Date().toISOString(),
           mimeType: exportResult.mimeType,
           totalBytes: exportResult.totalBytes,
           frameCount: exportResult.frameCount,
+          sha256: exportSha256,
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
+          presetId: activeExportPreset,
+          manifest: retryManifest,
         });
         operationLedger.finish(entryId, 'completed', { resultRef: entryId });
         exportCompleted = true;
-        // File has already downloaded via the browser save prompt — drop the
-        // toast immediately and clear the full bar after a short settle so the
-        // processes menu (not the icon row) remains the durable record.
-        setExportStatus(undefined);
+        const previousExport = lastExportRef.current;
+        lastExportRef.current = { entryId, url: pendingExportUrl };
+        pendingExportUrl = undefined;
+        if (previousExport !== null && previousExport.url !== lastExportRef.current.url) {
+          try {
+            URL.revokeObjectURL(previousExport.url);
+          } catch {
+            // The committed export remains available even if releasing the old URL fails.
+          }
+        }
+        void exportCachePromise
+          .then((cache) => cache.prune(undefined, [entryId]))
+          .catch(() => undefined);
+        setExportProgress(1);
+        try {
+          triggerBrowserDownload(durableBlob, exportResult.filename);
+          setExportStatus(undefined);
+        } catch {
+          setExportStatus('Export saved. Download it from Recent processes.');
+        }
         exportToastTimerRef.current = window.setTimeout(() => {
           setExportProgress(undefined);
         }, 450);
@@ -2635,17 +2946,34 @@ function EditorWorkspace({
             ? 'Export cancelled. You can retry from Recent processes.'
             : `Export failed: ${message}`,
         );
-        recordExportEntry({
-          id: entryId,
-          filename: exportFilename,
-          status: cancelled ? 'interrupted-retryable' : 'failed',
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          mimeType: selectedMimeType,
-          error: cancelled ? 'cancelled by user' : message,
-        });
+        if (retryInputsAccepted && retryManifest !== undefined && exportFingerprint !== undefined)
+          try {
+            recordExportEntry({
+              id: entryId,
+              projectId,
+              filename: exportFilename,
+              status: cancelled ? 'interrupted-retryable' : 'failed',
+              cacheState: 'none',
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              mimeType: selectedMimeType,
+              error: cancelled ? 'cancelled by user' : message,
+              fingerprint: exportFingerprint,
+              revision: sourceRevision,
+              presetId: activeExportPreset,
+              manifest: retryManifest,
+            });
+          } catch {
+            // Storage quota failures must not prevent partial-output cleanup.
+          }
         if (operationStarted)
-          operationLedger.finish(entryId, cancelled ? 'cancelled' : 'failed', { error: message });
+          try {
+            operationLedger.finish(entryId, cancelled ? 'cancelled' : 'failed', {
+              error: message,
+            });
+          } catch {
+            // Preserve the original failure and continue releasing the new partial output.
+          }
         setExportProgress(undefined);
         exportToastTimerRef.current = window.setTimeout(() => {
           setExportStatus(undefined);
@@ -2661,6 +2989,8 @@ function EditorWorkspace({
         for (const media of exportMediaCleanup) {
           try {
             media.video?.pause();
+            media.video?.removeAttribute('src');
+            media.video?.load();
           } catch {
             // Continue releasing renderer and audio resources.
           }
@@ -2672,29 +3002,32 @@ function EditorWorkspace({
         }
         if (activeAudioContext !== undefined && activeAudioContext.state !== 'closed')
           await activeAudioContext.close().catch(() => undefined);
+        activeExportAudioTrack?.stop();
         if (!exportCompleted) {
-          if (lastExportRef.current?.entryId === entryId) {
+          if (pendingExportUrl !== undefined) {
             try {
-              URL.revokeObjectURL(lastExportRef.current.url);
+              URL.revokeObjectURL(pendingExportUrl);
             } catch {
-              // The reference is still cleared so it cannot be offered again.
+              // The new partial URL is never published as a re-download.
             }
-            lastExportRef.current = null;
+            pendingExportUrl = undefined;
           }
-          await exportCachePromise.then((cache) => cache.remove(entryId)).catch(() => undefined);
+          await exportCachePromise
+            .then((cache) => cache.removeVerified(entryId))
+            .catch(() => undefined);
         }
         if (exportAbortRef.current === abortController) exportAbortRef.current = null;
+        exportInFlightRef.current = false;
         setExporting(false);
       }
     },
     [
-      audioState.buses,
-      audioState.clips,
-      audioState.effects,
+      audioState,
+      controlPlaneProject.controlPlaneProjectId,
       exportPreset,
-      exporting,
       mediaResolver,
       operationLedger,
+      projectId,
       recordExportEntry,
       session,
       syncStickerBitmaps,
@@ -2824,6 +3157,7 @@ function EditorWorkspace({
           readonly width?: number;
           readonly height?: number;
         };
+        readonly generationProvenance?: AssetRecordV1['generationProvenance'];
       },
     ) => ({
       ...project,
@@ -2852,6 +3186,9 @@ function EditorWorkspace({
                     : { height: asset.descriptor.height }),
                 },
               }),
+          ...(asset.generationProvenance === undefined
+            ? {}
+            : { generationProvenance: asset.generationProvenance }),
         },
       },
     });
@@ -2983,12 +3320,24 @@ function EditorWorkspace({
       result: VerifiedWorkerAudioResult,
       mode: 'replace' | 'keep',
     ): Promise<void> => {
-      if (operationLedger.get(result.jobId)?.status === 'applied') {
+      const existingGeneratedAsset = context.session.visualProject.assets[result.generatedAsset.id];
+      if (existingGeneratedAsset !== undefined) {
+        const provenance = existingGeneratedAsset.generationProvenance;
+        const parameters = provenance?.parameters;
+        const parameterRecord = recordValue(parameters);
+        if (
+          provenance?.providerId !== 'local-worker' ||
+          parameterRecord?.jobId !== result.jobId ||
+          parameterRecord?.derivativeId !== result.derivativeId
+        )
+          throw new Error('Generated asset ID collision with unrelated project media');
         context.showToast('This Worker result is already applied.', 'info');
         return;
       }
-      if (mode === 'replace' && state.selectedIds[0] === undefined)
+      const targetClipId = state.selectedIds[0];
+      if (mode === 'replace' && targetClipId === undefined)
         throw new Error('Select a timeline clip before replacing audio');
+      const expectedRevision = context.session.historyCursorSequence;
       const generated = result.generatedAsset;
       const cache = await originalAssetCachePromise;
       await cache.put(
@@ -3000,26 +3349,38 @@ function EditorWorkspace({
         },
         result.blob,
       );
-      const nextProject = projectWithImportedAsset(context.visualProject, {
-        id: generated.id,
+      if (context.session.historyCursorSequence !== expectedRevision)
+        throw new Error('The project changed while the Worker result was being prepared');
+      const currentProject = context.session.visualProject;
+      const currentAudio = loadAudioStateFromProject(
+        window.localStorage,
+        projectId,
+        currentProject,
+      );
+      if (
+        mode === 'replace' &&
+        !Object.values(context.session.timelineProject.compositions)
+          .flatMap((composition) => composition.tracks)
+          .flatMap((track) => track.clips)
+          .some((clip) => clip.id === targetClipId)
+      )
+        throw new Error('The selected clip no longer exists');
+      const nextProject = projectWithImportedAsset(currentProject, {
+        ...generated,
         kind: 'audio',
-        displayName: generated.displayName,
-        ...(generated.sha256 === undefined ? {} : { sha256: generated.sha256 }),
-        ...(generated.bytes === undefined ? {} : { bytes: generated.bytes }),
-        ...(generated.descriptor === undefined ? {} : { descriptor: generated.descriptor }),
       });
       if (mode === 'replace') {
-        const clipId = state.selectedIds[0]!;
-        const current = context.audioState.clips[clipId] ?? {
+        const clipId = targetClipId!;
+        const current = currentAudio.clips[clipId] ?? {
           gain: 1,
           pan: 0,
           mute: false,
           solo: false,
         };
         const nextAudio = {
-          ...context.audioState,
+          ...currentAudio,
           clips: {
-            ...context.audioState.clips,
+            ...currentAudio.clips,
             [clipId]: { ...current, sourceAssetId: generated.id },
           },
         };
@@ -3082,10 +3443,14 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'audio') {
-      const clipIds =
-        context.timelineProject.compositions.root?.tracks.flatMap((track) =>
-          track.clips.map((clip) => clip.id),
-        ) ?? [];
+      const audioComposition =
+        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
+      const audioClips = audioComposition?.tracks.flatMap((track) => track.clips) ?? [];
+      const clipIds = audioClips.map((clip) => clip.id);
+      const selectedAudioClip =
+        audioClips.find(
+          (clip): clip is VideoClip => clip.kind === 'video' && state.selectedIds.includes(clip.id),
+        ) ?? audioClips.find((clip): clip is VideoClip => clip.kind === 'video');
       return (
         <AudioPanel
           clipIds={clipIds}
@@ -3110,7 +3475,7 @@ function EditorWorkspace({
               },
               { kind: 'limiter' as const, ceiling: -1, releaseUs: 80_000 },
             ];
-            const nextEffects = context.timelineProject.compositions.root?.tracks
+            const nextEffects = audioComposition?.tracks
               .flatMap((track) => track.clips.map((clip) => clip.id))
               .flatMap((clipId) =>
                 effectKinds.map((effect, index) => ({
@@ -3127,6 +3492,230 @@ function EditorWorkspace({
               `Run ${workflowId} with Browser DSP`,
             );
             context.showToast('Browser Voice Polish applied to the project.', 'success');
+          }}
+          onRunLocalWorker={async (workflowId) => {
+            if (selectedAudioClip === undefined)
+              throw new Error('Place a video or audio clip before running Local Worker.');
+            const operationId = workerAudioDenoiseOperationId(
+              controlPlaneProject.controlPlaneProjectId,
+              selectedAudioClip.assetId,
+            );
+            const existing = operationLedger.get(operationId);
+            if (
+              existing?.status === 'running' ||
+              existing?.status === 'review' ||
+              existing?.status === 'applied' ||
+              existing?.status === 'completed'
+            ) {
+              context.showToast('This Local Worker operation is already in Jobs.', 'info');
+              context.activatePanel('jobs');
+              return;
+            }
+            operationLedger.begin({
+              id: operationId,
+              type: 'worker-job',
+              fingerprint: `${selectedAudioClip.assetId}:audio.ml-denoise:v1`,
+              revision: context.session.historyCursorSequence,
+            });
+            try {
+              await mediaControlPlaneClient.ensureProject(
+                controlPlaneProject.controlPlaneProjectId,
+                controlPlaneProject.title,
+              );
+              if (existing?.status === 'failed' || existing?.status === 'cancelled')
+                await mediaControlPlaneClient.retry(
+                  controlPlaneProject.controlPlaneProjectId,
+                  operationId,
+                );
+              else
+                await mediaControlPlaneClient.enqueueWorkerGeneration(
+                  controlPlaneProject.controlPlaneProjectId,
+                  operationId,
+                  'audio.ml-denoise',
+                  selectedAudioClip.assetId,
+                );
+              context.showToast(`Local Worker ${workflowId} queued in Jobs.`, 'success');
+              context.activatePanel('jobs');
+            } catch (error) {
+              operationLedger.finish(operationId, 'failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              throw error;
+            }
+          }}
+          onRunCloudBrain={async (workflowId) => {
+            if (selectedAudioClip === undefined)
+              throw new Error('Place a video or audio clip before running Cloud Brain.');
+            const targetClipId = selectedAudioClip.id;
+            const targetAssetId = selectedAudioClip.assetId;
+            const sourceProjectRevisionId = context.session.projectRevisionId;
+            const sourceRevision = context.session.historyCursorSequence;
+            const sourceAsset = context.session.visualProject.assets[targetAssetId];
+            const source = await mediaResolver.resolve(targetAssetId);
+            const response = await fetch(source.url);
+            if (!response.ok) throw new Error('Cloud Brain could not read the selected media.');
+            const sourceBlob = await response.blob();
+            const sourceSha256 =
+              sourceAsset?.sha256 ??
+              (await sha256Hex(new Uint8Array(await sourceBlob.arrayBuffer())));
+            const operationId = `cloud-audio-${targetAssetId}-${workflowId}`;
+            const fingerprint = `${sourceSha256}:${workflowId}:afftdn:0.8`;
+            const existing = operationLedger.get(operationId);
+            if (existing?.status === 'applied' || existing?.status === 'completed') {
+              context.showToast('This Cloud Brain result is already applied.', 'info');
+              return;
+            }
+            if (existing === undefined)
+              operationLedger.begin({
+                id: operationId,
+                type: 'cloud-audio',
+                fingerprint,
+                revision: sourceRevision,
+              });
+            try {
+              await mediaControlPlaneClient.ensureProject(
+                controlPlaneProject.controlPlaneProjectId,
+                controlPlaneProject.title,
+              );
+              let recovered:
+                | Awaited<ReturnType<typeof mediaControlPlaneClient.denoiseAudioOperation>>
+                | undefined;
+              if (existing !== undefined) {
+                recovered = await mediaControlPlaneClient.denoiseAudioOperation(
+                  controlPlaneProject.controlPlaneProjectId,
+                  operationId,
+                );
+                if (recovered === undefined) {
+                  // A 429 before the durable server claim is safe to retry: the
+                  // authoritative recovery lookup proves no provider run exists.
+                  operationLedger.begin({
+                    id: operationId,
+                    type: 'cloud-audio',
+                    fingerprint,
+                    revision: sourceRevision,
+                  });
+                }
+              }
+              if (
+                recovered?.status === 'running' &&
+                recovered.leaseExpiresAt !== undefined &&
+                recovered.leaseExpiresAt > Date.now()
+              ) {
+                context.showToast(
+                  'This Cloud Brain operation is still running. Try recovery again shortly.',
+                  'info',
+                );
+                return;
+              }
+              if (recovered?.status === 'running' || recovered?.status === 'failed')
+                operationLedger.begin({
+                  id: operationId,
+                  type: 'cloud-audio',
+                  fingerprint,
+                  revision: sourceRevision,
+                });
+              const result =
+                recovered?.result ??
+                (await mediaControlPlaneClient.denoiseAudio({
+                  projectId: controlPlaneProject.controlPlaneProjectId,
+                  operationId,
+                  assetId: targetAssetId,
+                  media: sourceBlob,
+                  strength: 0.8,
+                }));
+              const generatedBytes = bytesFromBase64(result.bytesBase64);
+              const generatedBlob = new Blob([generatedBytes.buffer as ArrayBuffer], {
+                type: result.mimeType,
+              });
+              const generatedSha256 = await sha256Hex(generatedBytes);
+              const generatedAsset: AssetRecordV1 = {
+                id: result.assetId,
+                kind: 'audio',
+                displayName: `Cloud denoise · ${sourceAsset?.displayName ?? targetAssetId}`,
+                sha256: generatedSha256,
+                bytes: generatedBlob.size,
+                descriptor: { mimeType: result.mimeType },
+                generationProvenance: {
+                  providerId: 'joy.cloud-brain',
+                  modelId: result.method,
+                  modelVersion: 'v1',
+                  prompt: workflowId,
+                  inputAssetHashes: [sourceSha256],
+                  parameters: { strength: result.strength },
+                  generatedAssetId: result.assetId,
+                  createdAt: new Date().toISOString(),
+                },
+              };
+              await (
+                await originalAssetCachePromise
+              ).put(
+                {
+                  assetId: generatedAsset.id,
+                  sha256: generatedSha256,
+                  bytes: generatedBlob.size,
+                  mimeType: result.mimeType,
+                },
+                generatedBlob,
+              );
+              if (
+                context.session.projectRevisionId !== sourceProjectRevisionId ||
+                context.session.historyCursorSequence !== sourceRevision
+              )
+                throw new Error(
+                  'The project changed while Cloud Brain was running. The result was not applied.',
+                );
+              const currentTimeline =
+                context.session.timelineProject.compositions[
+                  context.session.timelineProject.rootCompositionId
+                ];
+              const currentTarget = currentTimeline?.tracks
+                .flatMap((track) => track.clips)
+                .find(
+                  (clip): clip is VideoClip => clip.id === targetClipId && clip.kind === 'video',
+                );
+              if (currentTarget?.assetId !== targetAssetId)
+                throw new Error(
+                  'The target clip changed while Cloud Brain was running. The result was not applied.',
+                );
+              const currentProject = context.session.visualProject;
+              const collision = currentProject.assets[generatedAsset.id];
+              if (collision !== undefined && collision.sha256 !== generatedAsset.sha256)
+                throw new Error(
+                  'Cloud Brain returned an asset ID already used by different media.',
+                );
+              const nextProject = projectWithImportedAsset(currentProject, {
+                ...generatedAsset,
+                kind: 'audio',
+              });
+              const currentAudioState = loadAudioStateFromProject(
+                window.localStorage,
+                projectId,
+                currentProject,
+              );
+              const currentClipAudio = currentAudioState.clips[targetClipId] ?? {
+                gain: 1,
+                pan: 0,
+                mute: false,
+                solo: false,
+              };
+              context.replaceVisualProjectAndAudio(nextProject, {
+                ...currentAudioState,
+                clips: {
+                  ...currentAudioState.clips,
+                  [targetClipId]: {
+                    ...currentClipAudio,
+                    sourceAssetId: generatedAsset.id,
+                  },
+                },
+              });
+              operationLedger.finish(operationId, 'applied', { resultRef: generatedAsset.id });
+              context.showToast('Cloud Brain audio applied to the selected clip.', 'success');
+            } catch (error) {
+              operationLedger.finish(operationId, 'failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              throw error;
+            }
           }}
         />
       );
@@ -3155,6 +3744,7 @@ function EditorWorkspace({
       return (
         <TransitionsPanel
           project={visualProject}
+          timelineProject={context.timelineProject}
           selectedClipIds={state.selectedIds}
           onAddTransition={(t) =>
             context.replaceVisualProject({
@@ -3237,6 +3827,9 @@ function EditorWorkspace({
             rememberImportedAsset(asset);
             return asset;
           }}
+          assetDisplayNames={Object.fromEntries(
+            Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
+          )}
           onImportFiles={(files) => {
             for (const file of files) {
               void importMediaFile({
@@ -3417,7 +4010,7 @@ function EditorWorkspace({
     if (api.id === 'jobs') {
       const selectedAudioAssetId = state.selectedIds
         .map((clipId) =>
-          context.timelineProject.compositions.root?.tracks
+          context.timelineProject.compositions[context.timelineProject.rootCompositionId]?.tracks
             .flatMap((track) => track.clips)
             .find((clip) => clip.id === clipId),
         )
@@ -3899,6 +4492,12 @@ function EditorWorkspace({
         </section>
       )}
       <video ref={videoRef} className="playback-media" playsInline muted={false} />
+      <audio
+        ref={replacementAudioRef}
+        className="playback-media"
+        aria-hidden="true"
+        preload="auto"
+      />
       <EditorPanelContext.Provider
         value={{
           state,
@@ -4137,6 +4736,8 @@ function MonitorPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [monitorDragOver, setMonitorDragOver] = useState(false);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
+  const rendererPromiseRef = useRef<Promise<BrowserPixiRenderer> | null>(null);
+  const rendererDisposeTimerRef = useRef<number | undefined>(undefined);
   const paintRef = useRef<() => void>(() => {});
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
@@ -4146,6 +4747,13 @@ function MonitorPanel() {
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const syncFullscreenState = () =>
+      setFullscreen(document.fullscreenElement === panelRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreenState);
+  }, []);
 
   useEffect(() => {
     if (!zoomDrawerOpen) return;
@@ -4247,13 +4855,17 @@ function MonitorPanel() {
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
+    if (rendererDisposeTimerRef.current !== undefined) {
+      window.clearTimeout(rendererDisposeTimerRef.current);
+      rendererDisposeTimerRef.current = undefined;
+    }
     let disposed = false;
-    createBrowserPixiRenderer({ parent: container })
+    const initialization =
+      rendererPromiseRef.current ?? createBrowserPixiRenderer({ parent: container });
+    rendererPromiseRef.current = initialization;
+    initialization
       .then((created) => {
-        if (disposed) {
-          created.destroy();
-          return;
-        }
+        if (disposed) return;
         rendererRef.current = created;
         paintRef.current();
       })
@@ -4263,9 +4875,20 @@ function MonitorPanel() {
       });
     return () => {
       disposed = true;
-      const existing = rendererRef.current;
-      rendererRef.current = null;
-      if (existing !== null) existing.destroy();
+      // React StrictMode replays effects while preserving this panel. Reuse
+      // the same async Pixi Application across that replay so two renderers do
+      // not race through Pixi's process-wide CanvasText texture pool. A real
+      // unmount has no matching setup and disposes after the zero-delay gate.
+      rendererDisposeTimerRef.current = window.setTimeout(() => {
+        rendererDisposeTimerRef.current = undefined;
+        const pending = rendererPromiseRef.current;
+        const existing = rendererRef.current;
+        rendererPromiseRef.current = null;
+        rendererRef.current = null;
+        if (pending !== null)
+          void pending.then((created) => created.destroy()).catch(() => undefined);
+        else existing?.destroy();
+      }, 0);
     };
   }, []);
 
@@ -4317,11 +4940,14 @@ function MonitorPanel() {
     const el = panelRef.current;
     if (el === null) return;
     if (document.fullscreenElement === el) {
-      void document.exitFullscreen();
-      setFullscreen(false);
+      void document
+        .exitFullscreen()
+        .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
       return;
     }
-    void el.requestFullscreen().then(() => setFullscreen(true));
+    void el
+      .requestFullscreen()
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   };
 
   const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
@@ -4506,6 +5132,19 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
       .join('');
   }
   return fallbackSha256Hex(bytes);
+}
+
+function bytesFromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function recordValue(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }
 
 void sha256Hex;

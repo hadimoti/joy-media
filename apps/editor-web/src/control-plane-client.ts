@@ -76,6 +76,36 @@ export interface BrowserReasoningProvider {
   readonly adapterVersion: string;
 }
 
+export interface BrowserSpectralDenoiseResult {
+  readonly assetId: string;
+  readonly mimeType: string;
+  readonly bytesBase64: string;
+  readonly method: 'ffmpeg-afftdn';
+  readonly strength: number;
+}
+
+export interface BrowserSpectralDenoiseOperation {
+  readonly projectId: string;
+  readonly operationId: string;
+  readonly status: 'running' | 'succeeded' | 'failed';
+  readonly result?: BrowserSpectralDenoiseResult;
+  readonly error?: string;
+  readonly leaseExpiresAt?: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export class BrowserControlPlaneRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'BrowserControlPlaneRequestError';
+  }
+}
+
 export interface BrowserProjectMetadata {
   readonly id: string;
   readonly title: string;
@@ -145,7 +175,12 @@ export class BrowserControlPlaneClient {
     if (!response.ok) throw new Error(`cloud original request failed (${response.status})`);
     return response.blob();
   }
-  async remuxBrowserMp4(projectId: string, file: Blob, frameRate = 30): Promise<Blob> {
+  async remuxBrowserMp4(
+    projectId: string,
+    file: Blob,
+    frameRate = 30,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
     const token = await this.assertion();
     const endpoint =
       this.apiUrl.replace(/\/$/, '') +
@@ -160,6 +195,7 @@ export class BrowserControlPlaneClient {
         'x-joy-frame-rate': String(frameRate),
       },
       body: file,
+      ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
       const body = await responseBody(response);
@@ -356,8 +392,8 @@ export class BrowserControlPlaneClient {
       ...(options?.params !== undefined ? { params: options.params } : {}),
     });
   }
-  async pairWorker(workerId: string, pairingCode: string): Promise<void> {
-    await this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
+  async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
+    return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
   }
   async revokeWorker(workerId: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/revoke`, {});
@@ -473,6 +509,43 @@ export class BrowserControlPlaneClient {
     return this.post('/v1/providers/speech/synthesize', input);
   }
 
+  /** Authenticated VPS spectral denoise used only after explicit Cloud Brain consent. */
+  async denoiseAudio(input: {
+    readonly projectId: string;
+    readonly operationId: string;
+    readonly assetId: string;
+    readonly media: Blob;
+    readonly sampleRate?: number;
+    readonly strength?: number;
+  }): Promise<BrowserSpectralDenoiseResult> {
+    return this.post('/v1/providers/audio/denoise', {
+      projectId: input.projectId,
+      operationId: input.operationId,
+      assetId: input.assetId,
+      mediaBase64: await blobToBase64(input.media),
+      ...(input.sampleRate === undefined ? {} : { sampleRate: input.sampleRate }),
+      ...(input.strength === undefined ? {} : { strength: input.strength }),
+    });
+  }
+
+  /** Recovers a durable accepted/running Cloud denoise operation without re-submitting media. */
+  async denoiseAudioOperation(
+    projectId: string,
+    operationId: string,
+  ): Promise<BrowserSpectralDenoiseOperation | undefined> {
+    const query = new URLSearchParams({ projectId, operationId });
+    try {
+      return await this.get(`/v1/providers/audio/denoise?${query.toString()}`);
+    } catch (error) {
+      if (
+        error instanceof BrowserControlPlaneRequestError &&
+        error.code === 'PROVIDER_OPERATION_NOT_FOUND'
+      )
+        return undefined;
+      throw error;
+    }
+  }
+
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }
@@ -490,7 +563,7 @@ export class BrowserControlPlaneClient {
       headers: { ...init.headers, authorization: `Bearer ${token}` },
     });
     const body = await responseBody(response);
-    if (!response.ok) throw new Error(errorMessage(body, response.status));
+    if (!response.ok) throw requestError(body, response.status);
     if (!isRecord(body) || !('data' in body))
       throw new Error('JOY Media API returned an invalid response');
     return body.data as T;
@@ -502,6 +575,16 @@ export class BrowserControlPlaneClient {
   }
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function errorMessage(body: unknown, status: number): string {
   if (isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string') {
     const code = typeof body.error.code === 'string' ? `${body.error.code}: ` : '';
@@ -509,6 +592,13 @@ function errorMessage(body: unknown, status: number): string {
   }
   if (isRecord(body) && typeof body.error === 'string') return body.error;
   return `JOY Media request failed (${status})`;
+}
+function requestError(body: unknown, status: number): BrowserControlPlaneRequestError {
+  const code =
+    isRecord(body) && isRecord(body.error) && typeof body.error.code === 'string'
+      ? body.error.code
+      : undefined;
+  return new BrowserControlPlaneRequestError(status, code, errorMessage(body, status));
 }
 async function responseBody(response: Response): Promise<unknown> {
   const text = await response.text();

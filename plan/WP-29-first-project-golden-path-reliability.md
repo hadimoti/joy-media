@@ -1,6 +1,7 @@
 # WP-29 — First Project Golden Path and Real-Media Reliability
 
-**Status:** In progress — reliability hardening and browser safety smoke implemented; signed-in 100-case closure pending
+**Status:** Pre-deploy gates approved — final immutable deployment, live cleanup,
+and GBrain reconciliation pending
 **Priority:** P1 product reliability  
 **Depends on:** WP-27 audit remediation and WP-28 project lifecycle, both live  
 **Closeout plan:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
@@ -51,11 +52,8 @@ The first vertical slice is implemented in the working tree:
   provisioned model exists, so normal CI is hermetic.
 
 The first reliability hardening slice is now implemented in the working tree.
-The remaining closeout work is live evidence rather than an unverified claim:
-the authenticated 37-case rerun, real Worker pairing/result insertion, and
-browser-level post-encode ffprobe evidence still require a disposable signed-in
-run. The implementation deliberately keeps those rows open until they are
-observed and recorded.
+This paragraph is a historical implementation snapshot. Its remaining evidence
+gates are superseded by the accepted 2026-08-11 checkpoint below.
 
 ## 2026-08-10 implementation evidence
 
@@ -86,6 +84,27 @@ observed and recorded.
   widths; the live browser emitted no warning/error logs. No destructive action
   was submitted.
 
+## 2026-08-11 pre-deploy closure evidence
+
+- `pnpm verify:ci` is green: 259 test files and 1,851 tests passed; one file and
+  two tests are explicitly skipped. Typecheck, lint, formatting, builds, and
+  production audit pass.
+- R2 passes 3/3 in installed Google Chrome through the real editor UI and
+  production Worker HTTP lifecycle; separate licensed Worker evidence proves
+  real DSP execution.
+- R3 retains three authenticated H.264/AAC browser downloads. Its deterministic
+  duration/audio proof measures 13,000 µs duration delta, -21.1 dB audible mean,
+  -91 dB muted mean, and 12.1 dB gain-direction change.
+- Export interruption/retry/re-download/cancel/revision recovery passes 3/3 in
+  installed Chrome.
+- R4 controlled playback and EOF/Space/Fit/follow acceptance is closed.
+- The former 37 NOT-RUN cases close at 108/108 direct installed-Chrome instances
+  plus three complementary R2 CASE-66 instances, for 111/111 reconciled.
+
+Only R6 remains: commit the final reviewed SHA, build and switch immutable
+`/opt/joy-media` releases, verify signed-in production and cleanup, then update
+and push GBrain. No final deployment is claimed by this checkpoint.
+
 ## Success metric
 
 Starting from the Projects page in a fresh authenticated browser profile, a user
@@ -105,7 +124,7 @@ The reference fixture journey must finish in less than five minutes at
 `1639×1066`, with the same functional path remaining available at `1366×768`
 and `1024×768`.
 
-## Current evidence and risks
+## Historical evidence and risks (superseded by the 2026-08-11 checkpoint)
 
 | Area                 | Current evidence                                                                                                    | Risk                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -512,6 +531,11 @@ and completed output re-downloads after refresh.
 a non-catastrophic smoke threshold and never replaces the named-host evidence.
 
 ### WP-29.8 — Browser audit closure, production deployment, and cleanup
+
+The browser-audit portion is accepted through the resumable Batch A–G specs,
+the complementary R2 installed-Chrome spec, and export-recovery spec rather than
+the provisional filenames below. Deployment and cleanup checkboxes remain open
+until the final SHA and live evidence exist.
 
 #### Automated browser suites
 

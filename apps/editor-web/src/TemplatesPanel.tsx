@@ -2,9 +2,11 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
-import { PlusIcon, TrashIcon } from './icons.js';
 import { CONTENT_TEMPLATES, contentTemplateById } from './content-template-catalog.js';
-import { listTemplates, removeTemplate, type TemplateCatalogEntry } from './template-catalog.js';
+import { listTemplates, type TemplateCatalogEntry } from './template-catalog.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
+import { authorTemplateCopy, deleteTemplateWithConfirmation } from './template-catalog-ui.js';
+import { TemplateCatalogCardActions } from './TemplateCatalogCardActions.js';
 import type {
   SeededContentTemplate,
   ContentTemplateV1,
@@ -24,6 +26,9 @@ import {
 interface TemplatesPanelProps {
   readonly onApplyTemplate: (seeded: SeededContentTemplate) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+  readonly storage?: BrowserKeyValueStore;
+  readonly promptForTemplateName?: (message: string, defaultValue: string) => string | null;
+  readonly confirmTemplateDelete?: (message: string) => boolean;
 }
 
 type TemplateView =
@@ -39,8 +44,22 @@ const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: str
   { id: 'Effects', iconUrl: iconUrl('ui/motion_24x24.png') },
 ];
 
-export function TemplatesPanel({ onApplyTemplate, showToast }: TemplatesPanelProps) {
+const SERVER_RENDER_STORAGE: BrowserKeyValueStore = {
+  getItem: () => null,
+  setItem: () => undefined,
+};
+
+export function TemplatesPanel({
+  onApplyTemplate,
+  showToast,
+  storage,
+  promptForTemplateName,
+  confirmTemplateDelete,
+}: TemplatesPanelProps) {
   const [view, setView] = useState<TemplateView>('library');
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const catalogStorage =
+    storage ?? (typeof window === 'undefined' ? SERVER_RENDER_STORAGE : window.localStorage);
 
   const handleApplyLibraryTemplate = useCallback(
     (templateId: string) => {
@@ -72,18 +91,46 @@ export function TemplatesPanel({ onApplyTemplate, showToast }: TemplatesPanelPro
   );
 
   const handleDeleteTemplate = useCallback(
-    (id: string) => {
-      removeTemplate(window.localStorage, id);
+    (entry: TemplateCatalogEntry) => {
+      const confirmed = deleteTemplateWithConfirmation(
+        catalogStorage,
+        entry,
+        confirmTemplateDelete ??
+          ((message) => (typeof window === 'undefined' ? false : window.confirm(message))),
+      );
+      if (!confirmed) return;
+      setCatalogRevision((revision) => revision + 1);
       showToast('Template deleted', 'info');
     },
-    [showToast],
+    [catalogStorage, confirmTemplateDelete, showToast],
   );
 
-  const filteredTemplates = useMemo(() => {
+  const handleAuthorTemplate = useCallback(
+    (template: ContentTemplateV1) => {
+      const requestedName = (
+        promptForTemplateName ??
+        ((message, defaultValue) =>
+          typeof window === 'undefined' ? null : window.prompt(message, defaultValue))
+      )(`Save “${template.label}” to My Templates`, `${template.label} Copy`);
+      if (requestedName === null) return;
+      try {
+        const entry = authorTemplateCopy(catalogStorage, template, requestedName);
+        setCatalogRevision((revision) => revision + 1);
+        setView('mine');
+        showToast(`Template "${entry.label}" saved`, 'success');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not save template', 'error');
+      }
+    },
+    [catalogStorage, promptForTemplateName, showToast],
+  );
+
+  void catalogRevision;
+  const filteredTemplates = (() => {
     if (view === 'library') return CONTENT_TEMPLATES;
-    if (view === 'mine') return listTemplates(window.localStorage);
+    if (view === 'mine') return listTemplates(catalogStorage);
     return CONTENT_TEMPLATES.filter((tpl) => tpl.category === view);
-  }, [view]);
+  })();
 
   const isMine = view === 'mine';
 
@@ -99,41 +146,25 @@ export function TemplatesPanel({ onApplyTemplate, showToast }: TemplatesPanelPro
           <div
             key={tpl.id}
             className="template-card"
+            data-template-id={tpl.id}
             title={'description' in tpl ? tpl.description : undefined}
           >
             <TemplatePreviewThumb template={tpl} />
             <span className="template-card-name">{tpl.label}</span>
             <span className="template-card-category">{tpl.category}</span>
-            <button
-              type="button"
-              className="icon-button template-card-apply"
-              aria-label={`Apply ${tpl.label}`}
-              title={`Apply ${tpl.label}`}
-              onClick={(e) => {
-                e.stopPropagation();
+            <TemplateCatalogCardActions
+              label={tpl.label}
+              isMine={isMine}
+              onApply={() => {
                 if (isMine) {
                   handleApplyCatalogTemplate(tpl as TemplateCatalogEntry);
                 } else {
                   handleApplyLibraryTemplate(tpl.id);
                 }
               }}
-            >
-              <PlusIcon />
-            </button>
-            {isMine && (
-              <button
-                type="button"
-                className="icon-button template-card-delete"
-                aria-label={`Delete ${tpl.label}`}
-                title="Delete template"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteTemplate(tpl.id);
-                }}
-              >
-                <TrashIcon />
-              </button>
-            )}
+              onSave={() => handleAuthorTemplate(tpl as ContentTemplateV1)}
+              onDelete={() => handleDeleteTemplate(tpl as TemplateCatalogEntry)}
+            />
           </div>
         ))}
       </div>
@@ -144,6 +175,7 @@ export function TemplatesPanel({ onApplyTemplate, showToast }: TemplatesPanelPro
     handleApplyLibraryTemplate,
     handleApplyCatalogTemplate,
     handleDeleteTemplate,
+    handleAuthorTemplate,
   ]);
 
   return (

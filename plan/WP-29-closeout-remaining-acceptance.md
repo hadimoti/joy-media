@@ -1,8 +1,9 @@
 # WP-29 Closeout — Remaining Acceptance Gates
 
-**Status:** In progress — reliability slices implemented; live closeout gates remain
+**Status:** R0–R5 approved — R6 immutable deployment, live cleanup, and GBrain pending
 **Parent:** [`WP-29-first-project-golden-path-reliability.md`](WP-29-first-project-golden-path-reliability.md)
-**Baseline:** product release `e02f646`; closeout candidate is the current `main` tip
+**Baseline:** current live API `ccdb031`; current live editor `8567f3e`; final
+closeout candidate SHA pending
 **Target:** close WP-29 without converting unavailable or unobserved behavior into PASS
 
 ## Outcome
@@ -25,8 +26,9 @@ must not be called PASS.
 
 - The closeout candidate has a clean verification worktree after commit; production
   API/editor artifacts are built from the candidate commit.
-- Typecheck, ESLint, build, production audit, 1,727 tests, and the three-viewport
-  Playwright/Axe login smoke pass.
+- `pnpm verify:ci` passes: 259 test files and 1,851 tests passed; one file and
+  two tests are explicitly skipped. Typecheck, ESLint, formatting, builds, and
+  production audit are green.
 - Project media resolution, metadata-preserving placement, content-range export,
   authored audio mix, export cancel/retry, OPFS output cache, Worker derivative
   upload, Worker keepalive, and fail-closed ML capability advertisement exist.
@@ -34,8 +36,23 @@ must not be called PASS.
   `1366×768`, and `1024×768` with no browser warning/error logs.
 - The isolated 81-file formatting baseline has been normalized; `pnpm verify:ci`
   now exits zero (235 test files, one expected file skip, two expected test skips).
-- The current Playwright suite proves only the login safety envelope. It does
-  not yet provide a test identity or drive the signed-in golden path.
+- Installed Google Chrome passes R2 3/3, export recovery 3/3, and the complete
+  R5 closure: 108/108 direct instances plus three reconciled R2 CASE-66
+  instances, for 111/111 total.
+
+### Pre-deploy closure checkpoint — 2026-08-11
+
+- R2 PASS: deterministic Pair/Approve and production Worker HTTP lifecycle at
+  all viewports, combined with separately retained licensed real DSP evidence.
+- R3 PASS: three authenticated H.264/AAC downloads plus 13,000 µs duration
+  delta, -21.1 dB audible mean, -91 dB muted mean, and 12.1 dB gain-direction
+  proof.
+- R4 PASS: controlled playback thresholds plus EOF loop, Space transport,
+  arbitrary-duration Fit, and paged follow.
+- R5 PASS: 111/111 reconciled installed-Chrome instances, zero blockers,
+  failures, or flakes.
+- R6 PENDING: final SHA, immutable API/editor releases, fresh backup, public
+  hashes, signed-in live cleanup, and GBrain commit.
 
 ## Dependency order
 
@@ -202,7 +219,7 @@ bypass, fixture-only result, or committed credential.
 
 ## R3 — Browser MP4 download and independent FFprobe proof
 
-### Implementation checkpoint — 2026-08-10
+### Historical implementation checkpoint — 2026-08-10 (superseded)
 
 The independent FFprobe verifier and manifest contract are implemented in
 `packages/export-core`. A real authenticated Chrome smoke imported the committed
@@ -212,6 +229,10 @@ repeated 1080×1920 GPU `ReadPixels` stalls while the preview-equivalent recorde
 was rendering. This is recorded as an open R3 performance/product blocker, not a
 PASS; the browser-originated file, SHA, duration, audio loudness, and reload
 re-download evidence must be rerun after the export readback path is optimized.
+
+This blocker is closed by
+`docs/qa/WP-29-step-03-ffprobe-audio-20260810-0621.md` and
+`docs/qa/WP-29-export-recovery-20260811.md`.
 
 ### R3.1 Golden-path export spec
 
@@ -319,6 +340,10 @@ re-download evidence must be rerun after the export readback path is optimized.
 
 ## R5 — Close the 37 previously NOT-RUN cases
 
+**Accepted 2026-08-11:** 108/108 direct installed-Chrome instances plus three
+complementary R2 CASE-66 instances reconcile to 111/111. See
+`docs/qa/WP-29-r5-browser-closure-20260810-0621.md`.
+
 Run deterministic local automation first. Repeat the necessary end-to-end
 subset in the signed-in live browser using a disposable project named
 `WP-29 closeout <run-id>`. Cases are grouped into resumable batches:
@@ -370,6 +395,10 @@ subset in the signed-in live browser using a disposable project named
 ## R6 — Candidate verification, deployment, and closeout
 
 ### Candidate gate
+
+**PASS on the pre-deploy working tree:** `pnpm verify:ci` is green with 259
+files / 1,851 tests passed, one file and two tests explicitly skipped; builds
+and production audit are green. The final committed SHA is still pending.
 
 Run on the exact clean commit:
 

@@ -1,16 +1,19 @@
 import { useCallback, useMemo } from 'react';
-import type {
-  MotionLayer,
-  MotionLayerId,
-  MotionSceneDocument,
-  MotionTransform,
-  MotionTypography,
-  MotionFill,
-  MotionStroke,
-  MotionShadow,
-  MotionFilter,
-  SceneBackground,
-  BlendMode,
+import {
+  hasKeyframeAtMotion,
+  removeKeyframeAt,
+  setKeyframeAt,
+  type MotionLayer,
+  type MotionLayerId,
+  type MotionSceneDocument,
+  type MotionTransform,
+  type MotionTypography,
+  type MotionFill,
+  type MotionStroke,
+  type MotionShadow,
+  type MotionFilter,
+  type SceneBackground,
+  type BlendMode,
 } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
 import { UI_ICONS } from '../ui-icons.js';
@@ -19,6 +22,7 @@ import {
   layerCapabilities,
   commonCapabilities,
   MOTION_BLEND_MODES,
+  type AnimatablePath,
 } from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
 
@@ -99,6 +103,30 @@ function isMixedString(value: string | number): value is string {
   return typeof value === 'string';
 }
 
+interface KeyframeControls {
+  readonly isActive: (property: string) => boolean;
+  readonly toggle: (property: string, value: number) => void;
+}
+
+function keyframeControlProps(
+  controls: KeyframeControls | undefined,
+  property: string,
+  value: number | undefined,
+): {
+  readonly diamond: boolean;
+  readonly keyframeActive: boolean;
+  readonly onToggleKeyframe?: () => void;
+} {
+  if (controls === undefined || value === undefined) {
+    return { diamond: false, keyframeActive: false };
+  }
+  return {
+    diamond: true,
+    keyframeActive: controls.isActive(property),
+    onToggleKeyframe: () => controls.toggle(property, value),
+  };
+}
+
 function NumberRow({
   label,
   value,
@@ -107,6 +135,8 @@ function NumberRow({
   min,
   max,
   diamond,
+  keyframeActive,
+  onToggleKeyframe,
 }: {
   readonly label: string | number;
   readonly value: number | string;
@@ -115,6 +145,8 @@ function NumberRow({
   readonly min?: number;
   readonly max?: number;
   readonly diamond?: boolean;
+  readonly keyframeActive?: boolean;
+  readonly onToggleKeyframe?: () => void;
 }) {
   return (
     <div className="ms-inspector-row" key={label}>
@@ -124,7 +156,9 @@ function NumberRow({
           type="button"
           className="ms-inspector-keyframe"
           aria-label="Toggle keyframe"
-          title="Keyframe (Phase 4)"
+          aria-pressed={keyframeActive ?? false}
+          title={keyframeActive ? 'Remove keyframe' : 'Add keyframe'}
+          onClick={onToggleKeyframe}
         >
           <KeyframeDiamondIcon />
         </button>
@@ -153,12 +187,16 @@ function SelectRow({
   options,
   onChange,
   diamond,
+  keyframeActive,
+  onToggleKeyframe,
 }: {
   readonly label: string;
   readonly value: string;
   readonly options: readonly string[];
   readonly onChange: (v: string) => void;
   readonly diamond?: boolean;
+  readonly keyframeActive?: boolean;
+  readonly onToggleKeyframe?: () => void;
 }) {
   return (
     <div className="ms-inspector-row" key={label}>
@@ -168,7 +206,9 @@ function SelectRow({
           type="button"
           className="ms-inspector-keyframe"
           aria-label="Toggle keyframe"
-          title="Keyframe (Phase 4)"
+          aria-pressed={keyframeActive ?? false}
+          title={keyframeActive ? 'Remove keyframe' : 'Add keyframe'}
+          onClick={onToggleKeyframe}
         >
           <KeyframeDiamondIcon />
         </button>
@@ -369,11 +409,11 @@ function SceneInspector({
 function TransformSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const xs = selected.map((l) => l.transform.x);
   const ys = selected.map((l) => l.transform.y);
@@ -402,14 +442,14 @@ function TransformSection({
         value={mixedNumber(xs)}
         step={1}
         onChange={(v) => updateTransform({ x: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.x', xs[0])}
       />
       <NumberRow
         label="Y"
         value={mixedNumber(ys)}
         step={1}
         onChange={(v) => updateTransform({ y: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.y', ys[0])}
       />
       <NumberRow
         label="Width"
@@ -417,7 +457,7 @@ function TransformSection({
         step={1}
         min={1}
         onChange={(v) => updateTransform({ width: Math.max(1, v) })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.width', ws[0])}
       />
       <NumberRow
         label="Height"
@@ -425,14 +465,14 @@ function TransformSection({
         step={1}
         min={1}
         onChange={(v) => updateTransform({ height: Math.max(1, v) })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.height', hs[0])}
       />
       <NumberRow
         label="Rotation"
         value={mixedNumber(rots)}
         step={1}
         onChange={(v) => updateTransform({ rotationDeg: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.rotationDeg', rots[0])}
       />
       <NumberRow
         label="Scale X"
@@ -441,7 +481,7 @@ function TransformSection({
         min={-10}
         max={10}
         onChange={(v) => updateTransform({ scaleX: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.scaleX', scaleXs[0])}
       />
       <NumberRow
         label="Scale Y"
@@ -450,7 +490,7 @@ function TransformSection({
         min={-10}
         max={10}
         onChange={(v) => updateTransform({ scaleY: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.scaleY', scaleYs[0])}
       />
       <NumberRow
         label="Opacity"
@@ -459,7 +499,7 @@ function TransformSection({
         min={0}
         max={1}
         onChange={(v) => updateTransform({ opacity: Math.min(1, Math.max(0, v)) })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'transform.opacity', ops[0])}
       />
     </div>
   );
@@ -468,11 +508,11 @@ function TransformSection({
 function TextSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const texts = selected.map((l) => l.text ?? '');
   const fontFamilies = selected.map((l) => l.typography?.fontFamily ?? 'system-ui');
@@ -530,7 +570,7 @@ function TextSection({
           min={1}
           max={400}
           onChange={(v) => updateTypography({ fontSize: v })}
-          diamond={showDiamonds}
+          {...keyframeControlProps(keyframes, 'typography.fontSize', fontSizes[0])}
         />
         <NumberRow
           label="Line Height"
@@ -539,7 +579,7 @@ function TextSection({
           min={0.5}
           max={5}
           onChange={(v) => updateTypography({ lineHeight: v })}
-          diamond={showDiamonds}
+          {...keyframeControlProps(keyframes, 'typography.lineHeight', lineHeights[0])}
         />
         <NumberRow
           label="Letter Spacing"
@@ -548,7 +588,7 @@ function TextSection({
           min={-20}
           max={100}
           onChange={(v) => updateTypography({ letterSpacing: v })}
-          diamond={showDiamonds}
+          {...keyframeControlProps(keyframes, 'typography.letterSpacing', letterSpacings[0])}
         />
         <NumberRow
           label="Word Spacing"
@@ -557,7 +597,7 @@ function TextSection({
           min={-50}
           max={100}
           onChange={(v) => updateTypography({ wordSpacing: v })}
-          diamond={showDiamonds}
+          {...keyframeControlProps(keyframes, 'typography.wordSpacing', wordSpacings[0])}
         />
         <NumberRow
           label="Paragraph Spacing"
@@ -566,7 +606,7 @@ function TextSection({
           min={0}
           max={200}
           onChange={(v) => updateTypography({ paragraphSpacing: v })}
-          diamond={showDiamonds}
+          {...keyframeControlProps(keyframes, 'typography.paragraphSpacing', paragraphSpacings[0])}
         />
         <NumberRow
           label="Font Weight"
@@ -604,11 +644,11 @@ function TextSection({
 function FillSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const firstFills = selected.map((l) => l.fills[0]);
   const colors = firstFills.map((f) => (f?.kind === 'solid' ? f.color : '#ffffff'));
@@ -645,7 +685,7 @@ function FillSection({
           onChange={(color, opacity) => updateFill({ kind: 'solid', color, opacity })}
         />
       )}
-      {showDiamonds && (
+      {keyframes !== undefined && (
         <NumberRow
           label="Opacity"
           value={mixedNumber(opacities)}
@@ -653,7 +693,7 @@ function FillSection({
           min={0}
           max={1}
           onChange={(v) => updateFill({ opacity: v })}
-          diamond
+          {...keyframeControlProps(keyframes, 'fill.opacity', opacities[0])}
         />
       )}
     </div>
@@ -663,11 +703,11 @@ function FillSection({
 function StrokeSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const widths = selected.map((l) => l.strokes[0]?.width ?? 0);
   const colors = selected.map((l) => l.strokes[0]?.color ?? '#ffffff');
@@ -696,7 +736,7 @@ function StrokeSection({
         min={0}
         max={50}
         onChange={(v) => updateStrokes({ width: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'stroke.width', widths[0])}
       />
       <div className="ms-inspector-row">
         <label className="ms-inspector-label">Color</label>
@@ -720,11 +760,11 @@ function StrokeSection({
 function ShadowSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const xs = selected.map((l) => l.shadows[0]?.x ?? 0);
   const ys = selected.map((l) => l.shadows[0]?.y ?? 0);
@@ -763,14 +803,12 @@ function ShadowSection({
         value={mixedNumber(xs)}
         step={1}
         onChange={(v) => updateShadows({ x: v })}
-        diamond={showDiamonds}
       />
       <NumberRow
         label="Y"
         value={mixedNumber(ys)}
         step={1}
         onChange={(v) => updateShadows({ y: v })}
-        diamond={showDiamonds}
       />
       <NumberRow
         label="Blur"
@@ -779,7 +817,6 @@ function ShadowSection({
         min={0}
         max={100}
         onChange={(v) => updateShadows({ blur: v })}
-        diamond={showDiamonds}
       />
       <NumberRow
         label="Spread"
@@ -788,7 +825,6 @@ function ShadowSection({
         min={0}
         max={100}
         onChange={(v) => updateShadows({ spread: v })}
-        diamond={showDiamonds}
       />
       <NumberRow
         label="Opacity"
@@ -797,7 +833,7 @@ function ShadowSection({
         min={0}
         max={1}
         onChange={(v) => updateShadows({ opacity: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'shadow.opacity', opacities[0])}
       />
       <div className="ms-inspector-row">
         <label className="ms-inspector-label">Color</label>
@@ -924,11 +960,11 @@ function BlendModeSection({
 function SimpleFilterSection({
   selected,
   dispatch,
-  showDiamonds,
+  keyframes,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly showDiamonds: boolean;
+  readonly keyframes: KeyframeControls | undefined;
 }) {
   const firsts = selected.map((l) => l.filters[0]);
   const kinds = firsts.map((f) => f?.kind ?? 'blur');
@@ -966,7 +1002,7 @@ function SimpleFilterSection({
         min={0}
         max={1000}
         onChange={(v) => updateFilters({ value: v })}
-        diamond={showDiamonds}
+        {...keyframeControlProps(keyframes, 'filter.value', values[0])}
       />
     </div>
   );
@@ -975,18 +1011,44 @@ function SimpleFilterSection({
 function LayerInspector({
   selected,
   dispatch,
+  playheadMs,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
+  readonly playheadMs: number;
 }) {
   const isMulti = selected.length > 1;
   const types = selected.map((l) => l.type);
+  const first = selected[0]!;
+  const capabilities = layerCapabilities(first.type);
   const sections = useMemo(
     () => (isMulti ? commonCapabilities(types) : layerCapabilities(types[0]!).sections),
     [isMulti, types],
   );
-  const showDiamonds = !isMulti;
-  const first = selected[0]!;
+  const isAnimatable = (property: string): property is AnimatablePath =>
+    capabilities.animatable.includes(property as AnimatablePath);
+  const keyframes: KeyframeControls | undefined = isMulti
+    ? undefined
+    : {
+        isActive: (property) => {
+          if (!isAnimatable(property)) return false;
+          return hasKeyframeAtMotion(
+            first.animations.find((animation) => animation.property === property),
+            playheadMs,
+          );
+        },
+        toggle: (property, value) => {
+          if (!isAnimatable(property)) return;
+          const existing = first.animations.find((animation) => animation.property === property);
+          const animations = hasKeyframeAtMotion(existing, playheadMs)
+            ? removeKeyframeAt(first.animations, property, playheadMs)
+            : setKeyframeAt(first.animations, property, playheadMs, value);
+          dispatch('Toggle keyframe', {
+            type: 'scene.setLayerAnimations',
+            payload: { layerId: first.id, animations },
+          });
+        },
+      };
 
   return (
     <aside className="ms-panel ms-right" aria-label="Inspector">
@@ -995,19 +1057,19 @@ function LayerInspector({
       </div>
       <div className="ms-panel-body">
         {sections.includes('transform') && (
-          <TransformSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+          <TransformSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
         {sections.includes('text') && (
-          <TextSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+          <TextSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
         {sections.includes('fill') && (
-          <FillSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+          <FillSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
         {sections.includes('stroke') && (
-          <StrokeSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+          <StrokeSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
         {sections.includes('shadow') && (
-          <ShadowSection selected={selected} dispatch={dispatch} showDiamonds={showDiamonds} />
+          <ShadowSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
         {sections.includes('cornerRadius') && (
           <CornerRadiusSection selected={selected} dispatch={dispatch} />
@@ -1016,21 +1078,22 @@ function LayerInspector({
           <BlendModeSection selected={selected} dispatch={dispatch} />
         )}
         {sections.includes('filter') && (
-          <SimpleFilterSection
-            selected={selected}
-            dispatch={dispatch}
-            showDiamonds={showDiamonds}
-          />
+          <SimpleFilterSection selected={selected} dispatch={dispatch} keyframes={keyframes} />
         )}
       </div>
     </aside>
   );
 }
 
-export function MotionStudioInspector({ document, selectedLayerIds, dispatch }: InspectorProps) {
+export function MotionStudioInspector({
+  document,
+  selectedLayerIds,
+  dispatch,
+  playheadMs = 0,
+}: InspectorProps) {
   const selected = useSelectedLayers(document, selectedLayerIds);
   if (selected.length === 0) {
     return <SceneInspector document={document} dispatch={dispatch} />;
   }
-  return <LayerInspector selected={selected} dispatch={dispatch} />;
+  return <LayerInspector selected={selected} dispatch={dispatch} playheadMs={playheadMs} />;
 }

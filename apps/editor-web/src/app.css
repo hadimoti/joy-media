@@ -2094,6 +2094,10 @@ label {
     0 4px 10px rgb(0 0 0 / 32%);
   --clip-rail: var(--joy-accent);
 }
+.timeline-clip[role='button']:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
 .timeline-clip--lane-0,
 .timeline-clip--lane-1,
 .timeline-clip--lane-2,
@@ -2378,12 +2382,19 @@ label {
   width: 0.45rem;
   z-index: 4;
   cursor: ew-resize;
+  padding: 0;
+  border: 0;
   background: transparent;
   pointer-events: auto;
 }
 .timeline-clip-trim:hover,
-.timeline-clip-trim:active {
+.timeline-clip-trim:active,
+.timeline-clip-trim:focus-visible {
   background: #e9b949aa;
+}
+.timeline-clip-trim:focus-visible {
+  outline: 1px solid var(--joy-accent);
+  outline-offset: -1px;
 }
 .timeline-clip-trim-start {
   left: 0;
@@ -2609,6 +2620,19 @@ label {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  width: 100%;
+  height: 1.55rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.2rem;
+  background: transparent;
+}
+.caption-source:hover {
+  border-color: var(--joy-border);
+}
+.caption-source:focus-visible {
+  border-color: var(--joy-accent);
+  outline: 1px solid var(--joy-accent);
 }
 .caption-row .icon-button {
   grid-row: 2 / 3;
@@ -7137,6 +7161,10 @@ label {
 .transition-card:hover {
   border-color: var(--joy-accent);
 }
+.transition-card:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
 .transition-card:hover .transition-card-label {
   color: var(--joy-text);
 }
@@ -9530,8 +9558,11 @@ label {
   top: 0.38rem;
   right: 0.38rem;
   left: auto;
+  z-index: 4;
   height: auto;
   padding: 0;
+  opacity: 1;
+  pointer-events: auto;
 }
 .asset-grid--large .asset-card-tick,
 .asset-grid--medium .asset-card-tick {
@@ -11793,7 +11824,9 @@ label {
 }
 
 .template-card:hover .template-card-apply,
-.template-card:focus-within .template-card-apply {
+.template-card:focus-within .template-card-apply,
+.template-card:hover .template-card-save,
+.template-card:focus-within .template-card-save {
   opacity: 1;
 }
 
@@ -11870,11 +11903,13 @@ label {
   filter: brightness(1.1);
 }
 .template-card-apply svg,
+.template-card-save svg,
 .template-card-delete svg {
   width: 0.9rem;
   height: 0.9rem;
 }
-.template-card-delete {
+.template-card-delete,
+.template-card-save {
   position: absolute;
   top: 0.35rem;
   left: 0.35rem;
@@ -11892,7 +11927,9 @@ label {
   opacity: 0;
 }
 .template-card:hover .template-card-delete,
-.template-card:focus-within .template-card-delete {
+.template-card:focus-within .template-card-delete,
+.template-card:hover .template-card-save,
+.template-card:focus-within .template-card-save {
   opacity: 1;
 }
 .template-card-delete:hover {
@@ -11900,6 +11937,7 @@ label {
 }
 @media (hover: none) {
   .template-card-apply,
+  .template-card-save,
   .template-card-delete {
     opacity: 1;
   }
@@ -12601,10 +12639,21 @@ label {
 }
 .audio-run-action {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+}
+.audio-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+.audio-run-error {
+  color: var(--joy-danger);
+  font-size: var(--joy-type-2xs);
+  text-align: end;
 }
 .audio-run-readiness {
   min-width: 0;
@@ -12634,6 +12683,50 @@ label {
 }
 .audio-run-button:disabled {
   opacity: 0.62;
+}
+.audio-cloud-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 58%);
+}
+.audio-cloud-confirm-dialog {
+  width: min(25rem, 100%);
+  padding: 1rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-panel);
+  box-shadow: var(--joy-shadow-lg);
+}
+.audio-cloud-confirm-dialog h3,
+.audio-cloud-confirm-dialog p {
+  margin: 0;
+}
+.audio-cloud-confirm-dialog p {
+  margin-top: 0.5rem;
+  color: var(--joy-text-muted);
+}
+.audio-cloud-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.audio-cloud-confirm-actions button {
+  min-height: 2rem;
+  padding-inline: 0.75rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+}
+.audio-cloud-confirm-actions button.is-primary {
+  border-color: var(--joy-accent);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
 }
 .audio-capability-library > summary {
   display: flex;

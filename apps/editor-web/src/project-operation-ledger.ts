@@ -4,7 +4,7 @@
  * remain in OPFS/private storage. Reusing a logical ID with a different
  * fingerprint is rejected so reload/retry cannot silently create duplicates.
  */
-export type ProjectOperationType = 'import' | 'audio' | 'worker-job' | 'export';
+export type ProjectOperationType = 'import' | 'audio' | 'cloud-audio' | 'worker-job' | 'export';
 export type ProjectOperationStatus =
   'running' | 'review' | 'applied' | 'completed' | 'failed' | 'cancelled' | 'interrupted-retryable';
 
@@ -99,6 +99,68 @@ export class ProjectOperationLedger {
     return this.records().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
+  /**
+   * Browser encodes cannot resume after a page teardown. Reconcile only this
+   * project's matching running operations; Worker jobs may still be remotely
+   * attachable and therefore are not changed unless explicitly requested.
+   */
+  recoverInterrupted(
+    type: ProjectOperationType = 'export',
+    now = new Date().toISOString(),
+  ): readonly ProjectOperationRecord[] {
+    let changed = false;
+    const recovered = this.allRecords().map((record) => {
+      if (
+        record.projectId !== this.projectId ||
+        record.type !== type ||
+        record.status !== 'running'
+      )
+        return record;
+      changed = true;
+      return {
+        ...record,
+        status: 'interrupted-retryable' as const,
+        updatedAt: now,
+        error: 'interrupted by page reload',
+      };
+    });
+    if (changed) this.write(recovered);
+    return recovered
+      .filter((record) => record.projectId === this.projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  /**
+   * A paid provider request cannot be assumed safe to replay after the page
+   * disappears. Mark its outcome unknown and terminal instead of presenting a
+   * retry that could duplicate work or billing.
+   */
+  recoverUncertain(
+    type: ProjectOperationType,
+    now = new Date().toISOString(),
+  ): readonly ProjectOperationRecord[] {
+    let changed = false;
+    const recovered = this.allRecords().map((record) => {
+      if (
+        record.projectId !== this.projectId ||
+        record.type !== type ||
+        record.status !== 'running'
+      )
+        return record;
+      changed = true;
+      return {
+        ...record,
+        status: 'failed' as const,
+        updatedAt: now,
+        error: 'provider outcome unknown after page reload; automatic retry disabled',
+      };
+    });
+    if (changed) this.write(recovered);
+    return recovered
+      .filter((record) => record.projectId === this.projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
   removeAll(): void {
     this.write(this.allRecords().filter((record) => record.projectId !== this.projectId));
   }
@@ -120,7 +182,10 @@ export class ProjectOperationLedger {
   }
 
   private write(records: readonly ProjectOperationRecord[]): void {
-    this.storage.setItem(PROJECT_OPERATION_LEDGER_KEY, JSON.stringify(records.slice(-MAX_RECORDS)));
+    this.storage.setItem(
+      PROJECT_OPERATION_LEDGER_KEY,
+      JSON.stringify(records.slice(0, MAX_RECORDS)),
+    );
   }
 }
 
@@ -135,7 +200,10 @@ function upsert(
   records: readonly ProjectOperationRecord[],
   next: ProjectOperationRecord,
 ): ProjectOperationRecord[] {
-  return [next, ...records.filter((record) => record.id !== next.id)];
+  return [
+    next,
+    ...records.filter((record) => record.id !== next.id || record.projectId !== next.projectId),
+  ];
 }
 
 function isRecord(value: unknown): value is ProjectOperationRecord {
@@ -146,6 +214,7 @@ function isRecord(value: unknown): value is ProjectOperationRecord {
     typeof record.projectId === 'string' &&
     (record.type === 'import' ||
       record.type === 'audio' ||
+      record.type === 'cloud-audio' ||
       record.type === 'worker-job' ||
       record.type === 'export') &&
     typeof record.fingerprint === 'string' &&

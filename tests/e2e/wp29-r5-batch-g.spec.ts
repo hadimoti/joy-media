@@ -1,0 +1,102 @@
+import { expect, test } from '@playwright/test';
+import {
+  authenticate,
+  importMediaFixture,
+  openDisposableWorkspace,
+  openPanel,
+  recordEvidence,
+} from './wp29-r5-harness.js';
+
+test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
+  test.beforeEach(async ({ page }) => authenticate(page));
+
+  test('[R5 CASE-24] cloud, AI, and bulk-delete actions target only selected media', async ({
+    page,
+  }, testInfo) => {
+    await openDisposableWorkspace(page, `R5-24-${testInfo.project.name}`);
+    await importMediaFixture(page, 'image.png');
+    const card = page.locator('.asset-card', { hasText: 'image.png' }).first();
+    const assetId = await card.getAttribute('data-asset-id');
+    expect(assetId).toBeTruthy();
+    const targetCard = page.locator(`.asset-card[data-asset-id="${assetId}"]`);
+    await targetCard.getByRole('checkbox', { name: 'Select image.png' }).check();
+    const toolbar = page.getByRole('toolbar', { name: 'Bulk asset actions' });
+    await expect(toolbar).toContainText('1');
+    await toolbar.getByRole('button', { name: 'Share selected media to cloud' }).click();
+    await expect(page.locator('.joy-panel-note')).toContainText('No selected media needs backup');
+    await toolbar.getByRole('button', { name: 'Edit selected with AI' }).click();
+    await expect(page.locator('.joy-code-panel')).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Attached media' })).toContainText('image.png');
+
+    await openPanel(page, 'Assets');
+    await targetCard.getByRole('checkbox', { name: 'Select image.png' }).check();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page
+      .getByRole('toolbar', { name: 'Bulk asset actions' })
+      .getByRole('button', { name: 'Delete selected assets' })
+      .click();
+    await expect(page.locator(`.asset-card[data-asset-id="${assetId}"]`)).toHaveCount(0);
+    await expect(page.locator('.joy-panel-note')).toContainText(
+      'Deleted 1 of 1 selected media items',
+    );
+    await recordEvidence(testInfo, {
+      caseId: 24,
+      functional: 'PASS',
+      uiA11y: 'PASS',
+      expected: 'Bulk cloud, AI, and confirmed delete actions target only the selected asset.',
+      actual:
+        'Cloud reported the already-backed-up state, AI attached image.png, and confirmed delete removed exactly it.',
+      fixture: 'image.png',
+    });
+  });
+
+  test('[R5 CASE-100] reload reattaches to one queued operation without duplication', async ({
+    page,
+  }, testInfo) => {
+    const title = `R5-100-${testInfo.project.name}-${Date.now()}`;
+    await openDisposableWorkspace(page, title);
+    await openPanel(page, 'Jobs');
+    const initialize = page.getByRole('button', { name: 'Initialize project' });
+    if (await initialize.isVisible()) {
+      await initialize.click();
+      await expect(page.locator('.joy-panel-note')).toContainText('Project is ready');
+    }
+    const queue = page.getByRole('button', { name: 'Queue thumbnail derivative' });
+    await expect(queue).toBeEnabled();
+    await queue.click();
+    await page.getByRole('tab', { name: 'Queue' }).click();
+    const initialJobs = page.locator('.jobs-list > li[data-job-id]');
+    await expect(initialJobs).toHaveCount(1);
+    const jobId = await initialJobs.first().getAttribute('data-job-id');
+    await expect(initialJobs.first()).toHaveAttribute('data-job-state', 'queued');
+
+    await page.reload();
+    const libraryHeading = page.getByRole('heading', { name: 'Projects' });
+    if (await libraryHeading.isVisible()) {
+      await page
+        .getByRole('button', { name: new RegExp(title) })
+        .first()
+        .click();
+    }
+    await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+    await openPanel(page, 'Jobs');
+    await page.getByRole('tab', { name: 'Queue' }).click();
+    const recovered = page.locator(`.jobs-list > li[data-job-id="${jobId}"]`);
+    await expect(recovered).toHaveCount(1);
+    await expect(recovered).toHaveAttribute('data-job-state', 'queued');
+    await expect(page.locator('.jobs-list > li[data-job-id]')).toHaveCount(1);
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await recovered.getByRole('button', { name: `Cancel job ${jobId}` }).click();
+    await expect(recovered).toHaveAttribute('data-job-state', 'canceled');
+    await recordEvidence(testInfo, {
+      caseId: 100,
+      functional: 'PASS-FIXTURE',
+      uiA11y: 'PASS',
+      expected:
+        'Reload reconnects to the same queued operation without duplicate jobs or lost project state.',
+      actual: `Job ${jobId} remained unique and queued after reload, then canceled cleanly for test cleanup.`,
+      fixture: 'Disposable in-memory control-plane job',
+    });
+  });
+});

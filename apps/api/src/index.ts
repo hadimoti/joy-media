@@ -27,3 +27,14 @@ export {
   PostgresControlPlane,
   type PostgresControlPlaneOptions,
 } from './postgres-control-plane.js';
+export {
+  MemorySpectralDenoiseInvocationLedger,
+  PostgresSpectralDenoiseInvocationLedger,
+  SpectralDenoiseService,
+  type PublicSpectralDenoiseOperation,
+  type SpectralDenoiseInvocationLedger,
+  type SpectralDenoiseOperation,
+  type SpectralDenoiseOperationStatus,
+  type SpectralDenoiseServiceOptions,
+  type SpectralDenoiseServiceRequest,
+} from './spectral-denoise-service.js';

@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import { waitForWorkerPairing, type WorkerPairingClient } from './pairing-loop.js';
+
+function pairingStore(pending?: { readonly code: string; readonly expiresAt: number }) {
+  let active = pending;
+  let session: string | undefined;
+  return {
+    loadWorkerSession: () => session,
+    loadPendingPairing: () => active,
+    savePendingPairing: (code: string, expiresAt: number) => {
+      active = { code, expiresAt };
+    },
+    clearPendingPairing: () => {
+      active = undefined;
+    },
+    establishSession: () => {
+      session = 'paired-session';
+    },
+    pending: () => active,
+  };
+}
+
+describe('waitForWorkerPairing', () => {
+  it('replaces an already-expired persisted offer before the first claim', async () => {
+    const store = pairingStore({ code: 'expired-code', expiresAt: 99 });
+    const claimed: string[] = [];
+    const published: string[] = [];
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async (code) => {
+        published.push(code);
+        return 200;
+      },
+      claimPairing: async (code) => {
+        claimed.push(code);
+        store.establishSession();
+        return true;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'fresh-code',
+      now: () => 100,
+      sleep: async () => undefined,
+    });
+
+    expect(published).toEqual(['fresh-code']);
+    expect(claimed).toEqual(['fresh-code']);
+    expect(store.pending()).toBeUndefined();
+  });
+
+  it('claims the refreshed code after an active offer expires while polling', async () => {
+    const store = pairingStore({ code: 'first-code', expiresAt: 100 });
+    const claimed: string[] = [];
+    const published: string[] = [];
+    let currentTime = 50;
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async (code) => {
+        published.push(code);
+        return 250;
+      },
+      claimPairing: async (code) => {
+        claimed.push(code);
+        if (code === 'second-code') {
+          store.establishSession();
+          return true;
+        }
+        currentTime = 150;
+        return false;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'second-code',
+      now: () => currentTime,
+      sleep: async () => undefined,
+    });
+
+    expect(published).toEqual(['second-code']);
+    expect(claimed).toEqual(['first-code', 'second-code']);
+    expect(store.pending()).toBeUndefined();
+  });
+});

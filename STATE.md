@@ -45,8 +45,37 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                                                                                   |
 | WP-26 timeline track visibility  | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                              |
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
-| WP-29 first-project golden path  | in-progress | —        | 2026-08-11   | Playback performance, EOF loop, Space transport, and arbitrary-duration Fit/follow are live; close R2 UI pairing/undo-redo, export recovery, and remaining R5 browser cases  |
+| WP-29 first-project golden path  | in-progress | —        | 2026-08-11   | All pre-deploy gates are green; commit the reviewed candidate, deploy immutable `/opt/joy-media` releases, run signed-in cleanup, then reconcile GBrain                      |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
+
+## WP-29 pre-deploy closeout checkpoint (2026-08-11)
+
+R0–R5 and the consolidated candidate verification are green on the pre-deploy
+working tree based on `10751b1`:
+
+- `pnpm verify:ci` passed: 259 test files and 1,851 tests passed; one file and
+  two tests were explicitly skipped. Typecheck, lint, formatting, builds, and
+  the production dependency audit are green.
+- R2 passed in installed Google Chrome at all three required viewports. The
+  deterministic UI/HTTP lifecycle is combined with the separate licensed
+  real-Worker DSP proof; it covers Pair/Approve, review/replace, one-step
+  Undo/Redo, reload deduplication, and revoke/401.
+- R3 retains three authenticated H.264/AAC browser downloads plus deterministic
+  duration/audio proof: 13,000 µs duration delta within a 33,334 µs frame,
+  -21.1 dB audible mean, -91 dB muted mean, and 12.1 dB gain-direction change.
+- Export recovery passed 3/3 in installed Chrome for interrupted retry, verified
+  OPFS commit, reload re-download digest parity, cancel cleanup, and stale
+  revision rejection.
+- R4 playback/EOF/Space/Fit/follow remains accepted.
+- R5 directly passed 108/108 installed-Chrome instances; the complementary R2
+  CASE-66 run contributes three reconciled instances, for 111/111 total with no
+  blocked, failed, or flaky result.
+
+WP-29 is not yet finished. The final candidate SHA, immutable API/editor and
+rollback release labels, fresh backup, public hashes, signed-in live cleanup,
+and final GBrain commit are still pending. Historical handoff sections below
+remain evidence snapshots and are superseded where they describe R2, export
+recovery, R4, or R5 as open.
 
 ## WP-29 reliability handoff (2026-08-10)
 

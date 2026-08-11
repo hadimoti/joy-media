@@ -11,7 +11,15 @@ import {
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
+import { gpuDerivativeLocalRef } from './local-gpu.js';
 describe('Worker runtime', () => {
+  it('bounds retained GPU references for project-scoped job IDs', () => {
+    const jobId = `audio-denoise-${'project'.repeat(12)}-${'asset'.repeat(20)}`;
+    const localRef = gpuDerivativeLocalRef(jobId, 'a'.repeat(64));
+    expect(localRef).toMatch(/^gpu-[a-f0-9]{32}-[a-f0-9]{16}$/);
+    expect(localRef.slice('gpu-'.length).length).toBeLessThanOrEqual(110);
+  });
+
   it('persists device identity and advertises only detected capabilities', () => {
     let saved: ReturnType<typeof getDeviceIdentity> | undefined;
     const store = {

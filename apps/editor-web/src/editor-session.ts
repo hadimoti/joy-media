@@ -73,6 +73,28 @@ interface PersistedArtifactDocument {
 
 export const WORKFLOW_GRAPH_LOG_KEY = 'joy-media.workflow-graph-log.v1';
 export const CREATIVE_ARTIFACT_LOG_KEY = 'joy-media.creative-artifact-log.v1';
+const TIMELINE_PROJECT_LOG_KEY = 'joy-media.timeline-project-log.v1';
+const VISUAL_OBJECT_PROJECT_LOG_KEY = 'joy-media.visual-object-project-log.v1';
+const COMPOUND_WRITE_JOURNAL_PREFIX = 'joy-media.editor-compound-write.v1';
+
+interface CompoundPersistencePlan {
+  readonly storageKey: string;
+  readonly projectId: string;
+  readonly persist: () => void;
+  /** In-memory commits are deliberately deferred until every durable write succeeds. */
+  readonly commit: () => void;
+}
+
+interface CompoundWriteJournal {
+  readonly version: 1;
+  readonly state: 'prepared' | 'committed';
+  readonly projectId: string;
+  readonly previous: readonly {
+    readonly storageKey: string;
+    readonly projectId: string;
+    readonly serialized: string | null;
+  }[];
+}
 
 /** Optional current-state seeds used when materializing a duplicated project. */
 export interface EditorSessionSeed {
@@ -137,6 +159,8 @@ const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction>
  * separate logs until timeline commands graduate to the v1 project document.
  */
 export class EditorSession {
+  readonly #storage: BrowserKeyValueStore;
+  readonly #compoundJournalKey: string;
   readonly #timelinePersistence: LocalProjectPersistence<SpikeProject, CommandTransaction>;
   readonly #visualObjectPersistence: LocalProjectPersistence<JoyProjectV1, VisualObjectTransaction>;
   readonly #timeline: EditorCommandController;
@@ -178,12 +202,15 @@ export class EditorSession {
     initialVisualProject: JoyProjectV1,
     initialSeed: EditorSessionSeed = {},
   ) {
+    this.#storage = storage;
+    this.#compoundJournalKey = compoundWriteJournalKey(initialTimeline.id);
+    recoverPreparedCompoundWrite(storage, initialTimeline.id);
     this.#timelinePersistence = new LocalProjectPersistence(
-      new BrowserProjectStore(storage, 'joy-media.timeline-project-log.v1'),
+      new BrowserProjectStore(storage, TIMELINE_PROJECT_LOG_KEY),
       timelineAdapter,
     );
     this.#visualObjectPersistence = new LocalProjectPersistence(
-      new BrowserProjectStore(storage, 'joy-media.visual-object-project-log.v1'),
+      new BrowserProjectStore(storage, VISUAL_OBJECT_PROJECT_LOG_KEY),
       visualObjectAdapter,
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
@@ -349,8 +376,11 @@ export class EditorSession {
 
   dispatchTimeline(transaction: CommandTransaction): SpikeProject {
     const before = this.#timeline.project;
-    const project = this.#timeline.dispatch(transaction);
+    // Validate and persist before advancing the live history cursor. A failed
+    // localStorage write must leave both the document and Undo stack intact.
+    applyTransaction(before, transaction);
     this.#timelinePersistence.saveTransaction(before, transaction, false);
+    const project = this.#timeline.dispatch(transaction);
     this.#timelineRevision += 1;
     this.#record('timeline', transaction.label, transaction.commands.length);
     return project;
@@ -358,8 +388,9 @@ export class EditorSession {
 
   dispatchVisualObjects(transaction: VisualObjectTransaction): JoyProjectV1 {
     const before = this.#visualObjects.present;
-    const project = this.#visualObjects.apply(transaction);
+    applyVisualObjectProjectTransaction(before, transaction);
     this.#visualObjectPersistence.saveTransaction(before, transaction, false);
+    const project = this.#visualObjects.apply(transaction);
     this.#visualObjectRevision += 1;
     this.#record('visual-object', transaction.label, transaction.commands.length);
     return project;
@@ -376,8 +407,8 @@ export class EditorSession {
     }
     const before = this.#graphDocument;
     const result = applyGraphTransaction(before.graph, transaction);
-    this.#graphDocument = { ...before, graph: result.graph };
     this.#graphPersistence?.saveTransaction(before, transaction, false);
+    this.#graphDocument = { ...before, graph: result.graph };
     this.#graphRevision += 1;
     this.#graphUndo.push(result.record);
     this.#graphRedo.length = 0;
@@ -392,8 +423,8 @@ export class EditorSession {
     }
     const before = this.#artifactDocument;
     const result = applyArtifactTransaction(before.store, transaction);
-    this.#artifactDocument = { ...before, store: result.store };
     this.#artifactPersistence?.saveTransaction(before, transaction, false);
+    this.#artifactDocument = { ...before, store: result.store };
     this.#artifactRevision += 1;
     this.#artifactUndo.push(result.record);
     this.#artifactRedo.length = 0;
@@ -423,6 +454,7 @@ export class EditorSession {
     },
   ): void {
     const operations: EditorOperation[] = [];
+    const persistencePlans: CompoundPersistencePlan[] = [];
     let commandCount = 0;
 
     // Everything that can fail is checked before anything is written. Applying
@@ -439,50 +471,76 @@ export class EditorSession {
     if (parts.timeline !== undefined) {
       // Pure: throws on an invalid command without touching the live project.
       applyTransaction(this.#timeline.project, parts.timeline);
-    }
-
-    if (parts.timeline !== undefined) {
       const before = this.#timeline.project;
-      this.#timeline.dispatch(parts.timeline);
-      this.#timelinePersistence.saveTransaction(before, parts.timeline, false);
-      this.#timelineRevision += 1;
+      const transaction = parts.timeline;
+      persistencePlans.push({
+        storageKey: TIMELINE_PROJECT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#timelinePersistence.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#timeline.dispatch(transaction);
+          this.#timelineRevision += 1;
+        },
+      });
       operations.push('timeline');
       commandCount += parts.timeline.commands.length;
     }
 
     if (parts.document !== undefined) {
       const before = this.#visualObjects.present;
-      this.#visualObjects.replacePresent(parts.document);
+      const document = parts.document;
       // A replacement has no command form, so it persists as a snapshot; an
       // empty transaction would replay to the old document on reload.
-      this.#visualObjectPersistence.saveSnapshot(parts.document, false);
-      this.#visualObjectRevision += 1;
-      this.#snapshotUndo.push({ before, after: parts.document });
-      this.#snapshotRedo.length = 0;
+      persistencePlans.push({
+        storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#visualObjectPersistence.saveSnapshot(document, false);
+        },
+        commit: () => {
+          this.#visualObjects.replacePresent(document);
+          this.#visualObjectRevision += 1;
+          this.#snapshotUndo.push({ before, after: document });
+          this.#snapshotRedo.length = 0;
+        },
+      });
       operations.push('document-snapshot');
     }
 
     if (parts.artifacts !== undefined && artifactResult !== undefined) {
       const before = this.#artifactDocument;
-      this.#artifactDocument = { ...before, store: artifactResult.store };
-      this.#artifactPersistence?.saveTransaction(before, parts.artifacts, false);
-      this.#artifactRevision += 1;
-      this.#artifactUndo.push(artifactResult.record);
-      this.#artifactRedo.length = 0;
+      const transaction = parts.artifacts;
+      const next = { ...before, store: artifactResult.store };
+      persistencePlans.push({
+        storageKey: CREATIVE_ARTIFACT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#artifactDocument = next;
+          this.#artifactRevision += 1;
+          this.#artifactUndo.push(artifactResult.record);
+          this.#artifactRedo.length = 0;
+        },
+      });
       operations.push('artifact');
       commandCount += parts.artifacts.commands.length;
     }
 
     if (operations.length === 0) return;
+    this.#commitPersistencePlans(persistencePlans);
     this.#recordCompound(operations, label, commandCount);
   }
 
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
     const before = this.#visualObjects.present;
-    const project = this.#visualObjects.replacePresent(next);
     // Was persisting an empty transaction, which the object adapter rejects and
     // which would have replayed to the previous document even if it did not.
-    this.#visualObjectPersistence.saveSnapshot(project, false);
+    const project = this.#visualObjectPersistence.saveSnapshot(next, false);
+    this.#visualObjects.replacePresent(project);
     this.#visualObjectRevision += 1;
     // Whole-document replacement is not represented by a visual-object command.
     // Keep its before/after pair on the snapshot stack so History → Document
@@ -493,156 +551,296 @@ export class EditorSession {
     return project;
   }
 
+  /**
+   * Persists derived/runtime metadata without inserting a second creative
+   * history entry. This is used for canonical bookkeeping that follows an
+   * already-recorded edit (for example creating default audio rows for newly
+   * inserted timeline clips) so one Undo still reverses the user's action.
+   */
+  synchronizeVisualProject(next: JoyProjectV1): JoyProjectV1 {
+    // Persist and validate before swapping the live document. Quota or schema
+    // failures must leave the in-memory session on the last durable revision.
+    const project = this.#visualObjectPersistence.saveSnapshot(next, false);
+    this.#visualObjects.replacePresent(project);
+    this.#visualObjectRevision += 1;
+    return project;
+  }
+
   /** Persist project metadata without adding a creative undo entry. */
   renameProjectTitle(title: string): JoyProjectV1 {
     const next = { ...this.#visualObjects.present, title, updatedAt: new Date().toISOString() };
-    this.#visualObjects.replacePresent(next);
     this.#visualObjectPersistence.saveSnapshot(next, false);
+    this.#visualObjects.replacePresent(next);
     this.#visualObjectRevision += 1;
     return next;
   }
 
   undo(): void {
-    const entry = this.#undo.pop();
+    const entry = this.#undo.at(-1);
     if (entry === undefined) return;
     // Reverse order: a compound applied document-then-artifact must undo
     // artifact-then-document, or the halves come apart.
-    for (const operation of [...entry.operations].reverse()) {
-      this.#undoOne(operation);
-    }
+    const plans = [...entry.operations].reverse().map((operation) => this.#undoPlan(operation));
+    this.#commitPersistencePlans(plans);
+    this.#undo.pop();
     this.#redo.push(entry);
   }
 
-  #undoOne(operation: EditorOperation): void {
+  #undoPlan(operation: EditorOperation): CompoundPersistencePlan {
     if (operation === 'document-snapshot') {
-      const record = this.#snapshotUndo.pop();
-      if (record !== undefined) {
-        this.#visualObjects.replacePresent(record.before);
-        this.#visualObjectPersistence.saveSnapshot(record.before, false);
-        this.#visualObjectRevision += 1;
-        this.#snapshotRedo.push(record);
-      }
-      return;
+      const record = this.#snapshotUndo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Undo', operation);
+      return {
+        storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+        projectId: record.before.id,
+        persist: () => {
+          this.#visualObjectPersistence.saveSnapshot(record.before, false);
+        },
+        commit: () => {
+          this.#visualObjects.replacePresent(record.before);
+          this.#snapshotUndo.pop();
+          this.#visualObjectRevision += 1;
+          this.#snapshotRedo.push(record);
+        },
+      };
     }
     if (operation === 'timeline') {
       const before = this.#timeline.project;
-      const mutation = this.#timeline.undoWithRecord();
-      this.#timelinePersistence.saveTransaction(
-        before,
-        { label: `Undo ${mutation.record.label}`, commands: mutation.record.inverses },
-        false,
-      );
-      this.#timelineRevision += 1;
-    } else if (operation === 'graph') {
-      const record = this.#graphUndo.pop();
-      if (record !== undefined) {
-        const before = this.#graphDocument;
-        this.#graphDocument = { ...before, graph: revertGraphTransaction(before.graph, record) };
-        this.#graphPersistence?.saveTransaction(
-          before,
-          { label: `Undo ${record.label}`, commands: record.inverses },
-          false,
-        );
-        this.#graphRevision += 1;
-        this.#graphRedo.push(record);
-      }
-    } else if (operation === 'artifact') {
-      const record = this.#artifactUndo.pop();
-      if (record !== undefined) {
-        const before = this.#artifactDocument;
-        this.#artifactDocument = {
-          ...before,
-          store: revertArtifactTransaction(before.store, record),
-        };
-        this.#artifactPersistence?.saveTransaction(
-          before,
-          { label: `Undo ${record.label}`, commands: record.inverses },
-          false,
-        );
-        this.#artifactRevision += 1;
-        this.#artifactRedo.push(record);
-      }
-    } else {
-      const before = this.#visualObjects.present;
-      const mutation = this.#visualObjects.undo();
-      this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
-      this.#visualObjectRevision += 1;
+      const record = this.#timeline.undoRecords[0];
+      if (record === undefined) throw missingHistoryRecord('Undo', operation);
+      const transaction = { label: `Undo ${record.label}`, commands: record.inverses };
+      return {
+        storageKey: TIMELINE_PROJECT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#timelinePersistence.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#timeline.undoWithRecord();
+          this.#timelineRevision += 1;
+        },
+      };
     }
+    if (operation === 'graph') {
+      const record = this.#graphUndo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Undo', operation);
+      const before = this.#graphDocument;
+      const next = { ...before, graph: revertGraphTransaction(before.graph, record) };
+      const transaction = { label: `Undo ${record.label}`, commands: record.inverses };
+      return {
+        storageKey: WORKFLOW_GRAPH_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#graphPersistence?.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#graphDocument = next;
+          this.#graphUndo.pop();
+          this.#graphRevision += 1;
+          this.#graphRedo.push(record);
+        },
+      };
+    }
+    if (operation === 'artifact') {
+      const record = this.#artifactUndo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Undo', operation);
+      const before = this.#artifactDocument;
+      const next = {
+        ...before,
+        store: revertArtifactTransaction(before.store, record),
+      };
+      const transaction = { label: `Undo ${record.label}`, commands: record.inverses };
+      return {
+        storageKey: CREATIVE_ARTIFACT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#artifactDocument = next;
+          this.#artifactUndo.pop();
+          this.#artifactRevision += 1;
+          this.#artifactRedo.push(record);
+        },
+      };
+    }
+    const before = this.#visualObjects.present;
+    const record = this.#visualObjects.undoRecords[0];
+    if (record === undefined) throw missingHistoryRecord('Undo', operation);
+    return {
+      storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+      projectId: before.id,
+      persist: () => {
+        this.#visualObjectPersistence.saveTransaction(before, record.inverses, false);
+      },
+      commit: () => {
+        this.#visualObjects.undo();
+        this.#visualObjectRevision += 1;
+      },
+    };
   }
 
   redo(): void {
-    const entry = this.#redo.pop();
+    const entry = this.#redo.at(-1);
     if (entry === undefined) return;
-    for (const operation of entry.operations) {
-      this.#redoOne(operation);
-    }
+    const plans = entry.operations.map((operation) => this.#redoPlan(operation));
+    this.#commitPersistencePlans(plans);
+    this.#redo.pop();
     this.#undo.push(entry);
   }
 
-  #redoOne(operation: EditorOperation): void {
+  #redoPlan(operation: EditorOperation): CompoundPersistencePlan {
     if (operation === 'document-snapshot') {
-      const record = this.#snapshotRedo.pop();
-      if (record !== undefined) {
-        this.#visualObjects.replacePresent(record.after);
-        this.#visualObjectPersistence.saveSnapshot(record.after, false);
-        this.#visualObjectRevision += 1;
-        this.#snapshotUndo.push(record);
-      }
-      return;
+      const record = this.#snapshotRedo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Redo', operation);
+      return {
+        storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+        projectId: record.after.id,
+        persist: () => {
+          this.#visualObjectPersistence.saveSnapshot(record.after, false);
+        },
+        commit: () => {
+          this.#visualObjects.replacePresent(record.after);
+          this.#snapshotRedo.pop();
+          this.#visualObjectRevision += 1;
+          this.#snapshotUndo.push(record);
+        },
+      };
     }
     if (operation === 'timeline') {
       const before = this.#timeline.project;
-      const mutation = this.#timeline.redoWithRecord();
-      this.#timelinePersistence.saveTransaction(
-        before,
-        { label: `Redo ${mutation.record.label}`, commands: mutation.record.commands },
-        false,
-      );
-      this.#timelineRevision += 1;
-    } else if (operation === 'graph') {
-      const record = this.#graphRedo.pop();
-      if (record !== undefined) {
-        const before = this.#graphDocument;
-        this.#graphDocument = {
-          ...before,
-          graph: applyGraphTransaction(before.graph, {
-            label: record.label,
-            commands: record.commands,
-          }).graph,
-        };
-        this.#graphPersistence?.saveTransaction(
-          before,
-          { label: `Redo ${record.label}`, commands: record.commands },
-          false,
-        );
-        this.#graphRevision += 1;
-        this.#graphUndo.push(record);
-      }
-    } else if (operation === 'artifact') {
-      const record = this.#artifactRedo.pop();
-      if (record !== undefined) {
-        const before = this.#artifactDocument;
-        this.#artifactDocument = {
-          ...before,
-          store: applyArtifactTransaction(before.store, {
-            label: record.label,
-            commands: record.commands,
-          }).store,
-        };
-        this.#artifactPersistence?.saveTransaction(
-          before,
-          { label: `Redo ${record.label}`, commands: record.commands },
-          false,
-        );
-        this.#artifactRevision += 1;
-        this.#artifactUndo.push(record);
-      }
-    } else {
-      const before = this.#visualObjects.present;
-      const mutation = this.#visualObjects.redo();
-      this.#visualObjectPersistence.saveTransaction(before, mutation.transaction, false);
-      this.#visualObjectRevision += 1;
+      const record = this.#timeline.redoRecords[0];
+      if (record === undefined) throw missingHistoryRecord('Redo', operation);
+      const transaction = { label: `Redo ${record.label}`, commands: record.commands };
+      return {
+        storageKey: TIMELINE_PROJECT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#timelinePersistence.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#timeline.redoWithRecord();
+          this.#timelineRevision += 1;
+        },
+      };
     }
+    if (operation === 'graph') {
+      const record = this.#graphRedo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Redo', operation);
+      const before = this.#graphDocument;
+      const next = {
+        ...before,
+        graph: applyGraphTransaction(before.graph, {
+          label: record.label,
+          commands: record.commands,
+        }).graph,
+      };
+      const transaction = { label: `Redo ${record.label}`, commands: record.commands };
+      return {
+        storageKey: WORKFLOW_GRAPH_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#graphPersistence?.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#graphDocument = next;
+          this.#graphRedo.pop();
+          this.#graphRevision += 1;
+          this.#graphUndo.push(record);
+        },
+      };
+    }
+    if (operation === 'artifact') {
+      const record = this.#artifactRedo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Redo', operation);
+      const before = this.#artifactDocument;
+      const next = {
+        ...before,
+        store: applyArtifactTransaction(before.store, {
+          label: record.label,
+          commands: record.commands,
+        }).store,
+      };
+      const transaction = { label: `Redo ${record.label}`, commands: record.commands };
+      return {
+        storageKey: CREATIVE_ARTIFACT_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#artifactDocument = next;
+          this.#artifactRedo.pop();
+          this.#artifactRevision += 1;
+          this.#artifactUndo.push(record);
+        },
+      };
+    }
+    const before = this.#visualObjects.present;
+    const record = this.#visualObjects.redoRecords[0];
+    if (record === undefined) throw missingHistoryRecord('Redo', operation);
+    return {
+      storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+      projectId: before.id,
+      persist: () => {
+        this.#visualObjectPersistence.saveTransaction(before, record.transaction, false);
+      },
+      commit: () => {
+        this.#visualObjects.redo();
+        this.#visualObjectRevision += 1;
+      },
+    };
+  }
+
+  /**
+   * localStorage updates one key at a time, while an approved change can span
+   * several project logs. The prepared journal makes those writes recoverable:
+   * live histories advance only after every append succeeds, and a crash or a
+   * later write failure restores the exact pre-commit bytes before recovery.
+   */
+  #commitPersistencePlans(plans: readonly CompoundPersistencePlan[]): void {
+    if (plans.length === 0) return;
+    if (plans.length === 1) {
+      plans[0]!.persist();
+      plans[0]!.commit();
+      return;
+    }
+
+    const persistenceTargets = [
+      ...new Map(plans.map((plan) => [`${plan.storageKey}\0${plan.projectId}`, plan])).values(),
+    ];
+    const prepared: CompoundWriteJournal = {
+      version: 1,
+      state: 'prepared',
+      projectId: this.timelineProject.id,
+      previous: persistenceTargets.map(({ storageKey, projectId }) => ({
+        storageKey,
+        projectId,
+        serialized: storedProjectBytes(this.#storage, storageKey, projectId),
+      })),
+    };
+    this.#storage.setItem(this.#compoundJournalKey, JSON.stringify(prepared));
+    try {
+      for (const plan of plans) plan.persist();
+      this.#storage.setItem(
+        this.#compoundJournalKey,
+        JSON.stringify({ ...prepared, state: 'committed' as const }),
+      );
+    } catch (error) {
+      try {
+        restoreCompoundWrite(this.#storage, prepared);
+        resolveCompoundWriteJournal(this.#storage, this.#compoundJournalKey, prepared);
+      } catch (rollbackError) {
+        throw new PersistenceError(
+          'PERSISTENCE_ATOMIC_ROLLBACK_PENDING',
+          `compound write failed and requires reload recovery: ${errorMessage(error)}; rollback: ${errorMessage(rollbackError)}`,
+        );
+      }
+      throw error;
+    }
+
+    for (const plan of plans) plan.commit();
+    bestEffortRemove(this.#storage, this.#compoundJournalKey);
   }
 
   #record(operation: EditorOperation, label: string, commandCount: number): void {
@@ -664,6 +862,142 @@ export class EditorSession {
     this.#artifactRedo.length = 0;
     this.#snapshotRedo.length = 0;
   }
+}
+
+function compoundWriteJournalKey(projectId: string): string {
+  return `${COMPOUND_WRITE_JOURNAL_PREFIX}:${encodeURIComponent(projectId)}`;
+}
+
+function recoverPreparedCompoundWrite(storage: BrowserKeyValueStore, projectId: string): void {
+  const journalKey = compoundWriteJournalKey(projectId);
+  const serialized = storage.getItem(journalKey);
+  if (serialized === null) return;
+  const journal = parseCompoundWriteJournal(serialized, projectId);
+  if (journal === undefined) {
+    bestEffortRemove(storage, journalKey);
+    return;
+  }
+  if (journal.state === 'prepared') {
+    restoreCompoundWrite(storage, journal);
+    resolveCompoundWriteJournal(storage, journalKey, journal);
+    return;
+  }
+  bestEffortRemove(storage, journalKey);
+}
+
+function restoreCompoundWrite(storage: BrowserKeyValueStore, journal: CompoundWriteJournal): void {
+  for (const previous of journal.previous) {
+    const database = projectDatabase(storage.getItem(previous.storageKey));
+    const projects = { ...database.projects };
+    if (previous.serialized === null) delete projects[previous.projectId];
+    else projects[previous.projectId] = JSON.parse(previous.serialized) as unknown;
+    storage.setItem(previous.storageKey, JSON.stringify({ projects }));
+  }
+}
+
+/** Mark rollback resolved before removal, so a failed remove can never replay it. */
+function resolveCompoundWriteJournal(
+  storage: BrowserKeyValueStore,
+  journalKey: string,
+  journal: CompoundWriteJournal,
+): void {
+  storage.setItem(journalKey, JSON.stringify({ ...journal, state: 'committed' as const }));
+  bestEffortRemove(storage, journalKey);
+}
+
+function bestEffortRemove(storage: BrowserKeyValueStore, key: string): void {
+  try {
+    storage.removeItem?.(key);
+  } catch {
+    // A committed marker is harmless and will be removed on the next open.
+  }
+}
+
+function storedProjectBytes(
+  storage: BrowserKeyValueStore,
+  storageKey: string,
+  projectId: string,
+): string | null {
+  const project = projectDatabase(storage.getItem(storageKey)).projects[projectId];
+  return project === undefined ? null : JSON.stringify(project);
+}
+
+function projectDatabase(serialized: string | null): { projects: Record<string, unknown> } {
+  if (serialized === null) return { projects: {} };
+  try {
+    const parsed = JSON.parse(serialized) as { readonly projects?: unknown };
+    if (
+      parsed.projects === null ||
+      typeof parsed.projects !== 'object' ||
+      Array.isArray(parsed.projects)
+    )
+      throw new Error('project log has no projects object');
+    return { projects: parsed.projects as Record<string, unknown> };
+  } catch (error) {
+    throw new PersistenceError(
+      'PERSISTENCE_ATOMIC_LOG_CORRUPT',
+      `cannot protect a corrupt project log: ${errorMessage(error)}`,
+    );
+  }
+}
+
+function parseCompoundWriteJournal(
+  serialized: string,
+  projectId: string,
+): CompoundWriteJournal | undefined {
+  try {
+    const value = JSON.parse(serialized) as Partial<CompoundWriteJournal>;
+    if (
+      value.version !== 1 ||
+      value.projectId !== projectId ||
+      (value.state !== 'prepared' && value.state !== 'committed') ||
+      !Array.isArray(value.previous)
+    )
+      return undefined;
+    const allowedKeys = new Set([
+      TIMELINE_PROJECT_LOG_KEY,
+      VISUAL_OBJECT_PROJECT_LOG_KEY,
+      WORKFLOW_GRAPH_LOG_KEY,
+      CREATIVE_ARTIFACT_LOG_KEY,
+    ]);
+    const previous = value.previous.filter(
+      (
+        entry,
+      ): entry is {
+        readonly storageKey: string;
+        readonly projectId: string;
+        readonly serialized: string | null;
+      } =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        'storageKey' in entry &&
+        typeof entry.storageKey === 'string' &&
+        allowedKeys.has(entry.storageKey) &&
+        'projectId' in entry &&
+        typeof entry.projectId === 'string' &&
+        entry.projectId.length > 0 &&
+        entry.projectId.length <= 256 &&
+        'serialized' in entry &&
+        (typeof entry.serialized === 'string' || entry.serialized === null),
+    );
+    if (previous.length !== value.previous.length) return undefined;
+    return {
+      version: 1,
+      state: value.state,
+      projectId,
+      previous,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function missingHistoryRecord(direction: 'Undo' | 'Redo', operation: EditorOperation): Error {
+  return new Error(`${direction} history is inconsistent for ${operation}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function recoverOrInitialize<P, T>(

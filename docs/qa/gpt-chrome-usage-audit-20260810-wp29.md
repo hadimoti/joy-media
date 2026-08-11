@@ -135,3 +135,27 @@ signed-in Chrome acceptance for native EOF looping, Space pause/resume,
 arbitrary-duration Fit, and paged timeline following. WP-29 remains open for
 R2 UI pairing/undo-redo, export-recovery evidence, and the remaining R5 browser
 cases.
+
+## Pre-deploy closeout supersession — 2026-08-11
+
+The open-item statements above are retained as historical checkpoints and are
+now superseded by the accepted pre-deploy evidence:
+
+- `pnpm verify:ci` passed with 259 test files and 1,851 tests passed, one file
+  and two named integration tests skipped; builds and production audit passed.
+- R2 Worker insertion passed 3/3 in installed Google Chrome and is paired with
+  the retained licensed real-Worker DSP proof.
+- R3 passed 3/3 authenticated H.264/AAC browser exports. The retained
+  deterministic proof measured 3.013 s against 3.000 s (13,000 µs, below one
+  30 fps frame), mean levels of -21.1/-33.2/-91.0 dB for audible/gain-0.25/mute,
+  and a 12.1 dB gain-direction change.
+- R4 controlled playback remains accepted at 0.79%, 0.37%, and 1.33% drops,
+  including EOF loop, Space pause/resume, duration-aware Fit, and paged follow.
+- Export interruption/retry/cancel/reload/re-download passed 3/3 in installed
+  Google Chrome.
+- R5 closed the former 37 `NOT-RUN` cases: 108 direct browser instances plus
+  three reconciled R2 CASE-66 instances, for 111/111 across all viewports.
+
+The final candidate SHA, immutable API/editor releases, signed-in live cleanup,
+and final GBrain update are still pending. This pre-deploy report does not claim
+that the working-tree candidate is live.

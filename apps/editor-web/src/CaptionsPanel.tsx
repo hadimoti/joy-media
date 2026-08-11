@@ -15,6 +15,7 @@ import {
   parseWebVtt,
   resolveCaptionDirection,
   searchCaptionSegments,
+  segmentDisplayText,
   segmentMinConfidence,
   segmentSourceText,
   segmentTimelineRange,
@@ -33,6 +34,7 @@ import {
 } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { downloadBrowserTextFile } from './browser-text-download.js';
 
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
@@ -201,16 +203,6 @@ export function CaptionsPanel({
   );
 }
 
-/** Renders the templated caption layout at the playhead, scaled to a small stage. */
-function downloadTextFile(fileName: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-  const anchor = window.document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 function CaptionSlotEditor({
   slot,
   query,
@@ -229,6 +221,7 @@ function CaptionSlotEditor({
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [importIssues, setImportIssues] = useState(0);
+  const [transcribingLanguage, setTranscribingLanguage] = useState<'fa-IR' | 'en-US'>();
   const direction = resolveCaptionDirection(document);
   const matches =
     query.trim().length === 0
@@ -284,6 +277,15 @@ function CaptionSlotEditor({
       ],
     });
   };
+  const transcribe = async (language: 'fa-IR' | 'en-US') => {
+    if (transcribingLanguage !== undefined) return;
+    setTranscribingLanguage(language);
+    try {
+      await onTranscribe(document.id, language);
+    } finally {
+      setTranscribingLanguage(undefined);
+    }
+  };
   return (
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
@@ -314,7 +316,7 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Export captions as SRT"
           data-guide="Export SRT"
-          onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
+          onClick={() => downloadBrowserTextFile(`${document.id}.srt`, formatSrt(document))}
         >
           <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
@@ -322,7 +324,7 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Export captions as WebVTT"
           data-guide="Export VTT"
-          onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
+          onClick={() => downloadBrowserTextFile(`${document.id}.vtt`, formatWebVtt(document))}
         >
           <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
@@ -356,28 +358,39 @@ function CaptionSlotEditor({
         <button
           className="icon-button"
           aria-label="Auto caption"
+          aria-busy={transcribingLanguage === 'en-US'}
           data-guide="Auto caption"
-          onClick={() => void onTranscribe(document.id, 'en-US')}
+          disabled={transcribingLanguage !== undefined}
+          onClick={() => void transcribe('en-US')}
         >
           <AutoCaptionIcon />
         </button>
         <button
           className="icon-button"
           aria-label="Transcribe Persian"
+          aria-busy={transcribingLanguage === 'fa-IR'}
           data-guide="Persian (fa)"
-          onClick={() => void onTranscribe(document.id, 'fa-IR')}
+          disabled={transcribingLanguage !== undefined}
+          onClick={() => void transcribe('fa-IR')}
         >
           <LanguageIcon label="FA" />
         </button>
         <button
           className="icon-button"
           aria-label="Transcribe English"
+          aria-busy={transcribingLanguage === 'en-US'}
           data-guide="English (en)"
-          onClick={() => void onTranscribe(document.id, 'en-US')}
+          disabled={transcribingLanguage !== undefined}
+          onClick={() => void transcribe('en-US')}
         >
           <PngMaskIcon src="/assets/24_Audio.png" size={14} />
         </button>
       </header>
+      {transcribingLanguage !== undefined && (
+        <p className="caption-transcription-status" role="status">
+          Transcribing {transcribingLanguage === 'fa-IR' ? 'Persian' : 'English'}…
+        </p>
+      )}
       {importIssues > 0 && (
         <p className="caption-warning">On import, {importIssues} bad cue(s) were skipped.</p>
       )}
@@ -390,6 +403,7 @@ function CaptionSlotEditor({
             playheadUs >= range.startUs &&
             playheadUs < range.startUs + range.durationUs;
           const source = segmentSourceText(document, segment);
+          const displayText = segmentDisplayText(document, segment);
           const confidence = segmentMinConfidence(document, segment);
           return (
             <li key={segment.id} className={active ? 'caption-row active' : 'caption-row'}>
@@ -413,7 +427,30 @@ function CaptionSlotEditor({
                   {Math.round(confidence * 100)}%
                 </span>
               )}
-              <span className="caption-source">{source}</span>
+              <input
+                type="text"
+                className="caption-source"
+                aria-label={`Caption text ${segment.id}`}
+                title={source.length > 0 ? `Source: ${source}` : 'Manual caption text'}
+                value={displayText}
+                dir={direction}
+                lang={document.language}
+                onChange={(event) =>
+                  onDispatch({
+                    label: 'Edit caption text',
+                    commands: [
+                      {
+                        type: 'caption.setSegmentText',
+                        payload: {
+                          documentId: document.id,
+                          segmentId: segment.id,
+                          textOverride: event.currentTarget.value,
+                        },
+                      },
+                    ],
+                  })
+                }
+              />
               {segment.textOverride !== undefined && (
                 <button
                   className="icon-button caption-undo-btn"

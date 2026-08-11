@@ -545,6 +545,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               document={document}
               selectedLayerIds={selectedLayerIds}
               dispatch={dispatch}
+              playheadMs={playheadMs}
             />
           </div>
         )}

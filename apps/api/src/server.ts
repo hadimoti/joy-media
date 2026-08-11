@@ -10,6 +10,11 @@ import {
   createRuntimeMistralProviderRegistry,
   PostgresMistralInvocationLedger,
 } from './mistral-provider.js';
+import {
+  MemorySpectralDenoiseInvocationLedger,
+  PostgresSpectralDenoiseInvocationLedger,
+  SpectralDenoiseService,
+} from './spectral-denoise-service.js';
 
 await start();
 
@@ -22,6 +27,12 @@ async function start(): Promise<void> {
   if (durableControlPlane !== undefined) await durableControlPlane.initialize();
   const mistralLedger = pool === undefined ? undefined : new PostgresMistralInvocationLedger(pool);
   if (mistralLedger !== undefined) await mistralLedger.initialize();
+  const audioDenoiseLedger =
+    pool === undefined
+      ? new MemorySpectralDenoiseInvocationLedger()
+      : new PostgresSpectralDenoiseInvocationLedger(pool);
+  if (audioDenoiseLedger instanceof PostgresSpectralDenoiseInvocationLedger)
+    await audioDenoiseLedger.initialize();
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuth =
@@ -42,6 +53,7 @@ async function start(): Promise<void> {
         durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
     },
     mediaAuth,
+    audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
