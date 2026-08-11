@@ -12,6 +12,12 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable pnpm
+      - name: Install media toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:ci
   browser-e2e:
@@ -24,6 +30,12 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable pnpm
+      - name: Install media toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run test:e2e:audit
