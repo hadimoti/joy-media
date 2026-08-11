@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,9 +20,12 @@ import { createParitySpikeFrame } from './index.js';
 describe.runIf(findChromiumExecutable() !== undefined)(
   'P04.5 first-party scene pixel goldens',
   () => {
-    it('pins real Chromium RGBA frames and proves preview/export pixel parity', () => {
-      const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
-      const hashes = FIRST_PARTY_SCENES.map((scene) => {
+    const hashes = new Map<string, string>();
+
+    it.each(FIRST_PARTY_SCENES)(
+      'pins $id Chromium RGBA frames and proves preview/export pixel parity',
+      (scene) => {
+        const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
         const runtime = createSandboxedReactScene(scene.manifest, scene.source);
@@ -45,11 +48,15 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         // Product gate is preview↔export parity above; hashes are recorded for triage only.
         expect(typeof preview.sha256).toBe('string');
         expect(preview.sha256.length).toBe(64);
-        return preview.sha256;
-      });
-      expect(hashes).toHaveLength(FIRST_PARTY_SCENES.length);
-      expect(new Set(hashes).size).toBe(hashes.length);
-    }, 120_000);
+        hashes.set(scene.id, preview.sha256);
+      },
+      90_000,
+    );
+
+    afterAll(() => {
+      expect(hashes.size).toBe(FIRST_PARTY_SCENES.length);
+      expect(new Set(hashes.values()).size).toBe(FIRST_PARTY_SCENES.length);
+    });
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
       const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
