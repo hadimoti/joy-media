@@ -79,6 +79,11 @@ test.describe('WP-30 cross-browser animated assets', () => {
         await expect
           .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
           .toBeGreaterThan(0);
+        await card.getByRole('button', { name: `Preview ${name}` }).click();
+        const preview = page.getByRole('region', { name: `Preview: ${name}` });
+        await expect(preview).toBeVisible();
+        await expect(preview.locator('img, video')).toHaveAttribute('src', /^(blob:|https?:)/);
+        await preview.getByRole('button', { name: 'Close preview' }).click();
       }
 
       const secondContext = await browser.newContext({
