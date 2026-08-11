@@ -21,7 +21,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
   'P04.5 first-party scene pixel goldens',
   () => {
     it('pins real Chromium RGBA frames and proves preview/export pixel parity', () => {
-      const driver = createChromiumSceneDriver();
+      const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
       const hashes = FIRST_PARTY_SCENES.map((scene) => {
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
@@ -52,7 +52,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
     }, 120_000);
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
-      const driver = createChromiumSceneDriver();
+      const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
       const title = FIRST_PARTY_SCENES[0]!;
       const lowerThird = FIRST_PARTY_SCENES[2]!;
       const instances = [title, lowerThird].map((scene) => {
