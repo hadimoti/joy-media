@@ -112,6 +112,16 @@ viewports. The full matrix completed `6/6 PASS` in `14.2s` with no retained
 page-error or same-origin-request failure. Disposable projects and their
 fixture assets were purged by the test cleanup path.
 
+### Step-3 cache ownership slice
+
+`StickerImageCache` now uses a per-object generation token. Clearing or
+replacing an object invalidates in-flight blob/decoder work, stale completions
+cannot publish into the cache, and replaced animated sources are disposed
+before their entry is swapped. Focused ownership/cancellation coverage is
+`2/2 PASS`; the editor TypeScript build and `git diff --check` are also green.
+The complete normalized-manifest, eviction-budget, and Monitor/export frame
+hash gate remains open under Steps 3–6.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.

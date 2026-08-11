@@ -36,6 +36,7 @@ type CacheEntry = {
 export class StickerImageCache {
   private readonly byObjectId = new Map<string, CacheEntry>();
   private readonly assetBlobs = new Map<string, Blob>();
+  private readonly generations = new Map<string, number>();
 
   rememberBlob(assetId: string, blob: Blob): void {
     this.assetBlobs.set(assetId, blob);
@@ -64,6 +65,7 @@ export class StickerImageCache {
   }
 
   clear(): void {
+    for (const objectId of this.byObjectId.keys()) this.bumpGeneration(objectId);
     for (const entry of this.byObjectId.values()) entry.animated?.dispose();
     this.byObjectId.clear();
     this.assetBlobs.clear();
@@ -88,11 +90,13 @@ export class StickerImageCache {
     ) {
       return existing.bitmap;
     }
+    const generation = this.bumpGeneration(options.objectId);
 
     let blob = this.assetBlobs.get(options.assetId);
     if (blob === undefined) {
       blob = await options.loadBlob(options.assetId);
       if (blob === undefined) return undefined;
+      if (!this.isCurrent(options.objectId, generation)) return undefined;
       this.assetBlobs.set(options.assetId, blob);
     }
 
@@ -130,7 +134,12 @@ export class StickerImageCache {
         rgba = applyMatteAlpha(rgba, matte);
       }
     }
+    if (!this.isCurrent(options.objectId, generation)) {
+      animated?.dispose();
+      return undefined;
+    }
     rgba = applyCrop(rgba, options.crop);
+    this.byObjectId.get(options.objectId)?.animated?.dispose();
     this.byObjectId.set(options.objectId, {
       assetId: options.assetId,
       ...(options.matteAssetId !== undefined ? { matteAssetId: options.matteAssetId } : {}),
@@ -145,6 +154,7 @@ export class StickerImageCache {
   }
 
   clearObject(objectId: string): void {
+    this.bumpGeneration(objectId);
     this.byObjectId.get(objectId)?.animated?.dispose();
     this.byObjectId.delete(objectId);
     this.pruneUnusedAssetBlobs();
@@ -153,11 +163,22 @@ export class StickerImageCache {
   clearMissing(objectIds: ReadonlySet<string>): void {
     for (const objectId of [...this.byObjectId.keys()]) {
       if (!objectIds.has(objectId)) {
+        this.bumpGeneration(objectId);
         this.byObjectId.get(objectId)?.animated?.dispose();
         this.byObjectId.delete(objectId);
       }
     }
     this.pruneUnusedAssetBlobs();
+  }
+
+  private bumpGeneration(objectId: string): number {
+    const generation = (this.generations.get(objectId) ?? 0) + 1;
+    this.generations.set(objectId, generation);
+    return generation;
+  }
+
+  private isCurrent(objectId: string, generation: number): boolean {
+    return this.generations.get(objectId) === generation;
   }
 
   private pruneUnusedAssetBlobs(): void {
