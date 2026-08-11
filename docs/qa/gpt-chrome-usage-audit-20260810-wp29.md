@@ -125,3 +125,13 @@ The first continuous 10-second probe is recorded as BLOCKED-INTEGRATION:
 Diagnostics panel snapshot was not captured reliably. Earlier single-clip
 probes were excluded because the 3-second content ended before the window.
 No performance PASS is claimed; R2 real Worker insertion also remains open.
+
+## Playback supersession — 2026-08-11
+
+The controlled-playback item above is superseded: after commit `6d4db05`, three
+accepted desktop reruns measured 0.79%, 0.37%, and 1.33% drops with all drift
+and stall limits satisfied. Commits `1fce9c1` and `8567f3e` also passed
+signed-in Chrome acceptance for native EOF looping, Space pause/resume,
+arbitrary-duration Fit, and paged timeline following. WP-29 remains open for
+R2 UI pairing/undo-redo, export-recovery evidence, and the remaining R5 browser
+cases.
