@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { StickerImageCache } from './sticker-image-cache.js';
+import { MAX_ANIMATED_CACHE_BYTES, StickerImageCache } from './sticker-image-cache.js';
 
 const fixtureRoot = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -61,6 +61,48 @@ describe('StickerImageCache animated ownership', () => {
     release!();
     await loading;
     expect(cache.bitmaps()).toEqual(new Map());
+  });
+
+  it('evicts least-recently-used animated frames above the byte budget', async () => {
+    const first = new StickerImageCache();
+    const blob = animatedGifBlob();
+    const animation = {
+      frameCount: 4,
+      cycleDurationUs: 1_000_000,
+      loopCount: 0,
+      hasAlpha: true,
+    } as const;
+    const firstBitmap = await first.syncObject({
+      objectId: 'first',
+      assetId: 'asset-first',
+      crop: emptyCrop(),
+      animation,
+      mimeType: 'image/gif',
+      loadBlob: async () => blob,
+    });
+    expect(firstBitmap).toBeDefined();
+    const oneFrameBytes = firstBitmap!.data.byteLength;
+    const cache = new StickerImageCache(oneFrameBytes * 4 + 1);
+    await cache.syncObject({
+      objectId: 'first',
+      assetId: 'asset-first',
+      crop: emptyCrop(),
+      animation,
+      mimeType: 'image/gif',
+      loadBlob: async () => blob,
+    });
+    cache.get('first');
+    await cache.syncObject({
+      objectId: 'second',
+      assetId: 'asset-second',
+      crop: emptyCrop(),
+      animation,
+      mimeType: 'image/gif',
+      loadBlob: async () => blob,
+    });
+    expect(cache.get('first')).toBeUndefined();
+    expect(cache.get('second')).toBeDefined();
+    expect(MAX_ANIMATED_CACHE_BYTES).toBeGreaterThan(0);
   });
 });
 

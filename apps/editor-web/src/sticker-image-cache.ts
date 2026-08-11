@@ -30,13 +30,20 @@ type CacheEntry = {
   readonly crop: CropInsets;
   readonly matte?: StickerBitmap;
   readonly animated?: AnimatedImageFrameSource;
+  readonly estimatedBytes: number;
+  lastUsed: number;
 };
+
+export const MAX_ANIMATED_CACHE_BYTES = 256 * 1024 * 1024;
 
 /** In-memory RGBA cache keyed by visual object id. */
 export class StickerImageCache {
   private readonly byObjectId = new Map<string, CacheEntry>();
   private readonly assetBlobs = new Map<string, Blob>();
   private readonly generations = new Map<string, number>();
+  private useSequence = 0;
+
+  constructor(private readonly maxAnimatedBytes = MAX_ANIMATED_CACHE_BYTES) {}
 
   rememberBlob(assetId: string, blob: Blob): void {
     this.assetBlobs.set(assetId, blob);
@@ -47,12 +54,16 @@ export class StickerImageCache {
   }
 
   get(objectId: string): StickerBitmap | undefined {
-    return this.byObjectId.get(objectId)?.bitmap;
+    const entry = this.byObjectId.get(objectId);
+    if (entry === undefined) return undefined;
+    entry.lastUsed = ++this.useSequence;
+    return entry.bitmap;
   }
 
   bitmaps(timeUs = 0): ReadonlyMap<string, StickerBitmap> {
     const out = new Map<string, StickerBitmap>();
     for (const [id, entry] of this.byObjectId) {
+      entry.lastUsed = ++this.useSequence;
       if (entry.animated === undefined) {
         out.set(id, entry.bitmap);
         continue;
@@ -148,7 +159,13 @@ export class StickerImageCache {
       crop: options.crop,
       ...(matte !== undefined ? { matte } : {}),
       ...(animated !== undefined ? { animated } : {}),
+      estimatedBytes:
+        animated === undefined
+          ? 0
+          : animated.frames.reduce((sum, frame) => sum + frame.bitmap.data.byteLength, 0),
+      lastUsed: ++this.useSequence,
     });
+    this.pruneAnimatedBudget();
     this.pruneUnusedAssetBlobs();
     return rgba;
   }
@@ -189,6 +206,20 @@ export class StickerImageCache {
     }
     for (const assetId of [...this.assetBlobs.keys()]) {
       if (!usedAssetIds.has(assetId)) this.assetBlobs.delete(assetId);
+    }
+  }
+
+  private pruneAnimatedBudget(): void {
+    let total = [...this.byObjectId.values()].reduce((sum, entry) => sum + entry.estimatedBytes, 0);
+    if (total <= this.maxAnimatedBytes) return;
+    const candidates = [...this.byObjectId.entries()]
+      .filter(([, entry]) => entry.animated !== undefined)
+      .sort(([, left], [, right]) => left.lastUsed - right.lastUsed);
+    for (const [objectId, entry] of candidates) {
+      if (total <= this.maxAnimatedBytes) break;
+      entry.animated?.dispose();
+      this.byObjectId.delete(objectId);
+      total -= entry.estimatedBytes;
     }
   }
 }

@@ -122,6 +122,11 @@ before their entry is swapped. Focused ownership/cancellation coverage is
 The complete normalized-manifest, eviction-budget, and Monitor/export frame
 hash gate remains open under Steps 3–6.
 
+The cache now also enforces a `256 MiB` decoded-frame budget with
+least-recently-used eviction. Focused ownership/budget coverage is `3/3 PASS`
+after the addition; the complete browser resource-counter and frame-hash gate
+is still open.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.
