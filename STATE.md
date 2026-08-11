@@ -45,7 +45,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                                                                                   |
 | WP-26 timeline track visibility  | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                              |
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
-| WP-29 first-project golden path  | in-progress | —        | 2026-08-10   | Execute the one-step VPS doer/reviewer loop in `plan/WP-29-orchestrated-vps-closeout-loop.md`; export, Worker, playback, 37-case rerun, cleanup, and closeout remain gated   |
+| WP-29 first-project golden path  | in-progress | —        | 2026-08-11   | Playback performance, EOF loop, Space transport, and arbitrary-duration Fit/follow are live; close R2 UI pairing/undo-redo, export recovery, and remaining R5 browser cases  |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
 
 ## WP-29 reliability handoff (2026-08-10)
@@ -74,6 +74,18 @@ VPS/local health, public index hash parity, and `nginx -t` passed after cutover.
 The exact follow-up is recorded in
 [`docs/qa/gpt-chrome-usage-audit-20260810-wp29.md`](docs/qa/gpt-chrome-usage-audit-20260810-wp29.md)
 and [`plan/WP-29-first-project-golden-path-reliability.md`](plan/WP-29-first-project-golden-path-reliability.md).
+
+## WP-29 playback and timeline handoff (2026-08-11)
+
+Commits `6d4db05`, `1fce9c1`, and `8567f3e` are pushed and deployed. The
+accepted desktop playback rerun is within the R4 drop, drift, and stall limits;
+the signed-in owner upload now plays through native EOF, loops without stopping,
+and obeys Space pause/resume even across pending media work. Timeline Fit uses
+authored clip and marker bounds instead of the 60-second project shell, supports
+arbitrarily long scales, pages during playback when zoomed, resets on loop, and
+keeps its gutters visible. The current immutable frontend is
+`editor-web-20260811-013623-8567f3e-timeline-fit-follow`. WP-29 remains open for
+the R2 UI pairing/undo-redo, export-recovery, and remaining R5 browser gates.
 
 ## Production hardening handoff (2026-08-08)
 

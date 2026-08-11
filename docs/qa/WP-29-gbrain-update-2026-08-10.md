@@ -93,3 +93,24 @@ No credentials, tokens, private object paths, or personal file paths belong in
 the project documents or browser state. Production deployment must use the
 immutable API/editor release pattern and preserve the prior release as the
 rollback target.
+
+## Playback and timeline update — 2026-08-11
+
+- `6d4db05` removed a redundant full-workspace render from each presented video
+  frame. Three accepted desktop reruns measured 0.79%, 0.37%, and 1.33% drops,
+  with p95 drift at or below 32 ms, maximum drift at or below 40 ms, and no
+  stall. The R4 normal-play reference-host gate is now PASS.
+- `1fce9c1` added true native-EOF loop playback and a generation guard that
+  makes Space pause authoritative over pending asynchronous media work. Chrome
+  verified a full 115.966633-second EOF wrap, a stable Space pause, and resume.
+- `8567f3e` made Fit and the ruler use authored content bounds, added
+  arbitrary-length sub-5 px/s fitting, paged playback following, sticky track
+  controls, terminal padding, and Dual Lens duration parity.
+- The current immutable frontend is
+  `editor-web-20260811-013623-8567f3e-timeline-fit-follow`. The editor suite,
+  focused tests, typecheck, production build, `nginx -t`, HTTP smoke, and
+  signed-in Chrome acceptance passed.
+
+WP-29 remains `in-progress`. The accepted playback/Fit work does not replace
+the still-open R2 UI pairing/undo-redo, export-recovery, and R5 browser-case
+evidence gates.
