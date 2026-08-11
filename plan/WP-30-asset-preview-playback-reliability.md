@@ -1,6 +1,6 @@
 # WP-30 — Cross-Browser Asset Preview and Animated-Media Reliability
 
-**Status:** In progress — Steps 0–2 green; decoder/cache, Monitor/export parity, deployment, and closeout remain open
+**Status:** In progress — local decoder/cache, timeline/export, and CI gates green; live recovery/deployment/closeout remain open
 **Priority:** P1  
 **Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
 **Repository:** `/opt/joy-media/repo`  
@@ -533,7 +533,7 @@ WP-30 is finished only when all of the following are true:
 - [ ] STEP 3 — Deterministic decoder/cache green.
 - [ ] STEP 4 — Asset Library preview UX green.
 - [ ] STEP 5 — Timeline and Program Monitor parity green.
-- [ ] STEP 6 — Export parity and frame-hash proof green.
+- [x] STEP 6 — Local animated timeline/export parity and frame-hash proof green; live deployment proof remains open.
 - [ ] STEP 7 — Two-profile, three-viewport browser/performance matrix green.
 - [ ] STEP 8 — Immutable deployment, signed-in live acceptance, and cleanup green.
 - [ ] STEP 9 — QA, state, GBrain, and documentation CI green.

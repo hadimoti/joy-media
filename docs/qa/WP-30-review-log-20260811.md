@@ -127,23 +127,54 @@ least-recently-used eviction. Focused ownership/budget coverage is `3/3 PASS`
 after the addition; the complete browser resource-counter and frame-hash gate
 is still open.
 
+### Timeline/export browser proof
+
+Added `tests/e2e/wp30-animated-timeline-export.spec.ts`. The three-viewport
+run combined with the cross-profile suite completed `9/9 PASS` in `23.8s`:
+
+- a run-unique animated GIF was imported through the public UI and placed on
+  the timeline;
+- the resulting clip retained its `1.0s` authored cycle;
+- Export MP4 produced a non-empty browser download;
+- `ffprobe` verified H.264 video, AAC audio, and a positive duration;
+- `ffmpeg` frame-MD5 samples at `0s` and `0.3s` were distinct, proving the
+  exported animation was not frozen;
+- the test cleanup purged the disposable project and fixture asset.
+
+This is isolated local authenticated-stack evidence. Signed-in production
+deployment, OPFS corruption/recovery, and public-byte verification remain open.
+
+### Candidate gate
+
+`pnpm verify:ci` passed on the candidate after the export regression was added:
+
+- `267` test files passed, `1` licensed test file skipped;
+- `1,926` tests passed, `2` licensed skips;
+- all workspace TypeScript builds passed;
+- editor production build transformed `1,303` modules;
+- production dependency audit reported no known vulnerabilities.
+
+The combined WP-30 browser suite is `9/9 PASS` across the three configured
+desktop viewports. This evidence is still pre-deployment; no production release
+pointer or user project has been changed.
+
 ### Remaining Step-3/Step-4 work
 
 - Add resource-limit fixtures and enforce decoded-byte/frame-budget rejection before catalog mutation.
 - Complete deterministic animated-WebP proof. The current frame source uses a Chromium
   `ImageDecoder` capability adapter and fails closed when unavailable; it is not yet
   accepted as cross-browser parity evidence.
-- Run the three-viewport Playwright matrix, signed-in disposable-project acceptance,
-  export frame-hash proof, deployment, cleanup, and GBrain closeout.
+- Run signed-in disposable-project acceptance, deployment, cleanup, and GBrain closeout.
 - Add cache-budget/cancellation tests and full browser Monitor/export frame-hash evidence.
-- Run the three-viewport Playwright matrix and signed-in disposable-project acceptance.
+- Run signed-in production acceptance after the immutable release switch.
 
 ## Safety and cleanup
 
 - The surviving project and manually uploaded file were not changed.
 - No temporary project or asset was created by this review.
 - No production files, release pointers, database rows, or GBrain pages were changed.
-- Working-tree changes remain uncommitted pending the next WP-30 implementation slice.
+- The candidate changes are ready for the deployment/closeout commit; production
+  files, release pointers, database rows, and GBrain pages remain unchanged.
 
 ## Verdict
 
