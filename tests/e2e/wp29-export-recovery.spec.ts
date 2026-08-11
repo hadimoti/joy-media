@@ -47,6 +47,18 @@ async function addFixtureVideo(page: Parameters<typeof authenticate>[0]): Promis
   await expect(timelineClip).toHaveCount(1);
   const clipId = await timelineClip.getAttribute('data-clip-id');
   if (clipId === null) throw new Error('Fixture clip id is unavailable');
+
+  // Keep this recovery proof focused on transaction ordering rather than
+  // spending CI time encoding the full three-second fixture four times. Use
+  // the real keyboard trim path so the shortened source is persisted through
+  // the same editor/session contract that the export fingerprints below
+  // verify.
+  const trimEnd = page.getByRole('button', { name: `Trim end of ${clipId}` });
+  await trimEnd.press('Shift+ArrowLeft');
+  await trimEnd.press('Shift+ArrowLeft');
+  for (let step = 0; step < 5; step += 1) await trimEnd.press('ArrowLeft');
+  await expect(timelineClip).toHaveAttribute('aria-label', /, 0\.5s$/);
+
   await expect
     .poll(() =>
       page.evaluate((expectedClipId) => {

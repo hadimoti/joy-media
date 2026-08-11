@@ -95,20 +95,25 @@ test.describe('WP-29 R5 batch B — shell and timeline gestures', () => {
   test('[R5 CASE-37] freeze-frame and rate actions are visible and undoable', async ({
     page,
   }, testInfo) => {
+    test.setTimeout(60_000);
     await openReferenceWorkspace(page);
     const firstClip = page.locator('.timeline-clip[data-clip-id]').first();
     await firstClip.click();
     const playhead = page.getByRole('slider', { name: 'Playhead' });
     await playhead.focus();
     await page.keyboard.press('Home');
-    for (let step = 0; step < 10; step += 1) await page.keyboard.press('ArrowRight');
+    // The ruler's documented shifted step is one second. Keep this as one
+    // semantic gesture so trace snapshotting cannot consume the test budget.
+    await page.keyboard.press('Shift+ArrowRight');
     await expect(playhead).toHaveAttribute('aria-valuenow', '1000000');
 
     const beforeCount = await page.locator('.timeline-clip[data-clip-id]').count();
     await firstClip.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Freeze frame at playhead' }).click();
     await expect(page.locator('.timeline-clip[data-clip-id]')).toHaveCount(beforeCount + 2);
-    await page.getByRole('button', { name: 'Undo' }).click();
+    const undoButton = page.getByRole('button', { name: 'Undo' });
+    await expect(undoButton).toBeEnabled();
+    await undoButton.click();
     await expect(page.locator('.timeline-clip[data-clip-id]')).toHaveCount(beforeCount);
 
     // Use the final video clip so preserving its source range at 0.5x has
@@ -117,7 +122,8 @@ test.describe('WP-29 R5 batch B — shell and timeline gestures', () => {
     await rateClip.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Set playback rate…' }).click();
     await expect(rateClip).toContainText('0.5×');
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(undoButton).toBeEnabled();
+    await undoButton.click();
     await expect(rateClip).not.toContainText('0.5×');
     await recordEvidence(testInfo, {
       caseId: 37,

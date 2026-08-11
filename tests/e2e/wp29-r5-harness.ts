@@ -116,9 +116,27 @@ export async function authenticate(page: Page): Promise<void> {
   }, E2E_TOKEN);
 }
 
+const PROJECT_SELECTOR_READY_TIMEOUT_MS = 20_000;
+
+async function openReadyProjectSelector(page: Page): Promise<void> {
+  const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
+  expect(response, 'The project selector navigation must return an HTTP response.').not.toBeNull();
+  expect(response!.ok(), `Project selector navigation returned HTTP ${response!.status()}.`).toBe(
+    true,
+  );
+
+  await expect(
+    page.getByRole('heading', { name: 'Projects' }),
+    'The authenticated project selector must finish rendering after a cold application load.',
+  ).toBeVisible({ timeout: PROJECT_SELECTOR_READY_TIMEOUT_MS });
+  await expect(
+    page.getByRole('button', { name: 'New project' }),
+    'The rendered project selector must be interactive before a scenario continues.',
+  ).toBeEnabled({ timeout: PROJECT_SELECTOR_READY_TIMEOUT_MS });
+}
+
 export async function openReferenceWorkspace(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+  await openReadyProjectSelector(page);
   await page
     .getByRole('button', { name: /Local editor project/ })
     .first()
@@ -128,8 +146,7 @@ export async function openReferenceWorkspace(page: Page): Promise<void> {
 }
 
 export async function openDisposableWorkspace(page: Page, title: string): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+  await openReadyProjectSelector(page);
   await page.getByRole('button', { name: 'New project' }).click();
   await page.getByPlaceholder('Project name').fill(title);
   await page.getByRole('button', { name: 'Create project' }).click();
