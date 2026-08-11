@@ -37,6 +37,7 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run test:e2e:audit
         env:
