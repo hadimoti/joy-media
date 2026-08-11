@@ -23,6 +23,14 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(monitorMeta).toContainText('1080 × 1920');
     await expect(selector).toHaveAccessibleName('Canvas aspect ratio (9:16)');
+
+    await selector.click();
+    await page.getByRole('menuitemradio', { name: '1:1' }).click();
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Canvas aspect ratio (1:1)' })).toBeVisible();
+    await expect(page.locator('article.monitor-panel span.monitor-meta[dir="ltr"]')).toContainText(
+      '1080 × 1080',
+    );
   });
 
   test('merges contiguous clips from the context menu, drills in, and returns with Back', async ({
