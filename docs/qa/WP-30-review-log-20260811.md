@@ -94,6 +94,9 @@ all three viewports (`3/3 PASS`). Chromium reported four WebP frames and four
 distinct RGBA frame hashes. The production adapter now awaits
 `decoder.tracks.ready` before reading the selected track; this prevents a cold
 decoder race where `selectedTrack` was temporarily undefined.
+The decoder also revalidates frame-count, cycle-duration, and decoded-memory
+budgets immediately before parsing/allocating frames; the over-budget contract
+test passes (`4/4` decoder tests).
 
 ### Remaining Step-3/Step-4 work
 
