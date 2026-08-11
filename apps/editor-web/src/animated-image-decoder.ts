@@ -1,6 +1,9 @@
 import { decompressFrames, parseGIF } from 'gifuct-js';
 import type { ImageDataLike } from '@joy-media/playback-engine';
-import type { ImageAnimationDescriptor } from './animated-image-metadata.js';
+import {
+  validateImageAnimationBudget,
+  type ImageAnimationDescriptor,
+} from './animated-image-metadata.js';
 
 export interface AnimatedImageFrame {
   readonly startUs: number;
@@ -24,6 +27,7 @@ export async function createAnimatedImageFrameSource(
   blob: Blob,
   descriptor: ImageAnimationDescriptor,
 ): Promise<AnimatedImageFrameSource> {
+  validateImageAnimationBudget(descriptor);
   const bytes = await blob.arrayBuffer();
   if (blob.type.toLowerCase() === 'image/gif' || isGif(bytes))
     return decodeGifFrameSource(bytes, descriptor);
@@ -40,6 +44,7 @@ function decodeGifFrameSource(
   const decoded = decompressFrames(parsed, true);
   const width = parsed.lsd.width;
   const height = parsed.lsd.height;
+  validateImageAnimationBudget(descriptor, width, height);
   if (decoded.length !== descriptor.frameCount || width < 1 || height < 1) {
     throw new Error('animated GIF metadata does not match decoded frames');
   }
@@ -88,6 +93,7 @@ async function decodeWebpFrameSource(
     }
     const width = track.codedWidth;
     const height = track.codedHeight;
+    validateImageAnimationBudget(descriptor, width, height);
     if (width < 1 || height < 1) throw new Error('animated WebP dimensions are invalid');
     const frameDurationUs = descriptor.cycleDurationUs / track.frameCount;
     const frames: AnimatedImageFrame[] = [];

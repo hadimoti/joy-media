@@ -51,6 +51,17 @@ describe('createAnimatedImageFrameSource', () => {
     expect(source.frameAt(0).bitmap.data).not.toEqual(source.frameAt(300_000).bitmap.data);
     source.dispose();
   });
+
+  it('rejects an over-budget descriptor before decoding bytes', async () => {
+    await expect(
+      createAnimatedImageFrameSource(new Blob(['not decoded'], { type: 'image/gif' }), {
+        frameCount: 10_001,
+        cycleDurationUs: 1_000_000,
+        loopCount: 0,
+        hasAlpha: false,
+      }),
+    ).rejects.toThrow('frame-count resource limit');
+  });
 });
 
 function gifFixture(): Uint8Array {
