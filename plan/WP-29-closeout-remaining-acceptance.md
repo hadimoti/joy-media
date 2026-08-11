@@ -1,9 +1,8 @@
 # WP-29 Closeout — Remaining Acceptance Gates
 
-**Status:** R0–R5 approved — R6 immutable deployment, live cleanup, and GBrain pending
+**Status:** R0–R6 finished — immutable deployment, live cleanup, and GBrain verified
 **Parent:** [`WP-29-first-project-golden-path-reliability.md`](WP-29-first-project-golden-path-reliability.md)
-**Baseline:** current live API `ccdb031`; current live editor `8567f3e`; final
-closeout candidate SHA pending
+**Baseline:** deployed product candidate `8756325dc1c336385008332f5200c706c0c09954`
 **Target:** close WP-29 without converting unavailable or unobserved behavior into PASS
 
 ## Outcome
@@ -51,8 +50,19 @@ must not be called PASS.
   arbitrary-duration Fit, and paged follow.
 - R5 PASS: 111/111 reconciled installed-Chrome instances, zero blockers,
   failures, or flakes.
-- R6 PENDING: final SHA, immutable API/editor releases, fresh backup, public
-  hashes, signed-in live cleanup, and GBrain commit.
+- R6 PENDING (historical pre-deploy snapshot; superseded below): final SHA,
+  immutable API/editor releases, fresh backup, public hashes, signed-in live
+  cleanup, and GBrain commit.
+
+### Final Luna closeout — 2026-08-11
+
+R6 is now PASS. Candidate `8756325dc1c336385008332f5200c706c0c09954` passed
+GitHub workflow `31478310783` (check and browser-e2e), local `verify:ci`, and
+the 9/9 session-feature matrix at all three viewports. Immutable API/editor
+releases, backup hash, public byte hashes, signed-in feature verification,
+export re-download, and exact disposable-project purge are recorded in
+`docs/qa/WP-29-session-features-20260811T101245Z.md`. GBrain pages are
+hash-verified and the parent WP-29 status is FINISHED.
 
 ## Dependency order
 

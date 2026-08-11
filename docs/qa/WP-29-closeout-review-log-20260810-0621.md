@@ -273,3 +273,22 @@ STEP-20 must record signed-in live verification and exact cleanup. STEP-21 must
 then reconcile STATE, both plans, reports, WP-27 remediation, and GBrain. Until
 those records exist, the status is **READY-FOR-DEPLOYMENT**, not `WP-29
 FINISHED`.
+
+## Final Luna execution — 2026-08-11
+
+STEP-19 PASS: candidate `8756325dc1c336385008332f5200c706c0c09954` matched
+`origin/main` and workflow `31478310783`; check and browser-e2e both concluded
+success. Local `verify:ci` and the 9/9 session-feature matrix passed.
+
+STEP-20 PASS: fresh backup
+`joymedia-20260811-101137.sql.gz` was hashed
+`91f4b4e5aba395638988bc4f9f361e22fcab7170b0afe72acd2af962a64978f5`; immutable
+API/editor releases were switched atomically and health/public/static hashes
+matched. Signed-in feature and golden-path checks passed, including aspect
+refresh persistence, merge drill-in/back, Speed/reverse/ramp, Fit, export, and
+re-download. Disposable `WP-29 final live 20260811T0858Z` was permanently
+deleted; Trash is empty and the surviving project/upload were untouched.
+
+STEP-21 PASS: QA/plan/state sources were reconciled, both GBrain pages were
+fetch-hash-guarded and updated, and the complete evidence is recorded in
+`docs/qa/WP-29-session-features-20260811T101245Z.md`. WP-29 is **FINISHED**.

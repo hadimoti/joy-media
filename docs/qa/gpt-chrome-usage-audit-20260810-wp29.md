@@ -9,6 +9,10 @@ follow-up to the historical 100-scenario report
 
 ## Result
 
+This section records the historical reliability slice. It is superseded by the
+final Luna closeout amendment at the end of this report, which is the
+authoritative `WP-29 FINISHED` verdict.
+
 The reliability slice is verified in the canonical repository and the local
 browser harness is green. The full signed-in 100-scenario closure is **not yet
 claimed**: the 37 cases that require a real authenticated file bridge, a
@@ -159,3 +163,14 @@ now superseded by the accepted pre-deploy evidence:
 The final candidate SHA, immutable API/editor releases, signed-in live cleanup,
 and final GBrain update are still pending. This pre-deploy report does not claim
 that the working-tree candidate is live.
+
+## Final Luna closeout amendment — 2026-08-11
+
+The candidate is now live and verified. SHA
+`8756325dc1c336385008332f5200c706c0c09954` passed workflow `31478310783` and
+is deployed through immutable API/editor releases
+`wp29-final-api-20260811T101245Z-8756325` and
+`editor-web-20260811T101245Z-8756325-wp29-final`. Signed-in feature/export
+checks passed, the exact disposable project was permanently deleted, and the
+surviving project/upload were untouched. WP-29 is **FINISHED**; reverse preview
+silence remains the documented intentional limitation.

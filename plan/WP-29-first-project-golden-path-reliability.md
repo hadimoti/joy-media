@@ -1,7 +1,6 @@
 # WP-29 — First Project Golden Path and Real-Media Reliability
 
-**Status:** Pre-deploy gates approved — final immutable deployment, live cleanup,
-and GBrain reconciliation pending
+**Status:** FINISHED — immutable deployment, live cleanup, and GBrain reconciliation verified
 **Priority:** P1 product reliability  
 **Depends on:** WP-27 audit remediation and WP-28 project lifecycle, both live  
 **Closeout plan:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)

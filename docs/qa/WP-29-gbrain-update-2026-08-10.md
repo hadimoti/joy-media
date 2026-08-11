@@ -8,7 +8,7 @@ tags:
   - reliability
   - export
   - browser
-status: ready-for-deployment
+status: finished
 ---
 
 # JOY Media WP-29 — 2026-08-10 update
@@ -142,3 +142,13 @@ names, signed-in live cleanup evidence, and companion GBrain commit are
 **PENDING**. This file is prepared as the GBrain handoff source; it does not
 claim that the final candidate has been deployed or that GBrain has already
 been updated.
+
+## Final Luna closeout amendment — 2026-08-11
+
+The historical pending language above is superseded. Product candidate
+`8756325dc1c336385008332f5200c706c0c09954` is deployed as
+`wp29-final-api-20260811T101245Z-8756325` and
+`editor-web-20260811T101245Z-8756325-wp29-final`. Workflow `31478310783`,
+the three-viewport session-feature matrix, signed-in export/re-download, and
+exact disposable-project purge all passed. GBrain page hashes were fetched,
+compared, updated, and verified; WP-29 is **FINISHED**.

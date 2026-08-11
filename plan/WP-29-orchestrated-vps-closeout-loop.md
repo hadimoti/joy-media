@@ -1,6 +1,6 @@
 # WP-29 — Orchestrated VPS Closeout Loop
 
-**Status:** STEP-00 through STEP-18 approved; STEP-19 through STEP-21 pending
+**Status:** STEP-00 through STEP-21 approved; WP-29 FINISHED
 **Parent:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
 **Execution model:** Codex orchestrator reviews; one persistent Codex agent on the Sweden VPS implements
 **Repository:** `/opt/joy-media/repo`

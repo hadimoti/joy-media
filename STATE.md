@@ -45,8 +45,25 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-25 audio Studio UI            | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                                                                                   |
 | WP-26 timeline track visibility  | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                              |
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
-| WP-29 first-project golden path  | in-progress | —        | 2026-08-11   | All pre-deploy gates are green; commit the reviewed candidate, deploy immutable `/opt/joy-media` releases, run signed-in cleanup, then reconcile GBrain                      |
+| WP-29 first-project golden path  | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                         |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
+
+## WP-29 final Luna closeout (2026-08-11)
+
+WP-29 is **FINISHED** on product candidate
+`8756325dc1c336385008332f5200c706c0c09954`.
+
+- GitHub workflow `31478310783` passed `check` and `browser-e2e`.
+- Immutable releases: `wp29-final-api-20260811T101245Z-8756325` and
+  `editor-web-20260811T101245Z-8756325-wp29-final`.
+- Fresh backup: `/opt/joy-media/data/backups/joymedia-20260811-101137.sql.gz`,
+  SHA-256 `91f4b4e5aba395638988bc4f9f361e22fcab7170b0afe72acd2af962a64978f5`.
+- Signed-in feature/golden-path evidence and cleanup are in
+  `docs/qa/WP-29-session-features-20260811T101245Z.md`.
+- Disposable project `WP-29 final live 20260811T0858Z` was permanently deleted;
+  Trash is empty. The surviving project/upload and pre-existing audit project
+  were not touched. Rollback releases and the backup remain intact.
+- GBrain pages were hash-verified after closeout and report `WP-29 FINISHED`.
 
 ## WP-29 pre-deploy closeout checkpoint (2026-08-11)
 
