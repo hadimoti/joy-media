@@ -3,6 +3,7 @@ import {
   activeVideoClipAt,
   nextVideoClipAtOrAfter,
   playbackStartAtOrAfter,
+  playbackTargetAfterClip,
   type PlaybackClip,
   type PlaybackProject,
 } from './timeline-playback.js';
@@ -114,5 +115,37 @@ describe('playbackStartAtOrAfter', () => {
   it('preserves an in-clip playhead', () => {
     const p = project([{ id: 'V1', clips: [clip('a', 'video', 0, 2_000_000)] }]);
     expect(playbackStartAtOrAfter(p, 1_000_000)).toBe(1_000_000);
+  });
+});
+
+describe('playbackTargetAfterClip', () => {
+  it('advances across a gap and through a contiguous boundary', () => {
+    const p = project([
+      {
+        id: 'V1',
+        clips: [
+          clip('a', 'video', 0, 2_000_000),
+          clip('b', 'video', 2_000_000, 2_000_000),
+          clip('c', 'video', 7_000_000, 1_000_000),
+        ],
+      },
+    ]);
+    expect(playbackTargetAfterClip(p, 2_000_000)).toBe(2_000_000);
+    expect(playbackTargetAfterClip(p, 4_000_000)).toBe(7_000_000);
+  });
+
+  it('loops the last clip to the real first-video start', () => {
+    const p = project([
+      {
+        id: 'V1',
+        clips: [clip('first', 'video', 2_000_000), clip('last', 'video', 8_000_000)],
+      },
+    ]);
+    expect(playbackTargetAfterClip(p, 9_000_000)).toBe(2_000_000);
+  });
+
+  it('returns undefined for a timeline without video', () => {
+    const p = project([{ id: 'A1', clips: [clip('audio', 'audio', 0, 1_000_000)] }]);
+    expect(playbackTargetAfterClip(p, 1_000_000)).toBeUndefined();
   });
 });

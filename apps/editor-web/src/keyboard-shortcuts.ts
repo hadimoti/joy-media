@@ -34,6 +34,32 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return element.isContentEditable === true;
 }
 
+/** True when a focused control owns Space/Enter instead of the global editor. */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (target === null || typeof target !== 'object') return false;
+  let element: (Partial<HTMLElement> & { readonly tagName?: string }) | null =
+    target as Partial<HTMLElement> & { readonly tagName?: string };
+  const interactiveTags = new Set(['A', 'BUTTON', 'DETAILS', 'SUMMARY']);
+  const interactiveRoles = new Set([
+    'button',
+    'checkbox',
+    'link',
+    'menuitem',
+    'option',
+    'radio',
+    'slider',
+    'switch',
+    'tab',
+  ]);
+  while (element !== null) {
+    if (interactiveTags.has(element.tagName?.toUpperCase() ?? '')) return true;
+    const role = element.getAttribute?.('role')?.toLowerCase();
+    if (role !== undefined && interactiveRoles.has(role)) return true;
+    element = element.parentElement ?? null;
+  }
+  return false;
+}
+
 /** Resolve a keydown to an editor action, or undefined when the key is unbound. */
 export function resolveShortcut(event: ShortcutKeyEvent): ShortcutAction | undefined {
   const mod = event.ctrlKey || event.metaKey;

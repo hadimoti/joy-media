@@ -89,3 +89,11 @@ export function playbackStartAtOrAfter(
   const first = nextVideoClipAtOrAfter(project, 0);
   return first?.startUs;
 }
+
+/** Next playable target after a clip ends, wrapping to the first video. */
+export function playbackTargetAfterClip(
+  project: PlaybackProject,
+  clipEndUs: number,
+): number | undefined {
+  return playbackStartAtOrAfter(project, clipEndUs);
+}

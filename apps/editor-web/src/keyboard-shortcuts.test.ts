@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
 
 const key = (
   k: string,
@@ -54,5 +54,24 @@ describe('isEditableTarget', () => {
     ).toBe(true);
     expect(isEditableTarget({ tagName: 'BUTTON' } as unknown as EventTarget)).toBe(false);
     expect(isEditableTarget(null)).toBe(false);
+  });
+});
+
+describe('isInteractiveTarget', () => {
+  it('lets focused controls own Space without toggling the global transport', () => {
+    expect(isInteractiveTarget({ tagName: 'BUTTON' } as unknown as EventTarget)).toBe(true);
+    expect(
+      isInteractiveTarget({
+        tagName: 'DIV',
+        getAttribute: () => 'menuitem',
+      } as unknown as EventTarget),
+    ).toBe(true);
+    expect(isInteractiveTarget({ tagName: 'DIV' } as unknown as EventTarget)).toBe(false);
+  });
+
+  it('recognizes a control ancestor for nested icon targets', () => {
+    const button = { tagName: 'BUTTON', parentElement: null };
+    const icon = { tagName: 'SPAN', parentElement: button };
+    expect(isInteractiveTarget(icon as unknown as EventTarget)).toBe(true);
   });
 });

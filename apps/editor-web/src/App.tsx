@@ -182,7 +182,7 @@ import {
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
-import { isEditableTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
   CloseIcon,
   CommandIcon,
@@ -221,7 +221,8 @@ import {
 } from './export-preload.js';
 import { ProjectOperationLedger } from './project-operation-ledger.js';
 import { createMonoAudioBuffer } from './export-audio.js';
-import { nextVideoClipAtOrAfter, playbackStartAtOrAfter } from './timeline-playback.js';
+import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
+import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -910,6 +911,7 @@ function EditorWorkspace({
   const lastDiagnosticsObservedUsRef = useRef<number | undefined>(undefined);
   const freezeWallStartRef = useRef<{ wallMs: number; playheadUs: number } | undefined>(undefined);
   const playbackFrameRef = useRef<number | undefined>(undefined);
+  const playbackOperationRef = useRef(new PlaybackOperationGate());
 
   const rememberClipFrame = useCallback((clipId: string, bitmap: ImageDataLike) => {
     const cache = clipFrameCacheRef.current;
@@ -988,10 +990,11 @@ function EditorWorkspace({
   );
 
   const syncMediaToPlayhead = useCallback(
-    async (playheadUs: number, play: boolean): Promise<boolean> => {
+    async (playheadUs: number, play: boolean, epoch: number): Promise<boolean> => {
       const video = videoRef.current;
       const clock = clockRef.current;
       const decoder = decoderRef.current;
+      const operation = playbackOperationRef.current;
       const composition = session.timelineProject.compositions.root;
       const transition = activeTransitionAt(session.visualProject, playheadUs);
       const clip =
@@ -1008,6 +1011,7 @@ function EditorWorkspace({
       )
         return false;
       const source = await mediaResolver.resolve(clip.assetId);
+      if (!operation.isCurrent(epoch)) return false;
       playbackDiagnostics.current.start(clip.id, 'full');
       const sourceUrl = new URL(source.url, window.location.href).href;
       if (video.src !== sourceUrl) {
@@ -1028,6 +1032,7 @@ function EditorWorkspace({
           video.addEventListener('loadeddata', onLoaded, { once: true });
           video.addEventListener('error', onError, { once: true });
         });
+        if (!operation.isCurrent(epoch)) return false;
       }
       const rate = normalizePlaybackRate(clip.playbackRate);
       const sourceTimeUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
@@ -1046,7 +1051,13 @@ function EditorWorkspace({
           };
         } else {
           freezeWallStartRef.current = undefined;
-          await video.play();
+          const started = await playMediaWhenCurrent(
+            operation,
+            epoch,
+            () => video.play(),
+            () => video.pause(),
+          );
+          if (!started) return false;
         }
       } else {
         freezeWallStartRef.current = undefined;
@@ -1084,12 +1095,19 @@ function EditorWorkspace({
 
   const seek = useCallback(
     (timeUs: number) => {
+      const operation = playbackOperationRef.current;
+      const epoch = operation.begin(operation.intendsToPlay);
       scheduler.current.seek(timeUs);
       playbackDiagnostics.current.reset();
       lastMediaTimeUsRef.current = undefined;
       lastDiagnosticsObservedUsRef.current = undefined;
+      stateRef.current = { ...stateRef.current, playheadUs: timeUs };
       setState((current) => ({ ...current, playheadUs: timeUs }));
-      void syncMediaToPlayhead(timeUs, stateRef.current.playing).catch(() => {
+      void syncMediaToPlayhead(timeUs, operation.intendsToPlay, epoch).catch(() => {
+        if (!operation.isCurrent(epoch)) return;
+        operation.begin(false);
+        videoRef.current?.pause();
+        stateRef.current = { ...stateRef.current, playing: false };
         setState((current) => ({ ...current, playing: false }));
       });
     },
@@ -1102,6 +1120,60 @@ function EditorWorkspace({
     const clock = clockRef.current;
     if (video === null || decoder === null || clock === null) return;
     let cancelled = false;
+    let boundaryTransitionInFlight = false;
+    const stopPlaybackForEpoch = (epoch: number): void => {
+      const operation = playbackOperationRef.current;
+      if (!operation.isCurrent(epoch)) return;
+      operation.begin(false);
+      video.pause();
+      freezeWallStartRef.current = undefined;
+      stateRef.current = { ...stateRef.current, playing: false };
+      setState((active) => ({ ...active, playing: false }));
+    };
+    const advancePlaybackAfterClip = (clipEndUs: number): void => {
+      const operation = playbackOperationRef.current;
+      if (cancelled || boundaryTransitionInFlight || !operation.intendsToPlay) return;
+      const durationUs = session.timelineProject.compositions.root?.durationUs ?? clipEndUs;
+      // Advance across gaps and wrap the final playable clip back to the
+      // first. Move the authoritative playhead before loading the next media
+      // so the next frame cannot resolve the clip that just finished.
+      const nextPlayheadUs = playbackTargetAfterClip(session.timelineProject, clipEndUs);
+      if (nextPlayheadUs === undefined) {
+        operation.begin(false);
+        video.pause();
+        freezeWallStartRef.current = undefined;
+        stateRef.current = {
+          ...stateRef.current,
+          playheadUs: durationUs,
+          playing: false,
+        };
+        setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));
+        setRevision((revision) => revision + 1);
+        return;
+      }
+      boundaryTransitionInFlight = true;
+      const epoch = operation.begin(true);
+      stateRef.current = {
+        ...stateRef.current,
+        playheadUs: nextPlayheadUs,
+        playing: true,
+      };
+      setState((active) => ({ ...active, playheadUs: nextPlayheadUs, playing: true }));
+      void syncMediaToPlayhead(nextPlayheadUs, true, epoch)
+        .then((ready) => {
+          boundaryTransitionInFlight = false;
+          if (!operation.isCurrent(epoch) || !operation.intendsToPlay || cancelled) return;
+          if (!ready) {
+            stopPlaybackForEpoch(epoch);
+            return;
+          }
+          requestFrame();
+        })
+        .catch(() => {
+          boundaryTransitionInFlight = false;
+          stopPlaybackForEpoch(epoch);
+        });
+    };
     const capture = (frameInfo?: {
       readonly metadata?: VideoFramePresentationMetadata;
       readonly observedAtMs?: number;
@@ -1134,25 +1206,7 @@ function EditorWorkspace({
         compositionTimeUs = playheadForSourceTime(clip, sourceTimeUs, stateRef.current.playheadUs);
       }
       if (compositionTimeUs >= clip.startUs + clip.durationUs) {
-        const clipEndUs = clip.startUs + clip.durationUs;
-        const durationUs = session.timelineProject.compositions.root?.durationUs ?? clipEndUs;
-        // Advance to the next video clip on the timeline, skipping any gap.
-        // The old code always synced to `clipEndUs`, which is in a gap when the
-        // clips are not contiguous — syncMediaToPlayhead returns false there,
-        // so playback silently stopped after the first clip.
-        const nextClip = nextVideoClipAtOrAfter(session.timelineProject, clipEndUs);
-        const nextPlayheadUs =
-          nextClip === undefined ? clipEndUs : Math.max(clipEndUs, nextClip.startUs);
-        if (nextClip === undefined) {
-          video.pause();
-          freezeWallStartRef.current = undefined;
-          setState((active) => ({ ...active, playheadUs: durationUs, playing: false }));
-          setRevision((revision) => revision + 1);
-          return;
-        }
-        void syncMediaToPlayhead(nextPlayheadUs, true).then((ready) => {
-          if (ready && !cancelled) requestFrame();
-        });
+        advancePlaybackAfterClip(clip.startUs + clip.durationUs);
         return;
       }
       const token = scheduler.current.requestToken();
@@ -1219,9 +1273,20 @@ function EditorWorkspace({
           capture({ observedAtMs: now }),
         );
     };
+    const onEnded = (): void => {
+      const clip = activeVideoClipAt(
+        session.timelineProject,
+        stateRef.current.playheadUs,
+        stateRef.current.selectedIds,
+      );
+      if (clip !== undefined && clip.kind === 'video')
+        advancePlaybackAfterClip(clip.startUs + clip.durationUs);
+    };
+    video.addEventListener('ended', onEnded);
     requestFrame();
     return () => {
       cancelled = true;
+      video.removeEventListener('ended', onEnded);
       if (playbackFrameRef.current !== undefined) {
         if (typeof video.cancelVideoFrameCallback === 'function')
           video.cancelVideoFrameCallback(playbackFrameRef.current);
@@ -1259,6 +1324,7 @@ function EditorWorkspace({
         .catch(() => undefined);
     }
     return () => {
+      playbackOperationRef.current.begin(false);
       video.pause();
       decoderRef.current = null;
       clockRef.current = null;
@@ -1268,24 +1334,42 @@ function EditorWorkspace({
   }, [handleMediaReady, mediaResolver, session]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
-    if (current.playing) {
+    const operation = playbackOperationRef.current;
+    if (operation.intendsToPlay) {
+      operation.begin(false);
       videoRef.current?.pause();
+      freezeWallStartRef.current = undefined;
+      stateRef.current = { ...current, playing: false };
       setState((active) => ({ ...active, playing: false }));
       return;
     }
     ensurePreviewAudioGraph();
     const startUs = playbackStartAtOrAfter(session.timelineProject, current.playheadUs);
     if (startUs === undefined) {
+      operation.begin(false);
+      stateRef.current = { ...current, playing: false };
       setState((active) => ({ ...active, playing: false }));
       return;
     }
-    if (startUs !== current.playheadUs) {
-      scheduler.current.seek(startUs);
-      setState((active) => ({ ...active, playheadUs: startUs }));
-    }
-    void syncMediaToPlayhead(startUs, true)
-      .then((ready) => setState((active) => ({ ...active, playing: ready })))
-      .catch(() => setState((active) => ({ ...active, playing: false })));
+    const epoch = operation.begin(true);
+    scheduler.current.seek(startUs);
+    stateRef.current = { ...current, playheadUs: startUs, playing: true };
+    setState((active) => ({ ...active, playheadUs: startUs, playing: true }));
+    void syncMediaToPlayhead(startUs, true, epoch)
+      .then((ready) => {
+        if (ready || !operation.isCurrent(epoch)) return;
+        operation.begin(false);
+        videoRef.current?.pause();
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      })
+      .catch(() => {
+        if (!operation.isCurrent(epoch)) return;
+        operation.begin(false);
+        videoRef.current?.pause();
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      });
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
@@ -1881,10 +1965,19 @@ function EditorWorkspace({
   }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const action = resolveShortcut(event);
       if (action === undefined) return;
       // Escape must close the palette even while its search input has focus.
-      if (action !== 'palette.close' && isEditableTarget(event.target)) return;
+      if (
+        action !== 'palette.close' &&
+        (isEditableTarget(event.target) || isInteractiveTarget(event.target))
+      )
+        return;
+      if (action === 'playback.toggle' && event.repeat) {
+        event.preventDefault();
+        return;
+      }
       const current = stateRef.current;
       const composition = session.timelineProject.compositions.root;
       const durationUs = composition?.durationUs ?? 0;
