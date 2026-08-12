@@ -4880,7 +4880,10 @@ function EditorWorkspace({
               </span>
             </button>
             {exportPresetOpen && (
-              <section className="header-dropdown" aria-label="Export preset">
+              <section
+                className="header-dropdown header-export-preset-dropdown"
+                aria-label="Export preset"
+              >
                 <h3>Export preset</h3>
                 <ul className="export-preset-list">
                   {(

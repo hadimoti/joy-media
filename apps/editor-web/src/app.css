@@ -911,6 +911,10 @@ main {
   margin: 0.3rem 0;
   font-size: 0.82rem;
 }
+.header-export-preset-dropdown {
+  min-width: 12rem;
+  max-width: 12rem;
+}
 .account-dropdown {
   min-width: 17rem;
   max-width: 22rem;
@@ -1390,22 +1394,14 @@ a.icon-button {
 }
 .export-preset-list button {
   width: 100%;
-  display: grid;
-  grid-template-columns: 1.5rem minmax(0, 1fr) 1.5rem;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   min-height: 2rem;
-  text-align: center;
-}
-.export-preset-list button > svg {
-  grid-column: 1;
-  justify-self: center;
 }
 .export-preset-option-label {
   display: block;
-  grid-column: 2;
-  min-width: 0;
   line-height: 1.25;
-  text-align: center;
 }
 .sr-only {
   position: absolute;
