@@ -1,0 +1,20 @@
+{
+  "workPackage": "WP-32",
+  "runId": "wp32-20260812T141142Z",
+  "planCommit": "0bbd016",
+  "baselineProductCommit": "e6b0addd3fede4647cae6166c3fa2ddea4df0e1f",
+  "implementationSourceCommit": "fb745ac001773b528ff9983d5ef8143fada1d6bc",
+  "environment": "local E2E harness with the real API and Vite editor server",
+  "viewportProjects": ["desktop-primary", "desktop-compact", "desktop-minimum"],
+  "gates": {
+    "wp32JourneyAndResponsive": "6 passed",
+    "primaryAssetRegression": "6 passed",
+    "typecheck": "passed",
+    "eslint": "passed with generated Playwright output excluded",
+    "changedFilePrettier": "passed",
+    "unitTests": "1947 passed, 2 skipped",
+    "productionBuild": "passed"
+  },
+  "telemetryDisposition": "No console, HTTP, or failed-request errors in the WP-32 journey; Chromium opaque-iframe localStorage denial is expected and filtered.",
+  "secrets": "redacted"
+}

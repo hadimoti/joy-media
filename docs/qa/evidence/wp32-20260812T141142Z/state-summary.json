@@ -1,0 +1,13 @@
+{
+  "before": {
+    "apiRelease": "wp31-api-20260812T100237Z-e6b0add",
+    "webRelease": "editor-web-20260812T100237Z-e6b0add-wp31-ia",
+    "publicHealth": "green"
+  },
+  "implementation": {
+    "sourceCommit": "fb745ac001773b528ff9983d5ef8143fada1d6bc",
+    "deployment": "pending exact-SHA CI and immutable VPS release"
+  },
+  "rollbackPolicy": "retain previous immutable WP-31 API and web releases",
+  "liveStateFiles": "not copied into repository evidence"
+}

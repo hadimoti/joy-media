@@ -1,0 +1,19 @@
+{
+  "viewportProjects": {
+    "desktop-primary": { "passed": true, "horizontalOverflow": false },
+    "desktop-compact": { "passed": true, "horizontalOverflow": false },
+    "desktop-minimum": { "passed": true, "horizontalOverflow": false }
+  },
+  "verifiedControls": [
+    "Export MP4",
+    "Process Center",
+    "Workspace preset",
+    "Assets",
+    "Timeline",
+    "Captions",
+    "Audio",
+    "File menu keyboard focus",
+    "Projects Library navigation"
+  ],
+  "result": "6 passed"
+}

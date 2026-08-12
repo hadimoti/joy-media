@@ -1,0 +1,15 @@
+{
+  "exportFormat": "MP4",
+  "codecAssertions": {
+    "video": "H.264",
+    "audio": "AAC",
+    "duration": "> 0 seconds"
+  },
+  "downloadAssertions": {
+    "downloadedBytesNonEmpty": true,
+    "sha256Captured": true,
+    "processCenterRedownloadByteEqual": true,
+    "processCenterRedownloadSha256Equal": true
+  },
+  "proofMethod": "Playwright download hashing plus ffprobe on the downloaded file"
+}

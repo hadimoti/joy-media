@@ -1,0 +1,24 @@
+{
+  "scenario": "disposable project from import through verified export",
+  "viewportResults": {
+    "desktop-primary": "passed",
+    "desktop-compact": "passed",
+    "desktop-minimum": "passed"
+  },
+  "checkpoints": [
+    "create disposable project",
+    "import video, image, and audio fixtures",
+    "preview each imported asset",
+    "place all media on the timeline",
+    "author a timeline edit",
+    "import and render captions",
+    "apply browser audio processing and mix controls",
+    "export MP4 and verify encoded output",
+    "reload and verify Process Center re-download"
+  ],
+  "allCheckpointsPassed": true,
+  "consoleErrors": [],
+  "httpErrors": [],
+  "failedRequests": [],
+  "unexpectedPageErrors": []
+}

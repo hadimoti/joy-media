@@ -1,0 +1,11 @@
+{
+  "fixtureSource": "packages/test-fixtures/media",
+  "fixtures": [
+    { "file": "video.mp4", "role": "video import, trim, duplicate, export source" },
+    { "file": "image.png", "role": "image import, preview, timeline placement" },
+    { "file": "audio.wav", "role": "audio import, preview, timeline placement, Browser DSP" },
+    { "file": "captions-en.srt", "role": "caption track import and render" }
+  ],
+  "network": "local deterministic E2E API only",
+  "paidProvidersContacted": false
+}

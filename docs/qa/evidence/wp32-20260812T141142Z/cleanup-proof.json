@@ -1,0 +1,14 @@
+{
+  "cleanupMode": "exact opaque control-plane project binding",
+  "sequence": [
+    "list assets for exact project id",
+    "delete each returned asset id",
+    "read exact project revision",
+    "trash exact project with current base revision",
+    "delete exact project"
+  ],
+  "titleOrPrefixDeletionUsed": false,
+  "cleanupRuns": 6,
+  "allCleanupChecksPassed": true,
+  "secrets": "redacted"
+}
