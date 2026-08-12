@@ -77,14 +77,12 @@ interface Preview {
 export function AssetLibraryPanel({
   projectId,
   projectTitle = 'Editor project',
-  controlPlaneReady = true,
   onAddSticker: _onAddSticker,
   onAddToTimeline,
   onEditWithAi,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
-  readonly controlPlaneReady?: boolean;
   readonly onAddSticker?: (asset: {
     readonly assetId: string;
     readonly displayName?: string;
@@ -124,7 +122,6 @@ export function AssetLibraryPanel({
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [projectScopeReady, setProjectScopeReady] = useState(controlPlaneReady);
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>(
     initialUiPreferences.current.assetLibrary.category,
@@ -186,13 +183,11 @@ export function AssetLibraryPanel({
     }
     try {
       // Catalog listing must not create or reconcile a control-plane project.
-      // My Media is scoped to the active project, while importMediaFile owns
-      // the ensure-before-register transaction. Keeping refresh read-only
-      // avoids an idempotent POST (and its noisy 409 response) on every panel
-      // mount or category change. Before the signed-in project binding is
-      // ready, use the owner-wide catalog so a manual refresh remains
-      // responsive without issuing a project-scoped read for a missing ID.
-      const ownedResultPromise = projectScopeReady ? client.myAssets(projectId) : client.myAssets();
+      // My Media is the signed-in owner's library, including media from other
+      // projects. importMediaFile owns the ensure-before-register transaction,
+      // so this stays a read-only request even while the active project binding
+      // is still settling.
+      const ownedResultPromise = client.myAssets();
       const [ownedResult, sharedResult] = await Promise.allSettled([
         ownedResultPromise,
         client.sharedCloudAssets(),
@@ -206,11 +201,6 @@ export function AssetLibraryPanel({
           ? ownedResult.reason
           : new Error('Failed to load media catalog');
       }
-      // A pre-binding refresh is only a safe readiness probe. Preserve the
-      // local post-import reveal and wait for the authenticated project-scoped
-      // refresh before replacing the catalog state.
-      if (!projectScopeReady) return;
-
       const byId = new Map<string, BrowserAsset>();
       for (const asset of ownedAssets) byId.set(asset.id, asset);
       for (const asset of sharedAssets) {
@@ -259,10 +249,7 @@ export function AssetLibraryPanel({
       setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, projectId, projectScopeReady]);
-  useEffect(() => {
-    if (controlPlaneReady) setProjectScopeReady(true);
-  }, [controlPlaneReady]);
+  }, [client, projectId]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -368,7 +355,6 @@ export function AssetLibraryPanel({
           setStatus(progressMessage);
         },
       });
-      setProjectScopeReady(true);
       setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
       setOwnedAssetIds((current) => includeOwnedAsset([], current, imported).ownedAssetIds);
       const reveal = importedAssetRevealState(imported);
@@ -637,7 +623,10 @@ export function AssetLibraryPanel({
   // The top level is intentionally media-specific. Collections below it are
   // driven by category-* tags, so future videos and audio inherit the same UI.
   const categoryTabs: readonly PanelTabSpec[] = categories.map((entry) => {
-    const count = sourceItems.filter(({ asset }) => asset.kind === entry.id).length;
+    const count =
+      entry.id === 'all'
+        ? sourceItems.length
+        : sourceItems.filter(({ asset }) => asset.kind === entry.id).length;
     return {
       id: entry.id,
       label: `${entry.label} ${count}`,
@@ -1191,7 +1180,7 @@ export function AssetLibraryPanel({
                         {onAddToTimeline !== undefined && (
                           <button
                             type="button"
-                            className="icon-button icon-button-labeled asset-card-add"
+                            className="icon-button asset-card-add"
                             aria-label={`Add ${asset.displayName} to timeline`}
                             title="Add to timeline"
                             data-guide="Add to timeline"
@@ -1206,7 +1195,6 @@ export function AssetLibraryPanel({
                             }}
                           >
                             <PlusIcon />
-                            <span>Add to timeline</span>
                           </button>
                         )}
                         {assetSource === 'user' &&

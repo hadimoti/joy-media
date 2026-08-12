@@ -7108,7 +7108,7 @@ label {
 /* —— Project library gate —— */
 .project-library {
   min-height: 100vh;
-  background: #0e0e10;
+  background: #000;
   color: #e4e4e6;
 }
 .project-library-header {
@@ -7319,7 +7319,8 @@ label {
 .project-library-card-title {
   display: block;
   min-width: 0;
-  padding: 0.7rem 0.85rem 0;
+  /* Reserve the absolute overflow trigger so long project names stay readable. */
+  padding: 0.7rem 3.35rem 0 0.85rem;
 }
 .project-library-card-title strong {
   display: block;
@@ -9997,20 +9998,7 @@ label {
   line-height: 1.5;
 }
 .asset-card-add {
-  gap: 0.25rem;
-  width: auto !important;
   min-width: 1.55rem;
-  padding-inline: 0.35rem !important;
-}
-.asset-card-add span {
-  display: none;
-  font-size: var(--joy-type-2xs);
-  white-space: nowrap;
-}
-@container (min-width: 24rem) {
-  .asset-card-add span {
-    display: inline;
-  }
 }
 /* Assets: media sections above, semantic collections below, and distinct views. */
 .asset-library > .joy-panel-tabs {

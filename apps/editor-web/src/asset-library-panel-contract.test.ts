@@ -20,23 +20,27 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(successPath).toContain('setAvailability(reveal.availability);');
     expect(successPath).toContain('setSort(reveal.sort);');
     expect(successPath).toContain('setRenderLimit(reveal.renderLimit);');
-    expect(successPath).toContain('setProjectScopeReady(true);');
     expect(successPath).toContain('await refresh();');
   });
 
   it('renders an add-to-timeline action for every rendered asset', () => {
     expect(panelSource).toContain('rendered.map(({ asset, derivatives }) =>');
     expect(panelSource).toContain('aria-label={`Add ${asset.displayName} to timeline`}');
+    expect(panelSource).not.toContain('<span>Add to timeline</span>');
   });
 
-  it('keeps catalog refresh read-only after project creation', () => {
+  it('loads both owner and cloud libraries without waiting for project binding readiness', () => {
     const refreshPath = panelSource.slice(
       panelSource.indexOf('const refresh = useCallback'),
       panelSource.indexOf('const importSelectedFile'),
     );
     expect(refreshPath).not.toContain('ensureProject(');
-    expect(refreshPath).toContain('client.myAssets(projectId)');
-    expect(refreshPath).toContain('projectScopeReady');
+    expect(refreshPath).toContain('client.myAssets();');
+    expect(refreshPath).not.toContain('if (!projectScopeReady) return;');
     expect(refreshPath).toContain('client.sharedCloudAssets()');
+  });
+
+  it('reports a real All count alongside media-specific category counts', () => {
+    expect(panelSource).toMatch(/entry\.id === 'all'\s*\?\s*sourceItems\.length/);
   });
 });
