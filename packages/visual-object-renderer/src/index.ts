@@ -11,6 +11,7 @@
  */
 
 import type {
+  ColorGradeV2,
   ColorGradeV1,
   EffectInstanceV1,
   EffectParamValue,
@@ -46,7 +47,7 @@ export interface BuildRenderFrameOptions {
   readonly transitions?: readonly TransitionV1[];
   /** Right-clip start times used to activate transitions at the junction. */
   readonly clipTimes?: ClipTimingLookup;
-  readonly colorGrade?: ColorGradeV1 | ColorGradeIR;
+  readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR;
   /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
   readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
@@ -303,7 +304,25 @@ function mapParamsToNumbers(
   return out;
 }
 
-function normalizeColorGrade(grade: ColorGradeV1 | ColorGradeIR): ColorGradeIR {
+function normalizeColorGrade(grade: ColorGradeV1 | ColorGradeV2 | ColorGradeIR): ColorGradeIR {
+  if ('version' in grade && grade.version === 2) {
+    const adjust = grade.adjust;
+    const wheels = grade.wheels;
+    return {
+      version: 2,
+      ...(grade.enabled === undefined ? {} : { enabled: grade.enabled }),
+      lift: wheels?.lift.master ?? 0,
+      gamma: 1 + (wheels?.gamma.master ?? 0),
+      gain: 1 + (wheels?.gain.master ?? 0),
+      saturation: adjust?.saturation ?? grade.saturation ?? 1,
+      ...(adjust === undefined ? {} : { adjust }),
+      ...(wheels === undefined ? {} : { wheels }),
+      ...(grade.curves === undefined ? {} : { curves: grade.curves }),
+      ...(grade.hsl === undefined ? {} : { hsl: grade.hsl }),
+      ...(grade.lut === undefined ? {} : { lut: grade.lut }),
+      ...(grade.outputSafety === undefined ? {} : { outputSafety: grade.outputSafety }),
+    };
+  }
   return {
     lift: grade.lift,
     gamma: grade.gamma,
