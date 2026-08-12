@@ -715,12 +715,11 @@ main {
   align-items: center;
   justify-content: center;
   align-self: center;
-  width: auto;
+  width: 1.75rem;
   height: 1.75rem;
-  min-width: 5.9rem;
+  min-width: 1.75rem;
   min-height: 1.75rem;
-  gap: 0.35rem;
-  padding: 0 0.65rem;
+  padding: 0;
   border: 0;
   border-radius: var(--joy-radius-inner);
   background:
@@ -765,6 +764,8 @@ main {
 }
 .header-processes-trigger {
   color: var(--joy-text-muted);
+  width: 1.75rem !important;
+  padding-inline: 0 !important;
 }
 .process-center-count {
   display: inline-grid;
@@ -1389,19 +1390,20 @@ a.icon-button {
 }
 .export-preset-list button {
   width: 100%;
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) 1.5rem;
+  align-items: center;
   min-height: 2rem;
   text-align: center;
 }
 .export-preset-list button > svg {
-  position: absolute;
-  inset-inline-start: 0.55rem;
+  grid-column: 1;
+  justify-self: center;
 }
 .export-preset-option-label {
   display: block;
-  position: absolute;
-  inset-inline: 0.55rem;
+  grid-column: 2;
+  min-width: 0;
   line-height: 1.25;
   text-align: center;
 }

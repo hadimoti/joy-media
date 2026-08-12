@@ -4864,7 +4864,6 @@ function EditorWorkspace({
                 setAccountOpen(false);
               }}
             >
-              <PngMaskIcon src="/assets/24_export-presets.png" size={14} />
               <span className="header-disclosure-chevron" aria-hidden="true">
                 <ChevronDownIcon />
               </span>
@@ -4925,7 +4924,6 @@ function EditorWorkspace({
             aria-busy={exporting}
           >
             <ExportIcon />
-            <span>Export MP4</span>
           </button>
           {exporting && (
             <button
@@ -4951,7 +4949,6 @@ function EditorWorkspace({
               }}
             >
               <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
-              <span>Process Center</span>
               {processCounts.active + processCounts.attention > 0 && (
                 <span
                   className="process-center-count"
