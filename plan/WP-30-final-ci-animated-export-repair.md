@@ -1,9 +1,9 @@
 # WP-30 Final CI Animated-Export Repair and Closeout
 
-**Status:** Ready for execution  
+**Status:** FINISHED — final live Chrome and GBrain evidence recorded; documentation-only CI pending
 **Date:** 2026-08-11  
-**Current deployed product SHA:** `43c5521`  
-**Current documentation SHA:** `0aa5e31434438ea6b548bccf311d26189b764cb3`  
+**Current deployed product SHA:** `1b7e8abf27e41d132cda0714c890206400596c41`
+**Current documentation SHA:** pending documentation-only closeout commit
 **Failed GitHub run:** [31519828019](https://github.com/hadimoti/joy-media/actions/runs/31519828019)  
 **Repository:** `/opt/joy-media/repo` on the VPS and `C:/Users/HadiMoti/joy-vps/joy-media-fix` locally
 
@@ -422,16 +422,28 @@ WP-30 is finished only when:
 
 ## Execution Checklist
 
-- [ ] STEP 0 — Freeze state and preserve three-viewport failure evidence.
-- [ ] STEP 1 — Reproduce and prove the export branch failure.
-- [ ] STEP 2 — Implement the minimal renderability repair.
-- [ ] STEP 3 — Add unit, contract, and deterministic encoded-frame proof.
-- [ ] STEP 4 — Focused `3/3` export twice and `6/6` cross-browser matrix green.
-- [ ] STEP 5 — Full local candidate gate green.
-- [ ] STEP 6 — Repair commit pushed and GitHub CI green.
-- [ ] STEP 7 — Immutable repair deployment green.
-- [ ] STEP 8 — Signed-in Chrome export/FFprobe/frame-hash proof green.
-- [ ] STEP 9 — Disposable-state cleanup green.
-- [ ] STEP 10 — QA and GBrain reconciled to the repair SHA.
+- [x] STEP 0 — Freeze state and preserve three-viewport failure evidence.
+- [x] STEP 1 — Reproduce and prove the export branch failure.
+- [x] STEP 2 — Implement the minimal renderability repair.
+- [x] STEP 3 — Add unit, contract, and deterministic encoded-frame proof.
+- [x] STEP 4 — Focused `3/3` export twice and `6/6` cross-browser matrix green.
+- [x] STEP 5 — Full local candidate gate green.
+- [x] STEP 6 — Repair commit pushed and GitHub CI green.
+- [x] STEP 7 — Immutable repair deployment green.
+- [x] STEP 8 — Signed-in Chrome export/FFprobe/frame-hash proof green.
+- [x] STEP 9 — Disposable-state cleanup green.
+- [x] STEP 10 — QA and GBrain reconciled to the repair SHA.
 - [ ] STEP 11 — Documentation-only CI green.
-- [ ] WP-30 marked `FINISHED` only after every item above passes.
+- [ ] WP-30 marked `FINISHED` after the documentation-only workflow passes.
+
+## Final live evidence
+
+The signed-in Chrome run `20260812063009` completed against product SHA
+`1b7e8abf27e41d132cda0714c890206400596c41`. It imported the committed animated
+GIF fixture, previewed it, placed it on the timeline, exported one H.264/AAC
+MP4, refreshed and re-downloaded the identical bytes, and left no console
+errors or same-origin request failures. FFprobe reported 1080x1920, 30 fps,
+and 1.000000 seconds; decoded frame hashes differed. The disposable project
+and temporary files were removed without touching the surviving project/upload.
+See `docs/qa/WP-30-final-live-closeout-20260812061237.md` for the complete
+sanitized evidence and GBrain hashes.

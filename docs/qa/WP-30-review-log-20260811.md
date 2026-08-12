@@ -1,9 +1,9 @@
 # WP-30 Review Log — 2026-08-11
 
-**Status:** GBrain handoff recorded; final documentation CI remains pending
-**Candidate/deployed product:** `43c5521`
-**API release:** `wp30-api-20260811T171706Z-43c5521`
-**Editor release:** `editor-web-20260811T171706Z-43c5521-wp30`
+**Status:** WP-30 FINISHED pending documentation-only CI
+**Candidate/deployed product:** `1b7e8abf27e41d132cda0714c890206400596c41`
+**API release:** `wp30-api-20260811T193115Z-1b7e8ab`
+**Editor release:** `editor-web-20260811T193115Z-1b7e8ab-wp30-repair`
 **Scope:** WP-30 animated-media implementation, candidate gates, deployment, and signed-in smoke
 
 ## STEP 0 — Cross-browser reproduction
@@ -229,11 +229,39 @@ the signed-in smoke below.
   smoke, Chrome smoke, backup hash, and cleanup handoff. No token or secret was
   printed.
 
+## Final live Chrome closeout — 2026-08-12 06:30 UTC
+
+The prior handoff above is superseded by the final signed-in Chrome evidence
+recorded in
+`docs/qa/WP-30-final-live-closeout-20260812061237.md`.
+
+- Product candidate and deployed release: `1b7e8abf27e41d132cda0714c890206400596c41`;
+  API `wp30-api-20260811T193115Z-1b7e8ab`, editor
+  `editor-web-20260811T193115Z-1b7e8ab-wp30-repair`.
+- GitHub product workflow `31523239040` passed `check` and `browser-e2e`.
+- Chrome run `20260812063009` imported the committed animated GIF fixture,
+  previewed it, placed it at `1.0s`, and produced one downloadable H.264/AAC
+  MP4. The 14,260-byte download has SHA-256
+  `88197C88AE97E1BBDDE9788BE1931492D92CA1EF6E2AC515C6449D7537FA06A8`;
+  FFprobe reports 1080x1920, 30 fps, AAC audio, and 1.000000 seconds.
+- Refresh and re-download returned identical bytes. Chrome diagnostics ended
+  with zero console warnings/errors and no failed same-origin requests.
+- The disposable project and temporary fixture/download files were removed.
+  The surviving project and manually uploaded asset were not touched; the
+  pre-existing `Local editor project` Trash item was preserved.
+- GBrain pages were hash-verified after the write:
+  `joy-media-state` =
+  `055d00d6cc718b779b4fc1e68440f209e0bf3c9d3c14f0f027b27681668890b4` and
+  `joy-media-wp29-first-project-golden-path` =
+  `713068698070a46c73fef9ca7c7655acaada718b0ff9e7ddfcf275e08001753c`.
+  Doctor reported warnings/health 90 for pre-existing coverage and link
+  resolution opportunities only.
+
 ## Verdict
 
 WP-30 product implementation, immutable deployment, signed-in animated
-import/timeline/export smoke, Chrome verification, disposable-state cleanup,
-and GBrain page synchronization are green. The documentation workflow for
-`67e51a1` was still running its browser-e2e job at the time of this handoff;
-refresh the final verdict after that job concludes. The deployed product SHA
-is `43c5521`.
+import/timeline/export smoke, Chrome verification, byte-level FFprobe proof,
+refresh/re-download recovery, disposable-state cleanup, and GBrain
+synchronization are green. The only remaining gate is the documentation-only
+closeout commit and its GitHub workflow; WP-30 will be marked fully finished
+when that workflow passes.

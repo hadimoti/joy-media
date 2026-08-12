@@ -46,7 +46,35 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-26 timeline track visibility  | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                              |
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
 | WP-29 first-project golden path  | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                         |
+| WP-30 animated media reliability | closeout    | —        | 2026-08-12   | Product `1b7e8ab` deployed; signed-in Chrome GIF→timeline→H.264/AAC export, refresh/re-download, cleanup, and GBrain hashes verified; documentation-only CI pending |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
+
+## WP-30 final live closeout (2026-08-12)
+
+The animated-media repair is green on product candidate
+`1b7e8abf27e41d132cda0714c890206400596c41` and immutable releases
+`wp30-api-20260811T193115Z-1b7e8ab` and
+`editor-web-20260811T193115Z-1b7e8ab-wp30-repair`.
+
+- Product GitHub workflow `31523239040` passed `check` and `browser-e2e`.
+- Signed-in Chrome run `20260812063009` imported the committed animated GIF,
+  previewed it, placed it on the timeline, and downloaded an H.264/AAC MP4
+  (`14,260` bytes; SHA-256
+  `88197C88AE97E1BBDDE9788BE1931492D92CA1EF6E2AC515C6449D7537FA06A8`).
+  FFprobe reported `1080x1920`, `30 fps`, and `1.000000` seconds; sampled
+  decoded frame hashes differed.
+- Refresh and re-download returned identical bytes. Chrome ended with no
+  console errors or failed same-origin requests.
+- The disposable project and temporary fixture/download files were removed.
+  The surviving project and manually uploaded asset were untouched; the
+  pre-existing `Local editor project` Trash item was preserved.
+- GBrain hashes are recorded in the final QA report and the two authoritative
+  pages; doctor remains warnings/health 90 only for pre-existing coverage and
+  link-resolution opportunities.
+
+The final status becomes **FINISHED** after the documentation-only closeout
+commit's GitHub workflow passes. Product deployment is not repeated for that
+documentation SHA.
 
 ## WP-29 final Luna closeout (2026-08-11)
 
