@@ -29,22 +29,26 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     await expect(
       page.getByRole('button', { name: 'Showing user assets; switch to cloud bucket assets' }),
     ).toBeVisible();
-    const pngCards = page.locator('.asset-card', { hasText: 'image.png' });
-    const jpegCards = page.locator('.asset-card', { hasText: 'image.jpg' });
+    const fixturePrefix = `wp29-case15-${testInfo.project.name}-${Date.now()}`;
+    const pngName = `${fixturePrefix}.png`;
+    const jpegName = `${fixturePrefix}.jpg`;
+    const pngCards = page.locator('.asset-card', { hasText: pngName });
+    const jpegCards = page.locator('.asset-card', { hasText: jpegName });
     const pngBaseline = await pngCards.count();
     const jpegBaseline = await jpegCards.count();
     const imageCountBefore = Number(
       (await page.getByRole('tab', { name: /Images \d+/ }).textContent())?.match(/\d+/)?.[0] ?? 0,
     );
-    await importMediaFixture(page, 'image.png');
-    await importMediaFixture(page, 'image.jpg');
+    await importMediaFixture(page, 'image.png', pngName);
+    await importMediaFixture(page, 'image.jpg', jpegName);
 
     await expect(pngCards).toHaveCount(pngBaseline + 1);
     await expect(jpegCards).toHaveCount(jpegBaseline + 1);
-    await expect(page.getByRole('tab', { name: `Images ${imageCountBefore + 2}` })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    const imageTab = page.getByRole('tab', { name: /Images \d+/ });
+    await expect(imageTab).toHaveAttribute('aria-selected', 'true');
+    await expect
+      .poll(async () => Number((await imageTab.textContent())?.match(/\d+/)?.[0] ?? 0))
+      .toBeGreaterThanOrEqual(imageCountBefore + 2);
     await recordEvidence(testInfo, {
       caseId: 15,
       functional: 'PASS',
@@ -118,22 +122,26 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
       page.getByRole('button', { name: 'Showing user assets; switch to cloud bucket assets' }),
     ).toBeVisible();
     await page.getByRole('tab', { name: /Audio \d+/ }).click();
-    const wavCards = page.locator('.asset-card', { hasText: 'audio.wav' });
-    const mp3Cards = page.locator('.asset-card', { hasText: 'audio.mp3' });
+    const fixturePrefix = `wp29-case17-${testInfo.project.name}-${Date.now()}`;
+    const wavName = `${fixturePrefix}.wav`;
+    const mp3Name = `${fixturePrefix}.mp3`;
+    const wavCards = page.locator('.asset-card', { hasText: wavName });
+    const mp3Cards = page.locator('.asset-card', { hasText: mp3Name });
     const wavBaseline = await wavCards.count();
     const mp3Baseline = await mp3Cards.count();
     const audioCountBefore = Number(
       (await page.getByRole('tab', { name: /Audio \d+/ }).textContent())?.match(/\d+/)?.[0] ?? 0,
     );
-    await importMediaFixture(page, 'audio.wav');
-    await importMediaFixture(page, 'audio.mp3');
+    await importMediaFixture(page, 'audio.wav', wavName);
+    await importMediaFixture(page, 'audio.mp3', mp3Name);
 
     await expect(wavCards).toHaveCount(wavBaseline + 1);
     await expect(mp3Cards).toHaveCount(mp3Baseline + 1);
-    await expect(page.getByRole('tab', { name: `Audio ${audioCountBefore + 2}` })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    const audioTab = page.getByRole('tab', { name: /Audio \d+/ });
+    await expect(audioTab).toHaveAttribute('aria-selected', 'true');
+    await expect
+      .poll(async () => Number((await audioTab.textContent())?.match(/\d+/)?.[0] ?? 0))
+      .toBeGreaterThanOrEqual(audioCountBefore + 2);
     await recordEvidence(testInfo, {
       caseId: 17,
       functional: 'PASS',
@@ -176,8 +184,9 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     page,
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-25-${testInfo.project.name}`);
-    await importMediaFixture(page, 'image.png');
-    const card = page.locator('.asset-card', { hasText: 'image.png' }).first();
+    const imageName = `wp29-case25-${testInfo.project.name}-${Date.now()}.png`;
+    await importMediaFixture(page, 'image.png', imageName);
+    const card = page.locator('.asset-card', { hasText: imageName }).first();
     const lane = page.locator('.timeline-lane[data-track-id]').first();
     await expect(page.locator('.timeline-clip[data-clip-id]')).toHaveCount(0);
     await card.dragTo(lane, { targetPosition: { x: 80, y: 20 } });

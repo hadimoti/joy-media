@@ -166,9 +166,10 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
   }, testInfo) => {
     const title = `R5-66-${testInfo.project.name}`;
     await openDisposableWorkspace(page, title);
-    await importMediaFixture(page, 'audio.wav');
+    const audioName = `wp29-case66-${testInfo.project.name}-${Date.now()}.wav`;
+    await importMediaFixture(page, 'audio.wav', audioName);
     await page
-      .locator('.asset-card', { hasText: 'audio.wav' })
+      .locator('.asset-card', { hasText: audioName })
       .first()
       .dragTo(page.locator('.timeline-lane[data-track-id]').first(), {
         targetPosition: { x: 70, y: 20 },

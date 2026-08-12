@@ -14,22 +14,23 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
     page,
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-24-${testInfo.project.name}`);
-    await importMediaFixture(page, 'image.png');
-    const card = page.locator('.asset-card', { hasText: 'image.png' }).first();
+    const imageName = `wp29-case24-${testInfo.project.name}-${Date.now()}.png`;
+    await importMediaFixture(page, 'image.png', imageName);
+    const card = page.locator('.asset-card', { hasText: imageName }).first();
     const assetId = await card.getAttribute('data-asset-id');
     expect(assetId).toBeTruthy();
     const targetCard = page.locator(`.asset-card[data-asset-id="${assetId}"]`);
-    await targetCard.getByRole('checkbox', { name: 'Select image.png' }).check();
+    await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
     const toolbar = page.getByRole('toolbar', { name: 'Bulk asset actions' });
     await expect(toolbar).toContainText('1');
     await toolbar.getByRole('button', { name: 'Share selected media to cloud' }).click();
     await expect(page.locator('.joy-panel-note')).toContainText('No selected media needs backup');
     await toolbar.getByRole('button', { name: 'Edit selected with AI' }).click();
     await expect(page.locator('.joy-code-panel')).toBeVisible();
-    await expect(page.getByRole('list', { name: 'Attached media' })).toContainText('image.png');
+    await expect(page.getByRole('list', { name: 'Attached media' })).toContainText(imageName);
 
     await openPanel(page, 'Assets');
-    await targetCard.getByRole('checkbox', { name: 'Select image.png' }).check();
+    await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
     page.once('dialog', (dialog) => dialog.accept());
     await page
       .getByRole('toolbar', { name: 'Bulk asset actions' })

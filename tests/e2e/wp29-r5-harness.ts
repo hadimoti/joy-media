@@ -181,17 +181,31 @@ export async function selectFirstTimelineClip(page: Page): Promise<void> {
   await expect(clip).toHaveAttribute('aria-pressed', 'true');
 }
 
-export async function importMediaFixture(page: Page, fileName: string): Promise<void> {
+const fixtureMimeTypes: Readonly<Record<string, string>> = {
+  '.jpg': 'image/jpeg',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.wav': 'audio/wav',
+};
+
+export async function importMediaFixture(
+  page: Page,
+  fileName: string,
+  uploadedFileName = fileName,
+): Promise<void> {
   await openPanel(page, 'Assets');
   await page.getByRole('button', { name: 'Import media' }).first().click();
   const drawer = page.getByRole('dialog', { name: 'Import media' });
   await expect(drawer).toBeVisible();
-  await drawer
-    .locator('input[type="file"][aria-label="Media file"]')
-    .setInputFiles(join(MEDIA_FIXTURE_DIR, fileName));
-  await expect(drawer.getByText(fileName, { exact: true })).toBeVisible();
+  await drawer.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
+    name: uploadedFileName,
+    mimeType: fixtureMimeTypes[fileName.slice(fileName.lastIndexOf('.')).toLowerCase()],
+    buffer: await readFile(join(MEDIA_FIXTURE_DIR, fileName)),
+  });
+  await expect(drawer.getByText(uploadedFileName, { exact: true })).toBeVisible();
   await drawer.getByRole('button', { name: 'Confirm import' }).click();
-  await expect(page.locator('.asset-card', { hasText: fileName }).first()).toBeVisible({
+  await expect(page.locator('.asset-card', { hasText: uploadedFileName }).first()).toBeVisible({
     timeout: 15_000,
   });
 }

@@ -183,10 +183,10 @@ export function AssetLibraryPanel({
     }
     try {
       // Catalog listing must not create or reconcile a control-plane project.
-      // My Media stays scoped to the active project. importMediaFile owns the
-      // ensure-before-register transaction, so this stays a read-only request
-      // even while the active project binding is still settling.
-      const ownedResultPromise = client.myAssets(projectId);
+      // My Media is the signed-in account library; importing still owns the
+      // ensure-before-register transaction, so this remains read-only while
+      // the active project binding is settling.
+      const ownedResultPromise = client.myAssets();
       const [ownedResult, sharedResult] = await Promise.allSettled([
         ownedResultPromise,
         client.sharedCloudAssets(),
@@ -215,7 +215,23 @@ export function AssetLibraryPanel({
         });
       }
       const assets = [...byId.values()];
-      const derivatives = await Promise.all(
+      if (requestId !== refreshSeqRef.current) return;
+      setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
+      setOwnedAssetIds(new Set(ownedAssets.map((asset) => asset.id)));
+      // Render catalog metadata immediately. Derivatives only improve add-to-
+      // timeline behavior and must not make the libraries appear empty while
+      // their requests settle.
+      setItems(assets.map((asset) => ({ asset, derivatives: [] })));
+      if (sharedResult.status === 'rejected') {
+        setStatus(
+          `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
+        );
+      } else {
+        setStatus(undefined);
+      }
+      if (assets.length === 0) setImportOpen(true);
+
+      void Promise.all(
         ownedAssets.map(async (asset) => {
           try {
             return [
@@ -226,20 +242,16 @@ export function AssetLibraryPanel({
             return [asset.id, [] as readonly BrowserDerivative[]] as const;
           }
         }),
-      );
-      const byAsset = new Map(derivatives);
-      if (requestId !== refreshSeqRef.current) return;
-      setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
-      setOwnedAssetIds(new Set(ownedAssets.map((asset) => asset.id)));
-      setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
-      if (sharedResult.status === 'rejected') {
-        setStatus(
-          `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
+      ).then((derivatives) => {
+        if (requestId !== refreshSeqRef.current) return;
+        const byAsset = new Map(derivatives);
+        setItems((current) =>
+          current.map((item) => ({
+            ...item,
+            derivatives: byAsset.get(item.asset.id) ?? item.derivatives,
+          })),
         );
-      } else {
-        setStatus(undefined);
-      }
-      if (assets.length === 0) setImportOpen(true);
+      });
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
