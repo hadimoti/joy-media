@@ -47,7 +47,7 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
 | WP-29 first-project golden path  | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                         |
 | WP-30 animated media reliability | closeout    | —        | 2026-08-12   | Product `1b7e8ab` deployed; signed-in Chrome GIF→timeline→H.264/AAC export, refresh/re-download, cleanup, and GBrain hashes verified; documentation-only CI pending          |
-| WP-32 real-project workflow      | FINISHED    | —        | 2026-08-12   | Candidate `6d3b467` deployed immutably; GitHub `31622521087` green; signed-in disposable workflow and exact cleanup passed; evidence and GBrain reconciled |
+| WP-32 real-project workflow      | FINISHED    | —        | 2026-08-12   | Candidate `6d3b467` deployed immutably; GitHub `31622521087` green; signed-in disposable workflow and exact cleanup passed; evidence and GBrain reconciled                   |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
 
 ## WP-32 final live closeout (2026-08-12)
