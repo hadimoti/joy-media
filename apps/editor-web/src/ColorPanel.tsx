@@ -81,15 +81,6 @@ function v2From(value: ColorGradeV1 | ColorGradeV2 | undefined): ColorGradeV2 {
   };
 }
 
-function isClipGradeable(project: JoyProjectV1, clipId: string | undefined): boolean {
-  if (clipId === undefined) return false;
-  return Object.values(project.compositions).some((composition) =>
-    composition.tracks.some((track) =>
-      track.clips.some((clip) => clip.id === clipId && clip.kind === 'video'),
-    ),
-  );
-}
-
 export function ColorPanel({
   project,
   onChange,
@@ -98,7 +89,10 @@ export function ColorPanel({
   selectedClipName,
   readMonitorPixels,
 }: ColorPanelProps) {
-  const clipAvailable = isClipGradeable(project, selectedClipId);
+  // App only passes selectedClipId after resolving a gradeable video clip from
+  // the timeline project. The visual project intentionally has a different
+  // composition graph, so validating against it would disable Clip mode.
+  const clipAvailable = selectedClipId !== undefined;
   const [target, setTarget] = useState<'clip' | 'output'>(clipAvailable ? 'clip' : 'output');
   const [tab, setTab] = useState<TabId>('adjust');
   const source =
