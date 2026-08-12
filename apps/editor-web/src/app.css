@@ -1389,9 +1389,8 @@ a.icon-button {
 }
 .export-preset-list button {
   width: 100%;
-  display: grid;
-  grid-template-columns: 1fr;
-  place-items: center;
+  display: flex;
+  justify-content: center;
   min-height: 2rem;
   text-align: center;
 }
@@ -1401,7 +1400,8 @@ a.icon-button {
 }
 .export-preset-option-label {
   display: block;
-  max-width: calc(100% - 3rem);
+  position: absolute;
+  inset-inline: 0.55rem;
   line-height: 1.25;
   text-align: center;
 }
