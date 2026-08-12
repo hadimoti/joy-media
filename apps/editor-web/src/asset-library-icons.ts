@@ -7,6 +7,7 @@ import type { AssetCategory, AssetCollectionId } from './asset-library-state.js'
  * imported through Vite so redeploys bust CDN/browser caches.
  */
 export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, string>> = {
+  all: iconUrl('asset/24_Browse.png'),
   image: iconUrl('asset/24_Images.png'),
   video: iconUrl('asset/24_video.png'),
   audio: iconUrl('asset/24_Audio.png'),

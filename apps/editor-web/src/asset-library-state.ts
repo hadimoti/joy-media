@@ -1,7 +1,7 @@
 import type { BrowserAsset, BrowserDerivative } from './control-plane-client.js';
 
 /** Primary library sections. There is deliberately no global "all assets" view. */
-export type AssetCategory = BrowserAsset['kind'];
+export type AssetCategory = BrowserAsset['kind'] | 'all';
 export type AssetCollectionId = 'browse' | `category:${string}`;
 export type AssetAvailability = 'all' | BrowserDerivative['availability'] | 'none';
 export type AssetSort = 'recent' | 'name' | 'size' | 'tags';
@@ -121,7 +121,7 @@ export function assetCollectionsForCategory(
   items: readonly AssetLibraryItem[],
   category: AssetCategory,
 ): readonly AssetLibraryCollection[] {
-  const matching = items.filter(({ asset }) => asset.kind === category);
+  const matching = items.filter(({ asset }) => category === 'all' || asset.kind === category);
   const counts = new Map<AssetCollectionId, number>();
   for (const { asset } of matching) {
     const id = assetCollectionId(asset);
@@ -158,7 +158,7 @@ export function filterAssetLibrary(
 ): readonly AssetLibraryItem[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return [...items]
-    .filter(({ asset }) => asset.kind === category)
+    .filter(({ asset }) => category === 'all' || asset.kind === category)
     .filter(({ asset }) => collection === 'browse' || assetCollectionId(asset) === collection)
     .filter(({ asset }) => {
       if (normalizedQuery.length === 0) return true;

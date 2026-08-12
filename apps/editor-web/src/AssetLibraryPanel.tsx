@@ -48,6 +48,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+import { loadEditorUiPreferences, saveEditorUiPreferences } from './ui-preferences.js';
 
 type AssetSource = 'cloud' | 'user';
 
@@ -55,6 +56,7 @@ const categories: readonly {
   readonly id: AssetCategory;
   readonly label: string;
 }[] = [
+  { id: 'all', label: 'All' },
   { id: 'image', label: 'Images' },
   { id: 'video', label: 'Video' },
   { id: 'audio', label: 'Audio' },
@@ -116,22 +118,29 @@ export function AssetLibraryPanel({
   const previewRef = useRef<Preview | undefined>(undefined);
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
+  const initialUiPreferences = useRef(loadEditorUiPreferences(window.localStorage));
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [category, setCategory] = useState<AssetCategory>('image');
+  const [category, setCategory] = useState<AssetCategory>(
+    initialUiPreferences.current.assetLibrary.category,
+  );
   const [collection, setCollection] = useState<AssetCollectionId>('browse');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [availability, setAvailability] = useState<AssetAvailability>('all');
   const [sort, setSort] = useState<AssetSort>('name');
-  const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
+  const [viewMode, setViewMode] = useState<AssetViewMode>(
+    initialUiPreferences.current.assetLibrary.view,
+  );
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
-  const [assetSource, setAssetSource] = useState<AssetSource>('cloud');
+  const [assetSource, setAssetSource] = useState<AssetSource>(
+    initialUiPreferences.current.assetLibrary.source,
+  );
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
@@ -139,6 +148,24 @@ export function AssetLibraryPanel({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
   const canImport = selectedFile !== undefined && importProgress === undefined;
+
+  useEffect(() => {
+    const current = loadEditorUiPreferences(window.localStorage);
+    saveEditorUiPreferences(window.localStorage, {
+      ...current,
+      assetLibrary: {
+        ...current.assetLibrary,
+        source: assetSource,
+        category,
+        view: viewMode,
+        sort,
+        collectionByCategory: {
+          ...current.assetLibrary.collectionByCategory,
+          [category]: collection,
+        },
+      },
+    });
+  }, [assetSource, category, collection, sort, viewMode]);
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -157,11 +184,13 @@ export function AssetLibraryPanel({
     try {
       // Catalog listing must not depend on ensureProject — a stale binding to
       // another account's project returns PROJECT_EXISTS/NOT_FOUND and used to
-      // zero the whole Assets panel before cloud-assets could load.
+      // zero the whole Assets panel before cloud-assets could load. My Media is
+      // scoped to the active project, so unrelated project assets never leak
+      // into this workspace's selection and bulk-action flows.
       void client.ensureProject(projectId, projectTitle).catch(() => undefined);
 
       const [ownedResult, sharedResult] = await Promise.allSettled([
-        client.myAssets(),
+        client.myAssets(projectId),
         client.sharedCloudAssets(),
       ]);
       const ownedAssets =
@@ -211,11 +240,7 @@ export function AssetLibraryPanel({
           `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
         );
       } else {
-        setStatus(
-          assets.length === 0
-            ? 'No media yet. Import media to sync with the shared cloud library.'
-            : undefined,
-        );
+        setStatus(undefined);
       }
       if (assets.length === 0) setImportOpen(true);
     } catch (error) {
@@ -623,6 +648,24 @@ export function AssetLibraryPanel({
       note={status}
       leadingActions={
         <>
+          <div className="asset-source-switch" role="group" aria-label="Asset source">
+            <button
+              type="button"
+              aria-pressed={assetSource === 'user'}
+              aria-label="My media — Showing user assets; switch to cloud bucket assets"
+              onClick={() => setAssetSource('user')}
+            >
+              My media
+            </button>
+            <button
+              type="button"
+              aria-pressed={assetSource === 'cloud'}
+              aria-label="Cloud library — Showing cloud assets; switch to user assets"
+              onClick={() => setAssetSource('cloud')}
+            >
+              Cloud library
+            </button>
+          </div>
           <button
             type="button"
             className="icon-button"
@@ -652,6 +695,7 @@ export function AssetLibraryPanel({
             }}
           >
             <FilterIcon />
+            {filterActive && <span className="asset-filter-count">1</span>}
           </button>
           <button
             type="button"
@@ -666,22 +710,6 @@ export function AssetLibraryPanel({
       }
       actions={
         <>
-          <button
-            type="button"
-            className="icon-button asset-sync"
-            aria-pressed={assetSource === 'cloud'}
-            aria-label={
-              assetSource === 'cloud'
-                ? 'Showing cloud bucket assets; switch to user assets'
-                : 'Showing user assets; switch to cloud bucket assets'
-            }
-            title={assetSource === 'cloud' ? 'Cloud assets' : 'User assets'}
-            data-guide={assetSource === 'cloud' ? 'Cloud assets' : 'User assets'}
-            data-active={assetSource === 'cloud' ? 'true' : undefined}
-            onClick={() => setAssetSource((current) => (current === 'cloud' ? 'user' : 'cloud'))}
-          >
-            <CloudIcon />
-          </button>
           <div className="asset-view-switch" role="group" aria-label="Asset view">
             <button
               type="button"
@@ -807,12 +835,14 @@ export function AssetLibraryPanel({
                   disabled={importProgress !== undefined}
                   onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
                   aria-label="Media file"
+                  aria-hidden="true"
+                  tabIndex={-1}
                 />
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label="Choose media file"
-                  title="Choose media file"
+                  aria-label="Choose media"
+                  title="Choose media"
                   disabled={importProgress !== undefined}
                   data-active={selectedFile !== undefined ? 'true' : undefined}
                   onClick={() => fileInputRef.current?.click()}
@@ -902,6 +932,23 @@ export function AssetLibraryPanel({
                   Reset filters
                 </button>
               )}
+            </div>
+          )}
+          {filterActive && (
+            <div className="asset-filter-summary" aria-label="Active asset filters">
+              <span>Active filters</span>
+              {availability !== 'all' && <span className="asset-filter-chip">{availability}</span>}
+              {sort !== 'name' && <span className="asset-filter-chip">Sort: {sort}</span>}
+              <button
+                type="button"
+                className="asset-filter-summary-clear"
+                onClick={() => {
+                  setAvailability('all');
+                  setSort('name');
+                }}
+              >
+                Clear all
+              </button>
             </div>
           )}
           {preview !== undefined && (
@@ -1048,6 +1095,17 @@ export function AssetLibraryPanel({
                       className={`asset-card${selected ? ' is-selected' : ''}`}
                       draggable
                       title={`${asset.displayName} — ${detailHint}. Drag onto a timeline track`}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest('button, input, label') !== null)
+                          return;
+                        if (
+                          asset.kind === 'image' ||
+                          asset.kind === 'video' ||
+                          asset.kind === 'audio'
+                        ) {
+                          void openPreview(asset, derivatives);
+                        }
+                      }}
                       onDragStart={(event) => {
                         event.dataTransfer.setData(
                           JOY_MEDIA_ASSET_DND,
@@ -1121,7 +1179,7 @@ export function AssetLibraryPanel({
                         {onAddToTimeline !== undefined && (
                           <button
                             type="button"
-                            className="icon-button"
+                            className="icon-button icon-button-labeled asset-card-add"
                             aria-label={`Add ${asset.displayName} to timeline`}
                             title="Add to timeline"
                             data-guide="Add to timeline"
@@ -1136,6 +1194,7 @@ export function AssetLibraryPanel({
                             }}
                           >
                             <PlusIcon />
+                            <span>Add to timeline</span>
                           </button>
                         )}
                         {assetSource === 'user' &&
@@ -1418,16 +1477,6 @@ function message(error: unknown): string {
 }
 
 const ASSET_VIEW_KEY = 'joy-media.asset-view.v1';
-
-function readAssetViewMode(): AssetViewMode {
-  try {
-    const raw = localStorage.getItem(ASSET_VIEW_KEY);
-    if (raw === 'large' || raw === 'medium' || raw === 'list') return raw;
-  } catch {
-    /* ignore */
-  }
-  return 'medium';
-}
 
 function writeAssetViewMode(mode: AssetViewMode): void {
   try {

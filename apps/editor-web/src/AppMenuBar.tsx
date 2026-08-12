@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
+import { PANEL_INTENT_LABELS } from './panel-metadata.js';
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -37,6 +38,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const { onAction, signedIn } = props;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  const menuRefs = useRef(new Map<string, HTMLUListElement>());
   const baseId = useId();
 
   useEffect(() => {
@@ -47,7 +49,25 @@ export function AppMenuBar(props: AppMenuBarProps) {
       setOpenMenu(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpenMenu(null);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpenMenu(null);
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const menu = openMenu === null ? undefined : menuRefs.current.get(openMenu);
+      if (menu === undefined) return;
+      const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+      if (buttons.length === 0) return;
+      event.preventDefault();
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? buttons.length - 1
+            : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus();
     };
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -55,6 +75,16 @@ export function AppMenuBar(props: AppMenuBarProps) {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
     };
+  }, [openMenu]);
+
+  useEffect(() => {
+    if (openMenu === null) return;
+    window.setTimeout(() => {
+      menuRefs.current
+        .get(openMenu)
+        ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+        ?.focus();
+    }, 0);
   }, [openMenu]);
 
   return (
@@ -79,12 +109,28 @@ export function AppMenuBar(props: AppMenuBarProps) {
               {group.label}
             </button>
             {isOpen && (
-              <ul className="app-menu-dropdown" role="menu" id={menuId}>
+              <ul
+                className="app-menu-dropdown"
+                role="menu"
+                id={menuId}
+                ref={(element) => {
+                  if (element === null) menuRefs.current.delete(group.id);
+                  else menuRefs.current.set(group.id, element);
+                }}
+              >
                 {items.map((item, index) => {
                   const disabled = itemDisabled(item, props);
                   const showSeparator = item.separatorAfter === true && index < items.length - 1;
+                  const previous = items[index - 1];
+                  const sectionHeading =
+                    item.section !== undefined && item.section !== previous?.section
+                      ? PANEL_INTENT_LABELS[item.section]
+                      : undefined;
                   return (
                     <li key={item.id} role="none">
+                      {sectionHeading !== undefined && (
+                        <h4 className="app-menu-section-heading">{sectionHeading}</h4>
+                      )}
                       <button
                         type="button"
                         role="menuitem"
@@ -94,6 +140,13 @@ export function AppMenuBar(props: AppMenuBarProps) {
                           if (disabled) return;
                           onAction(item.id);
                           setOpenMenu(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') return;
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setOpenMenu(null);
+                          }
                         }}
                       >
                         <span className="app-menu-item-label">{item.label}</span>

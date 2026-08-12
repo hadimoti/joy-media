@@ -1,5 +1,5 @@
 import { PANEL_IDS, type PanelId } from './workspace.js';
-import { PANEL_LABELS } from './panel-tab-icons.js';
+import { PANEL_INTENT_ORDER, PANEL_METADATA, type PanelIntent } from './panel-metadata.js';
 
 export type AppMenuActionId =
   | 'file.projects'
@@ -30,6 +30,7 @@ export interface AppMenuItem {
   readonly disabled?: boolean;
   /** Hide when signed out / no session logout available. */
   readonly requiresSignedIn?: boolean;
+  readonly section?: PanelIntent;
 }
 
 export interface AppMenuGroup {
@@ -46,16 +47,19 @@ const WINDOW_PANELS = [
 ] as const satisfies readonly PanelId[];
 
 function panelViewItems(): readonly AppMenuItem[] {
-  return PANEL_IDS.map((panelId) => ({
-    id: `view.panel.${panelId}` as const,
-    label: PANEL_LABELS[panelId],
-  }));
+  return PANEL_INTENT_ORDER.flatMap((intent) =>
+    PANEL_METADATA.filter((entry) => entry.intent === intent).map((entry) => ({
+      id: `view.panel.${entry.id}` as const,
+      label: entry.label,
+      section: intent,
+    })),
+  );
 }
 
 function windowPanelItems(): readonly AppMenuItem[] {
   return WINDOW_PANELS.map((panelId) => ({
     id: `window.panel.${panelId}` as const,
-    label: `Focus ${PANEL_LABELS[panelId]}`,
+    label: `Focus ${PANEL_METADATA.find((entry) => entry.id === panelId)?.label ?? panelId}`,
   }));
 }
 

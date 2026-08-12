@@ -21,6 +21,8 @@ export interface PanelTabSpec {
   readonly iconUrl?: string;
   /** Tabs stay clickable while the body is inactive (§3c.5). */
   readonly disabled?: boolean;
+  /** Optional migration/accessibility alias for a renamed tab. */
+  readonly ariaLabel?: string;
 }
 
 export interface PanelShellProps {
@@ -94,16 +96,39 @@ export function PanelShell({
   const searchFieldId = `${title.toLowerCase().replace(/\s+/g, '-')}-panel-search`;
   const tabButtons =
     tabs !== undefined && tabs.length > 0
-      ? tabs.map((tab) => (
+      ? tabs.map((tab, index) => (
           <button
             key={tab.id}
             type="button"
             role="tab"
             className="joy-panel-tab"
+            data-panel-tab-id={tab.id}
             aria-selected={activeTab === tab.id}
-            aria-label={tab.label || tab.id}
+            aria-label={(tab.ariaLabel ?? tab.label) || tab.id}
             disabled={tab.disabled === true}
+            tabIndex={activeTab === tab.id || (activeTab === undefined && index === 0) ? 0 : -1}
             onClick={() => onTabChange?.(tab.id)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              const siblings = Array.from(
+                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]:not(:disabled)',
+                ) ?? [],
+              );
+              if (siblings.length === 0) return;
+              event.preventDefault();
+              const currentIndex = siblings.indexOf(event.currentTarget);
+              const nextIndex =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? siblings.length - 1
+                    : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + siblings.length) %
+                      siblings.length;
+              siblings[nextIndex]?.focus();
+              const nextId = siblings[nextIndex]?.dataset.panelTabId;
+              if (nextId !== undefined) onTabChange?.(nextId);
+            }}
           >
             {tab.iconUrl !== undefined && (
               <span

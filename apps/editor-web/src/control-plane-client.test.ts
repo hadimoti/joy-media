@@ -51,6 +51,29 @@ describe('BrowserControlPlaneClient', () => {
     }
   });
 
+  it('scopes My Media requests to the active project when supplied', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await client.myAssets('project / one');
+      await client.myAssets();
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      'https://media.joyteam.ir/api/v1/library/my-assets?projectId=project%20%2F%20one',
+      'https://media.joyteam.ir/api/v1/library/my-assets',
+    ]);
+  });
+
   it('reports a plain-text API denial without a JSON parsing failure', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });

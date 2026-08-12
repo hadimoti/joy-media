@@ -23,15 +23,7 @@ import {
 import type { CaptionSlot } from '@joy-media/captions-core';
 import { readCaptionBurnIn, withCaptionBurnIn } from './caption-burn-in.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import {
-  AutoCaptionIcon,
-  BurnInIcon,
-  LanguageIcon,
-  PlusIcon,
-  TrashIcon,
-  UndoIcon,
-  PngMaskIcon,
-} from './icons.js';
+import { BurnInIcon, LanguageIcon, PlusIcon, TrashIcon, UndoIcon, PngMaskIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
@@ -290,52 +282,61 @@ function CaptionSlotEditor({
     <section aria-label={`Captions ${document.language}`}>
       <header className="captions-slot-header">
         <strong>
-          {document.language} · {direction.toUpperCase()}
+          {document.language} · {direction.toUpperCase()} · {slot.trackId} · {segments.length} cues
         </strong>
-        <div className="captions-template-icons" role="group" aria-label="Caption template">
-          {JOY_CAPTION_TEMPLATES.map((template) => {
-            const meta = TEMPLATE_ICONS[template.id];
-            const Icon = meta?.Icon ?? (() => <PngMaskIcon src="/assets/24_Text.png" size={14} />);
-            const active = (document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID) === template.id;
-            return (
-              <button
-                key={template.id}
-                type="button"
-                className="icon-button"
-                aria-pressed={active}
-                aria-label={meta?.label ?? template.name}
-                data-guide={meta?.label ?? template.name}
-                onClick={() => applyTemplate(template.id)}
-              >
-                <Icon />
-              </button>
-            );
-          })}
-        </div>
-        <button
-          className="icon-button"
-          aria-label="Export captions as SRT"
-          data-guide="Export SRT"
-          onClick={() => downloadBrowserTextFile(`${document.id}.srt`, formatSrt(document))}
-        >
-          <PngMaskIcon src="/assets/24_output.png" size={14} />
-        </button>
-        <button
-          className="icon-button"
-          aria-label="Export captions as WebVTT"
-          data-guide="Export VTT"
-          onClick={() => downloadBrowserTextFile(`${document.id}.vtt`, formatWebVtt(document))}
-        >
-          <PngMaskIcon src="/assets/24_output.png" size={14} />
-        </button>
-        <button
-          className="icon-button"
-          aria-label="Import captions"
-          title="Import SRT/VTT file"
-          onClick={() => fileInput.current?.click()}
-        >
-          <PngMaskIcon src="/assets/24_arrows.png" size={14} />
-        </button>
+        <details className="caption-action-menu" open>
+          <summary>Style</summary>
+          <div className="captions-template-icons" role="group" aria-label="Caption template">
+            {JOY_CAPTION_TEMPLATES.map((template) => {
+              const meta = TEMPLATE_ICONS[template.id];
+              const Icon =
+                meta?.Icon ?? (() => <PngMaskIcon src="/assets/24_Text.png" size={14} />);
+              const active = (document.styleRef ?? DEFAULT_CAPTION_TEMPLATE_ID) === template.id;
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="icon-button"
+                  aria-pressed={active}
+                  aria-label={meta?.label ?? template.name}
+                  data-guide={meta?.label ?? template.name}
+                  onClick={() => applyTemplate(template.id)}
+                >
+                  <Icon />
+                </button>
+              );
+            })}
+          </div>
+        </details>
+        <details className="caption-action-menu" open>
+          <summary>Import/Export</summary>
+          <div className="caption-action-buttons">
+            <button
+              className="icon-button"
+              aria-label="Export captions as SRT"
+              data-guide="Export SRT"
+              onClick={() => downloadBrowserTextFile(`${document.id}.srt`, formatSrt(document))}
+            >
+              <PngMaskIcon src="/assets/24_output.png" size={14} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Export captions as WebVTT"
+              data-guide="Export VTT"
+              onClick={() => downloadBrowserTextFile(`${document.id}.vtt`, formatWebVtt(document))}
+            >
+              <PngMaskIcon src="/assets/24_output.png" size={14} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Import captions"
+              title="Import SRT/VTT file"
+              onClick={() => fileInput.current?.click()}
+            >
+              <PngMaskIcon src="/assets/24_arrows.png" size={14} />
+            </button>
+          </div>
+        </details>
         <input
           ref={fileInput}
           type="file"
@@ -348,43 +349,39 @@ function CaptionSlotEditor({
           }}
         />
         <button
-          className="icon-button"
+          className="icon-button icon-button-labeled caption-add-primary"
           aria-label="Add caption"
           title="Add caption at playhead"
           onClick={addSegment}
         >
           <PlusIcon />
+          <span>Add caption</span>
         </button>
-        <button
-          className="icon-button"
-          aria-label="Auto caption"
-          aria-busy={transcribingLanguage === 'en-US'}
-          data-guide="Auto caption"
-          disabled={transcribingLanguage !== undefined}
-          onClick={() => void transcribe('en-US')}
-        >
-          <AutoCaptionIcon />
-        </button>
-        <button
-          className="icon-button"
-          aria-label="Transcribe Persian"
-          aria-busy={transcribingLanguage === 'fa-IR'}
-          data-guide="Persian (fa)"
-          disabled={transcribingLanguage !== undefined}
-          onClick={() => void transcribe('fa-IR')}
-        >
-          <LanguageIcon label="FA" />
-        </button>
-        <button
-          className="icon-button"
-          aria-label="Transcribe English"
-          aria-busy={transcribingLanguage === 'en-US'}
-          data-guide="English (en)"
-          disabled={transcribingLanguage !== undefined}
-          onClick={() => void transcribe('en-US')}
-        >
-          <PngMaskIcon src="/assets/24_Audio.png" size={14} />
-        </button>
+        <details className="caption-action-menu caption-transcribe-menu" open>
+          <summary>Transcribe</summary>
+          <div className="caption-action-buttons">
+            <button
+              className="icon-button"
+              aria-label="Transcribe Persian"
+              aria-busy={transcribingLanguage === 'fa-IR'}
+              data-guide="Persian (fa)"
+              disabled={transcribingLanguage !== undefined}
+              onClick={() => void transcribe('fa-IR')}
+            >
+              <LanguageIcon label="FA" />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Transcribe English"
+              aria-busy={transcribingLanguage === 'en-US'}
+              data-guide="English (en)"
+              disabled={transcribingLanguage !== undefined}
+              onClick={() => void transcribe('en-US')}
+            >
+              <PngMaskIcon src="/assets/24_Audio.png" size={14} />
+            </button>
+          </div>
+        </details>
       </header>
       {transcribingLanguage !== undefined && (
         <p className="caption-transcription-status" role="status">

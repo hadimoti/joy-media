@@ -91,6 +91,9 @@ export interface MonitorAspectRatioSelectorProps {
   readonly defaultAspectRatio?: MonitorAspectRatio;
   /** Called after a user chooses a ratio; Fit reports `fit`. */
   readonly onAspectRatioChange?: (aspectRatio: MonitorAspectRatio) => void;
+  /** Authored canvas dimensions shown so view state is not confused with project state. */
+  readonly authoredWidth?: number;
+  readonly authoredHeight?: number;
 }
 
 const GROUPS = ['Landscape', 'Square', 'Portrait'] as const;
@@ -104,6 +107,8 @@ export function MonitorAspectRatioSelector({
   selectedAspectRatio,
   defaultAspectRatio = DEFAULT_MONITOR_ASPECT_RATIO,
   onAspectRatioChange,
+  authoredWidth,
+  authoredHeight,
 }: MonitorAspectRatioSelectorProps) {
   const [uncontrolledAspectRatio, setUncontrolledAspectRatio] = useState(defaultAspectRatio);
   const [open, setOpen] = useState(false);
@@ -112,6 +117,14 @@ export function MonitorAspectRatioSelector({
   const menuId = useId();
   const aspectRatio = selectedAspectRatio ?? uncontrolledAspectRatio;
   const currentLabel = monitorAspectRatioLabel(aspectRatio);
+  const orientation =
+    authoredWidth === undefined || authoredHeight === undefined
+      ? undefined
+      : authoredWidth === authoredHeight
+        ? 'Square'
+        : authoredWidth > authoredHeight
+          ? 'Landscape'
+          : 'Portrait';
 
   useEffect(() => {
     if (!open) return;
@@ -203,6 +216,12 @@ export function MonitorAspectRatioSelector({
         }}
       >
         <AspectRatioIcon />
+        <span className="monitor-aspect-ratio-trigger-details" aria-hidden="true">
+          {currentLabel}
+          {authoredWidth !== undefined && authoredHeight !== undefined
+            ? ` · ${authoredWidth}×${authoredHeight}`
+            : ''}
+        </span>
       </button>
       <div
         className="monitor-aspect-ratio-drawer"
@@ -212,7 +231,16 @@ export function MonitorAspectRatioSelector({
         hidden={!open}
       >
         <div className="monitor-aspect-ratio-drawer-head">
-          <strong>Canvas aspect ratio</strong>
+          <div>
+            <strong>Canvas format</strong>
+            <span className="monitor-aspect-ratio-current">
+              {currentLabel}
+              {authoredWidth !== undefined && authoredHeight !== undefined
+                ? ` · ${authoredWidth}×${authoredHeight}`
+                : ''}
+              {orientation === undefined ? '' : ` · ${orientation}`}
+            </span>
+          </div>
           <button
             type="button"
             className="monitor-transport-btn"
@@ -226,8 +254,33 @@ export function MonitorAspectRatioSelector({
             <CloseIcon />
           </button>
         </div>
+        <div
+          className="monitor-aspect-ratio-group monitor-preview-only"
+          role="group"
+          aria-label="Preview — view only"
+        >
+          <span className="monitor-aspect-ratio-group-label">Preview — view only</span>
+          <div className="monitor-aspect-ratio-options">
+            <button
+              type="button"
+              role="menuitemradio"
+              className="monitor-aspect-ratio-option"
+              aria-checked={aspectRatio === 'fit'}
+              data-monitor-aspect-ratio-option="fit"
+              onClick={() => selectAspectRatio('fit')}
+              onKeyDown={(event) => handleOptionKeyDown(event, 0)}
+            >
+              Fit
+            </button>
+          </div>
+        </div>
+        <p className="monitor-aspect-ratio-authored-note">
+          Canvas format — changes project/export; undoable
+        </p>
         {GROUPS.map((group) => {
-          const presets = MONITOR_ASPECT_RATIO_PRESETS.filter((preset) => preset.group === group);
+          const presets = MONITOR_ASPECT_RATIO_PRESETS.filter(
+            (preset) => preset.group === group && preset.id !== 'fit',
+          );
           if (presets.length === 0) return null;
           return (
             <div key={group} className="monitor-aspect-ratio-group" role="group" aria-label={group}>

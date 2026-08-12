@@ -363,7 +363,13 @@ async function route(
   }
 
   if (request.method === 'GET' && url.pathname === '/v1/library/my-assets') {
-    const assets = await options.controlPlane.assetsForOwner(actor);
+    const projectId = url.searchParams.has('projectId')
+      ? requiredQuery(url, 'projectId')
+      : undefined;
+    const assets =
+      projectId === undefined
+        ? await options.controlPlane.assetsForOwner(actor)
+        : await options.controlPlane.assetsForProject(actor, projectId);
     respondJson(response, 200, { data: assets.map(assetForBrowser) });
     return;
   }

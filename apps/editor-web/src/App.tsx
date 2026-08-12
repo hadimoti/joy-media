@@ -181,6 +181,17 @@ import {
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
+import type { WorkspacePresetId } from './panel-metadata.js';
+import {
+  loadEditorUiPreferences,
+  saveEditorUiPreferences,
+  updateEditorUiPreferences,
+  DEFAULT_EDITOR_UI_PREFERENCES,
+  EDITOR_UI_PREFERENCES_KEY,
+} from './ui-preferences.js';
+import type { EditorUiPreferencesV2 } from './ui-preferences.js';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
+import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
   DOCK_PANEL_MINIMUM_HEIGHT,
@@ -188,7 +199,6 @@ import {
   SUPERSEDED_DOCK_LAYOUT_KEYS,
   type EditorViewMode,
   dockLayoutKey,
-  loadViewMode,
   migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
   saveViewMode,
@@ -788,6 +798,9 @@ function EditorWorkspace({
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
   const [audioHydrated, setAudioHydrated] = useState(false);
   const [processesOpen, setProcessesOpen] = useState(false);
+  const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
+    () => loadEditorUiPreferences(window.localStorage).processFilter,
+  );
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
@@ -805,9 +818,16 @@ function EditorWorkspace({
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<EditorViewMode>(() => loadViewMode(window.localStorage));
+  const [viewMode, setViewMode] = useState<EditorViewMode>(
+    () => loadEditorUiPreferences(window.localStorage).viewMode,
+  );
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  const [workspacePreset, setWorkspacePreset] = useState<WorkspacePresetId>(
+    () => loadEditorUiPreferences(window.localStorage).workspacePreset,
+  );
+  const workspacePresetRef = useRef(workspacePreset);
+  workspacePresetRef.current = workspacePreset;
   const paletteRef = useRef<HTMLElement | null>(null);
   const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
@@ -888,6 +908,12 @@ function EditorWorkspace({
   useEffect(() => {
     saveAgentSettings(window.localStorage, agentSettings);
   }, [agentSettings]);
+  useEffect(() => {
+    updateEditorUiPreferences(window.localStorage, (current) => ({
+      ...current,
+      processFilter,
+    }));
+  }, [processFilter]);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
@@ -2392,8 +2418,9 @@ function EditorWorkspace({
   }, []);
 
   const applyDockLayout = useCallback(
-    (api: DockviewApi, mode: EditorViewMode) => {
-      const layoutKey = dockLayoutKey(mode);
+    (api: DockviewApi, mode: EditorViewMode, preset = workspacePresetRef.current) => {
+      const layoutKey =
+        preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
       const saved = window.localStorage.getItem(layoutKey);
       let restored = false;
       if (saved !== null) {
@@ -2408,7 +2435,12 @@ function EditorWorkspace({
       }
       if (!restored) {
         try {
-          api.fromJSON(seedDockLayout(mode) as never, { reuseExistingPanels: false });
+          api.fromJSON(
+            (preset === 'edit'
+              ? seedDockLayout(mode)
+              : workspacePresetLayout(preset, mode)) as never,
+            { reuseExistingPanels: false },
+          );
         } catch (error) {
           console.warn('default dock layout rejected, falling back to a stack', error);
         }
@@ -2420,6 +2452,53 @@ function EditorWorkspace({
     [ensureDockPanels],
   );
 
+  const persistUiPreferences = useCallback(
+    (next: Partial<{ workspacePreset: WorkspacePresetId; viewMode: EditorViewMode }>) => {
+      const current = loadEditorUiPreferences(window.localStorage);
+      saveEditorUiPreferences(window.localStorage, {
+        ...current,
+        ...next,
+      });
+    },
+    [],
+  );
+
+  const switchWorkspacePreset = useCallback(
+    (next: WorkspacePresetId) => {
+      if (next === workspacePresetRef.current) return;
+      const api = dockviewApiRef.current;
+      const current = workspacePresetRef.current;
+      const mode = viewModeRef.current;
+      if (api !== null && current !== 'custom') {
+        window.localStorage.setItem(
+          workspacePresetLayoutKey(mode, 'custom'),
+          JSON.stringify(api.toJSON()),
+        );
+      }
+      workspacePresetRef.current = next;
+      setWorkspacePreset(next);
+      persistUiPreferences({ workspacePreset: next });
+      if (api !== null) applyDockLayout(api, mode, next);
+    },
+    [applyDockLayout, persistUiPreferences],
+  );
+
+  const resetWorkspace = useCallback(() => {
+    for (const mode of ['vertical', 'widescreen'] as const) {
+      window.localStorage.removeItem(dockLayoutKey(mode));
+      for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
+        window.localStorage.removeItem(workspacePresetLayoutKey(mode, preset));
+      }
+    }
+    window.localStorage.removeItem(EDITOR_UI_PREFERENCES_KEY);
+    workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
+    setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
+    viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
+    const api = dockviewApiRef.current;
+    if (api !== null) applyDockLayout(api, 'vertical', 'edit');
+  }, [applyDockLayout]);
+
   const switchEditorView = useCallback(() => {
     const api = dockviewApiRef.current;
     if (api === null) return;
@@ -2427,9 +2506,10 @@ function EditorWorkspace({
     window.localStorage.setItem(dockLayoutKey(current), JSON.stringify(api.toJSON()));
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
     saveViewMode(window.localStorage, next);
+    persistUiPreferences({ viewMode: next });
     setViewMode(next);
-    applyDockLayout(api, next);
-  }, [applyDockLayout]);
+    applyDockLayout(api, next, workspacePresetRef.current);
+  }, [applyDockLayout, persistUiPreferences]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -3438,9 +3518,12 @@ function EditorWorkspace({
       // Drop the legacy single-key after migration copy.
       window.localStorage.removeItem(DOCK_LAYOUT_KEY);
 
-      const mode = loadViewMode(window.localStorage);
+      const mode = loadEditorUiPreferences(window.localStorage).viewMode;
+      const preset = loadEditorUiPreferences(window.localStorage).workspacePreset;
       setViewMode(mode);
-      applyDockLayout(event.api, mode);
+      setWorkspacePreset(preset);
+      workspacePresetRef.current = preset;
+      applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {
         window.localStorage.setItem(
@@ -3847,6 +3930,20 @@ function EditorWorkspace({
         <InspectorPanel
           object={object}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
+          selectedKind={selectedTimelineEntry?.clip?.kind ?? object?.kind}
+          selectedName={
+            selectedTimelineEntry?.clip?.kind === 'video'
+              ? (visualProject.assets[selectedTimelineEntry.clip.assetId]?.displayName ??
+                selectedTimelineEntry.clip.id)
+              : selectedTimelineEntry?.clip?.id
+          }
+          selectedTrackName={selectedTimelineEntry?.track.id}
+          selectedSourceDurationUs={
+            selectedTimelineEntry?.clip?.kind === 'video'
+              ? visualProject.assets[selectedTimelineEntry.clip.assetId]?.descriptor?.durationUs
+              : undefined
+          }
+          selectedTimelineDurationUs={selectedTimelineEntry?.clip?.durationUs}
           {...(selectedTimelineVideo === undefined
             ? {}
             : {
@@ -4619,6 +4716,39 @@ function EditorWorkspace({
     dockviewComponentsRef.current = { 'editor-panel': Panel };
   }
   const dockviewComponents = dockviewComponentsRef.current;
+  const processCounts = {
+    active: exportHistory.filter((entry) => entry.status === 'running').length,
+    attention: exportHistory.filter(
+      (entry) => entry.status === 'failed' || entry.status === 'interrupted-retryable',
+    ).length,
+    completed: exportHistory.filter((entry) => entry.status === 'completed').length,
+  };
+  const visibleProcesses = exportHistory.filter((entry) => {
+    if (processFilter === 'active') return entry.status === 'running';
+    if (processFilter === 'attention')
+      return entry.status === 'failed' || entry.status === 'interrupted-retryable';
+    if (processFilter === 'completed') return entry.status === 'completed';
+    return true;
+  });
+  const processGroups = [
+    {
+      id: 'running',
+      label: 'Running',
+      entries: visibleProcesses.filter((e) => e.status === 'running'),
+    },
+    {
+      id: 'attention',
+      label: 'Needs attention',
+      entries: visibleProcesses.filter(
+        (e) => e.status === 'failed' || e.status === 'interrupted-retryable',
+      ),
+    },
+    {
+      id: 'completed',
+      label: 'Completed',
+      entries: visibleProcesses.filter((e) => e.status === 'completed'),
+    },
+  ] as const;
 
   return (
     <main>
@@ -4702,6 +4832,11 @@ function EditorWorkspace({
           >
             {viewMode === 'vertical' ? <VerticalViewIcon /> : <WideViewIcon />}
           </button>
+          <WorkspaceSwitcher
+            value={workspacePreset}
+            onChange={switchWorkspacePreset}
+            onReset={resetWorkspace}
+          />
           <button
             className="icon-button"
             onClick={toggleKeyboardShortcuts}
@@ -4715,7 +4850,7 @@ function EditorWorkspace({
           <div className="header-menu">
             <button
               type="button"
-              className="icon-button"
+              className="icon-button header-export-preset-trigger"
               disabled={exporting}
               aria-label="Export preset"
               aria-expanded={exportPresetOpen}
@@ -4727,6 +4862,18 @@ function EditorWorkspace({
               }}
             >
               <PngMaskIcon src="/assets/24_export-presets.png" size={14} />
+              <span className="header-export-preset-label">
+                {exportPreset === 'reels-1080'
+                  ? 'Reels 1080×1920'
+                  : exportPreset === 'shorts-1080'
+                    ? 'Shorts 1080×1920'
+                    : exportPreset === 'youtube-1080'
+                      ? 'YouTube 1920×1080'
+                      : exportPreset === 'high-bitrate'
+                        ? 'High bitrate'
+                        : 'Social H.264'}
+              </span>
+              <span aria-hidden="true">⌄</span>
             </button>
             {exportPresetOpen && (
               <section className="header-dropdown" aria-label="Export preset">
@@ -4773,6 +4920,7 @@ function EditorWorkspace({
             aria-busy={exporting}
           >
             <ExportIcon />
+            <span>Export MP4</span>
           </button>
           {exporting && (
             <button
@@ -4787,7 +4935,7 @@ function EditorWorkspace({
           )}
           <div className="header-menu">
             <button
-              className="icon-button"
+              className="icon-button header-processes-trigger"
               aria-label="Recent processes"
               aria-expanded={processesOpen}
               title="Recent processes"
@@ -4798,53 +4946,108 @@ function EditorWorkspace({
               }}
             >
               <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
+              <span>Process Center</span>
+              {processCounts.active + processCounts.attention > 0 && (
+                <span
+                  className="process-center-count"
+                  aria-label={`${processCounts.active + processCounts.attention} active or attention processes`}
+                >
+                  {processCounts.active + processCounts.attention}
+                </span>
+              )}
             </button>
             {processesOpen && (
               <section className="header-dropdown" aria-label="Recent processes">
-                <h3>Recent processes</h3>
-                {exportHistory.length === 0 ? (
+                <h3>Process Center</h3>
+                <div className="process-filter-row" role="group" aria-label="Process filter">
+                  {(
+                    [
+                      ['active', 'Active', processCounts.active],
+                      ['attention', 'Needs attention', processCounts.attention],
+                      ['completed', 'Completed', processCounts.completed],
+                      ['all', 'All', exportHistory.length],
+                    ] as const
+                  ).map(([id, label, count]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className="process-filter-button"
+                      aria-pressed={processFilter === id}
+                      onClick={() => setProcessFilter(id)}
+                    >
+                      {label} <span>{count}</span>
+                    </button>
+                  ))}
+                </div>
+                {visibleProcesses.length === 0 ? (
                   <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
                 ) : (
-                  <ul className="process-list">
-                    {exportHistory.map((entry) => (
-                      <li key={entry.id} className={`process-row process-${entry.status}`}>
-                        <span className="process-dot" aria-hidden="true" />
-                        <span className="process-name" dir="ltr">
-                          {entry.filename}
-                        </span>
-                        <span className="process-meta">
-                          {entry.status === 'completed' && entry.totalBytes !== undefined
-                            ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
-                            : entry.status === 'failed' || entry.status === 'interrupted-retryable'
-                              ? (entry.error ?? 'failed')
-                              : 'encoding…'}
-                        </span>
-                        {lastExportRef.current?.entryId === entry.id && (
-                          <a
-                            className="icon-button"
-                            href={lastExportRef.current.url}
-                            download={entry.filename}
-                            aria-label={`Download ${entry.filename} again`}
-                            title="Download again"
+                  <div className="process-groups">
+                    {processGroups.map(
+                      (group) =>
+                        group.entries.length > 0 && (
+                          <section
+                            key={group.id}
+                            className="process-group"
+                            aria-label={group.label}
                           >
-                            <DownloadIcon />
-                          </a>
-                        )}
-                        {(entry.status === 'failed' ||
-                          entry.status === 'interrupted-retryable') && (
-                          <button
-                            type="button"
-                            className="process-retry"
-                            onClick={() => void handleExport(entry)}
-                            disabled={exporting}
-                            aria-label={`Retry ${entry.filename}`}
-                          >
-                            Retry
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                            <h4>{group.label}</h4>
+                            <ul className="process-list">
+                              {group.entries.map((entry) => (
+                                <li
+                                  key={entry.id}
+                                  className={`process-row process-${entry.status}`}
+                                >
+                                  <span className="process-dot" aria-hidden="true" />
+                                  <span className="process-name" dir="ltr">
+                                    {entry.filename}
+                                  </span>
+                                  <span className="process-meta">
+                                    <strong>
+                                      {entry.status === 'running'
+                                        ? 'Running'
+                                        : entry.status === 'completed'
+                                          ? 'Completed'
+                                          : entry.status === 'interrupted-retryable'
+                                            ? 'Interrupted — retry available'
+                                            : 'Failed — retry'}
+                                    </strong>{' '}
+                                    {entry.status === 'completed' && entry.totalBytes !== undefined
+                                      ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
+                                      : entry.status !== 'completed'
+                                        ? (entry.error ?? '')
+                                        : 'Ready to download'}
+                                  </span>
+                                  {lastExportRef.current?.entryId === entry.id && (
+                                    <a
+                                      className="icon-button"
+                                      href={lastExportRef.current.url}
+                                      download={entry.filename}
+                                      aria-label={`Download ${entry.filename} again`}
+                                      title="Download again"
+                                    >
+                                      <DownloadIcon />
+                                    </a>
+                                  )}
+                                  {(entry.status === 'failed' ||
+                                    entry.status === 'interrupted-retryable') && (
+                                    <button
+                                      type="button"
+                                      className="process-retry"
+                                      onClick={() => void handleExport(entry)}
+                                      disabled={exporting}
+                                      aria-label={`Retry ${entry.filename}`}
+                                    >
+                                      Retry
+                                    </button>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        ),
+                    )}
+                  </div>
                 )}
               </section>
             )}
@@ -5664,6 +5867,8 @@ function MonitorPanel() {
           </button>
           <MonitorAspectRatioSelector
             selectedAspectRatio={monitorAspectRatio}
+            authoredWidth={width}
+            authoredHeight={height}
             onAspectRatioChange={changeMonitorAspectRatio}
           />
         </div>

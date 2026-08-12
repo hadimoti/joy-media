@@ -125,6 +125,33 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
+  it('optionally scopes My Media catalog reads to one authorized project', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    for (const projectId of ['project-a', 'project-b']) {
+      await request(origin, 'POST', '/v1/projects', { id: projectId, title: projectId });
+      await request(origin, 'POST', `/v1/projects/${projectId}/assets`, {
+        id: `asset-${projectId}`,
+        kind: 'image',
+        displayName: `${projectId}.png`,
+        sha256: SHA256,
+        bytes: 12,
+        descriptor: { mimeType: 'image/png' },
+        locations: [{ kind: 'opfs-cache', ref: `opfs-${projectId}` }],
+      });
+    }
+
+    expect(await request(origin, 'GET', '/v1/library/my-assets')).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'asset-project-a' }, { id: 'asset-project-b' }] },
+    });
+    expect(await request(origin, 'GET', '/v1/library/my-assets?projectId=project-a')).toMatchObject(
+      {
+        status: 200,
+        body: { data: [{ id: 'asset-project-a', projectId: 'project-a' }] },
+      },
+    );
+  });
+
   it('keeps Mistral unconfigured without the dedicated runtime secret', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     expect(await request(origin, 'GET', '/v1/providers/reasoning')).toMatchObject({

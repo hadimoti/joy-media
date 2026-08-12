@@ -57,6 +57,7 @@ import {
   type ContextMenuItem,
 } from './commands/timeline-commands.js';
 import { ContextMenu } from './ContextMenu.js';
+import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflowMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
@@ -1129,6 +1130,66 @@ export function TimelinePanel({
     );
   };
 
+  const addVideoTrack = useCallback(() => {
+    const order = composition.tracks.length;
+    onDispatch({
+      label: 'Add track',
+      commands: [
+        {
+          type: 'timeline.addTrack',
+          payload: {
+            compositionId: composition.id,
+            track: {
+              id: `V${order + 1}`,
+              kind: 'video',
+              order,
+              enabled: true,
+              clips: [],
+            },
+          },
+        },
+      ],
+    });
+  }, [composition.id, composition.tracks.length, onDispatch]);
+
+  const overflowItems: readonly ActionOverflowMenuItem[] = [
+    { id: 'add-track', label: 'Add Track', onSelect: addVideoTrack },
+    {
+      id: 'marker',
+      label: 'Add Marker',
+      onSelect: () => onAddMarker?.(playheadUs, `Marker ${markers.length + 1}`),
+      disabled: onAddMarker === undefined,
+      disabledReason: 'Markers are unavailable in this view.',
+    },
+    {
+      id: 'duplicate',
+      label: 'Duplicate',
+      onSelect: () => {
+        if (selected !== undefined) dispatchDuplicate(selected.track.id, selected.clip);
+      },
+      disabled: !canDuplicate,
+      disabledReason: 'Select an unlocked clip first.',
+    },
+    {
+      id: 'delete',
+      label: selectedMarkerId !== undefined ? 'Remove Marker' : 'Ripple Delete',
+      onSelect: () => {
+        if (selectedMarkerId !== undefined) removeMarker(selectedMarkerId);
+        else if (selected !== undefined) dispatchDelete(selected.track.id, selected.clip.id);
+      },
+      disabled: !canDelete && selectedMarkerId === undefined,
+      disabledReason: 'Select an unlocked clip first.',
+      destructive: true,
+    },
+    {
+      id: 'flow',
+      label: dataLanesOpen ? 'Hide Data Lanes' : 'Show Data Lanes',
+      onSelect: () => setDataLanesOpen((open) => !open),
+      disabled: dataLanes === undefined,
+      disabledReason: 'Data lanes are unavailable in this workspace.',
+    },
+  ];
+
   const dispatchFreeze = (trackId: string, clipId: string) => {
     if (isCompoundView) {
       showToast?.(
@@ -1535,13 +1596,13 @@ export function TimelinePanel({
               </button>
               <span className="timeline-timecode-label" title={composition.name}>
                 <LayersIcon />
-                {composition.name}
+                Main / {composition.name}
               </span>
             </div>
             <span className="timeline-toolbar-sep" aria-hidden="true" />
           </>
         )}
-        <div className="timeline-toolbar-group">
+        <div className="timeline-toolbar-group timeline-toolbar-transport">
           <button
             className="icon-button"
             onClick={onTogglePlayback}
@@ -1570,33 +1631,13 @@ export function TimelinePanel({
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
-        <div className="timeline-toolbar-group">
+        <div className="timeline-toolbar-group timeline-toolbar-secondary timeline-toolbar-edit">
           <button
             type="button"
             className="icon-button"
             aria-label="Add video track"
             data-guide="Add track"
-            onClick={() => {
-              const order = composition.tracks.length;
-              onDispatch({
-                label: 'Add track',
-                commands: [
-                  {
-                    type: 'timeline.addTrack',
-                    payload: {
-                      compositionId: composition.id,
-                      track: {
-                        id: `V${order + 1}`,
-                        kind: 'video',
-                        order,
-                        enabled: true,
-                        clips: [],
-                      },
-                    },
-                  },
-                ],
-              });
-            }}
+            onClick={addVideoTrack}
           >
             <TrackAddIcon />
           </button>
@@ -1616,7 +1657,7 @@ export function TimelinePanel({
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
-        <div className="timeline-toolbar-group">
+        <div className="timeline-toolbar-group timeline-toolbar-tools">
           <button
             type="button"
             className="icon-button"
@@ -1655,7 +1696,7 @@ export function TimelinePanel({
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
-        <div className="timeline-toolbar-group">
+        <div className="timeline-toolbar-group timeline-toolbar-secondary timeline-toolbar-edit">
           <button
             className="icon-button"
             disabled={!canDuplicate}
@@ -1688,7 +1729,7 @@ export function TimelinePanel({
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
-        <div className="timeline-toolbar-group timeline-toolbar-zoom">
+        <div className="timeline-toolbar-group timeline-toolbar-zoom timeline-toolbar-view">
           <button
             type="button"
             className="icon-button"
@@ -1727,12 +1768,15 @@ export function TimelinePanel({
           >
             <FitWidthIcon />
           </button>
+          <span className="timeline-zoom-state" aria-label={autoFit ? 'Fit mode' : 'Follow mode'}>
+            {autoFit ? 'Fit' : 'Follow'}
+          </span>
         </div>
 
         {dataLanes !== undefined && (
           <>
             <span className="timeline-toolbar-sep" aria-hidden="true" />
-            <div className="timeline-toolbar-group">
+            <div className="timeline-toolbar-group timeline-toolbar-secondary">
               <button
                 type="button"
                 className="timeline-data-lanes-toggle"
@@ -1748,6 +1792,7 @@ export function TimelinePanel({
             </div>
           </>
         )}
+        <ActionOverflowMenu items={overflowItems} />
       </div>
 
       {provenance !== undefined && provenance.length > 0 && (

@@ -161,9 +161,14 @@ export class BrowserControlPlaneClient {
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
     return this.get('/v1/library/cloud-assets');
   }
-  /** All assets owned by this Joy identity across every local editor project. */
-  async myAssets(): Promise<readonly BrowserAsset[]> {
-    return this.get('/v1/library/my-assets');
+  /**
+   * Assets owned by this Joy identity. Passing a project keeps the active
+   * workspace focused on its own media while the unscoped catalog remains
+   * available to cross-project library consumers.
+   */
+  async myAssets(projectId?: string): Promise<readonly BrowserAsset[]> {
+    const query = projectId === undefined ? '' : `?projectId=${encodeURIComponent(projectId)}`;
+    return this.get(`/v1/library/my-assets${query}`);
   }
   /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
   async reasoningProviders(): Promise<readonly BrowserReasoningProvider[]> {

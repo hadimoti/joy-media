@@ -205,6 +205,14 @@ Panel header minimalism convention (2026-07-31): every panel header uses a 3-col
 
 Favorite icons (2026-准则): effects and transitions panels show a minimal SVG star icon for favorites — no text labels alongside the icon.
 
+## 3g. WP-31 information architecture (binding)
+
+- The durable mental model is **Media → Edit → Enhance → Automation → System**. The View menu, panel metadata, and workspace presets use these same intent groups.
+- Workspace presets are task-oriented entry points (Edit, Enhance, Audio & Captions, Automate, Custom). A preset changes the dock arrangement only; project data and authored media state remain untouched.
+- Project, asset, timeline, monitor, inspector, captions, audio, and process-center surfaces expose their primary action first. Secondary actions use labeled overflow menus or progressive disclosure.
+- Responsive behavior preserves the same hierarchy: critical actions stay visible, while lower-frequency actions collapse into overflow without changing labels or data behavior.
+- Selection context is explicit in the Inspector and Process Center. Capability-specific controls are hidden or disabled with an explanation, never silently repurposed.
+
 ## 4. Interaction standards
 
 - **Keyboard**: all global shortcuts live in [keyboard-shortcuts.ts](apps/editor-web/src/keyboard-shortcuts.ts) (pure resolver + tests). Space play/pause · S split · Del/Backspace ripple delete · **Ctrl/Cmd+D duplicate** · Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+K palette · Esc close · ←/→ seek 1s (Shift = 100 ms) · Home/End. New shortcuts are added to the resolver (with a test) — never as ad-hoc listeners in panels. Shortcuts never fire while typing (`isEditableTarget`).

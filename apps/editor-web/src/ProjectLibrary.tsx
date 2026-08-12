@@ -6,6 +6,11 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import {
+  loadEditorUiPreferences,
+  saveEditorUiPreferences,
+  type EditorUiPreferencesV2,
+} from './ui-preferences.js';
+import {
   CheckIcon,
   CloseIcon,
   DuplicateIcon,
@@ -55,6 +60,14 @@ export function ProjectLibrary({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
   const [showTrash, setShowTrash] = useState(false);
+  const initialUiPreferences = useRef(loadEditorUiPreferences(storage));
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<EditorUiPreferencesV2['projectLibrary']['sort']>(
+    initialUiPreferences.current.projectLibrary.sort,
+  );
+  const [view, setView] = useState<EditorUiPreferencesV2['projectLibrary']['view']>(
+    initialUiPreferences.current.projectLibrary.view,
+  );
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [dialog, setDialog] = useState<DialogState | undefined>(undefined);
@@ -63,8 +76,32 @@ export function ProjectLibrary({
   const [highlightProjectId, setHighlightProjectId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
-  const projects = showTrash ? listTrashedCatalogProjects(storage) : listCatalogProjects(storage);
-  const trashedCount = listTrashedCatalogProjects(storage).length;
+  const activeProjects = listCatalogProjects(storage);
+  const trashedProjects = listTrashedCatalogProjects(storage);
+  const trashedCount = trashedProjects.length;
+  const projectCount = activeProjects.length;
+  const projects = (showTrash ? trashedProjects : activeProjects)
+    .filter((entry) => {
+      const normalized = query.trim().toLocaleLowerCase();
+      return normalized.length === 0 || entry.title.toLocaleLowerCase().includes(normalized);
+    })
+    .sort((left, right) => {
+      if (showTrash) {
+        return (right.trashedAt ?? '').localeCompare(left.trashedAt ?? '');
+      }
+      if (sort === 'name-asc') return left.title.localeCompare(right.title);
+      if (sort === 'name-desc') return right.title.localeCompare(left.title);
+      if (sort === 'created-desc') return right.createdAt.localeCompare(left.createdAt);
+      return right.updatedAt.localeCompare(left.updatedAt);
+    });
+
+  useEffect(() => {
+    const current = loadEditorUiPreferences(storage);
+    saveEditorUiPreferences(storage, {
+      ...current,
+      projectLibrary: { view, sort },
+    });
+  }, [sort, storage, view]);
 
   const closeMenu = useCallback(
     (restoreFocus: boolean) => {
@@ -209,23 +246,36 @@ export function ProjectLibrary({
           <strong>JOY Studio</strong>
         </div>
         <div className="project-library-header-actions">
-          <button
-            type="button"
-            className={`project-library-trash-toggle ${showTrash ? 'is-active' : ''}`}
-            aria-pressed={showTrash}
-            onClick={() => {
-              setShowTrash((value) => !value);
-              setMenuProjectId(null);
-              setNotice(undefined);
-            }}
-          >
-            <TrashIcon />
-            Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
-          </button>
+          <div className="project-library-tabs" role="tablist" aria-label="Project library">
+            <button
+              type="button"
+              aria-pressed={!showTrash}
+              className={!showTrash ? 'is-active' : undefined}
+              onClick={() => {
+                setShowTrash(false);
+                setMenuProjectId(null);
+                setNotice(undefined);
+              }}
+            >
+              Projects ({projectCount})
+            </button>
+            <button
+              type="button"
+              aria-pressed={showTrash}
+              className={showTrash ? 'is-active' : undefined}
+              onClick={() => {
+                setShowTrash((active) => !active);
+                setMenuProjectId(null);
+                setNotice(undefined);
+              }}
+            >
+              Trash ({trashedCount})
+            </button>
+          </div>
           {!showTrash && (
             <button
               type="button"
-              className="icon-button"
+              className="project-library-new"
               aria-label="New project"
               data-guide="New project"
               onClick={() => {
@@ -234,6 +284,7 @@ export function ProjectLibrary({
               }}
             >
               <PlusIcon />
+              <span>New project</span>
             </button>
           )}
         </div>
@@ -253,6 +304,54 @@ export function ProjectLibrary({
           <p className={`project-library-notice is-${notice.kind}`} role="status">
             {notice.text}
           </p>
+        )}
+
+        {!showTrash && (
+          <div className="project-library-toolbar" role="search">
+            <label className="project-library-search">
+              <span className="sr-only">Search projects</span>
+              <input
+                value={query}
+                placeholder="Search projects"
+                onChange={(event) => setQuery(event.currentTarget.value)}
+              />
+            </label>
+            <label className="project-library-sort">
+              <span className="sr-only">Sort projects</span>
+              <select
+                aria-label="Sort projects"
+                value={sort}
+                onChange={(event) =>
+                  setSort(
+                    event.currentTarget.value as EditorUiPreferencesV2['projectLibrary']['sort'],
+                  )
+                }
+              >
+                <option value="updated-desc">Recently updated</option>
+                <option value="created-desc">Recently created</option>
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+              </select>
+            </label>
+            <div className="project-library-view" role="group" aria-label="Project view">
+              <button
+                type="button"
+                aria-label="Grid view"
+                aria-pressed={view === 'grid'}
+                onClick={() => setView('grid')}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                aria-label="List view"
+                aria-pressed={view === 'list'}
+                onClick={() => setView('list')}
+              >
+                List
+              </button>
+            </div>
+          </div>
         )}
 
         {!showTrash && creating && (
@@ -316,7 +415,7 @@ export function ProjectLibrary({
             </span>
           </div>
         ) : (
-          <ul className="project-library-grid">
+          <ul className={`project-library-grid${view === 'list' ? ' is-list' : ''}`}>
             {projects.map((entry) => {
               const busy = busyProjectId === entry.id;
               return (
@@ -332,14 +431,17 @@ export function ProjectLibrary({
                       if (!showTrash) onOpen(entry);
                     }}
                   >
+                    <span className="project-library-card-title">
+                      <strong dir="auto">{entry.title}</strong>
+                    </span>
                     <span className="project-library-card-thumb" aria-hidden="true" />
                     <span className="project-library-card-body">
-                      <strong dir="auto">{entry.title}</strong>
                       <span>
                         {showTrash && entry.trashedAt !== undefined
                           ? `Moved to Trash: ${formatUpdated(entry.trashedAt)}`
                           : `Last updated: ${formatUpdated(entry.updatedAt)}`}
                       </span>
+                      <span>Local project · Timeline ready</span>
                     </span>
                   </button>
                   <button

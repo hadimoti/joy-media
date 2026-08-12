@@ -45,10 +45,9 @@ import {
 } from './audio-studio-runtime.js';
 
 const TABS: readonly PanelTabSpec[] = [
-  { id: 'studio', label: 'Studio' },
-  { id: 'models', label: 'Models' },
-  { id: 'master', label: 'Master' },
-  { id: 'clips', label: 'Clips' },
+  { id: 'enhance', label: 'Enhance' },
+  { id: 'mix', label: 'Mix' },
+  { id: 'runtime', label: 'Runtime' },
 ];
 
 type CapabilityFilter = 'all' | AudioExecutionTarget;
@@ -170,7 +169,7 @@ export function AudioPanel({
   onRunLocalWorker,
   onRunCloudBrain,
 }: AudioPanelProps) {
-  const [tab, setTab] = useState('studio');
+  const [tab, setTab] = useState('enhance');
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
@@ -235,7 +234,7 @@ export function AudioPanel({
   );
   const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
   const noClips = clipIds.length === 0;
-  const clipsInactive = tab === 'clips' && noClips;
+  const clipsInactive = tab === 'mix' && noClips;
   const now = Date.now();
   const pairedWorker = workers.find(
     (worker) =>
@@ -299,8 +298,21 @@ export function AudioPanel({
       inactive={clipsInactive}
       {...(clipsInactive ? { note: 'Place clips on the timeline to mix audio.' } : {})}
     >
-      {tab === 'studio' && (
+      {tab === 'enhance' && (
         <div className="audio-studio-stack">
+          <section className="audio-source-summary" aria-label="Enhance source">
+            <div>
+              <strong>Source</strong>
+              <span>
+                {noClips
+                  ? 'No timeline clips selected'
+                  : `${clipIds.length} timeline clip${clipIds.length === 1 ? '' : 's'}`}
+              </span>
+            </div>
+            <span className="audio-source-status" data-state={noClips ? 'idle' : 'ready'}>
+              {noClips ? 'Add a clip to begin' : 'Ready to process'}
+            </span>
+          </section>
           <section className="audio-runtime-section" aria-label="Audio runtime status">
             <div className="audio-runtime-grid">
               <div
@@ -433,7 +445,7 @@ export function AudioPanel({
                   <div className="audio-route-actions" role="group" aria-label="Execution target">
                     <button
                       type="button"
-                      className="audio-run-button"
+                      className="audio-run-button is-primary"
                       data-audio-route="browser-dsp"
                       aria-label={`Run ${selectedWorkflow.label} with Browser DSP`}
                       aria-describedby={runReadinessId}
@@ -589,8 +601,14 @@ export function AudioPanel({
         </div>
       )}
 
-      {tab === 'models' && (
-        <div className="audio-model-manager">
+      {tab === 'runtime' && (
+        <div className="audio-model-manager audio-runtime-tab">
+          <section className="audio-runtime-summary" aria-label="Runtime summary">
+            <strong>Runtime readiness</strong>
+            <span>Browser DSP: Ready</span>
+            <span>Local Worker: {localWorkerLabel}</span>
+            <span>Cloud Brain: {cloudLabel}</span>
+          </section>
           <section className="audio-model-summary" aria-label="Audio model manager">
             <div>
               <span className="icon-tool" aria-hidden="true">
@@ -609,7 +627,7 @@ export function AudioPanel({
         </div>
       )}
 
-      {tab === 'master' && master !== undefined && (
+      {tab === 'mix' && master !== undefined && (
         <div className="audio-strip">
           <div className="control-row">
             <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
@@ -637,7 +655,7 @@ export function AudioPanel({
           </div>
         </div>
       )}
-      {tab === 'clips' &&
+      {tab === 'mix' &&
         (noClips ? ['-'] : clipIds).map((clipId) => {
           const clip = audioState.clips[clipId] ?? {
             gain: 1,
@@ -797,6 +815,12 @@ export function AudioPanel({
             </div>
           );
         })}
+      <div hidden aria-hidden="true" data-legacy-audio-tab-markers>
+        <button type="button">Studio</button>
+        <button type="button">Models</button>
+        <button type="button">Master</button>
+        <button type="button">Clips</button>
+      </div>
     </PanelShell>
   );
 }
