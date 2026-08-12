@@ -1103,13 +1103,14 @@ function EditorWorkspace({
     () =>
       new ProjectMediaResolver({
         projectId: controlPlaneProject.controlPlaneProjectId,
+        controlPlaneReady: joySession.kind === 'ready',
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
           get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
         },
       }),
-    [controlPlaneProject.controlPlaneProjectId, session.visualProject],
+    [controlPlaneProject.controlPlaneProjectId, joySession.kind, session.visualProject],
   );
   useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
@@ -4580,6 +4581,7 @@ function EditorWorkspace({
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
+          controlPlaneReady={joySession.kind === 'ready'}
           {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
           onApplyWorkerAudioResult={applyWorkerAudioResult}
           operationLedger={operationLedger}
@@ -4592,6 +4594,7 @@ function EditorWorkspace({
         <AssetLibraryPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
+          controlPlaneReady={joySession.kind === 'ready'}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {

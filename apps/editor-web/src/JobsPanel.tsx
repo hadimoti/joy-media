@@ -31,6 +31,7 @@ export function workerAudioDenoiseOperationId(projectId: string, assetId: string
 export function JobsPanel({
   projectId,
   projectTitle,
+  controlPlaneReady = true,
   audioAssetId,
   onApplyWorkerAudioResult,
   operationLedger,
@@ -38,6 +39,7 @@ export function JobsPanel({
 }: {
   projectId: string;
   projectTitle: string;
+  readonly controlPlaneReady?: boolean;
   readonly audioAssetId?: string;
   readonly onApplyWorkerAudioResult?: (
     result: VerifiedWorkerAudioResult,
@@ -82,12 +84,14 @@ export function JobsPanel({
     try {
       const nextWorkers = await client.workers();
       let nextJobs: readonly BrowserJob[] = [];
-      let projectMissing = false;
-      try {
-        nextJobs = await client.jobs(projectId);
-      } catch (error) {
-        if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
-        projectMissing = true;
+      let projectMissing = !controlPlaneReady;
+      if (controlPlaneReady) {
+        try {
+          nextJobs = await client.jobs(projectId);
+        } catch (error) {
+          if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
+          projectMissing = true;
+        }
       }
       if (requestId !== refreshSeqRef.current) return;
       setWorkers(nextWorkers);
@@ -98,7 +102,7 @@ export function JobsPanel({
       if (requestId !== refreshSeqRef.current) return;
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
     }
-  }, [client, projectId]);
+  }, [client, controlPlaneReady, projectId]);
 
   useEffect(() => {
     void refresh();

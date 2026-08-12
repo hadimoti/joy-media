@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 
 describe('ProjectMediaResolver', () => {
+  it('does not query a temporary control-plane binding before authentication is ready', async () => {
+    const assets = vi.fn(async () => []);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'signed-out-project',
+      controlPlaneReady: false,
+      client: {
+        assets,
+        originalBytes: vi.fn(async () => {
+          throw new Error('media API should not be queried');
+        }),
+        sharedCloudOriginalBytes: vi.fn(async () => {
+          throw new Error('shared cloud should not be queried');
+        }),
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(resolver.resolve('asset-intro')).resolves.toMatchObject({
+      source: 'reference',
+      url: '/media/reference/asset-intro.mp4',
+    });
+    expect(assets).not.toHaveBeenCalled();
+  });
+
   it('prefers OPFS bytes and reuses the object URL', async () => {
     const blob = new Blob(['local'], { type: 'video/mp4' });
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');

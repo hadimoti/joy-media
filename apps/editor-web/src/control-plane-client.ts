@@ -219,11 +219,7 @@ export class BrowserControlPlaneClient {
   }
 
   async ensureProject(id: string, title: string): Promise<void> {
-    try {
-      await this.createProject(id, title);
-    } catch (error) {
-      if (!messageIncludes(error, 'PROJECT_EXISTS')) throw error;
-    }
+    await this.post('/v1/projects/ensure', { id, title });
   }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
     return this.get(
@@ -625,7 +621,4 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-function messageIncludes(error: unknown, code: string): boolean {
-  return error instanceof Error && error.message.includes(code);
 }

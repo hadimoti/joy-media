@@ -442,6 +442,27 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/projects/ensure') {
+    const body = await readJson(request);
+    const id = requiredString(body, 'id');
+    const title = requiredString(body, 'title');
+    let project;
+    try {
+      project = await options.controlPlane.getProject(actor, id);
+    } catch (error) {
+      if (!(error instanceof ControlPlaneError) || error.code !== 'PROJECT_NOT_FOUND') throw error;
+      try {
+        project = await options.controlPlane.createProject(actor, id, title);
+      } catch (createError) {
+        if (!(createError instanceof ControlPlaneError) || createError.code !== 'PROJECT_EXISTS')
+          throw createError;
+        project = await options.controlPlane.getProject(actor, id);
+      }
+    }
+    respondJson(response, 200, { data: project });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/projects') {
     const body = await readJson(request);
     respondJson(response, 201, {

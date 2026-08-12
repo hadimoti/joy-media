@@ -27,4 +27,14 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).toContain('rendered.map(({ asset, derivatives }) =>');
     expect(panelSource).toContain('aria-label={`Add ${asset.displayName} to timeline`}');
   });
+
+  it('keeps catalog refresh read-only after project creation', () => {
+    const refreshPath = panelSource.slice(
+      panelSource.indexOf('const refresh = useCallback'),
+      panelSource.indexOf('const importSelectedFile'),
+    );
+    expect(refreshPath).not.toContain('ensureProject(');
+    expect(refreshPath).toContain('client.myAssets(projectId)');
+    expect(refreshPath).toContain('client.sharedCloudAssets()');
+  });
 });

@@ -74,6 +74,45 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('uses the idempotent ensure endpoint so refreshes do not emit conflicts', async () => {
+    const requests: Array<{ readonly url: string; readonly method?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        ...(init?.method === undefined ? {} : { method: init.method }),
+      });
+      return json(200, { data: { id: 'project-1', title: 'Project', revision: 0 } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await client.ensureProject('project-1', 'Project');
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      { url: 'https://media.joyteam.ir/api/v1/projects/ensure', method: 'POST' },
+    ]);
+  });
+
+  it('accepts an idempotent ensure response when the project already exists', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      json(200, { data: { id: 'project-1', title: 'Project', revision: 3 } });
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(client.ensureProject('project-1', 'Project')).resolves.toBeUndefined();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('reports a plain-text API denial without a JSON parsing failure', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });

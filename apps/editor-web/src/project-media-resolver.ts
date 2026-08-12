@@ -10,6 +10,8 @@ export interface ProjectMediaSource {
 
 export interface ProjectMediaResolverOptions {
   readonly projectId: string;
+  /** Project-scoped API calls wait until the authenticated owner is known. */
+  readonly controlPlaneReady?: boolean;
   readonly project?: JoyProjectV1;
   readonly client: Pick<
     BrowserControlPlaneClient,
@@ -71,6 +73,20 @@ export class ProjectMediaResolver {
       return source;
     }
 
+    if (this.#options.controlPlaneReady === false) {
+      if (
+        REFERENCE_ASSET_IDS.has(assetId) &&
+        (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
+      ) {
+        return this.#remember(assetId, {
+          url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+          mimeType: 'video/mp4',
+          source: 'reference',
+        });
+      }
+      throw new Error('Authenticated media session is not ready');
+    }
+
     try {
       let cloud: Blob;
       try {
@@ -107,6 +123,8 @@ export class ProjectMediaResolver {
 
   async #descriptor(assetId: string): Promise<BrowserAsset | undefined> {
     const projectAsset = this.#options.project?.assets[assetId];
+    if (this.#options.controlPlaneReady === false)
+      return projectAssetDescriptor(projectAsset, this.#options.projectId);
     try {
       const catalogAsset = (await this.#options.client.assets(this.#options.projectId)).find(
         (asset) => asset.id === assetId,
@@ -115,18 +133,7 @@ export class ProjectMediaResolver {
     } catch {
       /* OPFS and reference projects can resolve without a catalog request. */
     }
-    if (projectAsset === undefined) return undefined;
-    return {
-      id: projectAsset.id,
-      projectId: this.#options.projectId,
-      kind: projectAsset.kind === 'other' ? 'image' : projectAsset.kind,
-      displayName: projectAsset.displayName,
-      sha256: projectAsset.sha256 ?? '',
-      bytes: projectAsset.bytes ?? 0,
-      descriptor: projectAsset.descriptor ?? { mimeType: 'application/octet-stream' },
-      createdAt: Date.now(),
-      cloudBacked: false,
-    };
+    return projectAssetDescriptor(projectAsset, this.#options.projectId);
   }
 
   #remember(assetId: string, source: ProjectMediaSource): ProjectMediaSource {
@@ -138,6 +145,24 @@ export class ProjectMediaResolver {
     this.#sources.set(assetId, source);
     return source;
   }
+}
+
+function projectAssetDescriptor(
+  projectAsset: JoyProjectV1['assets'][string] | undefined,
+  projectId: string,
+): BrowserAsset | undefined {
+  if (projectAsset === undefined) return undefined;
+  return {
+    id: projectAsset.id,
+    projectId,
+    kind: projectAsset.kind === 'other' ? 'image' : projectAsset.kind,
+    displayName: projectAsset.displayName,
+    sha256: projectAsset.sha256 ?? '',
+    bytes: projectAsset.bytes ?? 0,
+    descriptor: projectAsset.descriptor ?? { mimeType: 'application/octet-stream' },
+    createdAt: Date.now(),
+    cloudBacked: false,
+  };
 }
 
 async function matchesDescriptor(

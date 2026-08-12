@@ -68,6 +68,24 @@ describe('control-plane HTTP transport', () => {
   it('exposes the owner-authorized project lifecycle routes with revision and trash guards', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     expect(
+      await request(origin, 'POST', '/v1/projects/ensure', {
+        id: 'ensured',
+        title: 'Ensured project',
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'ensured', revision: 0, title: 'Ensured project' } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/ensure', {
+        id: 'ensured',
+        title: 'Ignored after creation',
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'ensured', revision: 0, title: 'Ensured project' } },
+    });
+    expect(
       await request(origin, 'POST', '/v1/projects', { id: 'source', title: 'Source' }),
     ).toMatchObject({ status: 201, body: { data: { revision: 0, title: 'Source' } } });
     expect(
