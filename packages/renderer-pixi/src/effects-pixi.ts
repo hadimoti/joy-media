@@ -58,6 +58,40 @@ void main()
 }
 `;
 
+const COLOR_GRADE_V2_FRAG = `
+in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform float uExposure;
+uniform float uContrast;
+uniform float uTemperature;
+uniform float uTint;
+uniform float uSaturation;
+uniform float uHighlights;
+uniform float uShadows;
+uniform float uSoftClip;
+uniform float uMonochrome;
+
+void main() {
+  vec4 color = texture(uTexture, vTextureCoord);
+  vec3 rgb = color.rgb * pow(2.0, uExposure);
+  rgb.r += uTemperature * 0.06 + uTint * 0.02;
+  rgb.g += uTint * -0.03;
+  rgb.b -= uTemperature * 0.06 + uTint * 0.02;
+  float pivot = 0.5;
+  rgb = (rgb - pivot) * (1.0 + uContrast) + pivot;
+  float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  float shadowWeight = max(0.0, 1.0 - lum * 2.0);
+  float highlightWeight = max(0.0, lum * 2.0 - 1.0);
+  rgb += (uShadows * shadowWeight + uHighlights * highlightWeight) * 0.25;
+  rgb = mix(vec3(lum), rgb, uSaturation);
+  float mono = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  rgb = mix(rgb, vec3(mono), uMonochrome);
+  rgb = max(vec3(0.0), rgb);
+  if (uSoftClip > 0.0) rgb = rgb / (rgb + uSoftClip);
+  finalColor = vec4(clamp(rgb, 0.0, 1.0), color.a);
+}`;
+
 /** Build Pixi filters for a node's effect stack (enabled only). */
 export function buildPixiEffectFilters(effects: readonly EffectInstanceIR[] | undefined): Filter[] {
   if (effects === undefined || effects.length === 0) return [];
@@ -71,13 +105,37 @@ export function buildPixiEffectFilters(effects: readonly EffectInstanceIR[] | un
 }
 
 /** Master color grade as a ColorMatrixFilter (identity → undefined). */
-export function buildPixiColorGradeFilter(
-  grade: ColorGradeIR | undefined,
-): ColorMatrixFilter | undefined {
+export function buildPixiColorGradeFilter(grade: ColorGradeIR | undefined): Filter | undefined {
   if (grade === undefined || isIdentityColorGrade(grade)) return undefined;
+  if (grade.version === 2) return createColorGradeV2Filter(grade);
   const filter = new ColorMatrixFilter();
   applyColorGradeMatrix(filter, grade);
   return filter;
+}
+
+function createColorGradeV2Filter(grade: ColorGradeIR): Filter {
+  const adjust = grade.adjust;
+  const lut = grade.lut;
+  return new Filter({
+    glProgram: GlProgram.from({
+      vertex: DEFAULT_FILTER_VERT,
+      fragment: COLOR_GRADE_V2_FRAG,
+      name: 'joy-color-grade-v2',
+    }),
+    resources: {
+      colorGradeUniforms: {
+        uExposure: { value: adjust?.exposure ?? 0, type: 'f32' },
+        uContrast: { value: adjust?.contrast ?? 0, type: 'f32' },
+        uTemperature: { value: adjust?.temperature ?? 0, type: 'f32' },
+        uTint: { value: adjust?.tint ?? 0, type: 'f32' },
+        uSaturation: { value: adjust?.saturation ?? grade.saturation, type: 'f32' },
+        uHighlights: { value: adjust?.highlights ?? 0, type: 'f32' },
+        uShadows: { value: adjust?.shadows ?? 0, type: 'f32' },
+        uSoftClip: { value: grade.outputSafety?.softClip ?? 0, type: 'f32' },
+        uMonochrome: { value: lut?.builtIn === 'monochrome' ? lut.intensity : 0, type: 'f32' },
+      },
+    },
+  });
 }
 
 export function applyColorGradeMatrix(filter: ColorMatrixFilter, grade: ColorGradeIR): void {

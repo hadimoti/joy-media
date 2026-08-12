@@ -190,11 +190,11 @@ export const COLOR_REVIEW_AGENT: SpecialistDefinition = {
         domain: 'parameters',
         parameters: { lift: 0, gamma: 1, gain: 1, saturation: 1.05, lutId: 'rec709' },
       });
-    } else if (grade.saturation > 1.6) {
-      findings.push(`Saturation is ${grade.saturation.toFixed(2)} — beyond broadcast-safe.`);
+    } else if ((grade.saturation ?? 1) > 1.6) {
+      findings.push(`Saturation is ${(grade.saturation ?? 1).toFixed(2)} — beyond broadcast-safe.`);
       edits.push({
         targetId: 'colorGrade',
-        summary: `Reduce saturation from ${grade.saturation.toFixed(2)} to 1.20`,
+        summary: `Reduce saturation from ${(grade.saturation ?? 1).toFixed(2)} to 1.20`,
         domain: 'parameters',
         parameters: { saturation: 1.2 },
       });

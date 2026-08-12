@@ -4,6 +4,7 @@ import type { CompositionId, ProjectDiagnostic, TrackId } from './model.js';
 import type { Rational, TimeUs } from './time.js';
 import { clipTimeRange, rational } from './time.js';
 import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
+import type { ColorGradeV2 } from './color.js';
 
 export type EffectParamValue =
   | number
@@ -43,7 +44,9 @@ export interface JoyProjectV1 {
   /** Optional durable audio graph (mixer / buses / FX). */
   readonly audio?: ProjectAudioV1;
   /** Optional master color grade (DaVinci-lite). */
-  readonly colorGrade?: ColorGradeV1;
+  readonly colorGrade?: ColorGradeV1 | ColorGradeV2;
+  /** Optional clip-local grades keyed by timeline clip id. */
+  readonly clipColorGrades?: Readonly<Record<string, ColorGradeV2>>;
   /** Optional clip-junction transitions. */
   readonly transitions?: readonly TransitionV1[];
   /** Last chosen export preset id. */
@@ -308,7 +311,7 @@ export interface CaptionDocumentV1 {
 
 export interface AssetRecordV1 {
   readonly id: string;
-  readonly kind: 'video' | 'audio' | 'image' | 'other';
+  readonly kind: 'video' | 'audio' | 'image' | 'lut' | 'other';
   readonly displayName: string;
   /** Safe integrity metadata copied from the owner catalog when available. */
   readonly sha256?: string;

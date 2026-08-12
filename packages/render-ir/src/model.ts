@@ -128,11 +128,55 @@ export interface EffectRenderSpec {
 
 /** Master color grade applied once per frame (DaVinci-style lift/gamma/gain). */
 export interface ColorGradeIR {
+  readonly version?: 2;
+  readonly enabled?: boolean;
   readonly lift: number;
   readonly gamma: number;
   readonly gain: number;
   readonly saturation: number;
   readonly lutId?: 'none' | 'rec709' | 'contrast';
+  readonly adjust?: {
+    readonly temperature?: number;
+    readonly tint?: number;
+    readonly exposure?: number;
+    readonly contrast?: number;
+    readonly pivot?: number;
+    readonly highlights?: number;
+    readonly shadows?: number;
+    readonly whites?: number;
+    readonly blacks?: number;
+    readonly saturation?: number;
+    readonly vibrance?: number;
+    readonly hue?: number;
+  };
+  readonly wheels?: Readonly<
+    Record<
+      'lift' | 'gamma' | 'gain' | 'offset',
+      {
+        readonly r: number;
+        readonly g: number;
+        readonly b: number;
+        readonly master: number;
+      }
+    >
+  >;
+  readonly curves?: Readonly<
+    Record<'rgb' | 'red' | 'green' | 'blue', readonly { readonly x: number; readonly y: number }[]>
+  >;
+  readonly hsl?: readonly {
+    readonly hue: number;
+    readonly hueWidth: number;
+    readonly softness: number;
+    readonly saturation: number;
+    readonly luminance: number;
+  }[];
+  readonly lut?: {
+    readonly assetId?: string;
+    readonly sha256?: string;
+    readonly builtIn?: string;
+    readonly intensity: number;
+  };
+  readonly outputSafety?: { readonly softClip: number; readonly legalRange: boolean };
 }
 
 /** Alias kept for call sites / docs that say GradeNode. */

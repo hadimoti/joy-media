@@ -139,6 +139,7 @@ import { importMediaFile } from './media-import.js';
 import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
+import { setMonitorPixelReader } from './monitor-readback.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
 import {
   bindClipToObject,
@@ -4336,7 +4337,21 @@ function EditorWorkspace({
       );
     }
     if (api.id === 'color')
-      return <ColorPanel project={visualProject} onChange={context.replaceVisualProject} />;
+      return (
+        <ColorPanel
+          project={visualProject}
+          onChange={context.replaceVisualProject}
+          onDispatch={context.dispatchProject}
+          {...(selectedTimelineVideo === undefined
+            ? {}
+            : {
+                selectedClipId: selectedTimelineVideo.clip.id,
+                selectedClipName:
+                  visualProject.assets[selectedTimelineVideo.clip.assetId]?.displayName ??
+                  selectedTimelineVideo.clip.id,
+              })}
+        />
+      );
     if (api.id === 'captions')
       return (
         <CaptionsPanel
@@ -5548,6 +5563,7 @@ function MonitorPanel() {
       .then((created) => {
         if (disposed) return;
         rendererRef.current = created;
+        setMonitorPixelReader(() => created.readPixels());
         paintRef.current();
       })
       .catch((reason: unknown) => {
@@ -5566,6 +5582,7 @@ function MonitorPanel() {
         const existing = rendererRef.current;
         rendererPromiseRef.current = null;
         rendererRef.current = null;
+        setMonitorPixelReader(undefined);
         if (pending !== null)
           void pending.then((created) => created.destroy()).catch(() => undefined);
         else existing?.destroy();

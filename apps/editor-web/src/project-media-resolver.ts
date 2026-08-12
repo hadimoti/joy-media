@@ -155,7 +155,8 @@ function projectAssetDescriptor(
   return {
     id: projectAsset.id,
     projectId,
-    kind: projectAsset.kind === 'other' ? 'image' : projectAsset.kind,
+    kind:
+      projectAsset.kind === 'other' || projectAsset.kind === 'lut' ? 'image' : projectAsset.kind,
     displayName: projectAsset.displayName,
     sha256: projectAsset.sha256 ?? '',
     bytes: projectAsset.bytes ?? 0,

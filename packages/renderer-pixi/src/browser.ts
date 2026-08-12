@@ -110,6 +110,17 @@ export interface BrowserPixiRenderer {
   readonly width: number;
   /** Current canvas CSS height in pixels (tracks the last rendered frame). */
   readonly height: number;
+  /** Returns a bounded RGBA readback for diagnostics; overlays are not painted into it. */
+  readonly readPixels: (
+    maxWidth?: number,
+    maxHeight?: number,
+  ) =>
+    | {
+        readonly width: number;
+        readonly height: number;
+        readonly data: Uint8ClampedArray;
+      }
+    | undefined;
   /** Paints a {@link RenderFrameIR} into the canvas and returns per-frame stats. */
   render(
     frame: RenderFrameIR,
@@ -448,6 +459,20 @@ export async function createBrowserPixiRenderer(
     },
     get height() {
       return frameHeight;
+    },
+    readPixels(maxWidth = 640, maxHeight = 360) {
+      if (disposed || frameWidth <= 0 || frameHeight <= 0) return undefined;
+      const scale = Math.min(1, maxWidth / frameWidth, maxHeight / frameHeight);
+      const width = Math.max(1, Math.round(frameWidth * scale));
+      const height = Math.max(1, Math.round(frameHeight * scale));
+      const copy = document.createElement('canvas');
+      copy.width = width;
+      copy.height = height;
+      const context = copy.getContext('2d', { willReadFrequently: true });
+      if (context === null) return undefined;
+      context.drawImage(app.canvas, 0, 0, width, height);
+      const image = context.getImageData(0, 0, width, height);
+      return { width, height, data: image.data };
     },
     render(
       frame: RenderFrameIR,

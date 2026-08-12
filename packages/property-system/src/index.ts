@@ -5,6 +5,8 @@ import type {
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import type { ColorGradeV2 } from '@joy-media/project-schema';
+import { createIdentityColorGrade } from '@joy-media/project-schema';
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { CaptionCommand } from '@joy-media/captions-core';
 import { applyMotionProjectCommand } from '@joy-media/motion-core';
@@ -20,6 +22,8 @@ import type {
 } from '@joy-media/motion-core';
 
 export type ObjectKind = VisualObjectV1['kind'];
+export type ColorTarget =
+  { readonly scope: 'output' } | { readonly scope: 'clip'; readonly clipId: string };
 export type TransformProperties = VisualObjectTransformV1;
 export type VisualObject = VisualObjectV1;
 export interface PropertyDescriptor {
@@ -65,7 +69,7 @@ export function setVisualProperty(
 }
 
 export type NumericTransformProperty = Exclude<keyof TransformProperties, 'crop'>;
-export type VisualObjectCommand =
+type _VisualObjectCommand =
   | {
       /** Registers a completed generation result and its reproducibility record. */
       readonly type: 'asset.registerGenerated';
@@ -139,7 +143,16 @@ export type VisualObjectCommand =
   | ToggleEffectCommand
   | SetEffectParamCommand
   | ClearEffectsCommand
-  | ReplaceEffectCommand;
+  | ReplaceEffectCommand
+  | ColorCommand;
+export type ColorCommand = {
+  readonly type: 'color.setGrade';
+  readonly payload: {
+    readonly target: ColorTarget;
+    readonly grade?: ColorGradeV2;
+  };
+};
+export type VisualObjectCommand = _VisualObjectCommand;
 export interface VisualObjectApplyResult {
   readonly objects: readonly VisualObject[];
   readonly inverse: Extract<VisualObjectCommand, { readonly type: 'object.setTransformProperty' }>;
@@ -194,6 +207,57 @@ export function applyVisualObjectProjectCommand(
     return {
       project: { ...project, assets: { ...project.assets, [asset.id]: asset } },
       inverse: { type: 'asset.unregisterGenerated', payload: { assetId: asset.id } },
+    };
+  }
+  if (command.type === 'color.setGrade') {
+    const { target, grade } = command.payload;
+    const previous =
+      target.scope === 'output' ? project.colorGrade : project.clipColorGrades?.[target.clipId];
+    let previousV2: ColorGradeV2 | undefined;
+    if (previous !== undefined && 'version' in previous) previousV2 = previous;
+    else if (previous !== undefined) {
+      const identity = createIdentityColorGrade();
+      previousV2 = {
+        ...identity,
+        wheels: {
+          ...identity.wheels!,
+          lift: { ...identity.wheels!.lift, master: previous.lift },
+          gamma: { ...identity.wheels!.gamma, master: previous.gamma - 1 },
+          gain: { ...identity.wheels!.gain, master: previous.gain - 1 },
+        },
+        adjust: { ...identity.adjust!, saturation: previous.saturation },
+      };
+    }
+    if (target.scope === 'clip') {
+      if (
+        !Object.values(project.compositions).some((composition) =>
+          composition.tracks.some((track) => track.clips.some((clip) => clip.id === target.clipId)),
+        )
+      )
+        throw new RangeError(`unknown clip "${target.clipId}"`);
+      const clipColorGrades = { ...(project.clipColorGrades ?? {}) };
+      if (grade === undefined) delete clipColorGrades[target.clipId];
+      else clipColorGrades[target.clipId] = grade;
+      const nextProject = { ...project };
+      if (Object.keys(clipColorGrades).length === 0) delete nextProject.clipColorGrades;
+      else nextProject.clipColorGrades = clipColorGrades;
+      return {
+        project: nextProject,
+        inverse: {
+          type: 'color.setGrade',
+          payload: { target, ...(previousV2 === undefined ? {} : { grade: previousV2 }) },
+        },
+      };
+    }
+    const nextProject = { ...project };
+    if (grade === undefined) delete nextProject.colorGrade;
+    else nextProject.colorGrade = grade;
+    return {
+      project: nextProject,
+      inverse: {
+        type: 'color.setGrade',
+        payload: { target, ...(previousV2 === undefined ? {} : { grade: previousV2 }) },
+      },
     };
   }
   if (command.type === 'asset.unregisterGenerated') {

@@ -82,6 +82,27 @@ export type {
   EffectParamValue,
   EffectInstanceV1,
 } from './v1.js';
+export type {
+  ColorAdjustments,
+  ColorWheel,
+  ColorWheels,
+  ColorCurveChannel,
+  ColorCurvePoint,
+  ColorCurves,
+  HslBand,
+  ColorLutReference,
+  OutputSafety,
+  ColorGradeV2,
+  ColorGrade,
+} from './color.js';
+export {
+  IDENTITY_COLOR_ADJUSTMENTS,
+  IDENTITY_COLOR_WHEEL,
+  IDENTITY_COLOR_WHEELS,
+  IDENTITY_COLOR_CURVES,
+  createIdentityColorGrade,
+  isColorGradeV2,
+} from './color.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {
   CreativeCapability,

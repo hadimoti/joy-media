@@ -80,7 +80,17 @@ export function applyChangeSet(
       }
 
       if (edit.targetId === 'colorGrade') {
-        const base = next.colorGrade ?? { lift: 0, gamma: 1, gain: 1, saturation: 1 };
+        const rawBase = next.colorGrade;
+        const base =
+          rawBase !== undefined && 'version' in rawBase
+            ? {
+                lift: rawBase.lift ?? 0,
+                gamma: rawBase.gamma ?? 1,
+                gain: rawBase.gain ?? 1,
+                saturation: rawBase.saturation ?? 1,
+                lutId: rawBase.lutId,
+              }
+            : (rawBase ?? { lift: 0, gamma: 1, gain: 1, saturation: 1 });
         next = {
           ...next,
           colorGrade: {

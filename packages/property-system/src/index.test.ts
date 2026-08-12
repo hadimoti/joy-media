@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyVisualObjectCommand,
+  applyVisualObjectProjectCommand,
   applyVisualObjectProjectTransaction,
   applyVisualObjectTransaction,
   setVisualProperty,
@@ -8,7 +9,7 @@ import {
   VISUAL_INSPECTOR,
   sharedValue,
 } from './index.js';
-import { migrateV0ToV1 } from '@joy-media/project-schema';
+import { createIdentityColorGrade, migrateV0ToV1 } from '@joy-media/project-schema';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 describe('visual property schemas', () => {
   it('covers transform, opacity, and crop without per-object forms', () => {
@@ -126,5 +127,21 @@ describe('visual property schemas', () => {
     });
     expect(updated.visualObjects.title!.transform.x).toBe(12);
     expect(project.visualObjects.title!.transform.x).toBe(0);
+  });
+  it('applies a reversible output color grade command', () => {
+    const migrated = migrateV0ToV1(emptySpikeProject());
+    const project = migrated.project;
+    const grade = {
+      ...createIdentityColorGrade(),
+      adjust: { ...createIdentityColorGrade().adjust!, exposure: 1 },
+    };
+    const applied = applyVisualObjectProjectCommand(project, {
+      type: 'color.setGrade',
+      payload: { target: { scope: 'output' }, grade },
+    });
+    expect(applied.project.colorGrade).toEqual(grade);
+    expect(
+      applyVisualObjectProjectCommand(applied.project, applied.inverse).project.colorGrade,
+    ).toBeUndefined();
   });
 });
