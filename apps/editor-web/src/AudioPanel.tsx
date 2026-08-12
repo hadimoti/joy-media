@@ -43,6 +43,7 @@ import {
   type AudioExecutionTarget,
   type AudioModelSpec,
 } from './audio-studio-runtime.js';
+import { ensureClipAudio } from './audio-session.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'enhance', label: 'Enhance' },
@@ -69,6 +70,18 @@ interface AudioPanelProps {
   readonly onRunBrowserDsp?: (workflowId: string) => void | Promise<void>;
   readonly onRunLocalWorker?: (workflowId: string) => void | Promise<void>;
   readonly onRunCloudBrain?: (workflowId: string) => void | Promise<void>;
+}
+
+/**
+ * Timeline clips can arrive one render before their mixer rows. Hydrate the
+ * command input as well as the display fallback so a visible edit cannot be
+ * rejected as an unknown target and then disappear on reopen.
+ */
+export function prepareAudioCommandState(
+  state: AudioState,
+  clipIds: readonly string[],
+): AudioState {
+  return ensureClipAudio(state, clipIds);
 }
 
 function targetLabel(target: AudioAtomicCapability['target']): string {
@@ -208,7 +221,7 @@ export function AudioPanel({
   }, [cloudConfirmWorkflowId]);
   const dispatch = (command: AudioCommand, label: string) => {
     try {
-      const { state } = applyAudioCommand(audioState, command);
+      const { state } = applyAudioCommand(prepareAudioCommandState(audioState, clipIds), command);
       onAudioChange(state, label);
     } catch (error) {
       console.warn('audio command rejected', error);

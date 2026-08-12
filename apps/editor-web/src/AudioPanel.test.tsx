@@ -1,9 +1,20 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AudioPanel } from './AudioPanel.js';
+import { AudioPanel, prepareAudioCommandState } from './AudioPanel.js';
 import { EMPTY_AUDIO_STATE } from './audio-session.js';
+import { applyAudioCommand } from '@joy-media/commands';
 
 describe('AudioPanel Studio surface', () => {
+  it('hydrates a newly visible clip before applying a mix command', () => {
+    const hydrated = prepareAudioCommandState(EMPTY_AUDIO_STATE, ['voice-1']);
+    const { state } = applyAudioCommand(hydrated, {
+      type: 'audioClip.setGain',
+      payload: { clipId: 'voice-1', gain: 1.25 },
+    });
+
+    expect(state.clips['voice-1']).toMatchObject({ gain: 1.25 });
+  });
+
   it('server-renders the action-first, honest default Studio state', () => {
     const markup = renderToStaticMarkup(
       <AudioPanel clipIds={[]} audioState={EMPTY_AUDIO_STATE} onAudioChange={() => undefined} />,

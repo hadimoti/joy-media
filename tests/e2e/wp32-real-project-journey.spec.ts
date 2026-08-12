@@ -296,7 +296,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
             timeout: 15_000,
           });
           await page.getByRole('tab', { name: 'Mix' }).click();
-          const gain = page.getByRole('slider', { name: /^Gain / }).first();
+          const gain = page.getByRole('slider', { name: /^Gain voice-/ });
           await expect(gain).toBeEnabled();
           await gain.fill('1.25');
           await expect(gain).toHaveValue('1.25');
@@ -347,6 +347,9 @@ test.describe('WP-32 real-project workflow acceptance', () => {
       await runCheckpoint(checkpoints, 'refresh and re-download the verified export', async () => {
         await page.reload();
         await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
+        await page.locator('.panel-tab[aria-label="Audio"]').first().click();
+        await page.getByRole('tab', { name: 'Mix' }).click();
+        await expect(page.getByRole('slider', { name: /^Gain voice-/ })).toHaveValue('1.25');
         const processes = page.getByRole('button', { name: 'Recent processes' });
         if ((await processes.getAttribute('aria-expanded')) !== 'true') await processes.click();
         await expect(page.getByRole('region', { name: 'Recent processes' })).toBeVisible();
