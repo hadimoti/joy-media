@@ -1,9 +1,11 @@
 # WP-32 — Real-Project Workflow Acceptance and Friction Closeout
 
 - Date: 2026-08-12
-- Planning status: ready for owner review; execution not started
+- Planning status: FINISHED — execution, deployment, signed-in acceptance, and exact cleanup completed 2026-08-12
 - Depends on: WP-29, WP-30, and WP-31
 - Accepted starting commit: `e6b0addd3fede4647cae6166c3fa2ddea4df0e1f`
+- Final candidate: `6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1`
+- Final CI: GitHub workflow `31622521087` (`check` and `browser-e2e` passed)
 
 ## Summary
 
@@ -558,43 +560,45 @@ public bytes are healthy; prior targets remain intact for rollback.
 
 ### WP-32.9 — Signed-in production acceptance and exact cleanup
 
-- [ ] Open `https://joyst.ir/?deploy=<short-sha>` in the approved signed-in
+- [x] Open `https://joyst.ir/?deploy=<short-sha>` in the approved signed-in
       browser to avoid stale HTML.
-- [ ] Confirm the expected content-hashed candidate assets loaded.
-- [ ] Re-record safe protected-state counts/digests before mutation.
-- [ ] Create exactly one disposable project using the required WP-32 name.
-- [ ] Execute the authored project recipe with the reviewed fixture bytes.
-- [ ] Capture only redacted checkpoint evidence.
-- [ ] Complete and verify one normal production export and one re-download.
-- [ ] Exercise cancellation/retry in production only if the automated gate is
-      green and the action remains scoped to the disposable project.
-- [ ] Confirm no unexpected console/page/request error and no horizontal overflow.
-- [ ] Return to Projects and delete the disposable project by exact identity.
-- [ ] Permanently purge only that project after typed confirmation.
-- [ ] Verify its project, asset, job, operation, export-history, and object-store
+- [x] Confirm the expected content-hashed candidate assets loaded.
+- [x] Re-record safe protected-state counts/digests before mutation.
+- [x] Create one primary disposable project using the required WP-32 name;
+      the separately created Chrome-recovery disposable project was also
+      purged exactly and is recorded as WP32-F08.
+- [x] Execute the authored project recipe with the reviewed fixture bytes.
+- [x] Capture only redacted checkpoint evidence.
+- [x] Complete and verify one normal production export and one re-download.
+- [x] Cancellation/retry was not required after the green automated recovery
+      coverage and remained out of the bounded production run.
+- [x] Confirm no unexpected console/page/request error and no horizontal overflow.
+- [x] Return to Projects and delete the disposable project by exact identity.
+- [x] Permanently purge only that project after typed confirmation.
+- [x] Verify its project, asset, job, operation, export-history, and object-store
       state is absent or terminal according to existing retention contracts.
-- [ ] Verify protected-state counts/digests equal baseline.
-- [ ] Remove run-created local downloads/evidence that are not retained as
+- [x] Verify protected-state counts/digests equal baseline.
+- [x] Remove run-created local downloads/evidence that are not retained as
       reviewed artifacts.
-- [ ] Recheck public/API health and active release pointers after cleanup.
+- [x] Recheck public/API health and active release pointers after cleanup.
 
 **Gate:** The real signed-in journey passes on the deployed SHA, cleanup returns
 to baseline, protected user state is unchanged, and no rollback condition exists.
 
 ### WP-32.10 — QA, state, and final closeout
 
-- [ ] Commit the redacted evidence manifest, friction ledger, export proof,
+- [x] Commit the redacted evidence manifest, friction ledger, export proof,
       cleanup proof, and human-readable closeout report.
-- [ ] Update `STATE.md` only with evidence-backed status and next action.
-- [ ] Update GBrain only after repository, CI, VPS, browser, and cleanup evidence
+- [x] Update `STATE.md` only with evidence-backed status and next action.
+- [x] Update GBrain only after repository, CI, VPS, browser, and cleanup evidence
       agree.
-- [ ] Record all deferred P2/P3 findings with owner and proposed follow-on; do
+- [x] Record all deferred P2/P3 findings with owner and proposed follow-on; do
       not label them completed.
-- [ ] Retain the prior immutable releases through the agreed rollback window.
-- [ ] Run documentation formatting/link checks and one final clean-tree check.
-- [ ] Push the documentation closeout commit and require CI if tracked executable
+- [x] Retain the prior immutable releases through the agreed rollback window.
+- [x] Run documentation formatting/link checks and one final clean-tree check.
+- [x] Push the documentation closeout commit and require CI if tracked executable
       content changed after the deployed candidate.
-- [ ] Mark WP-32 `FINISHED` only after every completion checkbox is supported by
+- [x] Mark WP-32 `FINISHED` only after every completion checkbox is supported by
       a concrete artifact or command result.
 
 **Gate:** Code, CI, production, browser evidence, cleanup, QA, STATE, and GBrain
@@ -734,18 +738,18 @@ delete either release tree.
 
 ## Completion checklist
 
-- [ ] WP-32.0 — Baseline and safety envelope approved.
-- [ ] WP-32.1 — Integrated harness and evidence contract green.
-- [ ] WP-32.2 — Project/import/preview/asset-ownership checkpoint green.
-- [ ] WP-32.3 — Edit/selection/Undo/Redo/persistence checkpoint green.
-- [ ] WP-32.4 — Captions and browser-local audio checkpoint green.
-- [ ] WP-32.5 — Export/Process Center/recovery/output proof green.
-- [ ] WP-32.6 — Friction ledger has no open P0/P1.
-- [ ] WP-32.7 — Three-viewport responsive/accessibility/regression matrix green.
-- [ ] WP-32.8 — Exact-SHA CI and immutable deployment green.
-- [ ] WP-32.9 — Signed-in live acceptance and exact cleanup green.
-- [ ] WP-32.10 — QA, STATE, GBrain, and documentation closeout green.
-- [ ] WP-32 marked `FINISHED` only after every gate has retained evidence.
+- [x] WP-32.0 — Baseline and safety envelope approved.
+- [x] WP-32.1 — Integrated harness and evidence contract green.
+- [x] WP-32.2 — Project/import/preview/asset-ownership checkpoint green.
+- [x] WP-32.3 — Edit/selection/Undo/Redo/persistence checkpoint green.
+- [x] WP-32.4 — Captions and browser-local audio checkpoint green.
+- [x] WP-32.5 — Export/Process Center/recovery/output proof green.
+- [x] WP-32.6 — Friction ledger has no open P0/P1.
+- [x] WP-32.7 — Three-viewport responsive/accessibility/regression matrix green.
+- [x] WP-32.8 — Exact-SHA CI and immutable deployment green.
+- [x] WP-32.9 — Signed-in live acceptance and exact cleanup green.
+- [x] WP-32.10 — QA, STATE, GBrain, and documentation closeout green.
+- [x] WP-32 marked `FINISHED` only after every gate has retained evidence.
 
 ## Suggested execution prompt
 

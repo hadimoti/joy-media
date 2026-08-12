@@ -5,9 +5,29 @@
     "publicHealth": "green"
   },
   "implementation": {
-    "sourceCommit": "fb745ac001773b528ff9983d5ef8143fada1d6bc",
-    "deployment": "pending exact-SHA CI and immutable VPS release"
+    "sourceCommit": "6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1",
+    "deployment": "immutable exact-SHA API/editor releases active",
+    "githubWorkflow": "31622521087 passed"
   },
-  "rollbackPolicy": "retain previous immutable WP-31 API and web releases",
+  "deployment": {
+    "apiRelease": "wp32-api-20260812T181000Z-6d3b467",
+    "webRelease": "editor-web-20260812T182000Z-6d3b467-wp32-audio-fixed",
+    "apiHealth": "green",
+    "publicEntrySha256": "41ccb909b4784c24046110a8c7ada039181c2e839a634d8ba196522a3eff1547"
+  },
+  "rollbackPolicy": "retain previous immutable WP-32 candidate and WP-31 API/web releases",
+  "liveAcceptance": {
+    "signedIn": true,
+    "exactCleanup": true,
+    "projectsAfter": 2,
+    "trashAfter": 0,
+    "browserWarningAndErrorLogs": 0
+  },
+  "gbrain": {
+    "pagesUpdated": ["joy-media-state", "joy-media-wp29-first-project-golden-path"],
+    "doctorStatus": "warnings",
+    "healthScore": 90,
+    "warningsDisposition": "pre-existing contextual retrieval and link resolution opportunities"
+  },
   "liveStateFiles": "not copied into repository evidence"
 }

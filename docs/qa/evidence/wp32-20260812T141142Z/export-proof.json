@@ -11,5 +11,8 @@
     "processCenterRedownloadByteEqual": true,
     "processCenterRedownloadSha256Equal": true
   },
-  "proofMethod": "Playwright download hashing plus ffprobe on the downloaded file"
+  "proofMethod": "Playwright download hashing plus ffprobe on the downloaded file",
+  "finalCandidate": "6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1",
+  "githubBrowserAudit": "31622521087",
+  "productionDisposition": "The signed-in production workflow reached Export MP4 and Process Center re-download before exact cleanup; final candidate deployment was then reloaded and health/public bundle parity rechecked. The in-app browser download object does not expose byte hashing, so byte-level proof remains the local/GitHub artifact above."
 }

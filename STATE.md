@@ -47,7 +47,52 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 | WP-28 project selector lifecycle | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md |
 | WP-29 first-project golden path  | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                         |
 | WP-30 animated media reliability | closeout    | —        | 2026-08-12   | Product `1b7e8ab` deployed; signed-in Chrome GIF→timeline→H.264/AAC export, refresh/re-download, cleanup, and GBrain hashes verified; documentation-only CI pending          |
+| WP-32 real-project workflow      | FINISHED    | —        | 2026-08-12   | Candidate `6d3b467` deployed immutably; GitHub `31622521087` green; signed-in disposable workflow and exact cleanup passed; evidence and GBrain reconciled |
 | X01 VPS control plane            | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                              |
+
+## WP-32 final live closeout (2026-08-12)
+
+WP-32 is **FINISHED** on product candidate
+`6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1`.
+
+- GitHub workflow `31622521087` passed both `check` and `browser-e2e`.
+- Local verification passed `272` test files with `1,949` passing tests and
+  `2` skipped, typecheck, build, changed-file lint/format, and the complete
+  three-viewport WP-32 journey.
+- The focused audio regression covers a newly visible clip row whose mix
+  command must hydrate durable audio state before applying `setGain`. This
+  closes the live-run finding where a visible gain edit was not durable after
+  reopen.
+- Immutable production releases are
+  `/opt/joy-media/releases/wp32-api-20260812T181000Z-6d3b467` and
+  `/opt/joy-media/web-releases/editor-web-20260812T182000Z-6d3b467-wp32-audio-fixed`.
+  The previous WP-32 candidate releases remain rollback targets:
+  `/opt/joy-media/releases/wp32-api-20260812T165953Z-0136138` and
+  `/opt/joy-media/web-releases/editor-web-20260812T165953Z-0136138-wp32`.
+- VPS API health and public `/api/health` both returned
+  `{"ok":true,"service":"joy-media-api","controlPlane":true}`. The public
+  hashed editor entry byte matched the active release at SHA-256
+  `41ccb909b4784c24046110a8c7ada039181c2e839a634d8ba196522a3eff1547`.
+- The signed-in browser reopened the disposable WP-32 project, verified the
+  workflow surfaces, then moved and permanently deleted that exact project
+  through the visible Projects/Trash flow with typed confirmation. Counts
+  returned from Projects 3 / Trash 0 to Projects 2 / Trash 0; the two
+  pre-existing projects remained intact and the final browser warning/error log
+  was empty.
+- A separate Chrome connector-recovery disposable project was created while
+  testing the upload surface; it was also purged by exact title. Chrome's
+  pre-existing Trash item and two protected projects remain intact.
+- The in-app browser's synthetic range `fill` changes the visible DOM value but
+  does not dispatch the controlled React event. That limitation is retained in
+  `docs/qa/evidence/wp32-20260812T141142Z/friction-ledger.md`; final mixer
+  persistence is supported by the focused regression, full GitHub browser
+  audit, and deployed bundle parity rather than a false live-DOM claim.
+- Redacted evidence is in
+  `docs/qa/evidence/wp32-20260812T141142Z/`. The corresponding GBrain
+  `joy-media-state` and `joy-media-wp29-first-project-golden-path` pages carry
+  the same closeout facts and hashes. GBrain doctor returned warnings with
+  health score 90; the warnings are pre-existing contextual-retrieval and
+  link-resolution opportunities, not WP-32 defects.
 
 ## WP-30 final live closeout (2026-08-12)
 

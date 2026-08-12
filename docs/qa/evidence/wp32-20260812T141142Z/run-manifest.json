@@ -3,8 +3,15 @@
   "runId": "wp32-20260812T141142Z",
   "planCommit": "0bbd016",
   "baselineProductCommit": "e6b0addd3fede4647cae6166c3fa2ddea4df0e1f",
-  "implementationSourceCommit": "fb745ac001773b528ff9983d5ef8143fada1d6bc",
-  "environment": "local E2E harness with the real API and Vite editor server",
+  "implementationSourceCommit": "6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1",
+  "githubWorkflow": {
+    "runId": "31622521087",
+    "sha": "6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1",
+    "status": "success",
+    "check": "passed",
+    "browserE2E": "passed"
+  },
+  "environment": "local E2E harness, GitHub browser audit, and signed-in production browser",
   "viewportProjects": ["desktop-primary", "desktop-compact", "desktop-minimum"],
   "gates": {
     "wp32JourneyAndResponsive": "6 passed",
@@ -12,9 +19,25 @@
     "typecheck": "passed",
     "eslint": "passed with generated Playwright output excluded",
     "changedFilePrettier": "passed",
-    "unitTests": "1947 passed, 2 skipped",
+    "unitTests": "1949 passed, 2 skipped",
     "productionBuild": "passed"
   },
-  "telemetryDisposition": "No console, HTTP, or failed-request errors in the WP-32 journey; Chromium opaque-iframe localStorage denial is expected and filtered.",
+  "deployment": {
+    "apiRelease": "/opt/joy-media/releases/wp32-api-20260812T181000Z-6d3b467",
+    "webRelease": "/opt/joy-media/web-releases/editor-web-20260812T182000Z-6d3b467-wp32-audio-fixed",
+    "activeApiCwd": "/opt/joy-media/releases/wp32-api-20260812T181000Z-6d3b467",
+    "activeWeb": "/opt/joy-media/web-releases/editor-web-20260812T182000Z-6d3b467-wp32-audio-fixed",
+    "rollbackApi": "/opt/joy-media/releases/wp32-api-20260812T165953Z-0136138",
+    "rollbackWeb": "/opt/joy-media/web-releases/editor-web-20260812T165953Z-0136138-wp32",
+    "apiHealth": "{\"ok\":true,\"service\":\"joy-media-api\",\"controlPlane\":true}",
+    "publicEditorEntrySha256": "41ccb909b4784c24046110a8c7ada039181c2e839a634d8ba196522a3eff1547"
+  },
+  "gbrain": {
+    "pagesUpdated": ["joy-media-state", "joy-media-wp29-first-project-golden-path"],
+    "doctorStatus": "warnings",
+    "doctorHealthScore": 90,
+    "warnings": "pre-existing contextual retrieval coverage and link-resolution opportunities"
+  },
+  "telemetryDisposition": "No unexpected browser warnings/errors in the signed-in cleanup tab or final GitHub WP-32 journey; Chromium opaque-iframe localStorage denial is expected and filtered.",
   "secrets": "redacted"
 }

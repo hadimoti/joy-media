@@ -17,6 +17,24 @@
     "reload and verify Process Center re-download"
   ],
   "allCheckpointsPassed": true,
+  "candidate": "6d3b4677e0616bd6e0219ee9b871f941cb2c6ac1",
+  "githubRun": "31622521087",
+  "signedInProduction": {
+    "workflowSurfacesVerified": true,
+    "exactDisposableCleanup": true,
+    "projectsBefore": 3,
+    "projectsAfter": 2,
+    "trashBefore": 0,
+    "trashAfter": 0,
+    "protectedProjectsPreserved": true,
+    "browserWarningAndErrorLogs": 0
+  },
+  "auxiliaryBrowserRecoveryCleanup": {
+    "exactProjectPurged": true,
+    "preExistingTrashPreserved": true,
+    "projectsAfter": 2,
+    "trashAfter": 1
+  },
   "consoleErrors": [],
   "httpErrors": [],
   "failedRequests": [],

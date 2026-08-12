@@ -1,14 +1,33 @@
 {
-  "cleanupMode": "exact opaque control-plane project binding",
+  "cleanupMode": "exact visible project identity followed by exact Trash identity",
   "sequence": [
-    "list assets for exact project id",
-    "delete each returned asset id",
-    "read exact project revision",
-    "trash exact project with current base revision",
-    "delete exact project"
+    "open Projects Library from the signed-in editor",
+    "select the exact disposable project action menu",
+    "confirm Move to Trash",
+    "open Trash and select the exact same project",
+    "type the exact project title and confirm Delete permanently",
+    "verify protected project names remain and Projects/Trash counts return to baseline"
   ],
   "titleOrPrefixDeletionUsed": false,
-  "cleanupRuns": 6,
+  "cleanupRuns": 1,
+  "productionCounts": {
+    "projectsBefore": 3,
+    "trashBefore": 0,
+    "projectsAfter": 2,
+    "trashAfter": 0,
+    "protectedProjectsPreserved": true,
+    "disposableTitleRecordedOutOfBand": true
+  },
+  "auxiliaryBrowserRecoveryCleanup": {
+    "reason": "Chrome connector recovery created a separate profile-local disposable project",
+    "projectsBefore": 3,
+    "trashBefore": 1,
+    "projectsAfter": 2,
+    "trashAfter": 1,
+    "auxiliaryTitlePresentAfter": false,
+    "preExistingTrashPreserved": true,
+    "protectedProjectsPreserved": true
+  },
   "allCleanupChecksPassed": true,
   "secrets": "redacted"
 }
