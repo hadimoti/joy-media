@@ -7,7 +7,13 @@
  * are mapped to a frame node by these helpers. The editor renderer is then
  * responsible for painting the bitmap into the Monitor canvas.
  */
-import type { RenderFrameIR, RenderNode, Transform2D, VideoFrameNode } from '@joy-media/render-ir';
+import type {
+  ColorGradeIR,
+  RenderFrameIR,
+  RenderNode,
+  Transform2D,
+  VideoFrameNode,
+} from '@joy-media/render-ir';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 import type { MediaSource } from './decoder.js';
 import type { DecodedFrame } from './index.js';
@@ -31,6 +37,8 @@ export interface VideoClipSpec {
   readonly opacity: number;
   /** Draw order. Higher values render later. */
   readonly zIndex: number;
+  /** Optional grade resolved for this timeline clip before compositing. */
+  readonly colorGrade?: ColorGradeIR;
 }
 
 /** Build a {@link MediaSource} from an imported/proxy clip record. */
@@ -69,6 +77,7 @@ export function videoFrameNodeFromDecoded(
     height,
     sourceTimeUs: decoded.sourceTimeUs,
     color: { r: 0, g: 0, b: 0, a: 0 },
+    ...(clip.colorGrade === undefined ? {} : { colorGrade: clip.colorGrade }),
   };
 }
 

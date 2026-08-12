@@ -68,6 +68,27 @@ describe('video-frame-node bridge', () => {
     expect(node.height).toBe(1080);
   });
 
+  it('carries a resolved clip grade on the video node before compositing', () => {
+    const grade = {
+      version: 2 as const,
+      enabled: true,
+      adjust: { exposure: 1 },
+    };
+    const decoded: DecodedFrame = { assetId: 'm', sourceTimeUs: 0, token: 't' };
+    const node = videoFrameNodeFromDecoded(
+      { ...baseClip, colorGrade: { ...grade, lift: 0, gamma: 1, gain: 1, saturation: 1 } },
+      decoded,
+      { width: 640, height: 360 },
+    );
+    expect(node.colorGrade).toEqual({
+      ...grade,
+      lift: 0,
+      gamma: 1,
+      gain: 1,
+      saturation: 1,
+    });
+  });
+
   it('appends a VideoFrameNode to a RenderFrameIR and keeps the frame valid', () => {
     const decoded: DecodedFrame = { assetId: 'm', sourceTimeUs: 0, token: 't' };
     const node = videoFrameNodeFromDecoded(baseClip, decoded, { width: 640, height: 360 });

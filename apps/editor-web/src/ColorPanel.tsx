@@ -96,8 +96,10 @@ export function ColorPanel({
   const [target, setTarget] = useState<'clip' | 'output'>(clipAvailable ? 'clip' : 'output');
   const [tab, setTab] = useState<TabId>('adjust');
   const source =
-    target === 'clip' && clipAvailable && selectedClipId !== undefined
-      ? project.clipColorGrades?.[selectedClipId]
+    target === 'clip'
+      ? clipAvailable && selectedClipId !== undefined
+        ? project.clipColorGrades?.[selectedClipId]
+        : undefined
       : project.colorGrade;
   const committed = v2From(source);
   const [draft, setDraft] = useState<ColorGradeV2>(committed);
@@ -108,10 +110,10 @@ export function ColorPanel({
       draftKey.current = committedKey;
       setDraft(committed);
     }
-    if (target === 'clip' && !clipAvailable) setTarget('output');
   }, [committedKey, committed, target, clipAvailable]);
 
   const commit = (next: ColorGradeV2 = draft) => {
+    if (target === 'clip' && (!clipAvailable || selectedClipId === undefined)) return;
     draftKey.current = JSON.stringify(next);
     const updated = { ...project, updatedAt: new Date().toISOString() };
     if (onDispatch !== undefined) {
@@ -205,14 +207,22 @@ export function ColorPanel({
       {target === 'clip' && !clipAvailable && (
         <p className="color-empty">Select one visual clip to grade it.</p>
       )}
-      {tab === 'adjust' && <AdjustSection draft={draft} onPatch={patchAdjust} onCommit={commit} />}
-      {tab === 'wheels' && <WheelsSection draft={draft} onChange={setDraft} onCommit={commit} />}
-      {tab === 'curves' && <CurvesSection draft={draft} onChange={setDraft} onCommit={commit} />}
-      {tab === 'hsl' && <HslSection draft={draft} onChange={setDraft} onCommit={commit} />}
-      {tab === 'looks' && <LooksSection draft={draft} onChange={setDraft} onCommit={commit} />}
-      {tab === 'scopes' && (
-        <ScopeSection {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })} />
-      )}
+      <fieldset
+        className="color-controls"
+        disabled={target === 'clip' && !clipAvailable}
+        aria-label={target === 'clip' && !clipAvailable ? 'Color controls disabled' : undefined}
+      >
+        {tab === 'adjust' && (
+          <AdjustSection draft={draft} onPatch={patchAdjust} onCommit={commit} />
+        )}
+        {tab === 'wheels' && <WheelsSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'curves' && <CurvesSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'hsl' && <HslSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'looks' && <LooksSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'scopes' && (
+          <ScopeSection {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })} />
+        )}
+      </fieldset>
       <div className="color-utility-row">
         <button type="button" onClick={() => setTab('scopes')}>
           ◒ Mini scopes

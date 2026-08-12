@@ -27,6 +27,8 @@ import {
   applyVignetteToPixels,
 } from './effects-cpu.js';
 
+export { applyColorGradeToPixels } from './effects-cpu.js';
+
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
 
 export interface PreviewDrawCall {

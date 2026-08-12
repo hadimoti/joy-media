@@ -52,6 +52,8 @@ export interface VideoFrameNode extends RenderNodeBase {
   readonly height: number;
   readonly sourceTimeUs: number;
   readonly color: Rgba;
+  /** Optional clip grade applied before compositing and before transitions. */
+  readonly colorGrade?: ColorGradeIR;
   readonly effects?: readonly EffectInstanceIR[];
 }
 

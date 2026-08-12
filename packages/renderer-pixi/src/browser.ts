@@ -305,10 +305,15 @@ export async function createBrowserPixiRenderer(
       node.kind === 'sprite' || node.kind === 'video-frame' || node.kind === 'text'
         ? node.effects
         : undefined;
-    const key = effectsSignature(effects);
+    const grade = node.kind === 'video-frame' ? node.colorGrade : undefined;
+    const key = `${colorGradeSignature(grade)}\n${effectsSignature(effects)}`;
     if (layer.effectsKey === key) return;
     layer.effectsKey = key;
-    const filters = buildPixiEffectFilters(effects);
+    const gradeFilter = buildPixiColorGradeFilter(grade);
+    const filters = [
+      ...(gradeFilter === undefined ? [] : [gradeFilter]),
+      ...buildPixiEffectFilters(effects),
+    ];
     layer.filters = filters.length > 0 ? filters : null;
   };
 

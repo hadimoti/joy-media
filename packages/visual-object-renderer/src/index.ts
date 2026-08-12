@@ -304,7 +304,9 @@ function mapParamsToNumbers(
   return out;
 }
 
-function normalizeColorGrade(grade: ColorGradeV1 | ColorGradeV2 | ColorGradeIR): ColorGradeIR {
+export function normalizeColorGrade(
+  grade: ColorGradeV1 | ColorGradeV2 | ColorGradeIR,
+): ColorGradeIR {
   if ('version' in grade && grade.version === 2) {
     const adjust = grade.adjust;
     const wheels = grade.wheels;

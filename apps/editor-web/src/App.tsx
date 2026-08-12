@@ -28,7 +28,7 @@ import {
   type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
-import type { VideoFrameNode } from '@joy-media/render-ir';
+import type { ColorGradeIR, VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
@@ -57,6 +57,7 @@ import {
   buildRenderFrameIR,
   clipTimesFromTracks,
   isTransitionActive,
+  normalizeColorGrade,
   type BuildRenderFrameOptions,
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
@@ -82,6 +83,7 @@ import {
   createBrowserPixiRenderer,
   type BrowserPixiRenderer,
 } from '@joy-media/renderer-pixi/browser';
+import { applyColorGradeToPixels } from '@joy-media/renderer-pixi';
 import {
   downloadBrowserMp4,
   selectBrowserMp4MimeType,
@@ -372,6 +374,7 @@ function videoClipSpec(
     scaleY: 1,
   },
   opacity = 1,
+  colorGrade?: ColorGradeIR,
 ): VideoClipSpec {
   return {
     // IR / bitmap map key — must match TransitionV1 left/right clip ids.
@@ -383,6 +386,7 @@ function videoClipSpec(
     transform,
     opacity,
     zIndex: 0,
+    ...(colorGrade === undefined ? {} : { colorGrade }),
   };
 }
 
@@ -392,9 +396,11 @@ function videoClipSpecAt(
   timeUs: number,
   height: number,
 ): VideoClipSpec {
+  const clipGrade = project.clipColorGrades?.[clip.id];
+  const colorGrade = clipGrade === undefined ? undefined : normalizeColorGrade(clipGrade);
   const objectId = resolveObjectIdForSelection(project, [clip.id]);
   const object = objectId === undefined ? undefined : project.visualObjects[objectId];
-  if (object === undefined) return videoClipSpec(clip);
+  if (object === undefined) return videoClipSpec(clip, undefined, 1, colorGrade);
   const composition = project.compositions[project.rootCompositionId];
   const evaluated = evaluateCameraExpressionTransform(
     object.id,
@@ -412,6 +418,7 @@ function videoClipSpecAt(
       scaleY: evaluated.scaleY,
     },
     evaluated.opacity,
+    colorGrade,
   );
 }
 
@@ -423,6 +430,27 @@ function activeTransitionAt(project: JoyProjectV1, playheadUs: number): Transiti
   return project.transitions.find((transition) =>
     isTransitionActive(transition, playheadUs, clipTimes),
   );
+}
+
+/**
+ * Transition inputs are uploaded as independent textures, so they do not
+ * pass through the ordinary video-frame layer filters. Apply each source
+ * clip's grade to a private bitmap copy before the transition blends it.
+ */
+function applyClipGradesToTransitionBitmaps(
+  project: JoyProjectV1,
+  transition: TransitionV1 | undefined,
+  bitmaps: Map<string, ImageDataLike>,
+): void {
+  if (transition === undefined) return;
+  for (const clipId of [transition.leftClipId, transition.rightClipId]) {
+    const grade = project.clipColorGrades?.[clipId];
+    const bitmap = bitmaps.get(clipId);
+    if (grade === undefined || bitmap === undefined) continue;
+    const data = new Uint8ClampedArray(bitmap.data);
+    applyColorGradeToPixels(data, normalizeColorGrade(grade));
+    bitmaps.set(clipId, { ...bitmap, data });
+  }
 }
 
 function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
@@ -3236,6 +3264,7 @@ function EditorWorkspace({
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
+            applyClipGradesToTransitionBitmaps(exportVisualProject, transition, bitmaps);
             const frame = buildFrame(timeUs);
             renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
           },
@@ -5545,6 +5574,11 @@ function MonitorPanel() {
     for (const [id, bitmap] of stickerImageCache.bitmaps(state.playheadUs)) {
       videoBitmaps.set(id, bitmap);
     }
+    applyClipGradesToTransitionBitmaps(
+      visualProject,
+      activeTransitionAt(visualProject, state.playheadUs),
+      videoBitmaps,
+    );
     renderer.render(frame, videoBitmaps);
   };
 

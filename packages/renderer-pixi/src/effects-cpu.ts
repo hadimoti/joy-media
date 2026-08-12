@@ -72,7 +72,10 @@ export function colorGradeSignature(grade: ColorGradeIR | undefined): string {
 }
 
 /** CPU color-grade of a full RGBA8 surface (Node / parity path). */
-export function applyColorGradeToPixels(pixels: Uint8Array, grade: ColorGradeIR | undefined): void {
+export function applyColorGradeToPixels(
+  pixels: Uint8Array | Uint8ClampedArray,
+  grade: ColorGradeIR | undefined,
+): void {
   if (grade === undefined || isIdentityColorGrade(grade)) return;
   for (let offset = 0; offset < pixels.length; offset += 4) {
     let r = pixels[offset]! / 255;
