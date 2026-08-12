@@ -183,11 +183,10 @@ export function AssetLibraryPanel({
     }
     try {
       // Catalog listing must not create or reconcile a control-plane project.
-      // My Media is the signed-in owner's library, including media from other
-      // projects. importMediaFile owns the ensure-before-register transaction,
-      // so this stays a read-only request even while the active project binding
-      // is still settling.
-      const ownedResultPromise = client.myAssets();
+      // My Media stays scoped to the active project. importMediaFile owns the
+      // ensure-before-register transaction, so this stays a read-only request
+      // even while the active project binding is still settling.
+      const ownedResultPromise = client.myAssets(projectId);
       const [ownedResult, sharedResult] = await Promise.allSettled([
         ownedResultPromise,
         client.sharedCloudAssets(),

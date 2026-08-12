@@ -29,13 +29,13 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).not.toContain('<span>Add to timeline</span>');
   });
 
-  it('loads both owner and cloud libraries without waiting for project binding readiness', () => {
+  it('loads the active-project and cloud libraries without waiting for project binding readiness', () => {
     const refreshPath = panelSource.slice(
       panelSource.indexOf('const refresh = useCallback'),
       panelSource.indexOf('const importSelectedFile'),
     );
     expect(refreshPath).not.toContain('ensureProject(');
-    expect(refreshPath).toContain('client.myAssets();');
+    expect(refreshPath).toContain('client.myAssets(projectId);');
     expect(refreshPath).not.toContain('if (!projectScopeReady) return;');
     expect(refreshPath).toContain('client.sharedCloudAssets()');
   });
