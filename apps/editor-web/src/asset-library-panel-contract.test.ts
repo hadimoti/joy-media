@@ -20,6 +20,7 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(successPath).toContain('setAvailability(reveal.availability);');
     expect(successPath).toContain('setSort(reveal.sort);');
     expect(successPath).toContain('setRenderLimit(reveal.renderLimit);');
+    expect(successPath).toContain('setProjectScopeReady(true);');
     expect(successPath).toContain('await refresh();');
   });
 
@@ -35,6 +36,7 @@ describe('AssetLibraryPanel successful import contract', () => {
     );
     expect(refreshPath).not.toContain('ensureProject(');
     expect(refreshPath).toContain('client.myAssets(projectId)');
+    expect(refreshPath).toContain('projectScopeReady');
     expect(refreshPath).toContain('client.sharedCloudAssets()');
   });
 });

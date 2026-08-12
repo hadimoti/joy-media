@@ -124,6 +124,7 @@ export function AssetLibraryPanel({
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [projectScopeReady, setProjectScopeReady] = useState(controlPlaneReady);
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>(
     initialUiPreferences.current.assetLibrary.category,
@@ -191,7 +192,7 @@ export function AssetLibraryPanel({
       // mount or category change. Before the signed-in project binding is
       // ready, use the owner-wide catalog so a manual refresh remains
       // responsive without issuing a project-scoped read for a missing ID.
-      const ownedResultPromise = controlPlaneReady ? client.myAssets(projectId) : client.myAssets();
+      const ownedResultPromise = projectScopeReady ? client.myAssets(projectId) : client.myAssets();
       const [ownedResult, sharedResult] = await Promise.allSettled([
         ownedResultPromise,
         client.sharedCloudAssets(),
@@ -208,7 +209,7 @@ export function AssetLibraryPanel({
       // A pre-binding refresh is only a safe readiness probe. Preserve the
       // local post-import reveal and wait for the authenticated project-scoped
       // refresh before replacing the catalog state.
-      if (!controlPlaneReady) return;
+      if (!projectScopeReady) return;
 
       const byId = new Map<string, BrowserAsset>();
       for (const asset of ownedAssets) byId.set(asset.id, asset);
@@ -258,7 +259,10 @@ export function AssetLibraryPanel({
       setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, controlPlaneReady, projectId]);
+  }, [client, projectId, projectScopeReady]);
+  useEffect(() => {
+    if (controlPlaneReady) setProjectScopeReady(true);
+  }, [controlPlaneReady]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -364,6 +368,7 @@ export function AssetLibraryPanel({
           setStatus(progressMessage);
         },
       });
+      setProjectScopeReady(true);
       setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
       setOwnedAssetIds((current) => includeOwnedAsset([], current, imported).ownedAssetIds);
       const reveal = importedAssetRevealState(imported);

@@ -84,9 +84,16 @@ export function JobsPanel({
     try {
       const nextWorkers = await client.workers();
       let nextJobs: readonly BrowserJob[] = [];
-      let projectMissing = !controlPlaneReady;
-      if (controlPlaneReady) {
+      const projectScopeReady =
+        controlPlaneReady || projectInitialized || projectId.startsWith('project-');
+      let projectMissing = !projectScopeReady;
+      if (projectScopeReady) {
         try {
+          // The binding is browser-local and may not have been initialized on
+          // this device yet. Reconcile it through the idempotent endpoint
+          // before polling jobs, so a missing record never becomes a visible
+          // 409 console error during normal workspace startup or reload.
+          await client.ensureProject(projectId, projectTitle);
           nextJobs = await client.jobs(projectId);
         } catch (error) {
           if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
@@ -95,14 +102,16 @@ export function JobsPanel({
       }
       if (requestId !== refreshSeqRef.current) return;
       setWorkers(nextWorkers);
-      setJobs(nextJobs);
-      setProjectInitialized(!projectMissing);
-      setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));
+      if (projectScopeReady) {
+        setJobs(nextJobs);
+        setProjectInitialized(!projectMissing);
+        setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));
+      }
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
     }
-  }, [client, controlPlaneReady, projectId]);
+  }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
 
   useEffect(() => {
     void refresh();
@@ -157,11 +166,7 @@ export function JobsPanel({
 
   const initialize = async () => {
     try {
-      try {
-        await client.createProject(projectId, projectTitle);
-      } catch (error) {
-        if (!message(error).includes('PROJECT_EXISTS')) throw error;
-      }
+      await client.ensureProject(projectId, projectTitle);
       setProjectInitialized(true);
       setStatus('Project is ready. Pair a Worker, then queue a job.');
       await refresh();

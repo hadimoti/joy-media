@@ -31,6 +31,16 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toContain('no restart is');
   });
 
+  it('does not reset initialized state during the pre-binding readiness probe', () => {
+    expect(panelSource).toContain('if (projectScopeReady) {\n        setJobs(nextJobs);');
+    expect(panelSource).toContain("projectId.startsWith('project-')");
+    expect(panelSource).toContain('await client.ensureProject(projectId, projectTitle);');
+    expect(panelSource).toContain('setProjectInitialized(!projectMissing);');
+    expect(panelSource).toContain(
+      'setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));',
+    );
+  });
+
   it('never reconstructs a ledger key from an asset after review has completed', () => {
     expect(panelSource).toContain("operationLedger.finish(job.id, 'review'");
     expect(panelSource).toContain('if (operationLedger.get(job.id) === undefined)');

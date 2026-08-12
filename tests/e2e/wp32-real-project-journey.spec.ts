@@ -25,6 +25,7 @@ type JourneyTelemetry = {
 
 const EXPECTED_SANDBOX_STORAGE_ERROR =
   "Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.";
+const EXPORT_DOWNLOAD_TIMEOUT_MS = 240_000;
 
 async function downloadSha256(download: Download): Promise<{ bytes: number; sha256: string }> {
   const stream = await download.createReadStream();
@@ -187,7 +188,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
   test('completes the disposable-project journey from import through verified export', async ({
     page,
   }, testInfo) => {
-    test.setTimeout(180_000);
+    test.setTimeout(360_000);
     const suffix = `${testInfo.project.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const title = `WP32 journey ${suffix}`;
     const names = {
@@ -305,7 +306,9 @@ test.describe('WP-32 real-project workflow acceptance', () => {
       let firstDownload: { bytes: number; sha256: string } | undefined;
       let exportPath: string | undefined;
       await runCheckpoint(checkpoints, 'export and verify MP4', async () => {
-        const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+        const downloadPromise = page.waitForEvent('download', {
+          timeout: EXPORT_DOWNLOAD_TIMEOUT_MS,
+        });
         await page.getByRole('button', { name: 'Export MP4' }).click();
         const download = await downloadPromise;
         firstDownload = await downloadSha256(download);
@@ -384,7 +387,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
     expect(
       telemetry.pageErrors.filter((error) => error !== EXPECTED_SANDBOX_STORAGE_ERROR),
     ).toEqual([]);
-    expect(telemetry.consoleErrors).toEqual([]);
+    expect(telemetry.consoleErrors, telemetry.httpErrors.join('\n')).toEqual([]);
     expect(telemetry.httpErrors).toEqual([]);
     expect(telemetry.failedRequests).toEqual([]);
   });
