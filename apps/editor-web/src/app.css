@@ -612,10 +612,18 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-switcher-caret {
+.workspace-switcher-chevron,
+.header-disclosure-chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
   color: var(--joy-text-muted);
-  font-size: 0.9rem;
   line-height: 1;
+  transition: transform 0.14s ease;
+}
+.workspace-switcher-trigger[aria-expanded='true'] .workspace-switcher-chevron,
+.header-export-preset-trigger[aria-expanded='true'] .header-disclosure-chevron {
+  transform: rotate(180deg);
 }
 .workspace-switcher-menu {
   position: absolute;
@@ -1381,7 +1389,21 @@ a.icon-button {
 }
 .export-preset-list button {
   width: 100%;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  min-height: 2rem;
+  text-align: center;
+}
+.export-preset-list button > svg {
+  position: absolute;
+  inset-inline-start: 0.55rem;
+}
+.export-preset-option-label {
+  display: block;
+  max-width: calc(100% - 3rem);
+  line-height: 1.25;
+  text-align: center;
 }
 .sr-only {
   position: absolute;

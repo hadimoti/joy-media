@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ChevronDownIcon } from './icons.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import { WORKSPACE_PRESETS, workspacePresetLabel } from './workspace-presets.js';
 
@@ -59,10 +60,10 @@ export function WorkspaceSwitcher({
         title="Workspace preset"
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="workspace-switcher-label">{workspacePresetLabel(value)}</span>
-        <span className="workspace-switcher-caret" aria-hidden="true">
-          ⌄
+        <span className="workspace-switcher-chevron" aria-hidden="true">
+          <ChevronDownIcon />
         </span>
+        <span className="workspace-switcher-label">{workspacePresetLabel(value)}</span>
       </button>
       {open && (
         <div className="workspace-switcher-menu" role="menu" aria-label="Workspace presets">

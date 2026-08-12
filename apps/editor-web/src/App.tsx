@@ -208,6 +208,7 @@ import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
 import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
 import {
+  ChevronDownIcon,
   CloseIcon,
   CommandIcon,
   DownloadIcon,
@@ -4864,6 +4865,9 @@ function EditorWorkspace({
               }}
             >
               <PngMaskIcon src="/assets/24_export-presets.png" size={14} />
+              <span className="header-disclosure-chevron" aria-hidden="true">
+                <ChevronDownIcon />
+              </span>
               <span className="header-export-preset-label">
                 {exportPreset === 'reels-1080'
                   ? 'Reels 1080×1920'
@@ -4875,7 +4879,6 @@ function EditorWorkspace({
                         ? 'High bitrate'
                         : 'Social H.264'}
               </span>
-              <span aria-hidden="true">⌄</span>
             </button>
             {exportPresetOpen && (
               <section className="header-dropdown" aria-label="Export preset">
@@ -4904,7 +4907,7 @@ function EditorWorkspace({
                         }}
                       >
                         <Icon />
-                        {label}
+                        <span className="export-preset-option-label">{label}</span>
                       </button>
                     </li>
                   ))}
