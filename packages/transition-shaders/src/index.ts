@@ -19,6 +19,13 @@ export interface TransitionShaderEntry {
   readonly paramsTypes: Readonly<Record<string, string>>;
 }
 
+export interface TransitionUniformDescriptor {
+  readonly propertyId: string;
+  readonly type: string;
+  readonly animatable: boolean;
+  readonly interpolation: 'smooth' | 'hold';
+}
+
 interface CatalogRow {
   readonly id: string;
   readonly glName: string;
@@ -66,6 +73,24 @@ export function resolveTransitionShaderId(type: string): string {
 
 export function getTransitionShader(type: string): TransitionShaderEntry | undefined {
   return byId.get(resolveTransitionShaderId(type));
+}
+
+/**
+ * Descriptor view consumed by the universal animation layer. Uniforms that
+ * are not scalar are still advertised for UI/catalog introspection, but the
+ * first render adapter only evaluates numeric float uniforms.
+ */
+export function listTransitionUniformDescriptors(
+  type: string,
+): readonly TransitionUniformDescriptor[] {
+  const entry = getTransitionShader(type);
+  if (entry === undefined) return [];
+  return Object.entries(entry.paramsTypes).map(([propertyId, uniformType]) => ({
+    propertyId,
+    type: uniformType,
+    animatable: uniformType === 'float' || uniformType === 'vec2' || uniformType === 'vec3',
+    interpolation: 'smooth',
+  }));
 }
 
 export function isKnownTransitionType(type: string): boolean {

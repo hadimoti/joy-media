@@ -8,6 +8,7 @@ import {
   transitionProgress,
   clipTimesFromTracks,
   sampleEffectParams,
+  sampleTransitionParams,
 } from './index.js';
 import type { ResolvedObject } from './index.js';
 import type { JoyProjectV1, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
@@ -520,5 +521,46 @@ describe('transition timing', () => {
     expect(node.leftClipId).toBe('left');
     expect(node.rightClipId).toBe('right');
     expect(node.color.a).toBe(0);
+  });
+
+  it('samples transition uniforms in transition-local time', () => {
+    const animated: TransitionV1 = {
+      ...transition,
+      id: 't-animated',
+      type: 'gl:fadegrayscale',
+      params: { intensity: 0.2 },
+    };
+    const binding = {
+      ownerKind: 'transition' as const,
+      ownerId: animated.id,
+      propertyId: 'intensity',
+      timeDomain: 'transition-local' as const,
+    };
+    const propertyAnimations = {
+      [canonicalBindingKey(binding)]: {
+        binding,
+        value: {
+          kind: 'scalar' as const,
+          curve: {
+            keyframes: [
+              { timeUs: 0, value: 0.2, interpolation: 'linear' as const },
+              { timeUs: 1_000_000, value: 0.8, interpolation: 'linear' as const },
+            ],
+          },
+        },
+      },
+    };
+    expect(sampleTransitionParams(animated, 4_500_000, clipTimes, propertyAnimations)).toEqual({
+      intensity: 0.5,
+    });
+    const active = buildRenderFrameIR('c', 4_500_000, 100, 100, [], {
+      transitions: [animated],
+      clipTimes,
+      propertyAnimations,
+    });
+    const node = active.nodes.find((item) => item.kind === 'transition');
+    expect(node?.kind).toBe('transition');
+    if (node?.kind !== 'transition') throw new Error('expected transition');
+    expect(node.params).toEqual({ intensity: 0.5 });
   });
 });

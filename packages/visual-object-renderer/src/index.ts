@@ -28,7 +28,7 @@ import type {
   ColorGradeIR,
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
-import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
+import { mergeTransitionParams, resolveTransitionShaderId } from '@joy-media/transition-shaders';
 import {
   evaluateColorGradeAtTime,
   evaluateFrameProperty,
@@ -235,7 +235,9 @@ export function buildRenderFrameIR(
   if (options.transitions && options.transitions.length > 0) {
     const transitionNodes = options.transitions
       .filter((t) => isTransitionActive(t, timeUs, clipTimes))
-      .map((t) => transitionToRenderNode(t, timeUs, width, height, clipTimes));
+      .map((t) =>
+        transitionToRenderNode(t, timeUs, width, height, clipTimes, options.propertyAnimations),
+      );
     nodes.push(...transitionNodes);
   }
 
@@ -315,6 +317,7 @@ function transitionToRenderNode(
   width: number,
   height: number,
   clipTimes: ClipTimingLookup,
+  propertyAnimations: JoyProjectV1['propertyAnimations'] | undefined,
 ): RenderNode {
   const shaderId = resolveTransitionShaderId(transition.type);
   return {
@@ -331,8 +334,54 @@ function transitionToRenderNode(
     progress: transitionProgress(transition, timeUs, clipTimes),
     leftClipId: transition.leftClipId,
     rightClipId: transition.rightClipId,
-    ...(transition.params !== undefined ? { params: transition.params } : {}),
+    params: sampleTransitionParams(transition, timeUs, clipTimes, propertyAnimations),
   };
+}
+
+/** Resolve declared numeric uniforms against the transition-local clock. */
+export function sampleTransitionParams(
+  transition: TransitionV1,
+  timeUs: TimeUs,
+  clipTimes: ClipTimingLookup,
+  propertyAnimations: JoyProjectV1['propertyAnimations'] | undefined,
+): Readonly<Record<string, number>> {
+  const right = clipTimes.get(transition.rightClipId);
+  const defaults = mergeTransitionParams(transition.type, transition.params);
+  if (right === undefined) return numericParams(defaults);
+  const range = {
+    startUs: right.startUs - transition.durationUs,
+    durationUs: transition.durationUs,
+  };
+  const params: Record<string, number> = {};
+  for (const [propertyId, staticValue] of Object.entries(defaults)) {
+    if (typeof staticValue !== 'number') continue;
+    const binding = {
+      ownerKind: 'transition' as const,
+      ownerId: transition.id,
+      propertyId,
+      timeDomain: 'transition-local' as const,
+    };
+    const evaluated = evaluateFrameProperty<number>({
+      binding,
+      staticValue,
+      ...(propertyAnimations === undefined ? {} : { animations: propertyAnimations }),
+      time: { compositionTimeUs: timeUs, transition: range },
+      normalize: (value) =>
+        typeof value === 'number' && Number.isFinite(value) ? value : staticValue,
+    });
+    params[propertyId] = evaluated.value;
+  }
+  return params;
+}
+
+function numericParams(
+  params: Readonly<Record<string, number | readonly number[]>>,
+): Readonly<Record<string, number>> {
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      (entry): entry is [string, number] => typeof entry[1] === 'number',
+    ),
+  );
 }
 
 /** Convert VisualObjectTransformV1 → render-ir Transform2D. */

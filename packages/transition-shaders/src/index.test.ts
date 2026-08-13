@@ -4,6 +4,7 @@ import {
   getTransitionShader,
   isKnownTransitionType,
   listTransitionShaders,
+  listTransitionUniformDescriptors,
   mergeTransitionParams,
   resolveTransitionShaderId,
 } from './index.js';
@@ -28,6 +29,12 @@ describe('transition-shaders registry', () => {
   it('merges numeric params over defaults', () => {
     const merged = mergeTransitionParams('gl:fadegrayscale', { intensity: 0.8 });
     expect(merged.intensity).toBe(0.8);
+  });
+
+  it('derives animatable uniform descriptors from the shader catalog', () => {
+    expect(listTransitionUniformDescriptors('gl:fadegrayscale')).toEqual([
+      { propertyId: 'intensity', type: 'float', animatable: true, interpolation: 'smooth' },
+    ]);
   });
 
   it('builds a Pixi fragment that samples from/to textures', () => {
