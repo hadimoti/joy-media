@@ -6,6 +6,7 @@ import { clipTimeRange, rational } from './time.js';
 import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
 import type { ColorGradeV2 } from './color.js';
 import type { PropertyAnimationV2 } from './property-animation.js';
+import type { CaptionClipStyleV2 } from './caption-style.js';
 import { validatePropertyAnimations } from './property-animation.js';
 
 export type EffectParamValue =
@@ -260,6 +261,8 @@ export interface CompositionClipV1 extends ClipV1Base {
 export interface CaptionClipV1 extends ClipV1Base {
   readonly kind: 'caption';
   readonly captionDocumentId: string;
+  /** Optional per-clip appearance; absent preserves legacy document-template rendering. */
+  readonly style?: CaptionClipStyleV2;
 }
 
 export type ClipV1 = VideoClipV1 | CompositionClipV1 | CaptionClipV1;

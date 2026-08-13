@@ -85,6 +85,13 @@ export type {
   EffectParamValue,
   EffectInstanceV1,
 } from './v1.js';
+export type { CaptionClipStyleV2, CaptionClipStylePropertyId } from './caption-style.js';
+export {
+  IDENTITY_CAPTION_CLIP_STYLE,
+  captionClipStylePropertyBinding,
+  isCaptionClipStyleV2,
+  normalizeCaptionClipStyle,
+} from './caption-style.js';
 export type {
   ColorAdjustments,
   ColorWheel,
