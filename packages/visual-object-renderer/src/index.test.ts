@@ -7,6 +7,7 @@ import {
   isTransitionActive,
   transitionProgress,
   clipTimesFromTracks,
+  sampleEffectParams,
 } from './index.js';
 import type { ResolvedObject } from './index.js';
 import type { JoyProjectV1, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
@@ -239,6 +240,37 @@ describe('buildRenderFrameIR', () => {
       { id: 'e1', kind: 'blur', enabled: true, params: { amount: 4 } },
       { id: 'e2', kind: 'grain', enabled: false, params: { amount: 0.2 } },
     ]);
+  });
+
+  it('samples an effect parameter curve before emitting the shared Render IR', () => {
+    const effect = {
+      id: 'e1',
+      effectId: 'brightness-contrast',
+      enabled: true,
+      params: { brightness: 0 },
+      animations: {
+        brightness: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' as const },
+            { timeUs: 1_000_000, value: 1, interpolation: 'linear' as const },
+          ],
+        },
+      },
+    };
+    expect(sampleEffectParams(effect, 500_000)).toEqual({ brightness: 0.5 });
+    const frame = buildRenderFrameIR(
+      'c',
+      500_000,
+      100,
+      100,
+      [resolved(makeObject({ id: 'img', kind: 'image' }))],
+      {
+        effectsByObjectId: { img: [effect] },
+      },
+    );
+    const sprite = frame.nodes[0];
+    if (sprite?.kind !== 'sprite') throw new Error('expected sprite');
+    expect(sprite.effects?.[0]?.params).toEqual({ brightness: 0.5 });
   });
 });
 

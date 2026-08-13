@@ -23,6 +23,8 @@ export type {
   LegacyPropertyAnimationAdapter,
 } from './frame-property-evaluator.js';
 export { evaluateFrameProperty } from './frame-property-evaluator.js';
+/** Shared scalar curve sampler for render adapters that cannot depend on motion-core directly. */
+export { sampleCurve as sampleLegacyCurve } from '@joy-media/motion-core';
 export type {
   UniversalTransformDiagnostic,
   UniversalTransformResolution,

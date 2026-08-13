@@ -29,7 +29,7 @@ import type {
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
-import { evaluateUniversalCameraTransform } from '@joy-media/evaluator';
+import { evaluateUniversalCameraTransform, sampleLegacyCurve } from '@joy-media/evaluator';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -199,6 +199,7 @@ export function buildRenderFrameIR(
   for (const resolved of resolvedObjects) {
     const effects = normalizeEffects(
       options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects,
+      timeUs,
     );
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
@@ -321,14 +322,29 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
 
 function normalizeEffects(
   instances: readonly EffectInstanceV1[] | undefined,
+  timeUs: TimeUs,
 ): readonly EffectInstanceIR[] | undefined {
   if (!instances?.length) return undefined;
   return instances.map((e): EffectInstanceIR => ({
     id: e.id,
     kind: e.effectId as EffectInstanceIR['kind'],
     enabled: e.enabled,
-    params: mapParamsToNumbers(e.params),
+    params: mapParamsToNumbers(sampleEffectParams(e, timeUs)),
   }));
+}
+
+/** Samples each legacy scalar effect curve at the RenderFrameIR composition time. */
+export function sampleEffectParams(
+  effect: EffectInstanceV1,
+  timeUs: TimeUs,
+): Readonly<Record<string, EffectParamValue>> {
+  if (effect.animations === undefined) return effect.params;
+  const params = { ...effect.params };
+  for (const [key, curve] of Object.entries(effect.animations)) {
+    if (curve === undefined || curve.keyframes.length === 0) continue;
+    params[key] = sampleLegacyCurve(curve, timeUs);
+  }
+  return params;
 }
 
 function mapParamsToNumbers(
