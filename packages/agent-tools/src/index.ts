@@ -152,6 +152,12 @@ export type {
 export { analyseShortenIntro } from './shorten-intro.js';
 
 export type {
+  AgentPropertyAnimationOperation,
+  PropertyAnimationOperationValidation,
+} from './property-animation-operations.js';
+export { validatePropertyAnimationOperation } from './property-animation-operations.js';
+
+export type {
   SpecialistScope,
   SpecialistContext,
   SpecialistDefinition,
