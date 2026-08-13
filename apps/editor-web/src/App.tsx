@@ -4180,6 +4180,8 @@ function EditorWorkspace({
         <CameraPanel
           allObjects={visualProject.visualObjects}
           composition={composition}
+          project={visualProject}
+          playheadUs={state.playheadUs}
           onDispatch={context.dispatchProject}
         />
       );
