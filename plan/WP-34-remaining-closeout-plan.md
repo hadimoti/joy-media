@@ -1,5 +1,13 @@
 # WP-34 — Remaining Implementation and Closeout Plan
 
+> **Final closeout:** WP-34 implementation and release are complete on product
+> SHA `630c8ade4c80eea4ca13565204f744c66dd0b67b`. GitHub workflow `31737233944`
+> passed `check` and `browser-e2e`; immutable production releases, public
+> health/index parity, GBrain, ParsPack backup verification, and VPS cleanup
+> are recorded in `STATE.md` and the GBrain page `joy-media-wp34`. The status
+> table and packet descriptions below are the historical execution plan that
+> preceded the final accepted chain.
+
 **Prepared:** 2026-08-13  
 **Implementation branch:** `wp34-integration`  
 **Current reviewed head:** `3558556`  
