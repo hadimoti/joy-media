@@ -27,6 +27,7 @@ describe('panel metadata registry', () => {
       'Assets',
       'Captions',
       'Audio',
+      'Library',
     ]);
     expect(panelsForIntent('automation').map((entry) => entry.label)).toEqual([
       'Joy Code',
