@@ -143,6 +143,23 @@ describe('applyMotionProjectCommand — effect.replaceAnimation', () => {
   });
 });
 
+describe('applyMotionProjectCommand — effect.add automation', () => {
+  it('preserves a published recipe curve when adding its effect to a project', () => {
+    const result = applyMotionProjectCommand(project, {
+      type: 'effect.add',
+      payload: {
+        objectId: 'obj-1',
+        effectId: 'brightness-contrast',
+        params: { brightness: 0 },
+        animations: { brightness: curve },
+      },
+    });
+    expect(result.project.visualObjects['obj-1']!.effects?.[0]?.animations?.brightness).toEqual(
+      curve,
+    );
+  });
+});
+
 describe('applyMotionProjectCommand — object.setParent', () => {
   const twoObjects: JoyProjectV1 = {
     ...project,

@@ -5401,6 +5401,7 @@ function EditorWorkspace({
                       objectId,
                       effectId: effect.effectId,
                       params: effect.params,
+                      ...(effect.animations === undefined ? {} : { animations: effect.animations }),
                     },
                   })),
               ];

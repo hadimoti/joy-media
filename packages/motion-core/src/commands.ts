@@ -64,6 +64,7 @@ export interface AddEffectCommand {
     readonly objectId: string;
     readonly effectId: string;
     readonly params?: Readonly<Record<string, EffectParamValue>>;
+    readonly animations?: EffectInstanceV1['animations'];
     readonly index?: number;
   };
 }
@@ -338,13 +339,23 @@ export function applyMotionProjectCommand(
   }
 
   if (command.type === 'effect.add') {
-    const { effectId, params, index } = command.payload;
+    const { effectId, params, index, animations } = command.payload;
+    if (animations !== undefined) {
+      for (const [key, curve] of Object.entries(animations)) {
+        if (curve === undefined) continue;
+        const diagnostics: ProjectDiagnostic[] = [];
+        validateAnimationCurve(curve, `effect.${effectId}.${key}`, diagnostics);
+        if (diagnostics.length > 0)
+          throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+      }
+    }
     const effects = getEffectsArray(object);
     const newEffect: EffectInstanceV1 = {
       id: crypto.randomUUID(),
       effectId,
       params: params ?? {},
       enabled: true,
+      ...(animations === undefined ? {} : { animations }),
     };
     const nextEffects = [...effects];
     const insertIndex = index ?? nextEffects.length;
@@ -367,7 +378,13 @@ export function applyMotionProjectCommand(
     const nextObject = setEffectsArray(object, nextEffects);
     const inverse: MotionCommand = {
       type: 'effect.add',
-      payload: { objectId, effectId: removed.effectId, params: removed.params, index: idx },
+      payload: {
+        objectId,
+        effectId: removed.effectId,
+        params: removed.params,
+        index: idx,
+        ...(removed.animations === undefined ? {} : { animations: removed.animations }),
+      },
     };
     return commit(project, objectId, nextObject, inverse);
   }
