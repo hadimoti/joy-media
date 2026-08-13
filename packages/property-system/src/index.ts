@@ -20,6 +20,8 @@ import type {
   ClearEffectsCommand,
   ReplaceEffectCommand,
 } from '@joy-media/motion-core';
+import type { PropertyAnimationCommand } from './property-animation-commands.js';
+import { applyPropertyAnimationCommand } from './property-animation-commands.js';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type ColorTarget =
@@ -144,6 +146,7 @@ type _VisualObjectCommand =
   | SetEffectParamCommand
   | ClearEffectsCommand
   | ReplaceEffectCommand
+  | PropertyAnimationCommand
   | ColorCommand;
 export type ColorCommand = {
   readonly type: 'color.setGrade';
@@ -195,6 +198,12 @@ export function applyVisualObjectProjectCommand(
     case 'effect.clearAll':
     case 'effect.replace':
       return applyMotionProjectCommand(project, command);
+    case 'propertyAnimation.replace':
+    case 'propertyAnimation.enable':
+    case 'propertyAnimation.disable':
+    case 'propertyAnimation.setKey':
+    case 'propertyAnimation.removeKey':
+      return applyPropertyAnimationCommand(project, command);
     default:
       break;
   }
@@ -667,3 +676,10 @@ export {
   findPropertyCoverage,
   assertPropertyCoverageComplete,
 } from './property-coverage.js';
+
+export type {
+  PropertyAnimationKey,
+  PropertyAnimationCommand,
+  PropertyAnimationApplyResult,
+} from './property-animation-commands.js';
+export { applyPropertyAnimationCommand } from './property-animation-commands.js';
