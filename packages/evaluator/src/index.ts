@@ -13,6 +13,16 @@ export type {
   ResolvedPropertyAnimationTime,
 } from './property-time-domain.js';
 export { resolvePropertyAnimationTime } from './property-time-domain.js';
+export type {
+  EvaluatedFrameProperty,
+  FramePropertyDiagnostic,
+  FramePropertyEvaluatorRequest,
+  FramePropertyExpression,
+  FramePropertySource,
+  FramePropertyValue,
+  LegacyPropertyAnimationAdapter,
+} from './frame-property-evaluator.js';
+export { evaluateFrameProperty } from './frame-property-evaluator.js';
 export type { EvaluatedExpressionTransform, StaticProperty, TimedEntity } from './properties.js';
 export {
   evaluateAnimatedTransform,
