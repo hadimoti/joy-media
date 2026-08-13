@@ -4516,6 +4516,8 @@ function EditorWorkspace({
               ),
             })
           }
+          playheadUs={state.playheadUs}
+          onDispatch={context.dispatchProject}
           showToast={context.showToast}
         />
       );

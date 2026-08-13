@@ -1,7 +1,19 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import type { JoyProjectV1, SpikeProject, TransitionV1 } from '@joy-media/project-schema';
-import { listTransitionShaders } from '@joy-media/transition-shaders';
+import {
+  canonicalBindingKey,
+  type JoyProjectV1,
+  type PropertyBindingV2,
+  type SpikeProject,
+  type TransitionV1,
+} from '@joy-media/project-schema';
+import { sampleCurve } from '@joy-media/motion-core';
+import {
+  listTransitionShaders,
+  listTransitionUniformDescriptors,
+  mergeTransitionParams,
+} from '@joy-media/transition-shaders';
 import type { TransitionDragPayload } from '@joy-media/visual-effects';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { TransitionPreviewCard } from './TransitionPreviewCard.js';
 import { StarFilledIcon } from './icons.js';
 import { PanelShell } from './PanelShell.js';
@@ -11,6 +23,11 @@ import {
   toggleTransitionFavorite,
   transitionAtJunction,
 } from './transition-panel-state.js';
+import {
+  NumericPropertyControl,
+  useTransientPropertyControl,
+} from './components/PropertyControlAdapters.js';
+import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
 
 const SHADER_CATALOG = listTransitionShaders();
 
@@ -21,7 +38,194 @@ interface TransitionsPanelProps {
   readonly onAddTransition: (transition: Omit<TransitionV1, 'id'>) => void;
   readonly onRemoveTransition: (transitionId: string) => void;
   readonly onUpdateTransition: (transitionId: string, updates: Partial<TransitionV1>) => void;
+  readonly playheadUs?: number;
+  readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+}
+
+function transitionBinding(transitionId: string, propertyId: string): PropertyBindingV2 {
+  return {
+    ownerKind: 'transition',
+    ownerId: transitionId,
+    propertyId,
+    timeDomain: 'transition-local',
+  };
+}
+
+function TransitionUniformRow({
+  transition,
+  propertyId,
+  defaultValue,
+  project,
+  playheadUs,
+  onUpdateTransition,
+  onDispatch,
+}: {
+  readonly transition: TransitionV1;
+  readonly propertyId: string;
+  readonly defaultValue: number;
+  readonly project: JoyProjectV1;
+  readonly playheadUs: number;
+  readonly onUpdateTransition: (transitionId: string, updates: Partial<TransitionV1>) => void;
+  readonly onDispatch: ((transaction: VisualObjectTransaction) => void) | undefined;
+}) {
+  const binding = transitionBinding(transition.id, propertyId);
+  const animation = project.propertyAnimations?.[canonicalBindingKey(binding)];
+  const curve = animation?.value.kind === 'scalar' ? animation.value.curve : undefined;
+  const staticValue = transition.params?.[propertyId] ?? defaultValue;
+  const resolvedValue = curve === undefined ? staticValue : sampleCurve(curve, playheadUs);
+  const [previewValue, setPreviewValue] = useState(resolvedValue);
+  useEffect(() => setPreviewValue(resolvedValue), [resolvedValue]);
+  const keyed = curve?.keyframes.some((key) => key.timeUs === playheadUs) === true;
+  const animationState: PropertyAnimationState = keyed
+    ? 'keyed'
+    : curve === undefined
+      ? 'none'
+      : 'between';
+
+  const commitValue = (next: number) => {
+    if (!Number.isFinite(next)) return;
+    if (curve !== undefined && onDispatch !== undefined) {
+      onDispatch({
+        label: `Set transition ${propertyId} keyframe`,
+        commands: [
+          {
+            type: 'propertyAnimation.setKey',
+            payload: {
+              binding,
+              key: {
+                kind: 'scalar',
+                keyframe: { timeUs: playheadUs, value: next, interpolation: 'linear' },
+              },
+            },
+          },
+        ],
+      });
+      return;
+    }
+    const params = { ...(transition.params ?? {}), [propertyId]: next };
+    onUpdateTransition(transition.id, { params });
+  };
+  const adapter = useTransientPropertyControl(
+    {
+      read: () => previewValue,
+      preview: setPreviewValue,
+      restore: setPreviewValue,
+      commit: ({ next }) => commitValue(next),
+    },
+    `Set transition ${propertyId}`,
+  );
+
+  const toggleAnimation = () => {
+    if (onDispatch === undefined) return;
+    onDispatch({
+      label: `${keyed ? 'Remove' : 'Add'} transition ${propertyId} keyframe`,
+      commands: [
+        keyed
+          ? {
+              type: 'propertyAnimation.removeKey',
+              payload: { binding, timeUs: playheadUs },
+            }
+          : curve === undefined
+            ? {
+                type: 'propertyAnimation.replace',
+                payload: {
+                  binding,
+                  value: {
+                    kind: 'scalar',
+                    curve: {
+                      keyframes: [
+                        { timeUs: playheadUs, value: previewValue, interpolation: 'linear' },
+                      ],
+                    },
+                  },
+                },
+              }
+            : {
+                type: 'propertyAnimation.setKey',
+                payload: {
+                  binding,
+                  key: {
+                    kind: 'scalar',
+                    keyframe: { timeUs: playheadUs, value: previewValue, interpolation: 'linear' },
+                  },
+                },
+              },
+      ],
+    });
+  };
+
+  return (
+    <PropertyRow
+      label={propertyId}
+      controlId={`transition-${transition.id}-${propertyId}`}
+      value={previewValue.toFixed(3)}
+      onReset={() => {
+        setPreviewValue(defaultValue);
+        commitValue(defaultValue);
+      }}
+      {...(onDispatch === undefined ? {} : { onToggleAnimation: toggleAnimation })}
+      animationState={animationState}
+    >
+      <NumericPropertyControl
+        id={`transition-${transition.id}-${propertyId}`}
+        value={previewValue}
+        adapter={adapter}
+        ariaLabel={propertyId}
+        step={0.01}
+      />
+    </PropertyRow>
+  );
+}
+
+function SelectedTransitionInspector({
+  transition,
+  project,
+  playheadUs,
+  onUpdateTransition,
+  onDispatch,
+}: {
+  readonly transition: TransitionV1;
+  readonly project: JoyProjectV1;
+  readonly playheadUs: number;
+  readonly onUpdateTransition: (transitionId: string, updates: Partial<TransitionV1>) => void;
+  readonly onDispatch: ((transaction: VisualObjectTransaction) => void) | undefined;
+}) {
+  const params = mergeTransitionParams(transition.type, transition.params);
+  const descriptors = listTransitionUniformDescriptors(transition.type).filter(
+    (descriptor) => descriptor.animatable && descriptor.type === 'float',
+  );
+  return (
+    <section className="transitions-subsection" aria-label="Selected transition inspector">
+      <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+        Selected transition
+      </h4>
+      <p className="monitor-meta" dir="ltr">
+        {transition.type} · {(transition.durationUs / 1_000_000).toFixed(2)}s · {descriptors.length}{' '}
+        animated uniform{descriptors.length === 1 ? '' : 's'}
+      </p>
+      {descriptors.length === 0 ? (
+        <p className="empty-hint">This transition has no animatable float uniforms.</p>
+      ) : (
+        descriptors.map((descriptor) => {
+          const defaultValue = params[descriptor.propertyId];
+          if (typeof defaultValue !== 'number') return null;
+          return (
+            <TransitionUniformRow
+              key={descriptor.propertyId}
+              transition={transition}
+              propertyId={descriptor.propertyId}
+              defaultValue={defaultValue}
+              project={project}
+              playheadUs={playheadUs}
+              onUpdateTransition={onUpdateTransition}
+              onDispatch={onDispatch}
+            />
+          );
+        })
+      )}
+    </section>
+  );
 }
 
 function TransitionCard({
@@ -118,6 +322,8 @@ export function TransitionsPanel({
   onAddTransition,
   onRemoveTransition,
   onUpdateTransition,
+  playheadUs = 0,
+  onDispatch,
   showToast,
 }: TransitionsPanelProps) {
   const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
@@ -340,6 +546,15 @@ export function TransitionsPanel({
             ))}
           </div>
         </div>
+        {selectedTransition !== undefined && (
+          <SelectedTransitionInspector
+            transition={selectedTransition}
+            project={project}
+            playheadUs={playheadUs}
+            onUpdateTransition={onUpdateTransition}
+            onDispatch={onDispatch}
+          />
+        )}
       </>
     </PanelShell>
   );
