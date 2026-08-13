@@ -5,12 +5,14 @@
 
 import { useMemo, useRef, useState } from 'react';
 import type {
+  AnimationCurveV1,
   AnimatablePropertyV1,
   KeyframeInterpolationV1,
   KeyframeV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { TransientPropertyInteraction } from './property-interaction.js';
 import { JOY_COLORS } from './theme.js';
 import {
   copyKeyframes,
@@ -50,6 +52,35 @@ function defaultBezier(): NonNullable<KeyframeV1['bezier']> {
   return { x1: 0.42, y1: 0, x2: 0.58, y2: 1 };
 }
 
+export function graphKeyDragCurve(
+  curve: AnimationCurveV1,
+  index: number,
+  keyframe: KeyframeV1,
+): AnimationCurveV1 {
+  return setKeyframe(
+    { keyframes: curve.keyframes.filter((_, candidateIndex) => candidateIndex !== index) },
+    keyframe,
+  );
+}
+
+export function graphHandleDragCurve(
+  curve: AnimationCurveV1,
+  index: number,
+  which: 'in' | 'out',
+  x: number,
+  y: number,
+): AnimationCurveV1 | undefined {
+  const key = curve.keyframes[index];
+  if (key === undefined) return undefined;
+  const bezier = key.bezier ?? defaultBezier();
+  const nextBezier = which === 'out' ? { ...bezier, x2: x, y2: y } : { ...bezier, x1: x, y1: y };
+  return setKeyframe(curve, {
+    ...key,
+    interpolation: 'bezier',
+    bezier: nextBezier,
+  });
+}
+
 export function GraphEditor({
   object,
   channel,
@@ -60,30 +91,86 @@ export function GraphEditor({
 }: GraphEditorProps) {
   const curve = object.animations?.[channel];
   const [selected, setSelected] = useState<readonly number[]>([]);
+  const [previewCurve, setPreviewCurve] = useState<typeof curve | undefined>(undefined);
+  const curveRef = useRef(curve);
+  const previewCurveRef = useRef<typeof curve | undefined>(undefined);
+  const dispatchRef = useRef(onDispatch);
+  const objectRef = useRef(object);
+  const channelRef = useRef(channel);
+  curveRef.current = curve;
+  dispatchRef.current = onDispatch;
+  objectRef.current = object;
+  channelRef.current = channel;
   const dragRef = useRef<
-    | { kind: 'key'; index: number; originX: number; originY: number; start: KeyframeV1 }
-    | { kind: 'handle'; index: number; which: 'in' | 'out'; originX: number; originY: number }
+    | {
+        kind: 'key';
+        index: number;
+        start: KeyframeV1;
+        startCurve: AnimationCurveV1;
+      }
+    | {
+        kind: 'handle';
+        index: number;
+        which: 'in' | 'out';
+        startCurve: AnimationCurveV1;
+      }
     | null
   >(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const interactionRef = useRef<
+    TransientPropertyInteraction<NonNullable<typeof curve>> | undefined
+  >(undefined);
+  if (interactionRef.current === undefined) {
+    interactionRef.current = new TransientPropertyInteraction({
+      read: () => previewCurveRef.current ?? curveRef.current!,
+      preview: (next) => {
+        previewCurveRef.current = next;
+        setPreviewCurve(next);
+      },
+      restore: () => {
+        previewCurveRef.current = undefined;
+        setPreviewCurve(undefined);
+      },
+      commit: ({ label, next }) => {
+        previewCurveRef.current = undefined;
+        setPreviewCurve(undefined);
+        dispatchRef.current({
+          label,
+          commands: [
+            {
+              type: 'object.replaceAnimation',
+              payload: {
+                objectId: objectRef.current.id,
+                property: channelRef.current,
+                curve: next,
+              },
+            },
+          ],
+        });
+      },
+    });
+  }
+  const interaction = interactionRef.current;
+  if (interaction === undefined) throw new Error('graph interaction is unavailable');
 
+  const displayCurve = previewCurve ?? curve;
   const metrics = useMemo(() => {
-    if (curve === undefined) return undefined;
+    if (displayCurve === undefined) return undefined;
     const samples = 80;
     const points: { readonly t: number; readonly v: number }[] = [];
     for (let i = 0; i <= samples; i += 1) {
       const t = (duration * i) / samples;
-      points.push({ t, v: sampleCurve(curve, t) });
+      points.push({ t, v: sampleCurve(displayCurve, t) });
     }
-    const keyValues = curve.keyframes.map((k) => k.value);
+    const keyValues = displayCurve.keyframes.map((k) => k.value);
     const values = [...points.map((p) => p.v), ...keyValues];
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = max - min || 1;
     return { points, min, max, span };
-  }, [curve, duration]);
+  }, [displayCurve, duration]);
 
-  if (curve === undefined || metrics === undefined) return null;
+  if (curve === undefined || displayCurve === undefined || metrics === undefined) return null;
 
   const x = (t: number) => (Math.max(0, Math.min(duration, t)) / duration) * LANE_WIDTH;
   const y = (v: number) =>
@@ -143,7 +230,7 @@ export function GraphEditor({
 
   const onSvgPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
-    if (drag === null || curve === undefined) return;
+    if (drag === null || !interaction.active) return;
     const rect = svgRef.current?.getBoundingClientRect();
     if (rect === undefined) return;
     const localX = ((event.clientX - rect.left) / rect.width) * LANE_WIDTH;
@@ -151,28 +238,30 @@ export function GraphEditor({
     if (drag.kind === 'key') {
       const timeUs = Math.round(fromX(localX) / SNAP_US) * SNAP_US;
       const value = fromY(localY);
-      const next = setKeyframe(
-        {
-          keyframes: curve.keyframes.filter((_, i) => i !== drag.index),
-        },
-        { ...drag.start, timeUs: Math.max(0, Math.min(duration, timeUs)), value },
-      );
-      replaceCurve(next, `Move ${channel} key`);
+      const next = graphKeyDragCurve(drag.startCurve, drag.index, {
+        ...drag.start,
+        timeUs: Math.max(0, Math.min(duration, timeUs)),
+        value,
+      });
+      interaction.update(next);
     } else {
-      const key = curve.keyframes[drag.index];
-      if (key === undefined) return;
-      const bezier = key.bezier ?? defaultBezier();
       const nx = Math.max(0, Math.min(1, localX / LANE_WIDTH));
       const ny = 1 - Math.max(0, Math.min(1, localY / GRAPH_HEIGHT));
-      const nextBezier =
-        drag.which === 'out' ? { ...bezier, x2: nx, y2: ny } : { ...bezier, x1: nx, y1: ny };
-      const next = setKeyframe(curve, {
-        ...key,
-        interpolation: 'bezier',
-        bezier: nextBezier,
-      });
-      replaceCurve(next, `Edit ${channel} bezier`);
+      const next = graphHandleDragCurve(drag.startCurve, drag.index, drag.which, nx, ny);
+      if (next !== undefined) interaction.update(next);
     }
+  };
+
+  const finishDrag = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag === null || !interaction.active) return;
+    interaction.commit(drag.kind === 'key' ? `Move ${channel} key` : `Edit ${channel} bezier`);
+  };
+
+  const cancelDrag = () => {
+    dragRef.current = null;
+    if (interaction.active) interaction.cancel();
   };
 
   return (
@@ -275,12 +364,14 @@ export function GraphEditor({
         height={GRAPH_HEIGHT}
         role="img"
         aria-label={`${channel} editable value graph`}
+        tabIndex={0}
         onPointerMove={onSvgPointerMove}
-        onPointerUp={() => {
-          dragRef.current = null;
-        }}
-        onPointerLeave={() => {
-          dragRef.current = null;
+        onPointerUp={finishDrag}
+        onPointerCancel={cancelDrag}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          cancelDrag();
         }}
       >
         <polyline points={path} fill="none" stroke={JOY_COLORS.textMuted} strokeWidth={1.5} />
@@ -292,7 +383,7 @@ export function GraphEditor({
           stroke={JOY_COLORS.accent}
           strokeWidth={1}
         />
-        {curve.keyframes.map((keyframe, index) => {
+        {displayCurve.keyframes.map((keyframe, index) => {
           const cx = x(keyframe.timeUs);
           const cy = y(keyframe.value);
           const active = selected.includes(index);
@@ -323,9 +414,9 @@ export function GraphEditor({
                         kind: 'handle',
                         index,
                         which: 'out',
-                        originX: 0,
-                        originY: 0,
+                        startCurve: curve,
                       };
+                      interaction.begin();
                     }}
                   />
                 </>
@@ -355,10 +446,10 @@ export function GraphEditor({
                   dragRef.current = {
                     kind: 'key',
                     index,
-                    originX: event.clientX,
-                    originY: event.clientY,
                     start: keyframe,
+                    startCurve: curve,
                   };
+                  interaction.begin();
                 }}
               />
             </g>
