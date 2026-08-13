@@ -18,8 +18,9 @@ import {
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { Clip, SpikeProject } from '@joy-media/project-schema';
+import type { Clip, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { TimelineTrackView } from '@joy-media/timeline-engine';
 import {
   DuplicateIcon,
@@ -92,6 +93,7 @@ import {
   buildTimelineClipMoveTransaction,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
+import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -576,6 +578,8 @@ export function TimelinePanel({
   onTrackFlagsChange,
   activeCompositionId: activeCompositionIdProp,
   onActiveCompositionChange,
+  selectedObject,
+  onPropertyDispatch,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -633,6 +637,10 @@ export function TimelinePanel({
   readonly activeCompositionId?: string;
   /** Called after double-clicking a merged clip or using the toolbar Back button. */
   readonly onActiveCompositionChange?: (compositionId: string) => void;
+  /** Selected visual object, provided by the editor when a clip/object is selected. */
+  readonly selectedObject?: VisualObjectV1;
+  /** Durable visual-object transaction dispatcher for property keyframes. */
+  readonly onPropertyDispatch?: (transaction: VisualObjectTransaction) => void;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
@@ -647,6 +655,9 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
+  const [tracksViewportWidthPx, setTracksViewportWidthPx] = useState(0);
+  const [tracksScrollLeft, setTracksScrollLeft] = useState(0);
+  const [showAnimatedProperties, setShowAnimatedProperties] = useState(true);
   /** Clip being dragged over by an effect or transition — shows amber highlight. */
   const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
   // §6.2: collapsed by default, so standard editing is visually unchanged.
@@ -776,6 +787,7 @@ export function TimelinePanel({
       const entry = entries[0];
       if (entry === undefined) return;
       setTracksHeightPx(entry.contentRect.height);
+      setTracksViewportWidthPx(entry.contentRect.width);
       const scrollW = scrollRef.current?.clientWidth ?? entry.contentRect.width;
       const width = timelineContentWidthPx(scrollW);
       if (autoFit && width > 0) {
@@ -1840,6 +1852,7 @@ export function TimelinePanel({
       <div
         className="timeline-tracks"
         ref={scrollRef}
+        onScroll={(event) => setTracksScrollLeft(event.currentTarget.scrollLeft)}
         onWheel={(event) => {
           if (!(event.ctrlKey || event.metaKey)) return;
           event.preventDefault();
@@ -2272,6 +2285,22 @@ export function TimelinePanel({
               </div>
             );
           })}
+
+          {selectedObject !== undefined && onPropertyDispatch !== undefined && (
+            <TimelinePropertyLanes
+              object={selectedObject}
+              playheadUs={playheadUs}
+              frameUs={frameUs}
+              pixelsPerSecond={viewport.pixelsPerSecond}
+              laneWidthPx={laneWidthPx}
+              scrollLeft={tracksScrollLeft}
+              viewportWidthPx={Math.max(1, tracksViewportWidthPx)}
+              showAnimatedOnly={showAnimatedProperties}
+              onShowAnimatedOnlyChange={setShowAnimatedProperties}
+              onSeek={onSeek}
+              onDispatch={onPropertyDispatch}
+            />
+          )}
 
           {/* Virtual empty lanes: let the grid reach the bottom of the panel and
               create a real track when media is dropped into an unused lane. */}

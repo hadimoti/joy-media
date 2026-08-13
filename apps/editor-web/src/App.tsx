@@ -4422,7 +4422,10 @@ function EditorWorkspace({
           onProjectChange={(next) => context.replaceVisualProject(next)}
         />
       );
-    if (api.id === 'timeline')
+    if (api.id === 'timeline') {
+      const selectedObjectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+      const selectedObject =
+        selectedObjectId === undefined ? undefined : visualProject.visualObjects[selectedObjectId];
       return (
         <TimelinePanel
           project={context.timelineProject}
@@ -4508,6 +4511,9 @@ function EditorWorkspace({
           onToggleSelection={context.toggleSelection}
           onClearSelection={context.clearSelection}
           onDispatch={context.dispatchTimeline}
+          {...(selectedObject === undefined
+            ? {}
+            : { selectedObject, onPropertyDispatch: context.dispatchProject })}
           onAddMarker={(timeUs, label) =>
             context.dispatchProject({
               label: `Add ${label}`,
@@ -4571,6 +4577,7 @@ function EditorWorkspace({
           showToast={context.showToast}
         />
       );
+    }
     if (api.id === 'flow')
       return (
         <DualLensPanel
