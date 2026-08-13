@@ -23,6 +23,16 @@ export type {
   LegacyPropertyAnimationAdapter,
 } from './frame-property-evaluator.js';
 export { evaluateFrameProperty } from './frame-property-evaluator.js';
+export type {
+  UniversalTransformDiagnostic,
+  UniversalTransformResolution,
+} from './universal-transform.js';
+export {
+  evaluateUniversalCameraTransform,
+  evaluateUniversalObjectTransform,
+  evaluateUniversalWorldTransform,
+  hasUniversalTransformAnimation,
+} from './universal-transform.js';
 export type { EvaluatedExpressionTransform, StaticProperty, TimedEntity } from './properties.js';
 export {
   evaluateAnimatedTransform,

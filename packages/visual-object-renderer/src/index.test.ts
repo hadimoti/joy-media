@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   visualObjectToRenderNode,
   buildRenderFrameIR,
+  buildRenderFrameIRFromProject,
   transformToRenderTransform,
   isTransitionActive,
   transitionProgress,
   clipTimesFromTracks,
 } from './index.js';
 import type { ResolvedObject } from './index.js';
-import type { TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
+import { canonicalBindingKey } from '@joy-media/project-schema';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 
 function makeObject(
@@ -101,6 +103,59 @@ describe('transformToRenderTransform', () => {
 });
 
 describe('buildRenderFrameIR', () => {
+  it('uses the universal project transform resolver for the shared preview/export IR', () => {
+    const object = makeObject({ id: 'v2-position', kind: 'shape', shape: 'rectangle' });
+    const binding = {
+      ownerKind: 'visual-object' as const,
+      ownerId: object.id,
+      propertyId: 'visual.transform.position',
+      timeDomain: 'composition' as const,
+    };
+    const project = {
+      visualObjects: { [object.id]: object },
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 100,
+          height: 100,
+          pixelAspectRatio: { numerator: 1, denominator: 1 },
+          frameRate: { numerator: 30, denominator: 1 },
+          durationUs: 1_000_000,
+          background: '#000000',
+          tracks: [],
+        },
+      },
+      propertyAnimations: {
+        [canonicalBindingKey(binding)]: {
+          binding,
+          value: {
+            kind: 'vector',
+            curve: {
+              x: {
+                keyframes: [
+                  { timeUs: 0, value: 0, interpolation: 'linear' },
+                  { timeUs: 1_000_000, value: 80, interpolation: 'linear' },
+                ],
+              },
+              y: {
+                keyframes: [
+                  { timeUs: 0, value: 0, interpolation: 'linear' },
+                  { timeUs: 1_000_000, value: 40, interpolation: 'linear' },
+                ],
+              },
+            },
+          },
+        },
+      },
+    } as unknown as JoyProjectV1;
+
+    const frame = buildRenderFrameIRFromProject(project, 'root', 500_000, 100, 100);
+    const node = frame.nodes[0];
+    expect(node?.transform).toMatchObject({ translateX: 40, translateY: 20 });
+    expect(() => validateRenderFrameIR(frame)).not.toThrow();
+  });
+
   it('produces a valid RenderFrameIR from resolved objects', () => {
     const objects: ResolvedObject[] = [
       resolved(

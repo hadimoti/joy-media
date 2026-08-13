@@ -15,6 +15,7 @@ import type {
   ColorGradeV1,
   EffectInstanceV1,
   EffectParamValue,
+  JoyProjectV1,
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
@@ -28,6 +29,7 @@ import type {
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
+import { evaluateUniversalCameraTransform } from '@joy-media/evaluator';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -54,6 +56,43 @@ export interface BuildRenderFrameOptions {
   readonly imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
   >;
+}
+
+/**
+ * Project-facing render entry point. Both browser monitor/export adapters consume
+ * the resulting IR, so this is the single transform evaluation boundary.
+ */
+export function buildRenderFrameIRFromProject(
+  project: JoyProjectV1,
+  compositionId: string,
+  timeUs: TimeUs,
+  width: number,
+  height: number,
+  options: BuildRenderFrameOptions = {},
+): RenderFrameIR {
+  const composition = project.compositions[compositionId];
+  if (composition === undefined) throw new RangeError(`unknown composition "${compositionId}"`);
+  const resolvedObjects: ResolvedObject[] = Object.values(project.visualObjects).map((object) => {
+    const resolved = evaluateUniversalCameraTransform(
+      object.id,
+      composition.activeCameraId,
+      project.visualObjects,
+      timeUs,
+      height,
+      project.propertyAnimations,
+    );
+    return {
+      object,
+      transform: resolved.transform,
+      ...(resolved.diagnostics.length === 0 ? {} : { expressionDiagnostics: resolved.diagnostics }),
+    };
+  });
+  return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
+    ...options,
+    ...(options.colorGrade === undefined && project.colorGrade !== undefined
+      ? { colorGrade: project.colorGrade }
+      : {}),
+  });
 }
 
 /**
