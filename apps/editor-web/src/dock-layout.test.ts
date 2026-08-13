@@ -8,6 +8,9 @@ import {
   loadViewMode,
   migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
+  migrateDockLayout,
+  migrateDockLayoutAliases,
+  serializeDockLayout,
   saveViewMode,
   seedDockLayout,
   verticalDockLayout,
@@ -125,6 +128,27 @@ describe('dock layout constraints', () => {
     expect(migrated.panels.futurePanel).toBe(savedLayout.panels.futurePanel);
     expect(savedLayout.panels.media.minimumWidth).toBe(100);
     expect(savedLayout.panels.media.minimumHeight).toBe(100);
+  });
+
+  it('migrates renamed panels and stamps the saved layout version', () => {
+    const migrated = migrateDockLayoutAliases({
+      panels: { 'color-grading': { id: 'color-grading' }, media: { id: 'media' } },
+      grid: {
+        root: {
+          type: 'leaf',
+          data: { views: ['color-grading', 'dual-lens'], activeView: 'color-grading' },
+        },
+      },
+    }) as Record<string, unknown>;
+    expect(migrated.joyLayoutVersion).toBe(2);
+    expect((migrated.panels as Record<string, unknown>).color).toBeDefined();
+    expect(JSON.stringify(migrated)).not.toContain('color-grading');
+    const normalized = migrateDockLayout(migrated) as Record<string, unknown>;
+    expect(normalized.joyLayoutVersion).toBe(2);
+    expect(normalized.panels).toMatchObject({
+      color: { minimumWidth: DOCK_PANEL_MINIMUM_WIDTH, minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT },
+    });
+    expect(JSON.parse(serializeDockLayout(migrated)).joyLayoutVersion).toBe(2);
   });
 });
 

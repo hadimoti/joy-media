@@ -216,7 +216,8 @@ import {
   type EditorViewMode,
   dockLayoutKey,
   migrateLegacyDockLayout,
-  normalizeDockLayoutConstraints,
+  migrateDockLayout,
+  serializeDockLayout,
   saveViewMode,
   seedDockLayout,
 } from './dock-layout.js';
@@ -2570,7 +2571,7 @@ function EditorWorkspace({
       let restored = false;
       if (saved !== null) {
         try {
-          api.fromJSON(normalizeDockLayoutConstraints(JSON.parse(saved)) as never, {
+          api.fromJSON(migrateDockLayout(JSON.parse(saved)) as never, {
             reuseExistingPanels: false,
           });
           restored = true;
@@ -2592,7 +2593,7 @@ function EditorWorkspace({
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      window.localStorage.setItem(layoutKey, JSON.stringify(api.toJSON()));
+      window.localStorage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
     },
     [ensureDockPanels],
   );
@@ -2617,7 +2618,7 @@ function EditorWorkspace({
       if (api !== null && current !== 'custom') {
         window.localStorage.setItem(
           workspacePresetLayoutKey(mode, 'custom'),
-          JSON.stringify(api.toJSON()),
+          serializeDockLayout(api.toJSON()),
         );
       }
       workspacePresetRef.current = next;
@@ -2648,7 +2649,7 @@ function EditorWorkspace({
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    window.localStorage.setItem(dockLayoutKey(current), JSON.stringify(api.toJSON()));
+    window.localStorage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
     saveViewMode(window.localStorage, next);
     persistUiPreferences({ viewMode: next });
@@ -3708,7 +3709,7 @@ function EditorWorkspace({
       const persistDockLayout = () => {
         window.localStorage.setItem(
           dockLayoutKey(viewModeRef.current),
-          JSON.stringify(event.api.toJSON()),
+          serializeDockLayout(event.api.toJSON()),
         );
       };
       event.api.onDidLayoutChange(persistDockLayout);

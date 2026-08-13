@@ -35,7 +35,8 @@ export type EditorViewMode = 'vertical' | 'widescreen';
 export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
 
 /** Per-mode Dockview JSON keys (bump when a seed changes). */
-export const DOCK_LAYOUT_VERSION = 9;
+export const DOCK_LAYOUT_VERSION = 10;
+export const DOCK_LAYOUT_SCHEMA_VERSION = 2;
 
 /** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
 export const DOCK_LAYOUT_KEY = 'joy-media.dockview.v8';
@@ -160,6 +161,52 @@ export function normalizeDockLayoutConstraints(layout: unknown): unknown {
   }
 
   return changed ? { ...layout, panels } : layout;
+}
+
+const PANEL_ALIASES: Readonly<Record<string, string>> = {
+  'color-grading': 'color',
+  'motion-studio': 'motion',
+  'dual-lens': 'flow',
+  processes: 'jobs',
+  library: 'media',
+};
+
+/** Migrates renamed panels while retaining every unrelated Dockview field. */
+export function migrateDockLayoutAliases(layout: unknown): unknown {
+  if (!isRecord(layout)) return layout;
+  const migrate = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(migrate);
+    if (!isRecord(value)) return value;
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) next[key] = migrate(child);
+    if (Array.isArray(next.views))
+      next.views = next.views.map((id) =>
+        typeof id === 'string' ? (PANEL_ALIASES[id] ?? id) : id,
+      );
+    if (typeof next.activeView === 'string')
+      next.activeView = PANEL_ALIASES[next.activeView] ?? next.activeView;
+    if (typeof next.id === 'string') next.id = PANEL_ALIASES[next.id] ?? next.id;
+    return next;
+  };
+  const migrated = migrate(layout) as Record<string, unknown>;
+  if (isRecord(migrated.panels)) {
+    const nextPanels: Record<string, unknown> = {};
+    for (const [id, panel] of Object.entries(migrated.panels)) {
+      const nextId = PANEL_ALIASES[id] ?? id;
+      if (nextPanels[nextId] === undefined) nextPanels[nextId] = panel;
+    }
+    migrated.panels = nextPanels;
+  }
+  return { ...migrated, joyLayoutVersion: DOCK_LAYOUT_SCHEMA_VERSION };
+}
+
+/** Applies aliases, compact constraints, and the explicit saved-layout marker. */
+export function migrateDockLayout(layout: unknown): unknown {
+  return normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout));
+}
+
+export function serializeDockLayout(layout: unknown): string {
+  return JSON.stringify(migrateDockLayout(layout));
 }
 
 export function verticalDockLayout(): unknown {
