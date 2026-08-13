@@ -1,4 +1,4 @@
-import type { ColorGradeV1 } from './v1.js';
+import type { AssetRecordV1, ColorGradeV1 } from './v1.js';
 import type { PropertyBindingV2 } from './property-animation.js';
 
 /**
@@ -79,6 +79,66 @@ export interface ColorLutReference {
   readonly builtIn?:
     'none' | 'clean-contrast' | 'soft-film' | 'warm-cinema' | 'cool-fade' | 'monochrome';
   readonly intensity: number;
+}
+
+export type EncodedColorLutReference =
+  `builtin:${NonNullable<ColorLutReference['builtIn']>}` | `asset:${string}:${string}`;
+
+/** Removes presentation-only intensity before identity/hash validation. */
+export function colorLutReferenceIdentity(
+  reference: ColorLutReference,
+): Omit<ColorLutReference, 'intensity'> {
+  return reference.builtIn === undefined
+    ? {
+        ...(reference.assetId === undefined ? {} : { assetId: reference.assetId }),
+        ...(reference.sha256 === undefined ? {} : { sha256: reference.sha256 }),
+      }
+    : { builtIn: reference.builtIn };
+}
+
+/** Encodes a hold-key-safe LUT reference without dropping its integrity hash. */
+export function encodeColorLutReference(reference: ColorLutReference): EncodedColorLutReference {
+  const identity = colorLutReferenceIdentity(reference);
+  if (identity.builtIn !== undefined) return `builtin:${identity.builtIn}`;
+  if (
+    identity.assetId === undefined ||
+    identity.sha256 === undefined ||
+    !/^[a-f0-9]{64}$/.test(identity.sha256)
+  )
+    throw new RangeError('custom LUT references require an asset id and lowercase SHA-256');
+  return `asset:${identity.assetId}:${identity.sha256}`;
+}
+
+/** Decodes a persisted hold-key LUT reference, rejecting ambiguous strings. */
+export function decodeColorLutReference(
+  value: string,
+): Omit<ColorLutReference, 'intensity'> | undefined {
+  if (value.startsWith('builtin:')) {
+    const builtIn = value.slice('builtin:'.length);
+    if (
+      !['none', 'clean-contrast', 'soft-film', 'warm-cinema', 'cool-fade', 'monochrome'].includes(
+        builtIn,
+      )
+    )
+      return undefined;
+    return { builtIn: builtIn as NonNullable<ColorLutReference['builtIn']> };
+  }
+  const match = /^asset:([^:]+):([a-f0-9]{64})$/.exec(value);
+  return match === null ? undefined : { assetId: match[1]!, sha256: match[2]! };
+}
+
+/**
+ * A custom LUT is available only when the project asset is still a LUT and
+ * its recorded hash matches. Built-in looks never need remote asset access.
+ */
+export function isColorLutReferenceAvailable(
+  reference: Omit<ColorLutReference, 'intensity'>,
+  assets: Readonly<Record<string, AssetRecordV1>>,
+): boolean {
+  if (reference.builtIn !== undefined) return true;
+  if (reference.assetId === undefined || reference.sha256 === undefined) return false;
+  const asset = assets[reference.assetId];
+  return asset?.kind === 'lut' && asset.sha256 === reference.sha256;
 }
 
 export interface OutputSafety {

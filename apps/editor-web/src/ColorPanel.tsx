@@ -3,12 +3,15 @@ import type { ColorGradeV1, ColorGradeV2, JoyProjectV1 } from '@joy-media/projec
 import {
   canonicalBindingKey,
   colorCurveToSnapshot,
+  colorLutReferenceIdentity,
   colorPropertyBinding,
   createIdentityColorGrade,
+  encodeColorLutReference,
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_CURVES,
   IDENTITY_HSL_BANDS,
   IDENTITY_COLOR_WHEELS,
+  isColorLutReferenceAvailable,
 } from '@joy-media/project-schema';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
@@ -295,6 +298,48 @@ export function ColorPanel({
       ],
     });
   };
+  const toggleLutReferenceAnimation = () => {
+    if (onDispatch === undefined || draft.lut === undefined) return;
+    if (target === 'clip' && selectedClipId === undefined) return;
+    const reference = colorLutReferenceIdentity(draft.lut);
+    if (!isColorLutReferenceAvailable(reference, project.assets)) return;
+    const binding = colorPropertyBinding(
+      target,
+      'lut.reference',
+      target === 'clip' ? selectedClipId : undefined,
+    );
+    const localTimeUs =
+      target === 'clip'
+        ? Math.max(
+            0,
+            Math.min(
+              selectedClipDurationUs ?? Number.MAX_SAFE_INTEGER,
+              playheadUs - (selectedClipStartUs ?? playheadUs),
+            ),
+          )
+        : playheadUs;
+    const current = project.propertyAnimations?.[canonicalBindingKey(binding)];
+    const isString = current?.value.kind === 'string';
+    const hasKey = isString && current.value.keys.some((key) => key.timeUs === localTimeUs);
+    const key = {
+      kind: 'string' as const,
+      timeUs: localTimeUs,
+      value: encodeColorLutReference(draft.lut),
+    };
+    onDispatch({
+      label: `${hasKey ? 'Remove' : 'Add'} Color look keyframe`,
+      commands: [
+        hasKey
+          ? { type: 'propertyAnimation.removeKey', payload: { binding, timeUs: localTimeUs } }
+          : isString
+            ? { type: 'propertyAnimation.setKey', payload: { binding, key } }
+            : {
+                type: 'propertyAnimation.replace',
+                payload: { binding, value: { kind: 'string', keys: [key] } },
+              },
+      ],
+    });
+  };
   const reset = () => {
     const next = createIdentityColorGrade();
     setDraft(next);
@@ -400,7 +445,21 @@ export function ColorPanel({
             canAnimate={onDispatch !== undefined}
           />
         )}
-        {tab === 'looks' && <LooksSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'looks' && (
+          <LooksSection
+            draft={draft}
+            onChange={setDraft}
+            onCommit={commit}
+            animationStateFor={animationStateFor}
+            onToggleReference={toggleLutReferenceAnimation}
+            canAnimate={onDispatch !== undefined}
+            referenceAvailable={
+              draft.lut === undefined
+                ? true
+                : isColorLutReferenceAvailable(colorLutReferenceIdentity(draft.lut), project.assets)
+            }
+          />
+        )}
         {tab === 'scopes' && (
           <ScopeSection {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })} />
         )}
@@ -732,10 +791,18 @@ function LooksSection({
   draft,
   onChange,
   onCommit,
+  animationStateFor,
+  onToggleReference,
+  canAnimate,
+  referenceAvailable,
 }: {
   draft: ColorGradeV2;
   onChange: (next: ColorGradeV2) => void;
   onCommit: (next: ColorGradeV2) => void;
+  animationStateFor: (propertyId: string) => PropertyAnimationState;
+  onToggleReference: () => void;
+  canAnimate: boolean;
+  referenceAvailable: boolean;
 }) {
   const looks = [
     ['none', 'None'],
@@ -749,23 +816,35 @@ function LooksSection({
   return (
     <section className="color-section">
       <h3>Looks & LUTs</h3>
-      <div className="looks-grid">
-        {looks.map(([id, label]) => (
-          <button
-            type="button"
-            className={selected === id ? 'is-active' : ''}
-            key={id}
-            onClick={() => {
-              const next = { ...draft, lut: { builtIn: id, intensity: 1 } };
-              onChange(next);
-              onCommit(next);
-            }}
-          >
-            <span className={`look-thumb look-thumb--${id}`} />
-            {label}
-          </button>
-        ))}
-      </div>
+      <PropertyRow
+        label="Look or LUT"
+        value={selected}
+        disabled={!referenceAvailable}
+        {...(!canAnimate || !referenceAvailable
+          ? {}
+          : {
+              animationState: animationStateFor('lut.reference'),
+              onToggleAnimation: onToggleReference,
+            })}
+      >
+        <div className="looks-grid">
+          {looks.map(([id, label]) => (
+            <button
+              type="button"
+              className={selected === id ? 'is-active' : ''}
+              key={id}
+              onClick={() => {
+                const next = { ...draft, lut: { builtIn: id, intensity: 1 } };
+                onChange(next);
+                onCommit(next);
+              }}
+            >
+              <span className={`look-thumb look-thumb--${id}`} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </PropertyRow>
       <label className="color-control">
         <span>LUT intensity</span>
         <input
@@ -792,6 +871,11 @@ function LooksSection({
       <p className="color-hint">
         Custom .cube LUT import is private, hashed, and portable across your devices.
       </p>
+      {!referenceAvailable && (
+        <p className="color-empty" role="alert">
+          Restore this LUT before previewing or exporting the grade.
+        </p>
+      )}
     </section>
   );
 }

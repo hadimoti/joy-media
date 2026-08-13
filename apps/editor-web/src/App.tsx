@@ -71,7 +71,10 @@ import {
   type AnimatedImageFrameSource,
 } from './animated-image-decoder.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
-import { hasRenderableExportMedia } from './export-media-readiness.js';
+import {
+  hasRenderableExportMedia,
+  missingColorLutExportDependencies,
+} from './export-media-readiness.js';
 
 registerBuiltins();
 
@@ -2849,6 +2852,13 @@ function EditorWorkspace({
       const exportTimelineProject = structuredClone(session.timelineProject);
       const exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
+      const missingLuts = missingColorLutExportDependencies(exportVisualProject);
+      if (missingLuts.length > 0) {
+        setExportStatus(
+          `Export blocked: restore the required LUT${missingLuts.length === 1 ? '' : 's'} (${missingLuts.join(', ')}).`,
+        );
+        return;
+      }
       const sourceProjectRevisionId = session.projectRevisionId;
       const sourceRevision = session.historyCursorSequence;
       let selectedMimeType: ReturnType<typeof selectBrowserMp4MimeType>;

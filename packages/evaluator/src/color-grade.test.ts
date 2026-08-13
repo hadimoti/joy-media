@@ -3,6 +3,7 @@ import {
   canonicalBindingKey,
   colorPropertyBinding,
   colorCurveToSnapshot,
+  encodeColorLutReference,
   createIdentityColorGrade,
   type NormalizedPropertyAnimationsV2,
 } from '@joy-media/project-schema';
@@ -98,5 +99,39 @@ describe('evaluateColorGradeAtTime', () => {
     );
     expect(result.curves?.rgb).toHaveLength(256);
     expect(result.curves?.rgb[64]!.y).toBeGreaterThan(0.2);
+  });
+
+  it('uses a LUT hold key only after its dependency resolver accepts the hash', () => {
+    const grade = createIdentityColorGrade();
+    const binding = colorPropertyBinding('output', 'lut.reference');
+    const reference = { assetId: 'lut-1', sha256: 'a'.repeat(64), intensity: 0.5 };
+    const animations: NormalizedPropertyAnimationsV2 = {
+      [canonicalBindingKey(binding)]: {
+        binding,
+        value: {
+          kind: 'string',
+          keys: [{ timeUs: 0, value: encodeColorLutReference(reference) }],
+        },
+      },
+    };
+    const rejected = evaluateColorGradeAtTime(
+      grade,
+      animations,
+      { scope: 'output' },
+      { compositionTimeUs: 0 },
+    );
+    expect(rejected.lut?.assetId).toBeUndefined();
+    const accepted = evaluateColorGradeAtTime(
+      grade,
+      animations,
+      { scope: 'output' },
+      { compositionTimeUs: 0 },
+      { isLutReferenceAvailable: (candidate) => candidate?.sha256 === reference.sha256 },
+    );
+    expect(accepted.lut).toMatchObject({
+      assetId: reference.assetId,
+      sha256: reference.sha256,
+      intensity: 1,
+    });
   });
 });

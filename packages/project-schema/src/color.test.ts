@@ -5,6 +5,9 @@ import {
   COLOR_PROPERTY_DESCRIPTORS,
   colorCurveFromSnapshot,
   colorCurveToSnapshot,
+  decodeColorLutReference,
+  encodeColorLutReference,
+  isColorLutReferenceAvailable,
   createIdentityColorGrade,
   HSL_BAND_IDS,
 } from './color.js';
@@ -30,6 +33,42 @@ describe('WP34 color property descriptors', () => {
     expect(snapshot[128]).toBeGreaterThan(0.7);
     expect(colorCurveFromSnapshot(snapshot)).toHaveLength(256);
     expect(() => colorCurveFromSnapshot(snapshot.slice(0, 255))).toThrow(RangeError);
+  });
+
+  it('requires an exact project LUT asset hash for custom references', () => {
+    const reference = {
+      assetId: 'lut-private',
+      sha256: 'a'.repeat(64),
+      intensity: 0.8,
+    };
+    const encoded = encodeColorLutReference(reference);
+    expect(decodeColorLutReference(encoded)).toEqual({
+      assetId: 'lut-private',
+      sha256: 'a'.repeat(64),
+    });
+    expect(
+      isColorLutReferenceAvailable(reference, {
+        'lut-private': {
+          id: 'lut-private',
+          kind: 'lut',
+          displayName: 'grade.cube',
+          sha256: 'a'.repeat(64),
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isColorLutReferenceAvailable(
+        { ...reference, sha256: 'b'.repeat(64) },
+        {
+          'lut-private': {
+            id: 'lut-private',
+            kind: 'lut',
+            displayName: 'grade.cube',
+            sha256: 'a'.repeat(64),
+          },
+        },
+      ),
+    ).toBe(false);
   });
 
   it('uses output and clip-local bindings without addressing UI diagnostics', () => {

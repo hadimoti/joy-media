@@ -549,7 +549,7 @@ function validateAsset(
     !isRecord(value) ||
     value.id !== assetId ||
     !isNonEmptyString(value.displayName) ||
-    !['video', 'audio', 'image', 'other'].includes(String(value.kind))
+    !['video', 'audio', 'image', 'lut', 'other'].includes(String(value.kind))
   ) {
     diagnostics.push(
       diagnostic(

@@ -92,6 +92,7 @@ export type {
   HslBandId,
   HslBand,
   ColorLutReference,
+  EncodedColorLutReference,
   OutputSafety,
   ColorGradeV2,
   ColorGrade,
@@ -116,6 +117,10 @@ export {
   colorCurveToSnapshot,
   colorCurveFromSnapshot,
   normalizeColorCurvePoints,
+  colorLutReferenceIdentity,
+  encodeColorLutReference,
+  decodeColorLutReference,
+  isColorLutReferenceAvailable,
 } from './color.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {

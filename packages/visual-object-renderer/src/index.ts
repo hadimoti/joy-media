@@ -34,6 +34,7 @@ import {
   evaluateUniversalCameraTransform,
   sampleLegacyCurve,
 } from '@joy-media/evaluator';
+import { isColorLutReferenceAvailable } from '@joy-media/project-schema';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -102,6 +103,11 @@ export function buildRenderFrameIRFromProject(
                   project.propertyAnimations,
                   { scope: 'output' },
                   { compositionTimeUs: timeUs, outputTimeUs: timeUs },
+                  {
+                    isLutReferenceAvailable: (reference) =>
+                      reference !== undefined &&
+                      isColorLutReferenceAvailable(reference, project.assets),
+                  },
                 )
               : project.colorGrade,
         }

@@ -8,6 +8,7 @@ import {
   canonicalBindingKey,
   colorCurveFromSnapshot,
   colorPropertyBinding,
+  decodeColorLutReference,
   HSL_BAND_IDS,
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_WHEELS,
@@ -28,6 +29,16 @@ export interface ColorGradeEvaluationTarget {
   readonly clipId?: string;
 }
 
+export interface ColorGradeEvaluationOptions {
+  /**
+   * Resolves custom LUT integrity/preload state. Omitted means animated LUT
+   * reference keys are not applied, which is safer than guessing a look.
+   */
+  readonly isLutReferenceAvailable?: (
+    reference: ReturnType<typeof decodeColorLutReference>,
+  ) => boolean;
+}
+
 /**
  * Samples the continuous WP34 Color controls at an explicit time domain.
  * Curves are sampled through bounded snapshot tables; LUT reference changes
@@ -38,6 +49,7 @@ export function evaluateColorGradeAtTime(
   animations: NormalizedPropertyAnimationsV2 | undefined,
   target: ColorGradeEvaluationTarget,
   time: PropertyAnimationTimeContext,
+  options: ColorGradeEvaluationOptions = {},
 ): ColorGradeV2 {
   const binding = (propertyId: string) =>
     colorPropertyBinding(target.scope, propertyId, target.clipId);
@@ -108,10 +120,26 @@ export function evaluateColorGradeAtTime(
       luminance: property('luminance'),
     };
   });
-  const lut =
+  const staticLut =
     grade.lut === undefined
       ? undefined
       : { ...grade.lut, intensity: sampleNumber('lut.intensity', grade.lut.intensity) };
+  const lutReferenceAnimation = animations?.[canonicalBindingKey(binding('lut.reference'))];
+  const lut =
+    lutReferenceAnimation?.value.kind !== 'string'
+      ? staticLut
+      : (() => {
+          const resolved = resolvePropertyAnimationTime(
+            lutReferenceAnimation.binding.timeDomain,
+            time,
+          );
+          const sampled = sampleAnimationValue(lutReferenceAnimation.value, resolved.timeUs);
+          const reference =
+            typeof sampled === 'string' ? decodeColorLutReference(sampled) : undefined;
+          if (reference === undefined || options.isLutReferenceAvailable?.(reference) !== true)
+            return staticLut;
+          return { ...reference, intensity: staticLut?.intensity ?? 1 };
+        })();
   const staticCurves = grade.curves;
   const curves =
     staticCurves === undefined
