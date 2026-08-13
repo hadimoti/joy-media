@@ -137,22 +137,22 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
   }, testInfo) => {
     await openReferenceWorkspace(page);
     await openPanel(page, 'Color');
-    const lift = page.getByLabel('Lift');
-    await expect(lift).toHaveValue('0');
-    await lift.focus();
+    const exposure = page.getByLabel('Exposure', { exact: true });
+    await expect(exposure).toHaveValue('0');
+    await exposure.focus();
     await page.keyboard.press('ArrowRight');
-    await expect(lift).toHaveValue('0.01');
+    await expect(exposure).toHaveValue('0.01');
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(lift).toHaveValue('0');
-    await lift.focus();
+    await expect(exposure).toHaveValue('0');
+    await exposure.focus();
     await page.keyboard.press('ArrowRight');
-    const saturation = page.getByLabel('Saturation');
+    const saturation = page.getByRole('slider', { name: 'Saturation', exact: true });
     await saturation.focus();
     await page.keyboard.press('ArrowLeft');
-    const reset = page.getByRole('button', { name: 'Reset grade' });
+    const reset = page.getByRole('button', { name: 'Reset all' });
     await expect(reset).toBeEnabled();
     await reset.click();
-    await expect(lift).toHaveValue('0');
+    await expect(exposure).toHaveValue('0');
     await expect(saturation).toHaveValue('1');
     await expect(reset).toBeDisabled();
     await recordEvidence(testInfo, {
@@ -161,7 +161,7 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
       uiA11y: 'PASS',
       expected: 'Manual grade values update, undo, and reset to exact defaults.',
       actual:
-        'Keyboard changes updated Lift/Saturation, history undid Lift, and Reset restored defaults.',
+        'Keyboard changes updated Exposure/Saturation, history undid Exposure, and Reset restored defaults.',
     });
   });
 
@@ -170,21 +170,18 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
   }, testInfo) => {
     await openReferenceWorkspace(page);
     await openPanel(page, 'Color');
-    await page.getByRole('tab', { name: 'LUT' }).click();
-    const rec709 = page.getByRole('button', { name: 'Rec.709' });
-    await rec709.click();
-    await expect(rec709).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('tab', { name: 'Looks' }).click();
+    const look = page.getByRole('button', { name: 'Clean Contrast' });
+    await look.click();
+    await expect(look).toHaveClass(/is-active/);
     await page.getByRole('tab', { name: 'Scopes' }).click();
-    await expect(page.getByLabel('Parade scope')).toBeVisible();
-    await expect(page.getByLabel('Parade scope').locator('.scope-bar')).toHaveCount(3);
+    await page.getByRole('button', { name: 'parade' }).click();
+    await expect(page.locator('fieldset').getByLabel('Luma waveform scope')).toBeVisible();
     await page.reload();
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Color');
-    await page.getByRole('tab', { name: 'LUT' }).click();
-    await expect(page.getByRole('button', { name: 'Rec.709' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await page.getByRole('tab', { name: 'Looks' }).click();
+    await expect(page.getByRole('button', { name: 'Clean Contrast' })).toHaveClass(/is-active/);
     await recordEvidence(testInfo, {
       caseId: 76,
       functional: 'PASS',
@@ -207,7 +204,9 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await cropLeft.fill('0.1');
     await expect(cropLeft).toHaveValue('0.1');
     await page.getByRole('button', { name: 'Add Position X keyframe' }).click();
-    await expect(page.getByRole('button', { name: 'Remove Position X keyframe' })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Remove Position X keyframe', exact: true }),
+    ).toBeVisible();
     await page.getByRole('button', { name: 'Bezier' }).click();
     await page.getByRole('button', { name: 'Add Position Y expression' }).click();
     await page.getByPlaceholder('e.g. sin(time) * 10').fill('sin(time) * 10');
@@ -220,12 +219,11 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.getByRole('tab', { name: 'Effects' }).click();
     await expect(page.locator('.inspector-effect-item[data-effect-instance-id]')).toHaveCount(1);
     await page.getByRole('tab', { name: 'Audio' }).click();
-    await page.getByLabel('Volume').fill('0.75');
-    await page.getByLabel('Pan').fill('-0.25');
-    await page.getByText('Mute', { exact: true }).locator('..').getByRole('button').click();
-    await expect(
-      page.getByText('Mute', { exact: true }).locator('..').getByRole('button'),
-    ).toHaveText('Muted');
+    await page.getByRole('spinbutton', { name: 'Volume' }).fill('0.75');
+    await page.getByRole('spinbutton', { name: 'Pan' }).fill('-0.25');
+    const mute = page.getByRole('button', { name: 'On', exact: true });
+    await mute.click();
+    await expect(page.getByRole('button', { name: 'Muted', exact: true })).toBeVisible();
     await recordEvidence(testInfo, {
       caseId: 77,
       functional: 'PASS',

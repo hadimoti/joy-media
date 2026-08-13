@@ -164,13 +164,16 @@ async function activateTimeline(page: Page): Promise<void> {
 }
 
 export async function openPanel(page: Page, label: string): Promise<void> {
-  const tab = page.locator(`.panel-tab[aria-label="${label}"]`).first();
+  // WP-34 renamed Motion/Templates to Animate/Library; keep historical case
+  // wording while targeting the live information architecture.
+  const liveLabel = label === 'Motion' ? 'Animate' : label === 'Templates' ? 'Library' : label;
+  const tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
   await expect(tab).toBeVisible();
   await tab.click();
-  if (label === 'Joy Code') {
+  if (liveLabel === 'Joy Code') {
     await expect(page.locator('.joy-code-panel')).toBeVisible();
   } else {
-    await expect(page.locator('.joy-panel-title', { hasText: label }).first()).toBeVisible();
+    await expect(page.locator('.joy-panel-title', { hasText: liveLabel }).first()).toBeVisible();
   }
 }
 

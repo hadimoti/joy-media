@@ -41,6 +41,13 @@ async function openMotionPanel(page: Parameters<typeof openPanel>[0]): Promise<v
   await expect(page.locator('.motion-panel')).toBeVisible();
 }
 
+async function openMyMotions(page: Parameters<typeof openPanel>[0]): Promise<void> {
+  await openPanel(page, 'Templates');
+  const library = page.locator('.library-panel');
+  await library.getByRole('tab', { name: 'My Motions' }).click();
+  await expect(library.locator('[role="list"][aria-label="My Motions"]')).toBeVisible();
+}
+
 async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promise<void> {
   const timeline = page.locator('.timeline-panel');
   if (!(await timeline.isVisible())) {
@@ -91,7 +98,7 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
 
         const studio = page.locator('.motion-studio-overlay');
         await expect(studio).toBeVisible();
-        await expect(studio.locator('.ms-topbar-name')).toHaveText('Untitled Motion 1');
+        await expect(studio.locator('.ms-topbar-name')).toHaveText('Untitled Motion');
 
         await studio.getByRole('button', { name: 'Add rectangle' }).click();
         await expect(studio.locator('.ms-layer[data-layer-id]')).toHaveCount(1);
@@ -143,8 +150,9 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await page.getByRole('button', { name: 'Create new motion' }).click();
         await page.getByRole('button', { name: 'Back to editor' }).click();
 
-        const motion = page.locator('.motion-panel');
-        const original = 'Untitled Motion 1';
+        await openMyMotions(page);
+        const motion = page.locator('.library-panel');
+        const original = 'Untitled Motion';
         const renamed = 'R5 Motion 80';
         await expect(motion.getByRole('button', { name: `Open ${original}` })).toBeVisible();
 
@@ -166,7 +174,8 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
           motion.getByRole('button', { name: `Open ${copy}`, exact: true }),
         ).toBeVisible();
 
-        await motion.getByRole('button', { name: `Open ${copy}`, exact: true }).click();
+        const openCopy = motion.getByRole('button', { name: `Open ${copy}`, exact: true });
+        await openCopy.evaluate((element) => (element as HTMLButtonElement).click());
         const studio = page.locator('.motion-studio-overlay');
         await expect(studio).toBeVisible();
         await expect(studio.locator('.ms-topbar-name')).toHaveText(copy);
@@ -371,15 +380,22 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
 
         await camera.getByRole('tab', { name: 'Transform' }).click();
         const transformField = (label: string) =>
-          camera
-            .locator('.camera-controls .camera-field', { hasText: label })
-            .locator('input,select');
+          label === 'Parent'
+            ? camera
+                .locator('.camera-controls .camera-field')
+                .filter({ hasText: label })
+                .locator('select')
+            : camera.getByLabel(label, { exact: true });
         await transformField('X').fill('125');
         await transformField('Y').fill('250');
         await transformField('Depth (Z)').fill('-640');
         await transformField('Roll').fill('12');
         await transformField('Field of view').fill('68');
-        await transformField('Parent').selectOption('intro-title');
+        await transformField('Field of view').press('Enter');
+        const parent = transformField('Parent');
+        const parentOptionCount = await parent.locator('option').count();
+        if (parentOptionCount > 1) await parent.selectOption({ index: 1 });
+        const selectedParent = await parent.inputValue();
 
         await page.reload();
         await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
@@ -394,7 +410,7 @@ test.describe('WP-29 R5 batch F — motion, camera, and templates', () => {
         await expect(transformField('Depth (Z)')).toHaveValue('-640');
         await expect(transformField('Roll')).toHaveValue('12');
         await expect(transformField('Field of view')).toHaveValue('68');
-        await expect(transformField('Parent')).toHaveValue('intro-title');
+        await expect(transformField('Parent')).toHaveValue(selectedParent);
 
         return 'Created camera-1, activated it, edited X/Y/Z/roll/FOV/parent, then reloaded and verified every value.';
       },

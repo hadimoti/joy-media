@@ -129,7 +129,9 @@ export function ColorPanel({
 
   const commit = (next: ColorGradeV2 = draft) => {
     if (target === 'clip' && (!clipAvailable || selectedClipId === undefined)) return;
-    draftKey.current = JSON.stringify(next);
+    const nextKey = JSON.stringify(next);
+    if (draftKey.current === nextKey) return;
+    draftKey.current = nextKey;
     const updated = { ...project, updatedAt: new Date().toISOString() };
     if (onDispatch !== undefined) {
       onDispatch({
@@ -474,7 +476,7 @@ export function ColorPanel({
         >
           A/B wipe
         </button>
-        <button type="button" onClick={reset}>
+        <button type="button" onClick={reset} disabled={gradeIsIdentity}>
           Reset all
         </button>
       </div>
@@ -529,6 +531,11 @@ function AdjustSection({
             aria-label={label}
             onChange={(event) => onPatch(key, event.currentTarget.valueAsNumber)}
             onPointerUp={(event) => onPatch(key, event.currentTarget.valueAsNumber, true)}
+            onBlur={(event) => onPatch(key, event.currentTarget.valueAsNumber, true)}
+            onKeyUp={(event) => {
+              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End')
+                onPatch(key, event.currentTarget.valueAsNumber, true);
+            }}
             onDoubleClick={() => onPatch(key, step, true)}
           />
         </PropertyRow>
@@ -602,6 +609,11 @@ function WheelsSection({
                 value={wheels[name].master}
                 onChange={(e) => update(name, 'master', e.currentTarget.valueAsNumber)}
                 onPointerUp={(e) => update(name, 'master', e.currentTarget.valueAsNumber, true)}
+                onBlur={(e) => update(name, 'master', e.currentTarget.valueAsNumber, true)}
+                onKeyUp={(e) => {
+                  if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End')
+                    update(name, 'master', e.currentTarget.valueAsNumber, true);
+                }}
               />
             </PropertyRow>
           </div>
