@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { CaptionDocumentV1, CompositionV1 } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  IDENTITY_CAPTION_CLIP_STYLE,
+  type CaptionDocumentV1,
+  type CompositionV1,
+} from '@joy-media/project-schema';
 import type { TextNode } from '@joy-media/render-ir';
 import {
   activeCaptionSegments,
   activeCaptionWord,
   captionCuesAt,
   layoutCaptionNodes,
+  layoutTemplatedCaptionNodes,
   resolveCaptionDirection,
   segmentDisplayText,
   segmentSourceText,
@@ -224,5 +230,42 @@ describe('caption layout → Render IR (§20.5 safe areas)', () => {
       documentTimeUs: 0,
     };
     expect(layoutCaptionNodes([emptyCue], layout)).toEqual([]);
+  });
+
+  it('resolves clip-owned style and caption-local animation before layout', () => {
+    const composition = captionComposition();
+    const clip = composition.tracks[0]!.clips[0]!;
+    if (clip.kind !== 'caption') throw new Error('expected caption clip');
+    const style = { ...IDENTITY_CAPTION_CLIP_STYLE, fontSize: 2, positionX: 0.1 };
+    const binding = {
+      ownerKind: 'caption-clip' as const,
+      ownerId: clip.id,
+      propertyId: 'opacity',
+      timeDomain: 'caption-clip-local' as const,
+    };
+    const styledComposition = {
+      ...composition,
+      tracks: composition.tracks.map((track) =>
+        track.id === 'captions-fa'
+          ? {
+              ...track,
+              clips: track.clips.map((item) => (item.id === clip.id ? { ...item, style } : item)),
+            }
+          : track,
+      ),
+    };
+    const cues = captionCuesAt(styledComposition, documents, 2_100_000, {
+      [canonicalBindingKey(binding)]: {
+        binding,
+        value: {
+          kind: 'scalar',
+          curve: { keyframes: [{ timeUs: 0, value: 0.5, interpolation: 'hold' }] },
+        },
+      },
+    });
+    const node = layoutTemplatedCaptionNodes([cues[0]!], layout)[0] as TextNode;
+    expect(node.opacity).toBe(0.5);
+    expect(node.fontSizePx).toBeGreaterThan(80);
+    expect(node.transform.translateX).toBeGreaterThan(1080 / 2);
   });
 });

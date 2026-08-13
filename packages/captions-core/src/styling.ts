@@ -154,7 +154,29 @@ export function layoutTemplatedCaptionNodes(
   const nodes: TextNode[] = [];
   let bottomY = 0; // consumed height above the bottom safe line, across cues
   for (const [cueIndex, cue] of [...cues].reverse().entries()) {
-    const template = resolveCaptionTemplate(cue.document.styleRef, options.templates);
+    const baseTemplate = resolveCaptionTemplate(
+      cue.style?.templateId ?? cue.document.styleRef,
+      options.templates,
+    );
+    const clipStyle = cue.style;
+    const plateColor =
+      clipStyle === undefined
+        ? baseTemplate.plateColor
+        : clipStyle.plateOpacity > 0
+          ? withAlpha(
+              parseCaptionColor(clipStyle.plateColor) ?? baseTemplate.plateColor,
+              clipStyle.plateOpacity,
+            )
+          : undefined;
+    const template: CaptionTemplate = {
+      ...baseTemplate,
+      fontSizePct: baseTemplate.fontSizePct * (clipStyle?.fontSize ?? 1),
+      lineHeightFactor: baseTemplate.lineHeightFactor * (clipStyle?.lineHeight ?? 1),
+      textColor: parseCaptionColor(clipStyle?.textColor) ?? baseTemplate.textColor,
+      activeWordColor: parseCaptionColor(clipStyle?.highlightColor) ?? baseTemplate.activeWordColor,
+      align: clipStyle?.align ?? baseTemplate.align,
+      ...(plateColor === undefined ? {} : { plateColor }),
+    };
     const direction = resolveCaptionDirection(cue.document);
     const align =
       template.align === 'center'
@@ -191,6 +213,7 @@ export function layoutTemplatedCaptionNodes(
         : align === 'right'
           ? options.viewportWidth - safeX
           : options.viewportWidth / 2;
+    const positionedAnchorX = anchorX + (clipStyle?.positionX ?? 0) * options.viewportWidth;
     const lineHeightPx = fontSizePx * template.lineHeightFactor;
 
     const activeWord =
@@ -200,14 +223,24 @@ export function layoutTemplatedCaptionNodes(
     const activeIndex = activeWord === undefined ? -1 : cue.segment.wordIds.indexOf(activeWord.id);
 
     for (const [lineIndex, line] of [...lines].reverse().entries()) {
-      const lineY = options.viewportHeight - safeY - bottomY - (lineIndex + 1) * lineHeightPx;
+      const lineY =
+        options.viewportHeight -
+        safeY -
+        bottomY -
+        (lineIndex + 1) * lineHeightPx -
+        (clipStyle?.positionY ?? 0) * options.viewportHeight;
       if (lineY < safeY) break; // never escape the top safe boundary
       nodes.push({
         kind: 'text',
         id: `caption:${cue.clipId}:${cue.segment.id}:line${lines.length - 1 - lineIndex}`,
         zIndex: 10_000 + cueIndex * 10 + lineIndex,
-        opacity: 1,
-        transform: { translateX: anchorX, translateY: lineY, scaleX: 1, scaleY: 1 },
+        opacity: clipStyle?.opacity ?? 1,
+        transform: {
+          translateX: positionedAnchorX,
+          translateY: lineY,
+          scaleX: clipStyle?.scale ?? 1,
+          scaleY: clipStyle?.scale ?? 1,
+        },
         text: line.text,
         color: template.textColor,
         direction,
@@ -221,6 +254,24 @@ export function layoutTemplatedCaptionNodes(
     bottomY += lines.length * lineHeightPx + lineHeightPx * 0.25;
   }
   return nodes;
+}
+
+function parseCaptionColor(value: string | undefined): Rgba | undefined {
+  if (value === undefined) return undefined;
+  const match = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value.trim());
+  if (match === null) return undefined;
+  const hex = match[1]!;
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16),
+    a: hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) : 255,
+  };
+}
+
+function withAlpha(color: Rgba | undefined, opacity: number): Rgba | undefined {
+  if (color === undefined) return undefined;
+  return { ...color, a: Math.round(color.a * Math.max(0, Math.min(1, opacity))) };
 }
 
 function karaokeSpans(

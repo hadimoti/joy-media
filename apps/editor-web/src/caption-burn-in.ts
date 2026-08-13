@@ -30,7 +30,12 @@ export function captionBurnInNodes(project: JoyProjectV1, timeUs: number): reado
   if (!readCaptionBurnIn(project)) return [];
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) return [];
-  const cues = captionCuesAt(composition, project.captionDocuments, timeUs);
+  const cues = captionCuesAt(
+    composition,
+    project.captionDocuments,
+    timeUs,
+    project.propertyAnimations,
+  );
   return layoutTemplatedCaptionNodes(cues, {
     viewportWidth: composition.width,
     viewportHeight: composition.height,

@@ -272,6 +272,9 @@ importers:
 
   packages/captions-core:
     dependencies:
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../motion-core
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema

@@ -12,12 +12,19 @@
 
 import type {
   CaptionDocumentV1,
+  CaptionClipStyleV2,
   CaptionSegmentV1,
   CaptionWordV1,
   CompositionV1,
   TimeUs,
 } from '@joy-media/project-schema';
-import { rangeContainsUs } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  IDENTITY_CAPTION_CLIP_STYLE,
+  rangeContainsUs,
+  type NormalizedPropertyAnimationsV2,
+} from '@joy-media/project-schema';
+import { sampleAnimationValue } from '@joy-media/motion-core';
 import type { Rgba, RenderNode, TextNode } from '@joy-media/render-ir';
 
 export const PACKAGE_NAME = '@joy-media/captions-core' as const;
@@ -143,6 +150,7 @@ export interface CaptionCue {
   readonly segment: CaptionSegmentV1;
   /** Document-local time (clip-relative) that produced this cue. */
   readonly documentTimeUs: TimeUs;
+  readonly style?: CaptionClipStyleV2;
 }
 
 /**
@@ -156,6 +164,7 @@ export function captionCuesAt(
   composition: CompositionV1,
   captionDocuments: Readonly<Record<string, CaptionDocumentV1>>,
   timeUs: TimeUs,
+  animations?: NormalizedPropertyAnimationsV2,
 ): readonly CaptionCue[] {
   const cues: CaptionCue[] = [];
   const tracks = [...composition.tracks]
@@ -176,11 +185,93 @@ export function captionCuesAt(
           document,
           segment,
           documentTimeUs,
+          ...(clip.style === undefined && animations === undefined
+            ? {}
+            : {
+                style: resolveCaptionClipStyleAtTime(
+                  clip.id,
+                  clip.style,
+                  documentTimeUs,
+                  animations,
+                ),
+              }),
         });
       }
     }
   }
   return cues;
+}
+
+export function resolveCaptionClipStyleAtTime(
+  clipId: string,
+  style: CaptionClipStyleV2 | undefined,
+  timeUs: TimeUs,
+  animations?: NormalizedPropertyAnimationsV2,
+): CaptionClipStyleV2 {
+  const base = style ?? IDENTITY_CAPTION_CLIP_STYLE;
+  if (animations === undefined) return base;
+  const next = { ...base };
+  for (const propertyId of [
+    'positionX',
+    'positionY',
+    'scale',
+    'opacity',
+    'fontSize',
+    'tracking',
+    'lineHeight',
+    'plateOpacity',
+  ] as const) {
+    const animation =
+      animations[
+        canonicalBindingKey({
+          ownerKind: 'caption-clip',
+          ownerId: clipId,
+          propertyId,
+          timeDomain: 'caption-clip-local',
+        })
+      ];
+    if (animation?.value.kind !== 'scalar') continue;
+    try {
+      const value = sampleAnimationValue(animation.value, timeUs);
+      if (typeof value === 'number' && Number.isFinite(value)) next[propertyId] = value;
+    } catch {
+      // Invalid persisted animation data is ignored; static style remains safe.
+    }
+  }
+  for (const propertyId of [
+    'textColor',
+    'plateColor',
+    'highlightColor',
+    'align',
+    'templateId',
+  ] as const) {
+    const animation =
+      animations[
+        canonicalBindingKey({
+          ownerKind: 'caption-clip',
+          ownerId: clipId,
+          propertyId,
+          timeDomain: 'caption-clip-local',
+        })
+      ];
+    if (animation?.value.kind !== 'string') continue;
+    try {
+      const value = sampleAnimationValue(animation.value, timeUs);
+      if (typeof value === 'string') {
+        if (propertyId === 'align' && (value === 'start' || value === 'center' || value === 'end'))
+          next.align = value;
+        else if (value.length > 0) {
+          if (propertyId === 'textColor') next.textColor = value;
+          else if (propertyId === 'plateColor') next.plateColor = value;
+          else if (propertyId === 'highlightColor') next.highlightColor = value;
+          else if (propertyId === 'templateId') next.templateId = value;
+        }
+      }
+    } catch {
+      // Invalid persisted animation data is ignored; static style remains safe.
+    }
+  }
+  return next;
 }
 
 export interface CaptionLayoutOptions {
