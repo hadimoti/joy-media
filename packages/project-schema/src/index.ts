@@ -89,19 +89,29 @@ export type {
   ColorCurveChannel,
   ColorCurvePoint,
   ColorCurves,
+  HslBandId,
   HslBand,
   ColorLutReference,
   OutputSafety,
   ColorGradeV2,
   ColorGrade,
+  ColorPropertyScopeV2,
+  ColorPropertyValueKindV2,
+  ColorPropertyDescriptorV2,
 } from './color.js';
 export {
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_WHEEL,
   IDENTITY_COLOR_WHEELS,
   IDENTITY_COLOR_CURVES,
+  HSL_BAND_IDS,
+  IDENTITY_HSL_BANDS,
+  COLOR_PROPERTY_DESCRIPTORS,
   createIdentityColorGrade,
   isColorGradeV2,
+  findColorPropertyDescriptor,
+  colorPropertyBinding,
+  assertColorPropertyDescriptorCoverage,
 } from './color.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {

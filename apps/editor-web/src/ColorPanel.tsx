@@ -4,6 +4,7 @@ import {
   createIdentityColorGrade,
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_CURVES,
+  IDENTITY_HSL_BANDS,
   IDENTITY_COLOR_WHEELS,
 } from '@joy-media/project-schema';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
@@ -26,6 +27,7 @@ const ADJUST_RANGES = [
   ['tint', 'Tint', -1, 1, 0],
   ['exposure', 'Exposure', -4, 4, 0],
   ['contrast', 'Contrast', -1, 1, 0],
+  ['pivot', 'Pivot', 0, 1, 0.5],
   ['highlights', 'Highlights', -1, 1, 0],
   ['shadows', 'Shadows', -1, 1, 0],
   ['whites', 'Whites', -1, 1, 0],
@@ -428,15 +430,7 @@ function HslSection({
   onChange: (next: ColorGradeV2) => void;
   onCommit: (next: ColorGradeV2) => void;
 }) {
-  const bands =
-    draft.hsl ??
-    Array.from({ length: 8 }, (_, index) => ({
-      hue: index * 45,
-      hueWidth: 35,
-      softness: 0.2,
-      saturation: 0,
-      luminance: 0,
-    }));
+  const bands = draft.hsl ?? IDENTITY_HSL_BANDS;
   const update = (
     index: number,
     key: 'hue' | 'hueWidth' | 'softness' | 'saturation' | 'luminance',
@@ -453,11 +447,11 @@ function HslSection({
     <section className="color-section">
       <h3>Hue bands</h3>
       {bands.map((band, index) => (
-        <div className="hsl-band" key={index}>
+        <div className="hsl-band" key={band.id ?? index}>
           <span className="hsl-swatch" style={{ background: `hsl(${band.hue} 85% 55%)` }} />{' '}
-          <strong>{index + 1}</strong>
+          <strong>{band.id ?? index + 1}</strong>
           <input
-            aria-label={`Hue band ${index + 1} saturation`}
+            aria-label={`${band.id ?? `Hue band ${index + 1}`} saturation`}
             type="range"
             min={-1}
             max={1}

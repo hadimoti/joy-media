@@ -1,4 +1,5 @@
 import type { ColorGradeV1 } from './v1.js';
+import type { PropertyBindingV2 } from './property-animation.js';
 
 /**
  * Versioned SDR color model shared by the editor, Render IR, and export.
@@ -43,7 +44,26 @@ export interface ColorCurvePoint {
 
 export type ColorCurves = Readonly<Record<ColorCurveChannel, readonly ColorCurvePoint[]>>;
 
+export const HSL_BAND_IDS = [
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'cyan',
+  'blue',
+  'purple',
+  'magenta',
+] as const;
+
+/** Stable semantic owner ids for the eight HSL bands. */
+export type HslBandId = (typeof HSL_BAND_IDS)[number];
+
 export interface HslBand {
+  /**
+   * Optional for legacy V2 projects. New grades always carry a semantic id so
+   * a band can be addressed without relying on its array index.
+   */
+  readonly id?: HslBandId;
   readonly hue: number;
   readonly hueWidth: number;
   readonly softness: number;
@@ -78,6 +98,21 @@ export interface ColorGradeV2 {
   readonly hsl?: readonly HslBand[];
   readonly lut?: ColorLutReference;
   readonly outputSafety?: OutputSafety;
+}
+
+export type ColorPropertyScopeV2 = 'output' | 'clip';
+export type ColorPropertyValueKindV2 = 'scalar' | 'hue' | 'color' | 'curve-snapshot' | 'string';
+
+/**
+ * Classification for every creative WP-33 control. Monitor diagnostics and
+ * layout preferences are intentionally absent: they are local UI state, not
+ * project animation targets.
+ */
+export interface ColorPropertyDescriptorV2 {
+  readonly id: string;
+  readonly label: string;
+  readonly valueKind: ColorPropertyValueKindV2;
+  readonly scopes: readonly ColorPropertyScopeV2[];
 }
 
 export type ColorGrade = ColorGradeV1 | ColorGradeV2;
@@ -124,6 +159,127 @@ export const IDENTITY_COLOR_CURVES: ColorCurves = Object.freeze({
   ]),
 });
 
+export const IDENTITY_HSL_BANDS: readonly HslBand[] = Object.freeze(
+  HSL_BAND_IDS.map((id, index) =>
+    Object.freeze({
+      id,
+      hue: index * 45,
+      hueWidth: 35,
+      softness: 0.2,
+      saturation: 0,
+      luminance: 0,
+    }),
+  ),
+);
+
+const COLOR_SCOPES: readonly ColorPropertyScopeV2[] = Object.freeze(['output', 'clip']);
+const ADJUSTMENT_DEFINITIONS = [
+  ['temperature', 'Temperature', 'scalar'],
+  ['tint', 'Tint', 'scalar'],
+  ['exposure', 'Exposure', 'scalar'],
+  ['contrast', 'Contrast', 'scalar'],
+  ['pivot', 'Pivot', 'scalar'],
+  ['highlights', 'Highlights', 'scalar'],
+  ['shadows', 'Shadows', 'scalar'],
+  ['whites', 'Whites', 'scalar'],
+  ['blacks', 'Blacks', 'scalar'],
+  ['saturation', 'Saturation', 'scalar'],
+  ['vibrance', 'Vibrance', 'scalar'],
+  ['hue', 'Hue', 'hue'],
+] as const;
+const ADJUST_DESCRIPTORS: readonly ColorPropertyDescriptorV2[] = ADJUSTMENT_DEFINITIONS.map(
+  ([id, label, valueKind]) => ({
+    id: `adjust.${id}`,
+    label,
+    valueKind,
+    scopes: COLOR_SCOPES,
+  }),
+);
+
+const WHEEL_DESCRIPTORS: readonly ColorPropertyDescriptorV2[] = (
+  ['lift', 'gamma', 'gain', 'offset'] as const
+).flatMap((wheel) => [
+  {
+    id: `wheels.${wheel}.color`,
+    label: `${wheel[0]!.toUpperCase()}${wheel.slice(1)} color`,
+    valueKind: 'color' as const,
+    scopes: COLOR_SCOPES,
+  },
+  {
+    id: `wheels.${wheel}.master`,
+    label: `${wheel[0]!.toUpperCase()}${wheel.slice(1)} master`,
+    valueKind: 'scalar' as const,
+    scopes: COLOR_SCOPES,
+  },
+]);
+
+const HSL_PROPERTY_DEFINITIONS = [
+  ['hue', 'Hue', 'hue'],
+  ['hueWidth', 'Range', 'hue'],
+  ['softness', 'Softness', 'scalar'],
+  ['saturation', 'Saturation', 'scalar'],
+  ['luminance', 'Luminance', 'scalar'],
+] as const;
+const HSL_DESCRIPTORS: readonly ColorPropertyDescriptorV2[] = HSL_BAND_IDS.flatMap((band) =>
+  HSL_PROPERTY_DEFINITIONS.map(([property, label, valueKind]) => ({
+    id: `hsl.${band}.${property}`,
+    label: `${band[0]!.toUpperCase()}${band.slice(1)} ${label}`,
+    valueKind,
+    scopes: COLOR_SCOPES,
+  })),
+);
+
+export const COLOR_PROPERTY_DESCRIPTORS: readonly ColorPropertyDescriptorV2[] = Object.freeze([
+  ...ADJUST_DESCRIPTORS,
+  ...WHEEL_DESCRIPTORS,
+  ...(['rgb', 'red', 'green', 'blue'] as const).map((channel) => ({
+    id: `curves.${channel}`,
+    label: `${channel.toUpperCase()} curve`,
+    valueKind: 'curve-snapshot' as const,
+    scopes: COLOR_SCOPES,
+  })),
+  ...HSL_DESCRIPTORS,
+  { id: 'lut.reference', label: 'Look or LUT', valueKind: 'string', scopes: COLOR_SCOPES },
+  { id: 'lut.intensity', label: 'LUT intensity', valueKind: 'scalar', scopes: COLOR_SCOPES },
+]);
+
+export function findColorPropertyDescriptor(id: string): ColorPropertyDescriptorV2 | undefined {
+  return COLOR_PROPERTY_DESCRIPTORS.find((descriptor) => descriptor.id === id);
+}
+
+/** Builds the stable universal animation binding for a Color control. */
+export function colorPropertyBinding(
+  scope: ColorPropertyScopeV2,
+  propertyId: string,
+  clipId?: string,
+): PropertyBindingV2 {
+  if (findColorPropertyDescriptor(propertyId) === undefined)
+    throw new RangeError(`unknown color property "${propertyId}"`);
+  if (scope === 'clip' && (clipId === undefined || clipId.trim().length === 0))
+    throw new RangeError('clip color bindings require a clip id');
+  return {
+    ownerKind: scope === 'output' ? 'color-output' : 'color-clip',
+    ownerId: scope === 'output' ? 'output' : clipId!,
+    propertyId,
+    timeDomain: scope === 'output' ? 'output' : 'clip-local',
+  };
+}
+
+/** Fails fast if a caller supplies a duplicate or incomplete descriptor list. */
+export function assertColorPropertyDescriptorCoverage(
+  descriptors: readonly ColorPropertyDescriptorV2[] = COLOR_PROPERTY_DESCRIPTORS,
+): void {
+  const ids = new Set<string>();
+  for (const descriptor of descriptors) {
+    if (ids.has(descriptor.id)) throw new RangeError(`duplicate color property "${descriptor.id}"`);
+    ids.add(descriptor.id);
+    if (descriptor.scopes.length === 0)
+      throw new RangeError(`color property "${descriptor.id}" has no target scope`);
+  }
+  for (const descriptor of COLOR_PROPERTY_DESCRIPTORS)
+    if (!ids.has(descriptor.id)) throw new RangeError(`missing color property "${descriptor.id}"`);
+}
+
 export function createIdentityColorGrade(): ColorGradeV2 {
   return {
     version: 2,
@@ -131,6 +287,7 @@ export function createIdentityColorGrade(): ColorGradeV2 {
     adjust: IDENTITY_COLOR_ADJUSTMENTS,
     wheels: IDENTITY_COLOR_WHEELS,
     curves: IDENTITY_COLOR_CURVES,
+    hsl: IDENTITY_HSL_BANDS,
     lut: { builtIn: 'none', intensity: 1 },
     outputSafety: { softClip: 0, legalRange: false },
   };
