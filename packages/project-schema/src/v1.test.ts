@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { migrateV0ToV1 } from './migration.js';
 import type { SpikeProject } from './model.js';
+import { canonicalBindingKey } from './property-animation.js';
 import { rational } from './time.js';
 import { validateJoyProjectV1 } from './v1.js';
 
@@ -485,16 +486,17 @@ describe('v1 project schema and migration harness', () => {
 
   it('accepts a representative valid scalar property animation (WP34-05)', () => {
     const base = migrateV0ToV1(v0Fixture()).project;
+    const binding = {
+      ownerKind: 'visual-object' as const,
+      ownerId: 'obj-1',
+      propertyId: 'x',
+      timeDomain: 'composition' as const,
+    };
     const project = {
       ...base,
       propertyAnimations: {
-        'anim-move': {
-          binding: {
-            ownerKind: 'visual-object',
-            ownerId: 'obj-1',
-            propertyId: 'x',
-            timeDomain: 'composition',
-          },
+        [canonicalBindingKey(binding)]: {
+          binding,
           value: {
             kind: 'scalar',
             curve: {
@@ -512,16 +514,17 @@ describe('v1 project schema and migration harness', () => {
 
   it('accepts a valid curve-snapshot property animation (WP34-05)', () => {
     const base = migrateV0ToV1(v0Fixture()).project;
+    const binding = {
+      ownerKind: 'motion-scene-layer' as const,
+      ownerId: 'layer-1',
+      propertyId: 'master',
+      timeDomain: 'scene-local' as const,
+    };
     const project = {
       ...base,
       propertyAnimations: {
-        'anim-master-snap': {
-          binding: {
-            ownerKind: 'motion-scene-layer',
-            ownerId: 'layer-1',
-            propertyId: 'master',
-            timeDomain: 'scene-local',
-          },
+        [canonicalBindingKey(binding)]: {
+          binding,
           value: {
             kind: 'curve-snapshot',
             samples: [
@@ -577,7 +580,7 @@ describe('v1 project schema and migration harness', () => {
       propertyAnimations: [],
     });
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      'PROJECT_SCHEMA_V1_PROPERTY_ANIMATIONS',
+      'PROJECT_SCHEMA_V1_PROPERTY_ANIMATION_VALUE',
     );
     expect(diagnostics.map((diagnostic) => diagnostic.message)).toContain(
       'propertyAnimations must be an object',
