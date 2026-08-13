@@ -6,7 +6,7 @@
  * property the Inspector offers instead of a bare "Select a clip" sentence.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
@@ -27,14 +27,16 @@ import {
   InterpHoldIcon,
   InterpLinearIcon,
   TrashIcon,
-  KeyframeNoneIcon,
-  KeyframeActiveIcon,
-  KeyframeBetweenIcon,
 } from './icons.js';
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { effectReorderTransaction } from './effect-reorder.js';
+import { PropertyRow } from './components/PropertyRow.js';
+import {
+  NumericPropertyControl,
+  useTransientPropertyControl,
+} from './components/PropertyControlAdapters.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
@@ -158,6 +160,111 @@ function formatDuration(durationUs: number | undefined): string {
   if (seconds < 60) return `${seconds.toFixed(2)}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
+}
+
+interface TransformPropertyRowProps {
+  readonly property: {
+    readonly key: Exclude<AnimatablePropertyV1, 'positionZ'>;
+    readonly label: string;
+    readonly min?: number | undefined;
+    readonly max?: number | undefined;
+  };
+  readonly target: VisualObjectV1;
+  readonly resolvedValue: number;
+  readonly timeUs: number;
+  readonly idle: boolean;
+  readonly hasExpression: boolean;
+  readonly diagnostic?: string | undefined;
+  readonly onSetStatic: InspectorPanelProps['onSetStatic'];
+  readonly onReplaceChannel: (
+    property: AnimatablePropertyV1,
+    curve: ReturnType<typeof setKeyframe> | undefined,
+  ) => void;
+  readonly onKeyframePayload: (value: number) => Parameters<typeof setKeyframe>[1];
+  readonly onToggleKeyframe: (property: AnimatablePropertyV1, value: number) => void;
+  readonly expressionButton: ReactNode;
+  readonly children?: ReactNode;
+}
+
+/**
+ * The first consumer of the universal property shell. Preview stays in this
+ * row until the gesture completes, then exactly one legacy-compatible visual
+ * object transaction is dispatched. WP34-17 supplies monitor/render preview.
+ */
+function TransformPropertyRow({
+  property,
+  target,
+  resolvedValue,
+  timeUs,
+  idle,
+  hasExpression,
+  diagnostic,
+  onSetStatic,
+  onReplaceChannel,
+  onKeyframePayload,
+  onToggleKeyframe,
+  expressionButton,
+  children,
+}: TransformPropertyRowProps) {
+  const curve = target.animations?.[property.key];
+  const animated = curve !== undefined;
+  const keyed = animated && hasKeyframeAtCurve(curve, timeUs);
+  const sourceValue = hasExpression
+    ? resolvedValue
+    : animated
+      ? sampleCurve(curve, timeUs)
+      : resolvedValue;
+  const [previewValue, setPreviewValue] = useState(sourceValue);
+
+  useEffect(() => {
+    setPreviewValue(sourceValue);
+  }, [sourceValue]);
+
+  const commitValue = (next: number) => {
+    if (animated) onReplaceChannel(property.key, setKeyframe(curve, onKeyframePayload(next)));
+    else onSetStatic(target.id, property.key, next);
+  };
+  const adapter = useTransientPropertyControl(
+    {
+      read: () => previewValue,
+      preview: setPreviewValue,
+      restore: setPreviewValue,
+      commit: ({ next }) => commitValue(next),
+    },
+    `Set ${property.label}`,
+  );
+  const disabled = idle || hasExpression;
+  const modified = Math.abs(previewValue - (DEFAULTS[property.key] ?? 0)) > 0.0005;
+
+  return (
+    <div className={`inspector-transform-property${modified ? ' modified' : ''}`}>
+      <PropertyRow
+        label={property.label}
+        controlId={`insp-${property.key}`}
+        value={property.key === 'opacity' ? formatPercent(previewValue) : round(previewValue)}
+        disabled={disabled}
+        error={diagnostic}
+        onReset={() => commitValue(DEFAULTS[property.key] ?? 0)}
+        onToggleAnimation={() => onToggleKeyframe(property.key, previewValue)}
+        animationState={keyed ? 'keyed' : animated ? 'between' : 'none'}
+      >
+        <div className="inspector-prop-row">
+          <NumericPropertyControl
+            id={`insp-${property.key}`}
+            value={round(previewValue)}
+            adapter={adapter}
+            ariaLabel={property.label}
+            min={property.min}
+            max={property.max}
+            step={property.key === 'opacity' ? 0.01 : 1}
+            disabled={disabled}
+          />
+          {expressionButton}
+        </div>
+      </PropertyRow>
+      {children}
+    </div>
+  );
 }
 
 export function InspectorPanel({
@@ -394,60 +501,24 @@ export function InspectorPanel({
               </div>
               {NUMERIC_PROPERTIES.map((property) => {
                 const key = property.key as Exclude<AnimatablePropertyV1, 'positionZ'>;
-                const curve = target.animations?.[key];
-                const animated = curve !== undefined;
-                const keyed = animated && hasKeyframeAtCurve(curve, timeUs);
                 const expressionSource = target.expressions?.[key];
                 const hasExpression = expressionSource !== undefined;
                 const channelDiagnostic = diagnostics.find((d) => d.property === key);
-                const value = hasExpression
-                  ? resolved[key]
-                  : animated
-                    ? sampleCurve(curve, timeUs)
-                    : resolved[key];
-                const modified = Math.abs(value - (DEFAULTS[key] ?? 0)) > 0.0005;
                 return (
-                  <div key={key} className={`inspector-prop${modified ? ' modified' : ''}`}>
-                    <div className="inspector-prop-label">
-                      <label htmlFor={`insp-${key}`}>{property.label}</label>
-                      {key === 'opacity' && (
-                        <span className="monitor-meta">{formatPercent(value)}</span>
-                      )}
-                    </div>
-                    <div className="inspector-prop-row">
-                      <button
-                        type="button"
-                        className={keyed ? 'kf kf-active' : animated ? 'kf kf-on' : 'kf'}
-                        aria-label={`${keyed ? 'Remove' : 'Add'} ${property.label} keyframe`}
-                        aria-pressed={keyed}
-                        disabled={idle || hasExpression}
-                        title={keyed ? 'Remove keyframe (playhead)' : 'Add keyframe'}
-                        onClick={() => toggleKeyframe(key, value)}
-                      >
-                        {keyed ? (
-                          <KeyframeActiveIcon />
-                        ) : animated ? (
-                          <KeyframeBetweenIcon />
-                        ) : (
-                          <KeyframeNoneIcon />
-                        )}
-                      </button>
-                      <input
-                        id={`insp-${key}`}
-                        type="number"
-                        min={property.min}
-                        max={property.max}
-                        step={key === 'opacity' ? 0.01 : 1}
-                        value={round(value)}
-                        disabled={idle || hasExpression}
-                        onChange={(event) => {
-                          const next = event.currentTarget.valueAsNumber;
-                          if (!Number.isFinite(next)) return;
-                          if (animated)
-                            replaceChannel(key, setKeyframe(curve, keyframePayload(next)));
-                          else onSetStatic(target.id, key, next);
-                        }}
-                      />
+                  <TransformPropertyRow
+                    key={key}
+                    property={{ key, label: property.label, min: property.min, max: property.max }}
+                    target={target}
+                    resolvedValue={resolved[key]}
+                    timeUs={timeUs}
+                    idle={idle}
+                    hasExpression={hasExpression}
+                    diagnostic={channelDiagnostic?.message}
+                    onSetStatic={onSetStatic}
+                    onReplaceChannel={replaceChannel}
+                    onKeyframePayload={keyframePayload}
+                    onToggleKeyframe={toggleKeyframe}
+                    expressionButton={
                       <button
                         type="button"
                         className={hasExpression ? 'fx fx-on' : 'fx'}
@@ -462,7 +533,8 @@ export function InspectorPanel({
                       >
                         ƒx
                       </button>
-                    </div>
+                    }
+                  >
                     {editingExpression === key && (
                       <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>
                         <input
@@ -491,7 +563,7 @@ export function InspectorPanel({
                         {channelDiagnostic.message}
                       </p>
                     )}
-                  </div>
+                  </TransformPropertyRow>
                 );
               })}
             </>
