@@ -29,7 +29,11 @@ import type {
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
-import { evaluateUniversalCameraTransform, sampleLegacyCurve } from '@joy-media/evaluator';
+import {
+  evaluateColorGradeAtTime,
+  evaluateUniversalCameraTransform,
+  sampleLegacyCurve,
+} from '@joy-media/evaluator';
 
 export interface ResolvedObject {
   readonly object: VisualObjectV1;
@@ -90,7 +94,17 @@ export function buildRenderFrameIRFromProject(
   return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
     ...options,
     ...(options.colorGrade === undefined && project.colorGrade !== undefined
-      ? { colorGrade: project.colorGrade }
+      ? {
+          colorGrade:
+            'version' in project.colorGrade && project.colorGrade.version === 2
+              ? evaluateColorGradeAtTime(
+                  project.colorGrade,
+                  project.propertyAnimations,
+                  { scope: 'output' },
+                  { compositionTimeUs: timeUs, outputTimeUs: timeUs },
+                )
+              : project.colorGrade,
+        }
       : {}),
   });
 }

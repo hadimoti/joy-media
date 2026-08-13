@@ -157,6 +157,53 @@ describe('buildRenderFrameIR', () => {
     expect(() => validateRenderFrameIR(frame)).not.toThrow();
   });
 
+  it('samples output color animation before publishing the shared render IR', () => {
+    const object = makeObject({ id: 'color-output', kind: 'shape', shape: 'rectangle' });
+    const binding = {
+      ownerKind: 'color-output' as const,
+      ownerId: 'output',
+      propertyId: 'adjust.exposure',
+      timeDomain: 'output' as const,
+    };
+    const project = {
+      visualObjects: { [object.id]: object },
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 100,
+          height: 100,
+          pixelAspectRatio: { numerator: 1, denominator: 1 },
+          frameRate: { numerator: 30, denominator: 1 },
+          durationUs: 1_000_000,
+          background: '#000000',
+          tracks: [],
+        },
+      },
+      colorGrade: {
+        version: 2,
+        enabled: true,
+        adjust: { exposure: 0 },
+      },
+      propertyAnimations: {
+        [canonicalBindingKey(binding)]: {
+          binding,
+          value: {
+            kind: 'scalar',
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: 0, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: 2, interpolation: 'linear' },
+              ],
+            },
+          },
+        },
+      },
+    } as unknown as JoyProjectV1;
+    const frame = buildRenderFrameIRFromProject(project, 'root', 500_000, 100, 100);
+    expect(frame.colorGrade?.adjust?.exposure).toBe(1);
+  });
+
   it('produces a valid RenderFrameIR from resolved objects', () => {
     const objects: ResolvedObject[] = [
       resolved(
