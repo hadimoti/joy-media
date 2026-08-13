@@ -51,7 +51,10 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
-import type { VisualObjectTransaction } from '@joy-media/property-system';
+import {
+  removeClipPropertyAnimations,
+  type VisualObjectTransaction,
+} from '@joy-media/property-system';
 import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
 import {
   buildRenderFrameIR,
@@ -458,9 +461,13 @@ function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | u
 }
 
 /** Timeline edits that create additional clips must retain their presentation state. */
-function derivedClipPresentationTarget(
-  transaction: CommandTransaction,
-): { readonly originalClipId: string; readonly derivedClipIds: readonly string[] } | undefined {
+function derivedClipPresentationTarget(transaction: CommandTransaction):
+  | {
+      readonly originalClipId: string;
+      readonly derivedClipIds: readonly string[];
+      readonly splitAtUs?: number;
+    }
+  | undefined {
   if (transaction.commands.length !== 1) return undefined;
   const [command] = transaction.commands;
   if (command === undefined) return undefined;
@@ -474,6 +481,7 @@ function derivedClipPresentationTarget(
       return {
         originalClipId: command.payload.clipId,
         derivedClipIds: [command.payload.newClipId],
+        splitAtUs: command.payload.atUs,
       };
     case 'timeline.duplicateClip':
       return {
@@ -483,6 +491,12 @@ function derivedClipPresentationTarget(
     default:
       return undefined;
   }
+}
+
+/** Any remove transaction orphaning a clip-owned property map gets a matching document update. */
+function removedClipPresentationTarget(transaction: CommandTransaction): string | undefined {
+  return transaction.commands.find((command) => command.type === 'timeline.removeClip')?.payload
+    .clipId;
 }
 
 /** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
@@ -1862,20 +1876,35 @@ function EditorWorkspace({
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       const presentationTarget = derivedClipPresentationTarget(transaction);
-      if (presentationTarget === undefined) {
-        session.dispatchTimeline(transaction);
-      } else {
+      const removedClipId = removedClipPresentationTarget(transaction);
+      if (presentationTarget !== undefined) {
+        const sourceClip = Object.values(session.timelineProject.compositions)
+          .flatMap((composition) => composition.tracks)
+          .flatMap((track) => track.clips)
+          .find((clip) => clip.id === presentationTarget.originalClipId);
+        const splitLocalUs =
+          presentationTarget.splitAtUs === undefined || sourceClip === undefined
+            ? undefined
+            : presentationTarget.splitAtUs - sourceClip.startUs;
         const presentation = buildDerivedClipPresentation(
           session.visualProject,
           audioState,
           presentationTarget.originalClipId,
           presentationTarget.derivedClipIds,
+          splitLocalUs === undefined ? {} : { splitLocalUs },
         );
         session.dispatchCompound(transaction.label, {
           timeline: transaction,
           document: presentation.project,
         });
         setAudioStateRaw(presentation.audio);
+      } else if (removedClipId !== undefined) {
+        session.dispatchCompound(transaction.label, {
+          timeline: transaction,
+          document: removeClipPropertyAnimations(session.visualProject, removedClipId),
+        });
+      } else {
+        session.dispatchTimeline(transaction);
       }
       resyncTimelineMedia();
       setRevision((revision) => revision + 1);

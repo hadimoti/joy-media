@@ -696,3 +696,15 @@ export {
   restoreLegacyPropertyAnimation,
   writeLegacyPropertyAnimation,
 } from './legacy-property-animation.js';
+export type {
+  PropertyAnimationOwner,
+  PropertyAnimationOwnerClone,
+} from './property-animation-lifecycle.js';
+export {
+  clipPropertyAnimationOwners,
+  clonePropertyAnimations,
+  duplicateClipPropertyAnimations,
+  removeClipPropertyAnimations,
+  removePropertyAnimations,
+  splitClipPropertyAnimations,
+} from './property-animation-lifecycle.js';

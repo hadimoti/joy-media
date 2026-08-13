@@ -5,6 +5,11 @@ import {
   type Track,
   type VideoClip,
 } from '@joy-media/project-schema';
+import {
+  duplicateClipPropertyAnimations,
+  removeClipPropertyAnimations,
+  splitClipPropertyAnimations,
+} from '@joy-media/property-system';
 import { withProjectAudio } from './audio-session.js';
 import type { SpeedRampPreset } from './InspectorPanel.js';
 import {
@@ -53,10 +58,26 @@ export function buildDerivedClipPresentation(
   audio: AudioState,
   originalClipId: string,
   derivedClipIds: readonly string[],
-  options: { readonly removeOriginal?: boolean } = {},
+  options: { readonly removeOriginal?: boolean; readonly splitLocalUs?: number } = {},
 ): SpeedRampPresentationResult {
-  const bindings = { ...readClipObjectMap(project) };
-  const objectId = resolveObjectIdForSelection(project, [originalClipId]);
+  let propertyProject = project;
+  for (const clipId of derivedClipIds) {
+    propertyProject =
+      options.splitLocalUs === undefined
+        ? duplicateClipPropertyAnimations(propertyProject, originalClipId, clipId)
+        : splitClipPropertyAnimations(
+            propertyProject,
+            originalClipId,
+            clipId,
+            options.splitLocalUs,
+          );
+  }
+  if (options.removeOriginal) {
+    propertyProject = removeClipPropertyAnimations(propertyProject, originalClipId);
+  }
+
+  const bindings = { ...readClipObjectMap(propertyProject) };
+  const objectId = resolveObjectIdForSelection(propertyProject, [originalClipId]);
   if (objectId !== undefined) {
     for (const clipId of derivedClipIds) bindings[clipId] = objectId;
   }
@@ -87,7 +108,7 @@ export function buildDerivedClipPresentation(
     effects: nextEffects,
   };
   return {
-    project: withProjectAudio(writeClipObjectMap(project, bindings), nextAudio),
+    project: withProjectAudio(writeClipObjectMap(propertyProject, bindings), nextAudio),
     audio: nextAudio,
   };
 }

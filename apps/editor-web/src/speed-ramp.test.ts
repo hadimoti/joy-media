@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySpikeProject, makeVideoClip, withClips } from '@joy-media/test-fixtures';
 import { applyTransaction } from '@joy-media/commands';
+import { canonicalBindingKey } from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import {
@@ -139,5 +140,56 @@ describe('buildSpeedRampTransaction', () => {
       'intro-freeze',
       'intro-right',
     ]);
+  });
+
+  it('copies clip properties for a duplicate and rebases them for a split', () => {
+    const binding = {
+      ownerKind: 'color-clip' as const,
+      ownerId: 'intro',
+      propertyId: 'adjust.exposure',
+      timeDomain: 'clip-local' as const,
+    };
+    const project = {
+      ...INITIAL_EDITOR_PROJECT,
+      propertyAnimations: {
+        [canonicalBindingKey(binding)]: {
+          binding,
+          value: {
+            kind: 'scalar' as const,
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: 0, interpolation: 'linear' as const },
+                { timeUs: 1_000_000, value: 2, interpolation: 'linear' as const },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const audio = { clips: {}, buses: [], effects: [] };
+
+    const duplicate = buildDerivedClipPresentation(project, audio, 'intro', ['intro-copy']);
+    expect(
+      duplicate.project.propertyAnimations?.[
+        canonicalBindingKey({ ...binding, ownerId: 'intro-copy' })
+      ]?.value,
+    ).toEqual(project.propertyAnimations[canonicalBindingKey(binding)]?.value);
+
+    const split = buildDerivedClipPresentation(project, audio, 'intro', ['intro-right'], {
+      splitLocalUs: 500_000,
+    });
+    expect(
+      split.project.propertyAnimations?.[
+        canonicalBindingKey({ ...binding, ownerId: 'intro-right' })
+      ]?.value,
+    ).toEqual({
+      kind: 'scalar',
+      curve: {
+        keyframes: [
+          { timeUs: 0, value: 1, interpolation: 'linear' },
+          { timeUs: 500_000, value: 2, interpolation: 'linear' },
+        ],
+      },
+    });
   });
 });
