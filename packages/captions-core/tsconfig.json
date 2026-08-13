@@ -2,5 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
-  "references": [{ "path": "../render-ir" }, { "path": "../project-schema" }]
+  "references": [
+    { "path": "../render-ir" },
+    { "path": "../project-schema" },
+    { "path": "../motion-core" }
+  ]
 }
