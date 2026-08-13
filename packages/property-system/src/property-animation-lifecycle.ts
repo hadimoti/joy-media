@@ -11,7 +11,6 @@ import {
 } from '@joy-media/project-schema';
 import {
   sampleAnimationValue,
-  sampleCurve,
   sampleCurveSnapshots,
   sampleDiscreteKeys,
 } from '@joy-media/motion-core';

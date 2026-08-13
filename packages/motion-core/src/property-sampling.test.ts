@@ -1,8 +1,4 @@
-import type {
-  AnimationCurveV1,
-  AnimationValueV2,
-  CurveSnapshotKeyV2,
-} from '@joy-media/project-schema';
+import type { AnimationCurveV1, CurveSnapshotKeyV2 } from '@joy-media/project-schema';
 import { describe, expect, it } from 'vitest';
 import {
   sampleAnimationValue,
