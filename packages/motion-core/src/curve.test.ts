@@ -37,6 +37,17 @@ describe('sampleCurve', () => {
   it('throws on an empty curve', () => {
     expect(() => sampleCurve({ keyframes: [] }, 0)).toThrow();
   });
+
+  it('selects the correct segment when the curve has many keys', () => {
+    const manyKeys: AnimationCurveV1 = {
+      keyframes: Array.from({ length: 101 }, (_, index) => ({
+        timeUs: index * 1_000,
+        value: index,
+        interpolation: 'linear' as const,
+      })),
+    };
+    expect(sampleCurve(manyKeys, 54_500)).toBeCloseTo(54.5, 6);
+  });
 });
 
 describe('setKeyframe / removeKeyframe', () => {

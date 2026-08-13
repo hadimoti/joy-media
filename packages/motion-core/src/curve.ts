@@ -25,12 +25,18 @@ export function sampleCurve(curve: AnimationCurveV1, timeUs: TimeUs): number {
   if (timeUs <= first.timeUs) return first.value;
   const last = keyframes[keyframes.length - 1]!;
   if (timeUs >= last.timeUs) return last.value;
-  for (let i = 0; i < keyframes.length - 1; i += 1) {
-    const left = keyframes[i]!;
-    const right = keyframes[i + 1]!;
-    if (timeUs < right.timeUs) return interpolateSegment(left, right, timeUs);
+
+  // Find the segment whose left keyframe is the greatest keyframe at or before
+  // the sample time. Curves can grow large in a long composition, so keep the
+  // evaluator logarithmic instead of walking every preceding segment.
+  let low = 0;
+  let high = keyframes.length - 1;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (keyframes[middle]!.timeUs <= timeUs) low = middle;
+    else high = middle;
   }
-  return last.value;
+  return interpolateSegment(keyframes[low]!, keyframes[high]!, timeUs);
 }
 
 /** True when a keyframe exists exactly at `timeUs`. */

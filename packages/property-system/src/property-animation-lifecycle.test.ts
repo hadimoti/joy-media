@@ -11,6 +11,7 @@ import {
   removeClipPropertyAnimations,
   removePropertyAnimations,
   splitClipPropertyAnimations,
+  benchmarkScalarChannelSampling,
 } from './property-animation-lifecycle.js';
 
 const clipBinding = {
@@ -111,5 +112,18 @@ describe('property animation ownership lifecycle', () => {
     ]);
     expect(removed.propertyAnimations?.[canonicalBindingKey(effectBinding)]).toBeUndefined();
     expect(removed.propertyAnimations?.[canonicalBindingKey(copyBinding)]).toBeDefined();
+  });
+
+  it('keeps 500 scalar channels below the WP34 p95 sampling budget', () => {
+    const result = benchmarkScalarChannelSampling();
+    expect(result.channelCount).toBe(500);
+    expect(result.iterations).toBe(25);
+    expect(Number.isFinite(result.checksum)).toBe(true);
+    expect(result.p95Ms).toBeLessThan(5);
+  });
+
+  it('rejects invalid benchmark sizes', () => {
+    expect(() => benchmarkScalarChannelSampling(0, 1)).toThrow('channelCount');
+    expect(() => benchmarkScalarChannelSampling(1, 0)).toThrow('iterations');
   });
 });

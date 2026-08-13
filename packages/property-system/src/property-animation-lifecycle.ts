@@ -27,6 +27,46 @@ export interface PropertyAnimationOwnerClone {
   readonly rebaseFromUs?: number;
 }
 
+export interface ScalarSamplingBenchmark {
+  readonly channelCount: number;
+  readonly iterations: number;
+  readonly p95Ms: number;
+  readonly maxMs: number;
+  readonly checksum: number;
+}
+
+/** Measures the evaluator shape used by the 500-active-scalar-channel budget. */
+export function benchmarkScalarChannelSampling(
+  channelCount = 500,
+  iterations = 25,
+): ScalarSamplingBenchmark {
+  assertPositiveInteger(channelCount, 'channelCount');
+  assertPositiveInteger(iterations, 'iterations');
+  const values = Array.from({ length: channelCount }, (_, channel) => ({
+    kind: 'scalar' as const,
+    curve: scalarCurve(channel),
+  }));
+  const sampleTimeUs = 1_375_000;
+  for (let warmup = 0; warmup < 5; warmup += 1) sampleValues(values, sampleTimeUs);
+
+  const durations: number[] = [];
+  let checksum = 0;
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const start = performance.now();
+    checksum += sampleValues(values, sampleTimeUs);
+    durations.push(performance.now() - start);
+  }
+  durations.sort((left, right) => left - right);
+  const p95Index = Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1);
+  return {
+    channelCount,
+    iterations,
+    p95Ms: durations[p95Index]!,
+    maxMs: durations[durations.length - 1]!,
+    checksum,
+  };
+}
+
 const CLIP_OWNER_KINDS = ['clip', 'color-clip', 'audio-clip', 'caption-clip'] as const;
 
 /** Owner references for every property family whose lifetime is one timeline clip. */
@@ -218,5 +258,31 @@ function ownerKey(owner: PropertyAnimationOwner): string {
 function assertTime(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${label} must be a non-negative safe integer`);
+  }
+}
+
+function sampleValues(
+  values: readonly { readonly kind: 'scalar'; readonly curve: AnimationCurveV1 }[],
+  timeUs: number,
+): number {
+  let checksum = 0;
+  for (const value of values) checksum += Number(sampleAnimationValue(value, timeUs));
+  return checksum;
+}
+
+function scalarCurve(channel: number): AnimationCurveV1 {
+  return {
+    keyframes: [
+      { timeUs: 0, value: channel, interpolation: 'linear' },
+      { timeUs: 1_000_000, value: channel + 1, interpolation: 'linear' },
+      { timeUs: 2_000_000, value: channel - 1, interpolation: 'linear' },
+      { timeUs: 3_000_000, value: channel + 2, interpolation: 'linear' },
+    ],
+  };
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${label} must be a positive safe integer`);
   }
 }

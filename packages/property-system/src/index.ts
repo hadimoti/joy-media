@@ -713,4 +713,6 @@ export {
   removeClipPropertyAnimations,
   removePropertyAnimations,
   splitClipPropertyAnimations,
+  benchmarkScalarChannelSampling,
 } from './property-animation-lifecycle.js';
+export type { ScalarSamplingBenchmark } from './property-animation-lifecycle.js';
