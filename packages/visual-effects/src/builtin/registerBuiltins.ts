@@ -764,6 +764,11 @@ const ALL_DESCRIPTORS: readonly EffectDescriptor[] = [
   ...CREATIVE_PIXEL_DESCRIPTORS,
 ];
 
+/** The immutable first-party catalog, shared by registry-coverage tests and tooling. */
+export function listBuiltinEffects(): readonly EffectDescriptor[] {
+  return ALL_DESCRIPTORS;
+}
+
 export function registerBuiltins(): void {
   for (const desc of ALL_DESCRIPTORS) {
     registerEffect(desc);

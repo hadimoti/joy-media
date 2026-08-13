@@ -30,7 +30,17 @@ export {
 } from './factories/pixi/BrightnessContrastFilter.js';
 export type { BrightnessContrastParams } from './factories/pixi/BrightnessContrastFilter.js';
 
-export { registerBuiltins } from './builtin/metadata.js';
+export { listBuiltinEffects, registerBuiltins } from './builtin/metadata.js';
+
+export type {
+  EffectAnimationClassification,
+  EffectAnimationDescriptorEntry,
+  EffectAnimationValueKind,
+} from './effect-animation.js';
+export {
+  assertEffectAnimationDescriptorCoverage,
+  buildEffectAnimationDescriptorRegistry,
+} from './effect-animation.js';
 
 export { BUILTIN_PRESETS, findPreset, listPresets } from './presets/types.js';
 // `isolatedModules` requires types to leave through a type-only re-export.

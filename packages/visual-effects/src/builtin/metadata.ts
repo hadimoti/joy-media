@@ -1,1 +1,5 @@
-export { brightnessContrastDescriptor, registerBuiltins } from './registerBuiltins.js';
+export {
+  brightnessContrastDescriptor,
+  listBuiltinEffects,
+  registerBuiltins,
+} from './registerBuiltins.js';
