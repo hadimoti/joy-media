@@ -4021,6 +4021,24 @@ function EditorWorkspace({
       if (selectedTimelineVideo === undefined) return;
       const { composition, track, clip } = selectedTimelineVideo;
       try {
+        if (Object.hasOwn(change, 'timeRemap')) {
+          context.dispatchTimeline({
+            label,
+            commands: [
+              {
+                type: 'timeline.setTimeRemap',
+                payload: {
+                  compositionId: composition.id,
+                  trackId: track.id,
+                  clipId: clip.id,
+                  ...(change.timeRemap === undefined ? {} : { timeRemap: change.timeRemap }),
+                },
+              },
+            ],
+          });
+          context.showToast(label, 'success');
+          return;
+        }
         if (Object.hasOwn(change, 'ramp')) {
           if (change.ramp === undefined) {
             context.showToast('Undo the ramp to restore the original constant-speed clip.', 'info');
@@ -4137,6 +4155,9 @@ function EditorWorkspace({
                     selectedTimelineVideo.clip.reversed !== true &&
                     normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate) * 0.75 >= 0.1 &&
                     normalizePlaybackRate(selectedTimelineVideo.clip.playbackRate) * 2 <= 8,
+                  timeRemap: selectedTimelineVideo.clip.timeRemap,
+                  durationUs: selectedTimelineVideo.clip.durationUs,
+                  sourceInUs: selectedTimelineVideo.clip.sourceInUs,
                 },
                 onSpeedChange: changeSelectedClipSpeed,
               })}

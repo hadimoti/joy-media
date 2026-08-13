@@ -58,6 +58,7 @@ describe('applyCommand', () => {
       'timeline.restoreTrackClips',
       'timeline.setClipRate',
       'timeline.setCompositionDimensions',
+      'timeline.setTimeRemap',
       'timeline.splitClip',
       'timeline.toggleClipReverse',
       'timeline.trimClipEnd',
@@ -382,6 +383,30 @@ describe('applyCommand', () => {
     const back = restored.compositions['root']!.tracks[0]!.clips[0]!;
     expect(back.durationUs).toBe(2 * SECOND_US);
     expect(back.kind === 'video' && back.playbackRate === undefined).toBe(true);
+  });
+
+  it('sets a monotonic time remap and restores the legacy mapping on undo', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US, { playbackRate: 2, reversed: true }),
+    ]);
+    const timeRemap = {
+      version: 2 as const,
+      direction: 'forward' as const,
+      keyframes: [
+        { timeUs: 0, sourceTimeUs: 3 * SECOND_US, interpolation: 'linear' as const },
+        { timeUs: SECOND_US, sourceTimeUs: 4 * SECOND_US, interpolation: 'linear' as const },
+        { timeUs: 2 * SECOND_US, sourceTimeUs: 6 * SECOND_US, interpolation: 'linear' as const },
+      ],
+    };
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setTimeRemap',
+      payload: { ...TARGET, clipId: 'clip-a', timeRemap },
+    });
+    const clip = next.compositions.root!.tracks[0]!.clips[0]!;
+    expect(clip).toMatchObject({ kind: 'video', timeRemap });
+    expect((clip as Extract<typeof clip, { kind: 'video' }>).playbackRate).toBe(2);
+    expect((clip as Extract<typeof clip, { kind: 'video' }>).reversed).toBe(true);
+    expect(applyCommand(next, inverse).project).toEqual(project);
   });
 
   it('freezes at playhead, ripples the right half, and restores on undo', () => {

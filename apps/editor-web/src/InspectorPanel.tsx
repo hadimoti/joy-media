@@ -13,6 +13,7 @@ import {
   type AnimatablePropertyV1,
   type JoyProjectV1,
   type PropertyBindingV2,
+  type TimeRemapV2,
   type VisualObjectV1,
 } from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
@@ -72,6 +73,9 @@ export interface InspectorClipSpeed {
   readonly supportsRamps?: boolean | undefined;
   /** Omit to use a constant rate. */
   readonly ramp?: SpeedRampPreset | undefined;
+  readonly timeRemap?: TimeRemapV2 | undefined;
+  readonly durationUs?: number | undefined;
+  readonly sourceInUs?: number | undefined;
 }
 
 /** A small, controller-facing change request emitted by the Speed tab. */
@@ -80,6 +84,7 @@ export interface InspectorSpeedChange {
   readonly rate?: number | undefined;
   /** Apply the selected source-continuous three-segment ramp. */
   readonly ramp?: SpeedRampPreset | undefined;
+  readonly timeRemap?: TimeRemapV2 | undefined;
 }
 
 export const SPEED_RATE_PRESETS = [0.25, 0.5, 1, 1.25, 1.5, 2] as const;
@@ -1163,6 +1168,14 @@ export function SpeedSection({
   const supportsReverse = speed.supportsReverse === true;
   const supportsRamps = speed.supportsRamps === true;
   const rate = frozen ? 0 : (validInspectorSpeedRate(speed.rate, supportsReverse) ?? 1);
+  const remapDurationUs = Math.max(1, speed.durationUs ?? 1_000_000);
+  const remapStartUs = speed.timeRemap?.keyframes[0]?.sourceTimeUs ?? speed.sourceInUs ?? 0;
+  const remapEndUs =
+    speed.timeRemap?.keyframes.at(-1)?.sourceTimeUs ??
+    remapStartUs + Math.round(remapDurationUs * rate);
+  const [draftRemapStartUs, setDraftRemapStartUs] = useState(String(remapStartUs));
+  const [draftRemapEndUs, setDraftRemapEndUs] = useState(String(remapEndUs));
+  const [remapError, setRemapError] = useState<string | undefined>();
   const rateInputMin = supportsReverse ? -MAX_INSPECTOR_SPEED_RATE : MIN_INSPECTOR_SPEED_RATE;
   const rateInputMax = MAX_INSPECTOR_SPEED_RATE;
   const rateControlId = `insp-speed-rate-${clipId}`;
@@ -1174,7 +1187,10 @@ export function SpeedSection({
   useEffect(() => {
     setDraftRate(String(rate));
     setRateError(undefined);
-  }, [clipId, rate]);
+    setDraftRemapStartUs(String(remapStartUs));
+    setDraftRemapEndUs(String(remapEndUs));
+    setRemapError(undefined);
+  }, [clipId, rate, remapStartUs, remapEndUs]);
 
   const requestRate = (next: number) => {
     const valid = validInspectorSpeedRate(next, supportsReverse);
@@ -1206,6 +1222,29 @@ export function SpeedSection({
       SPEED_RAMP_PRESETS.find((preset) => preset.id === ramp)?.label ?? ramp
     }`;
     onChange?.({ ramp }, label);
+  };
+
+  const requestTimeRemap = () => {
+    const start = Number(draftRemapStartUs);
+    const end = Number(draftRemapEndUs);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < 0) {
+      setRemapError('Source times must be non-negative whole microseconds.');
+      return;
+    }
+    setRemapError(undefined);
+    onChange?.(
+      {
+        timeRemap: {
+          version: 2,
+          direction: end >= start ? 'forward' : 'reverse',
+          keyframes: [
+            { timeUs: 0, sourceTimeUs: start, interpolation: 'linear' },
+            { timeUs: remapDurationUs, sourceTimeUs: end, interpolation: 'linear' },
+          ],
+        },
+      },
+      `Remap source time for ${clipId}`,
+    );
   };
 
   return (
@@ -1325,6 +1364,62 @@ export function SpeedSection({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="inspector-speed-control" aria-label="Time remap">
+            <span className="inspector-speed-label">Time remap</span>
+            <div className="inspector-prop-row">
+              <label htmlFor={`insp-remap-start-${clipId}`}>Start source µs</label>
+              <input
+                id={`insp-remap-start-${clipId}`}
+                type="number"
+                min={0}
+                step={1}
+                value={draftRemapStartUs}
+                disabled={!canChange}
+                onChange={(event) => setDraftRemapStartUs(event.currentTarget.value)}
+              />
+              <label htmlFor={`insp-remap-end-${clipId}`}>End source µs</label>
+              <input
+                id={`insp-remap-end-${clipId}`}
+                type="number"
+                min={0}
+                step={1}
+                value={draftRemapEndUs}
+                disabled={!canChange}
+                onChange={(event) => setDraftRemapEndUs(event.currentTarget.value)}
+              />
+              <button
+                type="button"
+                className="icon-button icon-button-labeled inspector-speed-apply"
+                disabled={!canChange}
+                onClick={requestTimeRemap}
+              >
+                {speed.timeRemap === undefined ? 'Enable' : 'Apply'}
+              </button>
+              {speed.timeRemap !== undefined && (
+                <button
+                  type="button"
+                  className="icon-button icon-button-labeled inspector-speed-apply"
+                  disabled={!canChange}
+                  onClick={() =>
+                    onChange?.({ timeRemap: undefined }, `Clear time remap for ${clipId}`)
+                  }
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {remapError !== undefined ? (
+              <p className="inspector-speed-support-note inspector-speed-error" role="alert">
+                {remapError}
+              </p>
+            ) : (
+              <p className="inspector-speed-support-note">
+                Two bounded endpoints define a monotonic source-time curve; reverse remaps are
+                allowed.
+              </p>
+            )}
           </div>
 
           <div className="inspector-speed-control">

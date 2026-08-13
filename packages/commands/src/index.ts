@@ -23,6 +23,7 @@ export type {
   SetClipRatePayload,
   FreezeFramePayload,
   ToggleClipReversePayload,
+  SetTimeRemapPayload,
   CreateCompoundPayload,
   RestoreCompoundPayload,
   RestoreTrackClipsPayload,

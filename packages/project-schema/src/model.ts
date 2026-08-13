@@ -71,14 +71,14 @@ export function isValidPlaybackRate(rate: number): boolean {
   return rate >= MIN_PLAYBACK_RATE && rate <= MAX_PLAYBACK_RATE;
 }
 
-export interface TimeRemapKeyframe {
+export type TimeRemapKeyframe = {
   readonly timeUs: TimeUs;
   readonly sourceTimeUs: TimeUs;
   readonly interpolation: 'hold' | 'linear';
 }
 
 /** Explicit monotonic output-local to absolute source-time mapping. */
-export interface TimeRemapV2 {
+export type TimeRemapV2 = {
   readonly version: 2;
   readonly direction: 'forward' | 'reverse';
   readonly keyframes: readonly TimeRemapKeyframe[];

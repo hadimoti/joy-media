@@ -19,6 +19,7 @@ import type {
   TimeUs,
   Track,
   TrackId,
+  TimeRemapV2,
   VideoClip,
 } from '@joy-media/project-schema';
 import {
@@ -27,6 +28,7 @@ import {
   normalizePlaybackRate,
   rangeEndUs,
   validateSpikeProject,
+  validateTimeRemap,
 } from '@joy-media/project-schema';
 
 export class CommandError extends Error {
@@ -101,6 +103,11 @@ export interface FreezeFramePayload extends TrackTarget {
 export interface ToggleClipReversePayload extends TrackTarget {
   readonly clipId: string;
 }
+export interface SetTimeRemapPayload extends TrackTarget {
+  readonly clipId: string;
+  /** Omit to restore the legacy playback-rate mapping. */
+  readonly timeRemap?: TimeRemapV2;
+}
 /**
  * Turn a contiguous run of clips on one track into a nested composition clip.
  * IDs are supplied by the caller so the command can be persisted and replayed
@@ -148,6 +155,7 @@ export type SpikeCommand =
   | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
   | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
   | { readonly type: 'timeline.toggleClipReverse'; readonly payload: ToggleClipReversePayload }
+  | { readonly type: 'timeline.setTimeRemap'; readonly payload: SetTimeRemapPayload }
   | { readonly type: 'timeline.createCompound'; readonly payload: CreateCompoundPayload }
   | { readonly type: 'timeline.restoreCompound'; readonly payload: RestoreCompoundPayload }
   | { readonly type: 'timeline.restoreTrackClips'; readonly payload: RestoreTrackClipsPayload }
@@ -181,6 +189,9 @@ export const COMMAND_REGISTRY: Readonly<
   },
   'timeline.toggleClipReverse': {
     description: 'Reverse or restore a video clip while preserving its source window.',
+  },
+  'timeline.setTimeRemap': {
+    description: 'Set or clear a validated monotonic clip-local source-time remap.',
   },
   'timeline.createCompound': {
     description: 'Merge a contiguous run of clips into an editable nested composition.',
@@ -242,6 +253,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyFreezeFrame(project, command.payload);
     case 'timeline.toggleClipReverse':
       return applyToggleClipReverse(project, command.payload);
+    case 'timeline.setTimeRemap':
+      return applySetTimeRemap(project, command.payload);
     case 'timeline.createCompound':
       return applyCreateCompound(project, command.payload);
     case 'timeline.restoreCompound':
@@ -762,6 +775,47 @@ function applyFreezeFrame(project: SpikeProject, payload: FreezeFramePayload): A
  * to the opposite end of the existing source window. The `-1` is the same
  * end-exclusive boundary convention used by preview sampling.
  */
+function applySetTimeRemap(project: SpikeProject, payload: SetTimeRemapPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (clip.kind !== 'video') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `setTimeRemap: only video clips support source-time remapping (got "${clip.kind}")`,
+    );
+  }
+  if (payload.timeRemap !== undefined) {
+    const errors = validateTimeRemap(payload.timeRemap, clip.durationUs);
+    if (errors.length > 0) {
+      throw new CommandError('COMMAND_VALIDATION_RANGE', `setTimeRemap: ${errors[0]}`);
+    }
+  }
+  const previous = clip.timeRemap;
+  const updated: VideoClip =
+    payload.timeRemap === undefined
+      ? (() => {
+          const restored = { ...clip };
+          Reflect.deleteProperty(restored, 'timeRemap');
+          return restored;
+        })()
+      : { ...clip, timeRemap: payload.timeRemap };
+  return {
+    project: withTrackClips(project, payload, [
+      ...track.clips.filter((item) => item.id !== clip.id),
+      updated,
+    ]),
+    inverse: {
+      type: 'timeline.setTimeRemap',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clipId: clip.id,
+        ...(previous === undefined ? {} : { timeRemap: previous }),
+      },
+    },
+  };
+}
+
 function applyToggleClipReverse(
   project: SpikeProject,
   payload: ToggleClipReversePayload,
