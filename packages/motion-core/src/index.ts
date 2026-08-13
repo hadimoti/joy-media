@@ -44,6 +44,15 @@ export {
 
 export { sampleSpatialPath } from './spatial.js';
 
+export type { SampledAnimationValueV2 } from './property-sampling.js';
+export {
+  sampleAnimationValue,
+  sampleChannels,
+  sampleWrappedCurve,
+  sampleDiscreteKeys,
+  sampleCurveSnapshots,
+} from './property-sampling.js';
+
 export type { ObjectAnimations } from './transform.js';
 export { isAnimated, resolveAnimatedTransform, resolveObjectTransform } from './transform.js';
 
