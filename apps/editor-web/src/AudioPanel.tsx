@@ -700,6 +700,56 @@ export function AudioPanel({
               <span className="value">{master.gain.toFixed(2)}</span>
             </div>
           </PropertyRow>
+          <PropertyRow
+            label="Master pan"
+            value={master.pan.toFixed(2)}
+            {...keyframe(audioBusPropertyBinding(master.id, 'pan'), master.pan, 'Master pan')}
+          >
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Master pan" aria-hidden="true">
+                <PanIcon />
+              </span>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={master.pan}
+                aria-label="Master pan"
+                title="Master pan"
+                onChange={(event) =>
+                  dispatch(
+                    {
+                      type: 'audioBus.setPan',
+                      payload: { busId: master.id, pan: event.currentTarget.valueAsNumber },
+                    },
+                    `Master pan ${event.currentTarget.valueAsNumber.toFixed(2)}`,
+                  )
+                }
+              />
+              <span className="value">{master.pan.toFixed(2)}</span>
+            </div>
+          </PropertyRow>
+          <PropertyRow
+            label="Master mute"
+            value={master.mute ? 'On' : 'Off'}
+            {...keyframe(audioBusPropertyBinding(master.id, 'mute'), master.mute, 'Master mute')}
+          >
+            <button
+              type="button"
+              className="icon-button icon-button-labeled"
+              aria-pressed={master.mute}
+              aria-label="Mute master bus"
+              onClick={() =>
+                dispatch(
+                  { type: 'audioBus.setMute', payload: { busId: master.id, mute: !master.mute } },
+                  `Mute master bus`,
+                )
+              }
+            >
+              {master.mute ? 'Muted' : 'Live'}
+            </button>
+          </PropertyRow>
         </div>
       )}
       {tab === 'mix' &&
@@ -813,6 +863,28 @@ export function AudioPanel({
                   />
                   <span className="value">{clip.pan.toFixed(2)}</span>
                 </div>
+              </PropertyRow>
+              <PropertyRow
+                label="Mute"
+                value={clip.mute ? 'On' : 'Off'}
+                disabled={noClips}
+                {...keyframe(audioClipPropertyBinding(clipId, 'mute'), clip.mute, 'Clip mute')}
+              >
+                <button
+                  type="button"
+                  className="icon-button icon-button-labeled"
+                  aria-pressed={clip.mute}
+                  aria-label={`Mute ${clipId}`}
+                  disabled={noClips}
+                  onClick={() =>
+                    dispatch(
+                      { type: 'audioClip.setMute', payload: { clipId, mute: !clip.mute } },
+                      `Mute ${clipId}`,
+                    )
+                  }
+                >
+                  {clip.mute ? 'Muted' : 'Live'}
+                </button>
               </PropertyRow>
               <div className="control-row">
                 <span className="icon-tool" data-guide="Fade in" aria-hidden="true">

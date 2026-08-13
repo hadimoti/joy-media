@@ -59,6 +59,14 @@ export type AudioCommand =
       readonly payload: { readonly busId: string; readonly gain: number };
     }
   | {
+      readonly type: 'audioBus.setPan';
+      readonly payload: { readonly busId: string; readonly pan: number };
+    }
+  | {
+      readonly type: 'audioBus.setMute';
+      readonly payload: { readonly busId: string; readonly mute: boolean };
+    }
+  | {
       readonly type: 'audioEffect.add';
       readonly payload: {
         readonly id: string;
@@ -107,6 +115,10 @@ export function applyAudioCommand(state: AudioState, command: AudioCommand): Aud
       return applyBusRemove(state, command.payload);
     case 'audioBus.setGain':
       return applyBusSetGain(state, command.payload);
+    case 'audioBus.setPan':
+      return applyBusSetPan(state, command.payload);
+    case 'audioBus.setMute':
+      return applyBusSetMute(state, command.payload);
     case 'audioEffect.add':
       return applyEffectAdd(state, command.payload);
     case 'audioEffect.remove':
@@ -377,6 +389,43 @@ function applyBusSetGain(
       type: 'audioBus.setGain',
       payload: { busId: payload.busId, gain: bus.gain },
     },
+  };
+}
+
+function applyBusSetPan(
+  state: AudioState,
+  payload: { readonly busId: string; readonly pan: number },
+): AudioApplyResult {
+  const busIndex = state.buses.findIndex((b) => b.id === payload.busId);
+  if (busIndex === -1)
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown bus "${payload.busId}"`);
+  const bus = state.buses[busIndex]!;
+  const next = { ...bus, pan: Math.max(-1, Math.min(1, payload.pan)) };
+  return {
+    state: {
+      ...state,
+      buses: state.buses.map((candidate) => (candidate.id === bus.id ? next : candidate)),
+    },
+    inverse: { type: 'audioBus.setPan', payload: { busId: bus.id, pan: bus.pan } },
+  };
+}
+
+function applyBusSetMute(
+  state: AudioState,
+  payload: { readonly busId: string; readonly mute: boolean },
+): AudioApplyResult {
+  const busIndex = state.buses.findIndex((b) => b.id === payload.busId);
+  if (busIndex === -1)
+    throw new AudioCommandError('AUDIO_COMMAND_UNKNOWN_TARGET', `unknown bus "${payload.busId}"`);
+  const bus = state.buses[busIndex]!;
+  return {
+    state: {
+      ...state,
+      buses: state.buses.map((candidate) =>
+        candidate.id === bus.id ? { ...bus, mute: payload.mute } : candidate,
+      ),
+    },
+    inverse: { type: 'audioBus.setMute', payload: { busId: bus.id, mute: bus.mute } },
   };
 }
 

@@ -269,6 +269,25 @@ describe('audio commands', () => {
     });
   });
 
+  describe('audioBus.setPan and setMute', () => {
+    it('updates both animatable bus controls and restores them', () => {
+      const state = createTestState();
+      const panned = applyAudioCommand(state, {
+        type: 'audioBus.setPan',
+        payload: { busId: 'bus-1', pan: 0.75 },
+      });
+      expect(panned.state.buses[0]!.pan).toBe(0.75);
+      expect(applyAudioCommand(panned.state, panned.inverse).state.buses[0]!.pan).toBe(0);
+
+      const muted = applyAudioCommand(state, {
+        type: 'audioBus.setMute',
+        payload: { busId: 'bus-1', mute: true },
+      });
+      expect(muted.state.buses[0]!.mute).toBe(true);
+      expect(applyAudioCommand(muted.state, muted.inverse).state.buses[0]!.mute).toBe(false);
+    });
+  });
+
   describe('audioEffect.add', () => {
     it('adds an effect and inverts', () => {
       const state = createTestState();
