@@ -159,6 +159,13 @@ export type {
 export { MotionRegistry, convertPresetToScene } from './registry.js';
 export { validateMotionSceneDocument, migrateSceneDocument } from './schema.js';
 export { registerBuiltinMotions, BUILTIN_MOTIONS } from './builtins.js';
+export {
+  motionBinding,
+  motionAnimationToUniversal,
+  motionLayerToUniversalAnimations,
+  universalToMotionAnimation,
+  universalCurveForMotion,
+} from './universal-adapter.js';
 
 /* ─── Motion Studio evaluator ─── */
 
