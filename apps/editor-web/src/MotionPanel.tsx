@@ -1038,6 +1038,13 @@ export function MotionPanel({
   const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio;
   const motionStudioOpen = editorContext?.motionStudioOpen ?? false;
+  const animationGraphFocus = editorContext?.animationGraphFocus;
+
+  useEffect(() => {
+    if (animationGraphFocus === undefined || object?.id !== animationGraphFocus.objectId) return;
+    setSubtab('presets');
+    setGraphChannel(animationGraphFocus.channel);
+  }, [animationGraphFocus, object?.id]);
 
   // The catalog lives in localStorage, written by Motion Studio's own
   // autosave — this panel only re-reads it (Studio is a full-screen overlay,

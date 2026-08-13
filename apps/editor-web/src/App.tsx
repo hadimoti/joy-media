@@ -43,6 +43,7 @@ import type { HistoryEntry } from './editor-session.js';
 import type {
   AnimationDescriptorV1,
   AssetRecordV1,
+  AnimatablePropertyV1,
   EffectInstanceV1,
   JoyProjectV1,
   SpikeProject,
@@ -594,6 +595,13 @@ interface DecodedPreviewFrame {
   readonly bitmap: ImageDataLike;
 }
 
+export interface AnimationGraphFocusRequest {
+  readonly objectId: string;
+  readonly channel: AnimatablePropertyV1;
+  /** Makes repeat requests to an already focused channel observable. */
+  readonly token: number;
+}
+
 interface EditorPanelContextValue {
   readonly state: EditorRuntimeState;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
@@ -665,6 +673,9 @@ interface EditorPanelContextValue {
    */
   readonly session: EditorSession;
   readonly activatePanel: (panelId: string) => void;
+  /** Pending cross-panel request to show one selected object's animation curve. */
+  readonly animationGraphFocus: AnimationGraphFocusRequest | undefined;
+  readonly openAnimationGraph: (objectId: string, channel: AnimatablePropertyV1) => void;
   readonly agentContext: EditorContext;
   readonly agentSettings: AgentSettings;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
@@ -2357,6 +2368,16 @@ function EditorWorkspace({
   dualLensProjectionRef.current = dualLensProjection;
 
   const [lensReveal, setLensReveal] = useState<LensRevealRequest | undefined>(undefined);
+  const [animationGraphFocus, setAnimationGraphFocus] = useState<
+    AnimationGraphFocusRequest | undefined
+  >(undefined);
+  const openAnimationGraph = useCallback(
+    (objectId: string, channel: AnimatablePropertyV1) => {
+      setAnimationGraphFocus({ objectId, channel, token: Date.now() });
+      activatePanel('motion');
+    },
+    [activatePanel],
+  );
   const selectClips = useCallback((clipIds: readonly string[]) => {
     setState((current) => ({ ...current, selectedIds: [...clipIds] }));
   }, []);
@@ -4027,6 +4048,7 @@ function EditorWorkspace({
           onAudioChange={(next) => context.setAudioState(next)}
           onSetStatic={updateVisualProperty}
           onDispatch={context.dispatchProject}
+          onOpenAnimationGraph={context.openAnimationGraph}
         />
       );
     }
@@ -5300,6 +5322,8 @@ function EditorWorkspace({
           jumpToHistory,
           session,
           activatePanel,
+          animationGraphFocus,
+          openAnimationGraph,
           agentContext,
           agentSettings,
           agentPanelCommand,

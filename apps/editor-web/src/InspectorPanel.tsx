@@ -134,6 +134,9 @@ interface InspectorPanelProps {
     value: number,
   ) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  /** Opens a durable animated transform in the shared Motion graph view. */
+  readonly onOpenAnimationGraph?:
+    ((objectId: string, channel: AnimatablePropertyV1) => void) | undefined;
 }
 
 const NUMERIC_PROPERTIES = VISUAL_INSPECTOR.filter((property) => property.kind === 'number');
@@ -183,6 +186,8 @@ interface TransformPropertyRowProps {
   readonly onKeyframePayload: (value: number) => Parameters<typeof setKeyframe>[1];
   readonly onToggleKeyframe: (property: AnimatablePropertyV1, value: number) => void;
   readonly expressionButton: ReactNode;
+  readonly onOpenAnimationGraph?:
+    ((objectId: string, channel: AnimatablePropertyV1) => void) | undefined;
   readonly children?: ReactNode;
 }
 
@@ -204,6 +209,7 @@ function TransformPropertyRow({
   onKeyframePayload,
   onToggleKeyframe,
   expressionButton,
+  onOpenAnimationGraph,
   children,
 }: TransformPropertyRowProps) {
   const curve = target.animations?.[property.key];
@@ -247,6 +253,9 @@ function TransformPropertyRow({
         onReset={() => commitValue(DEFAULTS[property.key] ?? 0)}
         onToggleAnimation={() => onToggleKeyframe(property.key, previewValue)}
         animationState={keyed ? 'keyed' : animated ? 'between' : 'none'}
+        {...(animated && onOpenAnimationGraph !== undefined
+          ? { onOpenGraph: () => onOpenAnimationGraph(target.id, property.key) }
+          : {})}
       >
         <div className="inspector-prop-row">
           <NumericPropertyControl
@@ -283,6 +292,7 @@ export function InspectorPanel({
   onAudioChange,
   onSetStatic,
   onDispatch,
+  onOpenAnimationGraph,
 }: InspectorPanelProps) {
   const [editingExpression, setEditingExpression] = useState<AnimatablePropertyV1 | undefined>(
     undefined,
@@ -534,6 +544,7 @@ export function InspectorPanel({
                         ƒx
                       </button>
                     }
+                    onOpenAnimationGraph={onOpenAnimationGraph}
                   >
                     {editingExpression === key && (
                       <div className="inspector-expression-editor" style={{ gridColumn: '1 / -1' }}>

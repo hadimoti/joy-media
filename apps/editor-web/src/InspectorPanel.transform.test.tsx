@@ -35,6 +35,7 @@ describe('Inspector transform property rows', () => {
         playheadUs={1_000_000}
         onSetStatic={() => undefined}
         onDispatch={() => undefined}
+        onOpenAnimationGraph={() => undefined}
       />,
     );
 
@@ -42,7 +43,9 @@ describe('Inspector transform property rows', () => {
     expect(markup).toContain('data-property-row="Opacity"');
     expect(markup).toContain('Reset Position X');
     expect(markup).toContain('Remove Position X keyframe at playhead');
+    expect(markup).toContain('Open Position X in Graph Editor');
     expect(markup).toContain('Add Opacity keyframe at playhead');
+    expect(markup).not.toContain('Open Opacity in Graph Editor');
     expect(markup).toContain('aria-label="Add Position X expression"');
   });
 });
