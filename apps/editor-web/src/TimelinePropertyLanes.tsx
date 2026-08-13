@@ -47,7 +47,21 @@ export function visiblePropertyKeys(
 ): readonly TimelinePropertyKey[] {
   const start = Math.max(0, viewportStartUs - overscanUs);
   const end = viewportEndUs + overscanUs;
-  return keys.filter((key) => key.timeUs >= start && key.timeUs <= end);
+  let low = 0;
+  let high = keys.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (keys[middle]!.timeUs < start) low = middle + 1;
+    else high = middle;
+  }
+  const first = low;
+  high = keys.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (keys[middle]!.timeUs <= end) low = middle + 1;
+    else high = middle;
+  }
+  return keys.slice(first, low);
 }
 
 function snapToFrame(timeUs: number, frameUs: number): number {
