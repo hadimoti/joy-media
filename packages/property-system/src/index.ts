@@ -670,6 +670,8 @@ export type {
   AnimationPolicy,
   CoverageBinding,
   CoverageEntry,
+  PropertyCoverageReport,
+  PropertyCoverageReportEntry,
 } from './property-coverage.js';
 export {
   COVERAGE_CLASSIFICATIONS,
@@ -679,6 +681,7 @@ export {
   listPropertyCoverage,
   findPropertyCoverage,
   assertPropertyCoverageComplete,
+  buildPropertyCoverageReport,
 } from './property-coverage.js';
 
 export type {

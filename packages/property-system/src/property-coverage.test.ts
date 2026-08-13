@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   assertPropertyCoverageComplete,
+  buildPropertyCoverageReport,
   findPropertyCoverage,
   listPropertyCoverage,
   PROPERTY_COVERAGE,
@@ -26,6 +27,18 @@ function expectViolation(fn: () => void, pattern: RegExp): void {
 }
 
 describe('property coverage manifest', () => {
+  it('builds deterministic CI evidence with omission reasons', () => {
+    const report = buildPropertyCoverageReport();
+    expect(report.version).toBe(1);
+    expect(report.complete).toBe(true);
+    expect(report.entries).toHaveLength(PROPERTY_INVENTORY.length);
+    expect(report.entries.find((entry) => entry.propertyId === 'workspace.layout')).toMatchObject({
+      classification: 'ui-only',
+      evaluatorSupported: false,
+      consumerSupported: false,
+    });
+    expect(report.entries.every((entry) => entry.control && entry.descriptor)).toBe(true);
+  });
   it('is a complete, self-consistent registry', () => {
     expect(() => assertPropertyCoverageComplete()).not.toThrow();
   });

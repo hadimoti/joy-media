@@ -767,6 +767,57 @@ export function findPropertyCoverage(id: string): CoverageEntry | undefined {
   return PROPERTY_COVERAGE.find((entry) => entry.id === id);
 }
 
+export interface PropertyCoverageReportEntry {
+  readonly propertyId: string;
+  readonly control: string;
+  readonly descriptor: string;
+  readonly classification: CoverageClassification;
+  readonly evaluatorSupported: boolean;
+  readonly consumerSupported: boolean;
+  readonly omissionReason?: string;
+}
+
+export interface PropertyCoverageReport {
+  readonly version: 1;
+  readonly complete: boolean;
+  readonly entries: readonly PropertyCoverageReportEntry[];
+  readonly violations: readonly string[];
+}
+
+/** Stable JSON-shaped evidence consumed by CI and review tooling. */
+export function buildPropertyCoverageReport(
+  coverage: readonly CoverageEntry[] = PROPERTY_COVERAGE,
+  inventory: readonly string[] = PROPERTY_INVENTORY,
+): PropertyCoverageReport {
+  let violations: readonly string[] = [];
+  try {
+    assertPropertyCoverageComplete(coverage, inventory);
+  } catch (error) {
+    violations = String(error instanceof Error ? error.message : error)
+      .split('\n')
+      .slice(1)
+      .map((line) => line.replace(/^- /, ''));
+  }
+  const byInventory = new Map(coverage.map((entry) => [entry.inventoryKey, entry]));
+  const entries = inventory.flatMap((propertyId) => {
+    const entry = byInventory.get(propertyId);
+    if (entry === undefined) return [];
+    const supported = entry.classification === 'creative';
+    return [
+      {
+        propertyId,
+        control: entry.label,
+        descriptor: entry.id,
+        classification: entry.classification,
+        evaluatorSupported: supported,
+        consumerSupported: supported,
+        ...(supported ? {} : { omissionReason: entry.rationale }),
+      },
+    ];
+  });
+  return { version: 1, complete: violations.length === 0, entries, violations };
+}
+
 const VALID_VALUE_KINDS: readonly AnimationValueKindV2[] = [
   'scalar',
   'angle',
