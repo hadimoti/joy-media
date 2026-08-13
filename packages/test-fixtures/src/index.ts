@@ -26,3 +26,7 @@ export {
   TIMELINE_SCALE_REFERENCE,
   TIMELINE_SCALE_SCALED_DOWN,
 } from './benchmark.js';
+export {
+  createAnimationOwnershipFixture,
+  createLegacyAnimationFixture,
+} from './wp34-animation-fixtures.js';
