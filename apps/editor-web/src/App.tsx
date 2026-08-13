@@ -58,6 +58,7 @@ import {
 } from '@joy-media/property-system';
 import {
   evaluateCameraExpressionTransform,
+  evaluateColorGradeAtTime,
   evaluateAudioBusAtTime,
   evaluateAudioClipAtTime,
   evaluateProjectAudioAtTime,
@@ -299,14 +300,27 @@ function buildEffectsMap(
 
 function renderFrameOptions(
   project: JoyProjectV1,
+  timeUs: number,
   imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
   >,
 ): BuildRenderFrameOptions {
   const composition = project.compositions[project.rootCompositionId];
+  const outputGrade =
+    project.colorGrade !== undefined &&
+    'version' in project.colorGrade &&
+    project.colorGrade.version === 2
+      ? evaluateColorGradeAtTime(
+          project.colorGrade,
+          project.propertyAnimations,
+          { scope: 'output' },
+          { compositionTimeUs: timeUs, outputTimeUs: timeUs },
+        )
+      : project.colorGrade;
   return {
     effectsByObjectId: buildEffectsMap(project),
-    ...(project.colorGrade !== undefined ? { colorGrade: project.colorGrade } : {}),
+    propertyAnimations: project.propertyAnimations,
+    ...(outputGrade !== undefined ? { colorGrade: outputGrade } : {}),
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
     ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
     ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
@@ -408,8 +422,7 @@ function videoClipSpecAt(
   timeUs: number,
   height: number,
 ): VideoClipSpec {
-  const clipGrade = project.clipColorGrades?.[clip.id];
-  const colorGrade = clipGrade === undefined ? undefined : normalizeColorGrade(clipGrade);
+  const colorGrade = colorGradeForClipAtTime(project, clip, timeUs);
   const objectId = resolveObjectIdForSelection(project, [clip.id]);
   const object = objectId === undefined ? undefined : project.visualObjects[objectId];
   if (object === undefined) return videoClipSpec(clip, undefined, 1, colorGrade);
@@ -434,6 +447,26 @@ function videoClipSpecAt(
   );
 }
 
+function colorGradeForClipAtTime(
+  project: JoyProjectV1,
+  clip: VideoClip,
+  timeUs: number,
+): ColorGradeIR | undefined {
+  const grade = project.clipColorGrades?.[clip.id];
+  if (grade === undefined) return undefined;
+  const evaluated = evaluateColorGradeAtTime(
+    grade,
+    project.propertyAnimations,
+    { scope: 'clip', clipId: clip.id },
+    {
+      compositionTimeUs: timeUs,
+      outputTimeUs: timeUs,
+      clip: { startUs: clip.startUs, durationUs: clip.durationUs },
+    },
+  );
+  return normalizeColorGrade(evaluated);
+}
+
 /** Active transition (if any) at composition time. */
 function activeTransitionAt(project: JoyProjectV1, playheadUs: number): TransitionV1 | undefined {
   const composition = project.compositions[project.rootCompositionId];
@@ -452,21 +485,27 @@ function activeTransitionAt(project: JoyProjectV1, playheadUs: number): Transiti
 function applyClipGradesToTransitionBitmaps(
   project: JoyProjectV1,
   transition: TransitionV1 | undefined,
+  timeUs: number,
   bitmaps: Map<string, ImageDataLike>,
 ): void {
   if (transition === undefined) return;
   for (const clipId of [transition.leftClipId, transition.rightClipId]) {
-    const grade = project.clipColorGrades?.[clipId];
+    const clip = findVideoClipById(project, clipId);
     const bitmap = bitmaps.get(clipId);
-    if (grade === undefined || bitmap === undefined) continue;
+    if (clip === undefined || bitmap === undefined) continue;
+    const grade = colorGradeForClipAtTime(project, clip, timeUs);
+    if (grade === undefined) continue;
     const data = new Uint8ClampedArray(bitmap.data);
     applyColorGradeToPixels(data, normalizeColorGrade(grade));
     bitmaps.set(clipId, { ...bitmap, data });
   }
 }
 
-function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
-  return rootTimelineVideoClipById(project, clipId);
+function findVideoClipById(
+  project: SpikeProject | JoyProjectV1,
+  clipId: string,
+): VideoClip | undefined {
+  return rootTimelineVideoClipById(project as SpikeProject, clipId);
 }
 
 /** Timeline edits that create additional clips must retain their presentation state. */
@@ -3021,7 +3060,7 @@ function EditorWorkspace({
               width,
               height,
               resolved,
-              renderFrameOptions(exportVisualProject, imageSizesFromCache()),
+              renderFrameOptions(exportVisualProject, timeUs, imageSizesFromCache()),
             ),
             exportVisualProject,
           );
@@ -3373,7 +3412,7 @@ function EditorWorkspace({
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
-            applyClipGradesToTransitionBitmaps(exportVisualProject, transition, bitmaps);
+            applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
             const frame = buildFrame(timeUs);
             renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
           },
@@ -5671,7 +5710,7 @@ function MonitorPanel() {
         composition.width,
         composition.height,
         resolved,
-        renderFrameOptions(visualProject, imageSizesFromCache(state.playheadUs)),
+        renderFrameOptions(visualProject, state.playheadUs, imageSizesFromCache(state.playheadUs)),
       ),
       visualProject,
     );
@@ -5692,6 +5731,7 @@ function MonitorPanel() {
     applyClipGradesToTransitionBitmaps(
       visualProject,
       activeTransitionAt(visualProject, state.playheadUs),
+      state.playheadUs,
       videoBitmaps,
     );
     renderer.render(frame, videoBitmaps);
