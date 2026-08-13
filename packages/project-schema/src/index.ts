@@ -122,6 +122,18 @@ export {
   decodeColorLutReference,
   isColorLutReferenceAvailable,
 } from './color.js';
+export type {
+  AudioAutomationDescriptor,
+  AudioBusPropertyId,
+  AudioClipPropertyId,
+} from './audio.js';
+export {
+  AUDIO_AUTOMATION_DESCRIPTORS,
+  audioAutomationDescriptor,
+  audioBusPropertyBinding,
+  audioClipPropertyBinding,
+  audioEffectPropertyBinding,
+} from './audio.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {
   PropertyOwnerKindV2,
