@@ -18,12 +18,16 @@ import type { SceneVariableSchema, SceneVariableValue } from './variables.js';
 import type { SceneResolvers } from './resolver.js';
 import { createSandboxedReactScene } from './runtime.js';
 import type { SceneManifest } from './runtime.js';
+import { resolveSceneInputs, validateSceneInputAccess } from './scene-inputs.js';
+import type { SceneInputSchemaV1 } from './manifest.js';
+import type { SceneInputValue } from './scene-inputs.js';
 
 export interface ScenePackageInput {
   readonly manifest: SceneManifestV1;
   readonly source: string;
   readonly variableSchema?: SceneVariableSchema;
   readonly variables?: Readonly<Record<string, unknown>>;
+  readonly inputs?: Readonly<Record<string, unknown>>;
   /** Resolver handles used for the deterministic reference frame, if needed. */
   readonly resolvers?: SceneResolvers;
 }
@@ -34,6 +38,7 @@ export interface CompiledScene {
   /** Generated only when the manifest is structurally valid. */
   readonly csp?: string;
   readonly variables: Readonly<Record<string, SceneVariableValue>>;
+  readonly inputs: Readonly<Record<string, SceneInputValue>>;
   readonly diagnostics: readonly SceneDiagnostic[];
   /** Deterministic first-frame hash; present only for a rendered network-free scene. */
   readonly referenceFrameSha256?: string;
@@ -53,6 +58,10 @@ export function compileScenePackage(input: ScenePackageInput): CompiledScene {
 
   if (input.variableSchema !== undefined)
     diagnostics.push(...validateVariableSchema(input.variableSchema));
+
+  diagnostics.push(...validateSceneInputAccess(input.source, input.manifest.inputs));
+  const resolvedInputs = resolveSceneInputs(input.manifest.inputs, input.inputs ?? {});
+  diagnostics.push(...resolvedInputs.diagnostics);
 
   const resolved =
     input.variableSchema !== undefined
@@ -83,6 +92,7 @@ export function compileScenePackage(input: ScenePackageInput): CompiledScene {
         frameRate: { num: 30, den: 1 },
         seed: `${input.manifest.id}@${input.manifest.version}`,
         variables: resolved.values,
+        inputs: resolvedInputs.values,
         locale: 'en',
         ...(input.resolvers === undefined ? {} : { resolvers: input.resolvers }),
       });
@@ -103,6 +113,7 @@ export function compileScenePackage(input: ScenePackageInput): CompiledScene {
     sourceSha256,
     ...(csp === undefined ? {} : { csp }),
     variables: resolved.values,
+    inputs: resolvedInputs.values,
     diagnostics,
     ...(referenceFrameSha256 === undefined ? {} : { referenceFrameSha256 }),
   };
@@ -120,5 +131,6 @@ function toSpikeManifest(manifest: SceneManifestV1): SceneManifest {
     durationUs: manifest.durationUs,
     permissions: { network: [], storage: 'none' },
     determinism: { seededRandom: true, wallClock: false },
+    ...(manifest.inputs === undefined ? {} : { inputs: manifest.inputs as SceneInputSchemaV1 }),
   };
 }

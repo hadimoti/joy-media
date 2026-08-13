@@ -23,6 +23,9 @@ export type {
   ScenePermissionsV1,
   SceneDeterminismV1,
   SceneStoragePermission,
+  SceneInputKind,
+  SceneInputDefV1,
+  SceneInputSchemaV1,
 } from './manifest.js';
 export { isScenePackagePath, validateSceneManifest } from './manifest.js';
 
@@ -36,6 +39,8 @@ export type {
   ResolvedVariables,
 } from './variables.js';
 export { resolveSceneVariables, validateVariableSchema } from './variables.js';
+export type { SceneInputValue, ResolvedSceneInputs } from './scene-inputs.js';
+export { resolveSceneInputs, validateSceneInputAccess } from './scene-inputs.js';
 
 export type { JoySceneAssetResolver, JoySceneFontResolver, SceneResolvers } from './resolver.js';
 export { createManifestResolver, findUnresolved, SceneAssetError } from './resolver.js';

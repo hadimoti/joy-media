@@ -24,6 +24,23 @@ export interface SceneDeterminismV1 {
   readonly wallClock: boolean;
 }
 
+export type SceneInputKind = 'number' | 'vector2' | 'color';
+
+export interface SceneInputConstraint {
+  readonly min?: number;
+  readonly max?: number;
+}
+
+export interface SceneInputDefV1 {
+  readonly kind: SceneInputKind;
+  readonly default: number | readonly [number, number] | string;
+  /** WP34 scenes are sampled by JOY; hold is the only portable policy. */
+  readonly animation: 'hold';
+  readonly constraints?: SceneInputConstraint;
+}
+
+export type SceneInputSchemaV1 = Readonly<Record<string, SceneInputDefV1>>;
+
 export interface SceneManifestV1 {
   readonly formatVersion: 1;
   readonly id: string;
@@ -36,6 +53,8 @@ export interface SceneManifestV1 {
   readonly durationUs: TimeUs;
   readonly permissions: ScenePermissionsV1;
   readonly determinism: SceneDeterminismV1;
+  /** Explicit scene-local inputs; undeclared paths are not runtime-accessible. */
+  readonly inputs?: SceneInputSchemaV1;
   /** Path to the variables JSON schema inside the package, when the scene has variables. */
   readonly variablesSchema?: string;
 }
@@ -115,7 +134,53 @@ export function validateSceneManifest(value: unknown): SceneDiagnostic[] {
         'variablesSchema',
       ),
     );
+  validateInputs(value.inputs, diagnostics);
   return diagnostics;
+}
+
+function validateInputs(value: unknown, diagnostics: SceneDiagnostic[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) {
+    diagnostics.push(
+      sceneDiagnostic('SCENE_MANIFEST_INPUTS', 'inputs must be an object', 'inputs'),
+    );
+    return;
+  }
+  for (const [key, input] of Object.entries(value)) {
+    const path = `inputs.${key}`;
+    if (!isRecord(input) || !['number', 'vector2', 'color'].includes(String(input.kind))) {
+      diagnostics.push(sceneDiagnostic('SCENE_MANIFEST_INPUTS', 'input kind is invalid', path));
+      continue;
+    }
+    if (input.animation !== 'hold')
+      diagnostics.push(sceneDiagnostic('SCENE_MANIFEST_INPUTS', 'animation must be "hold"', path));
+    const validDefault =
+      input.kind === 'number'
+        ? typeof input.default === 'number' && Number.isFinite(input.default)
+        : input.kind === 'vector2'
+          ? Array.isArray(input.default) &&
+            input.default.length === 2 &&
+            input.default.every((part) => typeof part === 'number' && Number.isFinite(part))
+          : typeof input.default === 'string' &&
+            /^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(input.default);
+    if (!validDefault)
+      diagnostics.push(
+        sceneDiagnostic('SCENE_MANIFEST_INPUTS', 'default does not match kind', path),
+      );
+    if (input.constraints !== undefined) {
+      if (
+        !isRecord(input.constraints) ||
+        (input.constraints.min !== undefined &&
+          (typeof input.constraints.min !== 'number' || !Number.isFinite(input.constraints.min))) ||
+        (input.constraints.max !== undefined &&
+          (typeof input.constraints.max !== 'number' || !Number.isFinite(input.constraints.max))) ||
+        (input.constraints.min !== undefined &&
+          input.constraints.max !== undefined &&
+          input.constraints.min > input.constraints.max)
+      )
+        diagnostics.push(sceneDiagnostic('SCENE_MANIFEST_INPUTS', 'constraints are invalid', path));
+    }
+  }
 }
 
 function validatePermissions(value: unknown, diagnostics: SceneDiagnostic[]): void {

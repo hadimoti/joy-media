@@ -15,6 +15,9 @@ import { createElement, isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createManifestResolver } from './resolver.js';
 import type { SceneResolvers } from './resolver.js';
+import type { SceneInputSchemaV1 } from './manifest.js';
+import { resolveSceneInputs } from './scene-inputs.js';
+import type { SceneInputValue } from './scene-inputs.js';
 
 // A frame is still bounded, but 50 ms is below normal scheduling jitter when
 // the pinned browser capture tests run in parallel with the VM harness.
@@ -30,6 +33,7 @@ export interface SceneManifest {
   readonly durationUs: TimeUs;
   readonly permissions: { readonly network: readonly string[]; readonly storage: 'none' };
   readonly determinism: { readonly seededRandom: boolean; readonly wallClock: boolean };
+  readonly inputs?: SceneInputSchemaV1;
 }
 
 export interface JoySceneContext<TVariables> {
@@ -40,6 +44,7 @@ export interface JoySceneContext<TVariables> {
   readonly frameRate: Rational;
   readonly seed: string;
   readonly variables: Readonly<TVariables>;
+  readonly inputs?: Readonly<Record<string, SceneInputValue>>;
   /** Explicit, preflighted handles for package assets; never raw host paths. */
   readonly assets: SceneResolvers['assets'];
   /** Explicit, preflighted handles for package fonts; never host font access. */
@@ -54,6 +59,7 @@ export interface SceneRenderRequest<TVariables> {
   readonly frameRate: Rational;
   readonly seed: string;
   readonly variables: TVariables;
+  readonly inputs?: Readonly<Record<string, unknown>>;
   readonly locale: string;
   /**
    * Resource handles resolved by JOY before the scene runs. Omitted means an
@@ -212,6 +218,7 @@ function createJoyContext<TVariables>(
     frameRate: request.frameRate,
     seed: request.seed,
     variables: deepFreeze(structuredClone(request.variables)),
+    inputs: deepFreeze(resolveSceneInputs(manifest.inputs, request.inputs).values),
     assets: (request.resolvers ?? EMPTY_RESOLVERS).assets,
     fonts: (request.resolvers ?? EMPTY_RESOLVERS).fonts,
     random,

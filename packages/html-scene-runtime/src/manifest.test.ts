@@ -24,6 +24,16 @@ describe('validateSceneManifest', () => {
         ...valid,
         permissions: { network: ['https://cdn.example.com'], storage: 'none' },
         variablesSchema: 'schema.json',
+        inputs: {
+          amount: {
+            kind: 'number',
+            default: 12,
+            animation: 'hold',
+            constraints: { min: 0, max: 100 },
+          },
+          offset: { kind: 'vector2', default: [0, 1], animation: 'hold' },
+          accent: { kind: 'color', default: '#e9b949', animation: 'hold' },
+        },
       }),
     ).toEqual([]);
   });
@@ -69,6 +79,18 @@ describe('validateSceneManifest', () => {
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain('SCENE_MANIFEST_ENTRY');
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       'SCENE_MANIFEST_VARIABLES_SCHEMA',
+    );
+  });
+
+  it('rejects invalid input declarations', () => {
+    const diagnostics = validateSceneManifest({
+      ...valid,
+      inputs: {
+        bad: { kind: 'number', default: '12', animation: 'linear' },
+      },
+    });
+    expect(diagnostics.some((diagnostic) => diagnostic.code === 'SCENE_MANIFEST_INPUTS')).toBe(
+      true,
     );
   });
 });
