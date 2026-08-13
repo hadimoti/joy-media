@@ -525,5 +525,34 @@ describe('offline audio renderer', () => {
       expect(result.sampleRate).toBe(sampleRate);
       expect(result.channels).toBe(1);
     });
+
+    it('ramps resolved automation across short blocks without static zipper steps', () => {
+      const result = renderOfflineAudio(
+        [
+          {
+            clipId: 'automation',
+            samples: new Float32Array([1, 1, 1, 1]),
+            startUs: 0,
+            config: defaultClipConfig,
+            effects: [],
+          },
+        ],
+        [],
+        {
+          sampleRate: 1_000_000,
+          channels: 1,
+          startUs: 0,
+          endUs: 4,
+          automation: {
+            blockSize: 4,
+            clipAt: (_clipId, timeUs, fallback) => ({
+              ...fallback,
+              gain: 1 - timeUs / 4,
+            }),
+          },
+        },
+      );
+      expect([...result.samples]).toEqual([1, 0.75, 0.5, 0.25]);
+    });
   });
 });

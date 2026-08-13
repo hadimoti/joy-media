@@ -1,5 +1,5 @@
 import type { AudioClipConfig, AudioBus, AudioEffect } from './graph.js';
-import { applyGain, applyPan, applyFade } from './processing.js';
+import { applyFade } from './processing.js';
 import { applyEq, applyCompressor, applyLimiter, applyGate } from './effects.js';
 import { measurePeak, measureLoudness, detectClipping } from './analysis.js';
 
@@ -8,6 +8,18 @@ export interface OfflineRenderConfig {
   readonly channels: 1 | 2;
   readonly startUs: number;
   readonly endUs: number;
+  /**
+   * Optional time-varying mixer resolver. Hosts provide it from their
+   * project/evaluator boundary; audio-core remains independent of that model.
+   */
+  readonly automation?: OfflineAudioAutomation;
+}
+
+export interface OfflineAudioAutomation {
+  /** Block size used for continuous gain/pan ramps (default 256 samples). */
+  readonly blockSize?: number;
+  readonly clipAt?: (clipId: string, timeUs: number, fallback: AudioClipConfig) => AudioClipConfig;
+  readonly busAt?: (busId: string, timeUs: number, fallback: AudioBus) => AudioBus;
 }
 
 export interface AudioClipRenderSpec {
@@ -98,10 +110,6 @@ function applyClipConfig(
 ): Float32Array {
   let result = samples;
 
-  if (config.gain !== 1.0) {
-    result = applyGain(result, config.gain);
-  }
-
   if (config.fadeInUs || config.fadeOutUs) {
     result = applyFade(result, config.fadeInUs ?? 0, config.fadeOutUs ?? 0, sampleRate);
   }
@@ -123,9 +131,12 @@ export function renderOfflineAudio(
     busBuffers.set(bus.id, new Float32Array(totalSamples));
   }
   const anySolo = clips.some((clip) => clip.config.solo);
+  const blockSize = config.automation?.blockSize ?? 256;
+  if (!Number.isSafeInteger(blockSize) || blockSize < 1)
+    throw new RangeError('automation blockSize must be a positive safe integer');
 
   for (const clip of clips) {
-    if (clip.config.mute) continue;
+    if (config.automation?.clipAt === undefined && clip.config.mute) continue;
     if (anySolo && !clip.config.solo) continue;
 
     const clipOffsetUs = clip.startUs - config.startUs;
@@ -136,25 +147,60 @@ export function renderOfflineAudio(
     let processed = applyClipEffects(clip.samples, clip.effects, config.sampleRate);
     processed = applyClipConfig(processed, clip.config, config.sampleRate);
 
-    const { left, right } = applyPan(processed, clip.config.pan);
-
     const targetBuffer = buses.length > 0 ? busBuffers.get(buses[0]!.id) : output;
     if (!targetBuffer) continue;
 
-    const mixLength = Math.min(left.length, totalSamples - sampleOffset);
+    const mixLength = Math.min(processed.length, totalSamples - sampleOffset);
+    let blockIndex = -1;
+    let startConfig = clip.config;
+    let endConfig = clip.config;
     for (let i = 0; i < mixLength; i++) {
-      targetBuffer[sampleOffset + i]! += (left[i]! + right[i]!) * 0.5;
+      const outputSample = sampleOffset + i;
+      const nextBlockIndex = Math.floor(outputSample / blockSize);
+      if (nextBlockIndex !== blockIndex) {
+        blockIndex = nextBlockIndex;
+        const startUs = config.startUs + Math.floor((outputSample * 1_000_000) / config.sampleRate);
+        const endSample = Math.min(totalSamples, (blockIndex + 1) * blockSize);
+        const endUs = config.startUs + Math.floor((endSample * 1_000_000) / config.sampleRate);
+        startConfig = config.automation?.clipAt?.(clip.clipId, startUs, clip.config) ?? clip.config;
+        endConfig = config.automation?.clipAt?.(clip.clipId, endUs, clip.config) ?? clip.config;
+      }
+      const blockStart = blockIndex * blockSize;
+      const blockEnd = Math.min(totalSamples, blockStart + blockSize);
+      const fraction =
+        blockEnd === blockStart ? 0 : (outputSample - blockStart) / (blockEnd - blockStart);
+      if (startConfig.mute) continue;
+      const gain = interpolate(startConfig.gain, endConfig.gain, fraction);
+      const pan = interpolate(startConfig.pan, endConfig.pan, fraction);
+      targetBuffer[outputSample]! += processed[i]! * gain * monoPanGain(pan);
     }
   }
 
   for (const bus of buses) {
     const buffer = busBuffers.get(bus.id);
-    if (!buffer || bus.mute) continue;
+    if (!buffer || (config.automation?.busAt === undefined && bus.mute)) continue;
 
-    const { left, right } = applyPan(buffer, bus.pan);
-
+    let blockIndex = -1;
+    let startBus = bus;
+    let endBus = bus;
     for (let i = 0; i < buffer.length; i++) {
-      output[i]! += (left[i]! + right[i]!) * 0.5 * bus.gain;
+      const nextBlockIndex = Math.floor(i / blockSize);
+      if (nextBlockIndex !== blockIndex) {
+        blockIndex = nextBlockIndex;
+        const startUs = config.startUs + Math.floor((i * 1_000_000) / config.sampleRate);
+        const endSample = Math.min(totalSamples, (blockIndex + 1) * blockSize);
+        const endUs = config.startUs + Math.floor((endSample * 1_000_000) / config.sampleRate);
+        startBus = config.automation?.busAt?.(bus.id, startUs, bus) ?? bus;
+        endBus = config.automation?.busAt?.(bus.id, endUs, bus) ?? bus;
+      }
+      if (startBus.mute) continue;
+      const blockStart = blockIndex * blockSize;
+      const blockEnd = Math.min(totalSamples, blockStart + blockSize);
+      const fraction = blockEnd === blockStart ? 0 : (i - blockStart) / (blockEnd - blockStart);
+      output[i]! +=
+        buffer[i]! *
+        interpolate(startBus.gain, endBus.gain, fraction) *
+        monoPanGain(interpolate(startBus.pan, endBus.pan, fraction));
     }
   }
 
@@ -171,4 +217,16 @@ export function renderOfflineAudio(
     loudness: loudnessMeasurement.integrated,
     clipping: clippingDetection.clipping,
   };
+}
+
+function interpolate(start: number, end: number, fraction: number): number {
+  return start + (end - start) * fraction;
+}
+
+/** Equivalent mono contribution of the existing linear stereo pan law. */
+function monoPanGain(pan: number): number {
+  const clamped = Math.max(-1, Math.min(1, pan));
+  const left = clamped >= 0 ? 1 - clamped : 1;
+  const right = clamped <= 0 ? 1 + clamped : 1;
+  return (left + right) * 0.5;
 }

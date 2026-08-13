@@ -58,6 +58,8 @@ import {
 } from '@joy-media/property-system';
 import {
   evaluateCameraExpressionTransform,
+  evaluateAudioBusAtTime,
+  evaluateAudioClipAtTime,
   evaluateProjectAudioAtTime,
 } from '@joy-media/evaluator';
 import {
@@ -3192,7 +3194,34 @@ function EditorWorkspace({
               .map((effect) => effect.effect),
           })),
           exportAudioState.buses,
-          { sampleRate: audioSampleRate, channels: 1, startUs: 0, endUs: durationUs },
+          {
+            sampleRate: audioSampleRate,
+            channels: 1,
+            startUs: 0,
+            endUs: durationUs,
+            automation: {
+              clipAt: (clipId, timeUs, fallback) => {
+                const clip = exportVisualProject.audio?.clips[clipId];
+                return clip === undefined
+                  ? fallback
+                  : evaluateAudioClipAtTime(clip, clipId, exportVisualProject.propertyAnimations, {
+                      compositionTimeUs: timeUs,
+                      audioTimelineTimeUs: timeUs,
+                    });
+              },
+              busAt: (busId, timeUs, fallback) => {
+                const bus = exportVisualProject.audio?.buses.find(
+                  (candidate) => candidate.id === busId,
+                );
+                return bus === undefined
+                  ? fallback
+                  : evaluateAudioBusAtTime(bus, exportVisualProject.propertyAnimations, {
+                      compositionTimeUs: timeUs,
+                      audioTimelineTimeUs: timeUs,
+                    });
+              },
+            },
+          },
         );
         const mixedAudio = offlineAudio.samples;
         const mixedAudioBuffer = createMonoAudioBuffer(audioContext, mixedAudio, audioSampleRate);

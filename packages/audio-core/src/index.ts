@@ -57,6 +57,7 @@ export { PreviewStemCache, computeStemHash } from './stems.js';
 
 export type {
   OfflineRenderConfig,
+  OfflineAudioAutomation,
   AudioClipRenderSpec,
   OfflineRenderResult,
   AudioRenderJob,
