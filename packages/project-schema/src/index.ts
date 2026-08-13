@@ -116,7 +116,14 @@ export type {
 export {
   PROPERTY_OWNER_KINDS,
   PROPERTY_TIME_DOMAINS,
+  canonicalBindingKey,
+  normalizePropertyAnimations,
   validatePropertyAnimations,
+} from './property-animation.js';
+export type {
+  NormalizedPropertyAnimationsV2,
+  NormalizePropertyAnimationsResult,
+  PropertyOwnerResolverV2,
 } from './property-animation.js';
 export type {
   CreativeCapability,
