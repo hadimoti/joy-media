@@ -60,14 +60,7 @@ import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
-import {
-  createMotionScene,
-  duplicateMotionScene,
-  listCatalogScenes,
-  removeCatalogScene,
-  renameMotionScene,
-  type MotionSceneCatalogEntry,
-} from './motion-scene-catalog.js';
+import { createMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -115,7 +108,7 @@ function saveFavorites(favorites: Set<string>): void {
 
 /* ─── Subtab model ─── */
 
-type LibrarySubtab = 'my-motions' | 'library' | 'presets' | 'spatial' | 'html-scenes';
+type LibrarySubtab = 'library' | 'presets' | 'spatial' | 'html-scenes';
 
 /** Stand-in bound by the Motion/Spatial tabs when nothing is selected (§3c). */
 const IDLE_OBJECT: VisualObjectV1 = {
@@ -137,7 +130,6 @@ const LIBRARY_SUBTABS: readonly {
   readonly label: string;
   readonly iconUrl: string;
 }[] = [
-  { id: 'my-motions', label: 'My Motions', iconUrl: iconUrl('24_my-media.png') },
   { id: 'library', label: 'Library', iconUrl: iconUrl('24_library.png') },
   { id: 'html-scenes', label: 'Scenes', iconUrl: iconUrl('24_scenes.png') },
   { id: 'presets', label: 'Presets', iconUrl: iconUrl('24_presets.png') },
@@ -1024,7 +1016,7 @@ export function MotionPanel({
   selectedClipId,
   onAddHtmlSceneToSelection,
 }: MotionPanelProps) {
-  const [subtab, setSubtab] = useState<LibrarySubtab>('my-motions');
+  const [subtab, setSubtab] = useState<LibrarySubtab>('library');
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
   const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
@@ -1033,11 +1025,9 @@ export function MotionPanel({
   // box rendered and filtered nothing. PanelShell owns the toggle now and this
   // is the query it feeds.
   const [query, setQuery] = useState('');
-  const [, setMyMotionsTick] = useState(0);
 
   const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio;
-  const motionStudioOpen = editorContext?.motionStudioOpen ?? false;
   const animationGraphFocus = editorContext?.animationGraphFocus;
 
   useEffect(() => {
@@ -1046,46 +1036,10 @@ export function MotionPanel({
     setGraphChannel(animationGraphFocus.channel);
   }, [animationGraphFocus, object?.id]);
 
-  // The catalog lives in localStorage, written by Motion Studio's own
-  // autosave — this panel only re-reads it (Studio is a full-screen overlay,
-  // so there's no live subscription to keep in sync while it's open).
-  const wasMotionStudioOpenRef = useRef(false);
-  useEffect(() => {
-    if (wasMotionStudioOpenRef.current && !motionStudioOpen) {
-      setMyMotionsTick((tick) => tick + 1);
-    }
-    wasMotionStudioOpenRef.current = motionStudioOpen;
-  }, [motionStudioOpen]);
-
-  // Catalog writes increment state above; each resulting render reads current storage.
-  const myMotions = listCatalogScenes(window.localStorage);
-
   const createMotion = useCallback(() => {
-    const scene = createMotionScene(window.localStorage, `Untitled Motion ${myMotions.length + 1}`);
-    setMyMotionsTick((tick) => tick + 1);
+    const scene = createMotionScene(window.localStorage, 'Untitled Motion');
     openMotionStudio?.(scene.id);
-  }, [myMotions.length, openMotionStudio]);
-
-  const openMySceneMotion = useCallback((id: string) => openMotionStudio?.(id), [openMotionStudio]);
-
-  const renameMySceneMotion = useCallback((id: string, title: string) => {
-    renameMotionScene(window.localStorage, id, title);
-    setMyMotionsTick((tick) => tick + 1);
-  }, []);
-
-  const duplicateMySceneMotion = useCallback(
-    (id: string) => {
-      const source = myMotions.find((entry) => entry.id === id);
-      duplicateMotionScene(window.localStorage, id, `${source?.title ?? 'Motion'} (Copy)`);
-      setMyMotionsTick((tick) => tick + 1);
-    },
-    [myMotions],
-  );
-
-  const deleteMySceneMotion = useCallback((id: string) => {
-    removeCatalogScene(window.localStorage, id);
-    setMyMotionsTick((tick) => tick + 1);
-  }, []);
+  }, [openMotionStudio]);
 
   const duration = Math.max(1, compositionDurationUs);
   const timeToX = (timeUs: number) =>
@@ -1195,7 +1149,7 @@ export function MotionPanel({
 
   return (
     <PanelShell
-      title="Motion"
+      title="Animate"
       iconUrl={panelTabIconUrl('motion')}
       className="motion-panel"
       inactive={inactive}
@@ -1251,16 +1205,6 @@ export function MotionPanel({
           </div>
         </aside>
         <div className="templates-main">
-          {subtab === 'my-motions' && (
-            <MyMotionsTab
-              entries={myMotions}
-              onOpen={openMySceneMotion}
-              onRename={renameMySceneMotion}
-              onDuplicate={duplicateMySceneMotion}
-              onDelete={deleteMySceneMotion}
-            />
-          )}
-
           {subtab === 'library' && (
             <LibraryTab
               registry={motionRegistry}
