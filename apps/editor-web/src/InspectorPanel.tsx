@@ -9,8 +9,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   audioClipPropertyBinding,
+  canonicalBindingKey,
   type AnimatablePropertyV1,
   type JoyProjectV1,
+  type PropertyBindingV2,
   type VisualObjectV1,
 } from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
@@ -634,6 +636,7 @@ export function InspectorPanel({
       {tab === 'effects' && (
         <EffectsSection
           object={target}
+          {...(project === undefined ? {} : { project })}
           open={effectsOpen}
           onToggle={() => setEffectsOpen((v) => !v)}
           playheadUs={timeUs}
@@ -673,12 +676,14 @@ export function InspectorPanel({
 
 export function EffectsSection({
   object,
+  project,
   open,
   onToggle,
   playheadUs,
   onDispatch,
 }: {
   readonly object: VisualObjectV1;
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
   readonly open: boolean;
   readonly onToggle: () => void;
   readonly playheadUs: number;
@@ -835,6 +840,7 @@ export function EffectsSection({
                         param={param}
                         value={effect.params[param.key] ?? param.defaultValue}
                         effect={effect}
+                        {...(project === undefined ? {} : { project })}
                         objectId={object.id}
                         playheadUs={playheadUs}
                         onDispatch={onDispatch}
@@ -856,6 +862,7 @@ function EffectParamControl({
   param,
   value,
   effect,
+  project,
   objectId,
   playheadUs,
   onDispatch,
@@ -864,6 +871,7 @@ function EffectParamControl({
   readonly param: EffectDescriptor['params'][number];
   readonly value: unknown;
   readonly effect: NonNullable<VisualObjectV1['effects']>[number];
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
   readonly objectId: string;
   readonly playheadUs: number;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
@@ -893,6 +901,7 @@ function EffectParamControl({
         param={param}
         value={typeof value === 'number' ? value : (param.defaultValue as number)}
         effect={effect}
+        {...(project === undefined ? {} : { project })}
         objectId={objectId}
         playheadUs={playheadUs}
         onDispatch={onDispatch}
@@ -960,6 +969,7 @@ function EffectNumericParamControl({
   param,
   value,
   effect,
+  project,
   objectId,
   playheadUs,
   onDispatch,
@@ -968,37 +978,78 @@ function EffectNumericParamControl({
   readonly param: EffectDescriptor['params'][number];
   readonly value: number;
   readonly effect: NonNullable<VisualObjectV1['effects']>[number];
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
   readonly objectId: string;
   readonly playheadUs: number;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
-  const curve = effect.animations?.[param.key];
+  const binding: PropertyBindingV2 = {
+    ownerKind: 'object-effect',
+    ownerId: effect.id,
+    propertyId: param.key,
+    timeDomain: 'composition',
+  };
+  const animation = project?.propertyAnimations?.[canonicalBindingKey(binding)];
+  const v2Curve = animation?.value.kind === 'scalar' ? animation.value.curve : undefined;
+  const legacyCurve = effect.animations?.[param.key];
+  const curve = v2Curve ?? legacyCurve;
   const animated = curve !== undefined;
   const keyed = animated && hasKeyframeAtCurve(curve, playheadUs);
   const sourceValue = animated ? sampleCurve(curve, playheadUs) : value;
   const [previewValue, setPreviewValue] = useState(sourceValue);
   useEffect(() => setPreviewValue(sourceValue), [sourceValue]);
-  const replaceCurve = (next: ReturnType<typeof setKeyframe> | undefined, label: string) =>
+  const replaceCurve = (next: ReturnType<typeof setKeyframe>, label: string) =>
     onDispatch({
       label,
       commands: [
         {
-          type: 'effect.replaceAnimation',
-          payload: {
-            objectId,
-            effectInstanceId: effect.id,
-            paramKey: param.key,
-            ...(next === undefined ? {} : { curve: next }),
-          },
+          type: 'propertyAnimation.replace',
+          payload: { binding, value: { kind: 'scalar', curve: next } },
         },
       ],
     });
+  const setPropertyKey = (keyframe: Parameters<typeof setKeyframe>[1], label: string) => {
+    if (v2Curve === undefined && legacyCurve === undefined) {
+      onDispatch({
+        label,
+        commands: [
+          {
+            type: 'propertyAnimation.enable',
+            payload: {
+              animation: {
+                binding,
+                value: { kind: 'scalar', curve: { keyframes: [keyframe] } },
+              },
+            },
+          },
+        ],
+      });
+      return;
+    }
+    onDispatch({
+      label,
+      commands: [
+        {
+          type: 'propertyAnimation.setKey',
+          payload: { binding, key: { kind: 'scalar', keyframe } },
+        },
+      ],
+    });
+  };
+  const removePropertyKey = (timeUs: number, next: ReturnType<typeof setKeyframe> | undefined) => {
+    if (next === undefined) {
+      onDispatch({
+        label: `Remove ${param.label} keyframe`,
+        commands: [{ type: 'propertyAnimation.removeKey', payload: { binding, timeUs } }],
+      });
+      return;
+    }
+    replaceCurve(next, `Remove ${param.label} keyframe`);
+  };
   const commitValue = (next: number) => {
     if (animated) {
-      replaceCurve(
-        setKeyframe(curve, { timeUs: playheadUs, value: next, interpolation: 'linear' }),
-        `Set ${param.label} on ${descriptor.label}`,
-      );
+      const keyframe = { timeUs: playheadUs, value: next, interpolation: 'linear' as const };
+      setPropertyKey(keyframe, `Set ${param.label} on ${descriptor.label}`);
       return;
     }
     onDispatch({
@@ -1031,16 +1082,15 @@ function EffectNumericParamControl({
         ? {
             onToggleAnimation: () => {
               if (keyed) {
-                replaceCurve(removeKeyframe(curve!, playheadUs), `Remove ${param.label} keyframe`);
+                const next = removeKeyframe(curve!, playheadUs);
+                removePropertyKey(playheadUs, next);
               } else {
-                replaceCurve(
-                  setKeyframe(curve, {
-                    timeUs: playheadUs,
-                    value: previewValue,
-                    interpolation: 'linear',
-                  }),
-                  `Add ${param.label} keyframe`,
-                );
+                const keyframe = {
+                  timeUs: playheadUs,
+                  value: previewValue,
+                  interpolation: 'linear' as const,
+                };
+                setPropertyKey(keyframe, `Add ${param.label} keyframe`);
               }
             },
             animationState: keyed

@@ -31,6 +31,7 @@ import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { resolveTransitionShaderId } from '@joy-media/transition-shaders';
 import {
   evaluateColorGradeAtTime,
+  evaluateFrameProperty,
   evaluateUniversalCameraTransform,
   sampleLegacyCurve,
 } from '@joy-media/evaluator';
@@ -57,6 +58,8 @@ export interface BuildRenderFrameOptions {
   readonly colorGrade?: ColorGradeV1 | ColorGradeV2 | ColorGradeIR;
   /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
   readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
+  /** Universal property animation map used for frame-local effect sampling. */
+  readonly propertyAnimations?: JoyProjectV1['propertyAnimations'];
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
   readonly imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
@@ -94,6 +97,7 @@ export function buildRenderFrameIRFromProject(
   });
   return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
     ...options,
+    propertyAnimations: options.propertyAnimations ?? project.propertyAnimations,
     ...(options.colorGrade === undefined && project.colorGrade !== undefined
       ? {
           colorGrade:
@@ -220,6 +224,7 @@ export function buildRenderFrameIR(
     const effects = normalizeEffects(
       options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects,
       timeUs,
+      options.propertyAnimations,
     );
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
@@ -343,13 +348,14 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
 function normalizeEffects(
   instances: readonly EffectInstanceV1[] | undefined,
   timeUs: TimeUs,
+  propertyAnimations: JoyProjectV1['propertyAnimations'] | undefined,
 ): readonly EffectInstanceIR[] | undefined {
   if (!instances?.length) return undefined;
   return instances.map((e): EffectInstanceIR => ({
     id: e.id,
     kind: e.effectId as EffectInstanceIR['kind'],
     enabled: e.enabled,
-    params: mapParamsToNumbers(sampleEffectParams(e, timeUs)),
+    params: mapParamsToNumbers(sampleEffectParams(e, timeUs, propertyAnimations)),
   }));
 }
 
@@ -357,12 +363,33 @@ function normalizeEffects(
 export function sampleEffectParams(
   effect: EffectInstanceV1,
   timeUs: TimeUs,
+  propertyAnimations?: JoyProjectV1['propertyAnimations'],
 ): Readonly<Record<string, EffectParamValue>> {
-  if (effect.animations === undefined) return effect.params;
   const params = { ...effect.params };
-  for (const [key, curve] of Object.entries(effect.animations)) {
-    if (curve === undefined || curve.keyframes.length === 0) continue;
-    params[key] = sampleLegacyCurve(curve, timeUs);
+  for (const [key, value] of Object.entries(effect.params)) {
+    if (typeof value !== 'number') continue;
+    const binding = {
+      ownerKind: 'object-effect' as const,
+      ownerId: effect.id,
+      propertyId: key,
+      timeDomain: 'composition' as const,
+    };
+    const legacyCurve = effect.animations?.[key];
+    const evaluated = evaluateFrameProperty<number>({
+      binding,
+      staticValue: value,
+      ...(propertyAnimations === undefined ? {} : { animations: propertyAnimations }),
+      ...(legacyCurve === undefined
+        ? {}
+        : {
+            legacy: {
+              sample: (sampleTimeUs: TimeUs) => sampleLegacyCurve(legacyCurve, sampleTimeUs),
+            },
+          }),
+      time: { compositionTimeUs: timeUs },
+      normalize: (next) => (typeof next === 'number' ? next : value),
+    });
+    params[key] = evaluated.value;
   }
   return params;
 }

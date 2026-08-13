@@ -319,6 +319,45 @@ describe('buildRenderFrameIR', () => {
     if (sprite?.kind !== 'sprite') throw new Error('expected sprite');
     expect(sprite.effects?.[0]?.params).toEqual({ brightness: 0.5 });
   });
+
+  it('prefers the universal object-effect binding while preserving legacy fallback', () => {
+    const effect = {
+      id: 'e-v2',
+      effectId: 'brightness-contrast',
+      enabled: true,
+      params: { brightness: 0 },
+      animations: {
+        brightness: {
+          keyframes: [
+            { timeUs: 0, value: 0, interpolation: 'linear' as const },
+            { timeUs: 1_000_000, value: 1, interpolation: 'linear' as const },
+          ],
+        },
+      },
+    };
+    const binding = {
+      ownerKind: 'object-effect' as const,
+      ownerId: effect.id,
+      propertyId: 'brightness',
+      timeDomain: 'composition' as const,
+    };
+    expect(
+      sampleEffectParams(effect, 500_000, {
+        [canonicalBindingKey(binding)]: {
+          binding,
+          value: {
+            kind: 'scalar',
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: 2, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: 4, interpolation: 'linear' },
+              ],
+            },
+          },
+        },
+      }),
+    ).toEqual({ brightness: 3 });
+  });
 });
 
 describe('transition timing', () => {
