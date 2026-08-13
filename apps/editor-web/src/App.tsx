@@ -1097,7 +1097,7 @@ function EditorWorkspace({
   // Audio commands keep static mixer state in the project. Universal
   // automation is sampled only for the current playback instant, so it never
   // mutates that durable mixer state while the playhead advances.
-  const previewAudioState = useMemo<AudioState>(() => {
+  const previewAudioState: AudioState = (() => {
     const projectAudio = session.visualProject.audio;
     if (projectAudio === undefined) return audioState;
     const evaluated = evaluateProjectAudioAtTime(
@@ -1109,7 +1109,7 @@ function EditorWorkspace({
       },
     );
     return { clips: evaluated.clips, buses: evaluated.buses, effects: audioState.effects };
-  }, [audioState, revision, session, state.playheadUs]);
+  })();
   // Dockview keeps panel instances independently from this workspace render.
   // Keep compound drill-in state here, rather than inside the panel component,
   // so opening a child timeline survives the project update that created it.
