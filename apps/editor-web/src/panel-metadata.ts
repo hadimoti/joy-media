@@ -48,7 +48,7 @@ export const PANEL_METADATA: readonly PanelMetadata[] = [
   panel('color', 'enhance', 'Open Color', ['enhance']),
   panel('motion', 'enhance', 'Open Motion', ['enhance']),
   panel('camera', 'enhance', 'Open Camera', ['enhance']),
-  panel('templates', 'enhance', 'Open Templates', ['enhance']),
+  panel('templates', 'media', 'Open Library', ['edit', 'enhance']),
   panel('agent', 'automation', 'Open Joy Code', ['automate']),
   panel('workflows', 'automation', 'Open Workflows', ['automate']),
   panel('jobs', 'automation', 'Open Jobs', ['automate']),

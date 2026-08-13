@@ -185,7 +185,7 @@ import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agen
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
-import { TemplatesPanel } from './TemplatesPanel.js';
+import { LibraryPanel } from './LibraryPanel.js';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
@@ -4925,7 +4925,7 @@ function EditorWorkspace({
     }
     if (api.id === 'templates') {
       return (
-        <TemplatesPanel
+        <LibraryPanel
           onApplyTemplate={(seeded) => {
             buildContentTemplateTransaction(seeded, {
               session: context.session,
@@ -4935,6 +4935,7 @@ function EditorWorkspace({
             setRevision((r) => r + 1);
           }}
           showToast={context.showToast}
+          openMotionStudio={(sceneId) => context.openMotionStudio(sceneId)}
         />
       );
     }

@@ -475,7 +475,7 @@ function MotionSceneCard({
   );
 }
 
-function MyMotionsTab({
+export function MyMotionsTab({
   entries,
   onOpen,
   onRename,

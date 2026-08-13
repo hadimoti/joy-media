@@ -168,7 +168,7 @@ const PANEL_ALIASES: Readonly<Record<string, string>> = {
   'motion-studio': 'motion',
   'dual-lens': 'flow',
   processes: 'jobs',
-  library: 'media',
+  library: 'templates',
 };
 
 /** Migrates renamed panels while retaining every unrelated Dockview field. */
