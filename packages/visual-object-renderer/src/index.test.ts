@@ -157,6 +157,87 @@ describe('buildRenderFrameIR', () => {
     expect(() => validateRenderFrameIR(frame)).not.toThrow();
   });
 
+  it('samples camera depth, roll, and FOV through the universal binding map', () => {
+    const camera = makeObject({
+      id: 'camera-1',
+      kind: 'camera',
+      transform: {
+        ...makeObject({ id: 'camera-base', kind: 'camera' }).transform,
+        positionZ: -800,
+      },
+      camera: { fieldOfViewDeg: 54 },
+    });
+    const layer = makeObject({
+      id: 'layer-1',
+      kind: 'shape',
+      shape: 'rectangle',
+      transform: { ...makeObject({ id: 'layer-base', kind: 'shape' }).transform, positionZ: 400 },
+    });
+    const cameraZBinding = {
+      ownerKind: 'visual-object' as const,
+      ownerId: camera.id,
+      propertyId: 'positionZ',
+      timeDomain: 'composition' as const,
+    };
+    const cameraFovBinding = {
+      ownerKind: 'visual-object' as const,
+      ownerId: camera.id,
+      propertyId: 'camera.fieldOfView',
+      timeDomain: 'composition' as const,
+    };
+    const project = {
+      visualObjects: { [camera.id]: camera, [layer.id]: layer },
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 100,
+          height: 100,
+          pixelAspectRatio: { numerator: 1, denominator: 1 },
+          frameRate: { numerator: 30, denominator: 1 },
+          durationUs: 1_000_000,
+          background: '#000000',
+          tracks: [],
+          activeCameraId: camera.id,
+        },
+      },
+      propertyAnimations: {
+        [canonicalBindingKey(cameraZBinding)]: {
+          binding: cameraZBinding,
+          value: {
+            kind: 'scalar',
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: -800, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: -400, interpolation: 'linear' },
+              ],
+            },
+          },
+        },
+        [canonicalBindingKey(cameraFovBinding)]: {
+          binding: cameraFovBinding,
+          value: {
+            kind: 'scalar',
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: 54, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: 90, interpolation: 'linear' },
+              ],
+            },
+          },
+        },
+      },
+    } as unknown as JoyProjectV1;
+
+    const start = buildRenderFrameIRFromProject(project, 'root', 0, 100, 100);
+    const middle = buildRenderFrameIRFromProject(project, 'root', 500_000, 100, 100);
+    const startTransform = start.nodes[0]?.transform;
+    const middleTransform = middle.nodes[0]?.transform;
+    expect(startTransform).toBeDefined();
+    expect(middleTransform).toBeDefined();
+    expect(middleTransform?.scaleX).toBeLessThan(startTransform?.scaleX ?? Infinity);
+  });
+
   it('samples output color animation before publishing the shared render IR', () => {
     const object = makeObject({ id: 'color-output', kind: 'shape', shape: 'rectangle' });
     const binding = {

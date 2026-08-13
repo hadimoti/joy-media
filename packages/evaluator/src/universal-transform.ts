@@ -5,12 +5,9 @@
  * expressions still win last. The local resolver is injected into the normal
  * parent/camera composition path, so a V2 transform does not lose parenting.
  */
+import { projectThroughCamera } from '@joy-media/camera-core';
 import {
-  projectThroughCamera,
-  resolveCameraParamsWithExpressions,
-  worldDepth,
-} from '@joy-media/camera-core';
-import {
+  parentChain,
   resolveObjectTransformWithExpressions,
   resolveWorldTransform,
   sampleCurve,
@@ -27,13 +24,22 @@ import {
 } from '@joy-media/project-schema';
 import { evaluateFrameProperty, type EvaluatedFrameProperty } from './frame-property-evaluator.js';
 
-const SCALAR_CHANNELS = ['x', 'y', 'scaleX', 'scaleY', 'rotationDeg', 'opacity'] as const;
+const SCALAR_CHANNELS = [
+  'x',
+  'y',
+  'scaleX',
+  'scaleY',
+  'rotationDeg',
+  'opacity',
+  'positionZ',
+] as const;
 type ScalarChannel = (typeof SCALAR_CHANNELS)[number];
 
 const POSITION_PROPERTY = 'visual.transform.position';
 const SCALE_PROPERTY = 'visual.transform.scale';
 const ROTATION_PROPERTY = 'visual.transform.rotation';
 const OPACITY_PROPERTY = 'visual.transform.opacity';
+const CAMERA_FOV_PROPERTY = 'camera.fieldOfView';
 
 export interface UniversalTransformDiagnostic {
   readonly channel: string;
@@ -78,7 +84,7 @@ function scalarValue(
   timeUs: TimeUs,
   animations: NormalizedPropertyAnimationsV2 | undefined,
 ): EvaluatedFrameProperty<number> {
-  const staticValue = object.transform[channel];
+  const staticValue = object.transform[channel] ?? 0;
   const curve = object.animations?.[channel as AnimatablePropertyV1];
   return evaluateFrameProperty<number>({
     binding: binding(object.id, channel),
@@ -168,6 +174,11 @@ export function evaluateUniversalObjectTransform(
   let scaleY = scale.value.scaleY ?? values.scaleY.value;
   let rotationDeg = v2Rotation.value;
   let alpha = v2Opacity.value;
+  const positionZ =
+    expressionResolution.transform.positionZ ??
+    (values.positionZ.source === 'static' && object.transform.positionZ === undefined
+      ? undefined
+      : values.positionZ.value);
 
   // A legacy spatial path remains the authoritative position source until a
   // V2 position binding is authored. Expressions remain the final override.
@@ -201,9 +212,7 @@ export function evaluateUniversalObjectTransform(
       scaleY: Math.max(0.001, scaleY),
       rotationDeg,
       opacity: Math.min(1, Math.max(0, alpha)),
-      ...(expressionResolution.transform.positionZ === undefined
-        ? {}
-        : { positionZ: expressionResolution.transform.positionZ }),
+      ...(positionZ === undefined ? {} : { positionZ }),
     },
     diagnostics: expressionResolution.diagnostics.map((diagnostic) => ({
       channel: diagnostic.property,
@@ -239,23 +248,54 @@ export function evaluateUniversalCameraTransform(
 ): UniversalTransformResolution {
   const world = evaluateUniversalWorldTransform(objectId, objectsById, timeUs, animations);
   if (cameraId === undefined) return world;
-  const camera = resolveCameraParamsWithExpressions(cameraId, objectsById, timeUs);
+  const cameraWorld = evaluateUniversalWorldTransform(cameraId, objectsById, timeUs, animations);
+  const cameraObject = objectsById[cameraId];
+  if (
+    cameraObject === undefined ||
+    cameraObject.kind !== 'camera' ||
+    cameraObject.camera === undefined
+  ) {
+    return world;
+  }
+  const cameraDepth = universalWorldDepth(cameraId, objectsById, timeUs, animations);
+  const fieldOfView = evaluateFrameProperty<number>({
+    binding: binding(cameraId, CAMERA_FOV_PROPERTY),
+    staticValue: cameraObject.camera.fieldOfViewDeg,
+    ...(animations === undefined ? {} : { animations }),
+    time: { compositionTimeUs: timeUs },
+    normalize: (value) =>
+      Math.min(170, Math.max(0.001, finiteNumber(value, cameraObject.camera!.fieldOfViewDeg))),
+  });
   const projected = projectThroughCamera(
     world.transform,
-    worldDepth(objectId, objectsById, timeUs),
-    camera.params,
+    universalWorldDepth(objectId, objectsById, timeUs, animations),
+    {
+      x: cameraWorld.transform.x,
+      y: cameraWorld.transform.y,
+      z: cameraDepth,
+      rollDeg: cameraWorld.transform.rotationDeg,
+      fieldOfViewDeg: fieldOfView.value,
+    },
     compositionHeight,
   );
   return {
     transform: projected,
-    diagnostics: [
-      ...world.diagnostics,
-      ...camera.diagnostics.map((diagnostic) => ({
-        channel: diagnostic.property,
-        message: diagnostic.message,
-      })),
-    ],
+    diagnostics: [...world.diagnostics, ...cameraWorld.diagnostics],
   };
+}
+
+function universalWorldDepth(
+  objectId: string,
+  objectsById: Readonly<Record<string, VisualObjectV1>>,
+  timeUs: TimeUs,
+  animations: NormalizedPropertyAnimationsV2 | undefined,
+): number {
+  const object = objectsById[objectId];
+  if (object === undefined) return 0;
+  return [object, ...parentChain(objectId, objectsById)].reduce((depth, node) => {
+    const local = evaluateUniversalObjectTransform(node, objectsById, timeUs, animations);
+    return depth + (local.transform.positionZ ?? 0);
+  }, 0);
 }
 
 /** True only for the V2 bindings consumed by the transform render slice. */
@@ -269,5 +309,6 @@ export function hasUniversalTransformAnimation(
     SCALE_PROPERTY,
     ROTATION_PROPERTY,
     OPACITY_PROPERTY,
+    'positionZ',
   ].some((propertyId) => hasV2(animations, objectId, propertyId));
 }
