@@ -189,10 +189,13 @@ export function ColorPanel({
             : value.samples.some((sample) => sample.timeUs === localTimeUs);
     return hasKey ? 'keyed' : 'between';
   };
-  const toggleAdjustAnimation = (key: string, value: number) => {
+  const toggleNumericAnimation = (
+    propertyId: string,
+    value: number,
+    kind: 'scalar' | 'hue' = 'scalar',
+  ) => {
     if (onDispatch === undefined) return;
     if (target === 'clip' && selectedClipId === undefined) return;
-    const propertyId = `adjust.${key}`;
     const binding = colorPropertyBinding(
       target,
       propertyId,
@@ -209,14 +212,13 @@ export function ColorPanel({
           )
         : playheadUs;
     const current = project.propertyAnimations?.[canonicalBindingKey(binding)];
-    const kind = key === 'hue' ? 'hue' : 'scalar';
     const isCurrentKind = current?.value.kind === kind;
     const hasKey =
       isCurrentKind &&
       'curve' in current.value &&
       current.value.curve.keyframes.some((frame) => frame.timeUs === localTimeUs);
     onDispatch({
-      label: `${hasKey ? 'Remove' : 'Add'} Color ${key} keyframe`,
+      label: `${hasKey ? 'Remove' : 'Add'} Color ${propertyId} keyframe`,
       commands: [
         hasKey
           ? { type: 'propertyAnimation.removeKey', payload: { binding, timeUs: localTimeUs } }
@@ -315,13 +317,31 @@ export function ColorPanel({
             onPatch={patchAdjust}
             onCommit={commit}
             animationStateFor={animationStateFor}
-            onToggleAnimation={toggleAdjustAnimation}
+            onToggleAnimation={toggleNumericAnimation}
             canAnimate={onDispatch !== undefined}
           />
         )}
-        {tab === 'wheels' && <WheelsSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'wheels' && (
+          <WheelsSection
+            draft={draft}
+            onChange={setDraft}
+            onCommit={commit}
+            animationStateFor={animationStateFor}
+            onToggleAnimation={toggleNumericAnimation}
+            canAnimate={onDispatch !== undefined}
+          />
+        )}
         {tab === 'curves' && <CurvesSection draft={draft} onChange={setDraft} onCommit={commit} />}
-        {tab === 'hsl' && <HslSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'hsl' && (
+          <HslSection
+            draft={draft}
+            onChange={setDraft}
+            onCommit={commit}
+            animationStateFor={animationStateFor}
+            onToggleAnimation={toggleNumericAnimation}
+            canAnimate={onDispatch !== undefined}
+          />
+        )}
         {tab === 'looks' && <LooksSection draft={draft} onChange={setDraft} onCommit={commit} />}
         {tab === 'scopes' && (
           <ScopeSection {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })} />
@@ -360,7 +380,7 @@ function AdjustSection({
   onPatch: (key: string, value: number, finalize?: boolean) => void;
   onCommit: (next: ColorGradeV2) => void;
   animationStateFor: (propertyId: string) => PropertyAnimationState;
-  onToggleAnimation: (key: string, value: number) => void;
+  onToggleAnimation: (propertyId: string, value: number, kind?: 'scalar' | 'hue') => void;
   canAnimate: boolean;
 }) {
   const adjust = { ...IDENTITY_COLOR_ADJUSTMENTS, ...(draft.adjust ?? {}) };
@@ -378,7 +398,8 @@ function AdjustSection({
             ? {}
             : {
                 animationState: animationStateFor(`adjust.${key}`),
-                onToggleAnimation: () => onToggleAnimation(key, adjust[key]),
+                onToggleAnimation: () =>
+                  onToggleAnimation(`adjust.${key}`, adjust[key], key === 'hue' ? 'hue' : 'scalar'),
               })}
         >
           <input
@@ -410,10 +431,16 @@ function WheelsSection({
   draft,
   onChange,
   onCommit,
+  animationStateFor,
+  onToggleAnimation,
+  canAnimate,
 }: {
   draft: ColorGradeV2;
   onChange: (next: ColorGradeV2) => void;
   onCommit: (next: ColorGradeV2) => void;
+  animationStateFor: (propertyId: string) => PropertyAnimationState;
+  onToggleAnimation: (propertyId: string, value: number, kind?: 'scalar' | 'hue') => void;
+  canAnimate: boolean;
 }) {
   const wheels = { ...IDENTITY_COLOR_WHEELS, ...(draft.wheels ?? {}) };
   const update = (
@@ -436,9 +463,21 @@ function WheelsSection({
               <span>+</span>
             </div>
             <strong>{name}</strong>
-            <label>
-              Master
+            <PropertyRow
+              label="Master"
+              controlId={`color-wheel-${name}-master`}
+              value={wheels[name].master.toFixed(2)}
+              onReset={() => update(name, 'master', 0, true)}
+              {...(!canAnimate
+                ? {}
+                : {
+                    animationState: animationStateFor(`wheels.${name}.master`),
+                    onToggleAnimation: () =>
+                      onToggleAnimation(`wheels.${name}.master`, wheels[name].master),
+                  })}
+            >
               <input
+                id={`color-wheel-${name}-master`}
                 type="range"
                 min={-1}
                 max={1}
@@ -447,7 +486,7 @@ function WheelsSection({
                 onChange={(e) => update(name, 'master', e.currentTarget.valueAsNumber)}
                 onPointerUp={(e) => update(name, 'master', e.currentTarget.valueAsNumber, true)}
               />
-            </label>
+            </PropertyRow>
           </div>
         ))}
       </div>
@@ -545,10 +584,16 @@ function HslSection({
   draft,
   onChange,
   onCommit,
+  animationStateFor,
+  onToggleAnimation,
+  canAnimate,
 }: {
   draft: ColorGradeV2;
   onChange: (next: ColorGradeV2) => void;
   onCommit: (next: ColorGradeV2) => void;
+  animationStateFor: (propertyId: string) => PropertyAnimationState;
+  onToggleAnimation: (propertyId: string, value: number, kind?: 'scalar' | 'hue') => void;
+  canAnimate: boolean;
 }) {
   const bands = draft.hsl ?? IDENTITY_HSL_BANDS;
   const update = (
@@ -566,22 +611,40 @@ function HslSection({
   return (
     <section className="color-section">
       <h3>Hue bands</h3>
-      {bands.map((band, index) => (
-        <div className="hsl-band" key={band.id ?? index}>
-          <span className="hsl-swatch" style={{ background: `hsl(${band.hue} 85% 55%)` }} />{' '}
-          <strong>{band.id ?? index + 1}</strong>
-          <input
-            aria-label={`${band.id ?? `Hue band ${index + 1}`} saturation`}
-            type="range"
-            min={-1}
-            max={1}
-            step={0.01}
-            value={band.saturation}
-            onChange={(e) => update(index, 'saturation', e.currentTarget.valueAsNumber)}
-          />
-          <output>{band.saturation.toFixed(2)}</output>
-        </div>
-      ))}
+      {bands.map((band, index) => {
+        const bandId = band.id ?? IDENTITY_HSL_BANDS[index]!.id!;
+        return (
+          <div className="hsl-band" key={bandId}>
+            <span className="hsl-swatch" style={{ background: `hsl(${band.hue} 85% 55%)` }} />{' '}
+            <strong>{bandId}</strong>
+            <PropertyRow
+              label="Saturation"
+              controlId={`hsl-${bandId}-saturation`}
+              value={band.saturation.toFixed(2)}
+              onReset={() => update(index, 'saturation', 0)}
+              {...(!canAnimate
+                ? {}
+                : {
+                    animationState: animationStateFor(`hsl.${bandId}.saturation`),
+                    onToggleAnimation: () =>
+                      onToggleAnimation(`hsl.${bandId}.saturation`, band.saturation),
+                  })}
+            >
+              <input
+                id={`hsl-${bandId}-saturation`}
+                aria-label={`${bandId} saturation`}
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={band.saturation}
+                onChange={(e) => update(index, 'saturation', e.currentTarget.valueAsNumber)}
+                onPointerUp={(e) => update(index, 'saturation', e.currentTarget.valueAsNumber)}
+              />
+            </PropertyRow>
+          </div>
+        );
+      })}
     </section>
   );
 }
