@@ -1,9 +1,15 @@
 import { useRef, useState, type ReactElement } from 'react';
 import type {
+  CaptionClipStyleV2,
   CaptionClipV1,
   CaptionDocumentV1,
   JoyProjectV1,
   TrackV1,
+} from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  captionClipStylePropertyBinding,
+  IDENTITY_CAPTION_CLIP_STYLE,
 } from '@joy-media/project-schema';
 import {
   captionSlots,
@@ -27,6 +33,7 @@ import { BurnInIcon, LanguageIcon, PlusIcon, TrashIcon, UndoIcon, PngMaskIcon } 
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { downloadBrowserTextFile } from './browser-text-download.js';
+import { PropertyRow } from './components/PropertyRow.js';
 
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
@@ -188,6 +195,7 @@ export function CaptionsPanel({
             onSeek={onSeek}
             onDispatch={onDispatch}
             onTranscribe={onTranscribe}
+            project={project}
           />
         ))
       )}
@@ -202,6 +210,7 @@ function CaptionSlotEditor({
   onSeek,
   onDispatch,
   onTranscribe,
+  project,
 }: {
   readonly slot: CaptionSlot;
   readonly query: string;
@@ -209,6 +218,7 @@ function CaptionSlotEditor({
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
   readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly project: JoyProjectV1;
 }) {
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -248,6 +258,57 @@ function CaptionSlotEditor({
       label: 'Apply caption template',
       commands: [{ type: 'caption.setStyle', payload: { documentId: document.id, styleRef } }],
     });
+  };
+  const clipStyle = clip.style ?? IDENTITY_CAPTION_CLIP_STYLE;
+  const clipTimeUs = Math.max(0, playheadUs - clip.startUs);
+  const setClipStyle = (next: CaptionClipStyleV2, label: string) =>
+    onDispatch({
+      label,
+      commands: [{ type: 'caption.setClipStyle', payload: { clipId: clip.id, style: next } }],
+    });
+  const animatedStyleRow = (propertyId: 'opacity' | 'scale', value: number, label: string) => {
+    const binding = captionClipStylePropertyBinding(clip.id, propertyId);
+    const current = project.propertyAnimations?.[canonicalBindingKey(binding)];
+    const curve = current?.value.kind === 'scalar' ? current.value.curve : undefined;
+    const keyed = curve?.keyframes.some((key) => key.timeUs === clipTimeUs) === true;
+    return {
+      animationState: keyed
+        ? ('keyed' as const)
+        : curve === undefined
+          ? ('none' as const)
+          : ('between' as const),
+      onToggleAnimation: () =>
+        onDispatch({
+          label: `${keyed ? 'Remove' : 'Add'} ${label} keyframe`,
+          commands: [
+            keyed
+              ? { type: 'propertyAnimation.removeKey', payload: { binding, timeUs: clipTimeUs } }
+              : curve === undefined
+                ? {
+                    type: 'propertyAnimation.replace',
+                    payload: {
+                      binding,
+                      value: {
+                        kind: 'scalar',
+                        curve: {
+                          keyframes: [{ timeUs: clipTimeUs, value, interpolation: 'linear' }],
+                        },
+                      },
+                    },
+                  }
+                : {
+                    type: 'propertyAnimation.setKey',
+                    payload: {
+                      binding,
+                      key: {
+                        kind: 'scalar',
+                        keyframe: { timeUs: clipTimeUs, value, interpolation: 'linear' },
+                      },
+                    },
+                  },
+          ],
+        }),
+    };
   };
   const importFile = async (file: File) => {
     const text = await file.text();
@@ -306,6 +367,48 @@ function CaptionSlotEditor({
                 </button>
               );
             })}
+          </div>
+          <div className="caption-style-controls" aria-label="Clip caption appearance">
+            <PropertyRow
+              label="Opacity"
+              value={clipStyle.opacity.toFixed(2)}
+              {...animatedStyleRow('opacity', clipStyle.opacity, 'Opacity')}
+            >
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={clipStyle.opacity}
+                aria-label="Caption opacity"
+                onChange={(event) =>
+                  setClipStyle(
+                    { ...clipStyle, opacity: event.currentTarget.valueAsNumber },
+                    'Set caption opacity',
+                  )
+                }
+              />
+            </PropertyRow>
+            <PropertyRow
+              label="Scale"
+              value={clipStyle.scale.toFixed(2)}
+              {...animatedStyleRow('scale', clipStyle.scale, 'Scale')}
+            >
+              <input
+                type="range"
+                min={0.25}
+                max={3}
+                step={0.01}
+                value={clipStyle.scale}
+                aria-label="Caption scale"
+                onChange={(event) =>
+                  setClipStyle(
+                    { ...clipStyle, scale: event.currentTarget.valueAsNumber },
+                    'Set caption scale',
+                  )
+                }
+              />
+            </PropertyRow>
           </div>
         </details>
         <details className="caption-action-menu" open>

@@ -184,6 +184,7 @@ export function applyVisualObjectProjectCommand(
     case 'caption.addSegment':
     case 'caption.removeSegment':
     case 'caption.setStyle':
+    case 'caption.setClipStyle':
     case 'caption.replaceDocument':
       return applyCaptionProjectCommand(project, command);
     case 'object.replaceAnimation':

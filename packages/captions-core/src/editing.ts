@@ -10,6 +10,7 @@
 
 import type {
   CaptionClipV1,
+  CaptionClipStyleV2,
   CaptionDocumentV1,
   CaptionSegmentV1,
   CompositionV1,
@@ -29,6 +30,13 @@ export class CaptionCommandError extends RangeError {
 }
 
 export type CaptionCommand =
+  | {
+      readonly type: 'caption.setClipStyle';
+      readonly payload: {
+        readonly clipId: string;
+        readonly style?: CaptionClipStyleV2;
+      };
+    }
   | {
       readonly type: 'caption.setSegmentText';
       readonly payload: {
@@ -97,6 +105,7 @@ export function applyCaptionProjectCommand(
   project: JoyProjectV1,
   command: CaptionCommand,
 ): CaptionApplyResult {
+  if (command.type === 'caption.setClipStyle') return applyClipStyle(project, command);
   const document = project.captionDocuments[command.payload.documentId];
   if (document === undefined)
     throw new CaptionCommandError(
@@ -245,6 +254,74 @@ export function applyCaptionProjectCommand(
       };
     }
   }
+}
+
+function applyClipStyle(
+  project: JoyProjectV1,
+  command: Extract<CaptionCommand, { readonly type: 'caption.setClipStyle' }>,
+): CaptionApplyResult {
+  let found: CaptionClipV1 | undefined;
+  let matchCount = 0;
+  for (const composition of Object.values(project.compositions)) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        if (clip.kind === 'caption' && clip.id === command.payload.clipId) {
+          found = clip;
+          matchCount += 1;
+        }
+      }
+    }
+  }
+  if (found === undefined)
+    throw new CaptionCommandError(
+      'CAPTION_COMMAND_UNKNOWN_CLIP',
+      `unknown caption clip "${command.payload.clipId}"`,
+    );
+  if (matchCount !== 1)
+    throw new CaptionCommandError(
+      'CAPTION_COMMAND_DUPLICATE_CLIP',
+      `caption clip "${command.payload.clipId}" must be unique`,
+    );
+  const nextProject = mapCaptionClip(project, found.id, (clip) => {
+    const next = { ...clip };
+    if (command.payload.style === undefined) delete next.style;
+    else next.style = command.payload.style;
+    return next;
+  });
+  return {
+    project: nextProject,
+    inverse: {
+      type: 'caption.setClipStyle',
+      payload: {
+        clipId: found.id,
+        ...(found.style === undefined ? {} : { style: found.style }),
+      },
+    },
+  };
+}
+
+function mapCaptionClip(
+  project: JoyProjectV1,
+  clipId: string,
+  map: (clip: CaptionClipV1) => CaptionClipV1,
+): JoyProjectV1 {
+  return {
+    ...project,
+    compositions: Object.fromEntries(
+      Object.entries(project.compositions).map(([compositionId, composition]) => [
+        compositionId,
+        {
+          ...composition,
+          tracks: composition.tracks.map((track) => ({
+            ...track,
+            clips: track.clips.map((clip) =>
+              clip.kind === 'caption' && clip.id === clipId ? map(clip) : clip,
+            ),
+          })),
+        },
+      ]),
+    ),
+  };
 }
 
 /** A caption clip resolved with its document — what editing panels iterate. */

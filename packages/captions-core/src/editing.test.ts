@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { CaptionDocumentV1, JoyProjectV1 } from '@joy-media/project-schema';
-import { validateJoyProjectV1 } from '@joy-media/project-schema';
+import {
+  IDENTITY_CAPTION_CLIP_STYLE,
+  validateJoyProjectV1,
+  type CaptionDocumentV1,
+  type JoyProjectV1,
+} from '@joy-media/project-schema';
 import {
   applyCaptionProjectCommand,
   CaptionCommandError,
@@ -157,6 +161,17 @@ describe('style and document replacement commands', () => {
     expect(styled.project.captionDocuments.doc!.styleRef).toBe('joy-karaoke-pop');
     const reverted = applyCaptionProjectCommand(styled.project, styled.inverse);
     expect(reverted.project.captionDocuments.doc).toEqual(document);
+  });
+
+  it('owns per-clip appearance independently from the shared transcript', () => {
+    const base = project();
+    const styled = applyCaptionProjectCommand(base, {
+      type: 'caption.setClipStyle',
+      payload: { clipId: 'clip-1', style: { ...IDENTITY_CAPTION_CLIP_STYLE, opacity: 0.5 } },
+    });
+    const clip = styled.project.compositions.root!.tracks[0]!.clips[0]!;
+    expect(clip.kind === 'caption' && clip.style?.opacity).toBe(0.5);
+    expect(applyCaptionProjectCommand(styled.project, styled.inverse).project).toEqual(base);
   });
 
   it('replaces a whole document atomically (import path) and inverts to the original', () => {
