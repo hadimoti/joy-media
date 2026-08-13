@@ -5387,31 +5387,19 @@ function EditorWorkspace({
                 showToast('Select a clip to apply the recipe.', 'info');
                 return;
               }
-              const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
-              const commands = [
-                ...existing.map((effect) => ({
-                  type: 'effect.remove' as const,
-                  payload: { objectId, effectInstanceId: effect.id },
-                })),
-                ...effects
-                  .filter((effect) => effect.enabled)
-                  .map((effect) => ({
-                    type: 'effect.add' as const,
-                    payload: {
-                      objectId,
-                      effectId: effect.effectId,
-                      params: effect.params,
-                      ...(effect.animations === undefined ? {} : { animations: effect.animations }),
-                    },
-                  })),
-              ];
-              if (commands.length === 0) {
+              const activeEffects = effects.filter((effect) => effect.enabled);
+              if (activeEffects.length === 0) {
                 showToast('This recipe has no active effects to apply.', 'info');
                 return;
               }
               dispatchProject({
                 label: 'Apply Effect Recipe',
-                commands,
+                commands: [
+                  {
+                    type: 'effect.replaceAll',
+                    payload: { objectId, effects: activeEffects },
+                  },
+                ],
               } as unknown as VisualObjectTransaction);
               showToast('Effect recipe applied to the clip.', 'success');
               setEffectStudioSession(undefined);

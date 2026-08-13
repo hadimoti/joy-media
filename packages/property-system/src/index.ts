@@ -197,6 +197,7 @@ export function applyVisualObjectProjectCommand(
     case 'effect.setParam':
     case 'effect.replaceAnimation':
     case 'effect.clearAll':
+    case 'effect.replaceAll':
     case 'effect.replace':
       return applyMotionProjectCommand(project, command);
     case 'propertyAnimation.replace':

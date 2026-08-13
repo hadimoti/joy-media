@@ -62,9 +62,12 @@ export interface AddEffectCommand {
   readonly type: 'effect.add';
   readonly payload: {
     readonly objectId: string;
+    /** Supplying an id is used by undo/recipe application to preserve ownership. */
+    readonly effectInstanceId?: string;
     readonly effectId: string;
     readonly params?: Readonly<Record<string, EffectParamValue>>;
     readonly animations?: EffectInstanceV1['animations'];
+    readonly enabled?: boolean;
     readonly index?: number;
   };
 }
@@ -123,6 +126,15 @@ export interface ClearEffectsCommand {
   };
 }
 
+/** Atomically replaces an object's entire effect stack while preserving instance ids. */
+export interface ReplaceAllEffectsCommand {
+  readonly type: 'effect.replaceAll';
+  readonly payload: {
+    readonly objectId: string;
+    readonly effects: readonly EffectInstanceV1[];
+  };
+}
+
 export interface ReplaceEffectCommand {
   readonly type: 'effect.replace';
   readonly payload: {
@@ -145,6 +157,7 @@ export type MotionCommand =
   | SetEffectParamCommand
   | ReplaceEffectAnimationCommand
   | ClearEffectsCommand
+  | ReplaceAllEffectsCommand
   | ReplaceEffectCommand;
 
 export interface MotionApplyResult {
@@ -339,7 +352,7 @@ export function applyMotionProjectCommand(
   }
 
   if (command.type === 'effect.add') {
-    const { effectId, params, index, animations } = command.payload;
+    const { effectId, effectInstanceId, params, index, animations, enabled } = command.payload;
     if (animations !== undefined) {
       for (const [key, curve] of Object.entries(animations)) {
         if (curve === undefined) continue;
@@ -350,11 +363,14 @@ export function applyMotionProjectCommand(
       }
     }
     const effects = getEffectsArray(object);
+    const instanceId = effectInstanceId ?? crypto.randomUUID();
+    if (findEffectIndex(effects, instanceId) !== -1)
+      throw new MotionCommandError(`duplicate effect instance ${instanceId}`);
     const newEffect: EffectInstanceV1 = {
-      id: crypto.randomUUID(),
+      id: instanceId,
       effectId,
       params: params ?? {},
-      enabled: true,
+      enabled: enabled ?? true,
       ...(animations === undefined ? {} : { animations }),
     };
     const nextEffects = [...effects];
@@ -380,8 +396,10 @@ export function applyMotionProjectCommand(
       type: 'effect.add',
       payload: {
         objectId,
+        effectInstanceId: removed.id,
         effectId: removed.effectId,
         params: removed.params,
+        enabled: removed.enabled,
         index: idx,
         ...(removed.animations === undefined ? {} : { animations: removed.animations }),
       },
@@ -482,18 +500,37 @@ export function applyMotionProjectCommand(
     const effects = getEffectsArray(object);
     if (effects.length === 0) return commit(project, objectId, object, command);
     const nextObject = setEffectsArray(object, []);
-    const firstEffect = effects[0] as EffectInstanceV1;
     const inverse: MotionCommand = {
-      type: 'effect.replace',
-      payload: {
-        objectId,
-        effectInstanceId: firstEffect.id,
-        newEffectId: firstEffect.effectId,
-        params: firstEffect.params,
-      },
+      type: 'effect.replaceAll',
+      payload: { objectId, effects },
     };
-    // Note: clearAll inverse is a simplified single effect restore; for full restore
-    // we'd need a compound command. This is a pragmatic fallback.
+    return commit(project, objectId, nextObject, inverse);
+  }
+
+  if (command.type === 'effect.replaceAll') {
+    const effects = command.payload.effects;
+    const seenIds = new Set<string>();
+    for (const effect of effects) {
+      if (effect.id.trim().length === 0)
+        throw new MotionCommandError('effect instance id must not be empty');
+      if (seenIds.has(effect.id))
+        throw new MotionCommandError(`duplicate effect instance ${effect.id}`);
+      seenIds.add(effect.id);
+      if (effect.animations === undefined) continue;
+      for (const [key, curve] of Object.entries(effect.animations)) {
+        if (curve === undefined) continue;
+        const diagnostics: ProjectDiagnostic[] = [];
+        validateAnimationCurve(curve, `effect.${effect.id}.${key}`, diagnostics);
+        if (diagnostics.length > 0)
+          throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+      }
+    }
+    const previous = getEffectsArray(object);
+    const nextObject = setEffectsArray(object, effects);
+    const inverse: MotionCommand = {
+      type: 'effect.replaceAll',
+      payload: { objectId, effects: previous },
+    };
     return commit(project, objectId, nextObject, inverse);
   }
 

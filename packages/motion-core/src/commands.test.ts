@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { AnimationCurveV1, JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
+import type {
+  AnimationCurveV1,
+  EffectInstanceV1,
+  JoyProjectV1,
+  VisualObjectV1,
+} from '@joy-media/project-schema';
 import { applyMotionProjectCommand, MotionCommandError } from './commands.js';
 import type { MotionCommand } from './commands.js';
 
@@ -157,6 +162,62 @@ describe('applyMotionProjectCommand — effect.add automation', () => {
     expect(result.project.visualObjects['obj-1']!.effects?.[0]?.animations?.brightness).toEqual(
       curve,
     );
+  });
+});
+
+describe('applyMotionProjectCommand — effect.replaceAll', () => {
+  it('replaces a complete stack and restores exact instances, including automation', () => {
+    const projectWithEffect: JoyProjectV1 = {
+      ...project,
+      visualObjects: {
+        'obj-1': {
+          ...object,
+          effects: [
+            {
+              id: 'fx-1',
+              effectId: 'brightness-contrast',
+              enabled: true,
+              params: { brightness: 0 },
+            },
+          ],
+        },
+      },
+    };
+    const replacement: readonly EffectInstanceV1[] = [
+      {
+        id: 'recipe-effect-1',
+        effectId: 'brightness',
+        enabled: true,
+        params: { amount: 0.2 },
+        animations: {
+          amount: {
+            keyframes: [
+              { timeUs: 0, value: 0, interpolation: 'linear' },
+              { timeUs: 1_000_000, value: 0.2, interpolation: 'linear' },
+            ],
+          },
+        },
+      },
+    ];
+    const replaced = applyMotionProjectCommand(projectWithEffect, {
+      type: 'effect.replaceAll',
+      payload: { objectId: 'obj-1', effects: replacement },
+    });
+    expect(replaced.project.visualObjects['obj-1']!.effects).toEqual(replacement);
+    expect(
+      applyMotionProjectCommand(replaced.project, replaced.inverse).project.visualObjects['obj-1']!
+        .effects,
+    ).toEqual(projectWithEffect.visualObjects['obj-1']!.effects);
+  });
+
+  it('rejects duplicate effect instance ids', () => {
+    const duplicate = { id: 'duplicate', effectId: 'brightness', enabled: true, params: {} };
+    expect(() =>
+      applyMotionProjectCommand(project, {
+        type: 'effect.replaceAll',
+        payload: { objectId: 'obj-1', effects: [duplicate, duplicate] },
+      }),
+    ).toThrow(MotionCommandError);
   });
 });
 
