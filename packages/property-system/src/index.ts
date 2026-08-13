@@ -203,6 +203,7 @@ export function applyVisualObjectProjectCommand(
     case 'propertyAnimation.disable':
     case 'propertyAnimation.setKey':
     case 'propertyAnimation.removeKey':
+    case 'propertyAnimation.restoreState':
       return applyPropertyAnimationCommand(project, command);
     default:
       break;
@@ -683,3 +684,15 @@ export type {
   PropertyAnimationApplyResult,
 } from './property-animation-commands.js';
 export { applyPropertyAnimationCommand } from './property-animation-commands.js';
+export type {
+  LegacyPropertyAnimation,
+  LegacyPropertyAnimationAdapter,
+  LegacyPropertyMigration,
+} from './legacy-property-animation.js';
+export {
+  legacyPropertyAnimationAdapter,
+  migrateLegacyPropertyOnFirstV2Edit,
+  readLegacyPropertyAnimation,
+  restoreLegacyPropertyAnimation,
+  writeLegacyPropertyAnimation,
+} from './legacy-property-animation.js';

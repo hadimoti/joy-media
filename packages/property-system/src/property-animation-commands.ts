@@ -7,6 +7,13 @@ import {
   type PropertyAnimationV2,
   type PropertyBindingV2,
 } from '@joy-media/project-schema';
+import {
+  legacyPropertyAnimationAdapter,
+  migrateLegacyPropertyOnFirstV2Edit,
+  readLegacyPropertyAnimation,
+  restoreLegacyPropertyAnimation,
+  type LegacyPropertyAnimation,
+} from './legacy-property-animation.js';
 
 export type PropertyAnimationKey =
   | { readonly kind: 'scalar' | 'angle' | 'hue'; readonly keyframe: KeyframeV1 }
@@ -47,6 +54,15 @@ export type PropertyAnimationCommand =
   | {
       readonly type: 'propertyAnimation.removeKey';
       readonly payload: { readonly binding: PropertyBindingV2; readonly timeUs: number };
+    }
+  | {
+      /** Internal history command restoring the exact state before lazy V2 migration. */
+      readonly type: 'propertyAnimation.restoreState';
+      readonly payload: {
+        readonly binding: PropertyBindingV2;
+        readonly animation?: PropertyAnimationV2;
+        readonly legacy?: LegacyPropertyAnimation;
+      };
     };
 
 export interface PropertyAnimationApplyResult {
@@ -59,11 +75,16 @@ export function applyPropertyAnimationCommand(
   project: JoyProjectV1,
   command: PropertyAnimationCommand,
 ): PropertyAnimationApplyResult {
-  const current = normalized(project);
-  const binding =
-    command.type === 'propertyAnimation.enable'
-      ? command.payload.animation.binding
-      : command.payload.binding;
+  const binding = bindingFor(command);
+  if (command.type === 'propertyAnimation.restoreState') {
+    return restoreState(project, command.payload);
+  }
+
+  const migration =
+    command.type === 'propertyAnimation.disable'
+      ? { project }
+      : migrateLegacyPropertyOnFirstV2Edit(project, binding);
+  const current = normalized(migration.project);
   const id = canonicalBindingKey(binding);
   const previous = current[id];
   let next: PropertyAnimationV2 | undefined;
@@ -92,17 +113,65 @@ export function applyPropertyAnimationCommand(
   const animations = { ...current };
   if (next === undefined) delete animations[id];
   else animations[id] = next;
-  const nextProject: { -readonly [K in keyof JoyProjectV1]: JoyProjectV1[K] } = { ...project };
+  const nextProject: { -readonly [K in keyof JoyProjectV1]: JoyProjectV1[K] } = {
+    ...migration.project,
+  };
   if (Object.keys(animations).length === 0) delete nextProject.propertyAnimations;
   else nextProject.propertyAnimations = animations;
   return {
     project: nextProject,
     inverse:
-      previous === undefined
-        ? { type: 'propertyAnimation.disable', payload: { binding } }
-        : { type: 'propertyAnimation.replace', payload: { binding, value: previous.value } },
+      migration.legacy === undefined
+        ? stateCommand(binding, previous, readLegacyPropertyAnimation(project, binding))
+        : stateCommand(binding, undefined, migration.legacy),
   };
 }
+
+function restoreState(
+  project: JoyProjectV1,
+  payload: Extract<
+    PropertyAnimationCommand,
+    { readonly type: 'propertyAnimation.restoreState' }
+  >['payload'],
+): PropertyAnimationApplyResult {
+  const current = normalized(project);
+  const id = canonicalBindingKey(payload.binding);
+  const previous = current[id];
+  const previousLegacy = readLegacyPropertyAnimation(project, payload.binding);
+  const withoutLegacy = restoreLegacyPropertyAnimation(project, payload.binding, payload.legacy);
+  const animations = { ...(withoutLegacy.propertyAnimations ?? {}) };
+  if (payload.animation === undefined) delete animations[id];
+  else animations[id] = payload.animation;
+  const nextProject = { ...withoutLegacy };
+  if (Object.keys(animations).length === 0) delete nextProject.propertyAnimations;
+  else nextProject.propertyAnimations = animations;
+  return {
+    project: nextProject,
+    inverse: stateCommand(payload.binding, previous, previousLegacy),
+  };
+}
+
+function stateCommand(
+  binding: PropertyBindingV2,
+  animation: PropertyAnimationV2 | undefined,
+  legacy: LegacyPropertyAnimation | undefined,
+): PropertyAnimationCommand {
+  return {
+    type: 'propertyAnimation.restoreState',
+    payload: {
+      binding,
+      ...(animation === undefined ? {} : { animation }),
+      ...(legacy === undefined ? {} : { legacy }),
+    },
+  };
+}
+
+function bindingFor(command: PropertyAnimationCommand): PropertyBindingV2 {
+  if (command.type === 'propertyAnimation.enable') return command.payload.animation.binding;
+  return command.payload.binding;
+}
+
+export { legacyPropertyAnimationAdapter };
 
 function normalized(project: JoyProjectV1): Record<string, PropertyAnimationV2> {
   const result = normalizePropertyAnimations(project.propertyAnimations);
