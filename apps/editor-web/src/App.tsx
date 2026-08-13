@@ -4429,7 +4429,10 @@ function EditorWorkspace({
                 selectedClipName:
                   visualProject.assets[selectedTimelineVideo.clip.assetId]?.displayName ??
                   selectedTimelineVideo.clip.id,
+                selectedClipStartUs: selectedTimelineVideo.clip.startUs,
+                selectedClipDurationUs: selectedTimelineVideo.clip.durationUs,
               })}
+          playheadUs={state.playheadUs}
         />
       );
     if (api.id === 'captions')

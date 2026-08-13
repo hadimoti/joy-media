@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ColorGradeV1, ColorGradeV2, JoyProjectV1 } from '@joy-media/project-schema';
 import {
+  canonicalBindingKey,
+  colorPropertyBinding,
   createIdentityColorGrade,
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_CURVES,
@@ -8,6 +10,7 @@ import {
   IDENTITY_COLOR_WHEELS,
 } from '@joy-media/project-schema';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -49,6 +52,9 @@ interface ColorPanelProps {
   readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
   readonly selectedClipId?: string;
   readonly selectedClipName?: string;
+  readonly selectedClipStartUs?: number;
+  readonly selectedClipDurationUs?: number;
+  readonly playheadUs?: number;
   readonly readMonitorPixels?: () => ScopePixels | undefined;
 }
 
@@ -89,6 +95,9 @@ export function ColorPanel({
   onDispatch,
   selectedClipId,
   selectedClipName,
+  selectedClipStartUs,
+  selectedClipDurationUs,
+  playheadUs = 0,
   readMonitorPixels,
 }: ColorPanelProps) {
   // App only passes selectedClipId after resolving a gradeable video clip from
@@ -148,6 +157,92 @@ export function ColorPanel({
     };
     setDraft(next);
     if (finalize) commit(next);
+  };
+  const animationStateFor = (propertyId: string): PropertyAnimationState => {
+    if (target === 'clip' && selectedClipId === undefined) return 'none';
+    const binding = colorPropertyBinding(
+      target,
+      propertyId,
+      target === 'clip' ? selectedClipId : undefined,
+    );
+    const value = project.propertyAnimations?.[canonicalBindingKey(binding)]?.value;
+    if (value === undefined) return 'none';
+    const localTimeUs =
+      target === 'clip'
+        ? Math.max(
+            0,
+            Math.min(
+              selectedClipDurationUs ?? Number.MAX_SAFE_INTEGER,
+              playheadUs - (selectedClipStartUs ?? playheadUs),
+            ),
+          )
+        : playheadUs;
+    const hasKey =
+      value.kind === 'scalar' || value.kind === 'angle' || value.kind === 'hue'
+        ? value.curve.keyframes.some((key) => key.timeUs === localTimeUs)
+        : value.kind === 'vector' || value.kind === 'color'
+          ? Object.values(value.curve).some((curve) =>
+              curve.keyframes.some((key) => key.timeUs === localTimeUs),
+            )
+          : value.kind === 'boolean' || value.kind === 'string'
+            ? value.keys.some((key) => key.timeUs === localTimeUs)
+            : value.samples.some((sample) => sample.timeUs === localTimeUs);
+    return hasKey ? 'keyed' : 'between';
+  };
+  const toggleAdjustAnimation = (key: string, value: number) => {
+    if (onDispatch === undefined) return;
+    if (target === 'clip' && selectedClipId === undefined) return;
+    const propertyId = `adjust.${key}`;
+    const binding = colorPropertyBinding(
+      target,
+      propertyId,
+      target === 'clip' ? selectedClipId : undefined,
+    );
+    const localTimeUs =
+      target === 'clip'
+        ? Math.max(
+            0,
+            Math.min(
+              selectedClipDurationUs ?? Number.MAX_SAFE_INTEGER,
+              playheadUs - (selectedClipStartUs ?? playheadUs),
+            ),
+          )
+        : playheadUs;
+    const current = project.propertyAnimations?.[canonicalBindingKey(binding)];
+    const kind = key === 'hue' ? 'hue' : 'scalar';
+    const isCurrentKind = current?.value.kind === kind;
+    const hasKey =
+      isCurrentKind &&
+      'curve' in current.value &&
+      current.value.curve.keyframes.some((frame) => frame.timeUs === localTimeUs);
+    onDispatch({
+      label: `${hasKey ? 'Remove' : 'Add'} Color ${key} keyframe`,
+      commands: [
+        hasKey
+          ? { type: 'propertyAnimation.removeKey', payload: { binding, timeUs: localTimeUs } }
+          : isCurrentKind
+            ? {
+                type: 'propertyAnimation.setKey',
+                payload: {
+                  binding,
+                  key: {
+                    kind,
+                    keyframe: { timeUs: localTimeUs, value, interpolation: 'linear' },
+                  },
+                },
+              }
+            : {
+                type: 'propertyAnimation.replace',
+                payload: {
+                  binding,
+                  value: {
+                    kind,
+                    curve: { keyframes: [{ timeUs: localTimeUs, value, interpolation: 'linear' }] },
+                  },
+                },
+              },
+      ],
+    });
   };
   const reset = () => {
     const next = createIdentityColorGrade();
@@ -215,7 +310,14 @@ export function ColorPanel({
         aria-label={target === 'clip' && !clipAvailable ? 'Color controls disabled' : undefined}
       >
         {tab === 'adjust' && (
-          <AdjustSection draft={draft} onPatch={patchAdjust} onCommit={commit} />
+          <AdjustSection
+            draft={draft}
+            onPatch={patchAdjust}
+            onCommit={commit}
+            animationStateFor={animationStateFor}
+            onToggleAnimation={toggleAdjustAnimation}
+            canAnimate={onDispatch !== undefined}
+          />
         )}
         {tab === 'wheels' && <WheelsSection draft={draft} onChange={setDraft} onCommit={commit} />}
         {tab === 'curves' && <CurvesSection draft={draft} onChange={setDraft} onCommit={commit} />}
@@ -250,30 +352,48 @@ function AdjustSection({
   draft,
   onPatch,
   onCommit,
+  animationStateFor,
+  onToggleAnimation,
+  canAnimate,
 }: {
   draft: ColorGradeV2;
   onPatch: (key: string, value: number, finalize?: boolean) => void;
   onCommit: (next: ColorGradeV2) => void;
+  animationStateFor: (propertyId: string) => PropertyAnimationState;
+  onToggleAnimation: (key: string, value: number) => void;
+  canAnimate: boolean;
 }) {
   const adjust = { ...IDENTITY_COLOR_ADJUSTMENTS, ...(draft.adjust ?? {}) };
   return (
     <section className="color-section">
       <h3>Primary adjustments</h3>
       {ADJUST_RANGES.map(([key, label, min, max, step]) => (
-        <label className="color-control" key={key}>
-          <span>{label}</span>
+        <PropertyRow
+          key={key}
+          label={label}
+          controlId={`color-adjust-${key}`}
+          value={key === 'hue' ? `${adjust[key].toFixed(0)}°` : adjust[key].toFixed(2)}
+          onReset={() => onPatch(key, step, true)}
+          {...(!canAnimate
+            ? {}
+            : {
+                animationState: animationStateFor(`adjust.${key}`),
+                onToggleAnimation: () => onToggleAnimation(key, adjust[key]),
+              })}
+        >
           <input
+            id={`color-adjust-${key}`}
             type="range"
             min={min}
             max={max}
             step={key === 'hue' ? 1 : 0.01}
             value={adjust[key]}
+            aria-label={label}
             onChange={(event) => onPatch(key, event.currentTarget.valueAsNumber)}
             onPointerUp={(event) => onPatch(key, event.currentTarget.valueAsNumber, true)}
             onDoubleClick={() => onPatch(key, step, true)}
           />
-          <output>{key === 'hue' ? `${adjust[key].toFixed(0)}°` : adjust[key].toFixed(2)}</output>
-        </label>
+        </PropertyRow>
       ))}
       <button
         type="button"
