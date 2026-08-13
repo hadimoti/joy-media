@@ -5,6 +5,8 @@ import type { Rational, TimeUs } from './time.js';
 import { clipTimeRange, rational } from './time.js';
 import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
 import type { ColorGradeV2 } from './color.js';
+import type { PropertyAnimationV2 } from './property-animation.js';
+import { validatePropertyAnimations } from './property-animation.js';
 
 export type EffectParamValue =
   | number
@@ -51,6 +53,13 @@ export interface JoyProjectV1 {
   readonly transitions?: readonly TransitionV1[];
   /** Last chosen export preset id. */
   readonly exportPreset?: ExportPresetId;
+  /**
+   * Optional universal property animations (WP34-05), keyed by an animation id.
+   * Each entry addresses a target via a stable `ownerKind`/`ownerId`/`propertyId`
+   * binding and carries a discriminated curve/value. Absent = none. Cross-checks
+   * (owner existence, canonical ids, ranges, key ordering) land in WP34-06.
+   */
+  readonly propertyAnimations?: Readonly<Record<string, PropertyAnimationV2>>;
 }
 
 export interface VisualObjectTransformV1 {
@@ -526,6 +535,7 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
+  diagnostics.push(...validatePropertyAnimations(value.propertyAnimations));
   return diagnostics;
 }
 

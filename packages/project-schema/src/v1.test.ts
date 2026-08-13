@@ -476,4 +476,111 @@ describe('v1 project schema and migration harness', () => {
       0,
     );
   });
+
+  it('legacy v1 documents without propertyAnimations remain valid (WP34-05)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    expect(base.propertyAnimations).toBeUndefined();
+    expect(validateJoyProjectV1(base)).toEqual([]);
+  });
+
+  it('accepts a representative valid scalar property animation (WP34-05)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      propertyAnimations: {
+        'anim-move': {
+          binding: {
+            ownerKind: 'visual-object',
+            ownerId: 'obj-1',
+            propertyId: 'x',
+            timeDomain: 'composition',
+          },
+          value: {
+            kind: 'scalar',
+            curve: {
+              keyframes: [
+                { timeUs: 0, value: 0, interpolation: 'linear' },
+                { timeUs: 1_000_000, value: 480, interpolation: 'linear' },
+              ],
+            },
+          },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('accepts a valid curve-snapshot property animation (WP34-05)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      propertyAnimations: {
+        'anim-master-snap': {
+          binding: {
+            ownerKind: 'motion-scene-layer',
+            ownerId: 'layer-1',
+            propertyId: 'master',
+            timeDomain: 'scene-local',
+          },
+          value: {
+            kind: 'curve-snapshot',
+            samples: [
+              {
+                timeUs: 0,
+                channels: { master: [0, 0.1, 0.25] },
+                interpolation: 'linear',
+              },
+              {
+                timeUs: 1_000_000,
+                channels: { master: [0.8, 0.9, 1] },
+                interpolation: 'linear',
+              },
+            ],
+          },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('rejects a property animation with an unsupported time domain (WP34-05)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      propertyAnimations: {
+        'anim-bad': {
+          binding: {
+            ownerKind: 'visual-object',
+            ownerId: 'obj-1',
+            propertyId: 'x',
+            timeDomain: 'not-a-real-domain',
+          },
+          value: {
+            kind: 'scalar',
+            curve: { keyframes: [{ timeUs: 0, value: 0, interpolation: 'linear' }] },
+          },
+        },
+      },
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'PROJECT_SCHEMA_V1_PROPERTY_ANIMATION_BINDING',
+    );
+    expect(diagnostics.map((diagnostic) => diagnostic.message)).toContain(
+      'binding requires a valid ownerKind, non-empty ownerId/propertyId, and a known timeDomain',
+    );
+  });
+
+  it('rejects a top-level propertyAnimations that is an array (WP34-05)', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      propertyAnimations: [],
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'PROJECT_SCHEMA_V1_PROPERTY_ANIMATIONS',
+    );
+    expect(diagnostics.map((diagnostic) => diagnostic.message)).toContain(
+      'propertyAnimations must be an object',
+    );
+  });
 });

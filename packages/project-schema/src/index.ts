@@ -105,6 +105,20 @@ export {
 } from './color.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {
+  PropertyOwnerKindV2,
+  AnimationTimeDomainV2,
+  PropertyBindingV2,
+  DiscreteKeyV2,
+  CurveSnapshotKeyV2,
+  AnimationValueV2,
+  PropertyAnimationV2,
+} from './property-animation.js';
+export {
+  PROPERTY_OWNER_KINDS,
+  PROPERTY_TIME_DOMAINS,
+  validatePropertyAnimations,
+} from './property-animation.js';
+export type {
   CreativeCapability,
   CreativeArtifactKind,
   CreativeArtifactV2,
