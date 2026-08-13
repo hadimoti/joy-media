@@ -80,6 +80,7 @@ export type {
   ReorderEffectCommand,
   ToggleEffectCommand,
   SetEffectParamCommand,
+  ReplaceEffectAnimationCommand,
   ClearEffectsCommand,
   ReplaceEffectCommand,
 } from './commands.js';

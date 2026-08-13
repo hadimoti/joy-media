@@ -195,6 +195,7 @@ export function applyVisualObjectProjectCommand(
     case 'effect.reorder':
     case 'effect.toggle':
     case 'effect.setParam':
+    case 'effect.replaceAnimation':
     case 'effect.clearAll':
     case 'effect.replace':
       return applyMotionProjectCommand(project, command);

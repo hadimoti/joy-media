@@ -2,6 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { VisualObjectV1 } from '@joy-media/project-schema';
 import { EffectsSection } from './InspectorPanel.js';
+import { effectRegistry, registerBuiltins } from '@joy-media/visual-effects';
+
+if (!effectRegistry.hasEffect('brightness-contrast')) registerBuiltins();
 
 const OBJECT: VisualObjectV1 = {
   id: 'title-1',
@@ -29,6 +32,7 @@ describe('Inspector effects ordering controls', () => {
         object={OBJECT}
         open={true}
         onToggle={() => undefined}
+        playheadUs={0}
         onDispatch={() => undefined}
       />,
     );
@@ -39,5 +43,30 @@ describe('Inspector effects ordering controls', () => {
     expect(markup).toContain('aria-label="Move unknown-one down"');
     expect(markup).toContain('aria-label="Move unknown-two up"');
     expect(markup).toContain('aria-label="Move unknown-two down"');
+  });
+
+  it('uses the shared property row for a renderer-backed animatable parameter', () => {
+    const markup = renderToStaticMarkup(
+      <EffectsSection
+        object={{
+          ...OBJECT,
+          effects: [
+            {
+              id: 'brightness',
+              effectId: 'brightness-contrast',
+              enabled: true,
+              params: { brightness: 0, contrast: 0 },
+            },
+          ],
+        }}
+        open={true}
+        onToggle={() => undefined}
+        playheadUs={0}
+        onDispatch={() => undefined}
+      />,
+    );
+    expect(markup).toContain('data-property-row="Brightness"');
+    expect(markup).toContain('Add Brightness keyframe at playhead');
+    expect(markup).toContain('type="range"');
   });
 });

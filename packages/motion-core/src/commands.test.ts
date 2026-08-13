@@ -111,6 +111,38 @@ describe('applyMotionProjectCommand', () => {
   });
 });
 
+describe('applyMotionProjectCommand — effect.replaceAnimation', () => {
+  const projectWithEffect: JoyProjectV1 = {
+    ...project,
+    visualObjects: {
+      'obj-1': {
+        ...object,
+        effects: [
+          { id: 'fx-1', effectId: 'brightness-contrast', enabled: true, params: { brightness: 0 } },
+        ],
+      },
+    },
+  };
+
+  it('stores one effect lane and restores its exact absence through the inverse', () => {
+    const result = applyMotionProjectCommand(projectWithEffect, {
+      type: 'effect.replaceAnimation',
+      payload: { objectId: 'obj-1', effectInstanceId: 'fx-1', paramKey: 'brightness', curve },
+    });
+    expect(result.project.visualObjects['obj-1']!.effects?.[0]?.animations?.brightness).toEqual(
+      curve,
+    );
+    expect(result.inverse).toEqual({
+      type: 'effect.replaceAnimation',
+      payload: { objectId: 'obj-1', effectInstanceId: 'fx-1', paramKey: 'brightness' },
+    });
+    expect(
+      applyMotionProjectCommand(result.project, result.inverse).project.visualObjects['obj-1']!
+        .effects?.[0]?.animations,
+    ).toBeUndefined();
+  });
+});
+
 describe('applyMotionProjectCommand — object.setParent', () => {
   const twoObjects: JoyProjectV1 = {
     ...project,

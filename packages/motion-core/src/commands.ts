@@ -104,6 +104,17 @@ export interface SetEffectParamCommand {
   };
 }
 
+/** Atomically replaces one effect parameter curve; undefined removes the lane. */
+export interface ReplaceEffectAnimationCommand {
+  readonly type: 'effect.replaceAnimation';
+  readonly payload: {
+    readonly objectId: string;
+    readonly effectInstanceId: string;
+    readonly paramKey: string;
+    readonly curve?: AnimationCurveV1;
+  };
+}
+
 export interface ClearEffectsCommand {
   readonly type: 'effect.clearAll';
   readonly payload: {
@@ -131,6 +142,7 @@ export type MotionCommand =
   | ReorderEffectCommand
   | ToggleEffectCommand
   | SetEffectParamCommand
+  | ReplaceEffectAnimationCommand
   | ClearEffectsCommand
   | ReplaceEffectCommand;
 
@@ -411,6 +423,39 @@ export function applyMotionProjectCommand(
         effectInstanceId,
         paramKey,
         value: prevValue ?? 0,
+      },
+    };
+    return commit(project, objectId, nextObject, inverse);
+  }
+
+  if (command.type === 'effect.replaceAnimation') {
+    const { effectInstanceId, paramKey, curve } = command.payload;
+    if (curve !== undefined) {
+      const diagnostics: ProjectDiagnostic[] = [];
+      validateAnimationCurve(curve, `effect.${effectInstanceId}.${paramKey}`, diagnostics);
+      if (diagnostics.length > 0)
+        throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+    }
+    const effects = getEffectsArray(object);
+    const idx = findEffectIndex(effects, effectInstanceId);
+    if (idx === -1) throw new MotionCommandError(`unknown effect instance ${effectInstanceId}`);
+    const current = effects[idx]!;
+    const previous = current.animations?.[paramKey];
+    const animations = { ...(current.animations ?? {}) };
+    if (curve === undefined) delete animations[paramKey];
+    else animations[paramKey] = curve;
+    const nextEffect = { ...current };
+    if (Object.keys(animations).length === 0) delete nextEffect.animations;
+    else nextEffect.animations = animations;
+    const nextEffects = effects.map((effect, index) => (index === idx ? nextEffect : effect));
+    const nextObject = setEffectsArray(object, nextEffects);
+    const inverse: MotionCommand = {
+      type: 'effect.replaceAnimation',
+      payload: {
+        objectId,
+        effectInstanceId,
+        paramKey,
+        ...(previous === undefined ? {} : { curve: previous }),
       },
     };
     return commit(project, objectId, nextObject, inverse);

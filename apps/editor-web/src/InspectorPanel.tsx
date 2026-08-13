@@ -35,6 +35,7 @@ import { effectReorderTransaction } from './effect-reorder.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import {
   NumericPropertyControl,
+  SliderPropertyControl,
   useTransientPropertyControl,
 } from './components/PropertyControlAdapters.js';
 
@@ -626,6 +627,7 @@ export function InspectorPanel({
           object={target}
           open={effectsOpen}
           onToggle={() => setEffectsOpen((v) => !v)}
+          playheadUs={timeUs}
           onDispatch={onDispatch}
         />
       )}
@@ -662,11 +664,13 @@ export function EffectsSection({
   object,
   open,
   onToggle,
+  playheadUs,
   onDispatch,
 }: {
   readonly object: VisualObjectV1;
   readonly open: boolean;
   readonly onToggle: () => void;
+  readonly playheadUs: number;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const effects = object.effects ?? [];
@@ -819,8 +823,9 @@ export function EffectsSection({
                         descriptor={descriptor}
                         param={param}
                         value={effect.params[param.key] ?? param.defaultValue}
-                        effectInstanceId={effect.id}
+                        effect={effect}
                         objectId={object.id}
+                        playheadUs={playheadUs}
                         onDispatch={onDispatch}
                       />
                     ))}
@@ -839,15 +844,17 @@ function EffectParamControl({
   descriptor,
   param,
   value,
-  effectInstanceId,
+  effect,
   objectId,
+  playheadUs,
   onDispatch,
 }: {
   readonly descriptor: EffectDescriptor;
   readonly param: EffectDescriptor['params'][number];
   readonly value: unknown;
-  readonly effectInstanceId: string;
+  readonly effect: NonNullable<VisualObjectV1['effects']>[number];
   readonly objectId: string;
+  readonly playheadUs: number;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
 }) {
   const label = descriptor.id;
@@ -859,7 +866,7 @@ function EffectParamControl({
           type: 'effect.setParam',
           payload: {
             objectId,
-            effectInstanceId,
+            effectInstanceId: effect.id,
             paramKey: param.key,
             value: next as never,
           },
@@ -868,30 +875,20 @@ function EffectParamControl({
     });
   };
 
-  if (param.type === 'number' || param.type === 'vector2') {
-    const numValue = typeof value === 'number' ? value : (param.defaultValue as number);
+  if (param.type === 'number')
     return (
-      <div className="inspector-prop">
-        <label>{param.label}</label>
-        <div className="inspector-prop-row">
-          <input
-            type="range"
-            min={param.min ?? -1}
-            max={param.max ?? 1}
-            step={param.step ?? 0.01}
-            value={numValue}
-            aria-label={`${param.label}`}
-            title={`${numValue.toFixed(2)}${param.unit ?? ''}`}
-            onChange={(e) => setValue(e.currentTarget.valueAsNumber)}
-          />
-          <span className="value">
-            {numValue.toFixed(2)}
-            {param.unit}
-          </span>
-        </div>
-      </div>
+      <EffectNumericParamControl
+        descriptor={descriptor}
+        param={param}
+        value={typeof value === 'number' ? value : (param.defaultValue as number)}
+        effect={effect}
+        objectId={objectId}
+        playheadUs={playheadUs}
+        onDispatch={onDispatch}
+      />
     );
-  }
+
+  if (param.type === 'vector2') return null;
 
   if (param.type === 'boolean') {
     const boolValue = typeof value === 'boolean' ? value : (param.defaultValue as boolean);
@@ -945,6 +942,125 @@ function EffectParamControl({
   }
 
   return null;
+}
+
+function EffectNumericParamControl({
+  descriptor,
+  param,
+  value,
+  effect,
+  objectId,
+  playheadUs,
+  onDispatch,
+}: {
+  readonly descriptor: EffectDescriptor;
+  readonly param: EffectDescriptor['params'][number];
+  readonly value: number;
+  readonly effect: NonNullable<VisualObjectV1['effects']>[number];
+  readonly objectId: string;
+  readonly playheadUs: number;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+}) {
+  const curve = effect.animations?.[param.key];
+  const animated = curve !== undefined;
+  const keyed = animated && hasKeyframeAtCurve(curve, playheadUs);
+  const sourceValue = animated ? sampleCurve(curve, playheadUs) : value;
+  const [previewValue, setPreviewValue] = useState(sourceValue);
+  useEffect(() => setPreviewValue(sourceValue), [sourceValue]);
+  const replaceCurve = (next: ReturnType<typeof setKeyframe> | undefined, label: string) =>
+    onDispatch({
+      label,
+      commands: [
+        {
+          type: 'effect.replaceAnimation',
+          payload: {
+            objectId,
+            effectInstanceId: effect.id,
+            paramKey: param.key,
+            ...(next === undefined ? {} : { curve: next }),
+          },
+        },
+      ],
+    });
+  const commitValue = (next: number) => {
+    if (animated) {
+      replaceCurve(
+        setKeyframe(curve, { timeUs: playheadUs, value: next, interpolation: 'linear' }),
+        `Set ${param.label} on ${descriptor.label}`,
+      );
+      return;
+    }
+    onDispatch({
+      label: `Set ${param.label} on ${descriptor.label}`,
+      commands: [
+        {
+          type: 'effect.setParam',
+          payload: { objectId, effectInstanceId: effect.id, paramKey: param.key, value: next },
+        },
+      ],
+    });
+  };
+  const adapter = useTransientPropertyControl(
+    {
+      read: () => previewValue,
+      preview: setPreviewValue,
+      restore: setPreviewValue,
+      commit: ({ next }) => commitValue(next),
+    },
+    `Set ${param.label} on ${descriptor.label}`,
+  );
+  const controlId = `effect-${effect.id}-${param.key}`;
+  return (
+    <PropertyRow
+      label={param.label}
+      controlId={controlId}
+      value={`${previewValue.toFixed(2)}${param.unit ?? ''}`}
+      onReset={() => commitValue(param.defaultValue as number)}
+      {...(param.animatable
+        ? {
+            onToggleAnimation: () => {
+              if (keyed) {
+                replaceCurve(removeKeyframe(curve!, playheadUs), `Remove ${param.label} keyframe`);
+              } else {
+                replaceCurve(
+                  setKeyframe(curve, {
+                    timeUs: playheadUs,
+                    value: previewValue,
+                    interpolation: 'linear',
+                  }),
+                  `Add ${param.label} keyframe`,
+                );
+              }
+            },
+            animationState: keyed
+              ? ('keyed' as const)
+              : animated
+                ? ('between' as const)
+                : ('none' as const),
+          }
+        : {})}
+    >
+      <div className="inspector-prop-row">
+        <SliderPropertyControl
+          value={previewValue}
+          adapter={adapter}
+          ariaLabel={param.label}
+          min={param.min ?? -1}
+          max={param.max ?? 1}
+          step={param.step ?? 0.01}
+        />
+        <NumericPropertyControl
+          id={controlId}
+          value={previewValue}
+          adapter={adapter}
+          ariaLabel={`${param.label} value`}
+          min={param.min}
+          max={param.max}
+          step={param.step}
+        />
+      </div>
+    </PropertyRow>
+  );
 }
 
 export const SPEED_RAMP_PRESETS: readonly {
