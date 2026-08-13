@@ -1,4 +1,5 @@
 import {
+  COLOR_CURVE_SNAPSHOT_SAMPLES,
   canonicalBindingKey,
   normalizePropertyAnimations,
   type AnimationValueV2,
@@ -184,6 +185,31 @@ function assertValid(animation: PropertyAnimationV2): void {
     [canonicalBindingKey(animation.binding)]: animation,
   });
   if (result.diagnostics.length > 0) throw new RangeError(result.diagnostics[0]!.message);
+  assertColorCurveSnapshot(animation);
+}
+
+/** Color curve properties use fixed-size tables so different knot counts morph safely. */
+function assertColorCurveSnapshot(animation: PropertyAnimationV2): void {
+  const { binding, value } = animation;
+  if (
+    (binding.ownerKind !== 'color-output' && binding.ownerKind !== 'color-clip') ||
+    !binding.propertyId.startsWith('curves.')
+  )
+    return;
+  if (value.kind !== 'curve-snapshot')
+    throw new RangeError('color curves require curve-snapshot animation values');
+  const channel = binding.propertyId.slice('curves.'.length);
+  for (const sample of value.samples) {
+    const values = sample.channels[channel];
+    if (
+      Object.keys(sample.channels).length !== 1 ||
+      values === undefined ||
+      values.length !== COLOR_CURVE_SNAPSHOT_SAMPLES
+    )
+      throw new RangeError(
+        `color curve snapshots require one ${COLOR_CURVE_SNAPSHOT_SAMPLES}-sample "${channel}" channel`,
+      );
+  }
 }
 
 function setKey(value: AnimationValueV2, key: PropertyAnimationKey): AnimationValueV2 {

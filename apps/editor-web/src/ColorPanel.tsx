@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ColorGradeV1, ColorGradeV2, JoyProjectV1 } from '@joy-media/project-schema';
 import {
   canonicalBindingKey,
+  colorCurveToSnapshot,
   colorPropertyBinding,
   createIdentityColorGrade,
   IDENTITY_COLOR_ADJUSTMENTS,
@@ -246,6 +247,54 @@ export function ColorPanel({
       ],
     });
   };
+  const toggleCurveAnimation = (
+    channel: 'rgb' | 'red' | 'green' | 'blue',
+    curves: ColorGradeV2['curves'],
+  ) => {
+    if (onDispatch === undefined || curves === undefined) return;
+    if (target === 'clip' && selectedClipId === undefined) return;
+    const binding = colorPropertyBinding(
+      target,
+      `curves.${channel}`,
+      target === 'clip' ? selectedClipId : undefined,
+    );
+    const localTimeUs =
+      target === 'clip'
+        ? Math.max(
+            0,
+            Math.min(
+              selectedClipDurationUs ?? Number.MAX_SAFE_INTEGER,
+              playheadUs - (selectedClipStartUs ?? playheadUs),
+            ),
+          )
+        : playheadUs;
+    const current = project.propertyAnimations?.[canonicalBindingKey(binding)];
+    const isSnapshot = current?.value.kind === 'curve-snapshot';
+    const hasKey =
+      isSnapshot && current.value.samples.some((sample) => sample.timeUs === localTimeUs);
+    const key = {
+      kind: 'curve-snapshot' as const,
+      timeUs: localTimeUs,
+      channels: { [channel]: colorCurveToSnapshot(curves[channel]) },
+      interpolation: 'linear',
+    };
+    onDispatch({
+      label: `${hasKey ? 'Remove' : 'Add'} Color ${channel.toUpperCase()} curve keyframe`,
+      commands: [
+        hasKey
+          ? { type: 'propertyAnimation.removeKey', payload: { binding, timeUs: localTimeUs } }
+          : isSnapshot
+            ? { type: 'propertyAnimation.setKey', payload: { binding, key } }
+            : {
+                type: 'propertyAnimation.replace',
+                payload: {
+                  binding,
+                  value: { kind: 'curve-snapshot', samples: [key] },
+                },
+              },
+      ],
+    });
+  };
   const reset = () => {
     const next = createIdentityColorGrade();
     setDraft(next);
@@ -331,7 +380,16 @@ export function ColorPanel({
             canAnimate={onDispatch !== undefined}
           />
         )}
-        {tab === 'curves' && <CurvesSection draft={draft} onChange={setDraft} onCommit={commit} />}
+        {tab === 'curves' && (
+          <CurvesSection
+            draft={draft}
+            onChange={setDraft}
+            onCommit={commit}
+            animationStateFor={animationStateFor}
+            onToggleAnimation={toggleCurveAnimation}
+            canAnimate={onDispatch !== undefined}
+          />
+        )}
         {tab === 'hsl' && (
           <HslSection
             draft={draft}
@@ -505,15 +563,24 @@ function CurvesSection({
   draft,
   onChange,
   onCommit,
+  animationStateFor,
+  onToggleAnimation,
+  canAnimate,
 }: {
   draft: ColorGradeV2;
   onChange: (next: ColorGradeV2) => void;
   onCommit: (next: ColorGradeV2) => void;
+  animationStateFor: (propertyId: string) => PropertyAnimationState;
+  onToggleAnimation: (
+    channel: 'rgb' | 'red' | 'green' | 'blue',
+    curves: ColorGradeV2['curves'],
+  ) => void;
+  canAnimate: boolean;
 }) {
   const [channel, setChannel] = useState<'rgb' | 'red' | 'green' | 'blue'>('rgb');
   const curves = { ...IDENTITY_COLOR_CURVES, ...(draft.curves ?? {}) };
   const points = curves[channel];
-  const updatePoint = (index: number, y: number) => {
+  const updatePoint = (index: number, y: number, finalize = false) => {
     const next = {
       ...draft,
       curves: {
@@ -522,7 +589,7 @@ function CurvesSection({
       },
     };
     onChange(next);
-    onCommit(next);
+    if (finalize) onCommit(next);
   };
   return (
     <section className="color-section">
@@ -539,36 +606,48 @@ function CurvesSection({
           </button>
         ))}
       </div>
-      <div className="curve-editor" aria-label={`${channel} curve`}>
-        <svg viewBox="0 0 100 100" role="img">
-          <path d="M0 100 L100 0" className="curve-grid-line" />
+      <PropertyRow
+        label={`${channel.toUpperCase()} curve`}
+        value={canAnimate ? animationStateFor(`curves.${channel}`) : undefined}
+        {...(!canAnimate
+          ? {}
+          : {
+              animationState: animationStateFor(`curves.${channel}`),
+              onToggleAnimation: () => onToggleAnimation(channel, curves),
+            })}
+      >
+        <div className="curve-editor" aria-label={`${channel} curve`}>
+          <svg viewBox="0 0 100 100" role="img">
+            <path d="M0 100 L100 0" className="curve-grid-line" />
+            {points.map((point, index) => (
+              <circle
+                key={`${point.x}-${index}`}
+                cx={point.x * 100}
+                cy={(1 - point.y) * 100}
+                r="4"
+                className="curve-point"
+                onDoubleClick={() => updatePoint(index, point.x, true)}
+              />
+            ))}
+          </svg>
+        </div>
+        <div className="curve-sliders">
           {points.map((point, index) => (
-            <circle
-              key={`${point.x}-${index}`}
-              cx={point.x * 100}
-              cy={(1 - point.y) * 100}
-              r="4"
-              className="curve-point"
-              onDoubleClick={() => updatePoint(index, point.x)}
-            />
+            <label key={index}>
+              Point {index + 1}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={point.y}
+                onChange={(e) => updatePoint(index, e.currentTarget.valueAsNumber)}
+                onPointerUp={(e) => updatePoint(index, e.currentTarget.valueAsNumber, true)}
+              />
+            </label>
           ))}
-        </svg>
-      </div>
-      <div className="curve-sliders">
-        {points.map((point, index) => (
-          <label key={index}>
-            Point {index + 1}
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={point.y}
-              onChange={(e) => updatePoint(index, e.currentTarget.valueAsNumber)}
-            />
-          </label>
-        ))}
-      </div>
+        </div>
+      </PropertyRow>
       <button
         type="button"
         className="section-reset"

@@ -1,5 +1,6 @@
 import {
   canonicalBindingKey,
+  colorCurveToSnapshot,
   migrateV0ToV1,
   type PropertyAnimationV2,
 } from '@joy-media/project-schema';
@@ -79,5 +80,39 @@ describe('WP34 property-animation commands', () => {
       payload: { binding: compound.binding, timeUs: 0 },
     });
     expect(removed.project.propertyAnimations).toBeUndefined();
+  });
+
+  it('accepts only fixed-size snapshots for Color curve properties', () => {
+    const colorBinding = { ...binding, propertyId: 'curves.rgb' };
+    const snapshot = colorCurveToSnapshot([
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ]);
+    expect(() =>
+      applyPropertyAnimationCommand(project(), {
+        type: 'propertyAnimation.replace',
+        payload: {
+          binding: colorBinding,
+          value: {
+            kind: 'curve-snapshot',
+            samples: [{ timeUs: 0, channels: { rgb: snapshot }, interpolation: 'linear' }],
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      applyPropertyAnimationCommand(project(), {
+        type: 'propertyAnimation.replace',
+        payload: {
+          binding: colorBinding,
+          value: {
+            kind: 'curve-snapshot',
+            samples: [
+              { timeUs: 0, channels: { rgb: snapshot.slice(0, 2) }, interpolation: 'linear' },
+            ],
+          },
+        },
+      }),
+    ).toThrow('color curve snapshots require one 256-sample');
   });
 });

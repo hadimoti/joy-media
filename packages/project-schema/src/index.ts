@@ -104,6 +104,7 @@ export {
   IDENTITY_COLOR_WHEEL,
   IDENTITY_COLOR_WHEELS,
   IDENTITY_COLOR_CURVES,
+  COLOR_CURVE_SNAPSHOT_SAMPLES,
   HSL_BAND_IDS,
   IDENTITY_HSL_BANDS,
   COLOR_PROPERTY_DESCRIPTORS,
@@ -112,6 +113,9 @@ export {
   findColorPropertyDescriptor,
   colorPropertyBinding,
   assertColorPropertyDescriptorCoverage,
+  colorCurveToSnapshot,
+  colorCurveFromSnapshot,
+  normalizeColorCurvePoints,
 } from './color.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
 export type {

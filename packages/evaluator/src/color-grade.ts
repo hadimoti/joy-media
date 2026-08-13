@@ -6,12 +6,14 @@
 import { sampleAnimationValue } from '@joy-media/motion-core';
 import {
   canonicalBindingKey,
+  colorCurveFromSnapshot,
   colorPropertyBinding,
   HSL_BAND_IDS,
   IDENTITY_COLOR_ADJUSTMENTS,
   IDENTITY_COLOR_WHEELS,
   IDENTITY_HSL_BANDS,
   type ColorGradeV2,
+  type ColorCurves,
   type ColorPropertyScopeV2,
   type HslBand,
   type NormalizedPropertyAnimationsV2,
@@ -28,9 +30,8 @@ export interface ColorGradeEvaluationTarget {
 
 /**
  * Samples the continuous WP34 Color controls at an explicit time domain.
- * Curves and LUT reference changes remain static until their dedicated
- * snapshot/hold packets; this function handles Adjust, Wheels, HSL, and LUT
- * intensity only.
+ * Curves are sampled through bounded snapshot tables; LUT reference changes
+ * remain static until their dependency-gated hold-key packet.
  */
 export function evaluateColorGradeAtTime(
   grade: ColorGradeV2,
@@ -111,12 +112,46 @@ export function evaluateColorGradeAtTime(
     grade.lut === undefined
       ? undefined
       : { ...grade.lut, intensity: sampleNumber('lut.intensity', grade.lut.intensity) };
+  const staticCurves = grade.curves;
+  const curves =
+    staticCurves === undefined
+      ? undefined
+      : (Object.fromEntries(
+          (['rgb', 'red', 'green', 'blue'] as const).map((channel) => {
+            const animation = animations?.[canonicalBindingKey(binding(`curves.${channel}`))];
+            if (animation?.value.kind !== 'curve-snapshot')
+              return [channel, staticCurves[channel]] as const;
+            const resolved = resolvePropertyAnimationTime(animation.binding.timeDomain, time);
+            const sampled = sampleAnimationValue(animation.value, resolved.timeUs);
+            const snapshot =
+              typeof sampled === 'object' && sampled !== null && !Array.isArray(sampled)
+                ? sampled[channel]
+                : undefined;
+            return [channel, curveFromSnapshotOrStatic(snapshot, staticCurves[channel])] as const;
+          }),
+        ) as unknown as ColorCurves);
 
   return {
     ...grade,
     adjust,
     wheels,
     hsl,
+    ...(curves === undefined ? {} : { curves }),
     ...(lut === undefined ? {} : { lut }),
   };
+}
+
+function curveFromSnapshotOrStatic(
+  snapshot: unknown,
+  fallback: ColorCurves['rgb'],
+): ColorCurves['rgb'] {
+  if (!Array.isArray(snapshot)) return fallback;
+  try {
+    return colorCurveFromSnapshot(snapshot);
+  } catch {
+    // Persisted data can predate the fixed Color snapshot contract. Fallback
+    // preserves an accurate static grade instead of letting malformed motion
+    // data make monitor/export disagree.
+    return fallback;
+  }
 }

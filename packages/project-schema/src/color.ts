@@ -43,6 +43,8 @@ export interface ColorCurvePoint {
 }
 
 export type ColorCurves = Readonly<Record<ColorCurveChannel, readonly ColorCurvePoint[]>>;
+/** Fixed sample count for durable animated Color curve snapshots. */
+export const COLOR_CURVE_SNAPSHOT_SAMPLES = 256;
 
 export const HSL_BAND_IDS = [
   'red',
@@ -158,6 +160,64 @@ export const IDENTITY_COLOR_CURVES: ColorCurves = Object.freeze({
     { x: 1, y: 1 },
   ]),
 });
+
+/**
+ * Converts a sparse, ordered curve into the fixed 256-value representation
+ * used by universal curve-snapshot animation. Values are bounded to the SDR
+ * curve domain and interpolation is deterministic between knots.
+ */
+export function colorCurveToSnapshot(points: readonly ColorCurvePoint[]): readonly number[] {
+  const normalized = normalizeColorCurvePoints(points);
+  return Array.from({ length: COLOR_CURVE_SNAPSHOT_SAMPLES }, (_, index) =>
+    sampleColorCurve(normalized, index / (COLOR_CURVE_SNAPSHOT_SAMPLES - 1)),
+  );
+}
+
+/** Converts a bounded snapshot back into a uniform curve for the renderer/UI. */
+export function colorCurveFromSnapshot(snapshot: readonly number[]): readonly ColorCurvePoint[] {
+  if (snapshot.length !== COLOR_CURVE_SNAPSHOT_SAMPLES)
+    throw new RangeError(
+      `color curve snapshots must contain ${COLOR_CURVE_SNAPSHOT_SAMPLES} samples`,
+    );
+  if (!snapshot.every(Number.isFinite))
+    throw new RangeError('color curve snapshots must be finite');
+  return snapshot.map((y, index) => ({
+    x: index / (COLOR_CURVE_SNAPSHOT_SAMPLES - 1),
+    y: clampUnit(y),
+  }));
+}
+
+/** Keeps curve knots ordered and bounded before snapshotting or rendering. */
+export function normalizeColorCurvePoints(
+  points: readonly ColorCurvePoint[],
+): readonly ColorCurvePoint[] {
+  if (points.length < 2) return IDENTITY_COLOR_CURVES.rgb;
+  const sorted = [...points]
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => ({ x: clampUnit(point.x), y: clampUnit(point.y) }))
+    .sort((left, right) => left.x - right.x);
+  const distinct = sorted.filter((point, index) => index === 0 || point.x > sorted[index - 1]!.x);
+  if (distinct.length < 2) return IDENTITY_COLOR_CURVES.rgb;
+  return distinct;
+}
+
+function sampleColorCurve(points: readonly ColorCurvePoint[], x: number): number {
+  if (x <= points[0]!.x) return points[0]!.y;
+  const last = points[points.length - 1]!;
+  if (x >= last.x) return last.y;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const left = points[index]!;
+    const right = points[index + 1]!;
+    if (x > right.x) continue;
+    const fraction = (x - left.x) / (right.x - left.x);
+    return left.y + (right.y - left.y) * fraction;
+  }
+  return last.y;
+}
+
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
 
 export const IDENTITY_HSL_BANDS: readonly HslBand[] = Object.freeze(
   HSL_BAND_IDS.map((id, index) =>

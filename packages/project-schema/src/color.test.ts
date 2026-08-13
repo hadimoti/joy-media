@@ -3,6 +3,8 @@ import {
   assertColorPropertyDescriptorCoverage,
   colorPropertyBinding,
   COLOR_PROPERTY_DESCRIPTORS,
+  colorCurveFromSnapshot,
+  colorCurveToSnapshot,
   createIdentityColorGrade,
   HSL_BAND_IDS,
 } from './color.js';
@@ -15,6 +17,19 @@ describe('WP34 color property descriptors', () => {
     expect(COLOR_PROPERTY_DESCRIPTORS.map((descriptor) => descriptor.id)).toContain(
       'lut.reference',
     );
+  });
+
+  it('serializes bounded 256-sample curve snapshots deterministically', () => {
+    const snapshot = colorCurveToSnapshot([
+      { x: 1, y: 1 },
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.75 },
+    ]);
+    expect(snapshot).toHaveLength(256);
+    expect(snapshot[0]).toBe(0);
+    expect(snapshot[128]).toBeGreaterThan(0.7);
+    expect(colorCurveFromSnapshot(snapshot)).toHaveLength(256);
+    expect(() => colorCurveFromSnapshot(snapshot.slice(0, 255))).toThrow(RangeError);
   });
 
   it('uses output and clip-local bindings without addressing UI diagnostics', () => {
