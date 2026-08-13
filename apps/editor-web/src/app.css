@@ -9991,6 +9991,37 @@ label {
 .property-row-control > :is(input, select, textarea) {
   min-width: 0;
 }
+.property-control-input,
+.property-control-select {
+  width: min(100%, 6rem);
+  min-height: var(--control-sm);
+  font-variant-numeric: tabular-nums;
+}
+.property-control-slider {
+  width: min(100%, 8rem);
+  vertical-align: middle;
+}
+.property-control-color {
+  width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 2px;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+}
+.property-control-switch {
+  width: 1.7rem;
+  height: 0.95rem;
+  accent-color: var(--joy-accent);
+}
+.property-control-input:focus-visible,
+.property-control-select:focus-visible,
+.property-control-slider:focus-visible,
+.property-control-color:focus-visible,
+.property-control-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--joy-accent) 70%, transparent);
+  outline-offset: 1px;
+}
 .property-row-actions {
   display: inline-flex;
   align-items: center;
