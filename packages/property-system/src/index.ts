@@ -647,3 +647,23 @@ export function validateVisualObjectProject(
     return [{ code: 'OBJECT_PROJECT_DUPLICATE', message: 'object ids must be unique' }];
   return [];
 }
+
+// ---------------------------------------------------------------------------
+// WP34-03 executable property coverage manifest.
+// ---------------------------------------------------------------------------
+export type {
+  AnimationValueKindV2,
+  CoverageClassification,
+  AnimationPolicy,
+  CoverageBinding,
+  CoverageEntry,
+} from './property-coverage.js';
+export {
+  COVERAGE_CLASSIFICATIONS,
+  PROPERTY_INVENTORY,
+  OWNER_TIME_DOMAINS,
+  PROPERTY_COVERAGE,
+  listPropertyCoverage,
+  findPropertyCoverage,
+  assertPropertyCoverageComplete,
+} from './property-coverage.js';
