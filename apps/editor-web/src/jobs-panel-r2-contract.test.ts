@@ -32,7 +32,7 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
   });
 
   it('does not reset initialized state during the pre-binding readiness probe', () => {
-    expect(panelSource).toContain('if (projectScopeReady) {\n        setJobs(nextJobs);');
+    expect(panelSource).toMatch(/if \(projectScopeReady\) \{\s+setJobs\(nextJobs\);/);
     expect(panelSource).toContain("projectId.startsWith('project-')");
     expect(panelSource).toContain('await client.ensureProject(projectId, projectTitle);');
     expect(panelSource).toContain('setProjectInitialized(!projectMissing);');
