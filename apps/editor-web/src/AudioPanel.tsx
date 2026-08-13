@@ -6,6 +6,12 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import {
+  audioBusPropertyBinding,
+  audioClipPropertyBinding,
+  type JoyProjectV1,
+} from '@joy-media/project-schema';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
+import {
   AudioIcon,
   AudioWorkerIcon,
   CheckIcon,
@@ -44,6 +50,8 @@ import {
   type AudioModelSpec,
 } from './audio-studio-runtime.js';
 import { ensureClipAudio } from './audio-session.js';
+import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
+import { PropertyRow } from './components/PropertyRow.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'enhance', label: 'Enhance' },
@@ -67,6 +75,10 @@ interface AudioPanelProps {
   readonly clipIds: readonly string[];
   readonly audioState: AudioState;
   readonly onAudioChange: (next: AudioState, label: string) => void;
+  /** Shared durable animation map; omitted in simple/read-only embeddings. */
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
+  readonly playheadUs?: number;
+  readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
   readonly onRunBrowserDsp?: (workflowId: string) => void | Promise<void>;
   readonly onRunLocalWorker?: (workflowId: string) => void | Promise<void>;
   readonly onRunCloudBrain?: (workflowId: string) => void | Promise<void>;
@@ -178,6 +190,9 @@ export function AudioPanel({
   clipIds,
   audioState,
   onAudioChange,
+  project,
+  playheadUs = 0,
+  onDispatch,
   onRunBrowserDsp,
   onRunLocalWorker,
   onRunCloudBrain,
@@ -246,6 +261,19 @@ export function AudioPanel({
     [capabilityFilter],
   );
   const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
+  const keyframe = (
+    binding:
+      ReturnType<typeof audioClipPropertyBinding> | ReturnType<typeof audioBusPropertyBinding>,
+    value: number | boolean,
+    label: string,
+  ) => {
+    if (project === undefined || onDispatch === undefined) return {};
+    return {
+      animationState: audioKeyframeState(project, binding, playheadUs),
+      onToggleAnimation: () =>
+        onDispatch(audioKeyframeTransaction(project, binding, playheadUs, value, label)),
+    };
+  };
   const noClips = clipIds.length === 0;
   const clipsInactive = tab === 'mix' && noClips;
   const now = Date.now();
@@ -642,30 +670,36 @@ export function AudioPanel({
 
       {tab === 'mix' && master !== undefined && (
         <div className="audio-strip">
-          <div className="control-row">
-            <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
-              <MasterBusIcon />
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.01}
-              value={master.gain}
-              aria-label="Master gain"
-              title="Master gain"
-              onChange={(event) =>
-                dispatch(
-                  {
-                    type: 'audioBus.setGain',
-                    payload: { busId: master.id, gain: event.currentTarget.valueAsNumber },
-                  },
-                  `Master gain ${event.currentTarget.valueAsNumber.toFixed(2)}`,
-                )
-              }
-            />
-            <span className="value">{master.gain.toFixed(2)}</span>
-          </div>
+          <PropertyRow
+            label="Master gain"
+            value={master.gain.toFixed(2)}
+            {...keyframe(audioBusPropertyBinding(master.id, 'gain'), master.gain, 'Master gain')}
+          >
+            <div className="control-row">
+              <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
+                <MasterBusIcon />
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.01}
+                value={master.gain}
+                aria-label="Master gain"
+                title="Master gain"
+                onChange={(event) =>
+                  dispatch(
+                    {
+                      type: 'audioBus.setGain',
+                      payload: { busId: master.id, gain: event.currentTarget.valueAsNumber },
+                    },
+                    `Master gain ${event.currentTarget.valueAsNumber.toFixed(2)}`,
+                  )
+                }
+              />
+              <span className="value">{master.gain.toFixed(2)}</span>
+            </div>
+          </PropertyRow>
         </div>
       )}
       {tab === 'mix' &&
@@ -716,56 +750,70 @@ export function AudioPanel({
                   <SoloIcon />
                 </button>
               </div>
-              <div className="control-row">
-                <span className="icon-tool" data-guide="Gain" aria-hidden="true">
-                  <GainIcon />
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.01}
-                  value={clip.gain}
-                  aria-label={`Gain ${clipId}`}
-                  title="Gain"
-                  disabled={noClips}
-                  onChange={(event) =>
-                    dispatch(
-                      {
-                        type: 'audioClip.setGain',
-                        payload: { clipId, gain: event.currentTarget.valueAsNumber },
-                      },
-                      `Gain ${clipId}`,
-                    )
-                  }
-                />
-                <span className="value">{clip.gain.toFixed(2)}</span>
-              </div>
-              <div className="control-row">
-                <span className="icon-tool" data-guide="Pan" aria-hidden="true">
-                  <PanIcon />
-                </span>
-                <input
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={clip.pan}
-                  aria-label={`Pan ${clipId}`}
-                  title="Pan"
-                  disabled={noClips}
-                  onChange={(event) =>
-                    dispatch(
-                      {
-                        type: 'audioClip.setPan',
-                        payload: { clipId, pan: event.currentTarget.valueAsNumber },
-                      },
-                      `Pan ${clipId}`,
-                    )
-                  }
-                />
-                <span className="value">{clip.pan.toFixed(2)}</span>
-              </div>
+              <PropertyRow
+                label="Gain"
+                value={clip.gain.toFixed(2)}
+                disabled={noClips}
+                {...keyframe(audioClipPropertyBinding(clipId, 'gain'), clip.gain, 'Clip gain')}
+              >
+                <div className="control-row">
+                  <span className="icon-tool" data-guide="Gain" aria-hidden="true">
+                    <GainIcon />
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.01}
+                    value={clip.gain}
+                    aria-label={`Gain ${clipId}`}
+                    title="Gain"
+                    disabled={noClips}
+                    onChange={(event) =>
+                      dispatch(
+                        {
+                          type: 'audioClip.setGain',
+                          payload: { clipId, gain: event.currentTarget.valueAsNumber },
+                        },
+                        `Gain ${clipId}`,
+                      )
+                    }
+                  />
+                  <span className="value">{clip.gain.toFixed(2)}</span>
+                </div>
+              </PropertyRow>
+              <PropertyRow
+                label="Pan"
+                value={clip.pan.toFixed(2)}
+                disabled={noClips}
+                {...keyframe(audioClipPropertyBinding(clipId, 'pan'), clip.pan, 'Clip pan')}
+              >
+                <div className="control-row">
+                  <span className="icon-tool" data-guide="Pan" aria-hidden="true">
+                    <PanIcon />
+                  </span>
+                  <input
+                    type="range"
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    value={clip.pan}
+                    aria-label={`Pan ${clipId}`}
+                    title="Pan"
+                    disabled={noClips}
+                    onChange={(event) =>
+                      dispatch(
+                        {
+                          type: 'audioClip.setPan',
+                          payload: { clipId, pan: event.currentTarget.valueAsNumber },
+                        },
+                        `Pan ${clipId}`,
+                      )
+                    }
+                  />
+                  <span className="value">{clip.pan.toFixed(2)}</span>
+                </div>
+              </PropertyRow>
               <div className="control-row">
                 <span className="icon-tool" data-guide="Fade in" aria-hidden="true">
                   <FadeInIcon />

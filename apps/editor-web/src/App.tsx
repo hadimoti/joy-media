@@ -4074,6 +4074,7 @@ function EditorWorkspace({
               })}
           allObjects={visualProject.visualObjects}
           playheadUs={state.playheadUs}
+          project={visualProject}
           audioState={context.audioState}
           onAudioChange={(next) => context.setAudioState(next)}
           onSetStatic={updateVisualProperty}
@@ -4129,6 +4130,9 @@ function EditorWorkspace({
           clipIds={clipIds}
           audioState={context.audioState}
           onAudioChange={(next, label) => context.setAudioState(next, label)}
+          project={visualProject}
+          playheadUs={state.playheadUs}
+          onDispatch={context.dispatchProject}
           onRunBrowserDsp={(workflowId) => {
             const effectKinds = [
               {

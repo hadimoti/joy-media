@@ -7,7 +7,12 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
+import {
+  audioClipPropertyBinding,
+  type AnimatablePropertyV1,
+  type JoyProjectV1,
+  type VisualObjectV1,
+} from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import type { NumericTransformProperty, VisualObjectTransaction } from '@joy-media/property-system';
@@ -38,6 +43,7 @@ import {
   SliderPropertyControl,
   useTransientPropertyControl,
 } from './components/PropertyControlAdapters.js';
+import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
@@ -127,6 +133,8 @@ interface InspectorPanelProps {
   readonly onSpeedChange?: ((change: InspectorSpeedChange, label: string) => void) | undefined;
   readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
   readonly playheadUs: number;
+  /** Shared durable map for audio keyframes; omitted in read-only embeddings. */
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
   readonly audioState?: AudioState;
   readonly onAudioChange?: (next: AudioState, label: string) => void;
   readonly onSetStatic: (
@@ -289,6 +297,7 @@ export function InspectorPanel({
   onSpeedChange,
   allObjects,
   playheadUs,
+  project,
   audioState,
   onAudioChange,
   onSetStatic,
@@ -640,6 +649,8 @@ export function InspectorPanel({
             clipId={selectedClipId}
             clip={clipAudio}
             dispatch={dispatchAudio}
+            playheadUs={timeUs}
+            {...(project === undefined ? {} : { project, onProjectDispatch: onDispatch })}
           />
         ) : (
           <p className="empty-hint">Select a clip to mix its audio.</p>
@@ -1312,6 +1323,9 @@ function AudioSection({
   clipId,
   clip,
   dispatch,
+  playheadUs,
+  project,
+  onProjectDispatch,
 }: {
   readonly open: boolean;
   readonly onToggle: () => void;
@@ -1325,7 +1339,21 @@ function AudioSection({
     readonly fadeOutUs?: number;
   };
   readonly dispatch: (command: AudioCommand, label: string) => void;
+  readonly playheadUs: number;
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
+  readonly onProjectDispatch?: (transaction: VisualObjectTransaction) => void;
 }) {
+  const keyframe = (propertyId: 'gain' | 'pan' | 'mute', value: number | boolean) => {
+    if (project === undefined || onProjectDispatch === undefined) return {};
+    const binding = audioClipPropertyBinding(clipId, propertyId);
+    const label =
+      propertyId === 'gain' ? 'Clip gain' : propertyId === 'pan' ? 'Clip pan' : 'Clip mute';
+    return {
+      animationState: audioKeyframeState(project, binding, playheadUs),
+      onToggleAnimation: () =>
+        onProjectDispatch(audioKeyframeTransaction(project, binding, playheadUs, value, label)),
+    };
+  };
   return (
     <section className="inspector-section">
       <button
@@ -1338,8 +1366,12 @@ function AudioSection({
       </button>
       {open && (
         <>
-          <div className="inspector-prop">
-            <label htmlFor="insp-gain">Volume</label>
+          <PropertyRow
+            label="Volume"
+            controlId="insp-gain"
+            value={round(clip.gain)}
+            {...keyframe('gain', clip.gain)}
+          >
             <input
               id="insp-gain"
               type="number"
@@ -1357,9 +1389,13 @@ function AudioSection({
                 )
               }
             />
-          </div>
-          <div className="inspector-prop">
-            <label htmlFor="insp-pan">Pan</label>
+          </PropertyRow>
+          <PropertyRow
+            label="Pan"
+            controlId="insp-pan"
+            value={round(clip.pan)}
+            {...keyframe('pan', clip.pan)}
+          >
             <input
               id="insp-pan"
               type="number"
@@ -1377,9 +1413,12 @@ function AudioSection({
                 )
               }
             />
-          </div>
-          <div className="inspector-prop">
-            <label>Mute</label>
+          </PropertyRow>
+          <PropertyRow
+            label="Mute"
+            value={clip.mute ? 'Muted' : 'On'}
+            {...keyframe('mute', clip.mute)}
+          >
             <button
               type="button"
               className="icon-button icon-button-labeled"
@@ -1393,7 +1432,7 @@ function AudioSection({
             >
               {clip.mute ? 'Muted' : 'On'}
             </button>
-          </div>
+          </PropertyRow>
         </>
       )}
     </section>
