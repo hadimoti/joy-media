@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SpikeProject } from './model.js';
-import { sourceTimeAtVideoClipTime, validateSpikeProject } from './model.js';
+import { sourceTimeAtVideoClipTime, validateSpikeProject, validateTimeRemap } from './model.js';
 import { rational } from './time.js';
 
 function baseProject(): SpikeProject {
@@ -56,6 +56,44 @@ describe('validateSpikeProject', () => {
     };
     expect(sourceTimeAtVideoClipTime(clip, 1_000_000)).toBe(9_000_000);
     expect(sourceTimeAtVideoClipTime(clip, 1_500_000)).toBe(8_500_000);
+  });
+
+  it('samples a validated monotonic time-remap curve in clip-local time', () => {
+    const clip = {
+      kind: 'video' as const,
+      id: 'remapped',
+      startUs: 1_000_000,
+      durationUs: 2_000_000,
+      assetId: 'asset-a',
+      sourceInUs: 10_000_000,
+      timeRemap: {
+        version: 2 as const,
+        direction: 'forward' as const,
+        keyframes: [
+          { timeUs: 0, sourceTimeUs: 10_000_000, interpolation: 'linear' as const },
+          { timeUs: 1_000_000, sourceTimeUs: 12_000_000, interpolation: 'linear' as const },
+          { timeUs: 2_000_000, sourceTimeUs: 12_000_000, interpolation: 'hold' as const },
+        ],
+      },
+    };
+    expect(validateTimeRemap(clip.timeRemap, clip.durationUs)).toEqual([]);
+    expect(sourceTimeAtVideoClipTime(clip, 1_500_000)).toBe(11_000_000);
+    expect(sourceTimeAtVideoClipTime(clip, 2_000_000)).toBe(12_000_000);
+  });
+
+  it('rejects non-monotonic or non-zero-start remaps', () => {
+    const remap = {
+      version: 2 as const,
+      direction: 'forward' as const,
+      keyframes: [
+        { timeUs: 100, sourceTimeUs: 10, interpolation: 'linear' as const },
+        { timeUs: 200, sourceTimeUs: 5, interpolation: 'linear' as const },
+      ],
+    };
+    expect(validateTimeRemap(remap, 1_000)).toEqual([
+      'source times must be monotonic for forward remap',
+      'first keyframe must start at clip-local time 0',
+    ]);
   });
 
   it('flags a missing root composition', () => {

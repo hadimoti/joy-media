@@ -71,6 +71,63 @@ export function isValidPlaybackRate(rate: number): boolean {
   return rate >= MIN_PLAYBACK_RATE && rate <= MAX_PLAYBACK_RATE;
 }
 
+export interface TimeRemapKeyframe {
+  readonly timeUs: TimeUs;
+  readonly sourceTimeUs: TimeUs;
+  readonly interpolation: 'hold' | 'linear';
+}
+
+/** Explicit monotonic output-local to absolute source-time mapping. */
+export interface TimeRemapV2 {
+  readonly version: 2;
+  readonly direction: 'forward' | 'reverse';
+  readonly keyframes: readonly TimeRemapKeyframe[];
+}
+
+export function validateTimeRemap(remap: TimeRemapV2, clipDurationUs: TimeUs): readonly string[] {
+  const errors: string[] = [];
+  if (remap.version !== 2) errors.push('version must be 2');
+  if (remap.keyframes.length === 0) errors.push('keyframes must not be empty');
+  let previousTime = -1;
+  let previousSource: number | undefined;
+  remap.keyframes.forEach((keyframe, index) => {
+    if (!Number.isSafeInteger(keyframe.timeUs) || keyframe.timeUs < 0)
+      errors.push(`keyframe ${index} timeUs must be a non-negative safe integer`);
+    if (keyframe.timeUs > clipDurationUs)
+      errors.push(`keyframe ${index} timeUs exceeds clip duration`);
+    if (keyframe.timeUs <= previousTime) errors.push('keyframe times must be strictly increasing');
+    previousTime = keyframe.timeUs;
+    if (!Number.isSafeInteger(keyframe.sourceTimeUs) || keyframe.sourceTimeUs < 0)
+      errors.push(`keyframe ${index} sourceTimeUs must be a non-negative safe integer`);
+    if (previousSource !== undefined) {
+      const monotonic =
+        remap.direction === 'forward'
+          ? keyframe.sourceTimeUs >= previousSource
+          : keyframe.sourceTimeUs <= previousSource;
+      if (!monotonic) errors.push(`source times must be monotonic for ${remap.direction} remap`);
+    }
+    previousSource = keyframe.sourceTimeUs;
+  });
+  if (remap.keyframes[0]?.timeUs !== 0)
+    errors.push('first keyframe must start at clip-local time 0');
+  return errors;
+}
+
+function sampleTimeRemap(remap: TimeRemapV2, clipLocalUs: TimeUs): TimeUs {
+  const first = remap.keyframes[0];
+  if (first === undefined) return 0;
+  if (clipLocalUs <= first.timeUs) return first.sourceTimeUs;
+  for (let index = 1; index < remap.keyframes.length; index += 1) {
+    const right = remap.keyframes[index]!;
+    const left = remap.keyframes[index - 1]!;
+    if (clipLocalUs > right.timeUs) continue;
+    if (left.interpolation === 'hold') return left.sourceTimeUs;
+    const progress = (clipLocalUs - left.timeUs) / (right.timeUs - left.timeUs);
+    return Math.round(left.sourceTimeUs + (right.sourceTimeUs - left.sourceTimeUs) * progress);
+  }
+  return remap.keyframes[remap.keyframes.length - 1]!.sourceTimeUs;
+}
+
 export interface VideoClip extends ClipBase {
   readonly kind: 'video';
   readonly assetId: AssetId;
@@ -88,6 +145,8 @@ export interface VideoClip extends ClipBase {
   readonly playbackRate?: number;
   /** When true, source time runs backwards while `playbackRate` stays positive. */
   readonly reversed?: boolean;
+  /** Optional explicit monotonic output-local to source-time mapping. */
+  readonly timeRemap?: TimeRemapV2;
 }
 
 /**
@@ -97,6 +156,8 @@ export interface VideoClip extends ClipBase {
  * boundary calculations.
  */
 export function sourceTimeAtVideoClipTime(clip: VideoClip, compositionTimeUs: TimeUs): TimeUs {
+  if (clip.timeRemap !== undefined)
+    return sampleTimeRemap(clip.timeRemap, compositionTimeUs - clip.startUs);
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return clip.sourceInUs;
   const deltaUs = Math.round((compositionTimeUs - clip.startUs) * rate);
@@ -173,6 +234,15 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
             message: `playbackRate ${clip.playbackRate} must be 0 (freeze) or in [${MIN_PLAYBACK_RATE}, ${MAX_PLAYBACK_RATE}]`,
             path,
           });
+        }
+        if (clip.kind === 'video' && clip.timeRemap !== undefined) {
+          for (const message of validateTimeRemap(clip.timeRemap, clip.durationUs)) {
+            diagnostics.push({
+              code: 'PROJECT_SCHEMA_BAD_TIME_REMAP',
+              message,
+              path: `${path}.timeRemap`,
+            });
+          }
         }
       }
     }

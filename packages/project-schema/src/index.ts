@@ -33,6 +33,8 @@ export type {
   Track,
   Clip,
   VideoClip,
+  TimeRemapV2,
+  TimeRemapKeyframe,
   CompositionClip,
   ProjectDiagnostic,
 } from './model.js';
@@ -41,6 +43,7 @@ export {
   normalizePlaybackRate,
   isValidPlaybackRate,
   sourceTimeAtVideoClipTime,
+  validateTimeRemap,
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
 } from './model.js';
