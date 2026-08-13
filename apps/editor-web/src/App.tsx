@@ -56,7 +56,10 @@ import {
   removeClipPropertyAnimations,
   type VisualObjectTransaction,
 } from '@joy-media/property-system';
-import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
+import {
+  evaluateCameraExpressionTransform,
+  evaluateProjectAudioAtTime,
+} from '@joy-media/evaluator';
 import {
   buildRenderFrameIR,
   clipTimesFromTracks,
@@ -1091,6 +1094,22 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  // Audio commands keep static mixer state in the project. Universal
+  // automation is sampled only for the current playback instant, so it never
+  // mutates that durable mixer state while the playhead advances.
+  const previewAudioState = useMemo<AudioState>(() => {
+    const projectAudio = session.visualProject.audio;
+    if (projectAudio === undefined) return audioState;
+    const evaluated = evaluateProjectAudioAtTime(
+      projectAudio,
+      session.visualProject.propertyAnimations,
+      {
+        compositionTimeUs: state.playheadUs,
+        audioTimelineTimeUs: state.playheadUs,
+      },
+    );
+    return { clips: evaluated.clips, buses: evaluated.buses, effects: audioState.effects };
+  }, [audioState, revision, session, state.playheadUs]);
   // Dockview keeps panel instances independently from this workspace render.
   // Keep compound drill-in state here, rather than inside the panel component,
   // so opening a child timeline survives the project update that created it.
@@ -1115,9 +1134,10 @@ function EditorWorkspace({
     );
     const activeVideoClip = activeClip?.kind === 'video' ? activeClip : undefined;
     const clipConfig =
-      activeVideoClip === undefined ? undefined : audioState.clips[activeVideoClip.id];
-    const master = audioState.buses.find((bus) => bus.id === 'master') ?? audioState.buses[0];
-    const hasSolo = Object.values(audioState.clips).some((clip) => clip.solo);
+      activeVideoClip === undefined ? undefined : previewAudioState.clips[activeVideoClip.id];
+    const master =
+      previewAudioState.buses.find((bus) => bus.id === 'master') ?? previewAudioState.buses[0];
+    const hasSolo = Object.values(previewAudioState.clips).some((clip) => clip.solo);
     const clipAudible =
       clipConfig === undefined || (!clipConfig.mute && (!hasSolo || clipConfig.solo));
     const gain =
@@ -1131,7 +1151,7 @@ function EditorWorkspace({
     replacementGain.gain.value = replacementActive ? gain : 0;
     videoPan.pan.value = pan;
     replacementPan.pan.value = pan;
-  }, [audioState, ensurePreviewAudioGraph, session, state.playheadUs, state.selectedIds]);
+  }, [ensurePreviewAudioGraph, previewAudioState, session, state.playheadUs, state.selectedIds]);
   const audioMigrationRef = useRef(false);
   useEffect(() => {
     if (audioMigrationRef.current) return;

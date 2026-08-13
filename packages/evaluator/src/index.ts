@@ -25,6 +25,17 @@ export type {
 export { evaluateFrameProperty } from './frame-property-evaluator.js';
 export type { ColorGradeEvaluationTarget } from './color-grade.js';
 export { evaluateColorGradeAtTime } from './color-grade.js';
+export type {
+  AudioAutomationBlockRange,
+  AudioScalarRamp,
+  EvaluatedAudioBlock,
+} from './audio-automation.js';
+export {
+  buildAudioAutomationBlock,
+  evaluateAudioBusAtTime,
+  evaluateAudioClipAtTime,
+  evaluateProjectAudioAtTime,
+} from './audio-automation.js';
 /** Shared scalar curve sampler for render adapters that cannot depend on motion-core directly. */
 export { sampleCurve as sampleLegacyCurve } from '@joy-media/motion-core';
 export type {
