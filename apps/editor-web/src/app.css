@@ -9943,6 +9943,145 @@ label {
   gap: var(--space-2);
 }
 
+/* WP34: a semantic, reusable frameable property shell.  It is deliberately
+   independent of Inspector layout so Effects, Color, Audio, and captions can
+   share the exact same keyboard and focus behavior. */
+.property-row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 1fr) minmax(0, auto) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.property-row-heading,
+.property-row-control,
+.property-row-actions {
+  min-width: 0;
+}
+.property-row-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  overflow: hidden;
+}
+.property-row-label {
+  overflow: hidden;
+  color: var(--joy-text-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.property-row-value,
+.property-row-mixed,
+.property-row-description {
+  color: var(--joy-text-faint);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+.property-row-value {
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.property-row-mixed {
+  color: var(--joy-warning);
+  white-space: nowrap;
+}
+.property-row-control > :is(input, select, textarea) {
+  min-width: 0;
+}
+.property-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.property-row-action {
+  position: relative;
+  display: grid;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-text-muted);
+}
+.property-row-action:hover:not(:disabled),
+.property-row-action:focus-visible {
+  border-color: var(--joy-border-strong);
+  background: var(--joy-bg-hover);
+  color: var(--joy-text);
+  outline: none;
+}
+.property-row-action:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 60%, transparent);
+}
+.property-row-action svg {
+  width: 0.82rem;
+  height: 0.82rem;
+}
+.property-row-stopwatch.is-keyed {
+  color: var(--joy-accent);
+}
+.property-row-stopwatch.is-between {
+  color: color-mix(in srgb, var(--joy-accent) 72%, var(--joy-text-muted));
+}
+.property-row-key-state {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  display: grid;
+  width: 0.48rem;
+  height: 0.48rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--joy-bg-panel);
+}
+.property-row-key-state svg {
+  width: 0.46rem;
+  height: 0.46rem;
+}
+.property-row-description {
+  grid-column: 1 / -1;
+  margin: calc(var(--space-1) * -1) 0 0;
+  line-height: 1.3;
+}
+.property-row.has-error .property-row-description {
+  color: var(--joy-danger);
+}
+.property-row.is-disabled {
+  opacity: 0.62;
+}
+.property-row-two-line {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.property-row-two-line .property-row-control {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.property-row-two-line .property-row-actions {
+  grid-column: 2;
+  grid-row: 1;
+}
+@media (max-width: 560px) {
+  .property-row-compact {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .property-row-compact .property-row-control {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .property-row-compact .property-row-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .property-row-value {
+    max-width: 8rem;
+  }
+}
+
 .inspector-effects-list {
   display: flex;
   flex-direction: column;
