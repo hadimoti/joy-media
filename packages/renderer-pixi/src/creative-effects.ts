@@ -378,6 +378,79 @@ void main()
 }
 `;
 
+const ZOOM_BLUR_FRAG = `${FRAGMENT_HEADER}
+uniform float uAmount;
+
+void main()
+{
+    vec2 direction = (vec2(0.5) - vTextureCoord) * (max(0.0, uAmount) * 0.0032);
+    vec4 color = vec4(0.0);
+    color += texture(uTexture, clamp(vTextureCoord - direction * 4.0, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - direction * 3.0, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - direction * 2.0, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - direction, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, vTextureCoord) * 2.0;
+    color += texture(uTexture, clamp(vTextureCoord + direction, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + direction * 2.0, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + direction * 3.0, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + direction * 4.0, vec2(0.0), vec2(1.0)));
+    finalColor = color / 10.0;
+}
+`;
+
+const RADIAL_BLUR_FRAG = `${FRAGMENT_HEADER}
+uniform float uAmount;
+
+mat2 joyRotation(float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat2(c, -s, s, c);
+}
+
+vec2 radialUv(float amount)
+{
+    vec2 aspect = vec2(max(1.0, uInputSize.x / max(1.0, uInputSize.y)), 1.0);
+    vec2 point = (vTextureCoord - 0.5) * aspect;
+    return clamp((joyRotation(amount) * point) / aspect + 0.5, vec2(0.0), vec2(1.0));
+}
+
+void main()
+{
+    float angle = radians(max(0.0, uAmount) * 0.15);
+    vec4 color = texture(uTexture, radialUv(-angle * 2.0));
+    color += texture(uTexture, radialUv(-angle));
+    color += texture(uTexture, vTextureCoord) * 2.0;
+    color += texture(uTexture, radialUv(angle));
+    color += texture(uTexture, radialUv(angle * 2.0));
+    finalColor = color / 6.0;
+}
+`;
+
+const TILT_SHIFT_FRAG = `${FRAGMENT_HEADER}
+uniform float uAmount;
+uniform float uFocusY;
+uniform float uFocusHeight;
+
+void main()
+{
+    float halfFocus = max(0.025, uFocusHeight * 0.5);
+    float outside = max(0.0, abs(vTextureCoord.y - uFocusY) - halfFocus);
+    float blurMask = smoothstep(0.0, max(0.04, halfFocus), outside);
+    vec2 radius = uInputSize.zw * max(0.0, uAmount) * blurMask;
+    vec4 color = texture(uTexture, vTextureCoord) * 4.0;
+    color += texture(uTexture, clamp(vTextureCoord + vec2(radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - vec2(radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + vec2(0.0, radius.y), vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - vec2(0.0, radius.y), vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + radius * 0.7, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord - radius * 0.7, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + vec2(radius.x, -radius.y) * 0.7, vec2(0.0), vec2(1.0)));
+    color += texture(uTexture, clamp(vTextureCoord + vec2(-radius.x, radius.y) * 0.7, vec2(0.0), vec2(1.0)));
+    finalColor = color / 12.0;
+}
+`;
+
 export function createCreativeEffectFilter(effect: EffectInstanceIR): Filter | undefined {
   const number = (key: string, fallback: number): number => effect.params[key] ?? fallback;
   switch (effect.kind) {
@@ -461,6 +534,20 @@ export function createCreativeEffectFilter(effect: EffectInstanceIR): Filter | u
         uLength: number('length', 72),
         uIntensity: number('intensity', 1),
         uColorMode: number('colorMode', 1),
+      });
+    case 'zoom-blur':
+      return createFilter('joy-zoom-blur-filter', ZOOM_BLUR_FRAG, {
+        uAmount: number('amount', 6),
+      });
+    case 'radial-blur':
+      return createFilter('joy-radial-blur-filter', RADIAL_BLUR_FRAG, {
+        uAmount: number('amount', 5),
+      });
+    case 'tilt-shift':
+      return createFilter('joy-tilt-shift-filter', TILT_SHIFT_FRAG, {
+        uAmount: number('amount', 8),
+        uFocusY: number('focusY', 0.5),
+        uFocusHeight: number('focusHeight', 0.3),
       });
     default:
       return undefined;

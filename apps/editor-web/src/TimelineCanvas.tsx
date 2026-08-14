@@ -118,6 +118,7 @@ function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) 
     case 'filter':
     case 'adjust':
     case 'overlay':
+    case 'scene3d':
     case 'video':
       return <TimelineElementGlyph kind={icon} />;
     case undefined:
@@ -137,6 +138,7 @@ function elementKindForItem(item: TimelineCanvasItem): TimelineElementKind {
     case 'filter':
     case 'adjust':
     case 'overlay':
+    case 'scene3d':
     case 'video':
       return item.icon;
     default:
@@ -174,7 +176,7 @@ function TrackHeaderChrome({
       <>
         <span
           className="timeline-track-kind-icon"
-          title={`${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)} track`}
+          title={`${header.kind === 'scene3d' ? '3D Scene' : `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)}`} track`}
         >
           <ItemGlyph icon={header.kind} />
         </span>

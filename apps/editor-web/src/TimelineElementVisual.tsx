@@ -1,6 +1,7 @@
 import {
   AudioIcon,
   AutoCaptionIcon,
+  CubeIcon,
   EffectsUiIcon,
   FilterIcon,
   LayersIcon,
@@ -45,6 +46,8 @@ export function TimelineElementGlyph({ kind }: { readonly kind: TimelineElementK
       return <SlidersIcon />;
     case 'overlay':
       return <LayersIcon />;
+    case 'scene3d':
+      return <CubeIcon />;
     case 'audio':
       return <AudioIcon />;
     case 'video':

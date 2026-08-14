@@ -24,6 +24,7 @@ describe('feature architecture', () => {
       new Set([
         'video',
         'overlay',
+        'scene3d',
         'text',
         'caption',
         'audio',

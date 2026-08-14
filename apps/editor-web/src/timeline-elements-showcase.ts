@@ -12,7 +12,7 @@ import {
 } from './timeline-element-kind.js';
 
 export const TIMELINE_ELEMENTS_SHOWCASE = Object.freeze({
-  id: 'timeline-elements-showcase-v2',
+  id: 'timeline-elements-showcase-v3',
   title: 'Timeline Elements Showcase',
   durationUs: 30_000_000,
 });
@@ -37,7 +37,7 @@ function controller(id: string, assetId: string): VisualObjectV1 {
 
 /**
  * A deterministic, editable project whose two timeline lenses expose the same
- * Video baseline plus the six requested authored element kinds. Controller
+ * Video baseline plus every authored element kind, including CC and 3D. Controller
  * layers are intentionally real project objects, not decorative demo rows.
  */
 export function buildTimelineElementsShowcase(
@@ -51,6 +51,12 @@ export function buildTimelineElementsShowcase(
     brollA: clip('showcase-b-roll-a', 'asset-product', 0, 15_000_000),
     brollB: clip('showcase-b-roll-b', 'asset-intro', 15_000_000, 15_000_000),
     overlay: clip('showcase-overlay', 'showcase-overlay-asset', 4_000_000, 18_000_000),
+    scene3d: clip(
+      'showcase-scene3d',
+      'html-scene:joy.firstparty.holo-badge',
+      2_000_000,
+      10_000_000,
+    ),
     text: clip('showcase-text', 'showcase-text-asset', 1_000_000, 8_000_000),
     caption: clip('showcase-caption', 'showcase-caption-asset', 0, 30_000_000),
     motion: clip('showcase-motion', 'showcase-motion-asset', 8_000_000, 14_000_000),
@@ -88,13 +94,14 @@ export function buildTimelineElementsShowcase(
             clips: [clips.brollA, clips.brollB],
           },
           { id: 'Overlay', kind: 'video', order: 2, enabled: true, clips: [clips.overlay] },
-          { id: 'Text', kind: 'video', order: 3, enabled: true, clips: [clips.text] },
-          { id: 'Captions', kind: 'video', order: 4, enabled: true, clips: [clips.caption] },
-          { id: 'Motion', kind: 'video', order: 5, enabled: true, clips: [clips.motion] },
-          { id: 'Effects', kind: 'video', order: 6, enabled: true, clips: [clips.effect] },
-          { id: 'Filters', kind: 'video', order: 7, enabled: true, clips: [clips.filter] },
-          { id: 'Adjust', kind: 'video', order: 8, enabled: true, clips: [clips.adjust] },
-          { id: 'Audio', kind: 'video', order: 9, enabled: true, clips: [clips.audio] },
+          { id: '3D Scene', kind: 'video', order: 3, enabled: true, clips: [clips.scene3d] },
+          { id: 'Text', kind: 'video', order: 4, enabled: true, clips: [clips.text] },
+          { id: 'Captions', kind: 'video', order: 5, enabled: true, clips: [clips.caption] },
+          { id: 'Motion', kind: 'video', order: 6, enabled: true, clips: [clips.motion] },
+          { id: 'Effects', kind: 'video', order: 7, enabled: true, clips: [clips.effect] },
+          { id: 'Filters', kind: 'video', order: 8, enabled: true, clips: [clips.filter] },
+          { id: 'Adjust', kind: 'video', order: 9, enabled: true, clips: [clips.adjust] },
+          { id: 'Audio', kind: 'video', order: 10, enabled: true, clips: [clips.audio] },
         ],
       },
     },
@@ -111,6 +118,12 @@ export function buildTimelineElementsShowcase(
       kind: 'shape',
       shape: 'rectangle',
       transform: { ...ZERO_TRANSFORM, x: 690, y: 310, scaleX: 2.4, scaleY: 1.15, opacity: 0.7 },
+    },
+    'showcase-scene3d-object': {
+      id: 'showcase-scene3d-object',
+      kind: 'html-scene',
+      scenePackageId: 'joy.firstparty.holo-badge',
+      transform: { ...ZERO_TRANSFORM, x: 130, y: 390, scaleX: 0.92, scaleY: 0.92 },
     },
     'showcase-text-object': {
       id: 'showcase-text-object',
@@ -159,10 +172,16 @@ export function buildTimelineElementsShowcase(
       ...controller('showcase-filter-controller', 'showcase-filter-asset'),
       effects: [
         {
-          id: 'showcase-filter-hue',
-          effectId: 'hue-saturation',
+          id: 'showcase-filter-gaussian',
+          effectId: 'gaussian-blur',
           enabled: true,
-          params: { hue: 0.03, saturation: -0.12 },
+          params: { amount: 3.5 },
+        },
+        {
+          id: 'showcase-filter-noise',
+          effectId: 'noise',
+          enabled: true,
+          params: { amount: 0.12 },
         },
       ],
     },
@@ -193,6 +212,7 @@ export function buildTimelineElementsShowcase(
     [clips.brollA.id]: 'showcase-b-roll-a-controller',
     [clips.brollB.id]: 'showcase-b-roll-b-controller',
     [clips.overlay.id]: 'showcase-overlay-object',
+    [clips.scene3d.id]: 'showcase-scene3d-object',
     [clips.text.id]: 'showcase-text-object',
     [clips.caption.id]: 'showcase-caption-controller',
     [clips.motion.id]: 'showcase-motion-object',
@@ -208,6 +228,7 @@ export function buildTimelineElementsShowcase(
     [clips.brollA.id]: 'video',
     [clips.brollB.id]: 'video',
     [clips.overlay.id]: 'overlay',
+    [clips.scene3d.id]: 'scene3d',
     [clips.text.id]: 'text',
     [clips.caption.id]: 'caption',
     [clips.motion.id]: 'motion',
@@ -279,6 +300,11 @@ export function buildTimelineElementsShowcase(
         id: 'showcase-overlay-asset',
         kind: 'other',
         displayName: 'Overlay',
+      },
+      'html-scene:joy.firstparty.holo-badge': {
+        id: 'html-scene:joy.firstparty.holo-badge',
+        kind: 'other',
+        displayName: 'Joy Code 3D Holo Badge',
       },
       'showcase-text-asset': { id: 'showcase-text-asset', kind: 'other', displayName: 'Text' },
       'showcase-caption-asset': {

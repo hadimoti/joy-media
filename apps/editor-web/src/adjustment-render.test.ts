@@ -25,7 +25,7 @@ describe('targeted adjustment rendering', () => {
       effectInstancesForTimelineClip(visual, timeline, 'showcase-product', 13_000_000).map(
         (effect) => effect.id,
       ),
-    ).toContain('showcase-filter-hue');
+    ).toEqual(expect.arrayContaining(['showcase-filter-gaussian', 'showcase-filter-noise']));
     expect(
       effectInstancesForTimelineClip(visual, timeline, 'showcase-product', 19_000_000),
     ).toEqual([]);

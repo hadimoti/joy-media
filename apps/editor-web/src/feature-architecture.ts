@@ -62,7 +62,7 @@ export const FEATURE_HUBS: Readonly<Record<FeatureHubId, FeatureHubDefinition>> 
         id: 'templates',
         label: 'Templates',
         shortLabel: 'Templates',
-        timelineKinds: ['text', 'motion'],
+        timelineKinds: ['text', 'motion', 'scene3d'],
         timelineBehavior: 'layer',
       },
     ],

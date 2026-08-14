@@ -1939,7 +1939,7 @@ export function TimelinePanel({
                 >
                   <span
                     className="timeline-track-kind-icon"
-                    title={`${kind[0]?.toUpperCase()}${kind.slice(1)} track`}
+                    title={`${kind === 'scene3d' ? '3D Scene' : `${kind[0]?.toUpperCase()}${kind.slice(1)}`} track`}
                   >
                     <TimelineTrackKindIcon kind={kind} />
                   </span>

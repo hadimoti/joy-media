@@ -53,8 +53,17 @@ describe('TimelineCanvas track visibility controls', () => {
     expect(markup).not.toContain('Speaker');
   });
 
-  it('uses the shared six-kind visual language in Dual Lens Time items', () => {
-    const kinds = ['video', 'text', 'effect', 'filter', 'adjust', 'overlay', 'audio'] as const;
+  it('uses the shared authored-element visual language in Dual Lens Time items', () => {
+    const kinds = [
+      'video',
+      'text',
+      'effect',
+      'filter',
+      'adjust',
+      'overlay',
+      'scene3d',
+      'audio',
+    ] as const;
     const markup = renderToStaticMarkup(
       <TimelineCanvas
         durationUs={10_000_000}

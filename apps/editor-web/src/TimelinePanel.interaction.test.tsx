@@ -153,7 +153,16 @@ describe('TimelinePanel clip interaction semantics', () => {
       />,
     );
 
-    for (const kind of ['video', 'text', 'effect', 'filter', 'adjust', 'overlay', 'audio']) {
+    for (const kind of [
+      'video',
+      'text',
+      'effect',
+      'filter',
+      'adjust',
+      'overlay',
+      'scene3d',
+      'audio',
+    ]) {
       expect(markup).toContain(`data-element-kind="${kind}"`);
     }
     expect(markup).toContain('timeline-clip--adjust');

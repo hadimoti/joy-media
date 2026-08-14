@@ -74,4 +74,23 @@ describe('buildAdjustmentLayerInsertion', () => {
       'showcase-product',
     );
   });
+
+  it('seeds a catalog filter and accepts a 3D render as a picture target', () => {
+    const { timeline, visual } = buildTimelineElementsShowcase();
+    const insertion = buildTreatmentLayerInsertion({
+      timeline,
+      project: visual,
+      targetClipId: 'showcase-scene3d',
+      token: 'radial',
+      kind: 'filter',
+      effect: { effectId: 'radial-blur', params: { amount: 5 } },
+    });
+
+    expect(insertion.project.visualObjects['filter-controller-radial']?.effects).toEqual([
+      expect.objectContaining({ effectId: 'radial-blur', params: { amount: 5 } }),
+    ]);
+    expect(readEffectLayerTargetMap(insertion.project)['filter-controller-radial']).toBe(
+      'showcase-scene3d',
+    );
+  });
 });

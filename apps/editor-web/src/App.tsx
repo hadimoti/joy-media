@@ -155,6 +155,7 @@ import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
+import { FiltersPanel } from './FiltersPanel.js';
 import { ColorPanel } from './ColorPanel.js';
 import { setMonitorPixelReader } from './monitor-readback.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
@@ -182,6 +183,7 @@ import {
   type KiloCodeAttachedAsset,
 } from './AgentPanel.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
+import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
@@ -288,8 +290,13 @@ import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
 import { effectsByObjectIdAt, effectInstancesForTimelineClip } from './adjustment-render.js';
-import { buildTreatmentLayerInsertion, type TreatmentLayerKind } from './adjustment-layer.js';
+import {
+  buildTreatmentLayerInsertion,
+  type TreatmentLayerEffectSeed,
+  type TreatmentLayerKind,
+} from './adjustment-layer.js';
 import { buildCaptionLayerInsertion } from './caption-layer.js';
+import { buildThreeDRenderLayerInsertion } from './three-d-render-layer.js';
 import { FeatureHub } from './FeatureHub.js';
 import type { FeatureToolId } from './feature-architecture.js';
 import { AdjustmentLayersPanel } from './AdjustmentLayersPanel.js';
@@ -738,9 +745,14 @@ interface EditorPanelContextValue {
   }) => Promise<void>;
   /** Creates a separate Adjust controller targeting one root media clip. */
   readonly addAdjustmentLayer: (targetClipId: string) => void;
-  readonly addTreatmentLayer: (kind: TreatmentLayerKind, targetClipId: string) => void;
+  readonly addTreatmentLayer: (
+    kind: TreatmentLayerKind,
+    targetClipId: string,
+    effect?: TreatmentLayerEffectSeed,
+  ) => void;
   readonly addCaptionLayer: () => void;
   readonly addHtmlSceneToSelectedClip: (scenePackageId: string) => void;
+  readonly addJoyCode3DRender: (asset: JoyCode3DRenderAsset) => Promise<void>;
   readonly stickerTick: number;
   readonly audioState: AudioState;
   readonly setAudioState: (next: AudioState, label?: string) => void;
@@ -2228,8 +2240,41 @@ function EditorWorkspace({
     [session, syncStickerBitmaps],
   );
 
+  const addJoyCode3DRender = useCallback(
+    async (asset: JoyCode3DRenderAsset) => {
+      const composition =
+        session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+      if (composition === undefined || composition.durationUs <= 0) {
+        throw new Error('The main timeline is unavailable.');
+      }
+
+      stickerImageCache.rememberBlob(asset.assetId, asset.blob);
+      const insertion = buildThreeDRenderLayerInsertion({
+        timeline: session.timelineProject,
+        project: session.visualProject,
+        playheadUs: state.playheadUs,
+        token: Date.now().toString(36),
+        asset: {
+          assetId: asset.assetId,
+          displayName: asset.displayName,
+          bytes: asset.blob.size,
+          mimeType: asset.blob.type || 'image/png',
+        },
+      });
+      session.dispatchCompound(insertion.label, {
+        timeline: insertion.timeline,
+        document: insertion.project,
+      });
+      await syncStickerBitmaps();
+      setState((current) => ({ ...current, selectedIds: [insertion.clipId] }));
+      setRevision((revision) => revision + 1);
+      showToast('3D render added as an editable timeline layer.', 'success');
+    },
+    [session, showToast, state.playheadUs, syncStickerBitmaps],
+  );
+
   const addTreatmentLayer = useCallback(
-    (kind: TreatmentLayerKind, targetClipId: string) => {
+    (kind: TreatmentLayerKind, targetClipId: string, effect?: TreatmentLayerEffectSeed) => {
       try {
         const insertion = buildTreatmentLayerInsertion({
           timeline: session.timelineProject,
@@ -2237,6 +2282,7 @@ function EditorWorkspace({
           targetClipId,
           token: Date.now().toString(36),
           kind,
+          ...(effect === undefined ? {} : { effect }),
         });
         session.dispatchCompound(insertion.label, {
           timeline: insertion.timeline,
@@ -2246,7 +2292,10 @@ function EditorWorkspace({
         setState((current) => ({ ...current, selectedIds: [insertion.clipId] }));
         setRevision((revision) => revision + 1);
         const name = kind === 'effect' ? 'Effects' : kind === 'filter' ? 'Filters' : 'Adjust';
-        showToast(`${name} layer added and parented to the selected media.`, 'success');
+        showToast(
+          `${effect === undefined ? name : effect.effectId} layer added and parented to the selected media.`,
+          'success',
+        );
       } catch (reason) {
         showToast(reason instanceof Error ? reason.message : String(reason), 'info');
       }
@@ -4839,26 +4888,23 @@ function EditorWorkspace({
     }
     if (effectivePanelId === 'filters')
       return withFeatureHub(
-        <ColorPanel
-          title="Filters"
-          project={visualProject}
-          onChange={context.replaceVisualProject}
-          onDispatch={context.dispatchProject}
+        <FiltersPanel
+          canCreate={treatmentTarget?.clip !== undefined}
           {...(treatmentTarget?.clip === undefined
             ? {}
             : {
-                selectedClipId: treatmentTarget.clip.id,
-                selectedClipName:
+                targetLabel:
                   treatmentTarget.clip.kind === 'video'
                     ? (visualProject.assets[treatmentTarget.clip.assetId]?.displayName ??
                       treatmentTarget.clip.id)
                     : treatmentTarget.clip.id,
-                selectedClipStartUs: treatmentTarget.clip.startUs,
-                selectedClipDurationUs: treatmentTarget.clip.durationUs,
                 onCreateFilterLayer: () =>
                   context.addTreatmentLayer('filter', treatmentTarget.clip!.id),
               })}
-          playheadUs={state.playheadUs}
+          onAddFilter={(effectId, params) => {
+            if (treatmentTarget?.clip === undefined) return;
+            context.addTreatmentLayer('filter', treatmentTarget.clip.id, { effectId, params });
+          }}
         />,
       );
     if (effectivePanelId === 'adjust')
@@ -5204,6 +5250,7 @@ function EditorWorkspace({
           attachedAssets={context.kiloCodeAttachedAssets}
           onDetachAsset={context.detachKiloCodeAsset}
           onAttachAsset={context.attachKiloCodeAsset}
+          onAdd3DRender={context.addJoyCode3DRender}
         />
       );
     }
@@ -5799,6 +5846,7 @@ function EditorWorkspace({
           addTreatmentLayer,
           addCaptionLayer,
           addHtmlSceneToSelectedClip,
+          addJoyCode3DRender,
           stickerTick,
           audioState,
           setAudioState,

@@ -44,6 +44,7 @@ import {
   type JoyCodeThread,
 } from './joy-code-history.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
+import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 
 /** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
@@ -177,6 +178,7 @@ export function AgentPanel({
   attachedAssets = [],
   onDetachAsset,
   onAttachAsset,
+  onAdd3DRender,
   settings,
   command,
 }: {
@@ -189,6 +191,7 @@ export function AgentPanel({
   readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
+  readonly onAdd3DRender?: (asset: JoyCode3DRenderAsset) => Promise<void>;
   readonly settings: AgentSettings;
   readonly command?: AgentPanelCommand;
 }) {
@@ -902,7 +905,9 @@ export function AgentPanel({
 
         {tab === '3d' && (
           <Suspense fallback={null}>
-            <JoyCode3DViewer />
+            <JoyCode3DViewer
+              {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
+            />
           </Suspense>
         )}
       </div>

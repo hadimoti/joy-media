@@ -23,6 +23,7 @@ describe('Timeline Elements Showcase', () => {
       new Set([
         'video',
         'overlay',
+        'scene3d',
         'text',
         'caption',
         'motion',
@@ -37,6 +38,7 @@ describe('Timeline Elements Showcase', () => {
       'Video 1',
       'Video 2',
       'Overlay',
+      '3D Scene',
       'Text',
       'Captions',
       'Motion',
@@ -53,6 +55,13 @@ describe('Timeline Elements Showcase', () => {
       }),
     ]);
     expect(visual.captionDocuments['showcase-captions-en']?.segments).toHaveLength(2);
+    expect(visual.visualObjects['showcase-scene3d-object']).toMatchObject({
+      kind: 'html-scene',
+      scenePackageId: 'joy.firstparty.holo-badge',
+    });
+    expect(
+      visual.visualObjects['showcase-filter-controller']?.effects?.map((effect) => effect.effectId),
+    ).toEqual(['gaussian-blur', 'noise']);
   });
 
   it('stores Adjust as an independent controller targeted at the parent video', () => {

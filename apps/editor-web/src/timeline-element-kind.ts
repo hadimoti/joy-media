@@ -26,6 +26,7 @@ export const TIMELINE_ELEMENT_KINDS = [
   'filter',
   'adjust',
   'overlay',
+  'scene3d',
   'audio',
 ] as const;
 
@@ -101,7 +102,7 @@ export function isControlTimelineElement(kind: TimelineElementKind): boolean {
 }
 
 export function isAdjustmentTargetKind(kind: TimelineElementKind): boolean {
-  return kind === 'video' || kind === 'overlay';
+  return kind === 'video' || kind === 'overlay' || kind === 'scene3d';
 }
 
 export function readEffectLayerTargetMap(

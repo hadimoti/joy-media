@@ -24,6 +24,11 @@ export interface AdjustmentLayerInsertion {
 
 export type TreatmentLayerKind = 'effect' | 'filter' | 'adjust';
 
+export interface TreatmentLayerEffectSeed {
+  readonly effectId: string;
+  readonly params: Readonly<Record<string, EffectParamValue>>;
+}
+
 const TREATMENT_LAYER_SPEC: Readonly<
   Record<
     TreatmentLayerKind,
@@ -46,13 +51,7 @@ const TREATMENT_LAYER_SPEC: Readonly<
   filter: {
     name: 'Filters',
     assetId: 'joy-filter-layer',
-    effects: [
-      {
-        suffix: 'hue-saturation',
-        effectId: 'hue-saturation',
-        params: { hue: 0, saturation: 0 },
-      },
-    ],
+    effects: [],
   },
   adjust: {
     name: 'Adjust',
@@ -95,12 +94,15 @@ export function buildTreatmentLayerInsertion({
   targetClipId,
   token,
   kind,
+  effect,
 }: {
   readonly timeline: SpikeProject;
   readonly project: JoyProjectV1;
   readonly targetClipId: string;
   readonly token: string;
   readonly kind: TreatmentLayerKind;
+  /** Optional catalog choice used to seed a new Effects / Filters layer. */
+  readonly effect?: TreatmentLayerEffectSeed;
 }): AdjustmentLayerInsertion {
   const composition = timeline.compositions[timeline.rootCompositionId];
   if (composition === undefined) throw new Error('The main timeline is unavailable.');
@@ -122,6 +124,16 @@ export function buildTreatmentLayerInsertion({
   const objectId = `${kind}-controller-${token}`;
   const trackId = `${spec.name}-${token}`;
   const assetId = spec.assetId;
+  const effects =
+    effect === undefined
+      ? spec.effects
+      : [
+          {
+            suffix: effect.effectId.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, ''),
+            effectId: effect.effectId,
+            params: effect.params,
+          },
+        ];
   const order = composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
   const label = `Add ${spec.name} layer`;
   const nextObject: VisualObjectV1 = {
@@ -137,11 +149,11 @@ export function buildTreatmentLayerInsertion({
       opacity: 1,
       crop: { left: 0, top: 0, right: 0, bottom: 0 },
     },
-    effects: spec.effects.map((effect) => ({
-      id: `${objectId}-${effect.suffix}`,
-      effectId: effect.effectId,
+    effects: effects.map((entry) => ({
+      id: `${objectId}-${entry.suffix}`,
+      effectId: entry.effectId,
       enabled: true,
-      params: effect.params,
+      params: entry.params,
     })),
   };
   const withObject: JoyProjectV1 = {

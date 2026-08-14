@@ -2,8 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { CubeIcon, UploadIcon } from './icons.js';
 
-export function JoyCode3DViewer() {
+export interface JoyCode3DRenderAsset {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly blob: Blob;
+}
+
+function renderAssetId(): string {
+  const suffix =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 20)
+      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
+  return `joycode-3d-${suffix}`;
+}
+
+export function JoyCode3DViewer({
+  onAddToTimeline,
+}: {
+  readonly onAddToTimeline?: (asset: JoyCode3DRenderAsset) => Promise<void>;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -16,6 +35,8 @@ export function JoyCode3DViewer() {
   const contextRestoredHandlerRef = useRef<(() => void) | undefined>(undefined);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
+  const [currentModelName, setCurrentModelName] = useState<string | undefined>(undefined);
+  const [adding, setAdding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const disposeModel = useCallback((model: THREE.Object3D) => {
@@ -54,7 +75,7 @@ export function JoyCode3DViewer() {
     const height = container.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a2e);
+    scene.background = new THREE.Color(0x151515);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(50, width / Math.max(1, height), 0.1, 1000);
@@ -62,9 +83,14 @@ export function JoyCode3DViewer() {
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -84,7 +110,7 @@ export function JoyCode3DViewer() {
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    const grid = new THREE.GridHelper(10, 20, 0x444466, 0x222244);
+    const grid = new THREE.GridHelper(10, 20, 0x555555, 0x2a2a2a);
     scene.add(grid);
 
     setStatus('Scene ready — load a GLB/GLTF file to preview');
@@ -157,6 +183,7 @@ export function JoyCode3DViewer() {
       const url = URL.createObjectURL(file);
       const requestId = ++loadSeqRef.current;
       setFileList((prev) => [...prev, file.name]);
+      setCurrentModelName(undefined);
       setStatus(`Loading ${file.name}…`);
 
       clearScene();
@@ -186,6 +213,7 @@ export function JoyCode3DViewer() {
           model.position.sub(center.multiplyScalar(scale));
           model.position.y += size.y * scale * 0.5;
           sceneRef.current?.add(model);
+          setCurrentModelName(file.name);
           setStatus(`Loaded: ${file.name}`);
         },
         (progress) => {
@@ -209,12 +237,46 @@ export function JoyCode3DViewer() {
     [clearScene],
   );
 
+  const addCurrentView = useCallback(async () => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (
+      renderer === null ||
+      scene === null ||
+      camera === null ||
+      currentModelName === undefined ||
+      onAddToTimeline === undefined
+    ) {
+      return;
+    }
+
+    setAdding(true);
+    try {
+      renderer.render(scene, camera);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        renderer.domElement.toBlob((value) => {
+          if (value === null) reject(new Error('The 3D render could not be captured.'));
+          else resolve(value);
+        }, 'image/png');
+      });
+      const baseName = currentModelName.replace(/\.(?:glb|gltf)$/i, '');
+      await onAddToTimeline({
+        assetId: renderAssetId(),
+        displayName: `${baseName} · 3D Render`,
+        blob,
+      });
+      setStatus(`Added ${baseName} to the timeline`);
+    } catch (reason) {
+      setStatus(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAdding(false);
+    }
+  }, [currentModelName, onAddToTimeline]);
+
   return (
-    <div
-      className="joy-code-3d"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
-    >
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--joy-border)' }}>
+    <div className="joy-code-3d">
+      <div className="joy-code-3d-toolbar">
         <button
           type="button"
           className="icon-button"
@@ -222,40 +284,32 @@ export function JoyCode3DViewer() {
           title="Import GLB/GLTF"
           onClick={() => fileInputRef.current?.click()}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <path d="M8 2v9M4 7l4-4 4 4M3 13h10" />
-          </svg>
+          <UploadIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Add current 3D view to timeline"
+          title="Add current 3D view to timeline"
+          disabled={currentModelName === undefined || onAddToTimeline === undefined || adding}
+          onClick={() => void addCurrentView()}
+        >
+          <CubeIcon />
         </button>
         <input
           ref={fileInputRef}
           type="file"
           accept=".glb,.gltf"
-          style={{ display: 'none' }}
+          className="sr-only"
+          aria-hidden="true"
+          tabIndex={-1}
           onChange={handleFileSelect}
         />
-        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--joy-text-muted)' }}>
-          {status}
-        </span>
+        <span className="joy-code-3d-status">{adding ? 'Adding 3D render…' : status}</span>
       </div>
-      <div ref={containerRef} style={{ flex: 1, minHeight: 0, cursor: 'grab' }} />
+      <div ref={containerRef} className="joy-code-3d-viewport" />
       {fileList.length > 0 && (
-        <div
-          style={{
-            padding: '4px 12px',
-            borderTop: '1px solid var(--joy-border)',
-            fontSize: 11,
-            color: 'var(--joy-text-muted)',
-          }}
-        >
-          {fileList.length} model(s) loaded
-        </div>
+        <div className="joy-code-3d-footer">{fileList.length} model(s) loaded</div>
       )}
     </div>
   );

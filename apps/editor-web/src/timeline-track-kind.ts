@@ -14,6 +14,7 @@ const EFFECT_TOKEN = /(?:^|[^a-z0-9])(effect|effects|fx)(?:$|[^a-z0-9])/i;
 const FILTER_TOKEN = /(?:^|[^a-z0-9])(filter|filters|look|lut)(?:$|[^a-z0-9])/i;
 const ADJUST_TOKEN = /(?:^|[^a-z0-9])(adjust|adjustment|grade)(?:$|[^a-z0-9])/i;
 const OVERLAY_TOKEN = /(?:^|[^a-z0-9])(overlay|picture|pip)(?:$|[^a-z0-9])/i;
+const SCENE_3D_TOKEN = /(?:^|[^a-z0-9])(3d|three[-_ ]?d|model|scene3d)(?:$|[^a-z0-9])/i;
 
 function clipIdentity(clip: Clip): string {
   return clip.kind === 'video'
@@ -43,6 +44,7 @@ export function timelineTrackKind(
   if (EFFECT_TOKEN.test(track.id)) return 'effect';
   if (FILTER_TOKEN.test(track.id)) return 'filter';
   if (OVERLAY_TOKEN.test(track.id)) return 'overlay';
+  if (SCENE_3D_TOKEN.test(track.id)) return 'scene3d';
   if (CAPTION_TOKEN.test(track.id)) return 'caption';
   if (MOTION_TOKEN.test(track.id)) return 'motion';
   if (TEXT_TOKEN.test(track.id)) return 'text';
@@ -68,6 +70,7 @@ export function timelineTrackCode(kind: TimelineTrackKind, kindIndex: number): s
   if (kind === 'filter') return `F${kindIndex}`;
   if (kind === 'adjust') return `ADJ${kindIndex}`;
   if (kind === 'overlay') return `O${kindIndex}`;
+  if (kind === 'scene3d') return `3D${kindIndex}`;
   if (kind === 'script') return `S${kindIndex}`;
   return `V${kindIndex}`;
 }
@@ -82,6 +85,7 @@ export function timelineTrackDisplayName(kind: TimelineTrackKind, kindIndex: num
   if (kind === 'filter') return kindIndex === 1 ? 'Filters' : `Filters ${kindIndex}`;
   if (kind === 'adjust') return kindIndex === 1 ? 'Adjust' : `Adjust ${kindIndex}`;
   if (kind === 'overlay') return kindIndex === 1 ? 'Overlay' : `Overlay ${kindIndex}`;
+  if (kind === 'scene3d') return kindIndex === 1 ? '3D Scene' : `3D Scene ${kindIndex}`;
   if (kind === 'script') return kindIndex === 1 ? 'Script' : `Script ${kindIndex}`;
   if (kindIndex === 1) return 'Main Video';
   if (kindIndex === 2) return 'B-roll';

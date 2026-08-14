@@ -25,6 +25,7 @@ describe('Dual Lens Creative Document projections', () => {
         'motion',
         'effect',
         'filter',
+        'scene3d',
         'adjust',
         'audio',
       ]),

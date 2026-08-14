@@ -1065,6 +1065,16 @@ export function CanvasIcon() {
   );
 }
 
+/** Isometric scene glyph shared by Joy Code and both timeline lenses. */
+export function CubeIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 1.75 13.5 4.8v6.4L8 14.25 2.5 11.2V4.8Z" />
+      <path d="m2.75 4.95 5.25 3 5.25-3M8 7.95v6" />
+    </Svg>
+  );
+}
+
 export function TimelineIcon() {
   // Same glyph as the main editor Timeline dock tab.
   return <TimelineClassicIcon />;
