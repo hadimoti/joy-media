@@ -942,7 +942,7 @@ export function SlideIcon() {
 export function KeyframeNoneIcon() {
   return (
     <Svg size={14}>
-      <circle cx="8" cy="8" r="4" />
+      <path d="M8 3 13 8 8 13 3 8Z" />
     </Svg>
   );
 }
@@ -958,7 +958,7 @@ export function KeyframeActiveIcon() {
 export function KeyframeBetweenIcon() {
   return (
     <Svg size={14}>
-      <circle cx="8" cy="8" r="3.5" fill="currentColor" stroke="currentColor" strokeWidth="0.5" />
+      <path d="M8 3 13 8 8 13 3 8Z" />
     </Svg>
   );
 }

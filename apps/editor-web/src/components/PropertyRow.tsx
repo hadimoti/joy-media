@@ -29,17 +29,8 @@ export interface PropertyRowProps {
   readonly onPreviousKeyframe?: (() => void) | undefined;
   readonly onNextKeyframe?: (() => void) | undefined;
   readonly onOpenGraph?: (() => void) | undefined;
-  /** Use for coordinate and compound rows where the value belongs below the name. */
-  readonly layout?: 'compact' | 'two-line' | undefined;
-}
-
-function StopwatchIcon() {
-  return (
-    <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="9" r="4.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M8 6.5V9l2 1.25M6.5 2.5h3M8 2.5v2" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
+  /** `inline` keeps a small, high-frequency control on one line at every panel width. */
+  readonly layout?: 'compact' | 'inline' | 'two-line' | undefined;
 }
 
 function ResetIcon() {
@@ -129,17 +120,14 @@ export function PropertyRow({
         {onToggleAnimation !== undefined && (
           <button
             type="button"
-            className={`property-row-action property-row-stopwatch is-${animationState}`}
+            className={`property-row-action property-row-keyframe is-${animationState}`}
             aria-label={animationLabel}
             aria-pressed={animationState === 'keyed'}
             title={animationLabel}
             disabled={disabled}
             onClick={onToggleAnimation}
           >
-            <StopwatchIcon />
-            <span className="property-row-key-state" aria-hidden="true">
-              <AnimationStateIcon state={animationState} />
-            </span>
+            <AnimationStateIcon state={animationState} />
           </button>
         )}
         {onPreviousKeyframe !== undefined && (

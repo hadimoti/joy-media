@@ -7942,6 +7942,32 @@ label {
   align-items: center;
   gap: 0.25rem;
 }
+.audio-strip .property-row-inline {
+  gap: 0.25rem;
+}
+.audio-mix-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.25rem;
+}
+.audio-mix-control > input[type='range'] {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+.audio-mix-control > input[type='number'] {
+  width: 4rem;
+  min-width: 0;
+}
+.audio-mix-unit {
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-2xs);
+  font-variant-numeric: tabular-nums;
+}
+.audio-mix-toggle {
+  color: var(--joy-text-muted);
+}
 .audio-meter {
   height: 0.35rem;
   background: #1a1a1c;
@@ -10219,26 +10245,14 @@ label {
   width: 0.82rem;
   height: 0.82rem;
 }
-.property-row-stopwatch.is-keyed {
+.property-row-keyframe.is-keyed {
   color: var(--joy-accent);
 }
-.property-row-stopwatch.is-between {
+.property-row-keyframe.is-between {
   color: color-mix(in srgb, var(--joy-accent) 72%, var(--joy-text-muted));
 }
-.property-row-key-state {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  display: grid;
-  width: 0.48rem;
-  height: 0.48rem;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--joy-bg-panel);
-}
-.property-row-key-state svg {
-  width: 0.46rem;
-  height: 0.46rem;
+.property-row-keyframe.is-none {
+  color: var(--joy-text-muted);
 }
 .property-row-description {
   grid-column: 1 / -1;
@@ -10261,6 +10275,30 @@ label {
 .property-row-two-line .property-row-actions {
   grid-column: 2;
   grid-row: 1;
+}
+.property-row-inline {
+  grid-template-columns: minmax(3.9rem, auto) minmax(2rem, 1fr) max-content auto;
+  gap: 0.3rem;
+  min-height: var(--control-sm);
+}
+.property-row-inline .property-row-heading {
+  display: contents;
+}
+.property-row-inline .property-row-label {
+  grid-column: 1;
+}
+.property-row-inline .property-row-value,
+.property-row-inline .property-row-mixed {
+  grid-column: 3;
+  margin-inline-start: 0;
+  max-width: 4.25rem;
+}
+.property-row-inline .property-row-control {
+  grid-column: 2;
+}
+.property-row-inline .property-row-actions {
+  grid-column: 4;
+  justify-self: end;
 }
 @container (max-width: 32rem) {
   .property-row-compact {

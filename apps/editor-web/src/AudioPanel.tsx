@@ -19,13 +19,9 @@ import {
   CloudIcon,
   DeviceProcessorIcon,
   DownloadIcon,
-  FadeInIcon,
-  FadeOutIcon,
-  GainIcon,
   LayersIcon,
   MasterBusIcon,
   MuteIcon,
-  PanIcon,
   SlidersIcon,
   SoloIcon,
   SpeakerOnIcon,
@@ -759,12 +755,10 @@ export function AudioPanel({
           <PropertyRow
             label="Master gain"
             value={master.gain.toFixed(2)}
+            layout="inline"
             {...keyframe(audioBusPropertyBinding(master.id, 'gain'), master.gain, 'Master gain')}
           >
-            <div className="control-row">
-              <span className="icon-tool" data-guide="Master bus" aria-hidden="true">
-                <MasterBusIcon />
-              </span>
+            <div className="audio-mix-control">
               <input
                 type="range"
                 min={0}
@@ -783,18 +777,15 @@ export function AudioPanel({
                   )
                 }
               />
-              <span className="value">{master.gain.toFixed(2)}</span>
             </div>
           </PropertyRow>
           <PropertyRow
             label="Master pan"
             value={master.pan.toFixed(2)}
+            layout="inline"
             {...keyframe(audioBusPropertyBinding(master.id, 'pan'), master.pan, 'Master pan')}
           >
-            <div className="control-row">
-              <span className="icon-tool" data-guide="Master pan" aria-hidden="true">
-                <PanIcon />
-              </span>
+            <div className="audio-mix-control">
               <input
                 type="range"
                 min={-1}
@@ -813,19 +804,21 @@ export function AudioPanel({
                   )
                 }
               />
-              <span className="value">{master.pan.toFixed(2)}</span>
             </div>
           </PropertyRow>
           <PropertyRow
             label="Master mute"
-            value={master.mute ? 'On' : 'Off'}
+            value={master.mute ? 'Muted' : 'Live'}
+            layout="inline"
             {...keyframe(audioBusPropertyBinding(master.id, 'mute'), master.mute, 'Master mute')}
           >
             <button
               type="button"
-              className="icon-button icon-button-labeled"
+              className="icon-button audio-mix-toggle"
               aria-pressed={master.mute}
               aria-label="Mute master bus"
+              title="Mute master bus"
+              data-guide="Mute master bus"
               onClick={() =>
                 dispatch(
                   { type: 'audioBus.setMute', payload: { busId: master.id, mute: !master.mute } },
@@ -833,7 +826,7 @@ export function AudioPanel({
                 )
               }
             >
-              {master.mute ? 'Muted' : 'Live'}
+              {master.mute ? <MuteIcon /> : <SpeakerOnIcon />}
             </button>
           </PropertyRow>
         </div>
@@ -856,24 +849,9 @@ export function AudioPanel({
                 <button
                   type="button"
                   className="icon-button"
-                  aria-pressed={clip.mute}
-                  aria-label={`Mute ${clipId}`}
-                  data-guide="Mute"
-                  disabled={noClips}
-                  onClick={() =>
-                    dispatch(
-                      { type: 'audioClip.setMute', payload: { clipId, mute: !clip.mute } },
-                      `Mute ${clipId}`,
-                    )
-                  }
-                >
-                  {clip.mute ? <MuteIcon /> : <SpeakerOnIcon />}
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
                   aria-pressed={clip.solo}
                   aria-label={`Solo ${clipId}`}
+                  title={`Solo ${clipId}`}
                   data-guide="Solo"
                   disabled={noClips}
                   onClick={() =>
@@ -889,13 +867,11 @@ export function AudioPanel({
               <PropertyRow
                 label="Gain"
                 value={clip.gain.toFixed(2)}
+                layout="inline"
                 disabled={noClips}
                 {...keyframe(audioClipPropertyBinding(clipId, 'gain'), clip.gain, 'Clip gain')}
               >
-                <div className="control-row">
-                  <span className="icon-tool" data-guide="Gain" aria-hidden="true">
-                    <GainIcon />
-                  </span>
+                <div className="audio-mix-control">
                   <input
                     type="range"
                     min={0}
@@ -915,19 +891,16 @@ export function AudioPanel({
                       )
                     }
                   />
-                  <span className="value">{clip.gain.toFixed(2)}</span>
                 </div>
               </PropertyRow>
               <PropertyRow
                 label="Pan"
                 value={clip.pan.toFixed(2)}
+                layout="inline"
                 disabled={noClips}
                 {...keyframe(audioClipPropertyBinding(clipId, 'pan'), clip.pan, 'Clip pan')}
               >
-                <div className="control-row">
-                  <span className="icon-tool" data-guide="Pan" aria-hidden="true">
-                    <PanIcon />
-                  </span>
+                <div className="audio-mix-control">
                   <input
                     type="range"
                     min={-1}
@@ -947,20 +920,22 @@ export function AudioPanel({
                       )
                     }
                   />
-                  <span className="value">{clip.pan.toFixed(2)}</span>
                 </div>
               </PropertyRow>
               <PropertyRow
                 label="Mute"
-                value={clip.mute ? 'On' : 'Off'}
+                value={clip.mute ? 'Muted' : 'Live'}
+                layout="inline"
                 disabled={noClips}
                 {...keyframe(audioClipPropertyBinding(clipId, 'mute'), clip.mute, 'Clip mute')}
               >
                 <button
                   type="button"
-                  className="icon-button icon-button-labeled"
+                  className="icon-button audio-mix-toggle"
                   aria-pressed={clip.mute}
                   aria-label={`Mute ${clipId}`}
+                  title={`Mute ${clipId}`}
+                  data-guide="Mute"
                   disabled={noClips}
                   onClick={() =>
                     dispatch(
@@ -969,65 +944,63 @@ export function AudioPanel({
                     )
                   }
                 >
-                  {clip.mute ? 'Muted' : 'Live'}
+                  {clip.mute ? <MuteIcon /> : <SpeakerOnIcon />}
                 </button>
               </PropertyRow>
-              <div className="control-row">
-                <span className="icon-tool" data-guide="Fade in" aria-hidden="true">
-                  <FadeInIcon />
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={50}
-                  value={Math.round((clip.fadeInUs ?? 0) / 1000)}
-                  aria-label={`Fade in ${clipId} (ms)`}
-                  title="Fade in (ms)"
-                  disabled={noClips}
-                  onChange={(event) =>
-                    dispatch(
-                      {
-                        type: 'audioClip.setFade',
-                        payload: {
-                          clipId,
-                          fadeInUs: Math.max(0, event.currentTarget.valueAsNumber) * 1000,
-                          fadeInUsWasSet: true,
+              <PropertyRow label="Fade in" layout="inline" disabled={noClips}>
+                <div className="audio-mix-control">
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={Math.round((clip.fadeInUs ?? 0) / 1000)}
+                    aria-label={`Fade in ${clipId} (ms)`}
+                    title="Fade in (ms)"
+                    disabled={noClips}
+                    onChange={(event) =>
+                      dispatch(
+                        {
+                          type: 'audioClip.setFade',
+                          payload: {
+                            clipId,
+                            fadeInUs: Math.max(0, event.currentTarget.valueAsNumber) * 1000,
+                            fadeInUsWasSet: true,
+                          },
                         },
-                      },
-                      `Fade in ${clipId}`,
-                    )
-                  }
-                />
-                <span className="value">ms</span>
-              </div>
-              <div className="control-row">
-                <span className="icon-tool" data-guide="Fade out" aria-hidden="true">
-                  <FadeOutIcon />
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={50}
-                  value={Math.round((clip.fadeOutUs ?? 0) / 1000)}
-                  aria-label={`Fade out ${clipId} (ms)`}
-                  title="Fade out (ms)"
-                  disabled={noClips}
-                  onChange={(event) =>
-                    dispatch(
-                      {
-                        type: 'audioClip.setFade',
-                        payload: {
-                          clipId,
-                          fadeOutUs: Math.max(0, event.currentTarget.valueAsNumber) * 1000,
-                          fadeOutUsWasSet: true,
+                        `Fade in ${clipId}`,
+                      )
+                    }
+                  />
+                  <span className="audio-mix-unit">ms</span>
+                </div>
+              </PropertyRow>
+              <PropertyRow label="Fade out" layout="inline" disabled={noClips}>
+                <div className="audio-mix-control">
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={Math.round((clip.fadeOutUs ?? 0) / 1000)}
+                    aria-label={`Fade out ${clipId} (ms)`}
+                    title="Fade out (ms)"
+                    disabled={noClips}
+                    onChange={(event) =>
+                      dispatch(
+                        {
+                          type: 'audioClip.setFade',
+                          payload: {
+                            clipId,
+                            fadeOutUs: Math.max(0, event.currentTarget.valueAsNumber) * 1000,
+                            fadeOutUsWasSet: true,
+                          },
                         },
-                      },
-                      `Fade out ${clipId}`,
-                    )
-                  }
-                />
-                <span className="value">ms</span>
-              </div>
+                        `Fade out ${clipId}`,
+                      )
+                    }
+                  />
+                  <span className="audio-mix-unit">ms</span>
+                </div>
+              </PropertyRow>
               <div className="audio-meter" aria-hidden="true">
                 <span style={{ width: `${Math.min(100, clip.gain * 50)}%` }} />
               </div>

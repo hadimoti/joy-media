@@ -61,4 +61,38 @@ describe('PropertyRow', () => {
     expect(markup).toContain('property-row-two-line');
     expect(markup).toContain('Add Color keyframe at playhead');
   });
+
+  it('keeps an inline mix row to one line with one value and a diamond keyframe control', () => {
+    const markup = renderToStaticMarkup(
+      <PropertyRow
+        label="Gain"
+        controlId="gain"
+        value="1.00"
+        layout="inline"
+        onToggleAnimation={() => undefined}
+        animationState="keyed"
+      >
+        <input id="gain" type="range" value="1" readOnly />
+      </PropertyRow>,
+    );
+
+    expect(markup).toContain('property-row-inline');
+    expect(markup).toContain('property-row-keyframe is-keyed');
+    expect(markup).toContain('M8 3 13 8 8 13 3 8Z');
+    expect(markup).toContain('fill="currentColor"');
+    expect(markup).not.toContain('property-row-stopwatch');
+    expect(markup.match(/1\.00/g)).toHaveLength(1);
+  });
+
+  it('keeps a between-keyframe diamond outlined', () => {
+    const markup = renderToStaticMarkup(
+      <PropertyRow label="Pan" onToggleAnimation={() => undefined} animationState="between">
+        <input type="range" value="0" readOnly />
+      </PropertyRow>,
+    );
+
+    expect(markup).toContain('property-row-keyframe is-between');
+    expect(markup).toContain('M8 3 13 8 8 13 3 8Z');
+    expect(markup).not.toContain('fill="currentColor"');
+  });
 });
