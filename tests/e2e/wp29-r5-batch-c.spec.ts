@@ -43,12 +43,21 @@ const persianFixture = JSON.parse(
   readFileSync(join(fixtureDirectory, 'transcription-fa-IR.json'), 'utf8'),
 ) as TranscriptionFixture;
 
+async function openCaptionActions(page: Page): Promise<void> {
+  const menu = page.locator('.caption-action-menu').first();
+  if ((await menu.getAttribute('open')) === null) {
+    await menu.locator('summary[aria-label="Caption track actions"]').click();
+  }
+  await expect(menu).toHaveAttribute('open', '');
+}
+
 async function uploadCaptionText(
   page: Page,
   file: { readonly name: string; readonly mimeType: string; readonly text: string },
 ): Promise<void> {
+  await openCaptionActions(page);
   const chooserPromise = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Import captions' }).click();
+  await page.getByRole('button', { name: 'Import SRT/VTT' }).click();
   const chooser = await chooserPromise;
   await chooser.setFiles({
     name: file.name,
@@ -59,8 +68,9 @@ async function uploadCaptionText(
 
 async function downloadCaptionText(
   page: Page,
-  buttonName: 'Export captions as SRT' | 'Export captions as WebVTT',
+  buttonName: 'Export SRT' | 'Export VTT',
 ): Promise<{ readonly fileName: string; readonly text: string }> {
+  await openCaptionActions(page);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: buttonName }).click();
   const download = await downloadPromise;
@@ -76,7 +86,7 @@ async function openEmptyCaptionTrack(page: Page, title: string): Promise<void> {
   await openDisposableWorkspace(page, title);
   await openPanel(page, 'Captions');
   await page.getByRole('button', { name: 'Add caption track' }).click();
-  await expect(page.getByRole('button', { name: 'Import captions' })).toBeVisible();
+  await expect(page.locator('summary[aria-label="Caption track actions"]')).toBeVisible();
 }
 
 async function openVideoCaptionTrack(page: Page, title: string): Promise<void> {
@@ -100,7 +110,8 @@ async function openVideoCaptionTrack(page: Page, title: string): Promise<void> {
   await selectFirstTimelineClip(page);
   await openPanel(page, 'Captions');
   await page.getByRole('button', { name: 'Add caption track' }).click();
-  await expect(page.getByRole('button', { name: 'Transcribe English' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Generate' }).click();
+  await expect(page.getByRole('button', { name: 'Generate English' })).toBeVisible();
 }
 
 async function routeTranscriptionFixture(
@@ -214,6 +225,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     page,
   }, testInfo) => {
     await openEmptyCaptionTrack(page, `R5-54-${testInfo.project.name}`);
+    await page.getByRole('tab', { name: 'Style' }).click();
     const templateGroup = page.getByRole('group', { name: 'Caption template' });
     const clean = templateGroup.getByRole('button', { name: 'JOY Clean' });
     const karaoke = templateGroup.getByRole('button', { name: 'JOY Karaoke Pop' });
@@ -230,6 +242,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     await page.reload();
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Captions');
+    await page.getByRole('tab', { name: 'Style' }).click();
     const restoredGroup = page.getByRole('group', { name: 'Caption template' });
     await expect(restoredGroup.getByRole('button', { name: 'JOY RTL Classic' })).toHaveAttribute(
       'aria-pressed',
@@ -310,7 +323,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     await expect(section.locator('.caption-row')).toHaveCount(1);
     await expect(section.locator('.caption-source')).toHaveValue('سلام، این یک آزمون است.');
     await expect(section.locator('.caption-time')).toHaveAccessibleName('Seek to 0.50s');
-    await expect(section.locator('.captions-slot-header > strong')).toContainText('en-US · RTL');
+    await expect(section.locator('.caption-track-summary')).toContainText('en-USRTL');
     await expect(page.getByText('On import, 1 bad cue(s) were skipped.')).toBeVisible();
 
     await recordEvidence(testInfo, {
@@ -343,8 +356,8 @@ test.describe('WP-29 R5 batch C — captions', () => {
       ].join('\n'),
     });
 
-    const srt = await downloadCaptionText(page, 'Export captions as SRT');
-    const webVtt = await downloadCaptionText(page, 'Export captions as WebVTT');
+    const srt = await downloadCaptionText(page, 'Export SRT');
+    const webVtt = await downloadCaptionText(page, 'Export VTT');
 
     expect(srt.fileName).toMatch(/\.srt$/i);
     expect(Buffer.byteLength(srt.text, 'utf8')).toBeGreaterThan(0);
@@ -372,7 +385,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     const { probe, requestSeen } = await routeTranscriptionFixture(page, englishFixture, 350);
     await openVideoCaptionTrack(page, `R5-58-${testInfo.project.name}`);
 
-    const transcribeButton = page.getByRole('button', { name: 'Transcribe English' });
+    const transcribeButton = page.getByRole('button', { name: 'Generate English' });
     await transcribeButton.click();
     await requestSeen;
     const progressVisible =
@@ -385,6 +398,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
           elements.some((element) => element.getClientRects().length > 0),
         ));
 
+    await page.getByRole('tab', { name: 'Transcript' }).click();
     const source = page.locator('.captions-panel .caption-source').first();
     await expect(source).toHaveValue('Welcome to the JOY Media studio');
     await expect(
@@ -399,10 +413,12 @@ test.describe('WP-29 R5 batch C — captions', () => {
     expect(probe.bytes).toBeGreaterThan(0);
 
     probe.failNext = true;
-    await transcribeButton.click();
+    await page.getByRole('tab', { name: 'Generate' }).click();
+    await page.getByRole('button', { name: 'Generate English' }).click();
     await expect(page.locator('.joy-panel-note')).toContainText(
       'Live transcription could not process the selected media. You can continue editing captions manually.',
     );
+    await page.getByRole('tab', { name: 'Transcript' }).click();
     await expect(source).toHaveValue('Welcome to the JOY Media studio');
 
     await recordEvidence(testInfo, {
@@ -433,12 +449,13 @@ test.describe('WP-29 R5 batch C — captions', () => {
     };
     const { probe } = await routeTranscriptionFixture(page, fixture);
     await openVideoCaptionTrack(page, `R5-59-${testInfo.project.name}`);
-    await page.getByRole('button', { name: 'Transcribe Persian' }).click();
+    await page.getByRole('button', { name: 'Generate Persian' }).click();
+    await page.getByRole('tab', { name: 'Transcript' }).click();
 
     const section = page.getByRole('region', { name: 'Captions fa-IR' });
     const source = section.locator('.caption-source').first();
     await expect(source).toHaveValue('سلام به استودیوی جوی خوش آمدید.');
-    await expect(section.locator('.captions-slot-header > strong')).toContainText('fa-IR · RTL');
+    await expect(section.locator('.caption-track-summary')).toContainText('fa-IRRTL');
     await expect(section.locator('.caption-warning[title^="Transcription confidence"]')).toHaveText(
       '94%',
     );

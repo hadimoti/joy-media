@@ -489,12 +489,13 @@ function CaptionSlotEditor({
                     value={drafts[segment.id] ?? displayText}
                     dir={direction}
                     lang={document.language}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
                       setDrafts((current) => ({
                         ...current,
-                        [segment.id]: event.currentTarget.value,
-                      }))
-                    }
+                        [segment.id]: value,
+                      }));
+                    }}
                     onBlur={(event) => commitSegmentText(segment.id, event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Escape') {

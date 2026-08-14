@@ -185,6 +185,7 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     }
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Runtime' }).click();
     await expect(page.locator('.audio-runtime-cell', { hasText: 'Local Worker' })).toContainText(
       'Connected',
     );
@@ -215,10 +216,12 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     await openReferenceWorkspace(page);
     await selectFirstTimelineClip(page);
     await openPanel(page, 'Audio');
-    const browserRun = page.locator('[data-audio-route="browser-dsp"]');
+    await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
+    const browserRun = page.getByRole('button', { name: 'Apply changes' });
     await expect(browserRun).toBeEnabled();
     await browserRun.click();
-    await expect(page.getByText('Browser Voice Polish applied to the project.')).toBeVisible();
+    await expect(page.getByText(/Browser Voice Polish applied to \d+ clips?\./)).toBeVisible();
+    await page.getByRole('tab', { name: 'Runtime' }).click();
     const cloudRun = page.locator('[data-audio-route="vps-orchestrated"]');
     await expect(cloudRun).toBeEnabled();
     await expect(cloudRun).toHaveAttribute(
@@ -251,7 +254,7 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     expect(probe).toMatchObject({
       requests: 1,
       authorization: `Bearer ${E2E_TOKEN}`,
-      operationId: 'cloud-audio-asset-intro-podcast-quality',
+      operationId: 'cloud-audio-asset-intro-voice-polish',
       assetId: 'asset-intro',
       strength: 0.8,
     });
@@ -277,6 +280,7 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     }
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Runtime' }).click();
     const reloadedCloudRun = page.locator('[data-audio-route="vps-orchestrated"]');
     await expect(reloadedCloudRun).toBeEnabled();
     await reloadedCloudRun.click();

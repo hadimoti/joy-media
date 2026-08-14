@@ -289,10 +289,11 @@ test.describe('WP-32 real-project workflow acceptance', () => {
         async () => {
           await page.locator(`.timeline-clip[aria-label^="${names.audio},"]`).click();
           await openPanel(page, 'Audio');
-          const browserRun = page.locator('[data-audio-route="browser-dsp"]');
+          await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
+          const browserRun = page.getByRole('button', { name: 'Apply changes' });
           await expect(browserRun).toBeEnabled();
           await browserRun.click();
-          await expect(page.getByText('Browser Voice Polish applied to the project.')).toBeVisible({
+          await expect(page.getByText(/Browser Voice Polish applied to \d+ clips?\./)).toBeVisible({
             timeout: 15_000,
           });
           await page.getByRole('tab', { name: 'Mix' }).click();

@@ -14574,6 +14574,10 @@ label {
   justify-content: flex-end;
   gap: 0.25rem;
 }
+.audio-runtime-run-action {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--joy-border-subtle);
+}
 .audio-run-error {
   color: var(--joy-danger);
   font-size: var(--joy-type-2xs);
