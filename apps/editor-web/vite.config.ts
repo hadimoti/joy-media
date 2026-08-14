@@ -40,9 +40,12 @@ function editorChunk(id: string): string | undefined {
   const packageMatch = moduleId.match(/\/packages\/([^/]+)\//);
   const packageName = packageMatch?.[1];
   if (packageName === undefined) return undefined;
+  // Render IR is consumed by both playback/editing and the renderers. Keeping
+  // it in the renderer chunk creates a rendering -> editing -> rendering
+  // Rollup cycle once visual-object-renderer imports the evaluator.
+  if (packageName === 'render-ir') return 'joy-render-contract';
   if (
     [
-      'render-ir',
       'renderer-headless',
       'renderer-pixi',
       'transition-shaders',

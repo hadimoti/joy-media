@@ -697,7 +697,27 @@ export function EffectsSection({
   const effects = object.effects ?? [];
   const [draggedEffectId, setDraggedEffectId] = useState<string | null>(null);
 
-  if (effects.length === 0) return null;
+  if (effects.length === 0)
+    return (
+      <section className="inspector-section" aria-label="Effects">
+        <button
+          type="button"
+          className="inspector-section-toggle"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          <h3>Effects</h3>
+        </button>
+        {open && (
+          <div className="inspector-empty-state" role="status">
+            <strong>No effects applied</strong>
+            <span>
+              Choose an effect in the Effects tab, then return here to edit and keyframe it.
+            </span>
+          </div>
+        )}
+      </section>
+    );
 
   return (
     <section className="inspector-section">

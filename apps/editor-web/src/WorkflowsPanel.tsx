@@ -469,9 +469,15 @@ export function WorkflowsPanel({
         </div>
       )}
 
-      {tab === 'saved' && (
-        <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
-      )}
+      {tab === 'saved' &&
+        (workflows.length === 0 ? (
+          <div className="workflow-empty-state" role="status">
+            <strong>No saved workflows</strong>
+            <span>Run and save an Agent action to make it reusable here.</span>
+          </div>
+        ) : (
+          <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
+        ))}
 
       {tab === 'system' && (
         <>

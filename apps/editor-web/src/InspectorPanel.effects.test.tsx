@@ -26,6 +26,22 @@ const OBJECT: VisualObjectV1 = {
 };
 
 describe('Inspector effects ordering controls', () => {
+  it('keeps an actionable Effects section visible when the stack is empty', () => {
+    const markup = renderToStaticMarkup(
+      <EffectsSection
+        object={{ ...OBJECT, effects: [] }}
+        open={true}
+        onToggle={() => undefined}
+        playheadUs={0}
+        onDispatch={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Effects"');
+    expect(markup).toContain('No effects applied');
+    expect(markup).toContain('Effects tab');
+  });
+
   it('renders drag hooks and keyboard-accessible move actions', () => {
     const markup = renderToStaticMarkup(
       <EffectsSection

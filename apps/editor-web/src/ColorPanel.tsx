@@ -44,6 +44,14 @@ const ADJUST_RANGES = [
   ['hue', 'Hue', -180, 180, 0],
 ] as const;
 
+const HSL_CONTROL_DEFINITIONS = [
+  ['hue', 'Hue', 0, 359, 1, 'hue'],
+  ['hueWidth', 'Range', 1, 180, 1, 'hue'],
+  ['softness', 'Softness', 0, 1, 0.01, 'scalar'],
+  ['saturation', 'Saturation', -1, 1, 0.01, 'scalar'],
+  ['luminance', 'Luminance', -1, 1, 0.01, 'scalar'],
+] as const;
+
 export interface ScopePixels {
   readonly width: number;
   readonly height: number;
@@ -454,7 +462,12 @@ export function ColorPanel({
             onCommit={commit}
             animationStateFor={animationStateFor}
             onToggleReference={toggleLutReferenceAnimation}
+            onToggleAnimation={toggleNumericAnimation}
             canAnimate={onDispatch !== undefined}
+            {...(draft.lut?.assetId === undefined ||
+            project.assets[draft.lut.assetId]?.displayName === undefined
+              ? {}
+              : { customLutName: project.assets[draft.lut.assetId]!.displayName })}
             referenceAvailable={
               draft.lut === undefined
                 ? true
@@ -468,13 +481,7 @@ export function ColorPanel({
       </fieldset>
       <div className="color-utility-row">
         <button type="button" onClick={() => setTab('scopes')}>
-          ◒ Mini scopes
-        </button>
-        <button
-          type="button"
-          onClick={() => setDraft((value) => ({ ...value, enabled: !value.enabled }))}
-        >
-          A/B wipe
+          ◒ Open scopes
         </button>
         <button type="button" onClick={reset} disabled={gradeIsIdentity}>
           Reset all
@@ -730,7 +737,7 @@ function CurvesSection({
   );
 }
 
-function HslSection({
+export function HslSection({
   draft,
   onChange,
   onCommit,
@@ -750,62 +757,106 @@ function HslSection({
     index: number,
     key: 'hue' | 'hueWidth' | 'softness' | 'saturation' | 'luminance',
     value: number,
+    finalize = false,
   ) => {
     const next = {
       ...draft,
       hsl: bands.map((band, i) => (i === index ? { ...band, [key]: value } : band)),
     };
     onChange(next);
-    onCommit(next);
+    if (finalize) onCommit(next);
   };
   return (
     <section className="color-section">
       <h3>Hue bands</h3>
       {bands.map((band, index) => {
         const bandId = band.id ?? IDENTITY_HSL_BANDS[index]!.id!;
+        const bandLabel = `${bandId[0]!.toUpperCase()}${bandId.slice(1)}`;
+        const identityBand = IDENTITY_HSL_BANDS[index]!;
         return (
-          <div className="hsl-band" key={bandId}>
-            <span className="hsl-swatch" style={{ background: `hsl(${band.hue} 85% 55%)` }} />{' '}
-            <strong>{bandId}</strong>
-            <PropertyRow
-              label="Saturation"
-              controlId={`hsl-${bandId}-saturation`}
-              value={band.saturation.toFixed(2)}
-              onReset={() => update(index, 'saturation', 0)}
-              {...(!canAnimate
-                ? {}
-                : {
-                    animationState: animationStateFor(`hsl.${bandId}.saturation`),
-                    onToggleAnimation: () =>
-                      onToggleAnimation(`hsl.${bandId}.saturation`, band.saturation),
-                  })}
-            >
-              <input
-                id={`hsl-${bandId}-saturation`}
-                aria-label={`${bandId} saturation`}
-                type="range"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={band.saturation}
-                onChange={(e) => update(index, 'saturation', e.currentTarget.valueAsNumber)}
-                onPointerUp={(e) => update(index, 'saturation', e.currentTarget.valueAsNumber)}
+          <details className="hsl-band" key={bandId}>
+            <summary>
+              <span
+                className="hsl-swatch"
+                style={{ background: `hsl(${band.hue} 85% 55%)` }}
+                aria-hidden="true"
               />
-            </PropertyRow>
-          </div>
+              <strong>{bandLabel}</strong>
+              <span>{Math.round(band.hue)}° center</span>
+            </summary>
+            <div className="hsl-band-controls">
+              {HSL_CONTROL_DEFINITIONS.map(([key, label, min, max, step, valueKind]) => {
+                const value = band[key];
+                const propertyId = `hsl.${bandId}.${key}`;
+                const controlId = `hsl-${bandId}-${key}`;
+                const rowLabel = `${bandLabel} ${label}`;
+                const resetValue = identityBand[key];
+                return (
+                  <PropertyRow
+                    key={key}
+                    label={rowLabel}
+                    controlId={controlId}
+                    value={valueKind === 'hue' ? `${value.toFixed(0)}°` : value.toFixed(2)}
+                    onReset={() => update(index, key, resetValue, true)}
+                    {...(!canAnimate
+                      ? {}
+                      : {
+                          animationState: animationStateFor(propertyId),
+                          onToggleAnimation: () => onToggleAnimation(propertyId, value, valueKind),
+                        })}
+                  >
+                    <input
+                      id={controlId}
+                      aria-label={rowLabel}
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={value}
+                      onChange={(event) => update(index, key, event.currentTarget.valueAsNumber)}
+                      onPointerUp={(event) =>
+                        update(index, key, event.currentTarget.valueAsNumber, true)
+                      }
+                      onBlur={(event) =>
+                        update(index, key, event.currentTarget.valueAsNumber, true)
+                      }
+                      onKeyUp={(event) => {
+                        if (
+                          event.key.startsWith('Arrow') ||
+                          event.key === 'Home' ||
+                          event.key === 'End'
+                        )
+                          update(index, key, event.currentTarget.valueAsNumber, true);
+                      }}
+                      onDoubleClick={() => update(index, key, resetValue, true)}
+                    />
+                  </PropertyRow>
+                );
+              })}
+            </div>
+          </details>
         );
       })}
+      <button
+        type="button"
+        className="section-reset"
+        onClick={() => onCommit({ ...draft, hsl: IDENTITY_HSL_BANDS })}
+      >
+        Reset hue bands
+      </button>
     </section>
   );
 }
 
-function LooksSection({
+export function LooksSection({
   draft,
   onChange,
   onCommit,
   animationStateFor,
   onToggleReference,
+  onToggleAnimation,
   canAnimate,
+  customLutName,
   referenceAvailable,
 }: {
   draft: ColorGradeV2;
@@ -813,10 +864,12 @@ function LooksSection({
   onCommit: (next: ColorGradeV2) => void;
   animationStateFor: (propertyId: string) => PropertyAnimationState;
   onToggleReference: () => void;
+  onToggleAnimation: (propertyId: string, value: number, kind?: 'scalar' | 'hue') => void;
   canAnimate: boolean;
+  customLutName?: string;
   referenceAvailable: boolean;
 }) {
-  const looks = [
+  const builtInLooks = [
     ['none', 'None'],
     ['clean-contrast', 'Clean Contrast'],
     ['soft-film', 'Soft Film'],
@@ -824,7 +877,14 @@ function LooksSection({
     ['cool-fade', 'Cool Fade'],
     ['monochrome', 'Monochrome'],
   ] as const;
-  const selected = draft.lut?.builtIn ?? 'none';
+  const customId = draft.lut?.assetId === undefined ? undefined : `asset:${draft.lut.assetId}`;
+  const selected = customId ?? draft.lut?.builtIn ?? 'none';
+  const intensity = draft.lut?.intensity ?? 1;
+  const updateIntensity = (value: number, finalize = false) => {
+    const next = { ...draft, lut: { ...(draft.lut ?? {}), intensity: value } };
+    onChange(next);
+    if (finalize) onCommit(next);
+  };
   return (
     <section className="color-section">
       <h3>Looks & LUTs</h3>
@@ -840,7 +900,7 @@ function LooksSection({
             })}
       >
         <div className="looks-grid">
-          {looks.map(([id, label]) => (
+          {builtInLooks.map(([id, label]) => (
             <button
               type="button"
               className={selected === id ? 'is-active' : ''}
@@ -855,33 +915,48 @@ function LooksSection({
               {label}
             </button>
           ))}
+          {customId !== undefined && (
+            <div className="look-option is-active">
+              <span className="look-thumb look-thumb--custom" />
+              {customLutName ?? 'Custom LUT'}
+            </div>
+          )}
         </div>
       </PropertyRow>
-      <label className="color-control">
-        <span>LUT intensity</span>
+      <PropertyRow
+        label="LUT intensity"
+        controlId="color-lut-intensity"
+        value={intensity.toFixed(2)}
+        disabled={!referenceAvailable}
+        onReset={() => updateIntensity(1, true)}
+        {...(!canAnimate || !referenceAvailable
+          ? {}
+          : {
+              animationState: animationStateFor('lut.intensity'),
+              onToggleAnimation: () => onToggleAnimation('lut.intensity', intensity),
+            })}
+      >
         <input
+          id="color-lut-intensity"
+          aria-label="LUT intensity"
           type="range"
           min={0}
           max={1}
           step={0.01}
-          value={draft.lut?.intensity ?? 1}
-          onChange={(e) =>
-            onChange({
-              ...draft,
-              lut: { ...(draft.lut ?? {}), intensity: e.currentTarget.valueAsNumber },
-            })
-          }
-          onPointerUp={(e) =>
-            onCommit({
-              ...draft,
-              lut: { ...(draft.lut ?? {}), intensity: e.currentTarget.valueAsNumber },
-            })
-          }
+          value={intensity}
+          disabled={!referenceAvailable}
+          onChange={(event) => updateIntensity(event.currentTarget.valueAsNumber)}
+          onPointerUp={(event) => updateIntensity(event.currentTarget.valueAsNumber, true)}
+          onBlur={(event) => updateIntensity(event.currentTarget.valueAsNumber, true)}
+          onKeyUp={(event) => {
+            if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End')
+              updateIntensity(event.currentTarget.valueAsNumber, true);
+          }}
+          onDoubleClick={() => updateIntensity(1, true)}
         />
-        <output>{(draft.lut?.intensity ?? 1).toFixed(2)}</output>
-      </label>
+      </PropertyRow>
       <p className="color-hint">
-        Custom .cube LUT import is private, hashed, and portable across your devices.
+        Built-in looks and project-linked .cube LUTs remain private and portable across devices.
       </p>
       {!referenceAvailable && (
         <p className="color-empty" role="alert">
@@ -903,12 +978,19 @@ function ScopeSection({
   return (
     <section className="color-section">
       <h3>Program scopes</h3>
-      <div className="scope-source">
-        <button type="button" className="is-active">
+      <div className="scope-source" role="group" aria-label="Scope source">
+        <button type="button" className="is-active" aria-pressed="true">
           Program
         </button>
-        <button type="button">Selected clip</button>
+        <button
+          type="button"
+          disabled
+          title="Selected Clip scopes need clip-stage monitor readback"
+        >
+          Selected clip
+        </button>
       </div>
+      <p className="color-hint">Scopes analyze the final Program Monitor pixels.</p>
       <div className="scope-source" role="group" aria-label="Scope type">
         {(['waveform', 'parade', 'vectorscope', 'histogram'] as const).map((id) => (
           <button
@@ -917,7 +999,7 @@ function ScopeSection({
             key={id}
             onClick={() => setScope(id)}
           >
-            {id}
+            {id === 'parade' ? 'RGB Parade' : `${id[0]!.toUpperCase()}${id.slice(1)}`}
           </button>
         ))}
       </div>
@@ -926,7 +1008,7 @@ function ScopeSection({
   );
 }
 
-function ScopeCanvas({
+export function ScopeCanvas({
   readMonitorPixels,
   compact = false,
   scope = 'waveform',
@@ -1020,13 +1102,27 @@ function ScopeCanvas({
     const timer = window.setInterval(draw, 84);
     return () => window.clearInterval(timer);
   }, [readMonitorPixels, compact, scope]);
+  const scopeLabel =
+    scope === 'parade' ? 'RGB Parade' : `${scope[0]!.toUpperCase()}${scope.slice(1)}`;
   return (
-    <canvas
-      ref={ref}
-      width={compact ? 240 : 420}
-      height={compact ? 64 : 180}
-      className="scope-canvas"
-      aria-label="Luma waveform scope"
-    />
+    <div className="scope-frame">
+      <canvas
+        ref={ref}
+        width={compact ? 240 : 420}
+        height={compact ? 64 : 180}
+        className="scope-canvas"
+        role="img"
+        aria-label={`${scopeLabel} scope analyzing final Program output`}
+      />
+      {!compact && (scope === 'waveform' || scope === 'parade') && (
+        <div className="scope-ire-scale" aria-hidden="true">
+          <span>100</span>
+          <span>75</span>
+          <span>50</span>
+          <span>25</span>
+          <span>0 IRE</span>
+        </div>
+      )}
+    </div>
   );
 }

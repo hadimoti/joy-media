@@ -170,13 +170,33 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
   }, testInfo) => {
     await openReferenceWorkspace(page);
     await openPanel(page, 'Color');
+    await page.getByRole('tab', { name: 'HSL' }).click();
+    await page.getByText('Red', { exact: true }).click();
+    for (const property of [
+      'Red Hue',
+      'Red Range',
+      'Red Softness',
+      'Red Saturation',
+      'Red Luminance',
+    ]) {
+      await expect(page.getByRole('slider', { name: property })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: `Add ${property} keyframe at playhead` }),
+      ).toBeVisible();
+    }
     await page.getByRole('tab', { name: 'Looks' }).click();
     const look = page.getByRole('button', { name: 'Clean Contrast' });
     await look.click();
     await expect(look).toHaveClass(/is-active/);
+    await expect(
+      page.getByRole('button', { name: 'Add LUT intensity keyframe at playhead' }),
+    ).toBeVisible();
     await page.getByRole('tab', { name: 'Scopes' }).click();
-    await page.getByRole('button', { name: 'parade' }).click();
-    await expect(page.locator('fieldset').getByLabel('Luma waveform scope')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Selected clip' })).toBeDisabled();
+    await page.getByRole('button', { name: 'RGB Parade' }).click();
+    await expect(
+      page.locator('fieldset').getByLabel('RGB Parade scope analyzing final Program output'),
+    ).toBeVisible();
     await page.reload();
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
     await openPanel(page, 'Color');
@@ -213,6 +233,8 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.keyboard.press('Enter');
     await expect(page.getByRole('button', { name: 'Edit Position Y expression' })).toBeVisible();
 
+    await page.getByRole('tab', { name: 'Effects' }).click();
+    await expect(page.getByText('No effects applied', { exact: true })).toBeVisible();
     await openPanel(page, 'Effects');
     await page.locator('.effect-add-btn:not([disabled])').first().click();
     await openPanel(page, 'Inspector');

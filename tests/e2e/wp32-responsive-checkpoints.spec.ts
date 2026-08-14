@@ -23,7 +23,15 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     await expect(page.getByRole('button', { name: 'Recent processes' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Workspace preset' })).toBeVisible();
 
-    for (const label of ['Assets', 'Timeline', 'Captions', 'Audio']) {
+    for (const label of [
+      'Assets',
+      'Timeline',
+      'Captions',
+      'Audio',
+      'Inspector',
+      'Color',
+      'Workflows',
+    ]) {
       if (label === 'Timeline') {
         await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
         await expect(page.locator('.timeline-panel')).toBeVisible();
@@ -31,6 +39,9 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
         await openPanel(page, label);
       }
       await expect(page.locator(`.panel-tab[aria-label="${label}"]`).first()).toBeVisible();
+      if (label === 'Workflows') {
+        await expect(page.getByText('No saved workflows', { exact: true })).toBeVisible();
+      }
     }
 
     const fileMenu = page.getByRole('button', { name: 'File' });
