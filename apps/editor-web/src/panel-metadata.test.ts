@@ -26,6 +26,7 @@ describe('panel metadata registry', () => {
     expect(panelsForIntent('media').map((entry) => entry.label)).toEqual([
       'Assets',
       'Captions',
+      'Text',
       'Audio',
       'Library',
     ]);

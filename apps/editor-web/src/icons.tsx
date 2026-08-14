@@ -186,6 +186,16 @@ export function TimelineClassicIcon() {
   );
 }
 
+/** Minimal outlined T for the native editable text panel. */
+export function TextTabIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M3 3.5h10M8 3.5v9" />
+      <path d="M5.5 12.5h5" />
+    </Svg>
+  );
+}
+
 export function SoloIcon() {
   return (
     <Svg>

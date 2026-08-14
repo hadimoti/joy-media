@@ -137,6 +137,7 @@ import {
 } from './project-lifecycle.js';
 import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
+import { TextPanel } from './TextPanel.js';
 import { InspectorPanel, type InspectorSpeedChange } from './InspectorPanel.js';
 import {
   MonitorAspectRatioSelector,
@@ -4610,6 +4611,18 @@ function EditorWorkspace({
           onTranscribe={context.transcribe}
           transcriptionError={context.transcriptionError}
           onProjectChange={(next) => context.replaceVisualProject(next)}
+        />
+      );
+    if (api.id === 'text')
+      return (
+        <TextPanel
+          project={visualProject}
+          session={context.session}
+          selectedIds={state.selectedIds}
+          playheadUs={state.playheadUs}
+          onSelectClip={context.selectClips}
+          onProjectChange={context.replaceVisualProject}
+          onProjectRevision={context.bumpProjectRevision}
         />
       );
     if (api.id === 'timeline') {

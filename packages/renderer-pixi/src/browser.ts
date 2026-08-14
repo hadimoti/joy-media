@@ -26,7 +26,7 @@
  * that persist have their transform / opacity / zIndex updated in place.
  */
 
-import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
+import { Application, Container, FillGradient, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type {
   Rgba,
   RenderFrameIR,
@@ -246,12 +246,71 @@ export async function createBrowserPixiRenderer(
 
   const updateTextVisual = (text: Text, node: TextNode): void => {
     text.text = node.text;
+    const fill =
+      node.fill?.kind === 'linear-gradient' && node.fill.stops.length > 1
+        ? (() => {
+            const radians = (node.fill.angleDeg * Math.PI) / 180;
+            const dx = Math.cos(radians) * 0.5;
+            const dy = Math.sin(radians) * 0.5;
+            return new FillGradient({
+              type: 'linear',
+              start: { x: 0.5 - dx, y: 0.5 - dy },
+              end: { x: 0.5 + dx, y: 0.5 + dy },
+              textureSpace: 'local',
+              colorStops: node.fill.stops.map((stop) => ({
+                offset: stop.offset,
+                color: rgbaToHexString(stop.color),
+              })),
+            });
+          })()
+        : node.fill?.kind === 'solid'
+          ? rgbaToHexString(node.fill.color)
+          : node.fill?.stops[0] === undefined
+            ? rgbaToHexString(node.color)
+            : rgbaToHexString(node.fill.stops[0].color);
+    const dropShadow =
+      node.shadow === undefined && node.glow !== undefined
+        ? {
+            color: rgbaToHexString(node.glow.color),
+            alpha: node.glow.color.a / 255,
+            blur: node.glow.radiusPx,
+            distance: 0,
+            angle: 0,
+          }
+        : node.shadow === undefined
+          ? undefined
+          : {
+              color: rgbaToHexString(node.shadow.color),
+              alpha: node.shadow.color.a / 255,
+              blur: node.shadow.blurPx,
+              distance: Math.hypot(node.shadow.offsetX, node.shadow.offsetY),
+              angle: Math.atan2(node.shadow.offsetY, node.shadow.offsetX),
+            };
     text.style = {
-      fill: rgbaToHexString(node.color),
+      fill,
       fontSize: node.fontSizePx ?? 16,
+      ...(node.fontFamily === undefined ? {} : { fontFamily: node.fontFamily }),
+      ...(node.fontWeight === undefined
+        ? {}
+        : { fontWeight: node.fontWeight >= 700 ? 'bold' : 'normal' }),
+      ...(node.italic === undefined ? {} : { fontStyle: node.italic ? 'italic' : 'normal' }),
+      ...(node.lineHeight === undefined || node.fontSizePx === undefined
+        ? {}
+        : { lineHeight: node.fontSizePx * node.lineHeight }),
+      ...(node.tracking === undefined ? {} : { letterSpacing: node.tracking }),
       align: node.align ?? 'left',
       ...(node.maxWidth !== undefined ? { wordWrap: true, wordWrapWidth: node.maxWidth } : {}),
+      ...(node.stroke === undefined
+        ? {}
+        : {
+            stroke: {
+              color: rgbaToHexString(node.stroke.color),
+              width: node.stroke.widthPx,
+            },
+          }),
+      ...(dropShadow === undefined ? {} : { dropShadow }),
     };
+    text.blendMode = (node.blendMode ?? 'normal') as typeof text.blendMode;
     text.label = `text:${node.id}`;
     applyTextAlignment(text, node);
   };

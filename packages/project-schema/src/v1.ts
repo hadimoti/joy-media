@@ -7,6 +7,7 @@ import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './mod
 import type { ColorGradeV2 } from './color.js';
 import type { PropertyAnimationV2 } from './property-animation.js';
 import type { CaptionClipStyleV2 } from './caption-style.js';
+import type { TextDocumentV1, TextStyleV1 } from './text-style.js';
 import { validatePropertyAnimations } from './property-animation.js';
 
 export type EffectParamValue =
@@ -199,6 +200,10 @@ export interface VisualObjectV1 {
   readonly motionBlur?: MotionBlurV1;
   readonly assetId?: string;
   readonly text?: string;
+  /** Structured editable text; absent legacy text is normalized at render time. */
+  readonly textDocument?: TextDocumentV1;
+  /** Base typography/effects for `textDocument` runs. */
+  readonly textStyle?: TextStyleV1;
   readonly shape?: 'rectangle' | 'ellipse';
   /** Present iff `kind === 'camera'` (ADR-0015). */
   readonly camera?: CameraParamsV1;

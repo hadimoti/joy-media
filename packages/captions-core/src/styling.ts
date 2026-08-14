@@ -247,6 +247,7 @@ export function layoutTemplatedCaptionNodes(
         align,
         maxWidth: usableWidth,
         fontSizePx,
+        ...(clipStyle?.tracking === undefined ? {} : { tracking: clipStyle.tracking }),
         ...(template.plateColor === undefined ? {} : { background: template.plateColor }),
         ...karaokeSpans(line, sourceTokens, activeIndex, template),
       });

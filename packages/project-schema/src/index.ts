@@ -96,6 +96,26 @@ export {
   normalizeCaptionClipStyle,
 } from './caption-style.js';
 export type {
+  TextDirectionV1,
+  TextAlignV1,
+  TextBlendModeV1,
+  TextGradientStopV1,
+  TextFillV1,
+  TextStrokeV1,
+  TextShadowV1,
+  TextGlowV1,
+  TextStyleV1,
+  TextRunStyleV1,
+  TextRunV1,
+  TextBlockV1,
+  TextDocumentV1,
+} from './text-style.js';
+export {
+  DEFAULT_TEXT_STYLE_V1,
+  textDocumentFromString,
+  textDocumentToString,
+} from './text-style.js';
+export type {
   ColorAdjustments,
   ColorWheel,
   ColorWheels,

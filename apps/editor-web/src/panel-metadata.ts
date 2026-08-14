@@ -32,6 +32,7 @@ const panel = (
 export const PANEL_METADATA: readonly PanelMetadata[] = [
   panel('media', 'media', 'Open Assets', ['edit', 'enhance', 'audio-captions', 'automate']),
   panel('captions', 'media', 'Open Captions', ['audio-captions', 'edit']),
+  panel('text', 'media', 'Open Text', ['edit', 'enhance']),
   panel('audio', 'media', 'Open Audio', ['audio-captions', 'edit']),
   panel('monitor', 'edit', 'Open Program Monitor', [
     'edit',

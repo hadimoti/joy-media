@@ -10,6 +10,6 @@ describe('workspace presets', () => {
     const layout = workspacePresetLayout('audio-captions', 'vertical') as {
       readonly panels: Record<string, unknown>;
     };
-    expect(Object.keys(layout.panels)).toHaveLength(19);
+    expect(Object.keys(layout.panels)).toHaveLength(20);
   });
 });

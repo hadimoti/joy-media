@@ -16,6 +16,9 @@ import type {
   EffectInstanceV1,
   EffectParamValue,
   JoyProjectV1,
+  TextDocumentV1,
+  TextFillV1,
+  TextStyleV1,
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
@@ -26,6 +29,8 @@ import type {
   Transform2D,
   EffectInstanceIR,
   ColorGradeIR,
+  TextFillIR,
+  TextSpan,
 } from '@joy-media/render-ir';
 import type { TimeUs, TransitionV1 } from '@joy-media/project-schema';
 import { mergeTransitionParams, resolveTransitionShaderId } from '@joy-media/transition-shaders';
@@ -80,21 +85,25 @@ export function buildRenderFrameIRFromProject(
 ): RenderFrameIR {
   const composition = project.compositions[compositionId];
   if (composition === undefined) throw new RangeError(`unknown composition "${compositionId}"`);
-  const resolvedObjects: ResolvedObject[] = Object.values(project.visualObjects).map((object) => {
-    const resolved = evaluateUniversalCameraTransform(
-      object.id,
-      composition.activeCameraId,
-      project.visualObjects,
-      timeUs,
-      height,
-      project.propertyAnimations,
-    );
-    return {
-      object,
-      transform: resolved.transform,
-      ...(resolved.diagnostics.length === 0 ? {} : { expressionDiagnostics: resolved.diagnostics }),
-    };
-  });
+  const resolvedObjects: ResolvedObject[] = Object.values(project.visualObjects)
+    .filter((object) => isBoundObjectActive(project, object.id, timeUs))
+    .map((object) => {
+      const resolved = evaluateUniversalCameraTransform(
+        object.id,
+        composition.activeCameraId,
+        project.visualObjects,
+        timeUs,
+        height,
+        project.propertyAnimations,
+      );
+      return {
+        object,
+        transform: resolved.transform,
+        ...(resolved.diagnostics.length === 0
+          ? {}
+          : { expressionDiagnostics: resolved.diagnostics }),
+      };
+    });
   return buildRenderFrameIR(compositionId, timeUs, width, height, resolvedObjects, {
     ...options,
     propertyAnimations: options.propertyAnimations ?? project.propertyAnimations,
@@ -143,14 +152,62 @@ export function visualObjectToRenderNode(
   const effectList = effects && effects.length > 0 ? effects : undefined;
 
   if (object.kind === 'text') {
+    const style = object.textStyle;
+    const document = object.textDocument;
+    const text = document === undefined ? (object.text ?? '') : textDocumentText(document);
+    const fill = style?.fill === undefined ? undefined : textFillToIR(style.fill);
+    const color = fill?.kind === 'solid' ? fill.color : (fill?.stops[0]?.color ?? WHITE);
+    const spans = document === undefined ? undefined : textDocumentSpans(document, style);
     return {
       kind: 'text',
       id: object.id,
       zIndex: 0,
-      opacity,
+      opacity: opacity * (style?.opacity ?? 1),
       transform: renderTransform,
-      text: object.text ?? '',
-      color: WHITE,
+      text,
+      color,
+      ...(style?.direction === 'ltr' || style?.direction === 'rtl'
+        ? { direction: style.direction }
+        : {}),
+      ...(style?.align === 'start' || style?.align === 'center' || style?.align === 'end'
+        ? { align: style.align === 'start' ? 'left' : style.align === 'end' ? 'right' : 'center' }
+        : {}),
+      ...(style?.fontFamily === undefined ? {} : { fontFamily: style.fontFamily }),
+      ...(style?.fontSizePx === undefined ? {} : { fontSizePx: style.fontSizePx }),
+      ...(style?.fontWeight === undefined ? {} : { fontWeight: style.fontWeight }),
+      ...(style?.italic === undefined ? {} : { italic: style.italic }),
+      ...(style?.lineHeight === undefined ? {} : { lineHeight: style.lineHeight }),
+      ...(style?.tracking === undefined ? {} : { tracking: style.tracking }),
+      ...(fill === undefined ? {} : { fill }),
+      ...(style?.stroke === undefined
+        ? {}
+        : {
+            stroke: {
+              color: parseTextColor(style.stroke.color),
+              widthPx: style.stroke.widthPx,
+            },
+          }),
+      ...(style?.shadow === undefined
+        ? {}
+        : {
+            shadow: {
+              color: parseTextColor(style.shadow.color, style.shadow.opacity),
+              offsetX: style.shadow.offsetX,
+              offsetY: style.shadow.offsetY,
+              blurPx: style.shadow.blurPx,
+            },
+          }),
+      ...(style?.glow === undefined
+        ? {}
+        : {
+            glow: {
+              color: parseTextColor(style.glow.color),
+              radiusPx: style.glow.radiusPx,
+              strength: style.glow.strength,
+            },
+          }),
+      ...(style?.blendMode === undefined ? {} : { blendMode: style.blendMode }),
+      ...(spans === undefined ? {} : { spans }),
       ...(effectList ? { effects: effectList } : {}),
     };
   }
@@ -489,6 +546,85 @@ export function normalizeColorGrade(
 const WHITE: Rgba = Object.freeze({ r: 255, g: 255, b: 255, a: 255 });
 const DARK_BG: Rgba = Object.freeze({ r: 12, g: 16, b: 28, a: 255 });
 const EMPTY_CLIP_TIMES: ClipTimingLookup = new Map();
+
+/**
+ * Overlay objects are bound to a timeline clip through namespaced plugin data.
+ * Old projects without an explicit binding remain always visible for backward
+ * compatibility; newly inserted text/sticker overlays obey their clip range.
+ */
+function isBoundObjectActive(project: JoyProjectV1, objectId: string, timeUs: TimeUs): boolean {
+  const raw = project.pluginData?.['joy.clipObjects'];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return true;
+  const boundClipIds = Object.entries(raw as Record<string, unknown>)
+    .filter(([, candidate]) => candidate === objectId)
+    .map(([clipId]) => clipId);
+  if (boundClipIds.length === 0) return true;
+  return Object.values(project.compositions).some((candidate) =>
+    candidate.tracks.some((track) =>
+      track.clips.some(
+        (clip) =>
+          boundClipIds.includes(clip.id) &&
+          timeUs >= clip.startUs &&
+          timeUs < clip.startUs + clip.durationUs,
+      ),
+    ),
+  );
+}
+
+function textDocumentText(document: TextDocumentV1): string {
+  return document.blocks.map((block) => block.runs.map((run) => run.text).join('')).join('\n');
+}
+
+function textDocumentSpans(document: TextDocumentV1, baseStyle?: TextStyleV1): readonly TextSpan[] {
+  const spans: TextSpan[] = [];
+  document.blocks.forEach((block, blockIndex) => {
+    if (blockIndex > 0) spans.push({ text: '\n', color: parseTextColor('#ffffff') });
+    block.runs.forEach((run) => {
+      const runFill = run.style?.fill;
+      const runColor =
+        run.style?.highlightColor ??
+        (runFill?.kind === 'solid' ? runFill.color : undefined) ??
+        (baseStyle?.fill.kind === 'solid' ? baseStyle.fill.color : '#ffffff');
+      spans.push({
+        text: run.text,
+        color: parseTextColor(runColor),
+        ...(run.style?.highlightColor === undefined ? {} : { emphasis: true }),
+        ...(run.style?.fontFamily === undefined ? {} : { fontFamily: run.style.fontFamily }),
+        ...(run.style?.fontSizePx === undefined ? {} : { fontSizePx: run.style.fontSizePx }),
+        ...(run.style?.fontWeight === undefined ? {} : { fontWeight: run.style.fontWeight }),
+        ...(run.style?.italic === undefined ? {} : { italic: run.style.italic }),
+      });
+    });
+  });
+  return spans;
+}
+
+function textFillToIR(fill: TextFillV1): TextFillIR {
+  if (fill.kind === 'solid') return { kind: 'solid', color: parseTextColor(fill.color) };
+  return {
+    kind: 'linear-gradient',
+    angleDeg: fill.angleDeg,
+    stops: fill.stops.map((stop) => ({ offset: stop.offset, color: parseTextColor(stop.color) })),
+  };
+}
+
+function parseTextColor(value: string, alpha = 1): Rgba {
+  const normalized = value.trim().replace(/^#/, '');
+  const hex =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((channel) => `${channel}${channel}`)
+          .join('')
+      : normalized;
+  if (!/^[0-9a-f]{6}$/iu.test(hex)) return WHITE;
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16),
+    a: Math.round(Math.max(0, Math.min(1, alpha)) * 255),
+  };
+}
 
 function shapeColor(
   kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene',

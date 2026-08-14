@@ -63,6 +63,37 @@ export interface TextSpan {
   readonly color: Rgba;
   /** Marks the emphasized (e.g. active-word) run for renderers with effects. */
   readonly emphasis?: boolean;
+  /** Optional per-run typography override from a native text document. */
+  readonly fontFamily?: string;
+  readonly fontSizePx?: number;
+  readonly fontWeight?: number;
+  readonly italic?: boolean;
+}
+
+export type TextFillIR =
+  | { readonly kind: 'solid'; readonly color: Rgba }
+  | {
+      readonly kind: 'linear-gradient';
+      readonly angleDeg: number;
+      readonly stops: readonly { readonly offset: number; readonly color: Rgba }[];
+    };
+
+export interface TextStrokeIR {
+  readonly color: Rgba;
+  readonly widthPx: number;
+}
+
+export interface TextShadowIR {
+  readonly color: Rgba;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly blurPx: number;
+}
+
+export interface TextGlowIR {
+  readonly color: Rgba;
+  readonly radiusPx: number;
+  readonly strength: number;
 }
 
 /** A text run rendered with the spike's pinned bitmap glyph set. */
@@ -78,6 +109,16 @@ export interface TextNode extends RenderNodeBase {
   readonly maxWidth?: number;
   /** Evaluated glyph size in viewport pixels; renderer default when absent. */
   readonly fontSizePx?: number;
+  readonly fontFamily?: string;
+  readonly fontWeight?: number;
+  readonly italic?: boolean;
+  readonly lineHeight?: number;
+  readonly tracking?: number;
+  readonly fill?: TextFillIR;
+  readonly stroke?: TextStrokeIR;
+  readonly shadow?: TextShadowIR;
+  readonly glow?: TextGlowIR;
+  readonly blendMode?: string;
   /** Box drawn behind the run (caption plates). Absent = no box. */
   readonly background?: Rgba;
   /** Styled runs; when present their concatenated text MUST equal `text`. */
