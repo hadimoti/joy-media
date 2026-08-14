@@ -14374,7 +14374,18 @@ label {
   justify-content: space-between;
   margin-bottom: 0.35rem;
 }
-.audio-enhance-target-heading > div {
+.audio-enhance-heading-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.audio-enhance-heading-icon,
+.audio-enhance-route-summary > span > svg {
+  flex: none;
+  color: var(--joy-text-muted);
+}
+.audio-enhance-target-copy {
   display: grid;
   gap: 0.04rem;
   min-width: 0;
@@ -14386,7 +14397,7 @@ label {
 }
 .audio-enhance-target-heading span,
 .audio-execution-plan-heading span,
-.audio-enhance-route-summary span,
+.audio-enhance-route-summary > span,
 .audio-enhance-apply > span,
 .audio-enhance-review > span {
   min-width: 0;
@@ -14399,8 +14410,7 @@ label {
   gap: 0.25rem;
 }
 .audio-enhance-scope-button,
-.audio-enhance-route-summary button,
-.audio-enhance-review button {
+.audio-enhance-review .icon-button:not(.is-primary) {
   min-height: 1.8rem;
   border: 1px solid var(--joy-border);
   border-radius: var(--radius-sm);
@@ -14433,19 +14443,27 @@ label {
   flex-wrap: wrap;
   padding: 0.3rem 0.45rem;
 }
-.audio-enhance-route-summary span[data-state='ready'],
+.audio-enhance-route-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.audio-enhance-route-summary > span[data-state='ready'],
 .audio-execution-plan [data-state='ready'] > small,
 .audio-execution-plan-heading span[data-state='ready'] {
   color: var(--joy-ok);
 }
-.audio-enhance-route-summary span[data-state='blocked'],
+.audio-enhance-route-summary > span[data-state='ready'] > svg {
+  color: var(--joy-ok);
+}
+.audio-enhance-route-summary > span[data-state='blocked'],
 .audio-execution-plan [data-state='blocked'] > small,
 .audio-execution-plan-heading span[data-state='blocked'] {
   color: var(--joy-text-muted);
 }
-.audio-enhance-route-summary button {
+.audio-enhance-runtime-button {
   margin-left: auto;
-  padding-inline: 0.45rem;
+  color: var(--joy-text-muted);
 }
 .audio-enhance-workspace .audio-workflow-steps {
   display: grid;
@@ -14502,7 +14520,7 @@ label {
   padding: 0.35rem;
 }
 .audio-enhance-primary,
-.audio-enhance-review button.is-primary {
+.audio-enhance-review .icon-button.is-primary {
   min-height: 2rem;
   border: 1px solid var(--joy-accent);
   border-radius: var(--radius-sm);
@@ -14519,9 +14537,6 @@ label {
 }
 .audio-enhance-review > div {
   flex: none;
-}
-.audio-enhance-review button {
-  padding-inline: 0.5rem;
 }
 @container (max-width: 22rem) {
   .audio-enhance-scope-options {

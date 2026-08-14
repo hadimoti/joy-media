@@ -15,18 +15,21 @@ import {
   AudioIcon,
   AudioWorkerIcon,
   CheckIcon,
+  CloseIcon,
   CloudIcon,
   DeviceProcessorIcon,
   DownloadIcon,
   FadeInIcon,
   FadeOutIcon,
   GainIcon,
+  LayersIcon,
   MasterBusIcon,
   MuteIcon,
   PanIcon,
   SlidersIcon,
   SoloIcon,
   SpeakerOnIcon,
+  SettingsGearIcon,
   StorageFolderIcon,
   WorkflowPathIcon,
 } from './icons.js';
@@ -380,9 +383,14 @@ export function AudioPanel({
         <div className="audio-studio-stack audio-enhance-workspace">
           <section className="audio-enhance-target" aria-label="Enhance target">
             <div className="audio-enhance-target-heading">
-              <div>
-                <strong>Enhance target</strong>
-                <span>{selectedScope.description}</span>
+              <div className="audio-enhance-heading-main">
+                <span className="icon-tool audio-enhance-heading-icon" aria-hidden="true">
+                  <LayersIcon />
+                </span>
+                <div className="audio-enhance-target-copy">
+                  <strong>Enhance target</strong>
+                  <span>{selectedScope.description}</span>
+                </div>
               </div>
               <span className="audio-source-status" data-state={noClips ? 'idle' : 'ready'}>
                 {noClips
@@ -416,13 +424,22 @@ export function AudioPanel({
 
           <section className="audio-enhance-route-summary" aria-label="Enhancement runtime summary">
             <span data-state={browserDspReady ? 'ready' : 'blocked'}>
-              Browser DSP {browserDspReady ? 'ready' : 'needs clips'}
+              <DeviceProcessorIcon />
+              <span>Browser DSP {browserDspReady ? 'ready' : 'needs clips'}</span>
             </span>
             <span data-state={localWorkerReady ? 'ready' : 'blocked'}>
-              Local Worker {localWorkerReady ? 'connected' : 'disconnected'}
+              <AudioWorkerIcon />
+              <span>Local Worker {localWorkerReady ? 'connected' : 'disconnected'}</span>
             </span>
-            <button type="button" onClick={() => setTab('runtime')}>
-              Runtime
+            <button
+              type="button"
+              className="icon-button audio-enhance-runtime-button"
+              aria-label="Open Audio Runtime"
+              title="Open Audio Runtime"
+              data-guide="Open Runtime"
+              onClick={() => setTab('runtime')}
+            >
+              <SettingsGearIcon />
             </button>
           </section>
 
@@ -521,27 +538,48 @@ export function AudioPanel({
                         {selectedScope.clipIds.length === 1 ? '' : 's'}.
                       </span>
                       <div>
-                        <button type="button" onClick={() => setReviewingWorkflow(null)}>
-                          Back
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Back to enhancement review"
+                          title="Back to enhancement review"
+                          data-guide="Back"
+                          onClick={() => setReviewingWorkflow(null)}
+                        >
+                          <CloseIcon />
                         </button>
                         <button
                           type="button"
-                          className="is-primary"
+                          className="icon-button icon-button-labeled is-primary"
+                          aria-label={
+                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                          }
+                          title={
+                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                          }
+                          data-guide={
+                            runningTarget === 'browser-dsp' ? 'Applying changes' : 'Apply changes'
+                          }
                           disabled={runningTarget !== null}
                           onClick={() => void applyBrowserWorkflow()}
                         >
-                          {runningTarget === 'browser-dsp' ? 'Applying…' : 'Apply changes'}
+                          <CheckIcon />
+                          <span>{runningTarget === 'browser-dsp' ? 'Applying…' : 'Apply'}</span>
                         </button>
                       </div>
                     </div>
                   ) : (
                     <button
                       type="button"
-                      className="audio-enhance-primary"
+                      className="icon-button icon-button-labeled audio-enhance-primary"
+                      aria-label="Review Voice Polish changes"
+                      title="Review Voice Polish changes"
+                      data-guide="Review changes"
                       data-audio-review-workflow
                       onClick={() => setReviewingWorkflow(selectedWorkflow.id)}
                     >
-                      Review changes
+                      <SlidersIcon />
+                      <span>Review</span>
                     </button>
                   )
                 ) : (

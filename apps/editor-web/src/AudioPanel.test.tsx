@@ -29,7 +29,11 @@ describe('AudioPanel Enhance workspace', () => {
     expect(markup).toContain('Voice Polish');
     expect(markup).toContain('Processing plan');
     expect(markup).toContain('3/3 ready');
-    expect(markup).toContain('Review changes');
+    expect(markup).toContain('aria-label="Review Voice Polish changes"');
+    expect(markup).toContain('title="Review Voice Polish changes"');
+    expect(markup).toContain('audio-enhance-heading-icon');
+    expect(markup).toContain('audio-enhance-runtime-button');
+    expect(markup).toContain('icon-button-labeled audio-enhance-primary');
     expect(markup).toContain('Browser DSP ready');
     expect(markup).toContain('<strong>Browser</strong>DSP');
     expect(markup).not.toContain('<strong>0G</strong>RAM');
