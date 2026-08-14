@@ -42,10 +42,13 @@ import {
   AUDIO_MODEL_CATALOG,
   AUDIO_WORKFLOW_PRESETS,
   DEFAULT_MODEL_CACHE_PATH,
+  audioExecutionTargetLabel,
   buildAudioWorkflowGraph,
+  buildAudioWorkflowExecutionPlan,
   getAudioCapability,
   summarizeLocalAudioResources,
   type AudioAtomicCapability,
+  type AudioEnhanceScopeId,
   type AudioExecutionTarget,
   type AudioModelSpec,
 } from './audio-studio-runtime.js';
@@ -73,15 +76,26 @@ const CAPABILITY_FILTERS: readonly {
 
 interface AudioPanelProps {
   readonly clipIds: readonly string[];
+  readonly enhanceScopes?: readonly AudioEnhanceScopeOption[];
   readonly audioState: AudioState;
   readonly onAudioChange: (next: AudioState, label: string) => void;
   /** Shared durable animation map; omitted in simple/read-only embeddings. */
   readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
   readonly playheadUs?: number;
   readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
-  readonly onRunBrowserDsp?: (workflowId: string) => void | Promise<void>;
+  readonly onRunBrowserDsp?: (
+    workflowId: string,
+    clipIds: readonly string[],
+  ) => void | Promise<void>;
   readonly onRunLocalWorker?: (workflowId: string) => void | Promise<void>;
   readonly onRunCloudBrain?: (workflowId: string) => void | Promise<void>;
+}
+
+export interface AudioEnhanceScopeOption {
+  readonly id: AudioEnhanceScopeId;
+  readonly label: string;
+  readonly description: string;
+  readonly clipIds: readonly string[];
 }
 
 /**
@@ -94,17 +108,6 @@ export function prepareAudioCommandState(
   clipIds: readonly string[],
 ): AudioState {
   return ensureClipAudio(state, clipIds);
-}
-
-function targetLabel(target: AudioAtomicCapability['target']): string {
-  switch (target) {
-    case 'local-worker':
-      return 'Local Worker';
-    case 'browser-dsp':
-      return 'Browser DSP';
-    case 'vps-orchestrated':
-      return 'Cloud Brain';
-  }
 }
 
 function installLabel(state: AudioModelSpec['installState']): string {
@@ -136,7 +139,7 @@ function CapabilityTile({ capability }: { readonly capability: AudioAtomicCapabi
     <li className="audio-capability-tile" data-target={capability.target}>
       <div className="audio-capability-topline">
         <strong>{capability.label}</strong>
-        <span>{targetLabel(capability.target)}</span>
+        <span>{audioExecutionTargetLabel(capability.target)}</span>
       </div>
       <div className="audio-capability-id">{capability.id}</div>
       <div className="audio-capability-provider">{capability.provider}</div>
@@ -188,6 +191,7 @@ function ModelRow({ model }: { readonly model: AudioModelSpec }) {
 
 export function AudioPanel({
   clipIds,
+  enhanceScopes,
   audioState,
   onAudioChange,
   project,
@@ -199,13 +203,14 @@ export function AudioPanel({
 }: AudioPanelProps) {
   const [tab, setTab] = useState('enhance');
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
+  const [scopeId, setScopeId] = useState<AudioEnhanceScopeId>('timeline');
   const [device, setDevice] = useState<'gpu' | 'cpu'>('gpu');
   const [modelCachePath, setModelCachePath] = useState(DEFAULT_MODEL_CACHE_PATH);
   const [capabilityFilter, setCapabilityFilter] = useState<CapabilityFilter>('all');
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [providers, setProviders] = useState<readonly BrowserReasoningProvider[]>([]);
-  const [cloudConfirmWorkflowId, setCloudConfirmWorkflowId] = useState<string | null>(null);
   const [runningTarget, setRunningTarget] = useState<AudioExecutionTarget | null>(null);
+  const [reviewingWorkflow, setReviewingWorkflow] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   useEffect(() => {
@@ -226,14 +231,6 @@ export function AudioPanel({
       window.clearInterval(timer);
     };
   }, [client]);
-  useEffect(() => {
-    if (cloudConfirmWorkflowId === null) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCloudConfirmWorkflowId(null);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [cloudConfirmWorkflowId]);
   const dispatch = (command: AudioCommand, label: string) => {
     try {
       const { state } = applyAudioCommand(prepareAudioCommandState(audioState, clipIds), command);
@@ -245,6 +242,34 @@ export function AudioPanel({
 
   const selectedWorkflow =
     AUDIO_WORKFLOW_PRESETS.find((preset) => preset.id === workflowId) ?? AUDIO_WORKFLOW_PRESETS[0]!;
+  const resolvedEnhanceScopes = useMemo<readonly AudioEnhanceScopeOption[]>(
+    () =>
+      enhanceScopes ?? [
+        {
+          id: 'selection',
+          label: 'Selected',
+          description: 'Select timeline clips to target them directly.',
+          clipIds: [],
+        },
+        {
+          id: 'track',
+          label: 'Track',
+          description: 'Select a timeline clip to target its track.',
+          clipIds: [],
+        },
+        {
+          id: 'timeline',
+          label: 'Timeline',
+          description: `${clipIds.length} timeline clip${clipIds.length === 1 ? '' : 's'}`,
+          clipIds,
+        },
+      ],
+    [clipIds, enhanceScopes],
+  );
+  const selectedScope =
+    resolvedEnhanceScopes.find((scope) => scope.id === scopeId) ??
+    resolvedEnhanceScopes.find((scope) => scope.id === 'timeline') ??
+    resolvedEnhanceScopes[0]!;
   const workflowGraph = useMemo(
     () => buildAudioWorkflowGraph(selectedWorkflow.id),
     [selectedWorkflow.id],
@@ -298,27 +323,39 @@ export function AudioPanel({
     (provider) => provider.state === 'healthy' || provider.state === 'configured',
   );
   const cloudLabel = cloudProvider === undefined ? 'Unavailable' : 'Online';
-  const browserDspReady = clipIds.length > 0 && onRunBrowserDsp !== undefined;
-  const localRunReady = clipIds.length > 0 && localWorkerReady && onRunLocalWorker !== undefined;
-  const cloudRunReady =
-    clipIds.length > 0 && cloudProvider !== undefined && onRunCloudBrain !== undefined;
-  const runReadinessId = `audio-${selectedWorkflow.id}-run-readiness`;
-  const cloudConfirmWorkflow = AUDIO_WORKFLOW_PRESETS.find(
-    (workflow) => workflow.id === cloudConfirmWorkflowId,
+  const browserDspReady = selectedScope.clipIds.length > 0 && onRunBrowserDsp !== undefined;
+  const executionPlan = useMemo(
+    () =>
+      buildAudioWorkflowExecutionPlan(selectedWorkflow.id, {
+        browserDsp: browserDspReady,
+        localWorker: localWorkerReady && onRunLocalWorker !== undefined,
+        cloudBrain: cloudProvider !== undefined && onRunCloudBrain !== undefined,
+      }),
+    [
+      browserDspReady,
+      cloudProvider,
+      localWorkerReady,
+      onRunCloudBrain,
+      onRunLocalWorker,
+      selectedWorkflow.id,
+    ],
   );
-  const runWorkflow = async (
-    target: AudioExecutionTarget,
-    workflow: string,
-    callback: ((workflowId: string) => void | Promise<void>) | undefined,
-  ) => {
-    if (callback === undefined || runningTarget !== null) return;
+  const applyBrowserWorkflow = async () => {
+    if (
+      onRunBrowserDsp === undefined ||
+      !executionPlan.browserDspRunnable ||
+      selectedScope.clipIds.length === 0 ||
+      runningTarget !== null
+    )
+      return;
     setRunError(null);
-    setRunningTarget(target);
+    setRunningTarget('browser-dsp');
     try {
-      await callback(workflow);
+      await onRunBrowserDsp(selectedWorkflow.id, selectedScope.clipIds);
+      setReviewingWorkflow(null);
     } catch (error) {
-      console.warn(`audio ${target} workflow rejected`, error);
-      setRunError(error instanceof Error ? error.message : `Could not run ${target} workflow`);
+      console.warn('browser audio workflow rejected', error);
+      setRunError(error instanceof Error ? error.message : 'Could not apply Browser DSP workflow');
     } finally {
       setRunningTarget(null);
     }
@@ -340,21 +377,198 @@ export function AudioPanel({
       {...(clipsInactive ? { note: 'Place clips on the timeline to mix audio.' } : {})}
     >
       {tab === 'enhance' && (
-        <div className="audio-studio-stack">
-          <section className="audio-source-summary" aria-label="Enhance source">
-            <div>
-              <strong>Source</strong>
-              <span>
+        <div className="audio-studio-stack audio-enhance-workspace">
+          <section className="audio-enhance-target" aria-label="Enhance target">
+            <div className="audio-enhance-target-heading">
+              <div>
+                <strong>Enhance target</strong>
+                <span>{selectedScope.description}</span>
+              </div>
+              <span className="audio-source-status" data-state={noClips ? 'idle' : 'ready'}>
                 {noClips
-                  ? 'No timeline clips selected'
-                  : `${clipIds.length} timeline clip${clipIds.length === 1 ? '' : 's'}`}
+                  ? 'Add clips first'
+                  : `${selectedScope.clipIds.length} clip${selectedScope.clipIds.length === 1 ? '' : 's'}`}
               </span>
             </div>
-            <span className="audio-source-status" data-state={noClips ? 'idle' : 'ready'}>
-              {noClips ? 'Add a clip to begin' : 'Ready to process'}
-            </span>
+            <div
+              className="audio-enhance-scope-options"
+              role="group"
+              aria-label="Enhancement scope"
+            >
+              {resolvedEnhanceScopes.map((scope) => (
+                <button
+                  key={scope.id}
+                  type="button"
+                  className="audio-enhance-scope-button"
+                  aria-pressed={scope.id === selectedScope.id}
+                  disabled={scope.clipIds.length === 0}
+                  onClick={() => {
+                    setScopeId(scope.id);
+                    setReviewingWorkflow(null);
+                  }}
+                >
+                  {scope.label}
+                  <span>{scope.clipIds.length}</span>
+                </button>
+              ))}
+            </div>
           </section>
-          <section className="audio-runtime-section" aria-label="Audio runtime status">
+
+          <section className="audio-enhance-route-summary" aria-label="Enhancement runtime summary">
+            <span data-state={browserDspReady ? 'ready' : 'blocked'}>
+              Browser DSP {browserDspReady ? 'ready' : 'needs clips'}
+            </span>
+            <span data-state={localWorkerReady ? 'ready' : 'blocked'}>
+              Local Worker {localWorkerReady ? 'connected' : 'disconnected'}
+            </span>
+            <button type="button" onClick={() => setTab('runtime')}>
+              Runtime
+            </button>
+          </section>
+
+          <section className="audio-workflow-section" aria-label="Audio AI workflows">
+            <div className="audio-section-heading">
+              <span className="icon-tool audio-workflow-icon" aria-hidden="true">
+                <WorkflowPathIcon />
+              </span>
+              <div>
+                <strong>Choose an enhancement</strong>
+                <span>Review exact coverage before audio is changed</span>
+              </div>
+            </div>
+            <div
+              className="audio-workflow-pickers"
+              role="group"
+              aria-label="Audio workflow presets"
+            >
+              {AUDIO_WORKFLOW_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="audio-workflow-button"
+                  aria-pressed={preset.id === selectedWorkflow.id}
+                  title={preset.command}
+                  onClick={() => setWorkflowId(preset.id)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="audio-workflow-card">
+              <div className="audio-workflow-card-heading">
+                <div>
+                  <strong>{selectedWorkflow.label}</strong>
+                  <span>{selectedWorkflow.steps.length} processing steps</span>
+                </div>
+                <p className="audio-workflow-command">“{selectedWorkflow.command}”</p>
+              </div>
+              <ol
+                className="audio-workflow-steps"
+                aria-label={`${selectedWorkflow.label} workflow path`}
+              >
+                {workflowGraph.nodes.map((node, index) => (
+                  <li key={node.id}>
+                    <span className="audio-workflow-step-number" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <span className="audio-workflow-step-label">{node.label}</span>
+                    {index < workflowGraph.nodes.length - 1 && (
+                      <span className="audio-workflow-step-connector" aria-hidden="true">
+                        →
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              <div className="audio-workflow-resources" aria-label="Workflow resource estimate">
+                {workflowResources.modelCount === 0 ? (
+                  <ResourcePill value="Browser" label="DSP" />
+                ) : (
+                  <>
+                    <ResourcePill value={`${workflowResources.ramGb}G`} label="RAM" />
+                    <ResourcePill value={`${workflowResources.vramGb}G`} label="VRAM" />
+                    <ResourcePill value={`${workflowResources.diskGb}G`} label="Disk" />
+                    <ResourcePill value={String(workflowResources.modelCount)} label="models" />
+                  </>
+                )}
+              </div>
+              <section className="audio-execution-plan" aria-label="Processing plan">
+                <div className="audio-execution-plan-heading">
+                  <strong>Processing plan</strong>
+                  <span data-state={executionPlan.blockedSteps === 0 ? 'ready' : 'blocked'}>
+                    {executionPlan.readySteps}/{executionPlan.steps.length} ready
+                  </span>
+                </div>
+                <ul>
+                  {executionPlan.steps.map((step) => (
+                    <li key={step.id} data-state={step.ready ? 'ready' : 'blocked'}>
+                      <span>{step.label}</span>
+                      <span>{audioExecutionTargetLabel(step.target)}</span>
+                      <small>{step.ready ? 'Ready' : step.reason}</small>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              <div className="audio-enhance-apply">
+                {selectedScope.clipIds.length === 0 ? (
+                  <span>Select a target with clips to continue.</span>
+                ) : executionPlan.browserDspRunnable ? (
+                  reviewingWorkflow === selectedWorkflow.id ? (
+                    <div className="audio-enhance-review" data-audio-review>
+                      <span>
+                        Review: apply {selectedWorkflow.label} to {selectedScope.clipIds.length}{' '}
+                        clip
+                        {selectedScope.clipIds.length === 1 ? '' : 's'}.
+                      </span>
+                      <div>
+                        <button type="button" onClick={() => setReviewingWorkflow(null)}>
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          className="is-primary"
+                          disabled={runningTarget !== null}
+                          onClick={() => void applyBrowserWorkflow()}
+                        >
+                          {runningTarget === 'browser-dsp' ? 'Applying…' : 'Apply changes'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="audio-enhance-primary"
+                      data-audio-review-workflow
+                      onClick={() => setReviewingWorkflow(selectedWorkflow.id)}
+                    >
+                      Review changes
+                    </button>
+                  )
+                ) : (
+                  <span>
+                    This preset is not fully wired. Review the blocked steps or open Runtime.
+                  </span>
+                )}
+                {runError !== null && (
+                  <span className="audio-run-error" role="alert" data-audio-run-error>
+                    {runError}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === 'runtime' && (
+        <div className="audio-model-manager audio-runtime-tab">
+          <section className="audio-runtime-summary" aria-label="Runtime summary">
+            <strong>Runtime readiness</strong>
+            <span>Browser DSP: {clipIds.length > 0 ? 'Ready' : 'Needs clips'}</span>
+            <span>Local Worker: {localWorkerLabel}</span>
+            <span>Cloud Brain: {cloudLabel}</span>
+          </section>
+          <section className="audio-runtime-section" aria-label="Audio runtime controls">
             <div className="audio-runtime-grid">
               <div
                 className="audio-runtime-cell"
@@ -413,189 +627,21 @@ export function AudioPanel({
               </label>
             </details>
           </section>
-
-          <section className="audio-workflow-section" aria-label="Audio AI workflows">
-            <div className="audio-section-heading">
-              <span className="icon-tool audio-workflow-icon" aria-hidden="true">
-                <WorkflowPathIcon />
+          <section className="audio-model-summary" aria-label="Audio model manager">
+            <div>
+              <span className="icon-tool" aria-hidden="true">
+                <AudioIcon />
               </span>
-              <div>
-                <strong>Choose a workflow</strong>
-                <span>Start with a focused audio preset</span>
-              </div>
+              <strong>Audio Models</strong>
             </div>
-            <div
-              className="audio-workflow-pickers"
-              role="group"
-              aria-label="Audio workflow presets"
-            >
-              {AUDIO_WORKFLOW_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className="audio-workflow-button"
-                  aria-pressed={preset.id === selectedWorkflow.id}
-                  title={preset.command}
-                  onClick={() => setWorkflowId(preset.id)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <div className="audio-workflow-card">
-              <div className="audio-workflow-card-heading">
-                <div>
-                  <strong>{selectedWorkflow.label}</strong>
-                  <span>{selectedWorkflow.steps.length} steps · local estimate</span>
-                </div>
-                <p className="audio-workflow-command">“{selectedWorkflow.command}”</p>
-              </div>
-              <ol
-                className="audio-workflow-steps"
-                aria-label={`${selectedWorkflow.label} workflow path`}
-              >
-                {workflowGraph.nodes.map((node, index) => (
-                  <li key={node.id}>
-                    <span className="audio-workflow-step-number" aria-hidden="true">
-                      {index + 1}
-                    </span>
-                    <span className="audio-workflow-step-label">{node.label}</span>
-                    {index < workflowGraph.nodes.length - 1 && (
-                      <span className="audio-workflow-step-connector" aria-hidden="true">
-                        →
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-              <div className="audio-workflow-footer">
-                <div className="audio-workflow-resources" aria-label="Workflow resource estimate">
-                  <ResourcePill value={`${workflowResources.ramGb}G`} label="RAM" />
-                  <ResourcePill value={`${workflowResources.vramGb}G`} label="VRAM" />
-                  <ResourcePill value={`${workflowResources.diskGb}G`} label="Disk" />
-                  <ResourcePill value={String(workflowResources.modelCount)} label="models" />
-                </div>
-                <div className="audio-run-action">
-                  <span className="audio-run-readiness" id={runReadinessId}>
-                    {clipIds.length === 0
-                      ? 'Place clips to run'
-                      : browserDspReady
-                        ? 'Choose an execution target'
-                        : 'Connect an execution target'}
-                  </span>
-                  <div className="audio-route-actions" role="group" aria-label="Execution target">
-                    <button
-                      type="button"
-                      className="audio-run-button is-primary"
-                      data-audio-route="browser-dsp"
-                      aria-label={`Run ${selectedWorkflow.label} with Browser DSP`}
-                      aria-describedby={runReadinessId}
-                      title={
-                        browserDspReady
-                          ? 'Run with Browser DSP'
-                          : clipIds.length === 0
-                            ? 'Place clips to run'
-                            : 'Browser DSP is not connected'
-                      }
-                      disabled={!browserDspReady || runningTarget !== null}
-                      onClick={() => {
-                        if (browserDspReady) {
-                          void runWorkflow('browser-dsp', selectedWorkflow.id, onRunBrowserDsp);
-                        }
-                      }}
-                    >
-                      {runningTarget === 'browser-dsp' ? 'Running…' : 'Browser DSP'}
-                    </button>
-                    <button
-                      type="button"
-                      className="audio-run-button"
-                      data-audio-route="local-worker"
-                      aria-label={`Run ${selectedWorkflow.label} on Local Worker`}
-                      aria-describedby={runReadinessId}
-                      title={
-                        localRunReady
-                          ? `Run on ${connectedWorker?.id ?? 'Local Worker'}`
-                          : !localWorkerReady
-                            ? 'Pair a Local Worker to run'
-                            : 'Local Worker execution is not connected'
-                      }
-                      disabled={!localRunReady || runningTarget !== null}
-                      onClick={() => {
-                        if (localRunReady) {
-                          void runWorkflow('local-worker', selectedWorkflow.id, onRunLocalWorker);
-                        }
-                      }}
-                    >
-                      {runningTarget === 'local-worker' ? 'Running…' : 'Local Worker'}
-                    </button>
-                    <button
-                      type="button"
-                      className="audio-run-button"
-                      data-audio-route="vps-orchestrated"
-                      aria-label={`Run ${selectedWorkflow.label} with Cloud Brain`}
-                      aria-describedby={runReadinessId}
-                      title={
-                        cloudRunReady
-                          ? `Confirm Cloud Brain run with ${cloudProvider?.providerId ?? 'provider'}`
-                          : cloudProvider === undefined
-                            ? 'Configure a Cloud Brain provider to run'
-                            : 'Cloud Brain execution is not connected'
-                      }
-                      disabled={!cloudRunReady || runningTarget !== null}
-                      onClick={() => {
-                        if (cloudRunReady) setCloudConfirmWorkflowId(selectedWorkflow.id);
-                      }}
-                    >
-                      {runningTarget === 'vps-orchestrated' ? 'Running…' : 'Cloud Brain'}
-                    </button>
-                  </div>
-                  {runError !== null && (
-                    <span className="audio-run-error" role="alert" data-audio-run-error>
-                      {runError}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
+            <ResourcePill value={String(AUDIO_MODEL_CATALOG.length)} label="models" />
+            <ResourcePill value={modelCachePath} label="cache" />
           </section>
-
-          {cloudConfirmWorkflowId !== null && cloudConfirmWorkflow !== undefined && (
-            <div className="audio-cloud-confirm-backdrop">
-              <section
-                className="audio-cloud-confirm-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="audio-cloud-confirm-title"
-                aria-describedby="audio-cloud-confirm-description"
-                data-audio-cloud-confirmation
-              >
-                <h3 id="audio-cloud-confirm-title">Run with Cloud Brain?</h3>
-                <p id="audio-cloud-confirm-description">
-                  {cloudConfirmWorkflow.label} sends selected audio to{' '}
-                  {cloudProvider?.providerId ?? 'the configured cloud provider'} and may use paid
-                  credits.
-                </p>
-                <div className="audio-cloud-confirm-actions">
-                  <button type="button" onClick={() => setCloudConfirmWorkflowId(null)}>
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="is-primary"
-                    autoFocus
-                    onClick={() => {
-                      const workflow = cloudConfirmWorkflowId;
-                      setCloudConfirmWorkflowId(null);
-                      void runWorkflow('vps-orchestrated', workflow, onRunCloudBrain);
-                    }}
-                  >
-                    Run Cloud Brain
-                  </button>
-                </div>
-              </section>
-            </div>
-          )}
-
+          <ul className="audio-model-list">
+            {AUDIO_MODEL_CATALOG.map((model) => (
+              <ModelRow key={model.id} model={model} />
+            ))}
+          </ul>
           <details className="audio-capability-library">
             <summary>
               <span className="icon-tool" aria-hidden="true">
@@ -603,7 +649,7 @@ export function AudioPanel({
               </span>
               <strong>Capability Library</strong>
               <span>{AUDIO_ATOMIC_CAPABILITIES.length} capabilities</span>
-              <small>Browse the building blocks behind each workflow</small>
+              <small>Browse routes and future building blocks</small>
             </summary>
             <div className="audio-capability-section" aria-label="Audio capabilities">
               <div
@@ -639,32 +685,6 @@ export function AudioPanel({
               </ul>
             </div>
           </details>
-        </div>
-      )}
-
-      {tab === 'runtime' && (
-        <div className="audio-model-manager audio-runtime-tab">
-          <section className="audio-runtime-summary" aria-label="Runtime summary">
-            <strong>Runtime readiness</strong>
-            <span>Browser DSP: Ready</span>
-            <span>Local Worker: {localWorkerLabel}</span>
-            <span>Cloud Brain: {cloudLabel}</span>
-          </section>
-          <section className="audio-model-summary" aria-label="Audio model manager">
-            <div>
-              <span className="icon-tool" aria-hidden="true">
-                <AudioIcon />
-              </span>
-              <strong>Audio Models</strong>
-            </div>
-            <ResourcePill value={String(AUDIO_MODEL_CATALOG.length)} label="models" />
-            <ResourcePill value={modelCachePath} label="cache" />
-          </section>
-          <ul className="audio-model-list">
-            {AUDIO_MODEL_CATALOG.map((model) => (
-              <ModelRow key={model.id} model={model} />
-            ))}
-          </ul>
         </div>
       )}
 
@@ -948,12 +968,6 @@ export function AudioPanel({
             </div>
           );
         })}
-      <div hidden aria-hidden="true" data-legacy-audio-tab-markers>
-        <button type="button">Studio</button>
-        <button type="button">Models</button>
-        <button type="button">Master</button>
-        <button type="button">Clips</button>
-      </div>
     </PanelShell>
   );
 }

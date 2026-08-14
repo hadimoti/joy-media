@@ -18,6 +18,35 @@ export type AudioAtomicApiId =
 
 export type AudioExecutionTarget = 'local-worker' | 'browser-dsp' | 'vps-orchestrated';
 export type AudioModelInstallState = 'installed' | 'available' | 'update';
+export type AudioEnhanceScopeId = 'selection' | 'track' | 'timeline';
+
+/**
+ * The UI must distinguish a capability's aspirational catalog target from a
+ * handler that can actually run it today. This keeps a preset from claiming a
+ * full workflow when only part of that workflow is wired.
+ */
+export interface AudioExecutionReadiness {
+  readonly browserDsp: boolean;
+  readonly localWorker: boolean;
+  readonly cloudBrain: boolean;
+}
+
+export interface AudioWorkflowExecutionStep {
+  readonly id: AudioAtomicApiId;
+  readonly label: string;
+  readonly target: AudioExecutionTarget;
+  readonly ready: boolean;
+  readonly reason?: string;
+}
+
+export interface AudioWorkflowExecutionPlan {
+  readonly presetId: string;
+  readonly steps: readonly AudioWorkflowExecutionStep[];
+  readonly readySteps: number;
+  readonly blockedSteps: number;
+  /** True only when the current editor can execute every step without a hand-off. */
+  readonly browserDspRunnable: boolean;
+}
 
 export interface AudioResourceEstimate {
   readonly ramGb: number;
@@ -263,6 +292,15 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
 
 export const AUDIO_WORKFLOW_PRESETS: readonly AudioWorkflowPreset[] = [
   {
+    id: 'voice-polish',
+    label: 'Voice Polish',
+    command: 'Balance and polish this voice in the editor.',
+    // These are the three effects App.tsx can apply today. Keep this preset
+    // deliberately narrower than Podcast Quality rather than implying local
+    // ML steps ran in the browser.
+    steps: ['audio.eq', 'audio.compress', 'audio.limit'],
+  },
+  {
     id: 'podcast-quality',
     label: 'Podcast Quality',
     command: 'Clean this voice and make it podcast quality.',
@@ -339,4 +377,72 @@ export function summarizeLocalAudioResources(capabilityIds: readonly AudioAtomic
   }
 
   return { ramGb, vramGb, diskGb: Number(diskGb.toFixed(1)), modelCount: modelIds.size };
+}
+
+const EXECUTABLE_CAPABILITIES: Readonly<Record<AudioExecutionTarget, readonly AudioAtomicApiId[]>> =
+  {
+    // The editor currently persists these three non-destructive Audio Core
+    // effects. Normalize and Mix remain catalog capabilities until their
+    // corresponding editor handlers are added.
+    'browser-dsp': ['audio.eq', 'audio.compress', 'audio.limit'],
+    // The Worker and Cloud routes are intentionally declared narrowly: the
+    // current product handlers enqueue/apply denoise only.
+    'local-worker': ['audio.denoise'],
+    'vps-orchestrated': ['audio.denoise'],
+  };
+
+function routeIsReady(target: AudioExecutionTarget, readiness: AudioExecutionReadiness): boolean {
+  switch (target) {
+    case 'browser-dsp':
+      return readiness.browserDsp;
+    case 'local-worker':
+      return readiness.localWorker;
+    case 'vps-orchestrated':
+      return readiness.cloudBrain;
+  }
+}
+
+export function audioExecutionTargetLabel(target: AudioExecutionTarget): string {
+  switch (target) {
+    case 'browser-dsp':
+      return 'Browser DSP';
+    case 'local-worker':
+      return 'Local Worker';
+    case 'vps-orchestrated':
+      return 'Cloud Brain';
+  }
+}
+
+/**
+ * Build the exact execution coverage shown in Enhance. A step can be cataloged
+ * but still blocked if its route is disconnected or no product handler exists.
+ */
+export function buildAudioWorkflowExecutionPlan(
+  presetId: string,
+  readiness: AudioExecutionReadiness,
+): AudioWorkflowExecutionPlan {
+  const workflow = buildAudioWorkflowGraph(presetId);
+  const steps = workflow.nodes.map(({ id, label }) => {
+    const target = getAudioCapability(id).target;
+    const supported = EXECUTABLE_CAPABILITIES[target].includes(id);
+    const routeReady = routeIsReady(target, readiness);
+    const ready = supported && routeReady;
+    const reason = ready
+      ? undefined
+      : !supported
+        ? `${audioExecutionTargetLabel(target)} does not run this step yet`
+        : `${audioExecutionTargetLabel(target)} is unavailable`;
+    return reason === undefined
+      ? { id, label, target, ready }
+      : { id, label, target, ready, reason };
+  });
+  const readySteps = steps.filter((step) => step.ready).length;
+  return {
+    presetId,
+    steps,
+    readySteps,
+    blockedSteps: steps.length - readySteps,
+    browserDspRunnable:
+      steps.length > 0 && steps.every((step) => step.ready && step.target === 'browser-dsp'),
+  };
 }

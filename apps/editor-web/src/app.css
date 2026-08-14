@@ -14342,3 +14342,198 @@ label {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* WP-35: Enhance is an action workspace. Runtime diagnostics and the full
+   capability catalog live on Runtime so the initial viewport can answer what
+   will change, where it will run, and whether it is safe to apply. */
+.audio-enhance-workspace {
+  gap: 0.5rem;
+}
+.audio-enhance-target,
+.audio-enhance-route-summary,
+.audio-execution-plan,
+.audio-enhance-apply {
+  min-width: 0;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--joy-radius-inner);
+  background: var(--joy-bg-inset);
+}
+.audio-enhance-target {
+  padding: 0.45rem;
+}
+.audio-enhance-target-heading,
+.audio-execution-plan-heading,
+.audio-enhance-route-summary,
+.audio-enhance-review,
+.audio-enhance-review > div {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.audio-enhance-target-heading {
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+.audio-enhance-target-heading > div {
+  display: grid;
+  gap: 0.04rem;
+  min-width: 0;
+}
+.audio-enhance-target-heading strong,
+.audio-execution-plan-heading strong {
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.audio-enhance-target-heading span,
+.audio-execution-plan-heading span,
+.audio-enhance-route-summary span,
+.audio-enhance-apply > span,
+.audio-enhance-review > span {
+  min-width: 0;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+}
+.audio-enhance-scope-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+.audio-enhance-scope-button,
+.audio-enhance-route-summary button,
+.audio-enhance-review button {
+  min-height: 1.8rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-muted);
+  font: inherit;
+  font-size: var(--joy-type-2xs);
+  cursor: pointer;
+}
+.audio-enhance-scope-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-inline: 0.35rem;
+}
+.audio-enhance-scope-button > span {
+  color: var(--joy-text-faint);
+}
+.audio-enhance-scope-button[aria-pressed='true'] {
+  border-color: var(--joy-accent);
+  background: var(--joy-bg-active);
+  color: var(--joy-accent);
+}
+.audio-enhance-scope-button[aria-pressed='true'] > span {
+  color: var(--joy-accent);
+}
+.audio-enhance-route-summary {
+  flex-wrap: wrap;
+  padding: 0.3rem 0.45rem;
+}
+.audio-enhance-route-summary span[data-state='ready'],
+.audio-execution-plan [data-state='ready'] > small,
+.audio-execution-plan-heading span[data-state='ready'] {
+  color: var(--joy-ok);
+}
+.audio-enhance-route-summary span[data-state='blocked'],
+.audio-execution-plan [data-state='blocked'] > small,
+.audio-execution-plan-heading span[data-state='blocked'] {
+  color: var(--joy-text-muted);
+}
+.audio-enhance-route-summary button {
+  margin-left: auto;
+  padding-inline: 0.45rem;
+}
+.audio-enhance-workspace .audio-workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+.audio-enhance-workspace .audio-workflow-steps li {
+  flex: none;
+  min-height: 1.55rem;
+  padding: 0.1rem 0.25rem;
+}
+.audio-enhance-workspace .audio-workflow-step-connector {
+  display: none;
+}
+.audio-execution-plan {
+  margin-top: 0.35rem;
+  padding: 0.35rem;
+}
+.audio-execution-plan-heading {
+  justify-content: space-between;
+  margin-bottom: 0.2rem;
+}
+.audio-execution-plan ul {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.audio-execution-plan li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.35rem;
+  padding: 0.18rem 0.25rem;
+  border-radius: var(--radius-xs);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+}
+.audio-execution-plan li > span:nth-child(2) {
+  color: var(--joy-text-muted);
+}
+.audio-execution-plan li > small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-size: var(--joy-type-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-enhance-apply {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  padding: 0.35rem;
+}
+.audio-enhance-primary,
+.audio-enhance-review button.is-primary {
+  min-height: 2rem;
+  border: 1px solid var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font: inherit;
+  font-size: var(--joy-type-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+.audio-enhance-review {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.audio-enhance-review > div {
+  flex: none;
+}
+.audio-enhance-review button {
+  padding-inline: 0.5rem;
+}
+@container (max-width: 22rem) {
+  .audio-enhance-scope-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .audio-enhance-workspace .audio-workflow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .audio-enhance-review {
+    display: grid;
+  }
+  .audio-enhance-review > div {
+    justify-content: flex-end;
+  }
+}

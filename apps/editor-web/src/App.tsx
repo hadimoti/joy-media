@@ -151,7 +151,7 @@ import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { importMediaFile } from './media-import.js';
-import { AudioPanel } from './AudioPanel.js';
+import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
 import { setMonitorPixelReader } from './monitor-readback.js';
@@ -4211,8 +4211,41 @@ function EditorWorkspace({
     if (api.id === 'audio') {
       const audioComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
-      const audioClips = audioComposition?.tracks.flatMap((track) => track.clips) ?? [];
+      const audioTracks = audioComposition?.tracks ?? [];
+      const audioClips = audioTracks.flatMap((track) => track.clips);
       const clipIds = audioClips.map((clip) => clip.id);
+      const selectedClipIds = audioClips
+        .filter((clip) => state.selectedIds.includes(clip.id))
+        .map((clip) => clip.id);
+      const selectedTrack = audioTracks.find((track) =>
+        track.clips.some((clip) => state.selectedIds.includes(clip.id)),
+      );
+      const enhanceScopes: readonly AudioEnhanceScopeOption[] = [
+        {
+          id: 'selection',
+          label: 'Selected',
+          description:
+            selectedClipIds.length === 0
+              ? 'Select timeline clips to target them directly.'
+              : `${selectedClipIds.length} selected clip${selectedClipIds.length === 1 ? '' : 's'}`,
+          clipIds: selectedClipIds,
+        },
+        {
+          id: 'track',
+          label: 'Track',
+          description:
+            selectedTrack === undefined
+              ? 'Select a timeline clip to target its track.'
+              : `${selectedTrack.clips.length} clip${selectedTrack.clips.length === 1 ? '' : 's'} on ${selectedTrack.id}`,
+          clipIds: selectedTrack?.clips.map((clip) => clip.id) ?? [],
+        },
+        {
+          id: 'timeline',
+          label: 'Timeline',
+          description: `${clipIds.length} timeline clip${clipIds.length === 1 ? '' : 's'}`,
+          clipIds,
+        },
+      ];
       const selectedAudioClip =
         audioClips.find(
           (clip): clip is VideoClip => clip.kind === 'video' && state.selectedIds.includes(clip.id),
@@ -4220,12 +4253,15 @@ function EditorWorkspace({
       return (
         <AudioPanel
           clipIds={clipIds}
+          enhanceScopes={enhanceScopes}
           audioState={context.audioState}
           onAudioChange={(next, label) => context.setAudioState(next, label)}
           project={visualProject}
           playheadUs={state.playheadUs}
           onDispatch={context.dispatchProject}
-          onRunBrowserDsp={(workflowId) => {
+          onRunBrowserDsp={(workflowId, targetClipIds) => {
+            if (targetClipIds.length === 0)
+              throw new Error('Select timeline clips before applying Browser DSP.');
             const effectKinds = [
               {
                 kind: 'eq' as const,
@@ -4244,23 +4280,24 @@ function EditorWorkspace({
               },
               { kind: 'limiter' as const, ceiling: -1, releaseUs: 80_000 },
             ];
-            const nextEffects = audioComposition?.tracks
-              .flatMap((track) => track.clips.map((clip) => clip.id))
-              .flatMap((clipId) =>
-                effectKinds.map((effect, index) => ({
-                  id: `browser-polish-${clipId}-${index}`,
-                  targetId: clipId,
-                  effect,
-                })),
-              );
+            const nextEffects = targetClipIds.flatMap((clipId) =>
+              effectKinds.map((effect, index) => ({
+                id: `browser-polish-${workflowId}-${clipId}-${index}`,
+                targetId: clipId,
+                effect,
+              })),
+            );
             context.setAudioState(
               {
                 ...context.audioState,
-                effects: nextEffects ?? context.audioState.effects,
+                effects: nextEffects,
               },
               `Run ${workflowId} with Browser DSP`,
             );
-            context.showToast('Browser Voice Polish applied to the project.', 'success');
+            context.showToast(
+              `Browser Voice Polish applied to ${targetClipIds.length} clip${targetClipIds.length === 1 ? '' : 's'}.`,
+              'success',
+            );
           }}
           onRunLocalWorker={async (workflowId) => {
             if (selectedAudioClip === undefined)

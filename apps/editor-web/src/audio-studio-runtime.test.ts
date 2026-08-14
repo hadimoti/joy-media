@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUDIO_MODEL_CATALOG,
   buildAudioWorkflowGraph,
+  buildAudioWorkflowExecutionPlan,
   getDefaultAudioModel,
   summarizeLocalAudioResources,
 } from './audio-studio-runtime.js';
@@ -51,5 +52,19 @@ describe('audio studio runtime contract', () => {
     expect(summary.ramGb).toBe(4);
     expect(summary.vramGb).toBe(4);
     expect(summary.diskGb).toBeGreaterThan(0);
+  });
+
+  it('marks Voice Polish as browser-runnable without overstating Podcast Quality coverage', () => {
+    const readiness = { browserDsp: true, localWorker: false, cloudBrain: true };
+    const voicePolish = buildAudioWorkflowExecutionPlan('voice-polish', readiness);
+    const podcastQuality = buildAudioWorkflowExecutionPlan('podcast-quality', readiness);
+
+    expect(voicePolish.readySteps).toBe(3);
+    expect(voicePolish.blockedSteps).toBe(0);
+    expect(voicePolish.browserDspRunnable).toBe(true);
+    expect(podcastQuality.browserDspRunnable).toBe(false);
+    expect(podcastQuality.steps.find((step) => step.id === 'audio.enhance')?.reason).toContain(
+      'does not run',
+    );
   });
 });
