@@ -29,8 +29,8 @@ import {
   SlidersIcon,
   SoloIcon,
   SpeakerOnIcon,
-  SettingsGearIcon,
   StorageFolderIcon,
+  TuningIcon,
   WorkflowPathIcon,
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
@@ -439,7 +439,7 @@ export function AudioPanel({
               data-guide="Open Runtime"
               onClick={() => setTab('runtime')}
             >
-              <SettingsGearIcon />
+              <TuningIcon />
             </button>
           </section>
 

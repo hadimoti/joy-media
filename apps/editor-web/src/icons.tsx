@@ -295,6 +295,19 @@ export function SettingsGearIcon() {
   return <PngMaskIcon src={UI_ICONS.settings} />;
 }
 
+/** Three small controls — a crisp vector affordance for runtime tuning. */
+export function TuningIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M3 2.5v11M8 2.5v11M13 2.5v11" />
+      <path d="M1.75 5.25h2.5M6.75 9.25h2.5M11.75 6.75h2.5" />
+      <circle cx="3" cy="5.25" r="1.25" />
+      <circle cx="8" cy="9.25" r="1.25" />
+      <circle cx="13" cy="6.75" r="1.25" />
+    </Svg>
+  );
+}
+
 export function CameraUiIcon() {
   return <PngMaskIcon src={UI_ICONS.camera} />;
 }
