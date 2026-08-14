@@ -14508,6 +14508,10 @@ label {
   color: var(--joy-text);
   font-size: var(--joy-type-2xs);
 }
+.audio-execution-plan li[data-state='ready'] {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
 .audio-execution-plan li > span:nth-child(2) {
   color: var(--joy-text-muted);
 }
@@ -14517,6 +14521,9 @@ label {
   font-size: var(--joy-type-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.audio-execution-plan li[data-state='ready'] > small {
+  grid-column: auto;
 }
 .audio-enhance-apply {
   display: grid;
