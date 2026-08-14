@@ -16,18 +16,14 @@ import { formatTime } from './format-time.js';
 import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
 import {
   AiEffectIcon,
-  AutoCaptionIcon,
   CloseIcon,
   CommandIcon,
   ImageIcon,
-  ListIcon,
   LockIcon,
   SearchIcon,
   SoloIcon,
-  TimelineAudioTrackIcon,
   TimelineMarkerIcon,
   TimelineScriptTrackIcon,
-  TimelineVideoTrackIcon,
 } from './icons.js';
 import {
   TIMELINE_END_PADDING_PX,
@@ -36,9 +32,13 @@ import {
   timelineOriginStyle,
 } from './timeline-layout.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
+import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVisual.js';
+import type { TimelineElementKind } from './timeline-element-kind.js';
+import type { TransitionV1 } from '@joy-media/project-schema';
+import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
 
 export type TimelineCanvasIcon =
-  'video' | 'audio' | 'text' | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
+  TimelineElementKind | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
 
 export interface TimelineCanvasItem {
   readonly id: string;
@@ -47,6 +47,7 @@ export interface TimelineCanvasItem {
   readonly endUs: number;
   readonly clipId?: string;
   readonly icon?: TimelineCanvasIcon;
+  readonly elementKind?: TimelineElementKind;
   readonly unplaced?: boolean;
 }
 
@@ -94,29 +95,11 @@ export interface TimelineCanvasProps {
   readonly gutterIconSrc?: string;
   readonly markers?: readonly TimelineCanvasMarker[];
   readonly onRemoveMarker?: (id: string) => void;
-}
-
-function hashUnit(seed: string, salt: number): number {
-  let h = (salt + 1) * 0x9e3779b9;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return ((h >>> 0) % 1000) / 1000;
-}
-
-function filmstripCellCount(widthPx: number): number {
-  return Math.max(2, Math.min(24, Math.floor(widthPx / 28)));
+  readonly transitions?: readonly TransitionV1[];
 }
 
 function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) {
   switch (icon) {
-    case 'audio':
-      return <TimelineAudioTrackIcon />;
-    case 'text':
-      return <ListIcon />;
-    case 'caption':
-      return <AutoCaptionIcon />;
     case 'script':
       return <TimelineScriptTrackIcon />;
     case 'prompt':
@@ -127,10 +110,37 @@ function ItemGlyph({ icon }: { readonly icon: TimelineCanvasIcon | undefined }) 
       return <AiEffectIcon />;
     case 'generic':
       return <CommandIcon />;
+    case 'audio':
+    case 'text':
+    case 'caption':
+    case 'motion':
+    case 'effect':
+    case 'filter':
+    case 'adjust':
+    case 'overlay':
     case 'video':
+      return <TimelineElementGlyph kind={icon} />;
     case undefined:
     default:
-      return <TimelineVideoTrackIcon />;
+      return <TimelineElementGlyph kind="video" />;
+  }
+}
+
+function elementKindForItem(item: TimelineCanvasItem): TimelineElementKind {
+  if (item.elementKind !== undefined) return item.elementKind;
+  switch (item.icon) {
+    case 'audio':
+    case 'text':
+    case 'caption':
+    case 'motion':
+    case 'effect':
+    case 'filter':
+    case 'adjust':
+    case 'overlay':
+    case 'video':
+      return item.icon;
+    default:
+      return 'video';
   }
 }
 
@@ -233,13 +243,14 @@ function InspectClip({
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
   const showChrome = layoutWidthPx >= 48;
   const showDuration = layoutWidthPx >= 100;
-  const cellCount = filmstripCellCount(layoutWidthPx);
   const durationLabel = `${(durationUs / 1_000_000).toFixed(1)}s`;
+  const elementKind = elementKindForItem(item);
 
   return (
     <button
       type="button"
-      className="timeline-clip timeline-clip--video timeline-clip--lane-0"
+      className={`timeline-clip timeline-clip--${elementKind} timeline-clip--lane-0`}
+      data-element-kind={elementKind}
       aria-pressed={item.clipId === undefined ? undefined : selected}
       title={
         item.clipId === undefined
@@ -256,29 +267,16 @@ function InspectClip({
       }}
       onDoubleClick={() => onSeek(item.startUs)}
     >
-      <span className="timeline-clip-filmstrip" aria-hidden="true">
-        {Array.from({ length: cellCount }, (_, index) => {
-          const t = hashUnit(item.id, index);
-          const u = hashUnit(item.id, index + 17);
-          const r = 244 + t * (139 - 244);
-          const g = 183 + t * (108 - 183);
-          const b = 47 + t * (255 - 47);
-          const lift = 0.22 + u * 0.28;
-          return (
-            <span
-              key={index}
-              className="timeline-clip-cell"
-              style={{
-                backgroundColor: `rgb(${Math.round(r + (255 - r) * lift)} ${Math.round(g + (255 - g) * lift)} ${Math.round(b + (255 - b) * lift)})`,
-              }}
-            />
-          );
-        })}
-      </span>
+      <TimelineElementMedia
+        kind={elementKind}
+        seed={item.id}
+        widthPx={layoutWidthPx}
+        pixelsPerSecond={viewport.pixelsPerSecond}
+      />
       {showChrome && (
         <span className="timeline-clip-chrome">
           <span className="timeline-clip-icon" aria-hidden="true">
-            <ItemGlyph icon={item.icon} />
+            <TimelineElementGlyph kind={elementKind} />
           </span>
           <span className="timeline-clip-label">{item.label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
@@ -303,6 +301,7 @@ export function TimelineCanvas({
   gutterIconSrc,
   markers = [],
   onRemoveMarker,
+  transitions = [],
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -452,11 +451,13 @@ export function TimelineCanvas({
               ) : (
                 track.items.map((item) => {
                   if (item.unplaced === true) {
+                    const elementKind = elementKindForItem(item);
                     return (
                       <button
                         key={item.id}
                         type="button"
-                        className="timeline-clip timeline-clip--video timeline-clip--lane-0 is-unplaced"
+                        className={`timeline-clip timeline-clip--${elementKind} timeline-clip--lane-0 is-unplaced`}
+                        data-element-kind={elementKind}
                         title={item.label}
                         onClick={() => {
                           if (item.startUs !== undefined) onSeek(item.startUs);
@@ -464,7 +465,7 @@ export function TimelineCanvas({
                       >
                         <span className="timeline-clip-chrome">
                           <span className="timeline-clip-icon" aria-hidden="true">
-                            <ItemGlyph icon={item.icon} />
+                            <TimelineElementGlyph kind={elementKind} />
                           </span>
                           <span className="timeline-clip-label">{item.label}</span>
                         </span>
@@ -486,6 +487,26 @@ export function TimelineCanvas({
                   );
                 })
               )}
+              {transitions
+                .filter(
+                  (transition) =>
+                    transition.trackId === track.controls?.trackId &&
+                    track.items.some((item) => item.clipId === transition.leftClipId) &&
+                    track.items.some((item) => item.clipId === transition.rightClipId),
+                )
+                .map((transition) => {
+                  const right = track.items.find((item) => item.clipId === transition.rightClipId);
+                  if (right === undefined) return null;
+                  return (
+                    <TimelineTransitionJunction
+                      key={transition.id}
+                      transition={transition}
+                      boundaryUs={right.startUs}
+                      viewport={viewport}
+                      onSeek={onSeek}
+                    />
+                  );
+                })}
             </div>
           </div>
         ))}

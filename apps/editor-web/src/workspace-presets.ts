@@ -26,7 +26,7 @@ export function workspacePresetLabel(id: WorkspacePresetId): string {
 
 /** Separate keys keep a user's Custom layout independent from named presets. */
 export function workspacePresetLayoutKey(mode: EditorViewMode, preset: WorkspacePresetId): string {
-  return `joy-media.workspace.${preset}.${mode}.v1`;
+  return `joy-media.workspace.${preset}.${mode}.v2`;
 }
 
 export function workspacePresetLayout(preset: WorkspacePresetId, mode: EditorViewMode): unknown {

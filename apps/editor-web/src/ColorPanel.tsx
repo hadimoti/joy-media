@@ -18,6 +18,7 @@ import { PropertyRow, type PropertyAnimationState } from './components/PropertyR
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
+import { LayersIcon } from './icons.js';
 
 type TabId = 'adjust' | 'wheels' | 'curves' | 'hsl' | 'looks' | 'scopes';
 const TABS: readonly PanelTabSpec[] = [
@@ -59,6 +60,7 @@ export interface ScopePixels {
 }
 
 interface ColorPanelProps {
+  readonly title?: string;
   readonly project: JoyProjectV1;
   readonly onChange: (next: JoyProjectV1) => void;
   readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
@@ -68,6 +70,7 @@ interface ColorPanelProps {
   readonly selectedClipDurationUs?: number;
   readonly playheadUs?: number;
   readonly readMonitorPixels?: () => ScopePixels | undefined;
+  readonly onCreateFilterLayer?: () => void;
 }
 
 export const DEFAULT_GRADE: ColorGradeV1 = {
@@ -102,6 +105,7 @@ function v2From(value: ColorGradeV1 | ColorGradeV2 | undefined): ColorGradeV2 {
 }
 
 export function ColorPanel({
+  title = 'Color',
   project,
   onChange,
   onDispatch,
@@ -111,6 +115,7 @@ export function ColorPanel({
   selectedClipDurationUs,
   playheadUs = 0,
   readMonitorPixels,
+  onCreateFilterLayer,
 }: ColorPanelProps) {
   // App only passes selectedClipId after resolving a gradeable video clip from
   // the timeline project. The visual project intentionally has a different
@@ -359,23 +364,37 @@ export function ColorPanel({
 
   return (
     <PanelShell
-      title="Color"
+      title={title}
       iconUrl={panelTabIconUrl('color')}
       className="color-panel"
       tabs={TABS}
       activeTab={tab}
       onTabChange={(id) => setTab(id as TabId)}
       actions={
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Reset color grade"
-          title="Reset all color controls"
-          disabled={gradeIsIdentity}
-          onClick={reset}
-        >
-          ↺
-        </button>
+        <>
+          {title === 'Filters' && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Add Filters layer"
+              title="Add a parented Filters layer"
+              disabled={onCreateFilterLayer === undefined}
+              onClick={onCreateFilterLayer}
+            >
+              <LayersIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Reset color grade"
+            title="Reset all color controls"
+            disabled={gradeIsIdentity}
+            onClick={reset}
+          >
+            ↺
+          </button>
+        </>
       }
     >
       <div className="color-target-bar" role="group" aria-label="Color target">

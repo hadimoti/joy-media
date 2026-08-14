@@ -1,5 +1,10 @@
 import { PANEL_IDS, type PanelId } from './workspace.js';
-import { PANEL_INTENT_ORDER, PANEL_METADATA, type PanelIntent } from './panel-metadata.js';
+import {
+  PANEL_INTENT_ORDER,
+  PANEL_METADATA,
+  panelsForIntent,
+  type PanelIntent,
+} from './panel-metadata.js';
 
 export type AppMenuActionId =
   | 'file.projects'
@@ -48,7 +53,7 @@ const WINDOW_PANELS = [
 
 function panelViewItems(): readonly AppMenuItem[] {
   return PANEL_INTENT_ORDER.flatMap((intent) =>
-    PANEL_METADATA.filter((entry) => entry.intent === intent).map((entry) => ({
+    panelsForIntent(intent).map((entry) => ({
       id: `view.panel.${entry.id}` as const,
       label: entry.label,
       section: intent,

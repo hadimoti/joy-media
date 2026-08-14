@@ -10,6 +10,8 @@ export interface PanelMetadata {
   readonly intent: PanelIntent;
   readonly command: string;
   readonly defaultPresets: readonly WorkspacePresetId[];
+  /** Feature is reached inside a hub and omitted from the top-level View menu. */
+  readonly nested?: boolean;
 }
 
 const panel = (
@@ -17,12 +19,14 @@ const panel = (
   intent: PanelIntent,
   command: string,
   defaultPresets: readonly WorkspacePresetId[],
+  nested = false,
 ): PanelMetadata => ({
   id,
   label: PANEL_LABELS[id],
   intent,
   command,
   defaultPresets,
+  ...(nested ? { nested: true } : {}),
 });
 
 /**
@@ -30,10 +34,10 @@ const panel = (
  * affordances, and workspace presets. Durable panel IDs stay unchanged.
  */
 export const PANEL_METADATA: readonly PanelMetadata[] = [
-  panel('media', 'media', 'Open Assets', ['edit', 'enhance', 'audio-captions', 'automate']),
-  panel('captions', 'media', 'Open Captions', ['audio-captions', 'edit']),
-  panel('text', 'media', 'Open Text', ['edit', 'enhance']),
-  panel('audio', 'media', 'Open Audio', ['audio-captions', 'edit']),
+  panel('media', 'media', 'Open Create', ['edit', 'enhance', 'audio-captions', 'automate']),
+  panel('captions', 'media', 'Open Captions', ['audio-captions', 'edit'], true),
+  panel('text', 'media', 'Open Text', ['edit', 'enhance'], true),
+  panel('audio', 'media', 'Open Audio', ['audio-captions', 'edit'], true),
   panel('monitor', 'edit', 'Open Program Monitor', [
     'edit',
     'enhance',
@@ -44,12 +48,12 @@ export const PANEL_METADATA: readonly PanelMetadata[] = [
   panel('inspector', 'edit', 'Open Inspector', ['edit', 'enhance']),
   panel('history', 'edit', 'Open History', ['edit']),
   panel('flow', 'edit', 'Open Flow', ['edit', 'automate']),
-  panel('effects', 'enhance', 'Open Effects', ['enhance', 'edit']),
-  panel('transitions', 'enhance', 'Open Transitions', ['enhance', 'edit']),
-  panel('color', 'enhance', 'Open Color', ['enhance']),
-  panel('motion', 'enhance', 'Open Animate', ['enhance']),
+  panel('effects', 'enhance', 'Open Enhance', ['enhance', 'edit']),
+  panel('transitions', 'enhance', 'Open Transitions', ['enhance', 'edit'], true),
+  panel('color', 'enhance', 'Open Color', ['enhance'], true),
+  panel('motion', 'enhance', 'Open Animate', ['enhance'], true),
   panel('camera', 'enhance', 'Open Camera', ['enhance']),
-  panel('templates', 'media', 'Open Library', ['edit', 'enhance']),
+  panel('templates', 'media', 'Open Library', ['edit', 'enhance'], true),
   panel('agent', 'automation', 'Open Joy Code', ['automate']),
   panel('workflows', 'automation', 'Open Workflows', ['automate']),
   panel('jobs', 'automation', 'Open Jobs', ['automate']),
@@ -78,7 +82,7 @@ export const PANEL_INTENT_ORDER: readonly PanelIntent[] = [
 ];
 
 export function panelsForIntent(intent: PanelIntent): readonly PanelMetadata[] {
-  return PANEL_METADATA.filter((entry) => entry.intent === intent);
+  return PANEL_METADATA.filter((entry) => entry.intent === intent && entry.nested !== true);
 }
 
 export function panelMetadata(panelId: PanelId): PanelMetadata {

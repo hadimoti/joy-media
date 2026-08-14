@@ -9,6 +9,11 @@ import {
 } from './timeline-track-kind.js';
 import { formatTime } from './format-time.js';
 import { timelineEffectiveDurationUs } from './timeline-layout.js';
+import {
+  readTimelineElementKindMap,
+  timelineElementKindForClip,
+  type TimelineElementKind,
+} from './timeline-element-kind.js';
 
 export { formatTime } from './format-time.js';
 
@@ -47,10 +52,12 @@ export interface DualLensLaneItem {
   readonly clipId?: string;
   /** Glyph shown left of the polished label in Time View. */
   readonly icon?: DualLensItemIcon;
+  /** Shared Classic/Time View presentation for placed timeline elements. */
+  readonly elementKind?: TimelineElementKind;
 }
 
 export type DualLensItemIcon =
-  'video' | 'audio' | 'text' | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
+  TimelineElementKind | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
 
 export interface DualLensLane {
   readonly id: string;
@@ -293,6 +300,7 @@ function buildLanes(
 ): readonly DualLensLane[] {
   const composition = timeline.compositions[timeline.rootCompositionId];
   const objectBindings = readClipObjectMap(creative);
+  const elementKinds = readTimelineElementKindMap(creative);
   const rangeForClip = (clipId: string): { readonly startUs?: number; readonly endUs?: number } => {
     const found = clips.find(({ clip }) => clip.id === clipId)?.clip;
     return found === undefined
@@ -301,10 +309,10 @@ function buildLanes(
   };
   const tracks = composition?.tracks ?? [];
   const core: DualLensLane[] = tracks.map((track, index) => {
-    const kind = timelineTrackKind(track);
+    const kind = timelineTrackKind(track, elementKinds);
     const kindIndex = tracks
       .slice(0, index + 1)
-      .filter((row) => timelineTrackKind(row) === kind).length;
+      .filter((row) => timelineTrackKind(row, elementKinds) === kind).length;
     const code = timelineTrackCode(kind, kindIndex);
     const name = timelineTrackDisplayName(kind, kindIndex);
     return {
@@ -318,7 +326,8 @@ function buildLanes(
         id: clip.id,
         label: polishMediaLabel(clip.id),
         clipId: clip.id,
-        icon: 'video' as const,
+        icon: timelineElementKindForClip(clip, elementKinds),
+        elementKind: timelineElementKindForClip(clip, elementKinds),
         startUs: clip.startUs,
         endUs: clip.startUs + clip.durationUs,
       })),
@@ -345,6 +354,13 @@ function buildLanes(
     ...rangeForClip(clipId),
   }));
   const creativeComposition = creative.compositions[creative.rootCompositionId];
+  const captionClipIdsInCore = new Set(
+    tracks.flatMap((track) =>
+      track.clips
+        .filter((clip) => timelineElementKindForClip(clip, elementKinds) === 'caption')
+        .map((clip) => clip.id),
+    ),
+  );
   const captionItems: readonly DualLensLaneItem[] =
     creativeComposition?.tracks.flatMap((track) =>
       track.kind !== 'caption'
@@ -352,18 +368,20 @@ function buildLanes(
         : track.clips.flatMap((clip) =>
             clip.kind !== 'caption'
               ? []
-              : [
-                  {
-                    id: `caption:${clip.id}`,
-                    label: polishMediaLabel(
-                      creative.captionDocuments[clip.captionDocumentId]?.language ??
-                        clip.captionDocumentId,
-                    ),
-                    icon: 'caption' as const,
-                    startUs: clip.startUs,
-                    endUs: clip.startUs + clip.durationUs,
-                  },
-                ],
+              : captionClipIdsInCore.has(clip.id)
+                ? []
+                : [
+                    {
+                      id: `caption:${clip.id}`,
+                      label: polishMediaLabel(
+                        creative.captionDocuments[clip.captionDocumentId]?.language ??
+                          clip.captionDocumentId,
+                      ),
+                      icon: 'caption' as const,
+                      startUs: clip.startUs,
+                      endUs: clip.startUs + clip.durationUs,
+                    },
+                  ],
           ),
     ) ?? [];
   const generationAssets = Object.values(creative.assets).filter(
@@ -417,7 +435,7 @@ function buildLanes(
       id: 'data:captions',
       label: 'Captions',
       advanced: true,
-      header: { kind: 'caption', code: 'C1', name: 'Captions' },
+      header: { kind: 'caption', code: 'CC1', name: 'Captions' },
       items: captionItems,
     },
     {

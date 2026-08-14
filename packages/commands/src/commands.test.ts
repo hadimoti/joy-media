@@ -77,6 +77,24 @@ describe('applyCommand', () => {
     expect(applyCommand(next, inverse).project).toEqual(project);
   });
 
+  it('requires clips to be inserted separately so adding a track remains undo-safe', () => {
+    const track = {
+      id: 'undo-safe-track',
+      kind: 'video' as const,
+      order: 1,
+      enabled: true,
+      clips: [makeVideoClip('clip-c', 0, SECOND_US)],
+    };
+    expectCode(
+      () =>
+        applyCommand(emptySpikeProject(), {
+          type: 'timeline.addTrack',
+          payload: { compositionId: 'root', track },
+        }),
+      'COMMAND_VALIDATION_UNSUPPORTED',
+    );
+  });
+
   it('rejects overlapping inserts and duplicate ids', () => {
     const project = baseProject();
     expectCode(

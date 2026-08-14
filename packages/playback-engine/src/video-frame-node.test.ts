@@ -89,6 +89,23 @@ describe('video-frame-node bridge', () => {
     });
   });
 
+  it('carries evaluated controller effects onto a decoded video frame', () => {
+    const decoded: DecodedFrame = { assetId: 'm', sourceTimeUs: 0, token: 't' };
+    const effects = [
+      {
+        id: 'adjust-contrast',
+        kind: 'brightness-contrast' as const,
+        enabled: true,
+        params: { brightness: 0.1, contrast: 0.2 },
+      },
+    ];
+    const node = videoFrameNodeFromDecoded({ ...baseClip, effects }, decoded, {
+      width: 640,
+      height: 360,
+    });
+    expect(node.effects).toEqual(effects);
+  });
+
   it('appends a VideoFrameNode to a RenderFrameIR and keeps the frame valid', () => {
     const decoded: DecodedFrame = { assetId: 'm', sourceTimeUs: 0, token: 't' };
     const node = videoFrameNodeFromDecoded(baseClip, decoded, { width: 640, height: 360 });

@@ -52,4 +52,39 @@ describe('TimelineCanvas track visibility controls', () => {
     expect(markup).not.toContain('Mute');
     expect(markup).not.toContain('Speaker');
   });
+
+  it('uses the shared six-kind visual language in Dual Lens Time items', () => {
+    const kinds = ['video', 'text', 'effect', 'filter', 'adjust', 'overlay', 'audio'] as const;
+    const markup = renderToStaticMarkup(
+      <TimelineCanvas
+        durationUs={10_000_000}
+        playheadUs={0}
+        viewport={{ originUs: 0, pixelsPerSecond: 20 }}
+        onViewportChange={() => undefined}
+        autoFit={false}
+        tracks={kinds.map((kind, index) => ({
+          id: kind,
+          label: kind,
+          header: { kind, code: String(index + 1), name: kind },
+          items: [
+            {
+              id: `${kind}-item`,
+              label: kind,
+              startUs: index * 100_000,
+              endUs: index * 100_000 + 2_000_000,
+              elementKind: kind,
+              icon: kind,
+            },
+          ],
+        }))}
+        selectedClipIds={new Set(['adjust-item'])}
+        onSeek={() => undefined}
+        onSelectClips={() => undefined}
+      />,
+    );
+
+    for (const kind of kinds) expect(markup).toContain(`data-element-kind="${kind}"`);
+    expect(markup).toContain('timeline-clip--adjust');
+    expect(markup).not.toContain('data-element-kind="sticker"');
+  });
 });

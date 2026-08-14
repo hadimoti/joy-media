@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
@@ -28,7 +29,7 @@ import {
   type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
-import type { ColorGradeIR, VideoFrameNode } from '@joy-media/render-ir';
+import type { ColorGradeIR, EffectInstanceIR, VideoFrameNode } from '@joy-media/render-ir';
 import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
@@ -44,7 +45,6 @@ import type {
   AnimationDescriptorV1,
   AssetRecordV1,
   AnimatablePropertyV1,
-  EffectInstanceV1,
   JoyProjectV1,
   SpikeProject,
   TransitionV1,
@@ -66,6 +66,7 @@ import {
 import {
   buildRenderFrameIR,
   clipTimesFromTracks,
+  evaluateEffectInstances,
   isTransitionActive,
   normalizeColorGrade,
   type BuildRenderFrameOptions,
@@ -197,7 +198,7 @@ import {
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
-import { DEFAULT_WORKSPACE } from './workspace.js';
+import { CORE_WORKSPACE_PANELS } from './workspace.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import {
   loadEditorUiPreferences,
@@ -286,22 +287,26 @@ import {
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
+import { effectsByObjectIdAt, effectInstancesForTimelineClip } from './adjustment-render.js';
+import { buildTreatmentLayerInsertion, type TreatmentLayerKind } from './adjustment-layer.js';
+import { buildCaptionLayerInsertion } from './caption-layer.js';
+import { FeatureHub } from './FeatureHub.js';
+import type { FeatureToolId } from './feature-architecture.js';
+import { AdjustmentLayersPanel } from './AdjustmentLayersPanel.js';
+import {
+  isAdjustmentTargetKind,
+  isControlTimelineElement,
+  readEffectLayerTargetMap,
+  readTimelineElementKindMap,
+  timelineElementKindForClip,
+  withEffectLayerTarget,
+} from './timeline-element-kind.js';
+import { reconcileTimelineSelection } from './timeline-selection.js';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
-function buildEffectsMap(
-  project: JoyProjectV1,
-): Readonly<Record<string, readonly EffectInstanceV1[]>> {
-  const map: Record<string, EffectInstanceV1[]> = {};
-  for (const [objectId, object] of Object.entries(project.visualObjects)) {
-    if (object.effects && object.effects.length > 0) {
-      map[objectId] = [...object.effects];
-    }
-  }
-  return map;
-}
-
 function renderFrameOptions(
   project: JoyProjectV1,
+  timeline: SpikeProject,
   timeUs: number,
   imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
@@ -320,7 +325,7 @@ function renderFrameOptions(
         )
       : project.colorGrade;
   return {
-    effectsByObjectId: buildEffectsMap(project),
+    effectsByObjectId: effectsByObjectIdAt(project, timeline, timeUs),
     propertyAnimations: project.propertyAnimations,
     ...(outputGrade !== undefined ? { colorGrade: outputGrade } : {}),
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
@@ -358,10 +363,28 @@ function activeVideoClipAt(
   project: SpikeProject,
   playheadUs: number,
   preferredClipIds: readonly string[] = [],
+  creative?: JoyProjectV1,
 ) {
-  const active = flattenRootTimelineVideoClips(project).filter(
-    (clip) => playheadUs >= clip.startUs && playheadUs < clip.startUs + clip.durationUs,
-  );
+  const elementKinds = creative === undefined ? {} : readTimelineElementKindMap(creative);
+  const active = flattenRootTimelineVideoClips(project)
+    .filter((clip) => {
+      const kind = timelineElementKindForClip(clip, elementKinds);
+      const assetKind = creative?.assets[clip.assetId]?.kind;
+      return (
+        !isControlTimelineElement(kind) &&
+        kind !== 'audio' &&
+        (assetKind === undefined || assetKind === 'video') &&
+        playheadUs >= clip.startUs &&
+        playheadUs < clip.startUs + clip.durationUs
+      );
+    })
+    .sort((left, right) => {
+      const leftKind = timelineElementKindForClip(left, elementKinds);
+      const rightKind = timelineElementKindForClip(right, elementKinds);
+      const leftPriority = leftKind === 'video' ? 0 : 1;
+      const rightPriority = rightKind === 'video' ? 0 : 1;
+      return leftPriority - rightPriority;
+    });
   if (active.length === 0) return undefined;
   return (
     preferredClipIds.map((id) => active.find((clip) => clip.id === id)).find(Boolean) ?? active[0]
@@ -403,6 +426,7 @@ function videoClipSpec(
   },
   opacity = 1,
   colorGrade?: ColorGradeIR,
+  effects?: readonly EffectInstanceIR[],
 ): VideoClipSpec {
   return {
     // IR / bitmap map key — must match TransitionV1 left/right clip ids.
@@ -415,11 +439,13 @@ function videoClipSpec(
     opacity,
     zIndex: 0,
     ...(colorGrade === undefined ? {} : { colorGrade }),
+    ...(effects === undefined ? {} : { effects }),
   };
 }
 
 function videoClipSpecAt(
   project: JoyProjectV1,
+  timeline: SpikeProject,
   clip: VideoClip,
   timeUs: number,
   height: number,
@@ -427,7 +453,9 @@ function videoClipSpecAt(
   const colorGrade = colorGradeForClipAtTime(project, clip, timeUs);
   const objectId = resolveObjectIdForSelection(project, [clip.id]);
   const object = objectId === undefined ? undefined : project.visualObjects[objectId];
-  if (object === undefined) return videoClipSpec(clip, undefined, 1, colorGrade);
+  const effectInstances = effectInstancesForTimelineClip(project, timeline, clip.id, timeUs);
+  const effects = evaluateEffectInstances(effectInstances, timeUs, project.propertyAnimations);
+  if (object === undefined) return videoClipSpec(clip, undefined, 1, colorGrade, effects);
   const composition = project.compositions[project.rootCompositionId];
   const evaluated = evaluateCameraExpressionTransform(
     object.id,
@@ -446,6 +474,7 @@ function videoClipSpecAt(
     },
     evaluated.opacity,
     colorGrade,
+    effects,
   );
 }
 
@@ -707,6 +736,10 @@ interface EditorPanelContextValue {
     readonly displayName?: string;
     readonly blob?: Blob;
   }) => Promise<void>;
+  /** Creates a separate Adjust controller targeting one root media clip. */
+  readonly addAdjustmentLayer: (targetClipId: string) => void;
+  readonly addTreatmentLayer: (kind: TreatmentLayerKind, targetClipId: string) => void;
+  readonly addCaptionLayer: () => void;
   readonly addHtmlSceneToSelectedClip: (scenePackageId: string) => void;
   readonly stickerTick: number;
   readonly audioState: AudioState;
@@ -1174,6 +1207,7 @@ function EditorWorkspace({
       session.timelineProject,
       state.playheadUs,
       state.selectedIds,
+      session.visualProject,
     );
     const activeVideoClip = activeClip?.kind === 'video' ? activeClip : undefined;
     const clipConfig =
@@ -1363,7 +1397,12 @@ function EditorWorkspace({
         session.timelineProject.compositions[session.timelineProject.rootCompositionId];
       const transition = activeTransitionAt(session.visualProject, playheadUs);
       const clip =
-        activeVideoClipAt(session.timelineProject, playheadUs, stateRef.current.selectedIds) ??
+        activeVideoClipAt(
+          session.timelineProject,
+          playheadUs,
+          stateRef.current.selectedIds,
+          session.visualProject,
+        ) ??
         (transition !== undefined
           ? findVideoClipById(session.timelineProject, transition.leftClipId)
           : undefined);
@@ -1510,6 +1549,7 @@ function EditorWorkspace({
             const node = videoFrameNodeFromDecoded(
               videoClipSpecAt(
                 session.visualProject,
+                session.timelineProject,
                 clip,
                 playheadUs,
                 visualComposition?.height ?? 1920,
@@ -1696,6 +1736,7 @@ function EditorWorkspace({
           const node = videoFrameNodeFromDecoded(
             videoClipSpecAt(
               session.visualProject,
+              session.timelineProject,
               clip,
               compositionTimeUs,
               visualComposition?.height ?? 1920,
@@ -1732,6 +1773,7 @@ function EditorWorkspace({
         session.timelineProject,
         stateRef.current.playheadUs,
         stateRef.current.selectedIds,
+        session.visualProject,
       );
       if (clip === undefined || clip.kind !== 'video') return;
       if (clip.reversed === true) {
@@ -1784,6 +1826,7 @@ function EditorWorkspace({
         session.visualProject.compositions[session.visualProject.rootCompositionId];
       const clipSpec = videoClipSpecAt(
         session.visualProject,
+        session.timelineProject,
         clip,
         compositionTimeUs,
         visualComposition?.height ?? 1920,
@@ -1817,7 +1860,12 @@ function EditorWorkspace({
     };
     const requestFrame = (): void => {
       // Freeze holds a still frame — drive with rAF. Otherwise follow media cadence.
-      const clip = activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
+      const clip = activeVideoClipAt(
+        session.timelineProject,
+        stateRef.current.playheadUs,
+        [],
+        session.visualProject,
+      );
       const manualReverse = clip?.kind === 'video' && clip.reversed === true;
       const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
       if (!freeze && !manualReverse && typeof video.requestVideoFrameCallback === 'function')
@@ -1842,6 +1890,7 @@ function EditorWorkspace({
         session.timelineProject,
         stateRef.current.playheadUs,
         stateRef.current.selectedIds,
+        session.visualProject,
       );
       if (clip !== undefined && clip.kind === 'video')
         advancePlaybackAfterClip(clip.startUs + clip.durationUs);
@@ -1881,7 +1930,7 @@ function EditorWorkspace({
     captureCanvas.height = 0;
     const decoder = createHtmlMediaDecoder(video, captureCanvas);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
-    const firstClip = activeVideoClipAt(session.timelineProject, 0);
+    const firstClip = activeVideoClipAt(session.timelineProject, 0, [], session.visualProject);
     if (firstClip !== undefined && firstClip.kind === 'video') {
       void mediaResolver
         .resolve(firstClip.assetId)
@@ -2179,6 +2228,57 @@ function EditorWorkspace({
     [session, syncStickerBitmaps],
   );
 
+  const addTreatmentLayer = useCallback(
+    (kind: TreatmentLayerKind, targetClipId: string) => {
+      try {
+        const insertion = buildTreatmentLayerInsertion({
+          timeline: session.timelineProject,
+          project: session.visualProject,
+          targetClipId,
+          token: Date.now().toString(36),
+          kind,
+        });
+        session.dispatchCompound(insertion.label, {
+          timeline: insertion.timeline,
+          document: insertion.project,
+        });
+        resyncTimelineMedia();
+        setState((current) => ({ ...current, selectedIds: [insertion.clipId] }));
+        setRevision((revision) => revision + 1);
+        const name = kind === 'effect' ? 'Effects' : kind === 'filter' ? 'Filters' : 'Adjust';
+        showToast(`${name} layer added and parented to the selected media.`, 'success');
+      } catch (reason) {
+        showToast(reason instanceof Error ? reason.message : String(reason), 'info');
+      }
+    },
+    [resyncTimelineMedia, session, showToast],
+  );
+
+  const addAdjustmentLayer = useCallback(
+    (targetClipId: string) => addTreatmentLayer('adjust', targetClipId),
+    [addTreatmentLayer],
+  );
+
+  const addCaptionLayer = useCallback(() => {
+    try {
+      const insertion = buildCaptionLayerInsertion({
+        timeline: session.timelineProject,
+        project: session.visualProject,
+        token: Date.now().toString(36),
+      });
+      session.dispatchCompound(insertion.label, {
+        timeline: insertion.timeline,
+        document: insertion.project,
+      });
+      resyncTimelineMedia();
+      setState((current) => ({ ...current, selectedIds: [insertion.clipId] }));
+      setRevision((revision) => revision + 1);
+      showToast('CC captions layer added to the timeline.', 'success');
+    } catch (reason) {
+      showToast(reason instanceof Error ? reason.message : String(reason), 'error');
+    }
+  }, [resyncTimelineMedia, session, showToast]);
+
   const addHtmlSceneToSelectedClip = useCallback(
     (scenePackageId: string) => {
       const composition =
@@ -2302,13 +2402,21 @@ function EditorWorkspace({
     [session],
   );
 
-  const timelineClipIds = useMemo(
-    () =>
+  const timelineClipIds = useMemo(() => {
+    const kinds = readTimelineElementKindMap(session.visualProject);
+    return (
       session.timelineProject.compositions[
         session.timelineProject.rootCompositionId
-      ]?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? [],
-    [session.timelineProject],
-  );
+      ]?.tracks.flatMap((track) =>
+        track.clips
+          .filter((clip) => {
+            const kind = timelineElementKindForClip(clip, kinds);
+            return kind === 'video' || kind === 'overlay' || kind === 'audio';
+          })
+          .map((clip) => clip.id),
+      ) ?? []
+    );
+  }, [session.timelineProject, session.visualProject]);
   useEffect(() => {
     // The initial state comes from the legacy key because the EditorSession is
     // created later in this component. Wait until canonical project audio has
@@ -2336,6 +2444,7 @@ function EditorWorkspace({
           session.timelineProject,
           state.playheadUs,
           state.selectedIds,
+          session.visualProject,
         );
         if (clip === undefined || clip.kind !== 'video')
           throw new Error('Place a media clip before transcribing.');
@@ -2378,32 +2487,43 @@ function EditorWorkspace({
         operationLedger.finish(record.id, 'review', { resultRef: record.resultRef });
     }
   }, [operationLedger, session]);
+  const reconcileSelection = useCallback(() => {
+    setState((current) => {
+      const selectedIds = reconcileTimelineSelection(session.timelineProject, current.selectedIds);
+      return selectedIds.length === current.selectedIds.length
+        ? current
+        : { ...current, selectedIds: [...selectedIds] };
+    });
+  }, [session]);
   const undo = useCallback(() => {
     session.undo();
+    reconcileSelection();
     setAudioStateRaw(
       loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
     );
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
   const redo = useCallback(() => {
     session.redo();
+    reconcileSelection();
     setAudioStateRaw(
       loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
     );
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
   const jumpToHistory = useCallback(
     (sequence: number) => {
       session.jumpToHistory(sequence);
+      reconcileSelection();
       setAudioStateRaw(
         loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
       );
       reconcileWorkerResultOperations();
       setRevision((revision) => revision + 1);
     },
-    [projectId, reconcileWorkerResultOperations, session],
+    [projectId, reconcileSelection, reconcileWorkerResultOperations, session],
   );
   const executeAction = useCallback(
     (id: string) => {
@@ -2414,7 +2534,20 @@ function EditorWorkspace({
     [redo, undo],
   );
   const activatePanel = useCallback((panelId: string) => {
-    dockviewApiRef.current?.getPanel(panelId)?.api.setActive();
+    const api = dockviewApiRef.current;
+    if (api === null) return;
+    let panel = api.getPanel(panelId);
+    if (panel === undefined) {
+      api.addPanel({
+        id: panelId,
+        component: 'editor-panel',
+        title: panelLabel(panelId),
+        minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
+        minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
+      });
+      panel = api.getPanel(panelId);
+    }
+    panel?.api.setActive();
   }, []);
 
   const dualLensProjection = useMemo(
@@ -2554,7 +2687,7 @@ function EditorWorkspace({
       });
     };
 
-    for (const panel of DEFAULT_WORKSPACE.panels) {
+    for (const panel of CORE_WORKSPACE_PANELS) {
       addPanel(panel, {
         inactive: true,
         ...(panel === 'flow' && api.getPanel('timeline') !== undefined
@@ -2994,6 +3127,16 @@ function EditorWorkspace({
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
+        const exportElementKinds = readTimelineElementKindMap(exportVisualProject);
+        const playableTimelineClips = allTimelineClips.filter((clip) => {
+          const kind = timelineElementKindForClip(clip, exportElementKinds);
+          const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
+          return (
+            !isControlTimelineElement(kind) &&
+            kind !== 'audio' &&
+            (assetKind === undefined || assetKind === 'video')
+          );
+        });
         const contentEndUs = allTimelineClips.reduce(
           (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
           0,
@@ -3062,12 +3205,17 @@ function EditorWorkspace({
               width,
               height,
               resolved,
-              renderFrameOptions(exportVisualProject, timeUs, imageSizesFromCache()),
+              renderFrameOptions(
+                exportVisualProject,
+                exportTimelineProject,
+                timeUs,
+                imageSizesFromCache(),
+              ),
             ),
             exportVisualProject,
           );
         };
-        const clipsByBoundary = allTimelineClips;
+        const clipsByBoundary = playableTimelineClips;
         const transitionPartnerClips = (exportVisualProject.transitions ?? []).flatMap(
           (transition) =>
             [transition.leftClipId, transition.rightClipId]
@@ -3322,7 +3470,12 @@ function EditorWorkspace({
           paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
             const transition = activeTransitionAt(exportVisualProject, timeUs);
-            const activeClip = activeVideoClipAt(exportTimelineProject, timeUs);
+            const activeClip = activeVideoClipAt(
+              exportTimelineProject,
+              timeUs,
+              [],
+              exportVisualProject,
+            );
             const clip =
               (activeClip !== undefined &&
               hasRenderableExportMedia(mediaForClip.get(activeClip.id) ?? {})
@@ -3345,7 +3498,13 @@ function EditorWorkspace({
               if (media.stillFrame !== undefined) {
                 bitmaps.set(target.id, media.stillFrame);
                 return videoFrameNodeFromDecoded(
-                  videoClipSpecAt(exportVisualProject, target, timeUs, height),
+                  videoClipSpecAt(
+                    exportVisualProject,
+                    exportTimelineProject,
+                    target,
+                    timeUs,
+                    height,
+                  ),
                   {
                     assetId: target.assetId,
                     bitmap: media.stillFrame,
@@ -3360,7 +3519,13 @@ function EditorWorkspace({
                 const frame = media.animatedFrameSource.frameAt(sourceTimeUs - target.sourceInUs);
                 bitmaps.set(target.id, frame.bitmap);
                 return videoFrameNodeFromDecoded(
-                  videoClipSpecAt(exportVisualProject, target, timeUs, height),
+                  videoClipSpecAt(
+                    exportVisualProject,
+                    exportTimelineProject,
+                    target,
+                    timeUs,
+                    height,
+                  ),
                   {
                     assetId: target.assetId,
                     bitmap: frame.bitmap,
@@ -3386,7 +3551,7 @@ function EditorWorkspace({
                 );
               bitmaps.set(target.id, decoded.bitmap);
               return videoFrameNodeFromDecoded(
-                videoClipSpecAt(exportVisualProject, target, timeUs, height),
+                videoClipSpecAt(exportVisualProject, exportTimelineProject, target, timeUs, height),
                 decoded,
                 {
                   width: media.video.videoWidth,
@@ -3721,6 +3886,26 @@ function EditorWorkspace({
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
     if (context === undefined) throw new Error('editor panel context is unavailable');
+    const [createTool, setCreateTool] = useState<FeatureToolId>('media');
+    const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
+    const createHub = api.id === 'media';
+    const enhanceHub = api.id === 'effects';
+    const effectivePanelId = createHub ? createTool : enhanceHub ? enhanceTool : api.id;
+    const withFeatureHub = (content: ReactNode): ReactNode => {
+      if (createHub)
+        return (
+          <FeatureHub hub="create" activeTool={createTool} onToolChange={setCreateTool}>
+            {content}
+          </FeatureHub>
+        );
+      if (enhanceHub)
+        return (
+          <FeatureHub hub="enhance" activeTool={enhanceTool} onToolChange={setEnhanceTool}>
+            {content}
+          </FeatureHub>
+        );
+      return content;
+    };
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
     const activeTimelineView =
       timelineCompositionView(context.timelineProject, context.activeTimelineCompositionId) ??
@@ -4019,6 +4204,17 @@ function EditorWorkspace({
       selectedTimelineEntry?.clip?.kind === 'video'
         ? { ...selectedTimelineEntry, clip: selectedTimelineEntry.clip }
         : undefined;
+    const timelineElementKinds = readTimelineElementKindMap(visualProject);
+    const selectedElementKind =
+      selectedTimelineEntry?.clip === undefined
+        ? undefined
+        : timelineElementKindForClip(selectedTimelineEntry.clip, timelineElementKinds);
+    const treatmentTarget =
+      selectedTimelineEntry?.clip !== undefined &&
+      selectedElementKind !== undefined &&
+      isAdjustmentTargetKind(selectedElementKind)
+        ? selectedTimelineEntry
+        : undefined;
     const changeSelectedClipSpeed = (change: InspectorSpeedChange, label: string) => {
       if (selectedTimelineVideo === undefined) return;
       const { composition, track, clip } = selectedTimelineVideo;
@@ -4126,11 +4322,42 @@ function EditorWorkspace({
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      const rootComposition =
+        context.timelineProject.compositions[context.timelineProject.rootCompositionId];
+      const adjustmentTargets =
+        rootComposition?.tracks.flatMap((track) =>
+          track.clips.flatMap((clip) => {
+            const kind = timelineElementKindForClip(clip, timelineElementKinds);
+            if (!isAdjustmentTargetKind(kind)) return [];
+            const asset = clip.kind === 'video' ? visualProject.assets[clip.assetId] : undefined;
+            const targetObjectId = resolveObjectIdForSelection(visualProject, [clip.id]);
+            const targetObject =
+              targetObjectId === undefined
+                ? undefined
+                : visualProject.visualObjects[targetObjectId];
+            return [
+              {
+                clipId: clip.id,
+                label: asset?.displayName ?? clip.id,
+                kind:
+                  kind === 'overlay' || asset?.kind === 'image' || targetObject?.kind === 'image'
+                    ? ('picture' as const)
+                    : ('video' as const),
+              },
+            ];
+          }),
+        ) ?? [];
+      const adjustmentTargetId =
+        objectId === undefined ? undefined : readEffectLayerTargetMap(visualProject)[objectId];
       return (
         <InspectorPanel
           object={object}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
-          selectedKind={selectedTimelineEntry?.clip?.kind ?? object?.kind}
+          selectedKind={
+            selectedElementKind === undefined
+              ? object?.kind
+              : selectedElementKind.charAt(0).toUpperCase() + selectedElementKind.slice(1)
+          }
           selectedName={
             selectedTimelineEntry?.clip?.kind === 'video'
               ? (visualProject.assets[selectedTimelineEntry.clip.assetId]?.displayName ??
@@ -4170,16 +4397,38 @@ function EditorWorkspace({
           onAudioChange={(next) => context.setAudioState(next)}
           onSetStatic={updateVisualProperty}
           onDispatch={context.dispatchProject}
+          {...(selectedElementKind === 'adjust'
+            ? {
+                adjustmentLayer: {
+                  ...(adjustmentTargetId === undefined ? {} : { targetClipId: adjustmentTargetId }),
+                  targets: adjustmentTargets,
+                },
+                onAdjustmentTargetChange: (targetClipId: string) => {
+                  if (objectId === undefined) return;
+                  context.replaceVisualProject(
+                    withEffectLayerTarget(visualProject, objectId, targetClipId),
+                  );
+                },
+              }
+            : {})}
+          {...(selectedElementKind !== undefined &&
+          isAdjustmentTargetKind(selectedElementKind) &&
+          selectedTimelineEntry?.clip !== undefined
+            ? {
+                onCreateAdjustmentLayer: () =>
+                  context.addAdjustmentLayer(selectedTimelineEntry.clip!.id),
+              }
+            : {})}
           onOpenAnimationGraph={context.openAnimationGraph}
         />
       );
     }
-    if (api.id === 'motion') {
+    if (effectivePanelId === 'motion') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
       const motionTimelineComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
-      return (
+      return withFeatureHub(
         <MotionPanel
           object={object}
           allObjects={visualProject.visualObjects}
@@ -4193,7 +4442,7 @@ function EditorWorkspace({
           onDispatch={context.dispatchProject}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
           onAddHtmlSceneToSelection={context.addHtmlSceneToSelectedClip}
-        />
+        />,
       );
     }
     if (api.id === 'camera') {
@@ -4209,7 +4458,7 @@ function EditorWorkspace({
         />
       );
     }
-    if (api.id === 'audio') {
+    if (effectivePanelId === 'audio') {
       const audioComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       const audioTracks = audioComposition?.tracks ?? [];
@@ -4251,7 +4500,7 @@ function EditorWorkspace({
         audioClips.find(
           (clip): clip is VideoClip => clip.kind === 'video' && state.selectedIds.includes(clip.id),
         ) ?? audioClips.find((clip): clip is VideoClip => clip.kind === 'video');
-      return (
+      return withFeatureHub(
         <AudioPanel
           clipIds={clipIds}
           enhanceScopes={enhanceScopes}
@@ -4524,19 +4773,25 @@ function EditorWorkspace({
               throw error;
             }
           }}
-        />
+        />,
       );
     }
-    if (api.id === 'effects') {
+    if (effectivePanelId === 'effects') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const canApplyEffects =
         objectId !== undefined &&
         isSingleVideoClipSelected(context.timelineProject, state.selectedIds);
-      return (
+      return withFeatureHub(
         <EffectsPanel
           project={visualProject}
           objectId={objectId}
           canApplyEffects={canApplyEffects}
+          {...(treatmentTarget === undefined
+            ? {}
+            : {
+                onCreateEffectLayer: () =>
+                  context.addTreatmentLayer('effect', treatmentTarget.clip!.id),
+              })}
           onDispatch={(command) => {
             context.dispatchProject({
               label: `Effect: ${(command.payload as { effectId: string }).effectId}`,
@@ -4544,11 +4799,11 @@ function EditorWorkspace({
             } as unknown as VisualObjectTransaction);
           }}
           showToast={context.showToast}
-        />
+        />,
       );
     }
-    if (api.id === 'transitions') {
-      return (
+    if (effectivePanelId === 'transitions') {
+      return withFeatureHub(
         <TransitionsPanel
           project={visualProject}
           timelineProject={context.timelineProject}
@@ -4579,9 +4834,52 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           onDispatch={context.dispatchProject}
           showToast={context.showToast}
-        />
+        />,
       );
     }
+    if (effectivePanelId === 'filters')
+      return withFeatureHub(
+        <ColorPanel
+          title="Filters"
+          project={visualProject}
+          onChange={context.replaceVisualProject}
+          onDispatch={context.dispatchProject}
+          {...(treatmentTarget?.clip === undefined
+            ? {}
+            : {
+                selectedClipId: treatmentTarget.clip.id,
+                selectedClipName:
+                  treatmentTarget.clip.kind === 'video'
+                    ? (visualProject.assets[treatmentTarget.clip.assetId]?.displayName ??
+                      treatmentTarget.clip.id)
+                    : treatmentTarget.clip.id,
+                selectedClipStartUs: treatmentTarget.clip.startUs,
+                selectedClipDurationUs: treatmentTarget.clip.durationUs,
+                onCreateFilterLayer: () =>
+                  context.addTreatmentLayer('filter', treatmentTarget.clip!.id),
+              })}
+          playheadUs={state.playheadUs}
+        />,
+      );
+    if (effectivePanelId === 'adjust')
+      return withFeatureHub(
+        <AdjustmentLayersPanel
+          canCreate={treatmentTarget?.clip !== undefined}
+          {...(treatmentTarget?.clip === undefined
+            ? {}
+            : {
+                targetLabel:
+                  treatmentTarget.clip.kind === 'video'
+                    ? (visualProject.assets[treatmentTarget.clip.assetId]?.displayName ??
+                      treatmentTarget.clip.id)
+                    : treatmentTarget.clip.id,
+              })}
+          onCreate={() => {
+            if (treatmentTarget?.clip !== undefined)
+              context.addTreatmentLayer('adjust', treatmentTarget.clip.id);
+          }}
+        />,
+      );
     if (api.id === 'color')
       return (
         <ColorPanel
@@ -4601,8 +4899,8 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
         />
       );
-    if (api.id === 'captions')
-      return (
+    if (effectivePanelId === 'captions')
+      return withFeatureHub(
         <CaptionsPanel
           project={visualProject}
           playheadUs={state.playheadUs}
@@ -4611,10 +4909,11 @@ function EditorWorkspace({
           onTranscribe={context.transcribe}
           transcriptionError={context.transcriptionError}
           onProjectChange={(next) => context.replaceVisualProject(next)}
-        />
+          onCreateCaptionTrack={context.addCaptionLayer}
+        />,
       );
-    if (api.id === 'text')
-      return (
+    if (effectivePanelId === 'text')
+      return withFeatureHub(
         <TextPanel
           project={visualProject}
           session={context.session}
@@ -4623,7 +4922,7 @@ function EditorWorkspace({
           onSelectClip={context.selectClips}
           onProjectChange={context.replaceVisualProject}
           onProjectRevision={context.bumpProjectRevision}
-        />
+        />,
       );
     if (api.id === 'timeline') {
       const selectedObjectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
@@ -4632,6 +4931,8 @@ function EditorWorkspace({
       return (
         <TimelinePanel
           project={context.timelineProject}
+          elementKinds={timelineElementKinds}
+          transitions={visualProject.transitions ?? []}
           activeCompositionId={activeTimelineView.composition.id}
           onActiveCompositionChange={setActiveTimelineComposition}
           playheadUs={activeTimelinePlayheadUs}
@@ -4785,6 +5086,7 @@ function EditorWorkspace({
       return (
         <DualLensPanel
           projection={context.dualLensProjection}
+          transitions={visualProject.transitions ?? []}
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedClipIds={state.selectedIds}
@@ -4873,8 +5175,8 @@ function EditorWorkspace({
         />
       );
     }
-    if (api.id === 'media')
-      return (
+    if (effectivePanelId === 'media')
+      return withFeatureHub(
         <AssetLibraryPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
@@ -4884,7 +5186,7 @@ function EditorWorkspace({
             context.attachKiloCodeAsset(asset);
             context.activatePanel('agent');
           }}
-        />
+        />,
       );
     if (api.id === 'agent') {
       return (
@@ -4973,8 +5275,8 @@ function EditorWorkspace({
     if (api.id === 'plugins') {
       return <PluginsPanel pluginHost={context.pluginHost} onChange={context.bumpPluginRevision} />;
     }
-    if (api.id === 'templates') {
-      return (
+    if (effectivePanelId === 'templates') {
+      return withFeatureHub(
         <LibraryPanel
           onApplyTemplate={(seeded) => {
             buildContentTemplateTransaction(seeded, {
@@ -4986,7 +5288,7 @@ function EditorWorkspace({
           }}
           showToast={context.showToast}
           openMotionStudio={(sceneId) => context.openMotionStudio(sceneId)}
-        />
+        />,
       );
     }
     return (
@@ -5493,6 +5795,9 @@ function EditorWorkspace({
           replaceVisualProject,
           replaceVisualProjectAndAudio,
           addStickerFromAsset,
+          addAdjustmentLayer,
+          addTreatmentLayer,
+          addCaptionLayer,
           addHtmlSceneToSelectedClip,
           stickerTick,
           audioState,
@@ -5787,7 +6092,12 @@ function MonitorPanel() {
         composition.width,
         composition.height,
         resolved,
-        renderFrameOptions(visualProject, state.playheadUs, imageSizesFromCache(state.playheadUs)),
+        renderFrameOptions(
+          visualProject,
+          timelineProject,
+          state.playheadUs,
+          imageSizesFromCache(state.playheadUs),
+        ),
       ),
       visualProject,
     );

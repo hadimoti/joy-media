@@ -8,6 +8,7 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import { BrowserProjectStore } from '@joy-media/project-persistence';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
+import { TIMELINE_ELEMENTS_SHOWCASE } from './timeline-elements-showcase.js';
 
 export const PROJECT_CATALOG_KEY = 'joy-media.project-catalog.v1';
 export const ACTIVE_PROJECT_KEY = 'joy-media.active-project.v1';
@@ -25,7 +26,7 @@ export interface ProjectCatalogEntry {
 }
 
 interface CatalogDatabase {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3 | 4;
   readonly projects: Readonly<Record<string, ProjectCatalogEntry>>;
 }
 
@@ -63,7 +64,7 @@ export function upsertCatalogProject(
 ): ProjectCatalogEntry {
   const database = readCatalog(storage);
   writeCatalog(storage, {
-    version: 2,
+    version: 4,
     projects: { ...database.projects, [entry.id]: entry },
   });
   return entry;
@@ -74,7 +75,7 @@ export function trashCatalogProject(storage: BrowserKeyValueStore, projectId: st
   const entry = database.projects[projectId];
   if (entry === undefined || entry.trashedAt !== undefined) return;
   writeCatalog(storage, {
-    version: 2,
+    version: 4,
     projects: {
       ...database.projects,
       [projectId]: {
@@ -94,7 +95,7 @@ export function restoreCatalogProject(storage: BrowserKeyValueStore, projectId: 
   const { trashedAt, ...rest } = entry;
   void trashedAt;
   writeCatalog(storage, {
-    version: 2,
+    version: 4,
     projects: {
       ...database.projects,
       [projectId]: { ...rest, updatedAt: new Date().toISOString() },
@@ -109,7 +110,7 @@ export function purgeCatalogProject(storage: BrowserKeyValueStore, projectId: st
   for (const [id, entry] of Object.entries(database.projects)) {
     if (id !== projectId) rest[id] = entry;
   }
-  writeCatalog(storage, { version: 2, projects: rest });
+  writeCatalog(storage, { version: 4, projects: rest });
   if (loadActiveProjectId(storage) === projectId) clearActiveProjectId(storage);
 }
 
@@ -142,7 +143,7 @@ export function clearActiveProjectId(storage: BrowserKeyValueStore): void {
   storage.setItem(ACTIVE_PROJECT_KEY, JSON.stringify(payload));
 }
 
-/** First visit only: register the sample editor project. Empty catalogs stay empty. */
+/** First visit only: register the sample editor and timeline-element showcase. */
 export function ensureSeedCatalog(storage: BrowserKeyValueStore): void {
   if (storage.getItem(PROJECT_CATALOG_KEY) !== null) return;
 
@@ -155,13 +156,28 @@ export function ensureSeedCatalog(storage: BrowserKeyValueStore): void {
     timelineProjectId: REFERENCE_PROJECT.id,
     visualProjectId: INITIAL_EDITOR_PROJECT.id,
   };
+  const showcase = showcaseCatalogEntry(now);
 
   const migrated = migrateFromStores(storage, now);
-  const projects: Record<string, ProjectCatalogEntry> = { [sample.id]: sample };
+  const projects: Record<string, ProjectCatalogEntry> = {
+    [sample.id]: sample,
+    [showcase.id]: showcase,
+  };
   for (const entry of migrated) {
     if (projects[entry.id] === undefined) projects[entry.id] = entry;
   }
-  writeCatalog(storage, { version: 2, projects });
+  writeCatalog(storage, { version: 4, projects });
+}
+
+function showcaseCatalogEntry(now: string): ProjectCatalogEntry {
+  return {
+    id: TIMELINE_ELEMENTS_SHOWCASE.id,
+    title: TIMELINE_ELEMENTS_SHOWCASE.title,
+    createdAt: now,
+    updatedAt: now,
+    timelineProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+    visualProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+  };
 }
 
 function migrateFromStores(
@@ -200,23 +216,34 @@ function migrateFromStores(
 
 function readCatalog(storage: BrowserKeyValueStore): CatalogDatabase {
   const serialized = storage.getItem(PROJECT_CATALOG_KEY);
-  if (serialized === null) return { version: 2, projects: {} };
+  if (serialized === null) return { version: 4, projects: {} };
   try {
     const parsed: unknown = JSON.parse(serialized);
-    if (!isCatalog(parsed)) return { version: 2, projects: {} };
+    if (!isCatalog(parsed)) return { version: 4, projects: {} };
+    const projects: Record<string, ProjectCatalogEntry> = Object.fromEntries(
+      Object.entries(parsed.projects).map(([id, entry]) => [
+        id,
+        entry.trashedAt === undefined ? entry : { ...entry, trashedAt: entry.trashedAt },
+      ]),
+    );
+    if (parsed.version < 4) {
+      for (const id of Object.keys(projects)) {
+        if (id.startsWith('timeline-elements-showcase-v') && id !== TIMELINE_ELEMENTS_SHOWCASE.id) {
+          delete projects[id];
+        }
+      }
+      const now = new Date().toISOString();
+      if (projects[TIMELINE_ELEMENTS_SHOWCASE.id] === undefined)
+        projects[TIMELINE_ELEMENTS_SHOWCASE.id] = showcaseCatalogEntry(now);
+    }
     const database: CatalogDatabase = {
-      version: 2,
-      projects: Object.fromEntries(
-        Object.entries(parsed.projects).map(([id, entry]) => [
-          id,
-          entry.trashedAt === undefined ? entry : { ...entry, trashedAt: entry.trashedAt },
-        ]),
-      ),
+      version: 4,
+      projects,
     };
-    if (parsed.version === 1) writeCatalog(storage, database);
+    if (parsed.version !== 4) writeCatalog(storage, database);
     return database;
   } catch {
-    return { version: 2, projects: {} };
+    return { version: 4, projects: {} };
   }
 }
 
@@ -225,7 +252,11 @@ function writeCatalog(storage: BrowserKeyValueStore, database: CatalogDatabase):
 }
 
 function isCatalog(value: unknown): value is CatalogDatabase {
-  if (!isRecord(value) || (value.version !== 1 && value.version !== 2) || !isRecord(value.projects))
+  if (
+    !isRecord(value) ||
+    (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4) ||
+    !isRecord(value.projects)
+  )
     return false;
   return Object.entries(value.projects).every(([id, entry]) => {
     if (!isRecord(entry) || entry.id !== id) return false;

@@ -125,6 +125,7 @@ export function CaptionsPanel({
   onTranscribe,
   transcriptionError,
   onProjectChange,
+  onCreateCaptionTrack,
 }: {
   readonly project: JoyProjectV1;
   readonly playheadUs: number;
@@ -133,6 +134,8 @@ export function CaptionsPanel({
   readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
   readonly transcriptionError: string | undefined;
   readonly onProjectChange: (next: JoyProjectV1) => void;
+  /** When supplied, creates the visual document and Classic timeline CC lane as one undo step. */
+  readonly onCreateCaptionTrack?: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState<CaptionsTab>('transcript');
@@ -193,7 +196,10 @@ export function CaptionsPanel({
             className="icon-button icon-button-labeled"
             aria-label="Add caption track"
             title="Add caption track"
-            onClick={() => onProjectChange(createCaptionSlotProject(project))}
+            onClick={() => {
+              if (onCreateCaptionTrack !== undefined) onCreateCaptionTrack();
+              else onProjectChange(createCaptionSlotProject(project));
+            }}
           >
             <PlusIcon />
             Add caption track

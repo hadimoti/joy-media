@@ -34,6 +34,7 @@ import {
   InterpEasedIcon,
   InterpHoldIcon,
   InterpLinearIcon,
+  SlidersIcon,
   TrashIcon,
 } from './icons.js';
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
@@ -50,6 +51,7 @@ import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
+  { id: 'adjust', label: 'Adjust', ariaLabel: 'Adjustment layer' },
   { id: 'effects', label: 'Effects' },
   { id: 'audio', label: 'Audio' },
   { id: 'speed', label: 'Speed' },
@@ -85,6 +87,17 @@ export interface InspectorSpeedChange {
   /** Apply the selected source-continuous three-segment ramp. */
   readonly ramp?: SpeedRampPreset | undefined;
   readonly timeRemap?: TimeRemapV2 | undefined;
+}
+
+export interface InspectorAdjustmentTarget {
+  readonly clipId: string;
+  readonly label: string;
+  readonly kind: 'video' | 'picture';
+}
+
+export interface InspectorAdjustmentLayer {
+  readonly targetClipId?: string;
+  readonly targets: readonly InspectorAdjustmentTarget[];
 }
 
 export const SPEED_RATE_PRESETS = [0.25, 0.5, 1, 1.25, 1.5, 2] as const;
@@ -150,6 +163,11 @@ interface InspectorPanelProps {
     value: number,
   ) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  /** Present when the selected controller is a targeted Adjust layer. */
+  readonly adjustmentLayer?: InspectorAdjustmentLayer;
+  readonly onAdjustmentTargetChange?: (targetClipId: string) => void;
+  /** Creates a separate timeline Adjust layer above the selected media. */
+  readonly onCreateAdjustmentLayer?: () => void;
   /** Opens a durable animated transform in the shared Motion graph view. */
   readonly onOpenAnimationGraph?:
     ((objectId: string, channel: AnimatablePropertyV1) => void) | undefined;
@@ -309,6 +327,9 @@ export function InspectorPanel({
   onAudioChange,
   onSetStatic,
   onDispatch,
+  adjustmentLayer,
+  onAdjustmentTargetChange,
+  onCreateAdjustmentLayer,
   onOpenAnimationGraph,
 }: InspectorPanelProps) {
   const [editingExpression, setEditingExpression] = useState<AnimatablePropertyV1 | undefined>(
@@ -321,7 +342,7 @@ export function InspectorPanel({
   const [effectsOpen, setEffectsOpen] = useState(true);
   const [audioOpen, setAudioOpen] = useState(true);
   const [speedOpen, setSpeedOpen] = useState(true);
-  const [tab, setTab] = useState('visual');
+  const [tab, setTab] = useState(adjustmentLayer === undefined ? 'visual' : 'adjust');
 
   // §3c — no early returns. `target` is the real selection or a neutral
   // stand-in; `idle` drives the disabled state, not the presence of markup.
@@ -330,6 +351,7 @@ export function InspectorPanel({
   // A timeline controller may supply speed for a selected video before it has
   // a visual-object counterpart. Transform remains disabled through `idle`.
   const inspectorInactive = idle && clipSpeed === undefined;
+  const isAdjustmentLayer = adjustmentLayer !== undefined;
 
   const timeUs = Math.max(0, Math.round(playheadUs));
   const title =
@@ -350,11 +372,14 @@ export function InspectorPanel({
         })
       : undefined;
 
-  const visibleTabs = TABS.filter(
-    (candidate) =>
+  const visibleTabs = TABS.filter((candidate) => {
+    if (isAdjustmentLayer) return candidate.id === 'adjust' || candidate.id === 'effects';
+    if (candidate.id === 'adjust') return false;
+    return (
       (candidate.id !== 'audio' || clipAudio !== undefined) &&
-      (candidate.id !== 'speed' || clipSpeed !== undefined),
-  );
+      (candidate.id !== 'speed' || clipSpeed !== undefined)
+    );
+  });
 
   useEffect(() => {
     // Older sessions used the Transform tab id. Keep that selection usable
@@ -363,6 +388,10 @@ export function InspectorPanel({
     if (tab === 'transform' || !visibleTabs.some((candidate) => candidate.id === tab))
       setTab('visual');
   }, [tab, visibleTabs]);
+
+  useEffect(() => {
+    setTab(isAdjustmentLayer ? 'adjust' : 'visual');
+  }, [isAdjustmentLayer, target.id]);
 
   const dispatchAudio = (command: AudioCommand, label: string) => {
     if (audioState === undefined || onAudioChange === undefined) return;
@@ -638,6 +667,35 @@ export function InspectorPanel({
         </section>
       )}
 
+      {tab === 'visual' && onCreateAdjustmentLayer !== undefined && (
+        <section className="inspector-section" aria-label="Adjustment layer">
+          <h3>Adjustment layer</h3>
+          <button
+            type="button"
+            className="icon-button icon-button-labeled inspector-create-adjustment"
+            aria-label="Create Adjust layer for selected media"
+            title="Create a separate Adjust layer targeting this media"
+            onClick={onCreateAdjustmentLayer}
+          >
+            <SlidersIcon />
+            Add Adjust
+          </button>
+        </section>
+      )}
+
+      {tab === 'adjust' && adjustmentLayer !== undefined && (
+        <AdjustmentLayerSection
+          object={target}
+          adjustment={adjustmentLayer}
+          playheadUs={timeUs}
+          {...(project === undefined ? {} : { project })}
+          {...(onAdjustmentTargetChange === undefined
+            ? {}
+            : { onTargetChange: onAdjustmentTargetChange })}
+          onDispatch={onDispatch}
+        />
+      )}
+
       {tab === 'effects' && (
         <EffectsSection
           object={target}
@@ -676,6 +734,93 @@ export function InspectorPanel({
         />
       )}
     </PanelShell>
+  );
+}
+
+function AdjustmentLayerSection({
+  object,
+  adjustment,
+  project,
+  playheadUs,
+  onTargetChange,
+  onDispatch,
+}: {
+  readonly object: VisualObjectV1;
+  readonly adjustment: InspectorAdjustmentLayer;
+  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
+  readonly playheadUs: number;
+  readonly onTargetChange?: (targetClipId: string) => void;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+}) {
+  const adjustmentEffects = (object.effects ?? []).filter(
+    (effect) =>
+      effect.effectId === 'brightness-contrast' ||
+      effect.effectId === 'hue-saturation' ||
+      effect.effectId === 'vibrance',
+  );
+  return (
+    <>
+      <section className="inspector-section inspector-adjustment-target" aria-label="Adjust target">
+        <h3>Parent media</h3>
+        <label className="inspector-adjustment-parent">
+          <span>Target</span>
+          <select
+            aria-label="Adjustment parent media"
+            value={adjustment.targetClipId ?? ''}
+            disabled={onTargetChange === undefined || adjustment.targets.length === 0}
+            onChange={(event) => onTargetChange?.(event.currentTarget.value)}
+          >
+            <option value="" disabled>
+              Choose video or picture
+            </option>
+            {adjustment.targets.map((candidate) => (
+              <option key={candidate.clipId} value={candidate.clipId}>
+                {candidate.label} · {candidate.kind}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="inspector-adjustment-routing" role="status">
+          Adjust → {adjustment.targetClipId ?? 'No parent selected'}
+        </span>
+      </section>
+      <section className="inspector-section" aria-label="Adjustments">
+        <h3>Adjustments</h3>
+        {adjustmentEffects.length === 0 ? (
+          <div className="inspector-empty-state" role="status">
+            <strong>No color adjustments</strong>
+            <span>Add a color effect from the Effects tab.</span>
+          </div>
+        ) : (
+          <div className="inspector-adjustment-stack">
+            {adjustmentEffects.map((effect) => {
+              const descriptor = effectRegistry.getEffect(effect.effectId);
+              if (descriptor === undefined) return null;
+              return (
+                <div className="inspector-adjustment-group" key={effect.id}>
+                  <strong>{descriptor.label}</strong>
+                  <div className="inspector-effect-params">
+                    {descriptor.params.map((param) => (
+                      <EffectParamControl
+                        key={param.key}
+                        descriptor={descriptor}
+                        param={param}
+                        value={effect.params[param.key] ?? param.defaultValue}
+                        effect={effect}
+                        {...(project === undefined ? {} : { project })}
+                        objectId={object.id}
+                        playheadUs={playheadUs}
+                        onDispatch={onDispatch}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 

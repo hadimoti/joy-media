@@ -23,13 +23,8 @@ describe('panel metadata registry', () => {
       'Automation',
       'System',
     ]);
-    expect(panelsForIntent('media').map((entry) => entry.label)).toEqual([
-      'Assets',
-      'Captions',
-      'Text',
-      'Audio',
-      'Library',
-    ]);
+    expect(panelsForIntent('media').map((entry) => entry.label)).toEqual(['Create']);
+    expect(panelsForIntent('enhance').map((entry) => entry.label)).toEqual(['Enhance', 'Camera']);
     expect(panelsForIntent('automation').map((entry) => entry.label)).toEqual([
       'Joy Code',
       'Workflows',

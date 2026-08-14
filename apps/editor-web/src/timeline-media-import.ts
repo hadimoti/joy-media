@@ -61,7 +61,11 @@ export function buildTimelineMediaImportTransaction(
       workingTracks.push(track);
       commands.push({
         type: 'timeline.addTrack',
-        payload: { compositionId: composition.id, track: { ...track, clips: [...track.clips] } },
+        payload: { compositionId: composition.id, track: { ...track, clips: [] } },
+      });
+      commands.push({
+        type: 'timeline.insertClip',
+        payload: { compositionId: composition.id, trackId: track.id, clip },
       });
       continue;
     }

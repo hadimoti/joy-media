@@ -14,11 +14,10 @@ import {
   toggleTrackFlag,
   toggleClipReverseCommand,
   trimCommand,
-  virtualTracks,
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { Clip, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
+import type { Clip, SpikeProject, TransitionV1, VisualObjectV1 } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { TimelineTrackView } from '@joy-media/timeline-engine';
@@ -37,7 +36,6 @@ import {
   ZoomOutIcon,
   MarkerIcon,
   TimelineMarkerIcon,
-  TimelineAudioTrackIcon,
   CloseIcon,
   FlowProvenanceIcon,
   ProgramOutputIcon,
@@ -94,6 +92,13 @@ import {
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
 import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
+import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVisual.js';
+import {
+  timelineElementKindForClip,
+  type TimelineElementKind,
+  type TimelineElementKindMap,
+} from './timeline-element-kind.js';
+import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -130,29 +135,9 @@ function clipDisplayName(id: string): string {
   return polishMediaLabel(id);
 }
 
-function hashUnit(seed: string, salt: number): number {
-  let h = (salt + 1) * 0x9e3779b9;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return ((h >>> 0) % 1000) / 1000;
-}
-
-function filmstripCellCount(widthPx: number): number {
-  return Math.max(2, Math.min(24, Math.floor(widthPx / 28)));
-}
-
-/** Voice/audio clips: denser bars as zoom (pps) increases for beat-accurate cuts. */
-function waveformBarCount(widthPx: number, pixelsPerSecond: number): number {
-  const barPitchPx = Math.max(1.25, Math.min(8, 140 / Math.max(5, pixelsPerSecond)));
-  return Math.max(8, Math.min(512, Math.round(widthPx / barPitchPx)));
-}
-
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
-  if (kind === 'audio') return <TimelineAudioTrackIcon />;
   if (kind === 'script') return <TimelineScriptTrackIcon />;
-  return <TimelineVideoTrackIcon />;
+  return <TimelineElementGlyph kind={kind} />;
 }
 
 function ProvenanceStepIcon({
@@ -168,14 +153,9 @@ function ProvenanceStepIcon({
   return null;
 }
 
-function isVoiceClip(clip: Clip): boolean {
-  if (clip.kind !== 'video') return false;
-  const id = `${clip.id}\0${clip.assetId}`;
-  return /(?:^|[-_])(voice|audio|vo|sfx|music|aiff|wav|mp3|m4a)(?:$|[-_])/i.test(id);
-}
-
 function TimelineClip({
   clip,
+  elementKind,
   displayName,
   selected,
   isDragOver,
@@ -194,6 +174,7 @@ function TimelineClip({
   onSplitAt,
 }: {
   readonly clip: Clip;
+  readonly elementKind: TimelineElementKind;
   readonly displayName?: string;
   readonly selected: boolean;
   readonly isDragOver: boolean;
@@ -220,7 +201,6 @@ function TimelineClip({
   const lastCompoundOpenAtRef = useRef(0);
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
-  const voice = isVoiceClip(clip);
 
   const splitTimeFromClientX = (clientX: number, target: HTMLElement): number | undefined => {
     const rect = target.getBoundingClientRect();
@@ -278,19 +258,13 @@ function TimelineClip({
   /** Half-gap between adjacent clips; start edge stays flush with timeToPixel. */
   const gapPx = 1;
   const layoutWidthPx = Math.max(6, widthPx - gapPx);
-  const cellCount = filmstripCellCount(layoutWidthPx);
-  const waveCount = waveformBarCount(layoutWidthPx, viewport.pixelsPerSecond);
   const label =
     displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
   const showChrome = layoutWidthPx >= 48;
   const showDuration = layoutWidthPx >= 100;
   const kindClass =
-    clip.kind === 'composition'
-      ? 'timeline-clip--comp'
-      : voice
-        ? 'timeline-clip--voice'
-        : 'timeline-clip--video';
+    clip.kind === 'composition' ? 'timeline-clip--comp' : `timeline-clip--${elementKind}`;
   const laneClass = `timeline-clip--lane-${Math.min(laneIndex, 3)}`;
 
   return (
@@ -301,6 +275,7 @@ function TimelineClip({
       aria-pressed={selected}
       aria-label={`${label}, ${durationLabel}`}
       data-clip-id={clip.id}
+      data-element-kind={elementKind}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`}
       style={{
         left: `${timeToPixel(displayStartUs, viewport)}px`,
@@ -477,41 +452,16 @@ function TimelineClip({
           />
         </>
       )}
-      {voice ? (
-        <span className="timeline-clip-waveform" aria-hidden="true">
-          {Array.from({ length: waveCount }, (_, index) => {
-            const amp = hashUnit(clip.id, index);
-            const beat = index % 8 === 0 ? 0.22 : index % 4 === 0 ? 0.1 : 0;
-            const level = Math.min(1, 0.28 + amp * 0.62 + beat);
-            const tone = level > 0.78 ? 'is-peak' : level > 0.48 ? '' : 'is-mid';
-            return (
-              <span
-                key={index}
-                className={`timeline-clip-wave-bar ${tone}`.trim()}
-                style={{ height: `${Math.round(level * 100)}%` }}
-              />
-            );
-          })}
-        </span>
-      ) : (
-        <span className="timeline-clip-filmstrip" aria-hidden="true">
-          {Array.from({ length: cellCount }, (_, index) => {
-            const t = hashUnit(clip.id, index);
-            const light = 14 + Math.round(t * 18);
-            return (
-              <span
-                key={index}
-                className="timeline-clip-cell"
-                style={{ backgroundColor: `hsl(42 42% ${light}%)` }}
-              />
-            );
-          })}
-        </span>
-      )}
+      <TimelineElementMedia
+        kind={elementKind}
+        seed={clip.id}
+        widthPx={layoutWidthPx}
+        pixelsPerSecond={viewport.pixelsPerSecond}
+      />
       {showChrome && (
         <span className="timeline-clip-chrome">
           <span className="timeline-clip-icon" aria-hidden="true">
-            {voice ? <TimelineAudioTrackIcon /> : <TimelineVideoTrackIcon />}
+            <TimelineElementGlyph kind={elementKind} />
           </span>
           <span className="timeline-clip-label">{label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
@@ -545,6 +495,8 @@ function parentCompositionFor(project: SpikeProject, compositionId: string): str
 
 export function TimelinePanel({
   project,
+  elementKinds = {},
+  transitions = [],
   playheadUs,
   playing,
   selectedIds,
@@ -582,6 +534,9 @@ export function TimelinePanel({
   onPropertyDispatch,
 }: {
   readonly project: SpikeProject;
+  /** Durable clip presentation kinds from the paired creative project. */
+  readonly elementKinds?: TimelineElementKindMap;
+  readonly transitions?: readonly TransitionV1[];
   readonly playheadUs: number;
   readonly playing: boolean;
   readonly selectedIds: readonly string[];
@@ -762,10 +717,12 @@ export function TimelinePanel({
     };
   }, []);
 
-  const visible = useMemo(
-    () => virtualTracks(tracks, 0, Math.max(36, tracksHeightPx)),
-    [tracks, tracksHeightPx],
-  );
+  // Keep every real track mounted. The previous viewport filter always used a
+  // zero scroll offset and supplied no spacer rows, so tracks below the first
+  // viewport (notably Audio in the showcase) could never render or be reached.
+  // The scroll container already bounds paint work and this guarantees that
+  // authored layers remain discoverable, selectable, and keyboard accessible.
+  const visible = tracks;
 
   // Virtual (not-yet-created) empty lanes that fill the track viewport below the
   // real tracks, so the grid reaches the bottom of the panel and media can be
@@ -1054,8 +1011,8 @@ export function TimelinePanel({
       dropUs: number,
     ) => {
       const order = composition.tracks.length;
-      // The shared schema only models video tracks; audio clips are classified by
-      // their asset (isVoiceClip) rather than by a separate audio track kind.
+      // The shared schema only models video tracks; presentation taxonomy is
+      // carried separately by the paired creative document.
       const trackId = `V${order + 1}`;
       const durationUs = safeAssetDuration(asset);
       const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
@@ -1081,16 +1038,22 @@ export function TimelinePanel({
                 kind: 'video',
                 order,
                 enabled: true,
-                clips: [
-                  {
-                    id: clipId,
-                    kind: 'video',
-                    assetId: asset.assetId,
-                    startUs,
-                    durationUs,
-                    sourceInUs: 0,
-                  },
-                ],
+                clips: [],
+              },
+            },
+          },
+          {
+            type: 'timeline.insertClip',
+            payload: {
+              compositionId: composition.id,
+              trackId,
+              clip: {
+                id: clipId,
+                kind: 'video',
+                assetId: asset.assetId,
+                startUs,
+                durationUs,
+                sourceInUs: 0,
               },
             },
           },
@@ -1912,10 +1875,10 @@ export function TimelinePanel({
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
-            const kind = timelineTrackKind(source);
+            const kind = timelineTrackKind(source, elementKinds);
             const kindIndex = visible.slice(0, index + 1).filter((t) => {
               const s = composition.tracks.find((item) => item.id === t.id);
-              return s !== undefined && timelineTrackKind(s) === kind;
+              return s !== undefined && timelineTrackKind(s, elementKinds) === kind;
             }).length;
             return (
               <div
@@ -2251,6 +2214,7 @@ export function TimelinePanel({
                     <TimelineClip
                       key={clip.id}
                       clip={clip}
+                      elementKind={timelineElementKindForClip(clip, elementKinds)}
                       {...(clip.kind === 'video' && assetDisplayNames?.[clip.assetId] !== undefined
                         ? { displayName: assetDisplayNames[clip.assetId] }
                         : {})}
@@ -2281,6 +2245,26 @@ export function TimelinePanel({
                       }}
                     />
                   ))}
+                  {transitions
+                    .filter(
+                      (transition) =>
+                        transition.trackId === source.id &&
+                        source.clips.some((clip) => clip.id === transition.leftClipId) &&
+                        source.clips.some((clip) => clip.id === transition.rightClipId),
+                    )
+                    .map((transition) => {
+                      const right = source.clips.find((clip) => clip.id === transition.rightClipId);
+                      if (right === undefined) return null;
+                      return (
+                        <TimelineTransitionJunction
+                          key={transition.id}
+                          transition={transition}
+                          boundaryUs={right.startUs}
+                          viewport={{ ...viewport, originUs: 0 }}
+                          onSeek={onSeek}
+                        />
+                      );
+                    })}
                 </span>
               </div>
             );

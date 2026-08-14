@@ -14,7 +14,7 @@ import {
 } from '@joy-media/visual-effects';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
+import { LayersIcon, PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 import { effectCategoryIconUrl } from './effect-category-icons.js';
 import { EditorPanelContext } from './App.js';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
@@ -78,6 +78,7 @@ interface EffectsPanelProps {
     };
   }) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+  readonly onCreateEffectLayer?: () => void;
 }
 
 export function EffectsPanel({
@@ -86,6 +87,7 @@ export function EffectsPanel({
   canApplyEffects,
   onDispatch,
   showToast,
+  onCreateEffectLayer,
 }: EffectsPanelProps) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('pixel-bw');
@@ -190,15 +192,27 @@ export function EffectsPanel({
       iconUrl={panelTabIconUrl('effects')}
       className="effects-panel"
       actions={
-        <button
-          type="button"
-          className="icon-button effects-studio-launch"
-          aria-label="Create effect recipe"
-          title="New Effect Studio recipe"
-          onClick={handleCreateRecipe}
-        >
-          <PlusIcon />
-        </button>
+        <>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Add Effects layer"
+            title="Add a parented Effects layer"
+            disabled={onCreateEffectLayer === undefined}
+            onClick={onCreateEffectLayer}
+          >
+            <LayersIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button effects-studio-launch"
+            aria-label="Create effect recipe"
+            title="New Effect Studio recipe"
+            onClick={handleCreateRecipe}
+          >
+            <PlusIcon />
+          </button>
+        </>
       }
       search={{ value: search, onChange: setSearch, placeholder: 'Search effects…' }}
       note={

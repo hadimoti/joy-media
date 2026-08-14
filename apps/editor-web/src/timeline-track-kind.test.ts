@@ -39,16 +39,17 @@ describe('timelineTrackKind', () => {
     ).toBe('audio');
   });
 
-  it('recognizes script tracks from either the row or all clip identities', () => {
-    expect(timelineTrackKind(track('captions-en'))).toBe('script');
+  it('distinguishes CC caption lanes from script/agent data lanes', () => {
+    expect(timelineTrackKind(track('captions-en'))).toBe('caption');
+    expect(timelineTrackKind(track('script-notes'))).toBe('script');
     expect(
       timelineTrackKind(
         track('track-3', [
-          videoClip('script-scene-1', 'draft-a'),
+          videoClip('caption-scene-1', 'dialogue.srt'),
           videoClip('subtitle-scene-2', 'dialogue.vtt'),
         ]),
       ),
-    ).toBe('script');
+    ).toBe('caption');
   });
 
   it('does not relabel mixed-purpose rows', () => {
@@ -61,6 +62,22 @@ describe('timelineTrackKind', () => {
       ),
     ).toBe('video');
   });
+
+  it('uses durable authored kinds before name heuristics', () => {
+    const row = track('ordinary-row', [videoClip('controller', 'generic')]);
+    for (const kind of [
+      'text',
+      'caption',
+      'motion',
+      'effect',
+      'filter',
+      'adjust',
+      'overlay',
+      'audio',
+    ] as const) {
+      expect(timelineTrackKind(row, { controller: kind })).toBe(kind);
+    }
+  });
 });
 
 describe('timelineTrack chrome labels', () => {
@@ -70,10 +87,28 @@ describe('timelineTrack chrome labels', () => {
     expect(timelineTrackDisplayName('video', 2)).toBe('B-roll');
   });
 
-  it('names audio and script rows with kind prefixes', () => {
+  it('names audio, captions, and script rows with kind prefixes', () => {
     expect(timelineTrackCode('audio', 1)).toBe('A1');
-    expect(timelineTrackDisplayName('audio', 1)).toBe('Voice');
+    expect(timelineTrackDisplayName('audio', 1)).toBe('Audio');
+    expect(timelineTrackCode('caption', 1)).toBe('CC1');
+    expect(timelineTrackDisplayName('caption', 1)).toBe('Captions');
     expect(timelineTrackCode('script', 2)).toBe('S2');
     expect(timelineTrackDisplayName('script', 2)).toBe('Script 2');
+  });
+
+  it('gives each requested element kind compact, distinct track chrome', () => {
+    expect(
+      (['text', 'motion', 'effect', 'filter', 'adjust', 'overlay'] as const).map((kind) => [
+        timelineTrackCode(kind, 1),
+        timelineTrackDisplayName(kind, 1),
+      ]),
+    ).toEqual([
+      ['T1', 'Text'],
+      ['M1', 'Motion'],
+      ['FX1', 'Effects'],
+      ['F1', 'Filters'],
+      ['ADJ1', 'Adjust'],
+      ['O1', 'Overlay'],
+    ]);
   });
 });

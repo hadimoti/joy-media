@@ -17,6 +17,10 @@ import {
   resolveObjectIdForSelection,
   writeClipObjectMap,
 } from './sticker-bindings.js';
+import {
+  readTimelineElementKindMap,
+  writeTimelineElementKindMap,
+} from './timeline-element-kind.js';
 
 /**
  * Source-continuous multipliers for the three supported ramps. Their inverse
@@ -77,10 +81,16 @@ export function buildDerivedClipPresentation(
   }
 
   const bindings = { ...readClipObjectMap(propertyProject) };
+  const elementKinds = { ...readTimelineElementKindMap(propertyProject) };
   const objectId = resolveObjectIdForSelection(propertyProject, [originalClipId]);
   if (objectId !== undefined) {
     for (const clipId of derivedClipIds) bindings[clipId] = objectId;
   }
+  const originalElementKind = elementKinds[originalClipId];
+  if (originalElementKind !== undefined) {
+    for (const clipId of derivedClipIds) elementKinds[clipId] = originalElementKind;
+  }
+  if (options.removeOriginal) delete elementKinds[originalClipId];
 
   const sourceConfig = audio.clips[originalClipId];
   const nextClipAudio: Record<string, (typeof audio.clips)[string]> = { ...audio.clips };
@@ -108,7 +118,10 @@ export function buildDerivedClipPresentation(
     effects: nextEffects,
   };
   return {
-    project: withProjectAudio(writeClipObjectMap(propertyProject, bindings), nextAudio),
+    project: withProjectAudio(
+      writeTimelineElementKindMap(writeClipObjectMap(propertyProject, bindings), elementKinds),
+      nextAudio,
+    ),
     audio: nextAudio,
   };
 }

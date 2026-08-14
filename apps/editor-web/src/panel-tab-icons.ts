@@ -6,7 +6,7 @@ import { iconUrl } from './icon-assets.js';
 /** Human panel names — used for tooltips, aria-label, overflow menus, and dockview title. */
 export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   // Keep the durable Dockview ID `media` for existing saved layouts.
-  media: 'Assets',
+  media: 'Create',
   monitor: 'Program Monitor',
   timeline: 'Timeline',
   flow: 'Flow',
@@ -16,7 +16,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   motion: 'Animate',
   camera: 'Camera',
   audio: 'Audio',
-  effects: 'Effects',
+  effects: 'Enhance',
   transitions: 'Transitions',
   color: 'Color',
   history: 'History',

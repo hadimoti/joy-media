@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { WorkflowGraphV2 } from '@joy-media/project-schema';
+import type { TransitionV1, WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { CommandTransaction, GraphTransaction } from '@joy-media/commands';
 import {
   fitPixelsPerSecond,
@@ -73,6 +73,7 @@ export interface DualLensPanelProps {
   }[];
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
+  readonly transitions?: readonly TransitionV1[];
 }
 
 export function DualLensPanel({
@@ -97,6 +98,7 @@ export function DualLensPanel({
   onRemoveMarker,
   markers = [],
   specialistReview,
+  transitions = [],
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -197,6 +199,7 @@ export function DualLensPanel({
             {...(onAddMarker === undefined ? {} : { onAddMarker })}
             {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
             markers={markers}
+            transitions={transitions}
           />
         )}
         {(mode === 'flow' || mode === 'split') && (
@@ -277,6 +280,7 @@ function lanesToCanvasTracks(
             endUs: item.endUs ?? item.startUs ?? 0,
             ...(item.clipId === undefined ? {} : { clipId: item.clipId }),
             ...(item.icon === undefined ? {} : { icon: item.icon }),
+            ...(item.elementKind === undefined ? {} : { elementKind: item.elementKind }),
             ...(timed ? {} : { unplaced: true as const }),
           };
         }),
@@ -305,6 +309,7 @@ function TimeProjection({
   onAddMarker,
   onRemoveMarker,
   markers,
+  transitions,
 }: {
   readonly lanes: readonly DualLensLane[];
   readonly durationUs: number;
@@ -330,6 +335,7 @@ function TimeProjection({
     readonly timeUs: number;
     readonly label: string;
   }[];
+  readonly transitions: readonly TransitionV1[];
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
   const tracks = useMemo(() => {
@@ -518,6 +524,7 @@ function TimeProjection({
         onSeek={onSeek}
         onSelectClips={onSelectClips}
         markers={markers}
+        transitions={transitions}
         {...(onRemoveMarker === undefined ? {} : { onRemoveMarker })}
       />
     </section>

@@ -278,7 +278,7 @@ export function buildRenderFrameIR(
 
   const nodes: RenderNode[] = [];
   for (const resolved of resolvedObjects) {
-    const effects = normalizeEffects(
+    const effects = evaluateEffectInstances(
       options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects,
       timeUs,
       options.propertyAnimations,
@@ -451,7 +451,7 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
   };
 }
 
-function normalizeEffects(
+export function evaluateEffectInstances(
   instances: readonly EffectInstanceV1[] | undefined,
   timeUs: TimeUs,
   propertyAnimations: JoyProjectV1['propertyAnimations'] | undefined,

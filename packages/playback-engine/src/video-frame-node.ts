@@ -9,6 +9,7 @@
  */
 import type {
   ColorGradeIR,
+  EffectInstanceIR,
   RenderFrameIR,
   RenderNode,
   Transform2D,
@@ -39,6 +40,8 @@ export interface VideoClipSpec {
   readonly zIndex: number;
   /** Optional grade resolved for this timeline clip before compositing. */
   readonly colorGrade?: ColorGradeIR;
+  /** Evaluated effects applied to the decoded frame before compositing. */
+  readonly effects?: readonly EffectInstanceIR[];
 }
 
 /** Build a {@link MediaSource} from an imported/proxy clip record. */
@@ -78,6 +81,7 @@ export function videoFrameNodeFromDecoded(
     sourceTimeUs: decoded.sourceTimeUs,
     color: { r: 0, g: 0, b: 0, a: 0 },
     ...(clip.colorGrade === undefined ? {} : { colorGrade: clip.colorGrade }),
+    ...(clip.effects === undefined ? {} : { effects: clip.effects }),
   };
 }
 

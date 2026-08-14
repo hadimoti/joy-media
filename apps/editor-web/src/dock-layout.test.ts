@@ -184,8 +184,8 @@ describe('view modes', () => {
     expect(leafIds(vertical)).toContain('monitor-col');
     expect(leafIds(wide)).toContain('monitor-row');
     expect(leafIds(wide)).not.toContain('monitor-col');
-    expect(leafViews(vertical, 'monitor-col')).toEqual(['monitor', 'templates']);
-    expect(leafViews(wide, 'monitor-row')).toEqual(['monitor', 'templates']);
+    expect(leafViews(vertical, 'monitor-col')).toEqual(['monitor']);
+    expect(leafViews(wide, 'monitor-row')).toEqual(['monitor']);
     expect(wide.activeGroup).toBe('monitor-row');
     expect(seedDockLayout('widescreen')).toEqual(wide);
     expect(seedDockLayout('vertical')).toEqual(vertical);

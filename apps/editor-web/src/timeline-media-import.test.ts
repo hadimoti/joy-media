@@ -63,16 +63,24 @@ describe('buildTimelineMediaImportTransaction', () => {
     expect(transaction.commands.map((command) => command.type)).toEqual([
       'timeline.addTrack',
       'timeline.insertClip',
+      'timeline.insertClip',
       'timeline.addTrack',
+      'timeline.insertClip',
     ]);
     expect(transaction.commands[0]).toMatchObject({
-      payload: { track: { id: 'audio-1', clips: [{ assetId: 'voice-a' }] } },
+      payload: { track: { id: 'audio-1', clips: [] } },
     });
     expect(transaction.commands[1]).toMatchObject({
-      payload: { trackId: 'audio-1', clip: { assetId: 'voice-b', startUs: 5_000_000 } },
+      payload: { trackId: 'audio-1', clip: { assetId: 'voice-a', startUs: 0 } },
     });
     expect(transaction.commands[2]).toMatchObject({
-      payload: { track: { id: 'video-1', clips: [{ assetId: 'still' }] } },
+      payload: { trackId: 'audio-1', clip: { assetId: 'voice-b', startUs: 5_000_000 } },
+    });
+    expect(transaction.commands[3]).toMatchObject({
+      payload: { track: { id: 'video-1', clips: [] } },
+    });
+    expect(transaction.commands[4]).toMatchObject({
+      payload: { trackId: 'video-1', clip: { assetId: 'still', startUs: 0 } },
     });
   });
 
@@ -89,6 +97,10 @@ describe('buildTimelineMediaImportTransaction', () => {
       expect.objectContaining({
         type: 'timeline.addTrack',
         payload: expect.objectContaining({ track: expect.objectContaining({ id: 'video-1' }) }),
+      }),
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({ trackId: 'video-1' }),
       }),
     ]);
   });

@@ -3,8 +3,34 @@ import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { buildDualLensProjection } from './dual-lens-model.js';
 import type { HistoryEntry } from './editor-session.js';
+import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
 
 describe('Dual Lens Creative Document projections', () => {
+  it('projects the same complete element taxonomy into Dual Lens Time', () => {
+    const { timeline, visual } = buildTimelineElementsShowcase();
+    const projection = buildDualLensProjection(timeline, visual, 7_000_000, []);
+    const kinds = new Set(
+      projection.lanes
+        .filter((lane) => !lane.advanced)
+        .flatMap((lane) => lane.items)
+        .flatMap((item) => (item.elementKind === undefined ? [] : [item.elementKind])),
+    );
+
+    expect(kinds).toEqual(
+      new Set([
+        'video',
+        'overlay',
+        'text',
+        'caption',
+        'motion',
+        'effect',
+        'filter',
+        'adjust',
+        'audio',
+      ]),
+    );
+  });
+
   it('extends Time view through the actual end of long authored media', () => {
     const project = buildReferenceSpikeProject();
     const root = project.compositions[project.rootCompositionId]!;

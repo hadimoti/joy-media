@@ -1213,6 +1213,12 @@ function applyAddTrack(project: SpikeProject, payload: AddTrackPayload): ApplyRe
       `track id "${payload.track.id}" already exists`,
     );
   }
+  if (payload.track.clips.length > 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      'addTrack: create an empty track, then insert clips in the same transaction',
+    );
+  }
   return {
     project: {
       ...project,

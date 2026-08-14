@@ -22,6 +22,17 @@ export const PANEL_IDS = [
 ] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
+/** The professional default surface; specialist panels remain available from View on demand. */
+export const CORE_WORKSPACE_PANELS = [
+  'media',
+  'effects',
+  'inspector',
+  'agent',
+  'timeline',
+  'flow',
+  'monitor',
+] as const satisfies readonly PanelId[];
+
 export interface WorkspaceLayout {
   readonly version: 1;
   readonly panels: readonly PanelId[];

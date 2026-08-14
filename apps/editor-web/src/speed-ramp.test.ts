@@ -9,6 +9,7 @@ import {
   buildSpeedRampPresentation,
   buildSpeedRampTransaction,
 } from './speed-ramp.js';
+import { readTimelineElementKindMap, withTimelineElementKinds } from './timeline-element-kind.js';
 
 describe('buildSpeedRampTransaction', () => {
   it('creates a source-continuous three-part ease in that preserves the timeline span', () => {
@@ -140,6 +141,32 @@ describe('buildSpeedRampTransaction', () => {
       'intro-freeze',
       'intro-right',
     ]);
+  });
+
+  it('preserves an authored timeline element identity on split and replacement clips', () => {
+    const project = withTimelineElementKinds(INITIAL_EDITOR_PROJECT, { intro: 'adjust' });
+    const duplicate = buildDerivedClipPresentation(
+      project,
+      { clips: {}, buses: [], effects: [] },
+      'intro',
+      ['intro-right'],
+    );
+    expect(readTimelineElementKindMap(duplicate.project)).toMatchObject({
+      intro: 'adjust',
+      'intro-right': 'adjust',
+    });
+
+    const replacement = buildDerivedClipPresentation(
+      project,
+      { clips: {}, buses: [], effects: [] },
+      'intro',
+      ['intro-a', 'intro-b'],
+      { removeOriginal: true },
+    );
+    expect(readTimelineElementKindMap(replacement.project)).toEqual({
+      'intro-a': 'adjust',
+      'intro-b': 'adjust',
+    });
   });
 
   it('copies clip properties for a duplicate and rebases them for a split', () => {

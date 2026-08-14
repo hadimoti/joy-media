@@ -8,8 +8,8 @@ describe('PanelTab', () => {
     const props = { api: { id: 'media' } } as unknown as IDockviewPanelHeaderProps;
     const markup = renderToStaticMarkup(<PanelTab {...props} />);
 
-    expect(markup).toContain('title="Assets"');
-    expect(markup).toContain('aria-label="Assets"');
-    expect(markup).toContain('class="panel-tab-label">Assets</span>');
+    expect(markup).toContain('title="Create"');
+    expect(markup).toContain('aria-label="Create"');
+    expect(markup).toContain('class="panel-tab-label">Create</span>');
   });
 });

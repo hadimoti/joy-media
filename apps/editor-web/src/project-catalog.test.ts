@@ -13,6 +13,7 @@ import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-fac
 import { EditorSession } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
+import { TIMELINE_ELEMENTS_SHOWCASE } from './timeline-elements-showcase.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -25,12 +26,18 @@ function memoryStorage() {
 }
 
 describe('project catalog library gate', () => {
-  it('seeds the sample project on first list', () => {
+  it('seeds the sample and timeline-elements showcase on first list', () => {
     const storage = memoryStorage();
     const projects = listCatalogProjects(storage);
-    expect(projects).toHaveLength(1);
-    expect(projects[0]?.id).toBe(INITIAL_EDITOR_PROJECT.id);
-    expect(projects[0]?.timelineProjectId).toBe(REFERENCE_PROJECT.id);
+    expect(projects).toHaveLength(2);
+    expect(
+      projects.find((entry) => entry.id === INITIAL_EDITOR_PROJECT.id)?.timelineProjectId,
+    ).toBe(REFERENCE_PROJECT.id);
+    expect(projects.find((entry) => entry.id === TIMELINE_ELEMENTS_SHOWCASE.id)).toMatchObject({
+      title: TIMELINE_ELEMENTS_SHOWCASE.title,
+      timelineProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+      visualProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+    });
   });
 
   it('creates, activates, and reopens a blank project through EditorSession', () => {
@@ -77,7 +84,7 @@ describe('project catalog library gate', () => {
     expect(loadActiveProjectId(storage)).toBeNull();
   });
 
-  it('migrates a v1 catalog to v2 and keeps legacy projects active', () => {
+  it('migrates an old catalog to v4, keeps legacy projects, and adds the complete showcase once', () => {
     const storage = memoryStorage();
     storage.setItem(
       'joy-media.project-catalog.v1',
@@ -95,8 +102,19 @@ describe('project catalog library gate', () => {
         },
       }),
     );
-    expect(listCatalogProjects(storage).map((entry) => entry.id)).toEqual(['legacy']);
+    expect(listCatalogProjects(storage).map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['legacy', TIMELINE_ELEMENTS_SHOWCASE.id]),
+    );
     expect(listTrashedCatalogProjects(storage)).toEqual([]);
-    expect(JSON.parse(storage.getItem('joy-media.project-catalog.v1')!).version).toBe(2);
+    expect(JSON.parse(storage.getItem('joy-media.project-catalog.v1')!).version).toBe(4);
+  });
+
+  it('does not recreate a showcase intentionally removed from a v4 catalog', () => {
+    const storage = memoryStorage();
+    listCatalogProjects(storage);
+    removeCatalogProject(storage, TIMELINE_ELEMENTS_SHOWCASE.id);
+    expect(
+      listCatalogProjects(storage).some((entry) => entry.id === TIMELINE_ELEMENTS_SHOWCASE.id),
+    ).toBe(false);
   });
 });

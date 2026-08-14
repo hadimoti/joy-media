@@ -6,6 +6,10 @@ import {
 } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT, DEFAULT_COMPOSITION_SIZE } from './editor-project.js';
 import type { ProjectCatalogEntry } from './project-catalog.js';
+import {
+  buildTimelineElementsShowcase,
+  TIMELINE_ELEMENTS_SHOWCASE,
+} from './timeline-elements-showcase.js';
 
 /** Blank creative documents for a brand-new library project (same id on both slices). */
 export function createBlankProjectDocuments(
@@ -68,6 +72,13 @@ export function seedsForCatalogEntry(entry: ProjectCatalogEntry): {
   readonly timeline: SpikeProject;
   readonly visual: JoyProjectV1;
 } {
+  if (
+    entry.id === TIMELINE_ELEMENTS_SHOWCASE.id ||
+    entry.timelineProjectId === TIMELINE_ELEMENTS_SHOWCASE.id ||
+    entry.visualProjectId === TIMELINE_ELEMENTS_SHOWCASE.id
+  ) {
+    return buildTimelineElementsShowcase(entry.title, entry.createdAt);
+  }
   if (
     entry.timelineProjectId === REFERENCE_PROJECT.id ||
     entry.visualProjectId === INITIAL_EDITOR_PROJECT.id

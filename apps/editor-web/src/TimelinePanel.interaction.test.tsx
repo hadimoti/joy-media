@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { ContextMenu } from './ContextMenu.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { readTimelineElementKindMap } from './timeline-element-kind.js';
+import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
 
 describe('TimelinePanel clip interaction semantics', () => {
   it('exposes keyboard selection and trim controls plus stable track hooks', () => {
@@ -120,5 +122,41 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain('Merge 2 selected clips');
     expect(markup).toContain('Open merged timeline');
     expect(markup).toContain('role="menuitem"');
+  });
+
+  it('renders Video and the six requested element identities in the Classic timeline', () => {
+    const { timeline, visual } = buildTimelineElementsShowcase();
+    const markup = renderToStaticMarkup(
+      <TimelinePanel
+        project={timeline}
+        elementKinds={readTimelineElementKindMap(visual)}
+        playheadUs={7_000_000}
+        playing={false}
+        selectedIds={['showcase-adjust']}
+        trackFlags={timeline.compositions.root!.tracks.map((track, order) => ({
+          id: track.id,
+          heightPx: 20,
+          locked: false,
+          visible: true,
+          solo: false,
+          order,
+        }))}
+        viewport={{ originUs: 0, pixelsPerSecond: 20 }}
+        onViewportChange={() => undefined}
+        autoFit={false}
+        onAutoFitChange={() => undefined}
+        onTogglePlayback={() => undefined}
+        onSeek={() => undefined}
+        onToggleSelection={() => undefined}
+        onClearSelection={() => undefined}
+        onDispatch={() => undefined}
+      />,
+    );
+
+    for (const kind of ['video', 'text', 'effect', 'filter', 'adjust', 'overlay', 'audio']) {
+      expect(markup).toContain(`data-element-kind="${kind}"`);
+    }
+    expect(markup).toContain('timeline-clip--adjust');
+    expect(markup).not.toContain('data-element-kind="sticker"');
   });
 });

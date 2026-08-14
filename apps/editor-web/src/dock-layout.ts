@@ -35,7 +35,7 @@ export type EditorViewMode = 'vertical' | 'widescreen';
 export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
 
 /** Per-mode Dockview JSON keys (bump when a seed changes). */
-export const DOCK_LAYOUT_VERSION = 10;
+export const DOCK_LAYOUT_VERSION = 11;
 export const DOCK_LAYOUT_SCHEMA_VERSION = 2;
 
 /** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
@@ -50,6 +50,8 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
   'joy-media.dockview.v6',
   'joy-media.dockview.v7',
   'joy-media.dockview.v8',
+  'joy-media.dockview.v9',
+  'joy-media.dockview.v10',
 ];
 
 /**
@@ -59,25 +61,9 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
 export const DOCK_PANEL_MINIMUM_WIDTH = 64;
 export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
-const BROWSER_GROUP = [
-  'media',
-  'effects',
-  'transitions',
-  'captions',
-  'audio',
-  'color',
-  'plugins',
-] as const;
+const BROWSER_GROUP = ['media', 'effects'] as const;
 
-const CONTEXT_GROUP = [
-  'inspector',
-  'motion',
-  'history',
-  'jobs',
-  'diagnostics',
-  'workflows',
-  'camera',
-] as const;
+const CONTEXT_GROUP = ['inspector'] as const;
 
 export interface ViewModeStorage {
   getItem(key: string): string | null;
@@ -255,7 +241,7 @@ export function verticalDockLayout(): unknown {
           {
             type: 'leaf',
             size: 500,
-            data: { views: ['monitor', 'templates'], activeView: 'monitor', id: 'monitor-col' },
+            data: { views: ['monitor'], activeView: 'monitor', id: 'monitor-col' },
           },
         ],
       },
@@ -288,7 +274,7 @@ export function widescreenDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 968,
-                data: { views: ['monitor', 'templates'], activeView: 'monitor', id: 'monitor-row' },
+                data: { views: ['monitor'], activeView: 'monitor', id: 'monitor-row' },
               },
               {
                 type: 'leaf',
