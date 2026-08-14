@@ -14528,8 +14528,12 @@ label {
 .audio-enhance-apply {
   display: grid;
   gap: 0.3rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   margin-top: 0.35rem;
   padding: 0.35rem;
+  box-shadow: 0 -0.35rem 0.5rem var(--joy-bg-raised);
 }
 .audio-enhance-primary,
 .audio-enhance-review .icon-button.is-primary {
