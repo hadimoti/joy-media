@@ -40,7 +40,10 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await addButtons.nth(1).click();
 
     await openPanel(page, 'Inspector');
-    await page.getByRole('tab', { name: 'Effects' }).click();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
     const rows = page.locator('.inspector-effect-item[data-effect-instance-id]');
     await expect(rows).toHaveCount(2);
     const firstId = await rows.nth(0).getAttribute('data-effect-instance-id');
@@ -84,7 +87,10 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.getByRole('button', { name: 'Apply to selection' }).click();
     await expect(page.locator('.effect-studio-overlay')).toHaveCount(0);
     await openPanel(page, 'Inspector');
-    await page.getByRole('tab', { name: 'Effects' }).click();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
     await expect(page.locator('.inspector-effect-item[data-effect-instance-id]')).toHaveCount(1);
     await recordEvidence(testInfo, {
       caseId: 72,
@@ -233,14 +239,23 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     await page.keyboard.press('Enter');
     await expect(page.getByRole('button', { name: 'Edit Position Y expression' })).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Effects' }).click();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
     await expect(page.getByText('No effects applied', { exact: true })).toBeVisible();
     await openPanel(page, 'Effects');
     await page.locator('.effect-add-btn:not([disabled])').first().click();
     await openPanel(page, 'Inspector');
-    await page.getByRole('tab', { name: 'Effects' }).click();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
     await expect(page.locator('.inspector-effect-item[data-effect-instance-id]')).toHaveCount(1);
-    await page.getByRole('tab', { name: 'Audio' }).click();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Audio', exact: true })
+      .click();
     await page.getByRole('spinbutton', { name: 'Volume' }).fill('0.75');
     await page.getByRole('spinbutton', { name: 'Pan' }).fill('-0.25');
     const mute = page.getByRole('button', { name: 'On', exact: true });

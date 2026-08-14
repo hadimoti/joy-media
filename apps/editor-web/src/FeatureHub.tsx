@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import {
   AudioIcon,
   AutoCaptionIcon,
+  ColorWheelIcon,
   EffectsUiIcon,
   FilterIcon,
   LayersIcon,
@@ -34,6 +35,8 @@ function FeatureGlyph({ id }: { readonly id: FeatureToolId }) {
       return <EffectsUiIcon />;
     case 'filters':
       return <FilterIcon />;
+    case 'color':
+      return <ColorWheelIcon />;
     case 'adjust':
       return <SlidersIcon />;
     default:

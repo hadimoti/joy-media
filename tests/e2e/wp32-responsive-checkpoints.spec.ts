@@ -32,13 +32,14 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
       'Color',
       'Workflows',
     ]) {
+      let navigation = page.locator('.panel-tab[aria-label="Timeline"]').first();
       if (label === 'Timeline') {
-        await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
+        await navigation.click();
         await expect(page.locator('.timeline-panel')).toBeVisible();
       } else {
-        await openPanel(page, label);
+        navigation = await openPanel(page, label);
       }
-      await expect(page.locator(`.panel-tab[aria-label="${label}"]`).first()).toBeVisible();
+      await expect(navigation).toBeVisible();
       if (label === 'Workflows') {
         await expect(page.getByText('No saved workflows', { exact: true })).toBeVisible();
       }

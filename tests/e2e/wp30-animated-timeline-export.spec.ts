@@ -27,7 +27,16 @@ async function importAnimatedGif(page: Page, name: string): Promise<void> {
 }
 
 async function cleanup(page: Page): Promise<void> {
-  const projectId = await page.evaluate(() => localStorage.getItem('joy-media.active-project.v1'));
+  const projectId = await page.evaluate(() => {
+    const raw = localStorage.getItem('joy-media.active-project.v1');
+    if (raw === null) return null;
+    try {
+      const parsed = JSON.parse(raw) as { projectId?: unknown };
+      return typeof parsed.projectId === 'string' ? parsed.projectId : null;
+    } catch {
+      return raw;
+    }
+  });
   if (projectId === null) return;
   await page.evaluate(async (id) => {
     const headers = { authorization: 'Bearer joy-media-e2e-token' };

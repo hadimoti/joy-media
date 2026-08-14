@@ -80,6 +80,7 @@ import {
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
   hasRenderableExportMedia,
+  isExportVisualTimelineClip,
   missingColorLutExportDependencies,
 } from './export-media-readiness.js';
 
@@ -298,7 +299,7 @@ import {
 import { buildCaptionLayerInsertion } from './caption-layer.js';
 import { buildThreeDRenderLayerInsertion } from './three-d-render-layer.js';
 import { FeatureHub } from './FeatureHub.js';
-import type { FeatureToolId } from './feature-architecture.js';
+import { featureActivationRoute, type FeatureToolId } from './feature-architecture.js';
 import { AdjustmentLayersPanel } from './AdjustmentLayersPanel.js';
 import {
   isAdjustmentTargetKind,
@@ -766,6 +767,10 @@ interface EditorPanelContextValue {
    * bindings live in context rather than in a renderer closure.
    */
   readonly session: EditorSession;
+  readonly createTool: FeatureToolId;
+  readonly enhanceTool: FeatureToolId;
+  readonly onCreateToolChange: (tool: FeatureToolId) => void;
+  readonly onEnhanceToolChange: (tool: FeatureToolId) => void;
   readonly activatePanel: (panelId: string) => void;
   /** Pending cross-panel request to show one selected object's animation curve. */
   readonly animationGraphFocus: AnimationGraphFocusRequest | undefined;
@@ -977,6 +982,8 @@ function EditorWorkspace({
   );
   const workspacePresetRef = useRef(workspacePreset);
   workspacePresetRef.current = workspacePreset;
+  const [createTool, setCreateTool] = useState<FeatureToolId>('media');
+  const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
   const paletteRef = useRef<HTMLElement | null>(null);
   const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
@@ -2583,18 +2590,22 @@ function EditorWorkspace({
     [redo, undo],
   );
   const activatePanel = useCallback((panelId: string) => {
+    const route = featureActivationRoute(panelId);
+    if (route?.hub === 'create') setCreateTool(route.toolId);
+    if (route?.hub === 'enhance') setEnhanceTool(route.toolId);
+    const dockPanelId = route?.dockPanelId ?? panelId;
     const api = dockviewApiRef.current;
     if (api === null) return;
-    let panel = api.getPanel(panelId);
+    let panel = api.getPanel(dockPanelId);
     if (panel === undefined) {
       api.addPanel({
-        id: panelId,
+        id: dockPanelId,
         component: 'editor-panel',
-        title: panelLabel(panelId),
+        title: panelLabel(dockPanelId),
         minimumWidth: DOCK_PANEL_MINIMUM_WIDTH,
         minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
       });
-      panel = api.getPanel(panelId);
+      panel = api.getPanel(dockPanelId);
     }
     panel?.api.setActive();
   }, []);
@@ -3180,11 +3191,7 @@ function EditorWorkspace({
         const playableTimelineClips = allTimelineClips.filter((clip) => {
           const kind = timelineElementKindForClip(clip, exportElementKinds);
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
-          return (
-            !isControlTimelineElement(kind) &&
-            kind !== 'audio' &&
-            (assetKind === undefined || assetKind === 'video')
-          );
+          return isExportVisualTimelineClip(kind, assetKind);
         });
         const contentEndUs = allTimelineClips.reduce(
           (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
@@ -3276,7 +3283,7 @@ function EditorWorkspace({
             clips.findIndex((candidate) => candidate.id === clip.id) === index,
         );
         if (exportClips.length === 0)
-          throw new Error('No playable video clips are available for export');
+          throw new Error('No playable visual clips are available for export');
 
         setExportStatus('Preloading preview-equivalent video and audio…');
         setExportProgress(0.05);
@@ -3935,21 +3942,31 @@ function EditorWorkspace({
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
     if (context === undefined) throw new Error('editor panel context is unavailable');
-    const [createTool, setCreateTool] = useState<FeatureToolId>('media');
-    const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
     const createHub = api.id === 'media';
     const enhanceHub = api.id === 'effects';
-    const effectivePanelId = createHub ? createTool : enhanceHub ? enhanceTool : api.id;
+    const effectivePanelId = createHub
+      ? context.createTool
+      : enhanceHub
+        ? context.enhanceTool
+        : api.id;
     const withFeatureHub = (content: ReactNode): ReactNode => {
       if (createHub)
         return (
-          <FeatureHub hub="create" activeTool={createTool} onToolChange={setCreateTool}>
+          <FeatureHub
+            hub="create"
+            activeTool={context.createTool}
+            onToolChange={context.onCreateToolChange}
+          >
             {content}
           </FeatureHub>
         );
       if (enhanceHub)
         return (
-          <FeatureHub hub="enhance" activeTool={enhanceTool} onToolChange={setEnhanceTool}>
+          <FeatureHub
+            hub="enhance"
+            activeTool={context.enhanceTool}
+            onToolChange={context.onEnhanceToolChange}
+          >
             {content}
           </FeatureHub>
         );
@@ -4926,8 +4943,8 @@ function EditorWorkspace({
           }}
         />,
       );
-    if (api.id === 'color')
-      return (
+    if (effectivePanelId === 'color')
+      return withFeatureHub(
         <ColorPanel
           project={visualProject}
           onChange={context.replaceVisualProject}
@@ -4943,7 +4960,7 @@ function EditorWorkspace({
                 selectedClipDurationUs: selectedTimelineVideo.clip.durationUs,
               })}
           playheadUs={state.playheadUs}
-        />
+        />,
       );
     if (effectivePanelId === 'captions')
       return withFeatureHub(
@@ -5856,6 +5873,10 @@ function EditorWorkspace({
           redo,
           jumpToHistory,
           session,
+          createTool,
+          enhanceTool,
+          onCreateToolChange: setCreateTool,
+          onEnhanceToolChange: setEnhanceTool,
           activatePanel,
           animationGraphFocus,
           openAnimationGraph,

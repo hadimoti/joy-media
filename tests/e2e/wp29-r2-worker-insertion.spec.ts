@@ -253,6 +253,7 @@ test.describe('WP-29 R2 — Worker result insertion browser closeout', () => {
     await expect(reloadedJob).toHaveCount(1);
     await expect(reloadedJob.getByRole('button', { name: 'Applied' })).toBeDisabled();
 
+    await openPanel(page, 'Timeline');
     await page.locator('.timeline-clip[data-clip-id]').first().click();
     await openPanel(page, 'Jobs');
     await page.getByRole('button', { name: 'Run audio denoise' }).click();

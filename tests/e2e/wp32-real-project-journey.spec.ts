@@ -68,7 +68,10 @@ function assetCategory(fileName: string): RegExp {
 }
 
 async function selectAssetCategory(page: Page, fileName: string): Promise<void> {
-  await page.getByRole('tab', { name: assetCategory(fileName) }).click();
+  await page
+    .getByRole('tablist', { name: 'Assets sections' })
+    .getByRole('tab', { name: assetCategory(fileName) })
+    .click();
 }
 
 async function previewAsset(page: Page, displayName: string): Promise<void> {
@@ -348,7 +351,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
       await runCheckpoint(checkpoints, 'refresh and re-download the verified export', async () => {
         await page.reload();
         await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
-        await page.locator('.panel-tab[aria-label="Audio"]').first().click();
+        await openPanel(page, 'Audio');
         await page.getByRole('tab', { name: 'Mix' }).click();
         await expect(page.getByRole('slider', { name: /^Gain voice-/ })).toHaveValue('1.25');
         const processes = page.getByRole('button', { name: 'Recent processes' });

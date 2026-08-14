@@ -1,6 +1,10 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  featureActivationRoute,
+  featureTool,
+} from '../../apps/editor-web/src/feature-architecture.js';
 
 export const E2E_TOKEN = 'joy-media-e2e-token';
 export const MEDIA_FIXTURE_DIR = join(process.cwd(), 'packages/test-fixtures/media');
@@ -163,18 +167,80 @@ async function activateTimeline(page: Page): Promise<void> {
   }).toPass({ timeout: 10_000 });
 }
 
-export async function openPanel(page: Page, label: string): Promise<void> {
-  // WP-34 renamed Motion/Templates to Animate/Library; keep historical case
-  // wording while targeting the live information architecture.
-  const liveLabel = label === 'Motion' ? 'Animate' : label === 'Templates' ? 'Library' : label;
-  const tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+const PANEL_ID_BY_LABEL: Readonly<Record<string, string>> = {
+  Assets: 'media',
+  Create: 'media',
+  Media: 'media',
+  Text: 'text',
+  Captions: 'captions',
+  Audio: 'audio',
+  Templates: 'templates',
+  Library: 'templates',
+  Effects: 'effects',
+  Enhance: 'effects',
+  Motion: 'motion',
+  Animate: 'motion',
+  Transitions: 'transitions',
+  Filters: 'filters',
+  Color: 'color',
+  Adjust: 'adjust',
+};
+
+const PANEL_TITLE_BY_ID: Readonly<Record<string, string>> = {
+  media: 'Assets',
+  text: 'Text',
+  captions: 'Captions',
+  audio: 'Audio',
+  templates: 'Templates',
+  effects: 'Effects',
+  motion: 'Animate',
+  transitions: 'Transitions',
+  filters: 'Filters',
+  color: 'Color',
+  adjust: 'Adjust',
+};
+
+/** Opens both compact hub tools and on-demand specialist Dockview panels. */
+export async function openPanel(page: Page, label: string): Promise<Locator> {
+  const panelId = PANEL_ID_BY_LABEL[label];
+  const route = panelId === undefined ? undefined : featureActivationRoute(panelId);
+  if (route !== undefined) {
+    const hubLabel = route.hub === 'create' ? 'Create' : 'Enhance';
+    const dockTab = page.locator(`.panel-tab[aria-label="${hubLabel}"]`).first();
+    await expect(dockTab).toBeVisible();
+    await dockTab.click();
+
+    const definition = featureTool(route.hub, route.toolId);
+    if (definition === undefined) throw new Error(`Unknown feature route for ${label}`);
+    const hub = page.getByRole('region', { name: `${hubLabel} tools`, exact: true });
+    const featureTab = hub.getByRole('tab', { name: definition.label, exact: true });
+    await expect(featureTab).toBeVisible();
+    await featureTab.click();
+    const panelTitle = PANEL_TITLE_BY_ID[panelId];
+    if (panelTitle === undefined) throw new Error(`Unknown panel title for ${label}`);
+    await expect(hub.locator('.joy-panel-title', { hasText: panelTitle }).first()).toBeVisible();
+    return featureTab;
+  }
+
+  const liveLabel = label;
+  let tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+  if (!(await tab.isVisible())) {
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    const menuItem = page.getByRole('menuitem', { name: liveLabel, exact: true });
+    await expect(menuItem).toBeVisible();
+    await menuItem.click();
+    tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+  }
   await expect(tab).toBeVisible();
   await tab.click();
-  if (liveLabel === 'Joy Code') {
+  if (liveLabel === 'Timeline') {
+    await expect(page.locator('.timeline-panel')).toBeVisible();
+  } else if (liveLabel === 'Joy Code') {
     await expect(page.locator('.joy-code-panel')).toBeVisible();
   } else {
     await expect(page.locator('.joy-panel-title', { hasText: liveLabel }).first()).toBeVisible();
   }
+  return tab;
 }
 
 export async function selectFirstTimelineClip(page: Page): Promise<void> {

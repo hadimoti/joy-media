@@ -3,8 +3,25 @@ import {
   colorLutReferenceIdentity,
   isColorGradeV2,
   isColorLutReferenceAvailable,
+  type AssetRecordV1,
   type JoyProjectV1,
 } from '@joy-media/project-schema';
+import { isControlTimelineElement, type TimelineElementKind } from './timeline-element-kind.js';
+
+/**
+ * Visual media accepted by the browser export pipeline before it is decoded.
+ * Image assets cover both stills and animated formats such as GIF/WebP/APNG.
+ */
+export function isExportVisualTimelineClip(
+  elementKind: TimelineElementKind,
+  assetKind: AssetRecordV1['kind'] | undefined,
+): boolean {
+  return (
+    !isControlTimelineElement(elementKind) &&
+    elementKind !== 'audio' &&
+    (assetKind === undefined || assetKind === 'video' || assetKind === 'image')
+  );
+}
 
 /**
  * A prepared export record can be rendered from a detached video, a decoded

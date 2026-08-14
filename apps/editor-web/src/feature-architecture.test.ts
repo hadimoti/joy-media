@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEATURE_HUBS } from './feature-architecture.js';
+import { FEATURE_HUBS, featureActivationRoute } from './feature-architecture.js';
 
 describe('feature architecture', () => {
   it('keeps the two compact hubs exhaustive and free of Stickers', () => {
@@ -15,6 +15,7 @@ describe('feature architecture', () => {
       'transitions',
       'effects',
       'filters',
+      'color',
       'adjust',
     ]);
     const semantics = new Set(
@@ -39,5 +40,19 @@ describe('feature architecture', () => {
     expect(FEATURE_HUBS.enhance.tools.find((tool) => tool.id === 'transitions')).toMatchObject({
       timelineBehavior: 'junction',
     });
+  });
+
+  it('routes specialist features through compact dock hubs', () => {
+    expect(featureActivationRoute('captions')).toEqual({
+      hub: 'create',
+      dockPanelId: 'media',
+      toolId: 'captions',
+    });
+    expect(featureActivationRoute('color')).toEqual({
+      hub: 'enhance',
+      dockPanelId: 'effects',
+      toolId: 'color',
+    });
+    expect(featureActivationRoute('jobs')).toBeUndefined();
   });
 });

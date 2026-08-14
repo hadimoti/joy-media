@@ -2,8 +2,30 @@ import { describe, expect, it } from 'vitest';
 import { canonicalBindingKey, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
   hasRenderableExportMedia,
+  isExportVisualTimelineClip,
   missingColorLutExportDependencies,
 } from './export-media-readiness.js';
+
+describe('isExportVisualTimelineClip', () => {
+  it.each([
+    ['video media', 'video' as const, 'video' as const],
+    ['still or animated image media', 'video' as const, 'image' as const],
+    ['legacy unresolved media', 'overlay' as const, undefined],
+    ['3D render media', 'scene3d' as const, 'image' as const],
+  ])('accepts %s', (_label, elementKind, assetKind) => {
+    expect(isExportVisualTimelineClip(elementKind, assetKind)).toBe(true);
+  });
+
+  it.each([
+    ['audio element', 'audio' as const, 'audio' as const],
+    ['caption controller', 'caption' as const, undefined],
+    ['filter controller', 'filter' as const, undefined],
+    ['LUT asset', 'video' as const, 'lut' as const],
+    ['other asset', 'video' as const, 'other' as const],
+  ])('rejects %s', (_label, elementKind, assetKind) => {
+    expect(isExportVisualTimelineClip(elementKind, assetKind)).toBe(false);
+  });
+});
 
 describe('hasRenderableExportMedia', () => {
   it.each([

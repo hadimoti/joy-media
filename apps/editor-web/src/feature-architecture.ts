@@ -1,7 +1,7 @@
 import type { TimelineElementKind } from './timeline-element-kind.js';
 
 export type CreateToolId = 'media' | 'text' | 'captions' | 'audio' | 'templates';
-export type EnhanceToolId = 'motion' | 'transitions' | 'effects' | 'filters' | 'adjust';
+export type EnhanceToolId = 'motion' | 'transitions' | 'effects' | 'filters' | 'color' | 'adjust';
 export type FeatureToolId = CreateToolId | EnhanceToolId;
 export type FeatureHubId = 'create' | 'enhance';
 
@@ -94,8 +94,15 @@ export const FEATURE_HUBS: Readonly<Record<FeatureHubId, FeatureHubDefinition>> 
       },
       {
         id: 'filters',
-        label: 'Filters / Color',
+        label: 'Filters',
         shortLabel: 'Filters',
+        timelineKinds: ['filter'],
+        timelineBehavior: 'property-or-layer',
+      },
+      {
+        id: 'color',
+        label: 'Color',
+        shortLabel: 'Color',
         timelineKinds: ['filter'],
         timelineBehavior: 'property-or-layer',
       },
@@ -109,6 +116,35 @@ export const FEATURE_HUBS: Readonly<Record<FeatureHubId, FeatureHubDefinition>> 
     ],
   },
 };
+
+export interface FeatureActivationRoute {
+  readonly hub: FeatureHubId;
+  readonly dockPanelId: 'media' | 'effects';
+  readonly toolId: FeatureToolId;
+}
+
+/**
+ * Routes former specialist panel IDs into the two compact feature hubs. This
+ * keeps saved commands and internal links working without recreating the old
+ * row of top-level tabs.
+ */
+const FEATURE_ACTIVATION_ROUTES: Readonly<Record<string, FeatureActivationRoute>> = {
+  media: { hub: 'create', dockPanelId: 'media', toolId: 'media' },
+  text: { hub: 'create', dockPanelId: 'media', toolId: 'text' },
+  captions: { hub: 'create', dockPanelId: 'media', toolId: 'captions' },
+  audio: { hub: 'create', dockPanelId: 'media', toolId: 'audio' },
+  templates: { hub: 'create', dockPanelId: 'media', toolId: 'templates' },
+  effects: { hub: 'enhance', dockPanelId: 'effects', toolId: 'effects' },
+  motion: { hub: 'enhance', dockPanelId: 'effects', toolId: 'motion' },
+  transitions: { hub: 'enhance', dockPanelId: 'effects', toolId: 'transitions' },
+  filters: { hub: 'enhance', dockPanelId: 'effects', toolId: 'filters' },
+  color: { hub: 'enhance', dockPanelId: 'effects', toolId: 'color' },
+  adjust: { hub: 'enhance', dockPanelId: 'effects', toolId: 'adjust' },
+};
+
+export function featureActivationRoute(panelId: string): FeatureActivationRoute | undefined {
+  return FEATURE_ACTIVATION_ROUTES[panelId];
+}
 
 export function featureTool(hub: FeatureHubId, id: string): FeatureToolDefinition | undefined {
   return FEATURE_HUBS[hub].tools.find((tool) => tool.id === id);
