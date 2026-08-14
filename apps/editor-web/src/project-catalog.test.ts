@@ -109,6 +109,33 @@ describe('project catalog library gate', () => {
     expect(JSON.parse(storage.getItem('joy-media.project-catalog.v1')!).version).toBe(4);
   });
 
+  it('replaces a stale showcase even when the catalog already uses v4', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      'joy-media.project-catalog.v1',
+      JSON.stringify({
+        version: 4,
+        projects: {
+          'timeline-elements-showcase-v2': {
+            id: 'timeline-elements-showcase-v2',
+            title: 'Timeline Elements Showcase',
+            createdAt: '2026-08-14T00:00:00.000Z',
+            updatedAt: '2026-08-14T00:00:00.000Z',
+            timelineProjectId: 'timeline-elements-showcase-v2',
+            visualProjectId: 'timeline-elements-showcase-v2',
+          },
+        },
+      }),
+    );
+
+    const projects = listCatalogProjects(storage);
+    expect(projects.map((entry) => entry.id)).toEqual([TIMELINE_ELEMENTS_SHOWCASE.id]);
+    expect(projects[0]).toMatchObject({
+      timelineProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+      visualProjectId: TIMELINE_ELEMENTS_SHOWCASE.id,
+    });
+  });
+
   it('does not recreate a showcase intentionally removed from a v4 catalog', () => {
     const storage = memoryStorage();
     listCatalogProjects(storage);

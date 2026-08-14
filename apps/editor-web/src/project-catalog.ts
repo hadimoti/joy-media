@@ -226,12 +226,14 @@ function readCatalog(storage: BrowserKeyValueStore): CatalogDatabase {
         entry.trashedAt === undefined ? entry : { ...entry, trashedAt: entry.trashedAt },
       ]),
     );
-    if (parsed.version < 4) {
-      for (const id of Object.keys(projects)) {
-        if (id.startsWith('timeline-elements-showcase-v') && id !== TIMELINE_ELEMENTS_SHOWCASE.id) {
-          delete projects[id];
-        }
+    let replacedStaleShowcase = false;
+    for (const id of Object.keys(projects)) {
+      if (id.startsWith('timeline-elements-showcase-v') && id !== TIMELINE_ELEMENTS_SHOWCASE.id) {
+        delete projects[id];
+        replacedStaleShowcase = true;
       }
+    }
+    if (parsed.version < 4 || replacedStaleShowcase) {
       const now = new Date().toISOString();
       if (projects[TIMELINE_ELEMENTS_SHOWCASE.id] === undefined)
         projects[TIMELINE_ELEMENTS_SHOWCASE.id] = showcaseCatalogEntry(now);
@@ -240,7 +242,7 @@ function readCatalog(storage: BrowserKeyValueStore): CatalogDatabase {
       version: 4,
       projects,
     };
-    if (parsed.version !== 4) writeCatalog(storage, database);
+    if (parsed.version !== 4 || replacedStaleShowcase) writeCatalog(storage, database);
     return database;
   } catch {
     return { version: 4, projects: {} };
