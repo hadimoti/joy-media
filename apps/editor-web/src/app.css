@@ -14003,17 +14003,29 @@ label {
   gap: 0.05rem;
   min-width: 0;
 }
-.audio-workflow-card-heading > div {
+.audio-workflow-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.audio-workflow-card-icon,
+.audio-workflow-step-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--joy-text-muted);
+}
+.audio-workflow-card-copy {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.25rem;
+  min-width: 0;
 }
 .audio-workflow-card-heading strong {
   color: var(--joy-text);
   font-size: var(--joy-type-sm);
 }
-.audio-workflow-card-heading > div > span {
+.audio-workflow-card-copy > span {
   color: var(--joy-text-muted);
   font-size: var(--joy-type-2xs);
 }
@@ -14053,18 +14065,14 @@ label {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.audio-workflow-step-number {
-  display: none;
+.audio-workflow-step-icon {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 50%;
-  background: var(--joy-bg-inset);
-  color: var(--joy-text-muted);
-  font-size: var(--joy-type-2xs);
-  font-weight: 700;
+}
+.audio-workflow-step-icon svg {
+  width: 0.8rem;
+  height: 0.8rem;
 }
 .audio-workflow-step-connector {
   flex: none;
@@ -14290,9 +14298,6 @@ label {
     justify-content: flex-start;
     min-height: 1.7rem;
     padding: 0.15rem 0.3rem;
-  }
-  .audio-workflow-step-number {
-    display: inline-flex;
   }
   .audio-workflow-footer {
     grid-template-columns: 1fr;

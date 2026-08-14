@@ -35,6 +35,8 @@ describe('AudioPanel Enhance workspace', () => {
     expect(markup).toContain('audio-enhance-runtime-button');
     expect(markup).toMatch(/audio-enhance-runtime-button[^>]*><svg/);
     expect(markup).toContain('icon-button-labeled audio-enhance-primary');
+    expect(markup).toContain('audio-workflow-card-icon');
+    expect(markup).toContain('audio-workflow-step-icon');
     expect(markup).toContain('Browser DSP ready');
     expect(markup).toContain('<strong>Browser</strong>DSP');
     expect(markup).not.toContain('<strong>0G</strong>RAM');

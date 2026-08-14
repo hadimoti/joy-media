@@ -133,6 +133,29 @@ function ResourcePill({ value, label }: { readonly value: string; readonly label
   );
 }
 
+function AudioWorkflowStepIcon({
+  capabilityId,
+}: {
+  readonly capabilityId: AudioAtomicCapability['id'];
+}) {
+  switch (capabilityId) {
+    case 'audio.eq':
+      return <TuningIcon />;
+    case 'audio.compress':
+    case 'audio.limit':
+    case 'audio.normalize':
+    case 'audio.mix':
+    case 'audio.master':
+      return <MasterBusIcon />;
+    case 'audio.clone_voice':
+    case 'audio.tts':
+    case 'audio.convert_voice':
+      return <AudioIcon />;
+    default:
+      return <AudioWorkerIcon />;
+  }
+}
+
 function CapabilityTile({ capability }: { readonly capability: AudioAtomicCapability }) {
   const model =
     capability.modelId === undefined
@@ -473,9 +496,14 @@ export function AudioPanel({
             </div>
             <div className="audio-workflow-card">
               <div className="audio-workflow-card-heading">
-                <div>
-                  <strong>{selectedWorkflow.label}</strong>
-                  <span>{selectedWorkflow.steps.length} processing steps</span>
+                <div className="audio-workflow-card-title">
+                  <span className="icon-tool audio-workflow-card-icon" aria-hidden="true">
+                    <AudioIcon />
+                  </span>
+                  <div className="audio-workflow-card-copy">
+                    <strong>{selectedWorkflow.label}</strong>
+                    <span>{selectedWorkflow.steps.length} processing steps</span>
+                  </div>
                 </div>
                 <p className="audio-workflow-command">“{selectedWorkflow.command}”</p>
               </div>
@@ -485,8 +513,8 @@ export function AudioPanel({
               >
                 {workflowGraph.nodes.map((node, index) => (
                   <li key={node.id}>
-                    <span className="audio-workflow-step-number" aria-hidden="true">
-                      {index + 1}
+                    <span className="audio-workflow-step-icon" aria-hidden="true">
+                      <AudioWorkflowStepIcon capabilityId={node.id} />
                     </span>
                     <span className="audio-workflow-step-label">{node.label}</span>
                     {index < workflowGraph.nodes.length - 1 && (
