@@ -6033,18 +6033,6 @@ function EditorWorkspace({
   );
 }
 
-function formatTimecode(timeUs: number, fps = 30): string {
-  const totalFrames = Math.max(0, Math.floor((timeUs / 1_000_000) * fps));
-  const frames = totalFrames % fps;
-  const totalSeconds = Math.floor(totalFrames / fps);
-  const seconds = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const minutes = totalMinutes % 60;
-  const hours = Math.floor(totalMinutes / 60);
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
-}
-
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
   if (context === undefined) throw new Error('editor panel context is unavailable');
@@ -6489,11 +6477,6 @@ function MonitorPanel() {
             </div>
           </div>
         )}
-        <div className="monitor-transport-start">
-          <span className="monitor-meta" dir="ltr">
-            {width} × {height} · {formatTimecode(state.playheadUs)}
-          </span>
-        </div>
         <div className="monitor-transport-controls">
           <button
             type="button"

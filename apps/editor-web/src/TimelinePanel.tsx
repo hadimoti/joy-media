@@ -51,7 +51,7 @@ import {
   type CommandContext,
   type ContextMenuItem,
 } from './commands/timeline-commands.js';
-import { ContextMenu } from './ContextMenu.js';
+import { TimelineContextMenu } from './TimelineContextMenu.js';
 import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflowMenu.js';
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
@@ -2298,9 +2298,7 @@ export function TimelinePanel({
         </div>
       </div>
 
-      {menu !== undefined && (
-        <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(undefined)} />
-      )}
+      {menu !== undefined && <TimelineContextMenu menu={menu} onClose={() => setMenu(undefined)} />}
     </article>
   );
 }

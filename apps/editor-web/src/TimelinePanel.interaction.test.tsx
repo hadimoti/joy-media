@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { ContextMenu } from './ContextMenu.js';
+import { TimelineContextMenu } from './TimelineContextMenu.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { readTimelineElementKindMap } from './timeline-element-kind.js';
 import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
@@ -122,6 +123,30 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain('Merge 2 selected clips');
     expect(markup).toContain('Open merged timeline');
     expect(markup).toContain('role="menuitem"');
+  });
+
+  it('renders timeline actions in the anchored context drawer with their shortcuts', () => {
+    const markup = renderToStaticMarkup(
+      <TimelineContextMenu
+        menu={{
+          x: 240,
+          y: 180,
+          items: [
+            { label: 'Split at playhead', shortcut: 'S', action: () => undefined },
+            { label: '', action: () => undefined, dividerBefore: true },
+            { label: 'Ripple delete', shortcut: 'Delete', action: () => undefined },
+          ],
+        }}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('timeline-context-menu');
+    expect(markup).toContain('timeline-context-backdrop');
+    expect(markup).toContain('Split at playhead');
+    expect(markup).toContain('Ripple delete');
+    expect(markup).toContain('role="separator"');
+    expect(markup).toContain('data-menu-index="2"');
   });
 
   it('renders Video and the six requested element identities in the Classic timeline', () => {
