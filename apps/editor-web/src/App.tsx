@@ -4536,6 +4536,10 @@ function EditorWorkspace({
         selectedTimelineEntry?.clip?.kind === 'video'
           ? visualProject.assets[selectedTimelineEntry.clip.assetId]
           : undefined;
+      const selectedTimelineObjectId =
+        selectedTimelineEntry?.clip === undefined
+          ? undefined
+          : resolveObjectIdForSelection(visualProject, [selectedTimelineEntry.clip.id]);
       const maskTarget: MaskTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? {
@@ -4560,16 +4564,26 @@ function EditorWorkspace({
       const upscaleTarget: UpscaleTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? { targetId: object.id, objectId: object.id, assetId: object.assetId, kind: 'image' }
-          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'image'
             ? {
-                targetId: selectedTimelineEntry.clip.id,
+                targetId: selectedTimelineObjectId ?? selectedTimelineEntry.clip.id,
+                ...(selectedTimelineObjectId === undefined
+                  ? {}
+                  : { objectId: selectedTimelineObjectId }),
                 clipId: selectedTimelineEntry.clip.id,
                 assetId: selectedTimelineEntry.clip.assetId,
-                kind: 'video',
-                durationUs: selectedTimelineEntry.clip.durationUs,
-                playheadUs: state.playheadUs,
+                kind: 'image',
               }
-            : undefined;
+            : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+              ? {
+                  targetId: selectedTimelineEntry.clip.id,
+                  clipId: selectedTimelineEntry.clip.id,
+                  assetId: selectedTimelineEntry.clip.assetId,
+                  kind: 'video',
+                  durationUs: selectedTimelineEntry.clip.durationUs,
+                  playheadUs: state.playheadUs,
+                }
+              : undefined;
       const rootComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       const adjustmentTargets =
