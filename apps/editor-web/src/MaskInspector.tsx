@@ -24,6 +24,74 @@ export interface MaskInspectorProps {
   readonly client?: BrowserControlPlaneClient;
 }
 
+export type MaskRuntimeState = 'ready' | 'source-missing' | 'model-missing' | 'offline';
+
+export interface MaskRuntimeStatus {
+  readonly state: MaskRuntimeState;
+  readonly label: string;
+  readonly title: string;
+}
+
+/** Keep the Inspector's idea of a live Worker consistent with the Audio workspace. */
+export const MASK_WORKER_FRESHNESS_MS = 35_000;
+
+/**
+ * A paired record is not evidence of a usable local runtime. A Worker must
+ * have checked in recently, advertise the exact image/video capability, and
+ * hold the selected source asset before the destructive-looking actions can
+ * become enabled.
+ */
+export function maskRuntimeStatus(
+  target: Pick<MaskTarget, 'kind' | 'assetId'>,
+  workers: readonly BrowserWorker[],
+  nowMs = Date.now(),
+): MaskRuntimeStatus {
+  const capability = target.kind === 'image' ? 'mask.image' : 'mask.video';
+  const alternateCapability = target.kind === 'image' ? 'mask.video' : 'mask.image';
+  const pairedWorkers = workers.filter((worker) => worker.paired && !worker.revoked);
+  const onlineWorkers = pairedWorkers.filter(
+    (worker) =>
+      worker.lastSeenAt !== undefined &&
+      nowMs - worker.lastSeenAt >= 0 &&
+      nowMs - worker.lastSeenAt < MASK_WORKER_FRESHNESS_MS,
+  );
+  const capableWorkers = onlineWorkers.filter((worker) => worker.capabilities.includes(capability));
+  const readyWorker = capableWorkers.find((worker) =>
+    (worker.localAssetIds ?? []).includes(target.assetId),
+  );
+
+  if (readyWorker !== undefined) {
+    const label = target.kind === 'image' ? 'Photo Worker ready' : 'Video Worker ready';
+    return { state: 'ready', label, title: `${label} · selected source is local` };
+  }
+  if (capableWorkers.length > 0) {
+    return {
+      state: 'source-missing',
+      label: 'Worker ready · source missing',
+      title: 'The selected source is not available on a capable Local Worker',
+    };
+  }
+  if (onlineWorkers.some((worker) => worker.capabilities.includes(alternateCapability))) {
+    const label =
+      target.kind === 'image'
+        ? 'Video tracking ready · add image model'
+        : 'Photo masks ready · add SAM 2';
+    return { state: 'model-missing', label, title: label };
+  }
+  if (onlineWorkers.length > 0) {
+    const label = target.kind === 'image' ? 'Add image masking model' : 'Add SAM 2 video tracking';
+    return { state: 'model-missing', label, title: label };
+  }
+  return {
+    state: 'offline',
+    label: 'Local Worker offline',
+    title:
+      pairedWorkers.length > 0
+        ? 'A paired Local Worker has not checked in recently'
+        : 'Pair a Local Worker to enable masking',
+  };
+}
+
 export function MaskInspector({
   projectId,
   projectTitle,
@@ -46,7 +114,6 @@ export function MaskInspector({
   );
   const settingsRef = useRef(settings);
   const callbacksRef = useRef({ onChange, onApplyResult });
-  const capability = target.kind === 'image' ? 'mask.image' : 'mask.video';
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -69,20 +136,8 @@ export function MaskInspector({
     return () => window.clearInterval(timer);
   }, [refreshWorkers]);
 
-  const capableWorkers = workers.filter(
-    (worker) => worker.paired && !worker.revoked && worker.capabilities.includes(capability),
-  );
-  const readyWorker = capableWorkers.find((worker) =>
-    (worker.localAssetIds ?? []).includes(target.assetId),
-  );
-  const runtimeState =
-    readyWorker !== undefined
-      ? 'ready'
-      : capableWorkers.length > 0
-        ? 'source-missing'
-        : workers.length > 0
-          ? 'model-missing'
-          : 'offline';
+  const runtime = maskRuntimeStatus(target, workers);
+  const runtimeState = runtime.state;
 
   useEffect(() => {
     const jobId = settings.lastJob?.id;
@@ -208,15 +263,13 @@ export function MaskInspector({
       <section className="inspector-section mask-runtime-section">
         <div className="mask-section-heading">
           <h3>Model</h3>
-          <span className={`mask-runtime-state mask-runtime-state--${runtimeState}`}>
+          <span
+            className={`mask-runtime-state mask-runtime-state--${runtimeState}`}
+            role="status"
+            title={runtime.title}
+          >
             <span aria-hidden="true" />
-            {runtimeState === 'ready'
-              ? `${readyWorker!.id} ready`
-              : runtimeState === 'source-missing'
-                ? 'Sync source to Worker'
-                : runtimeState === 'model-missing'
-                  ? 'Install masking model'
-                  : 'Local Worker offline'}
+            {runtime.label}
           </span>
         </div>
         <select
@@ -456,6 +509,7 @@ export function MaskInspector({
             type="button"
             className="icon-button icon-button-labeled mask-primary-action"
             disabled={running || runtimeState !== 'ready'}
+            title={runtimeState === 'ready' ? 'Create alpha matte' : runtime.title}
             onClick={() => void queue('matte')}
           >
             <MaskIcon /> Create Mask
@@ -464,6 +518,7 @@ export function MaskInspector({
             type="button"
             className="icon-button icon-button-labeled"
             disabled={running || runtimeState !== 'ready'}
+            title={runtimeState === 'ready' ? 'Remove background' : runtime.title}
             onClick={() => void queue('cutout')}
           >
             <SubjectIcon /> Remove BG

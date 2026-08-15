@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { MaskInspector } from './MaskInspector.js';
+import { MaskInspector, maskRuntimeStatus } from './MaskInspector.js';
 import { defaultMaskSettings } from './masking.js';
 
 describe('MaskInspector', () => {
@@ -31,5 +31,35 @@ describe('MaskInspector', () => {
     expect(markup).toContain('aria-label="Tracking direction"');
     expect(markup).toContain('Create Mask');
     expect(markup).toContain('Remove BG');
+  });
+
+  it('distinguishes a live photo Worker from video tracking and stale pairings', () => {
+    const photoWorker = {
+      id: 'worker-photo',
+      paired: true,
+      revoked: false,
+      capabilities: ['mask.image'],
+      localAssetIds: ['photo-1'],
+      lastSeenAt: 1_000,
+    } as const;
+
+    expect(
+      maskRuntimeStatus({ kind: 'image', assetId: 'photo-1' }, [photoWorker], 2_000),
+    ).toMatchObject({
+      state: 'ready',
+      label: 'Photo Worker ready',
+    });
+    expect(
+      maskRuntimeStatus({ kind: 'video', assetId: 'video-1' }, [photoWorker], 2_000),
+    ).toMatchObject({
+      state: 'model-missing',
+      label: 'Photo masks ready · add SAM 2',
+    });
+    expect(
+      maskRuntimeStatus({ kind: 'image', assetId: 'photo-1' }, [photoWorker], 40_000),
+    ).toMatchObject({
+      state: 'offline',
+      label: 'Local Worker offline',
+    });
   });
 });
