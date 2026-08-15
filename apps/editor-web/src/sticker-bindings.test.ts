@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   bindClipToObject,
+  readClipMediaKindMap,
   readClipObjectMap,
   resolveObjectIdForSelection,
+  writeClipMediaKind,
 } from './sticker-bindings.js';
 
 function emptyProject(): JoyProjectV1 {
@@ -62,5 +64,10 @@ describe('sticker-bindings', () => {
     const next = bindClipToObject(emptyProject(), 'clip-sticker-1', 'sticker-1');
     expect(resolveObjectIdForSelection(next, ['clip-sticker-1'])).toBe('sticker-1');
     expect(readClipObjectMap(next)['clip-sticker-1']).toBe('sticker-1');
+  });
+
+  it('persists the source kind for image clips that use the video schema', () => {
+    const next = writeClipMediaKind(emptyProject(), 'clip-image-1', 'image');
+    expect(readClipMediaKindMap(next)['clip-image-1']).toBe('image');
   });
 });

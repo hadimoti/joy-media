@@ -161,8 +161,10 @@ import { TransitionsPanel } from './TransitionsPanel.js';
 import {
   bindClipToObject,
   clearImageMatte,
+  readClipMediaKindMap,
   readImageMatteMap,
   resolveObjectIdForSelection,
+  writeClipMediaKind,
   writeImageMatte,
 } from './sticker-bindings.js';
 import {
@@ -4227,34 +4229,38 @@ function EditorWorkspace({
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       const controllerId = `media-controller-${clipId}`;
       context.replaceVisualProject(
-        bindClipToObject(
-          {
-            ...projectWithImportedAsset(context.visualProject, {
-              id: asset.assetId,
-              kind: asset.kind,
-              displayName: asset.displayName,
-              descriptor: asset.descriptor,
-            }),
-            visualObjects: {
-              ...context.visualProject.visualObjects,
-              [controllerId]: {
-                id: controllerId,
-                kind: 'null',
-                assetId: asset.assetId,
-                transform: {
-                  x: 0,
-                  y: 0,
-                  scaleX: 1,
-                  scaleY: 1,
-                  rotationDeg: 0,
-                  opacity: 1,
-                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        writeClipMediaKind(
+          bindClipToObject(
+            {
+              ...projectWithImportedAsset(context.visualProject, {
+                id: asset.assetId,
+                kind: asset.kind,
+                displayName: asset.displayName,
+                descriptor: asset.descriptor,
+              }),
+              visualObjects: {
+                ...context.visualProject.visualObjects,
+                [controllerId]: {
+                  id: controllerId,
+                  kind: 'null',
+                  assetId: asset.assetId,
+                  transform: {
+                    x: 0,
+                    y: 0,
+                    scaleX: 1,
+                    scaleY: 1,
+                    rotationDeg: 0,
+                    opacity: 1,
+                    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+                  },
                 },
               },
             },
-          },
+            clipId,
+            controllerId,
+          ),
           clipId,
-          controllerId,
+          asset.kind,
         ),
       );
       context.dispatchTimeline(
@@ -4542,12 +4548,18 @@ function EditorWorkspace({
           : resolveObjectIdForSelection(visualProject, [selectedTimelineEntry.clip.id]);
       const selectedObjectAsset =
         object?.assetId === undefined ? undefined : visualProject.assets[object.assetId];
+      const selectedClipMediaKind =
+        selectedTimelineEntry?.clip === undefined
+          ? undefined
+          : readClipMediaKindMap(visualProject)[selectedTimelineEntry.clip.id];
       const selectedImageAssetId =
         selectedMaskAsset?.kind === 'image' && selectedTimelineEntry?.clip?.kind === 'video'
           ? selectedTimelineEntry?.clip?.assetId
           : selectedObjectAsset?.kind === 'image'
             ? object?.assetId
-            : undefined;
+            : selectedClipMediaKind === 'image' && selectedTimelineEntry?.clip?.kind === 'video'
+              ? selectedTimelineEntry.clip.assetId
+              : undefined;
       const maskTarget: MaskTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? {

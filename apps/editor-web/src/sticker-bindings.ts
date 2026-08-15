@@ -9,9 +9,11 @@ import { TIMELINE_OBJECT_IDS } from './editor-project.js';
 
 export const CLIP_OBJECTS_PLUGIN_KEY = 'joy.clipObjects';
 export const IMAGE_MATTE_PLUGIN_KEY = 'joy.imageMatte';
+export const CLIP_MEDIA_KINDS_PLUGIN_KEY = 'joy.clipMediaKinds';
 
 export type ClipObjectMap = Readonly<Record<string, string>>;
 export type ImageMatteMap = Readonly<Record<string, string>>;
+export type ClipMediaKindMap = Readonly<Record<string, 'video' | 'audio' | 'image'>>;
 
 export function readClipObjectMap(project: JoyProjectV1): ClipObjectMap {
   const raw = project.pluginData[CLIP_OBJECTS_PLUGIN_KEY];
@@ -48,6 +50,39 @@ export function bindClipToObject(
   objectId: string,
 ): JoyProjectV1 {
   return writeClipObjectMap(project, { ...readClipObjectMap(project), [clipId]: objectId });
+}
+
+/**
+ * Timeline clips use the video schema for still images too. Keep the source
+ * media kind beside the clip so Inspector capabilities do not depend on the
+ * asset record having been hydrated in the current browser session.
+ */
+export function readClipMediaKindMap(project: JoyProjectV1): ClipMediaKindMap {
+  const raw = project.pluginData[CLIP_MEDIA_KINDS_PLUGIN_KEY];
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, 'video' | 'audio' | 'image'> = {};
+  for (const [clipId, kind] of Object.entries(raw as Record<string, unknown>)) {
+    if (kind === 'video' || kind === 'audio' || kind === 'image') out[clipId] = kind;
+  }
+  return out;
+}
+
+export function writeClipMediaKind(
+  project: JoyProjectV1,
+  clipId: string,
+  kind: 'video' | 'audio' | 'image',
+): JoyProjectV1 {
+  return {
+    ...project,
+    pluginData: {
+      ...project.pluginData,
+      [CLIP_MEDIA_KINDS_PLUGIN_KEY]: {
+        ...readClipMediaKindMap(project),
+        [clipId]: kind,
+      } as unknown as JsonValue,
+    },
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export function resolveObjectIdForSelection(
