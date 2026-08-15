@@ -95,7 +95,9 @@ test.describe('WP-30 animated timeline export', () => {
           expect.objectContaining({ codec_type: 'audio', codec_name: 'aac' }),
         ]),
       );
-      expect(Number(probe.format?.duration)).toBeGreaterThan(0);
+      const durationSeconds = Number(probe.format?.duration);
+      expect(durationSeconds).toBeGreaterThanOrEqual(0.95);
+      expect(durationSeconds).toBeLessThanOrEqual(1.05);
       const frameHashes = execFileSync(
         'ffmpeg',
         ['-v', 'error', '-i', path!, '-map', '0:v:0', '-an', '-f', 'framemd5', '-'],
@@ -106,7 +108,7 @@ test.describe('WP-30 animated timeline export', () => {
         .map((line) => line.split(',').at(-1)?.trim())
         .filter((hash): hash is string => hash !== undefined);
       const uniqueFrameHashes = [...new Set(frameHashes)];
-      expect(frameHashes.length).toBeGreaterThan(1);
+      expect(frameHashes).toHaveLength(30);
       expect(uniqueFrameHashes.length).toBeGreaterThan(1);
       await info.attach('animated-export.json', {
         body: Buffer.from(
@@ -114,7 +116,7 @@ test.describe('WP-30 animated timeline export', () => {
             name,
             bytes,
             filename: download.suggestedFilename(),
-            duration: probe.format?.duration,
+            duration: durationSeconds,
             frameCount: frameHashes.length,
             uniqueFrameHashes,
           }),

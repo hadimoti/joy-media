@@ -320,9 +320,12 @@ async function route(
       throw new ControlPlaneError('REQUEST_INVALID', 'browser export must be video/mp4');
     const bytes = await readBytes(request, 512 * 1024 * 1024);
     const requestedFrameRate = Number(request.headers['x-joy-frame-rate'] ?? 30);
+    const requestedFrameCountHeader = request.headers['x-joy-frame-count'];
+    const requestedFrameCount =
+      requestedFrameCountHeader === undefined ? undefined : Number(requestedFrameCountHeader);
     let result: ReturnType<typeof remuxBrowserMp4Bytes>;
     try {
-      result = remuxBrowserMp4Bytes(bytes, requestedFrameRate);
+      result = remuxBrowserMp4Bytes(bytes, requestedFrameRate, requestedFrameCount);
     } catch {
       throw new ControlPlaneError('PROVIDER_FAILED', 'browser export remux failed');
     }

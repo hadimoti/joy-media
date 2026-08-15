@@ -204,9 +204,11 @@ describe('BrowserControlPlaneClient', () => {
   it('passes the caller abort signal through browser export remux', async () => {
     const abortController = new AbortController();
     let requestSignal: AbortSignal | null | undefined;
+    let requestHeaders: HeadersInit | undefined;
     const original = globalThis.fetch;
     globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       requestSignal = init?.signal;
+      requestHeaders = init?.headers;
       return new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
         headers: { 'content-type': 'video/mp4' },
@@ -222,6 +224,7 @@ describe('BrowserControlPlaneClient', () => {
           'project-1',
           new Blob(['browser mp4'], { type: 'video/mp4' }),
           30,
+          90,
           abortController.signal,
         ),
       ).resolves.toMatchObject({ size: 3, type: 'video/mp4' });
@@ -229,6 +232,10 @@ describe('BrowserControlPlaneClient', () => {
       globalThis.fetch = original;
     }
     expect(requestSignal).toBe(abortController.signal);
+    expect(requestHeaders).toMatchObject({
+      'x-joy-frame-rate': '30',
+      'x-joy-frame-count': '90',
+    });
   });
 });
 

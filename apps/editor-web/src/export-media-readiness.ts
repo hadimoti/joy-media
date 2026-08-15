@@ -60,6 +60,40 @@ export function hasRenderableExportMedia(media: PreparedExportMediaLike): boolea
   );
 }
 
+export interface ExportVisualClipLike {
+  readonly id: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+}
+
+/**
+ * Resolve the prepared visual that owns the export frame at `timeUs`.
+ *
+ * Preview playback deliberately resolves only HTML-video media. Export also
+ * pre-decodes still and animated images, so reusing the preview resolver would
+ * silently skip that deterministic image source and fall back to a cache owned
+ * by the monitor. Stable priority preserves timeline order for equal layers.
+ */
+export function activePreparedExportClipAt<T extends ExportVisualClipLike>(
+  clips: readonly T[],
+  timeUs: number,
+  mediaByClipId: ReadonlyMap<string, PreparedExportMediaLike>,
+  priorityForClip: (clip: T) => number = () => 0,
+): T | undefined {
+  let selected: T | undefined;
+  let selectedPriority = Number.POSITIVE_INFINITY;
+  for (const clip of clips) {
+    if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) continue;
+    if (!hasRenderableExportMedia(mediaByClipId.get(clip.id) ?? {})) continue;
+    const priority = priorityForClip(clip);
+    if (selected === undefined || priority < selectedPriority) {
+      selected = clip;
+      selectedPriority = priority;
+    }
+  }
+  return selected;
+}
+
 /**
  * Export must never silently bypass a referenced custom LUT. This includes
  * static grades and every persisted hold key, even if that key is not active

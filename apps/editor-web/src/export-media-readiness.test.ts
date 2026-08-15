@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalBindingKey, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
+  activePreparedExportClipAt,
   hasRenderableExportMedia,
   isExportDurationTimelineClip,
   isExportVisualTimelineClip,
@@ -66,6 +67,31 @@ describe('hasRenderableExportMedia', () => {
     ['explicitly empty', { video: undefined, stillFrame: undefined }],
   ])('rejects %s media', (_label, media) => {
     expect(hasRenderableExportMedia(media)).toBe(false);
+  });
+});
+
+describe('activePreparedExportClipAt', () => {
+  const clips = [
+    { id: 'animated-image', startUs: 0, durationUs: 1_000_000, layer: 1 },
+    { id: 'base-video', startUs: 0, durationUs: 1_000_000, layer: 0 },
+    { id: 'later-image', startUs: 1_000_000, durationUs: 1_000_000, layer: 0 },
+  ] as const;
+
+  it('selects prepared animated-image media instead of requiring an HTML video', () => {
+    const media = new Map([['animated-image', { animatedFrameSource: {} }]]);
+    expect(activePreparedExportClipAt(clips, 250_000, media)?.id).toBe('animated-image');
+  });
+
+  it('ignores unprepared and inactive clips while honoring stable layer priority', () => {
+    const media = new Map([
+      ['animated-image', { stillFrame: {} }],
+      ['base-video', { video: {} }],
+      ['later-image', { stillFrame: {} }],
+    ]);
+    expect(activePreparedExportClipAt(clips, 250_000, media, (clip) => clip.layer)?.id).toBe(
+      'base-video',
+    );
+    expect(activePreparedExportClipAt(clips, 1_000_000, media)?.id).toBe('later-image');
   });
 });
 

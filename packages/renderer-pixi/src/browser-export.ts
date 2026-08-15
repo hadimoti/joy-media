@@ -112,7 +112,7 @@ export interface BrowserMp4ExportSource {
   readonly audioTrack?: MediaStreamTrack;
   /** MP4 MIME selected by `selectBrowserMp4MimeType`; selected here when omitted. */
   readonly mimeType?: BrowserMp4MimeType;
-  /** Runs immediately after recording starts, for synchronized media starts. */
+  /** Runs after MediaRecorder emits `start`, for synchronized media starts. */
   readonly onRecordingStart?: () => void;
   readonly filename?: string;
   /** When false, the caller owns the final download (for server remux). */
@@ -168,10 +168,30 @@ export async function downloadBrowserMp4(
     const context = source.renderFrame === undefined ? undefined : canvas.getContext('2d');
     if (source.renderFrame !== undefined && context === null)
       throw new Error('2D canvas is unavailable for browser MP4 export');
-    stream = canvas.captureStream(frameRate);
-    videoTrack = stream.getVideoTracks()[0] as
-      (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+    let manualFrameCapture = false;
+    try {
+      const candidateStream = canvas.captureStream(0);
+      const candidateTrack = candidateStream.getVideoTracks()[0] as
+        (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+      if (typeof candidateTrack?.requestFrame === 'function') {
+        stream = candidateStream;
+        videoTrack = candidateTrack;
+        manualFrameCapture = true;
+      } else {
+        candidateTrack?.stop();
+      }
+    } catch {
+      // Older capture implementations reject a zero frame rate. The timed
+      // stream below retains compatibility, but modern Chromium uses manual
+      // capture so every authored frame is explicitly handed to the encoder.
+    }
+    if (stream === undefined) {
+      stream = canvas.captureStream(frameRate);
+      videoTrack = stream.getVideoTracks()[0] as
+        (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
+    }
     if (videoTrack === undefined) throw new Error('canvas capture did not produce a video track');
+    const captureVideoTrack = videoTrack;
 
     fallbackAudio = source.audioTrack === undefined ? new AudioContext() : undefined;
     const audioDestination = fallbackAudio?.createMediaStreamDestination();
@@ -214,10 +234,7 @@ export async function downloadBrowserMp4(
       oscillator.start();
       oscillatorStarted = true;
     }
-    recorder.start();
-    source.onRecordingStart?.();
-    let nextFrameAt = performance.now();
-    for (let index = 0; index < frameCount; index++) {
+    const paintExportFrame = async (index: number): Promise<void> => {
       if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (source.paintFrame !== undefined) await source.paintFrame(index);
       else {
@@ -231,7 +248,37 @@ export async function downloadBrowserMp4(
         pixels.set(frame);
         context!.putImageData(new ImageData(pixels, width, height), 0, 0);
       }
-      videoTrack.requestFrame?.();
+      // A requestAnimationFrame boundary lets a 2D/WebGL paint commit before
+      // the capture track samples it. Manual mode then submits exactly one
+      // frame per authored timeline frame instead of racing an automatic
+      // wall-clock sampler on a cold or software-rendered GPU.
+      await waitForBrowserPaint(source.signal);
+    };
+
+    let firstPendingIndex = 0;
+    if (manualFrameCapture) {
+      // Chromium may defer MediaRecorder's `start` event until the manual
+      // canvas track supplies its first frame. Paint that authored frame
+      // before start(), then request it immediately after start() to avoid a
+      // blank kick frame and the resulting start/request deadlock.
+      await paintExportFrame(0);
+      firstPendingIndex = 1;
+    }
+    await startMediaRecorder(
+      recorder,
+      source.signal,
+      manualFrameCapture ? () => captureVideoTrack.requestFrame?.() : undefined,
+    );
+    source.onRecordingStart?.();
+    let nextFrameAt = performance.now();
+    if (manualFrameCapture) {
+      source.onProgress?.(1, frameCount);
+      nextFrameAt += frameDurationMs;
+      await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
+    }
+    for (let index = firstPendingIndex; index < frameCount; index++) {
+      await paintExportFrame(index);
+      if (manualFrameCapture) captureVideoTrack.requestFrame?.();
       source.onProgress?.(index + 1, frameCount);
       nextFrameAt += frameDurationMs;
       await waitForBrowserExportFrame(Math.max(0, nextFrameAt - performance.now()), source.signal);
@@ -291,6 +338,62 @@ export async function downloadBrowserMp4(
       canvas.height = 0;
     }
   }
+}
+
+function startMediaRecorder(
+  recorder: MediaRecorder,
+  signal?: AbortSignal,
+  afterStartCall?: () => void,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Export cancelled', 'AbortError'));
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      recorder.removeEventListener('start', onStart);
+      recorder.removeEventListener('error', onError);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onStart = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (): void => {
+      cleanup();
+      reject(new Error(`browser MP4 recorder failed to start (${recorder.mimeType})`));
+    };
+    const onAbort = (): void => {
+      cleanup();
+      reject(new DOMException('Export cancelled', 'AbortError'));
+    };
+    recorder.addEventListener('start', onStart, { once: true });
+    recorder.addEventListener('error', onError, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      recorder.start();
+      afterStartCall?.();
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
+function waitForBrowserPaint(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Export cancelled', 'AbortError'));
+  return new Promise<void>((resolve, reject) => {
+    let frameId = 0;
+    const cleanup = (): void => signal?.removeEventListener('abort', onAbort);
+    const onAbort = (): void => {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frameId);
+      cleanup();
+      reject(new DOMException('Export cancelled', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    frameId = requestAnimationFrame(() => {
+      cleanup();
+      resolve();
+    });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 function waitForBrowserExportFrame(delayMs: number, signal?: AbortSignal): Promise<void> {

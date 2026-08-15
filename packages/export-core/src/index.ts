@@ -250,18 +250,40 @@ export function remuxBrowserMp4(
   inputPath: string,
   outputPath: string,
   frameRate = 30,
+  frameCount?: number,
 ): ExportProbe {
+  if (!Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 120)
+    throw new RangeError('browser remux frame rate is invalid');
+  if (
+    frameCount !== undefined &&
+    (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
+  )
+    throw new RangeError('browser remux frame count is invalid');
   const temporaryPath = join(
     dirname(outputPath),
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
   try {
+    const normalizeTimeline =
+      frameCount === undefined
+        ? []
+        : [
+            '-vf',
+            `setpts=N/(${frameRate}*TB)`,
+            '-af',
+            'asetpts=PTS-STARTPTS,apad',
+            '-frames:v',
+            String(frameCount),
+            '-t',
+            (frameCount / frameRate).toFixed(6),
+          ];
     const result = spawnSync(
       'ffmpeg',
       [
         '-y',
         '-i',
         inputPath,
+        ...normalizeTimeline,
         '-c:v',
         'libx264',
         '-pix_fmt',

@@ -79,6 +79,7 @@ import {
 } from './animated-image-decoder.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
+  activePreparedExportClipAt,
   hasRenderableExportMedia,
   isExportDurationTimelineClip,
   isExportVisualTimelineClip,
@@ -3149,6 +3150,7 @@ function EditorWorkspace({
       let activeMixedAudioSource: AudioBufferSourceNode | undefined;
       let mixedAudioStarted = false;
       let activeRenderer: BrowserPixiRenderer | undefined;
+      let activeRecorderCanvas: HTMLCanvasElement | undefined;
       const exportMediaCleanup: Array<{
         readonly video?: HTMLVideoElement;
         readonly animated?: AnimatedImageFrameSource;
@@ -3488,6 +3490,13 @@ function EditorWorkspace({
         activeExportAudioTrack = exportAudioTrack;
         const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
         activeRenderer = renderer;
+        const recorderCanvas = document.createElement('canvas');
+        recorderCanvas.width = width;
+        recorderCanvas.height = height;
+        const recorderContext = recorderCanvas.getContext('2d');
+        if (recorderContext === null)
+          throw new Error('Unable to create the deterministic export capture canvas');
+        activeRecorderCanvas = recorderCanvas;
         const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
           (object) => object.kind === 'html-scene',
         );
@@ -3516,7 +3525,7 @@ function EditorWorkspace({
         const browserExportResult: BrowserExportResult = await downloadBrowserMp4({
           manifest,
           frameCount: totalFrames,
-          canvas: renderer.canvas,
+          canvas: recorderCanvas,
           audioTrack: exportAudioTrack,
           mimeType: selectedMimeType,
           onRecordingStart: () => {
@@ -3532,17 +3541,15 @@ function EditorWorkspace({
           paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
             const transition = activeTransitionAt(exportVisualProject, timeUs);
-            const activeClip = activeVideoClipAt(
-              exportTimelineProject,
+            const activeClip = activePreparedExportClipAt(
+              playableTimelineClips,
               timeUs,
-              [],
-              exportVisualProject,
+              mediaForClip,
+              (candidate) =>
+                timelineElementKindForClip(candidate, exportElementKinds) === 'video' ? 0 : 1,
             );
             const clip =
-              (activeClip !== undefined &&
-              hasRenderableExportMedia(mediaForClip.get(activeClip.id) ?? {})
-                ? activeClip
-                : undefined) ??
+              activeClip ??
               (transition !== undefined
                 ? (() => {
                     const partner = findVideoClipById(exportTimelineProject, transition.leftClipId);
@@ -3644,6 +3651,11 @@ function EditorWorkspace({
             applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
             const frame = buildFrame(timeUs);
             renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
+            // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
+            // its GPU work is committed on cold/software renderers. Copying
+            // into a 2D staging canvas synchronizes the exact painted frame.
+            recorderContext.clearRect(0, 0, width, height);
+            recorderContext.drawImage(renderer.canvas, 0, 0, width, height);
           },
           onProgress: (completed, total) => {
             setExportProgress(0.05 + 0.93 * (completed / total));
@@ -3663,6 +3675,7 @@ function EditorWorkspace({
           controlPlaneProject.controlPlaneProjectId,
           browserExportResult.blob,
           frameRate,
+          totalFrames,
           abortController.signal,
         );
         abortController.signal.throwIfAborted();
@@ -3802,6 +3815,10 @@ function EditorWorkspace({
           activeRenderer?.destroy();
         } catch {
           // Continue releasing audio and persisted partial output.
+        }
+        if (activeRecorderCanvas !== undefined) {
+          activeRecorderCanvas.width = 0;
+          activeRecorderCanvas.height = 0;
         }
         if (activeAudioContext !== undefined && activeAudioContext.state !== 'closed')
           await activeAudioContext.close().catch(() => undefined);

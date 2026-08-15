@@ -193,6 +193,7 @@ export class BrowserControlPlaneClient {
     projectId: string,
     file: Blob,
     frameRate = 30,
+    frameCount?: number,
     signal?: AbortSignal,
   ): Promise<Blob> {
     const token = await this.assertion();
@@ -207,6 +208,7 @@ export class BrowserControlPlaneClient {
         authorization: 'Bearer ' + token,
         'content-type': 'video/mp4',
         'x-joy-frame-rate': String(frameRate),
+        ...(frameCount === undefined ? {} : { 'x-joy-frame-count': String(frameCount) }),
       },
       body: file,
       ...(signal === undefined ? {} : { signal }),

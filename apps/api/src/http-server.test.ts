@@ -869,6 +869,7 @@ describe('control-plane HTTP transport', () => {
           authorization: 'Bearer owner',
           'content-type': 'video/mp4',
           'x-joy-frame-rate': '30',
+          'x-joy-frame-count': '3',
         },
         body: readFileSync(inputPath),
       });

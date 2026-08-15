@@ -90,4 +90,22 @@ describe('deterministic export contract', () => {
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
   });
+  it('normalizes slow browser-capture timestamps to the authored frame count', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-timeline-'));
+    const fixturePath = join(directory, 'slow-browser.mp4');
+    const outputPath = join(directory, 'normalized.mp4');
+    renderFixture(
+      {
+        ...manifest,
+        frameRate: 1,
+        durationUs: 2_000_000,
+      },
+      fixturePath,
+    );
+
+    const probe = remuxBrowserMp4(fixturePath, outputPath, 30, 2);
+    expect(probe.frameRate).toBe(30);
+    expect(probe.durationUs).toBeGreaterThanOrEqual(60_000);
+    expect(probe.durationUs).toBeLessThanOrEqual(100_000);
+  });
 });
