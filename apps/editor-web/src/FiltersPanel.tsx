@@ -92,11 +92,6 @@ export function FiltersPanel({
       tabs={FILTER_TABS}
       activeTab={group}
       onTabChange={(id) => setGroup(id as FilterLibraryGroupId)}
-      note={
-        canCreate
-          ? undefined
-          : 'Select one video, picture, or 3D render to create a parented Filters layer.'
-      }
     >
       <div className="filters-target" aria-live="polite">
         <span>Target</span>

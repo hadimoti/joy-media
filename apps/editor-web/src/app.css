@@ -10710,12 +10710,6 @@ label {
     linear-gradient(135deg, transparent 45%, rgb(255 255 255 / 28%) 46% 54%, transparent 55%),
     conic-gradient(from 40deg, #e96b62, #e7be3f, #65bc82, #5d9be7, #a778d6, #e96b62);
 }
-.color-hint {
-  margin: 0;
-  color: #858791;
-  font-size: 0.65rem;
-  line-height: 1.35;
-}
 .scope-canvas {
   display: block;
   width: 100%;
@@ -15319,8 +15313,7 @@ label {
   min-width: 0;
 }
 
-.adjustment-library-target small,
-.adjustment-library-card p {
+.adjustment-library-target small {
   color: var(--joy-text-muted);
   font-size: var(--joy-type-2xs);
 }
@@ -15347,25 +15340,10 @@ label {
   padding: var(--space-3);
 }
 
-.adjustment-library-card p {
-  margin: 0.2rem 0 0;
-  line-height: 1.45;
-}
-
 .adjustment-library-card button {
   grid-column: 1 / -1;
   justify-self: start;
   margin-top: var(--space-1);
-}
-
-.adjustment-library-rules {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding-inline-start: 1.1rem;
-  color: var(--joy-text-muted);
-  font-size: var(--joy-type-xs);
-  line-height: 1.45;
 }
 
 @media (max-width: 1180px) {

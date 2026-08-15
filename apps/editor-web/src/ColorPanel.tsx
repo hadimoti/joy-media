@@ -974,9 +974,6 @@ export function LooksSection({
           onDoubleClick={() => updateIntensity(1, true)}
         />
       </PropertyRow>
-      <p className="color-hint">
-        Built-in looks and project-linked .cube LUTs remain private and portable across devices.
-      </p>
       {!referenceAvailable && (
         <p className="color-empty" role="alert">
           Restore this LUT before previewing or exporting the grade.
@@ -1009,7 +1006,6 @@ function ScopeSection({
           Selected clip
         </button>
       </div>
-      <p className="color-hint">Scopes analyze the final Program Monitor pixels.</p>
       <div className="scope-source" role="group" aria-label="Scope type">
         {(['waveform', 'parade', 'vectorscope', 'histogram'] as const).map((id) => (
           <button

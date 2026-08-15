@@ -215,11 +215,6 @@ export function EffectsPanel({
         </>
       }
       search={{ value: search, onChange: setSearch, placeholder: 'Search effects…' }}
-      note={
-        canApplyEffects
-          ? undefined
-          : 'Drag an effect to a clip on the timeline to apply it. Animated previews stay live.'
-      }
     >
       <div className="effects-panel-content">
         <aside className="effects-panel-sidebar" aria-label="Effect categories">

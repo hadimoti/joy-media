@@ -16,11 +16,6 @@ export function AdjustmentLayersPanel({
       title="Adjust"
       iconUrl={panelTabIconUrl('color')}
       className="adjustment-library-panel"
-      note={
-        canCreate
-          ? 'Creates an independent layer. Choose its parent and edit its stack in Inspector.'
-          : 'Select a video or picture layer first.'
-      }
     >
       <section className="adjustment-library-target" aria-label="Adjustment layer target">
         <span className="adjustment-library-target-icon" aria-hidden="true">
@@ -37,7 +32,6 @@ export function AdjustmentLayersPanel({
         </span>
         <div>
           <strong>Adjustment layer</strong>
-          <p>One timed controller for effects, filters, and animated corrections.</p>
         </div>
         <button
           type="button"
@@ -50,11 +44,6 @@ export function AdjustmentLayersPanel({
           Add Adjust
         </button>
       </section>
-      <ul className="adjustment-library-rules">
-        <li>Lives on its own ADJ timeline lane.</li>
-        <li>Targets one video or picture parent without changing source media.</li>
-        <li>Effects and keyframes remain editable and undoable.</li>
-      </ul>
     </PanelShell>
   );
 }

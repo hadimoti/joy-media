@@ -465,11 +465,6 @@ export function TransitionsPanel({
       iconUrl={panelTabIconUrl('transitions')}
       className="transitions-panel"
       search={{ value: query, onChange: setQuery, placeholder: 'Search transitions…' }}
-      {...(selectedJunction
-        ? {
-            note: `${selectedJunction.trackName}: ${selectedJunction.leftClipId} → ${selectedJunction.rightClipId}`,
-          }
-        : {})}
       actions={
         <>
           {selectedTransition !== undefined && (
