@@ -4540,6 +4540,14 @@ function EditorWorkspace({
         selectedTimelineEntry?.clip === undefined
           ? undefined
           : resolveObjectIdForSelection(visualProject, [selectedTimelineEntry.clip.id]);
+      const selectedObjectAsset =
+        object?.assetId === undefined ? undefined : visualProject.assets[object.assetId];
+      const selectedImageAssetId =
+        selectedMaskAsset?.kind === 'image' && selectedTimelineEntry?.clip?.kind === 'video'
+          ? selectedTimelineEntry?.clip?.assetId
+          : selectedObjectAsset?.kind === 'image'
+            ? object?.assetId
+            : undefined;
       const maskTarget: MaskTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? {
@@ -4564,14 +4572,14 @@ function EditorWorkspace({
       const upscaleTarget: UpscaleTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? { targetId: object.id, objectId: object.id, assetId: object.assetId, kind: 'image' }
-          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'image'
+          : selectedTimelineEntry?.clip?.kind === 'video' && selectedImageAssetId !== undefined
             ? {
-                targetId: selectedTimelineObjectId ?? selectedTimelineEntry.clip.id,
-                ...(selectedTimelineObjectId === undefined
+                targetId: selectedTimelineObjectId ?? object?.id ?? selectedTimelineEntry.clip.id,
+                ...(selectedTimelineObjectId === undefined && object?.id === undefined
                   ? {}
-                  : { objectId: selectedTimelineObjectId }),
+                  : { objectId: selectedTimelineObjectId ?? object!.id }),
                 clipId: selectedTimelineEntry.clip.id,
-                assetId: selectedTimelineEntry.clip.assetId,
+                assetId: selectedImageAssetId,
                 kind: 'image',
               }
             : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
