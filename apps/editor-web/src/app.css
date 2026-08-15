@@ -2372,7 +2372,7 @@ label {
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--joy-border);
-  background: transparent;
+  background: var(--joy-bg-inset);
   overflow: hidden;
   cursor: ew-resize;
   outline: none;
@@ -2433,7 +2433,7 @@ label {
   position: relative;
   z-index: 1;
   min-height: 2rem;
-  border-top: 1px solid #2e2e32;
+  border-top: 1px solid color-mix(in srgb, var(--joy-border) 65%, var(--joy-bg-deep));
 }
 
 /* Selected track: highlight both the header and a subtle lane tint so the
@@ -2477,12 +2477,14 @@ label {
   min-height: 0;
   overflow: auto;
   padding-bottom: 0.15rem;
+  background: var(--joy-bg-inset);
 }
 .timeline-tracks-inner {
   position: relative;
   display: grid;
   gap: 0.1rem;
   min-width: 100%;
+  background: color-mix(in srgb, var(--joy-bg-inset) 92%, var(--joy-bg-deep));
 }
 .timeline-clip {
   position: absolute;
@@ -2494,13 +2496,13 @@ label {
   /* Neutral at rest (DESIGN.md §1a). Every clip used to carry an amber tint,
      which left no ink to mark the selected one. Warmth now lives only in the
      3px rail and in the selection outline. */
-  border: 1px solid var(--joy-border-strong);
-  border-top-color: rgb(255 255 255 / 12%);
-  border-bottom-color: rgb(0 0 0 / 55%);
+  border: 1px solid var(--joy-border-hover);
+  border-top-color: rgb(255 255 255 / 18%);
+  border-bottom-color: rgb(0 0 0 / 45%);
   border-radius: var(--radius-sm);
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 6%), transparent 40%, rgb(0 0 0 / 28%)),
-    var(--joy-bg-control);
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--joy-bg-raised);
   color: var(--joy-text);
   cursor: grab;
   overflow: visible;
@@ -2527,15 +2529,15 @@ label {
 .timeline-clip--voice {
   /* Audio sits one surface step apart from video — by value, never by hue. */
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 5%), transparent 42%, rgb(0 0 0 / 30%)),
-    var(--joy-bg-raised);
+    linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 42%, rgb(0 0 0 / 18%)),
+    var(--joy-bg-control);
   border-color: var(--joy-border);
   border-top-color: rgb(255 255 255 / 10%);
   border-bottom-color: rgb(0 0 0 / 55%);
 }
 .timeline-clip--comp {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 7%), transparent 40%, rgb(0 0 0 / 28%)),
+    linear-gradient(180deg, rgb(255 255 255 / 12%), transparent 40%, rgb(0 0 0 / 18%)),
     var(--joy-bg-active);
   --clip-rail: var(--joy-accent);
 }
@@ -2549,7 +2551,7 @@ label {
   background: var(--joy-bg-raised);
 }
 .timeline-clip--overlay {
-  background: var(--joy-bg-inset);
+  background: var(--joy-bg-raised);
 }
 .timeline-clip--text .timeline-clip-kind-surface,
 .timeline-clip--caption .timeline-clip-kind-surface,
@@ -2588,9 +2590,9 @@ label {
 .timeline-clip--filter .timeline-clip-kind-surface {
   background: linear-gradient(
     90deg,
-    var(--joy-bg-inset),
+    var(--joy-bg-raised),
     var(--joy-bg-active) 50%,
-    var(--joy-bg-inset)
+    var(--joy-bg-raised)
   );
 }
 .timeline-clip--adjust .timeline-clip-kind-surface {
@@ -2614,7 +2616,7 @@ label {
     linear-gradient(150deg, transparent 48%, rgb(255 255 255 / 6%) 49% 51%, transparent 52%) 0 0 /
       20px 12px,
     linear-gradient(180deg, rgb(255 255 255 / 7%), transparent 58%),
-    var(--joy-bg-inset);
+    var(--joy-bg-raised);
   perspective: 120px;
 }
 .timeline-clip--scene3d .timeline-clip-kind-surface::before {
@@ -2749,7 +2751,7 @@ label {
   gap: 0.35rem;
   padding: 0 0.45rem 0 0.55rem;
   pointer-events: none;
-  background: linear-gradient(180deg, rgb(0 0 0 / 30%), rgb(0 0 0 / 48%));
+  background: linear-gradient(180deg, rgb(0 0 0 / 12%), rgb(0 0 0 / 26%));
   border-radius: inherit;
   overflow: hidden;
 }
@@ -2780,7 +2782,7 @@ label {
 .timeline-clip--filter .timeline-clip-chrome,
 .timeline-clip--adjust .timeline-clip-chrome,
 .timeline-clip--scene3d .timeline-clip-chrome {
-  background: linear-gradient(90deg, rgb(0 0 0 / 34%), transparent 70%);
+  background: linear-gradient(90deg, rgb(0 0 0 / 20%), transparent 70%);
 }
 .timeline-clip-duration {
   flex: none;
@@ -2913,7 +2915,7 @@ label {
   padding-left: var(--timeline-track-gutter-width);
   box-sizing: border-box;
   border-top: 1px solid var(--joy-border, #2e2e32);
-  background: color-mix(in srgb, var(--joy-bg-panel) 96%, var(--joy-accent) 4%);
+  background: color-mix(in srgb, var(--joy-bg-inset) 94%, var(--joy-bg-deep));
 }
 .timeline-property-lanes-header {
   position: relative;
