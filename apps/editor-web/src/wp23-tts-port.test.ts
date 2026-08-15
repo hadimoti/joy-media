@@ -13,7 +13,7 @@ describe('generation.speech edge-tts port', () => {
         id: 'speech',
         category: 'generation',
         type: 'generation.speech',
-        params: { text: 'سلام', voiceId: 'stock:fa', language: 'fa-IR' },
+        params: { text: 'Hello', voiceId: 'stock:fa', language: 'fa-IR' },
         deterministic: false,
       },
       upstream: {},

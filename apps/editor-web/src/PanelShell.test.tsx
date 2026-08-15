@@ -27,19 +27,18 @@ describe('PanelShell header actions', () => {
     expect(markup).toContain('aria-label="Search Assets"');
   });
 
-  it('marks Persian guidance without forcing a direction on the panel', () => {
+  it('renders English guidance without a language override', () => {
     const markup = renderToStaticMarkup(
-      <PanelShell title="History" note="هنوز ویرایشی انجام نشده است.">
+      <PanelShell title="History" note="No edits have been made yet.">
         <p>Body</p>
       </PanelShell>,
     );
 
-    expect(markup).toContain('class="joy-panel-note" lang="fa"');
-    expect(markup).not.toContain('dir="rtl"');
-    expect(markup).not.toContain('dir="ltr"');
+    expect(markup).toContain('class="joy-panel-note"');
+    expect(markup).not.toContain('lang=');
   });
 
-  it('does not label technical-only notes as Persian', () => {
+  it('does not add a language override to technical-only notes', () => {
     const markup = renderToStaticMarkup(
       <PanelShell title="Transitions" note="V1: clip-a → clip-b">
         <p>Body</p>
@@ -47,6 +46,6 @@ describe('PanelShell header actions', () => {
     );
 
     expect(markup).toContain('class="joy-panel-note"');
-    expect(markup).not.toContain('class="joy-panel-note" lang="fa"');
+    expect(markup).not.toContain('lang=');
   });
 });

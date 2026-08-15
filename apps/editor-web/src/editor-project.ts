@@ -173,15 +173,15 @@ export const INITIAL_EDITOR_PROJECT: JoyProjectV1 = {
   captionDocuments: {
     'captions-fa': {
       id: 'captions-fa',
-      language: 'fa-IR',
-      direction: 'auto',
+      language: 'en-US',
+      direction: 'ltr',
       speakers: [{ id: 'narrator', name: 'Narrator' }],
       words: {
-        w1: { id: 'w1', text: 'سلام', startUs: 0, endUs: 800_000, confidence: 0.95 },
-        w2: { id: 'w2', text: 'به', startUs: 800_000, endUs: 1_200_000, confidence: 0.62 },
-        w3: { id: 'w3', text: 'جوی', startUs: 1_200_000, endUs: 2_000_000, confidence: 0.88 },
-        w4: { id: 'w4', text: 'JOY', startUs: 2_000_000, endUs: 2_800_000 },
-        w5: { id: 'w5', text: 'Media', startUs: 2_800_000, endUs: 3_600_000 },
+        w1: { id: 'w1', text: 'Welcome', startUs: 0, endUs: 800_000, confidence: 0.95 },
+        w2: { id: 'w2', text: 'to', startUs: 800_000, endUs: 1_200_000, confidence: 0.62 },
+        w3: { id: 'w3', text: 'JOY', startUs: 1_200_000, endUs: 2_000_000, confidence: 0.88 },
+        w4: { id: 'w4', text: 'Media', startUs: 2_000_000, endUs: 2_800_000 },
+        w5: { id: 'w5', text: 'Studio', startUs: 2_800_000, endUs: 3_600_000 },
       },
       segments: [
         {

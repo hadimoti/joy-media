@@ -40,7 +40,7 @@ describe('agent panel intents', () => {
   it('split-at-playhead requires a selected clip', () => {
     const project = buildReferenceSpikeProject();
     const result = intent('split-at-playhead').buildStep(project, [], 5_000_000);
-    expect(result).toEqual({ ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' });
+    expect(result).toEqual({ ok: false, reason: 'Select a clip first.' });
   });
 
   it('split-at-playhead requires the playhead strictly inside the clip', () => {
@@ -106,7 +106,7 @@ describe('agent panel intents', () => {
     const result = intent('join-with-next').buildStep(project, ['outro'], 0);
     expect(result).toEqual({
       ok: false,
-      reason: 'بعد از کلیپ انتخاب‌شده، کلیپ مجاوری در همان ترک وجود ندارد.',
+      reason: 'There is no adjacent clip after the selected clip on this track.',
     });
   });
 

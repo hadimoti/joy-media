@@ -60,7 +60,7 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     destructive: false,
     buildStep: (project, selectedClipIds, playheadUs) => {
       const clipId = selectedClipIds[0];
-      if (clipId === undefined) return { ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' };
+      if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
       const location = findClipLocation(project, clipId);
       if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
       const { compositionId, trackId, clip } = location;
@@ -117,7 +117,7 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     destructive: false,
     buildStep: (project, selectedClipIds, playheadUs) => {
       const clipId = selectedClipIds[0];
-      if (clipId === undefined) return { ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' };
+      if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
       const location = findClipLocation(project, clipId);
       if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
       const { compositionId, trackId, clip } = location;
@@ -144,7 +144,7 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     destructive: true,
     buildStep: (project, selectedClipIds) => {
       const clipId = selectedClipIds[0];
-      if (clipId === undefined) return { ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' };
+      if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
       const location = findClipLocation(project, clipId);
       if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
       const { compositionId, trackId, clip } = location;
@@ -171,14 +171,14 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
     destructive: true,
     buildStep: (project, selectedClipIds) => {
       const clipId = selectedClipIds[0];
-      if (clipId === undefined) return { ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' };
+      if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
       const location = findClipLocation(project, clipId);
       if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
       const next = findNextClip(project, location);
       if (next === undefined)
         return {
           ok: false,
-          reason: 'بعد از کلیپ انتخاب‌شده، کلیپ مجاوری در همان ترک وجود ندارد.',
+          reason: 'There is no adjacent clip after the selected clip on this track.',
         };
       return {
         ok: true,
@@ -210,7 +210,7 @@ export const AGENT_INTENTS: readonly AgentIntent[] = [
       const composition = project.compositions[project.rootCompositionId];
       const track = composition?.tracks[0];
       if (composition === undefined || track === undefined)
-        return { ok: false, reason: 'در کامپوزیشن اصلی هیچ ترکی در دسترس نیست.' };
+        return { ok: false, reason: 'No track is available in the root composition.' };
       const newClipId = `agent-clip-${playheadUs}`;
       return {
         ok: true,
@@ -271,7 +271,7 @@ export function buildSplitTrimRecipe(
   playheadUs: number,
 ): RecipeBuildResult {
   const clipId = selectedClipIds[0];
-  if (clipId === undefined) return { ok: false, reason: 'ابتدا یک کلیپ را انتخاب کنید.' };
+  if (clipId === undefined) return { ok: false, reason: 'Select a clip first.' };
   const location = findClipLocation(project, clipId);
   if (location === undefined) return { ok: false, reason: `Clip ${clipId} not found.` };
   const { compositionId, trackId, clip } = location;

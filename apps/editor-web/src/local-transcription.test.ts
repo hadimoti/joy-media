@@ -11,7 +11,7 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
           language: 'fa-IR',
           words: [
             {
-              text: 'زنده',
+              text: 'Live',
               startUs: 0,
               endUs: 500_000,
               confidence: 0.99,
@@ -30,10 +30,10 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
 
     const document = await transcribeReferenceCaption('caption-fa', 'fa-IR', client);
     expect(document.provenance?.modelId).toBe('faster-whisper-tiny');
-    expect(Object.values(document.words).map((word) => word.text)).toEqual(['زنده']);
+    expect(Object.values(document.words).map((word) => word.text)).toEqual(['Live']);
   });
 
-  it('falls back to the Persian fixture when the live API fails', async () => {
+  it('falls back to the fa-IR fixture when the live API fails', async () => {
     const client = {
       async transcribeSpeech() {
         throw new Error('AUTH_REQUIRED');
@@ -44,12 +44,12 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
     expect(document.language).toBe('fa-IR');
     expect(document.segments).toHaveLength(1);
     expect(Object.values(document.words).map((word) => word.text)).toEqual([
-      'سلام',
-      'به',
-      'استودیوی',
-      'جوی',
-      'خوش',
-      'آمدید',
+      'Welcome',
+      'to',
+      'JOY',
+      'Media',
+      'Studio',
+      'today',
     ]);
     expect(document.provenance).toMatchObject({
       providerId: 'joy.local-whisper',

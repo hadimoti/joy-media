@@ -57,7 +57,7 @@ describe('CaptionsPanel empty state', () => {
 
     expect(markup).toContain('aria-label="Caption text seg-1"');
     expect(markup).toContain('value="Edited caption"');
-    expect(markup).toContain('title="Source: سلام به جوی"');
+    expect(markup).toContain('title="Source: Welcome to JOY"');
     expect(markup).toContain('aria-label="Revert caption seg-1 to source text"');
     expect(markup).toContain('aria-label="Delete caption seg-1"');
   });

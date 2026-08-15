@@ -82,8 +82,6 @@ export function PanelShell({
 }: PanelShellProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const noteLanguage = note !== undefined && /[\u0600-\u06ff]/u.test(note) ? 'fa' : undefined;
-
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
@@ -229,7 +227,7 @@ export function PanelShell({
       )}
 
       {note !== undefined && (
-        <p className="joy-panel-note" lang={noteLanguage} role="status" aria-live="polite">
+        <p className="joy-panel-note" role="status" aria-live="polite">
           {note}
         </p>
       )}

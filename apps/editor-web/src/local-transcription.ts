@@ -19,38 +19,38 @@ interface TranscriptionFixture {
   }[];
 }
 
-/** Fixture-backed FA/EN transcripts (WP-20). Used when live Whisper API is unavailable. */
+/** Fixture-backed language transcripts (WP-20). Used when live Whisper API is unavailable. */
 const FIXTURES: Readonly<Record<'fa-IR' | 'en-US', TranscriptionFixture>> = {
   'fa-IR': {
     language: 'fa-IR',
     modelId: 'fixture-whisper-fa-v1',
     speakers: [{ id: 'speaker-1', name: 'Local speaker' }],
     words: [
-      { text: 'سلام', startUs: 0, endUs: 400_000, confidence: 0.97, speakerId: 'speaker-1' },
-      { text: 'به', startUs: 400_000, endUs: 650_000, confidence: 0.94, speakerId: 'speaker-1' },
+      { text: 'Welcome', startUs: 0, endUs: 400_000, confidence: 0.97, speakerId: 'speaker-1' },
+      { text: 'to', startUs: 400_000, endUs: 650_000, confidence: 0.94, speakerId: 'speaker-1' },
       {
-        text: 'استودیوی',
+        text: 'JOY',
         startUs: 650_000,
         endUs: 1_200_000,
         confidence: 0.96,
         speakerId: 'speaker-1',
       },
       {
-        text: 'جوی',
+        text: 'Media',
         startUs: 1_200_000,
         endUs: 1_550_000,
         confidence: 0.98,
         speakerId: 'speaker-1',
       },
       {
-        text: 'خوش',
+        text: 'Studio',
         startUs: 1_550_000,
         endUs: 1_850_000,
         confidence: 0.95,
         speakerId: 'speaker-1',
       },
       {
-        text: 'آمدید',
+        text: 'today',
         startUs: 1_850_000,
         endUs: 2_400_000,
         confidence: 0.96,
@@ -129,7 +129,7 @@ async function tryLiveTranscription(
 }
 
 /**
- * Captions FA/EN transcription: prefer authenticated faster-whisper API,
+ * Caption transcription: prefer authenticated faster-whisper API,
  * fall back to committed fixtures when unsigned or the provider is down.
  */
 export async function transcribeReferenceCaption(

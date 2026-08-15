@@ -1,6 +1,14 @@
 # JOY Media — Editor Design System
 
-Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-25): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels, with **Modam Pro** for Eng/Fa/Arabic UI type. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); for UI fonts, [public/assets/fonts/modam-pro/](apps/editor-web/public/assets/fonts/modam-pro/) + §4f; for toolbar/action icons, [icons.tsx](apps/editor-web/src/icons.tsx); for dockview panel-tab glyphs, [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
+Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-25): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels, with **Modam Pro** for English UI type. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); for UI fonts, [public/assets/fonts/modam-pro/](apps/editor-web/public/assets/fonts/modam-pro/) + §4f; for toolbar/action icons, [icons.tsx](apps/editor-web/src/icons.tsx); for dockview panel-tab glyphs, [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
+
+## Language (binding)
+
+**JOY Media ships English-only product copy.** All UI labels, buttons, tooltips, empty states,
+onboarding, errors, status messages, templates, demo captions, and fixture-backed content must be
+written in English. Do not add Persian or Arabic-script product copy, including `lang="fa"` wrappers,
+to the editor. Imported or user-authored multilingual media and captions are source data and must be
+preserved exactly; this exception never applies to shipped interface or sample content.
 
 ## 1. Color tokens
 
