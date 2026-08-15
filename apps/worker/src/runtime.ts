@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
+import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import {
   readGpuDerivative,
@@ -33,6 +33,13 @@ import {
   type MaskingAvailability,
   type MaskWorkerDerivative,
 } from './local-masking.js';
+import {
+  readUpscaleDerivative,
+  runUpscaleJob,
+  upscalingAvailabilityFromEnvironment,
+  type UpscaleWorkerDerivative,
+  type UpscalingAvailability,
+} from './local-upscaling.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -146,6 +153,8 @@ export interface ToolAvailability {
   readonly aiProviders: readonly AiProvider[];
   /** Explicit local model runners; omitted means masking is unavailable. */
   readonly masking?: MaskingAvailability;
+  /** Explicit image/video upscaling runners; omitted means enhancement is unavailable. */
+  readonly upscaling?: UpscalingAvailability;
 }
 
 /** Private mapping held only by the Worker; it is never serialized to the API. */
@@ -213,6 +222,7 @@ export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolA
     // AI providers configured via ~/.joy-media/ai-providers.json
     aiProviders: getConfiguredProviders(),
     masking: maskingAvailabilityFromEnvironment(),
+    upscaling: upscalingAvailabilityFromEnvironment(),
   };
 }
 function canRun(tool: string): boolean {
@@ -251,8 +261,13 @@ export class WorkerRuntime {
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
+    const inventory = modelInventory(this.tools.upscaling);
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.comfy) capabilities.push('image.comfy');
+    if (this.tools.ffprobe && this.tools.upscaling?.image?.modelReady === true)
+      capabilities.push('upscale.image');
+    if (this.tools.ffprobe && this.tools.upscaling?.image !== undefined)
+      capabilities.push('model.manage');
     if (this.tools.ffprobe && this.tools.masking?.image !== undefined)
       capabilities.push('mask.image');
     if (this.tools.ffprobe && this.tools.masking?.video !== undefined)
@@ -271,6 +286,7 @@ export class WorkerRuntime {
       capabilities,
       localAssetIds: this.localAssetIds(),
       maxConcurrentJobs: 1,
+      ...(inventory === undefined ? {} : { modelInventory: inventory }),
     };
   }
   async run(
@@ -298,6 +314,37 @@ export class WorkerRuntime {
       }
     | { readonly state: 'canceled' }
   > {
+    if (job.type === 'upscale.image' || job.type === 'upscale.video') {
+      if (!this.tools.ffprobe) throw new Error('FFprobe is required for upscaling outputs');
+      if (job.assetId === undefined) throw new Error(job.type + ' requires an input asset');
+      const sourcePath = this.options.sources?.resolve(job.assetId);
+      if (sourcePath === undefined)
+        throw new Error('local source unavailable for asset ' + job.assetId);
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write('job ' + job.id + ' started (' + job.type + ')');
+      try {
+        const result = await runUpscaleJob({
+          jobId: job.id,
+          type: job.type,
+          assetId: job.assetId,
+          sourcePath,
+          payload: job.payload,
+          availability: this.tools.upscaling ?? {},
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write('job ' + job.id + ' completed');
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write('job ' + job.id + ' canceled');
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
     if (job.type === 'mask.image' || job.type === 'mask.video') {
       if (!this.tools.ffprobe) throw new Error('FFprobe is required for masking outputs');
       const runner =
@@ -502,6 +549,11 @@ export class WorkerRuntime {
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       return readMaskDerivative(directory, result);
     }
+    if (result.kind === 'upscale.image' || result.kind === 'upscale.video') {
+      const directory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      return readUpscaleDerivative(directory, result);
+    }
     if (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') {
       const directory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
@@ -545,7 +597,28 @@ function mlDenoiseRunnable(): boolean {
 }
 
 export type WorkerDerivativeReceipt =
-  RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt | MaskWorkerDerivative;
+  | RealThumbnailReceipt
+  | LocalGpuReceipt
+  | LocalAiReceipt
+  | MaskWorkerDerivative
+  | UpscaleWorkerDerivative;
+
+function modelInventory(
+  availability: UpscalingAvailability | undefined,
+): WorkerModelInventory | undefined {
+  if (availability?.image === undefined) return undefined;
+  return {
+    managerVersion: '0.1.0',
+    cacheStatus: 'ready',
+    models: [
+      {
+        modelId: availability.image.modelId,
+        version: availability.image.modelVersion,
+        state: availability.image.modelReady ? 'ready' : 'not-installed',
+      },
+    ],
+  };
+}
 
 export interface RealThumbnailReceipt {
   readonly kind: 'asset.thumbnail';

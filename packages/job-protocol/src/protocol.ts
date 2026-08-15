@@ -5,6 +5,9 @@ export const WORKER_PROTOCOL_VERSION = 1 as const;
 export type WorkerCapability =
   | 'asset.thumbnail'
   | 'image.comfy'
+  | 'upscale.image'
+  | 'upscale.video'
+  | 'model.manage'
   | 'mask.image'
   | 'mask.video'
   | 'audio.ml-denoise'
@@ -15,6 +18,8 @@ export type WorkerCapability =
 
 export type SpecializedJobType =
   | 'image.comfy'
+  | 'upscale.image'
+  | 'upscale.video'
   | 'mask.image'
   | 'mask.video'
   | 'audio.ml-denoise'
@@ -24,6 +29,8 @@ export type SpecializedJobType =
   | 'edit.higgsfield';
 export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
+  'upscale.image',
+  'upscale.video',
   'mask.image',
   'mask.video',
   'audio.ml-denoise',
@@ -32,6 +39,77 @@ export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'video.runway',
   'edit.higgsfield',
 ] as const;
+
+export type UpscalePreset = 'fast' | 'quality';
+export type UpscaleScale = 2 | 4;
+export type UpscaleMemoryMode = 'auto' | 'low-vram' | 'maximum-quality';
+
+/**
+ * Provider-neutral upscaling settings. Paths, executables, checkpoints,
+ * credentials, and arbitrary URLs never enter this envelope.
+ */
+export interface UpscaleJobPayload {
+  readonly schemaVersion: 1;
+  readonly mediaKind: 'image' | 'video';
+  readonly preset: UpscalePreset;
+  readonly modelId?: string;
+  readonly output:
+    | {
+        readonly mode: 'scale';
+        readonly scale: UpscaleScale;
+        readonly imageFormat?: 'png' | 'jpeg';
+        readonly videoProfile?: 'h264-aac-mp4';
+      }
+    | {
+        readonly mode: 'target';
+        readonly width: number;
+        readonly height: number;
+        readonly videoProfile?: 'h264-aac-mp4';
+      };
+  readonly processing: {
+    readonly restorationStrength?: number;
+    readonly denoiseStrength?: number;
+    readonly memoryMode: UpscaleMemoryMode;
+    readonly keepAudio?: boolean;
+  };
+  readonly range?: {
+    readonly startUs: number;
+    readonly endUs: number;
+    readonly purpose: 'preview' | 'full';
+  };
+  readonly region?: {
+    readonly maskAssetId: string;
+    readonly invert: boolean;
+    readonly featherPx: number;
+    readonly expandPx: number;
+  };
+}
+
+export type WorkerModelState =
+  | 'not-installed'
+  | 'downloading'
+  | 'verifying'
+  | 'installed'
+  | 'ready'
+  | 'update-available'
+  | 'incompatible'
+  | 'failed';
+
+export interface WorkerModelInventoryItem {
+  readonly modelId: string;
+  readonly version: string;
+  readonly state: WorkerModelState;
+  readonly progress?: number;
+  readonly installedBytes?: number;
+  readonly errorCode?: string;
+}
+
+export interface WorkerModelInventory {
+  readonly managerVersion: string;
+  readonly cacheStatus: 'ready' | 'read-only' | 'unavailable';
+  readonly freeBytes?: number;
+  readonly models: readonly WorkerModelInventoryItem[];
+}
 
 export type MaskProvider = 'auto' | 'sam3' | 'sam2-grounded' | 'birefnet';
 export type MaskSelectionMode = 'subject' | 'person' | 'prompt' | 'points' | 'box';
@@ -97,6 +175,7 @@ export interface WorkerHello {
   /** Opaque content identities already available to this worker; never filesystem paths. */
   readonly localAssetIds: readonly string[];
   readonly maxConcurrentJobs: number;
+  readonly modelInventory?: WorkerModelInventory;
 }
 
 export interface PairingOffer {

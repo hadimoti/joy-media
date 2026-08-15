@@ -173,6 +173,7 @@ import {
   type MaskSettings,
   type MaskTarget,
 } from './masking.js';
+import { writeUpscaleSettings, type UpscaleSettings, type UpscaleTarget } from './upscaling.js';
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
@@ -4152,6 +4153,62 @@ function EditorWorkspace({
       );
       return imported.id;
     };
+    const applyUpscaleWorkerResult = async (
+      job: BrowserJob,
+      target: UpscaleTarget,
+      settings: UpscaleSettings,
+    ): Promise<string> => {
+      if (job.state !== 'completed' || job.derivative === undefined)
+        throw new Error('Upscale result is not complete.');
+      const derivatives = await mediaControlPlaneClient.derivatives(
+        controlPlaneProject.controlPlaneProjectId,
+        target.assetId,
+      );
+      const derivative =
+        derivatives.find((candidate) => candidate.id === `derivative-${job.id}`) ??
+        [...derivatives]
+          .filter((candidate) => candidate.kind === 'upscale')
+          .sort((left, right) => right.verifiedAt - left.verifiedAt)[0];
+      if (derivative === undefined) throw new Error('Verified upscale derivative is unavailable.');
+      const blob = await mediaControlPlaneClient.derivativeBytes(
+        controlPlaneProject.controlPlaneProjectId,
+        target.assetId,
+        derivative.id,
+      );
+      const mimeType = derivative.descriptor.mimeType;
+      const extension =
+        mimeType === 'video/mp4'
+          ? 'mp4'
+          : mimeType === 'video/webm'
+            ? 'webm'
+            : mimeType === 'image/jpeg'
+              ? 'jpg'
+              : 'png';
+      const file = new File([blob], `JOY Upscale ${job.id.slice(-32)}.${extension}`, {
+        type: mimeType,
+      });
+      const expectedRevision = context.session.historyCursorSequence;
+      const imported = await importMediaFile({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        projectTitle: controlPlaneProject.title,
+        file,
+        client: mediaControlPlaneClient,
+        originalAssetCache: originalAssetCachePromise,
+      });
+      if (context.session.historyCursorSequence !== expectedRevision)
+        throw new Error('The project changed while the upscale result was being prepared.');
+      const next = writeUpscaleSettings(
+        projectWithImportedAsset(context.session.visualProject, imported),
+        target.targetId,
+        {
+          ...settings,
+          lastJob: { id: job.id, state: 'completed', progress: 100, resultAssetId: imported.id },
+        },
+      );
+      context.replaceVisualProject(next);
+      context.showToast('Upscale result imported to Project Assets.', 'success');
+      return imported.id;
+    };
     const addAssetToTimeline = (asset: {
       readonly assetId: string;
       readonly kind: 'video' | 'audio' | 'image';
@@ -4500,6 +4557,19 @@ function EditorWorkspace({
                 playheadUs: state.playheadUs,
               }
             : undefined;
+      const upscaleTarget: UpscaleTarget | undefined =
+        object?.kind === 'image' && object.assetId !== undefined
+          ? { targetId: object.id, objectId: object.id, assetId: object.assetId, kind: 'image' }
+          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+            ? {
+                targetId: selectedTimelineEntry.clip.id,
+                clipId: selectedTimelineEntry.clip.id,
+                assetId: selectedTimelineEntry.clip.assetId,
+                kind: 'video',
+                durationUs: selectedTimelineEntry.clip.durationUs,
+                playheadUs: state.playheadUs,
+              }
+            : undefined;
       const rootComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       const adjustmentTargets =
@@ -4603,6 +4673,19 @@ function EditorWorkspace({
                   context.replaceVisualProject(next);
                   context.showToast('Mask cleared.', 'success');
                 },
+              })}
+          {...(upscaleTarget === undefined
+            ? {}
+            : {
+                upscaleTarget,
+                upscaleProjectId: controlPlaneProject.controlPlaneProjectId,
+                upscaleProjectTitle: controlPlaneProject.title,
+                onUpscaleSettingsChange: (next: UpscaleSettings) =>
+                  context.replaceVisualProject(
+                    writeUpscaleSettings(context.visualProject, upscaleTarget.targetId, next),
+                  ),
+                onApplyUpscaleResult: (job: BrowserJob, settings: UpscaleSettings) =>
+                  applyUpscaleWorkerResult(job, upscaleTarget, settings),
               })}
           audioState={context.audioState}
           onAudioChange={(next) => context.setAudioState(next)}

@@ -18,6 +18,8 @@ export interface WorkerJobResult {
   readonly kind:
     | 'asset.thumbnail'
     | 'image.comfy'
+    | 'upscale.image'
+    | 'upscale.video'
     | 'audio.ml-denoise'
     | 'mask.image'
     | 'mask.video'
@@ -37,6 +39,8 @@ export interface WorkerJobResult {
   readonly provider?: string;
   readonly text?: string;
   readonly model?: string;
+  readonly modelId?: string;
+  readonly modelVersion?: string;
 }
 
 export interface WorkerControlPlaneClientOptions {
@@ -139,7 +143,9 @@ export class WorkerControlPlaneClient {
           ? 'thumbnail'
           : result.kind === 'mask.image' || result.kind === 'mask.video'
             ? 'mask'
-            : 'audio',
+            : result.kind === 'upscale.image' || result.kind === 'upscale.video'
+              ? 'upscale'
+              : 'audio',
     };
     if (result.descriptor?.width !== undefined)
       headers['x-joy-width'] = String(result.descriptor.width);

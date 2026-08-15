@@ -51,9 +51,12 @@ import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.
 import type { BrowserJob } from './control-plane-client.js';
 import { MaskInspector } from './MaskInspector.js';
 import { readMaskSettings, type MaskSettings, type MaskTarget } from './masking.js';
+import { EnhanceInspector } from './EnhanceInspector.js';
+import { readUpscaleSettings, type UpscaleSettings, type UpscaleTarget } from './upscaling.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
+  { id: 'enhance', label: 'Enhance', ariaLabel: 'AI upscaling' },
   { id: 'mask', label: 'Mask', ariaLabel: 'Mask and background removal' },
   { id: 'adjust', label: 'Adjust', ariaLabel: 'Adjustment layer' },
   { id: 'effects', label: 'Effects' },
@@ -165,6 +168,11 @@ interface InspectorPanelProps {
   readonly onMaskSettingsChange?: (next: MaskSettings) => void;
   readonly onApplyMaskResult?: (job: BrowserJob, settings: MaskSettings) => Promise<string>;
   readonly onClearMask?: () => void;
+  readonly upscaleTarget?: UpscaleTarget;
+  readonly upscaleProjectId?: string;
+  readonly upscaleProjectTitle?: string;
+  readonly onUpscaleSettingsChange?: (next: UpscaleSettings) => void;
+  readonly onApplyUpscaleResult?: (job: BrowserJob, settings: UpscaleSettings) => Promise<string>;
   readonly audioState?: AudioState;
   readonly onAudioChange?: (next: AudioState, label: string) => void;
   readonly onSetStatic: (
@@ -339,6 +347,11 @@ export function InspectorPanel({
   onMaskSettingsChange,
   onApplyMaskResult,
   onClearMask,
+  upscaleTarget,
+  upscaleProjectId,
+  upscaleProjectTitle,
+  onUpscaleSettingsChange,
+  onApplyUpscaleResult,
   audioState,
   onAudioChange,
   onSetStatic,
@@ -400,6 +413,13 @@ export function InspectorPanel({
           onMaskSettingsChange !== undefined &&
           onApplyMaskResult !== undefined &&
           onClearMask !== undefined)) &&
+      (candidate.id !== 'enhance' ||
+        (upscaleTarget !== undefined &&
+          project !== undefined &&
+          upscaleProjectId !== undefined &&
+          upscaleProjectTitle !== undefined &&
+          onUpscaleSettingsChange !== undefined &&
+          onApplyUpscaleResult !== undefined)) &&
       (candidate.id !== 'audio' || clipAudio !== undefined) &&
       (candidate.id !== 'speed' || clipSpeed !== undefined)
     );
@@ -747,6 +767,23 @@ export function InspectorPanel({
             onChange={onMaskSettingsChange}
             onApplyResult={onApplyMaskResult}
             onClear={onClearMask}
+          />
+        )}
+
+      {tab === 'enhance' &&
+        upscaleTarget !== undefined &&
+        project !== undefined &&
+        upscaleProjectId !== undefined &&
+        upscaleProjectTitle !== undefined &&
+        onUpscaleSettingsChange !== undefined &&
+        onApplyUpscaleResult !== undefined && (
+          <EnhanceInspector
+            projectId={upscaleProjectId}
+            projectTitle={upscaleProjectTitle}
+            target={upscaleTarget}
+            settings={readUpscaleSettings(project, upscaleTarget.targetId)}
+            onChange={onUpscaleSettingsChange}
+            onApplyResult={onApplyUpscaleResult}
           />
         )}
 

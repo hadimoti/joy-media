@@ -9,6 +9,7 @@ import {
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDerivativeRecord,
+  type WorkerModelInventoryRecord,
 } from './control-plane.js';
 import {
   DisabledMediaAuth,
@@ -169,6 +170,8 @@ async function route(
           decodeURIComponent(workerId),
           requiredStringArray(body, 'capabilities'),
           optionalStringArray(body, 'assetIds') ?? [],
+          undefined,
+          optionalWorkerModelInventory(body.modelInventory),
         ),
       });
       return;
@@ -240,7 +243,9 @@ async function route(
                 ? receipt.descriptor.mimeType === 'video/webm'
                   ? 'tracked-alpha-webm-v1'
                   : 'alpha-matte-png-v1'
-                : 'audio-processed',
+                : receipt.kind === 'upscale'
+                  ? 'ai-upscale-v1'
+                  : 'audio-processed',
           sha256: receipt.sha256,
           bytes: receipt.bytes,
           descriptor: receipt.descriptor,
@@ -948,7 +953,9 @@ async function route(
         : type === 'image.comfy' ||
             type === 'audio.ml-denoise' ||
             type === 'mask.image' ||
-            type === 'mask.video'
+            type === 'mask.video' ||
+            type === 'upscale.image' ||
+            type === 'upscale.video'
           ? await options.controlPlane.enqueue(
               actor,
               requiredString(body, 'id'),
@@ -1151,6 +1158,68 @@ function optionalStringArray(
   return requiredStringArray(body, field);
 }
 
+function optionalWorkerModelInventory(value: unknown): WorkerModelInventoryRecord | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', 'modelInventory must be an object');
+  const body = value as Record<string, unknown>;
+  const managerVersion = body.managerVersion;
+  const cacheStatus = body.cacheStatus;
+  const models = body.models;
+  if (
+    typeof managerVersion !== 'string' ||
+    managerVersion.length === 0 ||
+    managerVersion.length > 64 ||
+    !['ready', 'read-only', 'unavailable'].includes(String(cacheStatus)) ||
+    !Array.isArray(models) ||
+    models.length > 128
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'modelInventory is invalid');
+  return {
+    managerVersion,
+    cacheStatus: cacheStatus as WorkerModelInventoryRecord['cacheStatus'],
+    ...(typeof body.freeBytes === 'number' &&
+    Number.isSafeInteger(body.freeBytes) &&
+    body.freeBytes >= 0
+      ? { freeBytes: body.freeBytes }
+      : {}),
+    models: models.map((item) => {
+      if (item === null || typeof item !== 'object' || Array.isArray(item))
+        throw new ControlPlaneError(
+          'REQUEST_INVALID',
+          'modelInventory.models contains an invalid item',
+        );
+      const model = item as Record<string, unknown>;
+      if (
+        typeof model.modelId !== 'string' ||
+        model.modelId.length === 0 ||
+        model.modelId.length > 128 ||
+        typeof model.version !== 'string' ||
+        model.version.length > 128 ||
+        typeof model.state !== 'string' ||
+        model.state.length > 64
+      )
+        throw new ControlPlaneError('REQUEST_INVALID', 'modelInventory model is invalid');
+      return {
+        modelId: model.modelId,
+        version: model.version,
+        state: model.state,
+        ...(typeof model.progress === 'number' && Number.isFinite(model.progress)
+          ? { progress: Math.min(100, Math.max(0, model.progress)) }
+          : {}),
+        ...(typeof model.installedBytes === 'number' &&
+        Number.isSafeInteger(model.installedBytes) &&
+        model.installedBytes >= 0
+          ? { installedBytes: model.installedBytes }
+          : {}),
+        ...(typeof model.errorCode === 'string'
+          ? { errorCode: model.errorCode.slice(0, 128) }
+          : {}),
+      };
+    }),
+  };
+}
+
 /**
  * Keeps execution parameters in the private Worker lease while browser job
  * projections remain metadata-only. `payload` is the canonical form; the
@@ -1192,7 +1261,13 @@ function optionalWorkerResult(body: Record<string, unknown>):
       };
     }
   | {
-      readonly kind: 'image.comfy' | 'audio.ml-denoise' | 'mask.image' | 'mask.video';
+      readonly kind:
+        | 'image.comfy'
+        | 'audio.ml-denoise'
+        | 'mask.image'
+        | 'mask.video'
+        | 'upscale.image'
+        | 'upscale.video';
       readonly assetId: string;
       readonly sha256: string;
       readonly bytes: number;
@@ -1218,7 +1293,9 @@ function optionalWorkerResult(body: Record<string, unknown>):
     (result.kind === 'image.comfy' ||
       result.kind === 'audio.ml-denoise' ||
       result.kind === 'mask.image' ||
-      result.kind === 'mask.video') &&
+      result.kind === 'mask.video' ||
+      result.kind === 'upscale.image' ||
+      result.kind === 'upscale.video') &&
     typeof result.assetId === 'string' &&
     typeof result.localRef === 'string' &&
     isReceiptHashAndBytes(result) &&
@@ -1245,6 +1322,8 @@ function optionalWorkerResult(body: Record<string, unknown>):
           ? { durationUs }
           : {}),
       },
+      ...(typeof result.modelId === 'string' ? { modelId: result.modelId } : {}),
+      ...(typeof result.modelVersion === 'string' ? { modelVersion: result.modelVersion } : {}),
     };
   }
   if (
@@ -1279,7 +1358,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
-  readonly kind: 'thumbnail' | 'audio' | 'mask';
+  readonly kind: 'thumbnail' | 'audio' | 'mask' | 'upscale';
   readonly descriptor: {
     readonly mimeType: string;
     readonly width?: number;
@@ -1301,11 +1380,13 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   const isThumbnail =
     declaredKind === undefined ? mimeType === 'image/jpeg' : declaredKind === 'thumbnail';
   const isMask = declaredKind === 'mask';
+  const isUpscale = declaredKind === 'upscale';
   const declaredKindValid =
     declaredKind === undefined ||
     declaredKind === 'thumbnail' ||
     declaredKind === 'audio' ||
-    declaredKind === 'mask';
+    declaredKind === 'mask' ||
+    declaredKind === 'upscale';
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId) ||
     !/^[a-f0-9]{64}$/.test(sha256) ||
@@ -1329,8 +1410,27 @@ function workerDerivativeHeaders(request: IncomingMessage): {
         height <= 0 ||
         (mimeType === 'video/webm' &&
           (durationUs === undefined || !Number.isSafeInteger(durationUs) || durationUs <= 0)))) ||
-    (!isThumbnail && !isMask && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
+    (isUpscale && !['image/png', 'image/jpeg', 'video/mp4', 'video/webm'].includes(mimeType)) ||
+    (!isThumbnail && !isMask && !isUpscale && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
     (isMask && mimeType !== 'image/png' && mimeType !== 'video/webm') ||
+    (isUpscale &&
+      ((mimeType.startsWith('image/') &&
+        (width === undefined ||
+          !Number.isSafeInteger(width) ||
+          width <= 0 ||
+          height === undefined ||
+          !Number.isSafeInteger(height) ||
+          height <= 0)) ||
+        (mimeType.startsWith('video/') &&
+          (width === undefined ||
+            !Number.isSafeInteger(width) ||
+            width <= 0 ||
+            height === undefined ||
+            !Number.isSafeInteger(height) ||
+            height <= 0 ||
+            durationUs === undefined ||
+            !Number.isSafeInteger(durationUs) ||
+            durationUs <= 0)))) ||
     (durationUs !== undefined && (!Number.isSafeInteger(durationUs) || durationUs < 0))
   )
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
@@ -1338,7 +1438,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
     assetId,
     sha256,
     bytes,
-    kind: isThumbnail ? 'thumbnail' : isMask ? 'mask' : 'audio',
+    kind: isThumbnail ? 'thumbnail' : isMask ? 'mask' : isUpscale ? 'upscale' : 'audio',
     descriptor: {
       mimeType,
       ...(width === undefined ? {} : { width }),

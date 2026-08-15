@@ -17,6 +17,7 @@ import {
   type JobEvent,
   type LocalGpuWorkerReceipt,
   type MaskWorkerReceipt,
+  type UpscaleWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
   type ProjectLifecycleMetadata,
@@ -24,6 +25,7 @@ import {
   type ProjectDeletionResult,
   type WorkerPairingOffer,
   type WorkerRecord,
+  type WorkerModelInventoryRecord,
   type WorkerSession,
   validateAssetRegistration,
   validateAssetTags,
@@ -55,6 +57,7 @@ interface WorkerRow {
   readonly capabilities: readonly string[];
   readonly local_asset_ids: readonly string[];
   readonly last_seen_at: Date | null;
+  readonly model_inventory: WorkerModelInventoryRecord | null;
 }
 
 interface PairingOfferRow {
@@ -866,16 +869,18 @@ export class PostgresControlPlane implements ControlPlane {
     capabilities: readonly string[],
     localAssetIds: readonly string[] = [],
     now = Date.now(),
+    modelInventory?: WorkerModelInventoryRecord,
   ): Promise<WorkerRecord> {
     const assets = normalizeOpaqueAssetIds(localAssetIds);
     const result = await this.pool.query<WorkerRow>(
-      `UPDATE workers SET capabilities = $2::jsonb, local_asset_ids = $3::jsonb, last_seen_at = $4
+      `UPDATE workers SET capabilities = $2::jsonb, local_asset_ids = $3::jsonb, last_seen_at = $4, model_inventory = $5::jsonb
        WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
       [
         workerId,
         JSON.stringify([...new Set(capabilities)].sort()),
         JSON.stringify(assets),
         new Date(now),
+        modelInventory === undefined ? null : JSON.stringify(modelInventory),
       ],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
@@ -1001,6 +1006,13 @@ export class PostgresControlPlane implements ControlPlane {
             workerRecord.localAssetIds.includes(item.asset_id)
           );
         }
+        if (item.type === 'upscale.image' || item.type === 'upscale.video') {
+          return (
+            item.asset_id !== null &&
+            caps.includes(item.type) &&
+            workerRecord.localAssetIds.includes(item.asset_id)
+          );
+        }
         return true;
       });
       if (job === undefined) return undefined;
@@ -1059,7 +1071,8 @@ export class PostgresControlPlane implements ControlPlane {
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const isMask = receipt?.kind === 'mask.image' || receipt?.kind === 'mask.video';
-    const storesAsset = isThumb || isGpu || isMask;
+    const isUpscale = receipt?.kind === 'upscale.image' || receipt?.kind === 'upscale.video';
+    const storesAsset = isThumb || isGpu || isMask || isUpscale;
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
@@ -1072,8 +1085,10 @@ export class PostgresControlPlane implements ControlPlane {
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
            AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
-           AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
-           AND (type <> 'mask.video' OR ($4 = 'mask.video' AND asset_id = $10))
+            AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
+            AND (type <> 'mask.video' OR ($4 = 'mask.video' AND asset_id = $10))
+            AND (type <> 'upscale.image' OR ($4 = 'upscale.image' AND asset_id = $10))
+            AND (type <> 'upscale.video' OR ($4 = 'upscale.video' AND asset_id = $10))
          RETURNING *`,
         [
           jobId,
@@ -1090,15 +1105,15 @@ export class PostgresControlPlane implements ControlPlane {
           storesAsset && receipt !== undefined ? receipt.descriptor.mimeType : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.width
-            : (isGpu || isMask) && receipt !== undefined
+            : (isGpu || isMask || isUpscale) && receipt !== undefined
               ? (receipt.descriptor.width ?? null)
               : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.height
-            : (isGpu || isMask) && receipt !== undefined
+            : (isGpu || isMask || isUpscale) && receipt !== undefined
               ? (receipt.descriptor.height ?? null)
               : null,
-          (isGpu || isMask) && receipt !== undefined
+          (isGpu || isMask || isUpscale) && receipt !== undefined
             ? (receipt.descriptor.durationUs ?? null)
             : null,
         ],
@@ -1292,6 +1307,7 @@ function workerOf(row: WorkerRow): WorkerRecord {
     capabilities: row.capabilities,
     localAssetIds: row.local_asset_ids,
     ...(row.last_seen_at === null ? {} : { lastSeenAt: row.last_seen_at.getTime() }),
+    ...(row.model_inventory === null ? {} : { modelInventory: row.model_inventory }),
   };
 }
 
@@ -1363,7 +1379,9 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
     (row.result_kind === 'image.comfy' ||
       row.result_kind === 'audio.ml-denoise' ||
       row.result_kind === 'mask.image' ||
-      row.result_kind === 'mask.video') &&
+      row.result_kind === 'mask.video' ||
+      row.result_kind === 'upscale.image' ||
+      row.result_kind === 'upscale.video') &&
     row.result_asset_id !== null &&
     row.result_local_ref !== null &&
     row.result_mime_type !== null
@@ -1475,7 +1493,8 @@ function isWorkerReceipt(value: WorkerResultReceipt): boolean {
     isFixtureReceipt(value) ||
     isAssetThumbnailReceipt(value) ||
     isLocalGpuReceipt(value) ||
-    isMaskReceipt(value)
+    isMaskReceipt(value) ||
+    isUpscaleReceipt(value)
   );
 }
 
@@ -1530,10 +1549,33 @@ function isMaskReceipt(value: WorkerResultReceipt): value is MaskWorkerReceipt {
   );
 }
 
+function isUpscaleReceipt(value: WorkerResultReceipt): value is UpscaleWorkerReceipt {
+  const image = value.kind === 'upscale.image';
+  const video = value.kind === 'upscale.video';
+  return (
+    (image || video) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^upscale-[A-Za-z0-9._-]{1,120}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0 &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    (value.descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    (value.descriptor.height ?? 0) > 0 &&
+    (!video ||
+      value.descriptor.mimeType === 'video/mp4' ||
+      value.descriptor.mimeType === 'video/webm')
+  );
+}
+
 function derivativeKindForJob(type: string): DerivativeKind | undefined {
   if (type === 'asset.thumbnail') return 'thumbnail';
   if (type === 'audio.ml-denoise') return 'audio';
   if (type === 'mask.image' || type === 'mask.video') return 'mask';
+  if (type === 'upscale.image' || type === 'upscale.video') return 'upscale';
   return undefined;
 }
 
@@ -1542,7 +1584,9 @@ function requiresSourceAsset(type: string): boolean {
     type === 'image.comfy' ||
     type === 'audio.ml-denoise' ||
     type === 'mask.image' ||
-    type === 'mask.video'
+    type === 'mask.video' ||
+    type === 'upscale.image' ||
+    type === 'upscale.video'
   );
 }
 

@@ -10,6 +10,7 @@ ALTER TABLE workers ADD COLUMN IF NOT EXISTS session_expires_at timestamptz;
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS local_asset_ids jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS model_inventory jsonb;
 CREATE TABLE IF NOT EXISTS jobs (id text primary key, project_id text not null, type text not null, state text not null, lease_owner text, lease_expires_at timestamptz);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress integer NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFAULT false;

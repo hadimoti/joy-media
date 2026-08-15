@@ -25,7 +25,7 @@ export interface ProjectDuplicateResult {
   readonly derivativeIdMap: Readonly<Record<string, string>>;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
-export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio' | 'mask';
+export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio' | 'mask' | 'upscale';
 export type DerivativeAvailability =
   'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
 
@@ -129,6 +129,20 @@ export interface WorkerRecord {
   /** Opaque asset IDs present on the Worker; never local paths. */
   readonly localAssetIds: readonly string[];
   readonly lastSeenAt?: number;
+  readonly modelInventory?: WorkerModelInventoryRecord;
+}
+export interface WorkerModelInventoryRecord {
+  readonly managerVersion: string;
+  readonly cacheStatus: 'ready' | 'read-only' | 'unavailable';
+  readonly freeBytes?: number;
+  readonly models: readonly {
+    readonly modelId: string;
+    readonly version: string;
+    readonly state: string;
+    readonly progress?: number;
+    readonly installedBytes?: number;
+    readonly errorCode?: string;
+  }[];
 }
 export interface WorkerPairingOffer {
   readonly workerId: string;
@@ -201,8 +215,28 @@ export interface MaskWorkerReceipt {
     readonly durationUs?: number;
   };
 }
+/** AI upscaling result retained by the Local Worker. */
+export interface UpscaleWorkerReceipt {
+  readonly kind: 'upscale.image' | 'upscale.video';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationUs?: number;
+  };
+  readonly modelId?: string;
+  readonly modelVersion?: string;
+}
 export type WorkerResultReceipt =
-  FixtureThumbnailReceipt | AssetThumbnailReceipt | LocalGpuWorkerReceipt | MaskWorkerReceipt;
+  | FixtureThumbnailReceipt
+  | AssetThumbnailReceipt
+  | LocalGpuWorkerReceipt
+  | MaskWorkerReceipt
+  | UpscaleWorkerReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
@@ -361,6 +395,7 @@ export interface ControlPlane {
     capabilities: readonly string[],
     localAssetIds?: readonly string[],
     now?: number,
+    modelInventory?: WorkerModelInventoryRecord,
   ): WorkerRecord | Promise<WorkerRecord>;
   revokeWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   enqueue(
@@ -906,6 +941,7 @@ export class LocalControlPlane implements ControlPlane {
     capabilities: readonly string[],
     localAssetIds: readonly string[] = [],
     now = Date.now(),
+    modelInventory?: WorkerModelInventoryRecord,
   ): WorkerRecord {
     const worker = this.#workers.get(workerId);
     if (worker === undefined || worker.revoked)
@@ -915,6 +951,7 @@ export class LocalControlPlane implements ControlPlane {
       capabilities: [...new Set(capabilities)].sort(),
       localAssetIds: validatedOpaqueIds(localAssetIds),
       lastSeenAt: now,
+      ...(modelInventory === undefined ? {} : { modelInventory }),
     };
     this.#workers.set(workerId, next);
     return next;
@@ -1049,6 +1086,11 @@ export class LocalControlPlane implements ControlPlane {
     if (
       (job.type === 'mask.image' || job.type === 'mask.video') &&
       (!isMaskReceipt(receipt) || receipt.kind !== job.type || receipt.assetId !== job.assetId)
+    )
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (
+      (job.type === 'upscale.image' || job.type === 'upscale.video') &&
+      (!isUpscaleReceipt(receipt) || receipt.kind !== job.type || receipt.assetId !== job.assetId)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     const derivative =
@@ -1245,10 +1287,33 @@ function isMaskReceipt(value: WorkerResultReceipt | undefined): value is MaskWor
   );
 }
 
+function isUpscaleReceipt(value: WorkerResultReceipt | undefined): value is UpscaleWorkerReceipt {
+  const image = value?.kind === 'upscale.image';
+  const video = value?.kind === 'upscale.video';
+  return (
+    (image || video) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^upscale-[A-Za-z0-9._-]{1,120}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0 &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    (value.descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    (value.descriptor.height ?? 0) > 0 &&
+    (!video ||
+      value.descriptor.mimeType === 'video/mp4' ||
+      value.descriptor.mimeType === 'video/webm')
+  );
+}
+
 function derivativeKindForJob(type: string): DerivativeKind | undefined {
   if (type === 'asset.thumbnail') return 'thumbnail';
   if (type === 'audio.ml-denoise') return 'audio';
   if (type === 'mask.image' || type === 'mask.video') return 'mask';
+  if (type === 'upscale.image' || type === 'upscale.video') return 'upscale';
   return undefined;
 }
 
@@ -1257,7 +1322,9 @@ function requiresSourceAsset(type: string): boolean {
     type === 'image.comfy' ||
     type === 'audio.ml-denoise' ||
     type === 'mask.image' ||
-    type === 'mask.video'
+    type === 'mask.video' ||
+    type === 'upscale.image' ||
+    type === 'upscale.video'
   );
 }
 
@@ -1272,6 +1339,13 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
   if (job.type === 'mask.image' || job.type === 'mask.video') {
+    return (
+      job.assetId !== undefined &&
+      worker.capabilities.includes(job.type) &&
+      worker.localAssetIds.includes(job.assetId)
+    );
+  }
+  if (job.type === 'upscale.image' || job.type === 'upscale.video') {
     return (
       job.assetId !== undefined &&
       worker.capabilities.includes(job.type) &&

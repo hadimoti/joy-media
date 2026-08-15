@@ -8,6 +8,19 @@ export interface BrowserWorker {
   readonly capabilities: readonly string[];
   readonly localAssetIds?: readonly string[];
   readonly lastSeenAt?: number;
+  readonly modelInventory?: {
+    readonly managerVersion: string;
+    readonly cacheStatus: 'ready' | 'read-only' | 'unavailable';
+    readonly freeBytes?: number;
+    readonly models: readonly {
+      readonly modelId: string;
+      readonly version: string;
+      readonly state: string;
+      readonly progress?: number;
+      readonly installedBytes?: number;
+      readonly errorCode?: string;
+    }[];
+  };
 }
 
 export interface BrowserJob {
@@ -65,7 +78,7 @@ export interface BrowserDerivative {
   readonly id: string;
   readonly projectId: string;
   readonly assetId: string;
-  readonly kind: 'thumbnail' | 'proxy' | 'audio' | 'mask';
+  readonly kind: 'thumbnail' | 'proxy' | 'audio' | 'mask' | 'upscale';
   readonly profile: string;
   readonly sha256: string;
   readonly bytes: number;
@@ -366,6 +379,8 @@ export class BrowserControlPlaneClient {
     id: string,
     type:
       | 'image.comfy'
+      | 'upscale.image'
+      | 'upscale.video'
       | 'mask.image'
       | 'mask.video'
       | 'audio.ml-denoise'
@@ -387,6 +402,15 @@ export class BrowserControlPlaneClient {
     projectId: string,
     id: string,
     type: 'mask.image' | 'mask.video',
+    assetId: string,
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<BrowserJob> {
+    return this.enqueueWorkerGeneration(projectId, id, type, assetId, payload);
+  }
+  async enqueueUpscale(
+    projectId: string,
+    id: string,
+    type: 'upscale.image' | 'upscale.video',
     assetId: string,
     payload: Readonly<Record<string, unknown>>,
   ): Promise<BrowserJob> {

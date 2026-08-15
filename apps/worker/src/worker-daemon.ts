@@ -74,7 +74,9 @@ export class WorkerDaemon {
             result.result.kind === 'asset.thumbnail' ||
             result.result.kind === 'audio.ml-denoise' ||
             result.result.kind === 'mask.image' ||
-            result.result.kind === 'mask.video'
+            result.result.kind === 'mask.video' ||
+            result.result.kind === 'upscale.image' ||
+            result.result.kind === 'upscale.video'
           ) {
             await this.client.uploadDerivative(
               job.id,
