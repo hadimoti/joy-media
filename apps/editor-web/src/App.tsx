@@ -4571,16 +4571,26 @@ function EditorWorkspace({
                 ? {}
                 : { clipId: selectedTimelineEntry.clip.id }),
             }
-          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+          : selectedTimelineEntry?.clip?.kind === 'video' && selectedImageAssetId !== undefined
             ? {
-                targetId: selectedTimelineEntry.clip.id,
+                targetId: selectedTimelineObjectId ?? selectedTimelineEntry.clip.id,
+                ...(selectedTimelineObjectId === undefined
+                  ? {}
+                  : { objectId: selectedTimelineObjectId }),
                 clipId: selectedTimelineEntry.clip.id,
-                assetId: selectedTimelineEntry.clip.assetId,
-                kind: 'video',
-                durationUs: selectedTimelineEntry.clip.durationUs,
-                playheadUs: state.playheadUs,
+                assetId: selectedImageAssetId,
+                kind: 'image',
               }
-            : undefined;
+            : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+              ? {
+                  targetId: selectedTimelineEntry.clip.id,
+                  clipId: selectedTimelineEntry.clip.id,
+                  assetId: selectedTimelineEntry.clip.assetId,
+                  kind: 'video',
+                  durationUs: selectedTimelineEntry.clip.durationUs,
+                  playheadUs: state.playheadUs,
+                }
+              : undefined;
       const upscaleTarget: UpscaleTarget | undefined =
         object?.kind === 'image' && object.assetId !== undefined
           ? { targetId: object.id, objectId: object.id, assetId: object.assetId, kind: 'image' }
