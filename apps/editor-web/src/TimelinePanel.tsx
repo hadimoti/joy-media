@@ -37,11 +37,7 @@ import {
   MarkerIcon,
   TimelineMarkerIcon,
   CloseIcon,
-  FlowProvenanceIcon,
-  ProgramOutputIcon,
-  JoyBrandMarkIcon,
   TimelineScriptTrackIcon,
-  TimelineVideoTrackIcon,
   SelectIcon,
   TrackAddIcon,
   LayersIcon,
@@ -77,7 +73,6 @@ import {
 } from './timeline-layout.js';
 import { formatTime } from './format-time.js';
 import { useTimelineMarkerSelection } from './useTimelineMarkerSelection.js';
-import type { ProvenanceStep } from './dual-lens-reveal.js';
 import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
@@ -138,19 +133,6 @@ function clipDisplayName(id: string): string {
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
   if (kind === 'script') return <TimelineScriptTrackIcon />;
   return <TimelineElementGlyph kind={kind} />;
-}
-
-function ProvenanceStepIcon({
-  kind,
-  label,
-}: {
-  readonly kind: ProvenanceStep['kind'];
-  readonly label: string;
-}) {
-  if (kind === 'output') return <ProgramOutputIcon />;
-  if (kind === 'visual' || label === 'JOY') return <JoyBrandMarkIcon size={16} />;
-  if (kind === 'asset' || kind === 'clip') return <TimelineVideoTrackIcon size={12} />;
-  return null;
 }
 
 function TimelineClip({
@@ -514,9 +496,7 @@ export function TimelinePanel({
   onRemoveMarker,
   onEffectDrop,
   onTransitionDrop,
-  provenance,
   onRevealInFlow,
-  onRevealNode,
   dataLanes,
   artifacts,
   onDispatchArtifacts,
@@ -563,14 +543,7 @@ export function TimelinePanel({
     rightClipId: string,
     trackId: string,
   ) => void;
-  /**
-   * Causal chain through the selected item, source first. Supplied by the
-   * editor from the shared Dual Lens projection so the ribbon and the Flow
-   * panel can never disagree about what produced the selection.
-   */
-  readonly provenance?: readonly ProvenanceStep[];
   readonly onRevealInFlow?: (clipId: string) => void;
-  readonly onRevealNode?: (nodeId: string) => void;
   /**
    * Durable creative data laid against time. Absent unless the Dual Lens flag
    * is on, which is what keeps the default timeline unchanged.
@@ -1769,31 +1742,6 @@ export function TimelinePanel({
         )}
         <ActionOverflowMenu items={overflowItems} />
       </div>
-
-      {provenance !== undefined && provenance.length > 0 && (
-        <div className="timeline-provenance" aria-live="polite">
-          <span className="timeline-provenance-label">
-            <FlowProvenanceIcon />
-            Flow
-          </span>
-          <ol className="timeline-provenance-chain">
-            {provenance.map((step) => (
-              <li key={step.nodeId}>
-                <button
-                  type="button"
-                  className="timeline-provenance-step"
-                  data-kind={step.kind}
-                  title={`Reveal ${step.label} in Flow`}
-                  onClick={() => onRevealNode?.(step.nodeId)}
-                >
-                  <ProvenanceStepIcon kind={step.kind} label={step.label} />
-                  {step.label}
-                </button>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
 
       <TimelineEmptyState
         project={project}

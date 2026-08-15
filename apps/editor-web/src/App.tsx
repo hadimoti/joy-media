@@ -115,11 +115,7 @@ import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
-import {
-  primaryNodeIdForClip,
-  provenanceRibbon,
-  type LensRevealRequest,
-} from './dual-lens-reveal.js';
+import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
 import { buildDataLanes, type DataLane } from './data-lanes.js';
 import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
@@ -711,7 +707,6 @@ interface EditorPanelContextValue {
   /** A pending `Reveal in Flow`, consumed by the Dual Lens panel. */
   readonly lensReveal: LensRevealRequest | undefined;
   readonly revealInFlow: (clipId: string) => void;
-  readonly revealNodeInFlow: (nodeId: string) => void;
   readonly revealOnTimeline: (clipIds: readonly string[]) => void;
   /** The authored workflow graph — undefined unless the Dual Lens flag is on. */
   readonly workflowGraph: WorkflowGraphV2 | undefined;
@@ -2642,13 +2637,6 @@ function EditorWorkspace({
   const selectClips = useCallback((clipIds: readonly string[]) => {
     setState((current) => ({ ...current, selectedIds: [...clipIds] }));
   }, []);
-  const revealNodeInFlow = useCallback(
-    (nodeId: string) => {
-      setLensReveal({ mode: 'flow', nodeId, token: Date.now() });
-      activatePanel('flow');
-    },
-    [activatePanel],
-  );
   const revealInFlow = useCallback(
     (clipId: string) => {
       selectClips([clipId]);
@@ -5031,13 +5019,7 @@ function EditorWorkspace({
           autoFit={context.timelineAutoFit}
           onAutoFitChange={context.onTimelineAutoFitChange}
           markers={activeTimelineMarkers}
-          provenance={
-            state.selectedIds[0] === undefined
-              ? []
-              : provenanceRibbon(context.dualLensProjection, state.selectedIds[0])
-          }
           onRevealInFlow={context.revealInFlow}
-          onRevealNode={context.revealNodeInFlow}
           {...(context.dataLanes === undefined || context.artifacts === undefined
             ? {}
             : {
@@ -5859,7 +5841,6 @@ function EditorWorkspace({
           dualLensProjection,
           lensReveal,
           revealInFlow,
-          revealNodeInFlow,
           revealOnTimeline,
           workflowGraph: session.graphEnabled ? session.workflowGraph : undefined,
           dispatchGraph,
