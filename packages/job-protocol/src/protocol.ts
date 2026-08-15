@@ -5,6 +5,8 @@ export const WORKER_PROTOCOL_VERSION = 1 as const;
 export type WorkerCapability =
   | 'asset.thumbnail'
   | 'image.comfy'
+  | 'mask.image'
+  | 'mask.video'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
   | 'text.openrouter'
@@ -13,6 +15,8 @@ export type WorkerCapability =
 
 export type SpecializedJobType =
   | 'image.comfy'
+  | 'mask.image'
+  | 'mask.video'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
   | 'text.openrouter'
@@ -20,12 +24,61 @@ export type SpecializedJobType =
   | 'edit.higgsfield';
 export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
+  'mask.image',
+  'mask.video',
   'audio.ml-denoise',
   'text.lm-studio',
   'text.openrouter',
   'video.runway',
   'edit.higgsfield',
 ] as const;
+
+export type MaskProvider = 'auto' | 'sam3' | 'sam2-grounded' | 'birefnet';
+export type MaskSelectionMode = 'subject' | 'person' | 'prompt' | 'points' | 'box';
+
+/**
+ * Versioned, provider-neutral masking request. Coordinates are normalized to
+ * the source frame so the same request can be replayed at any decode size.
+ * Local paths and model credentials never enter this envelope.
+ */
+export interface MaskJobPayload {
+  readonly schemaVersion: 1;
+  readonly provider: MaskProvider;
+  readonly selection: {
+    readonly mode: MaskSelectionMode;
+    /** Video seed time. UI requests use the current playhead. */
+    readonly timeUs?: number;
+    readonly prompt?: string;
+    readonly points?: readonly {
+      readonly x: number;
+      readonly y: number;
+      readonly label: 'foreground' | 'background';
+      readonly timeUs?: number;
+    }[];
+    readonly box?: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+      readonly timeUs?: number;
+    };
+  };
+  readonly edge: {
+    readonly featherPx: number;
+    readonly expansionPx: number;
+    readonly detail: number;
+    readonly decontaminate: boolean;
+  };
+  readonly invert: boolean;
+  readonly output: 'matte' | 'cutout';
+  readonly video?: {
+    readonly range: 'clip' | 'in-out';
+    readonly inUs?: number;
+    readonly outUs?: number;
+    readonly direction: 'forward' | 'backward' | 'both';
+    readonly temporalConsistency: number;
+  };
+}
 
 /** @deprecated Use SpecializedJobType */
 export type LocalGpuWorkerJobType = SpecializedJobType;

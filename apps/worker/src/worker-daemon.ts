@@ -72,7 +72,9 @@ export class WorkerDaemon {
           // provider receipts remain Worker-local until their own contracts land.
           if (
             result.result.kind === 'asset.thumbnail' ||
-            result.result.kind === 'audio.ml-denoise'
+            result.result.kind === 'audio.ml-denoise' ||
+            result.result.kind === 'mask.image' ||
+            result.result.kind === 'mask.video'
           ) {
             await this.client.uploadDerivative(
               job.id,

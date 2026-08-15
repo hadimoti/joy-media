@@ -90,6 +90,19 @@ export function writeImageMatte(
   };
 }
 
+export function clearImageMatte(project: JoyProjectV1, objectId: string): JoyProjectV1 {
+  const next = { ...readImageMatteMap(project) };
+  delete next[objectId];
+  return {
+    ...project,
+    pluginData: {
+      ...project.pluginData,
+      [IMAGE_MATTE_PLUGIN_KEY]: next as unknown as JsonValue,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function seedClipObjectFlat(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [clipId, objectIds] of Object.entries(TIMELINE_OBJECT_IDS)) {

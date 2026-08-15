@@ -3,6 +3,8 @@ import type { BrowserControlPlaneClient, BrowserJob } from './control-plane-clie
 
 type WorkerGenerationType =
   | 'image.comfy'
+  | 'mask.image'
+  | 'mask.video'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
   | 'text.openrouter'
@@ -39,6 +41,10 @@ export class AgentWorkerJobClient implements AgentJobClient {
         request.jobId,
         request.jobType,
         request.inputAssetId,
+        {
+          arguments: request.arguments,
+          generation: request.generation,
+        },
       );
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('JOB_EXISTS')) throw error;
@@ -111,6 +117,8 @@ export class AgentWorkerJobClient implements AgentJobClient {
 function isWorkerGenerationType(value: string): value is WorkerGenerationType {
   return (
     value === 'image.comfy' ||
+    value === 'mask.image' ||
+    value === 'mask.video' ||
     value === 'audio.ml-denoise' ||
     value === 'text.lm-studio' ||
     value === 'text.openrouter' ||

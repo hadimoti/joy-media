@@ -150,7 +150,7 @@ import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel, workerAudioDenoiseOperationId } from './JobsPanel.js';
 import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
+import { BrowserControlPlaneClient, type BrowserJob } from './control-plane-client.js';
 import { importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -160,9 +160,19 @@ import { setMonitorPixelReader } from './monitor-readback.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
 import {
   bindClipToObject,
+  clearImageMatte,
   readImageMatteMap,
   resolveObjectIdForSelection,
+  writeImageMatte,
 } from './sticker-bindings.js';
+import {
+  readMaskSettings,
+  readVideoMaskSourceMap,
+  writeMaskSettings,
+  writeVideoMaskSource,
+  type MaskSettings,
+  type MaskTarget,
+} from './masking.js';
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
@@ -395,6 +405,10 @@ function activeVideoClipAt(
   return (
     preferredClipIds.map((id) => active.find((clip) => clip.id === id)).find(Boolean) ?? active[0]
   );
+}
+
+function playbackAssetId(project: JoyProjectV1, clip: VideoClip): string {
+  return readVideoMaskSourceMap(project)[clip.id] ?? clip.assetId;
 }
 
 function resampleMonoSamples(
@@ -1371,7 +1385,7 @@ function EditorWorkspace({
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
         const clip = findVideoClipById(session.timelineProject, clipId);
         if (clip === undefined) continue;
-        const source = await mediaResolver.resolve(clip.assetId);
+        const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
         const sourceUrl = new URL(source.url, window.location.href).href;
         if (video.src !== sourceUrl) {
           video.src = sourceUrl;
@@ -1431,7 +1445,7 @@ function EditorWorkspace({
         clip.kind !== 'video'
       )
         return false;
-      const source = await mediaResolver.resolve(clip.assetId);
+      const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
       if (!operation.isCurrent(epoch)) return false;
       const clipAudioConfig = audioState.clips[clip.id];
       const replacementAssetId =
@@ -3303,7 +3317,7 @@ function EditorWorkspace({
             };
             const audioAssetId = clipAudioConfig.sourceAssetId ?? clip.assetId;
             const source = await preloadStage('resolving source', () =>
-              mediaResolver.resolve(clip.assetId),
+              mediaResolver.resolve(playbackAssetId(session.visualProject, clip)),
             );
             const audioSource =
               audioAssetId === clip.assetId
@@ -4076,6 +4090,68 @@ function EditorWorkspace({
     }) => {
       context.replaceVisualProject(projectWithImportedAsset(context.visualProject, asset));
     };
+    const applyMaskWorkerResult = async (
+      job: BrowserJob,
+      target: MaskTarget,
+      settings: MaskSettings,
+    ): Promise<string> => {
+      if (job.state !== 'completed' || job.derivative === undefined)
+        throw new Error('Mask result is not complete.');
+      const derivatives = await mediaControlPlaneClient.derivatives(
+        controlPlaneProject.controlPlaneProjectId,
+        target.assetId,
+      );
+      const derivative =
+        derivatives.find((candidate) => candidate.id === `derivative-${job.id}`) ??
+        [...derivatives]
+          .filter((candidate) => candidate.kind === 'mask')
+          .sort((left, right) => right.verifiedAt - left.verifiedAt)[0];
+      if (derivative === undefined) throw new Error('Verified mask derivative is unavailable.');
+      const blob = await mediaControlPlaneClient.derivativeBytes(
+        controlPlaneProject.controlPlaneProjectId,
+        target.assetId,
+        derivative.id,
+      );
+      const extension = derivative.descriptor.mimeType === 'video/webm' ? 'webm' : 'png';
+      const file = new File([blob], `JOY Mask ${job.id.slice(-32)}.${extension}`, {
+        type: derivative.descriptor.mimeType,
+      });
+      const expectedRevision = context.session.historyCursorSequence;
+      const imported = await importMediaFile({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        projectTitle: controlPlaneProject.title,
+        file,
+        client: mediaControlPlaneClient,
+        originalAssetCache: originalAssetCachePromise,
+      });
+      if (context.session.historyCursorSequence !== expectedRevision)
+        throw new Error('The project changed while the mask result was being prepared.');
+      let next = projectWithImportedAsset(context.session.visualProject, imported);
+      next = writeMaskSettings(next, target.targetId, {
+        ...settings,
+        lastJob: {
+          id: job.id,
+          state: 'completed',
+          progress: 100,
+          resultAssetId: imported.id,
+        },
+      });
+      if (target.kind === 'image') {
+        if (target.objectId === undefined) throw new Error('Image mask target is unavailable.');
+        next = writeImageMatte(next, target.objectId, imported.id);
+      } else {
+        if (target.clipId === undefined) throw new Error('Video mask target is unavailable.');
+        next = writeVideoMaskSource(next, target.clipId, imported.id);
+      }
+      context.replaceVisualProject(next);
+      context.showToast(
+        target.kind === 'image'
+          ? 'Mask applied to the selected image.'
+          : 'Tracked alpha result linked to the selected video.',
+        'success',
+      );
+      return imported.id;
+    };
     const addAssetToTimeline = (asset: {
       readonly assetId: string;
       readonly kind: 'video' | 'audio' | 'image';
@@ -4399,6 +4475,31 @@ function EditorWorkspace({
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      const selectedMaskAsset =
+        selectedTimelineEntry?.clip?.kind === 'video'
+          ? visualProject.assets[selectedTimelineEntry.clip.assetId]
+          : undefined;
+      const maskTarget: MaskTarget | undefined =
+        object?.kind === 'image' && object.assetId !== undefined
+          ? {
+              targetId: object.id,
+              objectId: object.id,
+              assetId: object.assetId,
+              kind: 'image',
+              ...(selectedTimelineEntry?.clip === undefined
+                ? {}
+                : { clipId: selectedTimelineEntry.clip.id }),
+            }
+          : selectedTimelineEntry?.clip?.kind === 'video' && selectedMaskAsset?.kind === 'video'
+            ? {
+                targetId: selectedTimelineEntry.clip.id,
+                clipId: selectedTimelineEntry.clip.id,
+                assetId: selectedTimelineEntry.clip.assetId,
+                kind: 'video',
+                durationUs: selectedTimelineEntry.clip.durationUs,
+                playheadUs: state.playheadUs,
+              }
+            : undefined;
       const rootComposition =
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
       const adjustmentTargets =
@@ -4470,6 +4571,39 @@ function EditorWorkspace({
           allObjects={visualProject.visualObjects}
           playheadUs={state.playheadUs}
           project={visualProject}
+          {...(maskTarget === undefined
+            ? {}
+            : {
+                maskTarget,
+                maskProjectId: controlPlaneProject.controlPlaneProjectId,
+                maskProjectTitle: controlPlaneProject.title,
+                onMaskSettingsChange: (next: MaskSettings) =>
+                  context.replaceVisualProject(
+                    writeMaskSettings(context.visualProject, maskTarget.targetId, next),
+                  ),
+                onApplyMaskResult: (job: BrowserJob, settings: MaskSettings) =>
+                  applyMaskWorkerResult(job, maskTarget, settings),
+                onClearMask: () => {
+                  const current = readMaskSettings(
+                    context.visualProject,
+                    maskTarget.targetId,
+                    maskTarget.kind,
+                  );
+                  const { lastJob, ...withoutJob } = current;
+                  void lastJob;
+                  let next = writeMaskSettings(
+                    context.visualProject,
+                    maskTarget.targetId,
+                    withoutJob,
+                  );
+                  if (maskTarget.kind === 'image' && maskTarget.objectId !== undefined)
+                    next = clearImageMatte(next, maskTarget.objectId);
+                  if (maskTarget.kind === 'video' && maskTarget.clipId !== undefined)
+                    next = writeVideoMaskSource(next, maskTarget.clipId, undefined);
+                  context.replaceVisualProject(next);
+                  context.showToast('Mask cleared.', 'success');
+                },
+              })}
           audioState={context.audioState}
           onAudioChange={(next) => context.setAudioState(next)}
           onSetStatic={updateVisualProperty}

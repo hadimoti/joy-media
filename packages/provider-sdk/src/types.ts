@@ -49,11 +49,13 @@ export type CapabilityId =
   | 'image.generate'
   | 'image.edit'
   | 'image.removeBackground'
+  | 'image.segment'
   | 'image.upscale'
   | 'video.generate'
   | 'video.animate'
   | 'video.interpolate'
   | 'video.removeBackground'
+  | 'video.segment'
   | 'llm.complete'
   | 'embedding.create'
   | 'vision.analyze';

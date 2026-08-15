@@ -1071,6 +1071,61 @@ export function CanvasIcon() {
   );
 }
 
+export function MaskIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M8 1.75c3 0 5.25 2.1 5.25 5.1 0 3.7-2.35 6.8-5.25 7.4-2.9-.6-5.25-3.7-5.25-7.4 0-3 2.25-5.1 5.25-5.1Z" />
+      <path d="M5.2 7.1c.7-.55 1.5-.8 2.8-.8s2.1.25 2.8.8M6 9.5h4" />
+    </Svg>
+  );
+}
+
+export function SubjectIcon() {
+  return (
+    <Svg size={14}>
+      <circle cx="8" cy="5" r="2.2" />
+      <path d="M3.5 13c.45-2.5 2-3.75 4.5-3.75S12.05 10.5 12.5 13" />
+      <path d="M2 4V2h2M12 2h2v2M2 12v2h2M12 14h2v-2" />
+    </Svg>
+  );
+}
+
+export function PointAddIcon() {
+  return (
+    <Svg size={14}>
+      <circle cx="6" cy="8" r="2.5" />
+      <path d="M11.5 3v5M9 5.5h5" />
+    </Svg>
+  );
+}
+
+export function PointSubtractIcon() {
+  return (
+    <Svg size={14}>
+      <circle cx="6" cy="8" r="2.5" />
+      <path d="M9 5.5h5" />
+    </Svg>
+  );
+}
+
+export function SelectionBoxIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M2.5 5V2.5H5M11 2.5h2.5V5M13.5 11v2.5H11M5 13.5H2.5V11" />
+      <rect x="5" y="5" width="6" height="6" rx="1" />
+    </Svg>
+  );
+}
+
+export function TrackMaskIcon() {
+  return (
+    <Svg size={14}>
+      <path d="M2 8h9M8.5 4.5 12 8l-3.5 3.5" />
+      <circle cx="3" cy="8" r="1.25" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 /** Isometric scene glyph shared by Joy Code and both timeline lenses. */
 export function CubeIcon() {
   return (

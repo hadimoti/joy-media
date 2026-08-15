@@ -233,7 +233,14 @@ async function route(
           id: `derivative-${jobId}`,
           assetId: receipt.assetId,
           kind: receipt.kind,
-          profile: receipt.kind === 'thumbnail' ? 'jpeg-640' : 'audio-processed',
+          profile:
+            receipt.kind === 'thumbnail'
+              ? 'jpeg-640'
+              : receipt.kind === 'mask'
+                ? receipt.descriptor.mimeType === 'video/webm'
+                  ? 'tracked-alpha-webm-v1'
+                  : 'alpha-matte-png-v1'
+                : 'audio-processed',
           sha256: receipt.sha256,
           bytes: receipt.bytes,
           descriptor: receipt.descriptor,
@@ -938,7 +945,10 @@ async function route(
             decodeURIComponent(jobMatch[1]!),
             requiredString(body, 'assetId'),
           )
-        : type === 'image.comfy' || type === 'audio.ml-denoise'
+        : type === 'image.comfy' ||
+            type === 'audio.ml-denoise' ||
+            type === 'mask.image' ||
+            type === 'mask.video'
           ? await options.controlPlane.enqueue(
               actor,
               requiredString(body, 'id'),
@@ -946,12 +956,16 @@ async function route(
               type,
               Date.now(),
               requiredString(body, 'assetId'),
+              jobPayload(body),
             )
           : await options.controlPlane.enqueue(
               actor,
               requiredString(body, 'id'),
               decodeURIComponent(jobMatch[1]!),
               type,
+              Date.now(),
+              typeof body.assetId === 'string' ? body.assetId : undefined,
+              jobPayload(body),
             );
     respondJson(response, 201, { data: jobForBrowser(job) });
     return;
@@ -1137,6 +1151,32 @@ function optionalStringArray(
   return requiredStringArray(body, field);
 }
 
+/**
+ * Keeps execution parameters in the private Worker lease while browser job
+ * projections remain metadata-only. `payload` is the canonical form; the
+ * legacy top-level AI fields are normalized for existing clients.
+ */
+function jobPayload(body: Record<string, unknown>): Readonly<Record<string, unknown>> {
+  const explicit = body.payload;
+  if (explicit !== undefined) {
+    if (explicit === null || typeof explicit !== 'object' || Array.isArray(explicit))
+      throw new ControlPlaneError('REQUEST_INVALID', 'payload must be an object');
+    return explicit as Readonly<Record<string, unknown>>;
+  }
+  const payload: Record<string, unknown> = {};
+  for (const field of [
+    'prompt',
+    'negativePrompt',
+    'imageAssetId',
+    'model',
+    'params',
+    'fixture',
+  ] as const) {
+    if (body[field] !== undefined) payload[field] = body[field];
+  }
+  return payload;
+}
+
 function optionalWorkerResult(body: Record<string, unknown>):
   | { readonly kind: 'fixture.thumbnail'; readonly sha256: string; readonly bytes: number }
   | {
@@ -1152,7 +1192,7 @@ function optionalWorkerResult(body: Record<string, unknown>):
       };
     }
   | {
-      readonly kind: 'image.comfy' | 'audio.ml-denoise';
+      readonly kind: 'image.comfy' | 'audio.ml-denoise' | 'mask.image' | 'mask.video';
       readonly assetId: string;
       readonly sha256: string;
       readonly bytes: number;
@@ -1161,6 +1201,7 @@ function optionalWorkerResult(body: Record<string, unknown>):
         readonly mimeType: string;
         readonly width?: number;
         readonly height?: number;
+        readonly durationUs?: number;
       };
     }
   | undefined {
@@ -1174,7 +1215,10 @@ function optionalWorkerResult(body: Record<string, unknown>):
   }
   const descriptor = result.descriptor;
   if (
-    (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') &&
+    (result.kind === 'image.comfy' ||
+      result.kind === 'audio.ml-denoise' ||
+      result.kind === 'mask.image' ||
+      result.kind === 'mask.video') &&
     typeof result.assetId === 'string' &&
     typeof result.localRef === 'string' &&
     isReceiptHashAndBytes(result) &&
@@ -1186,6 +1230,7 @@ function optionalWorkerResult(body: Record<string, unknown>):
     const mimeType = (descriptor as Record<string, unknown>).mimeType as string;
     const width = (descriptor as Record<string, unknown>).width;
     const height = (descriptor as Record<string, unknown>).height;
+    const durationUs = (descriptor as Record<string, unknown>).durationUs;
     return {
       kind: result.kind,
       assetId: result.assetId,
@@ -1196,6 +1241,9 @@ function optionalWorkerResult(body: Record<string, unknown>):
         mimeType,
         ...(typeof width === 'number' && Number.isSafeInteger(width) ? { width } : {}),
         ...(typeof height === 'number' && Number.isSafeInteger(height) ? { height } : {}),
+        ...(typeof durationUs === 'number' && Number.isSafeInteger(durationUs)
+          ? { durationUs }
+          : {}),
       },
     };
   }
@@ -1231,11 +1279,12 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
-  readonly kind: 'thumbnail' | 'audio';
+  readonly kind: 'thumbnail' | 'audio' | 'mask';
   readonly descriptor: {
     readonly mimeType: string;
     readonly width?: number;
     readonly height?: number;
+    readonly durationUs?: number;
   };
 } {
   const assetId = requiredHeader(request, 'x-joy-asset-id');
@@ -1244,33 +1293,57 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   const mimeType = requiredHeader(request, 'content-type');
   const widthHeader = request.headers['x-joy-width'];
   const heightHeader = request.headers['x-joy-height'];
+  const durationHeader = request.headers['x-joy-duration-us'];
+  const declaredKind = request.headers['x-joy-derivative-kind'];
   const width = widthHeader === undefined ? undefined : Number(widthHeader);
   const height = heightHeader === undefined ? undefined : Number(heightHeader);
-  const isThumbnail = mimeType === 'image/jpeg';
+  const durationUs = durationHeader === undefined ? undefined : Number(durationHeader);
+  const isThumbnail =
+    declaredKind === undefined ? mimeType === 'image/jpeg' : declaredKind === 'thumbnail';
+  const isMask = declaredKind === 'mask';
+  const declaredKindValid =
+    declaredKind === undefined ||
+    declaredKind === 'thumbnail' ||
+    declaredKind === 'audio' ||
+    declaredKind === 'mask';
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId) ||
     !/^[a-f0-9]{64}$/.test(sha256) ||
     !Number.isSafeInteger(bytes) ||
     bytes <= 0 ||
+    !declaredKindValid ||
     (isThumbnail &&
-      (width === undefined ||
+      (mimeType !== 'image/jpeg' ||
+        width === undefined ||
         !Number.isSafeInteger(width) ||
         width <= 0 ||
         height === undefined ||
         !Number.isSafeInteger(height) ||
         height <= 0)) ||
-    (!isThumbnail && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType))
+    (isMask &&
+      (width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0 ||
+        (mimeType === 'video/webm' &&
+          (durationUs === undefined || !Number.isSafeInteger(durationUs) || durationUs <= 0)))) ||
+    (!isThumbnail && !isMask && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
+    (isMask && mimeType !== 'image/png' && mimeType !== 'video/webm') ||
+    (durationUs !== undefined && (!Number.isSafeInteger(durationUs) || durationUs < 0))
   )
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
   return {
     assetId,
     sha256,
     bytes,
-    kind: isThumbnail ? 'thumbnail' : 'audio',
+    kind: isThumbnail ? 'thumbnail' : isMask ? 'mask' : 'audio',
     descriptor: {
       mimeType,
       ...(width === undefined ? {} : { width }),
       ...(height === undefined ? {} : { height }),
+      ...(durationUs === undefined ? {} : { durationUs }),
     },
   };
 }

@@ -12,10 +12,18 @@ export interface LeasedJob {
   readonly projectId: string;
   readonly type: string;
   readonly assetId?: string;
+  readonly payload?: Readonly<Record<string, unknown>>;
 }
 export interface WorkerJobResult {
   readonly kind:
-    'asset.thumbnail' | 'image.comfy' | 'audio.ml-denoise' | 'text' | 'image' | 'video';
+    | 'asset.thumbnail'
+    | 'image.comfy'
+    | 'audio.ml-denoise'
+    | 'mask.image'
+    | 'mask.video'
+    | 'text'
+    | 'image'
+    | 'video';
   readonly assetId?: string;
   readonly sha256?: string;
   readonly bytes?: number;
@@ -24,6 +32,7 @@ export interface WorkerJobResult {
     readonly mimeType: string;
     readonly width?: number;
     readonly height?: number;
+    readonly durationUs?: number;
   };
   readonly provider?: string;
   readonly text?: string;
@@ -80,11 +89,13 @@ export class WorkerControlPlaneClient {
     if (result === null) return undefined;
     const assetId =
       isRecord(result) && typeof result.assetId === 'string' ? result.assetId : undefined;
+    const payload = isRecord(result) && isRecord(result.payload) ? result.payload : undefined;
     return {
       id: requiredString(result, 'id'),
       projectId: requiredString(result, 'projectId'),
       type: requiredString(result, 'type'),
       ...(assetId === undefined ? {} : { assetId }),
+      ...(payload === undefined ? {} : { payload }),
     };
   }
 
@@ -123,11 +134,19 @@ export class WorkerControlPlaneClient {
       'x-joy-asset-id': result.assetId ?? jobId,
       'x-joy-sha256': result.sha256 ?? '',
       'x-joy-bytes': String(result.bytes ?? 0),
+      'x-joy-derivative-kind':
+        result.kind === 'asset.thumbnail'
+          ? 'thumbnail'
+          : result.kind === 'mask.image' || result.kind === 'mask.video'
+            ? 'mask'
+            : 'audio',
     };
     if (result.descriptor?.width !== undefined)
       headers['x-joy-width'] = String(result.descriptor.width);
     if (result.descriptor?.height !== undefined)
       headers['x-joy-height'] = String(result.descriptor.height);
+    if (result.descriptor?.durationUs !== undefined)
+      headers['x-joy-duration-us'] = String(result.descriptor.durationUs);
     const response = await this.#fetch(
       `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,
       {

@@ -1,6 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { LocalControlPlane, SHARED_LIBRARY_OWNER_ID } from './control-plane.js';
 describe('local control plane', () => {
+  it('leases private mask parameters only to a capable Worker with the source asset', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-mask' };
+    api.createProject(owner, 'mask-project', 'Mask');
+    api.registerAsset(owner, 'mask-project', {
+      ...assetRegistration(),
+      id: 'mask-source',
+      kind: 'image',
+      displayName: 'subject.png',
+      descriptor: { mimeType: 'image/png', width: 640, height: 360 },
+    });
+    api.pairWorker(owner, 'mask-worker');
+    api.helloWorker('mask-worker', ['mask.image'], ['mask-source'], 100);
+    api.enqueue(owner, 'mask-job', 'mask-project', 'mask.image', 101, 'mask-source', {
+      schemaVersion: 1,
+      provider: 'birefnet',
+      selection: { mode: 'subject' },
+    });
+    const leased = api.lease('mask-worker', 102);
+    expect(leased).toMatchObject({
+      id: 'mask-job',
+      payload: {
+        schemaVersion: 1,
+        provider: 'birefnet',
+        selection: { mode: 'subject' },
+      },
+    });
+    api.fail('mask-worker', 'mask-job', 'model unavailable', 103);
+    api.retry(owner, 'mask-project', 'mask-job', 104);
+    expect(api.lease('mask-worker', 105)?.payload).toEqual(leased?.payload);
+  });
   it('enforces revisions, revocation, leases, and cursored events', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };

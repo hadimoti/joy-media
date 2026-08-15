@@ -578,6 +578,63 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
+  it('keeps mask prompts private to the authenticated Worker lease', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'mask-project', title: 'Mask' });
+    await request(origin, 'POST', '/v1/projects/mask-project/assets', {
+      id: 'mask-source',
+      kind: 'image',
+      displayName: 'subject.png',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'image/png', width: 640, height: 360 },
+      locations: [{ kind: 'opfs-cache', ref: 'mask-source-cache' }],
+    });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'mask-worker',
+      pairingCode: 'mask-pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/mask-worker/pair', {
+      pairingCode: 'mask-pairing-code',
+    });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'mask-worker',
+      pairingCode: 'mask-pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/mask-worker/hello',
+      { capabilities: ['mask.image'], assetIds: ['mask-source'] },
+      workerToken,
+    );
+    const payload = {
+      schemaVersion: 1,
+      provider: 'sam2-grounded',
+      selection: { mode: 'prompt', prompt: 'red bicycle' },
+      edge: { featherPx: 2, expansionPx: 0, detail: 0.8, decontaminate: true },
+      invert: false,
+      output: 'matte',
+    };
+    const queued = await request(origin, 'POST', '/v1/projects/mask-project/jobs', {
+      id: 'mask-job',
+      type: 'mask.image',
+      assetId: 'mask-source',
+      payload,
+    });
+    expect(queued).toMatchObject({ status: 201, body: { data: { id: 'mask-job' } } });
+    expect(JSON.stringify(queued.body)).not.toContain('red bicycle');
+    const jobs = await request(origin, 'GET', '/v1/projects/mask-project/jobs');
+    expect(JSON.stringify(jobs.body)).not.toContain('red bicycle');
+    expect(
+      await request(origin, 'POST', '/v1/workers/mask-worker/leases', {}, workerToken),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'mask-job', payload } },
+    });
+  });
+
   it('backs up an owner-only original and purges its unreferenced cloud object on delete', async () => {
     const store = new MemoryPrivateObjectStore();
     const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);

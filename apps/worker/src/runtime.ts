@@ -26,6 +26,13 @@ import {
   type LocalAiReceipt,
   type AiProvider,
 } from './local-ai.js';
+import {
+  maskingAvailabilityFromEnvironment,
+  readMaskDerivative,
+  runMaskingJob,
+  type MaskingAvailability,
+  type MaskWorkerDerivative,
+} from './local-masking.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -137,6 +144,8 @@ export interface ToolAvailability {
   readonly mlDenoise: boolean;
   /** AI providers configured via ~/.joy-media/ai-providers.json — never on the VPS. */
   readonly aiProviders: readonly AiProvider[];
+  /** Explicit local model runners; omitted means masking is unavailable. */
+  readonly masking?: MaskingAvailability;
 }
 
 /** Private mapping held only by the Worker; it is never serialized to the API. */
@@ -203,6 +212,7 @@ export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolA
     mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
     // AI providers configured via ~/.joy-media/ai-providers.json
     aiProviders: getConfiguredProviders(),
+    masking: maskingAvailabilityFromEnvironment(),
   };
 }
 function canRun(tool: string): boolean {
@@ -243,6 +253,10 @@ export class WorkerRuntime {
     const capabilities: WorkerCapability[] = [];
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.comfy) capabilities.push('image.comfy');
+    if (this.tools.ffprobe && this.tools.masking?.image !== undefined)
+      capabilities.push('mask.image');
+    if (this.tools.ffprobe && this.tools.masking?.video !== undefined)
+      capabilities.push('mask.video');
     if (this.tools.mlDenoise && mlDenoiseRunnable()) capabilities.push('audio.ml-denoise');
     if (this.tools.aiProviders.includes('lm-studio')) capabilities.push('text.lm-studio');
     if (this.tools.aiProviders.includes('openrouter')) capabilities.push('text.openrouter');
@@ -284,6 +298,40 @@ export class WorkerRuntime {
       }
     | { readonly state: 'canceled' }
   > {
+    if (job.type === 'mask.image' || job.type === 'mask.video') {
+      if (!this.tools.ffprobe) throw new Error('FFprobe is required for masking outputs');
+      const runner =
+        job.type === 'mask.image' ? this.tools.masking?.image : this.tools.masking?.video;
+      if (runner === undefined) throw new Error(`${job.type} is not enabled on this Worker`);
+      if (job.assetId === undefined) throw new Error(`${job.type} requires an input asset`);
+      const sourcePath = this.options.sources?.resolve(job.assetId);
+      if (sourcePath === undefined)
+        throw new Error(`local source unavailable for asset ${job.assetId}`);
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write(`job ${job.id} started (${job.type})`);
+      try {
+        const result = await runMaskingJob({
+          jobId: job.id,
+          type: job.type,
+          assetId: job.assetId,
+          sourcePath,
+          payload: job.payload,
+          runner,
+          derivativeDirectory,
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
     if (job.type === 'image.comfy') {
       if (!this.tools.comfy) throw new Error('ComfyUI is not enabled on this Worker');
       if (options.cancelled()) return { state: 'canceled' };
@@ -449,6 +497,11 @@ export class WorkerRuntime {
 
   /** Reads a retained derivative only after re-checking its receipt integrity. */
   readDerivative(result: WorkerDerivativeReceipt): Uint8Array {
+    if (result.kind === 'mask.image' || result.kind === 'mask.video') {
+      const directory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      return readMaskDerivative(directory, result);
+    }
     if (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') {
       const directory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
@@ -491,7 +544,8 @@ function mlDenoiseRunnable(): boolean {
   return existsSync(model);
 }
 
-export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt;
+export type WorkerDerivativeReceipt =
+  RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt | MaskWorkerDerivative;
 
 export interface RealThumbnailReceipt {
   readonly kind: 'asset.thumbnail';

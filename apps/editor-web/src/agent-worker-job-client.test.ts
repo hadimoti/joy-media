@@ -86,6 +86,10 @@ describe('AgentWorkerJobClient', () => {
       request.jobId,
       'image.comfy',
       'source-image',
+      {
+        arguments: request.arguments,
+        generation: request.generation,
+      },
     );
   });
 

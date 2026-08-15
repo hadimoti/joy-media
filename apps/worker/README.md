@@ -1,6 +1,7 @@
 # worker
 
-> **Status: WP-12.3 local protocol complete; live deployment pending.** The local Worker persists a device identity and Worker-only session, publishes an outbound pairing offer, claims a session only after owner approval, announces capabilities, renews lease/progress, obeys cancellation, and returns a verified fixture-thumbnail receipt. This is locally tested, not deployed.
+> **Status:** paired outbound Worker with verified thumbnail, AI, audio, and
+> professional masking derivative jobs.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §26, §8.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Local/GPU worker daemon: probing, proxies, waveforms, FFmpeg, deterministic export, provider execution, resource governor.
@@ -22,3 +23,10 @@ receipt, never the local path or media bytes.
 **Must not:** Editing project state without a validated job/command result; building shell strings from input.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## Masking models
+
+See [`masking/README.md`](masking/README.md). Mask model paths and source media
+paths remain Worker-only. The Worker advertises `mask.image` / `mask.video`
+only when the matching runner is explicitly configured, and the control plane
+leases work only when the source asset ID is present locally.

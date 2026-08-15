@@ -25,7 +25,7 @@ export interface ProjectDuplicateResult {
   readonly derivativeIdMap: Readonly<Record<string, string>>;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
-export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio';
+export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio' | 'mask';
 export type DerivativeAvailability =
   'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
 
@@ -143,6 +143,8 @@ export interface Job {
   readonly projectId: string;
   readonly type: string;
   readonly assetId?: string;
+  /** Validated JSON delivered only to the leased Worker, never to browser job listings. */
+  readonly payload?: Readonly<Record<string, unknown>>;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly leaseOwner?: string;
   readonly leaseExpiresAt?: number;
@@ -182,10 +184,25 @@ export interface LocalGpuWorkerReceipt {
     readonly mimeType: string;
     readonly width?: number;
     readonly height?: number;
+    readonly durationUs?: number;
+  };
+}
+/** Promptable image/video segmentation result retained by the Local Worker. */
+export interface MaskWorkerReceipt {
+  readonly kind: 'mask.image' | 'mask.video';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationUs?: number;
   };
 }
 export type WorkerResultReceipt =
-  FixtureThumbnailReceipt | AssetThumbnailReceipt | LocalGpuWorkerReceipt;
+  FixtureThumbnailReceipt | AssetThumbnailReceipt | LocalGpuWorkerReceipt | MaskWorkerReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
@@ -353,6 +370,7 @@ export interface ControlPlane {
     type: string,
     now?: number,
     assetId?: string,
+    payload?: Readonly<Record<string, unknown>>,
   ): Job | Promise<Job>;
   enqueueAssetThumbnail(
     actor: Actor,
@@ -753,6 +771,7 @@ export class LocalControlPlane implements ControlPlane {
     if (
       worker === undefined ||
       job.assetId !== derivative.assetId ||
+      derivativeKindForJob(job.type) !== derivative.kind ||
       derivative.availability !== 'available-cloud'
     )
       throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
@@ -915,6 +934,7 @@ export class LocalControlPlane implements ControlPlane {
     type: string,
     now = Date.now(),
     assetId?: string,
+    payload?: Readonly<Record<string, unknown>>,
   ): Job {
     this.project(actor, projectId);
     if (type === 'asset.thumbnail')
@@ -922,18 +942,24 @@ export class LocalControlPlane implements ControlPlane {
         'ASSET_JOB_INVALID',
         'asset thumbnail requires an opaque asset ID',
       );
-    if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
+    if (requiresSourceAsset(type) && assetId === undefined)
       throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
-    if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
+    if (requiresSourceAsset(type) && assetId !== undefined) {
       const asset = this.#assets.get(assetId);
       if (asset === undefined || asset.projectId !== projectId)
         throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      if (
+        (type === 'mask.image' && asset.kind !== 'image') ||
+        (type === 'mask.video' && asset.kind !== 'video')
+      )
+        throw new ControlPlaneError('ASSET_JOB_INVALID', `${type} source kind is invalid`);
     }
     const job: Job = {
       id,
       projectId,
       type,
       ...(assetId !== undefined ? { assetId } : {}),
+      ...(payload === undefined ? {} : { payload: validatedJobPayload(payload) }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1020,6 +1046,11 @@ export class LocalControlPlane implements ControlPlane {
       (!isLocalGpuReceipt(receipt) || receipt.kind !== job.type)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (
+      (job.type === 'mask.image' || job.type === 'mask.video') &&
+      (!isMaskReceipt(receipt) || receipt.kind !== job.type || receipt.assetId !== job.assetId)
+    )
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
     const done: Job = {
@@ -1075,6 +1106,7 @@ export class LocalControlPlane implements ControlPlane {
       projectId: job.projectId,
       type: job.type,
       ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+      ...(job.payload === undefined ? {} : { payload: job.payload }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1191,6 +1223,44 @@ function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is Loc
   );
 }
 
+function isMaskReceipt(value: WorkerResultReceipt | undefined): value is MaskWorkerReceipt {
+  const image = value?.kind === 'mask.image';
+  const video = value?.kind === 'mask.video';
+  return (
+    (image || video) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^mask-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    (image
+      ? value.descriptor.mimeType === 'image/png'
+      : value.descriptor.mimeType === 'video/webm') &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    (value.descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    (value.descriptor.height ?? 0) > 0 &&
+    (!video ||
+      (Number.isSafeInteger(value.descriptor.durationUs) && (value.descriptor.durationUs ?? 0) > 0))
+  );
+}
+
+function derivativeKindForJob(type: string): DerivativeKind | undefined {
+  if (type === 'asset.thumbnail') return 'thumbnail';
+  if (type === 'audio.ml-denoise') return 'audio';
+  if (type === 'mask.image' || type === 'mask.video') return 'mask';
+  return undefined;
+}
+
+function requiresSourceAsset(type: string): boolean {
+  return (
+    type === 'image.comfy' ||
+    type === 'audio.ml-denoise' ||
+    type === 'mask.image' ||
+    type === 'mask.video'
+  );
+}
+
 function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'asset.thumbnail') {
     return (
@@ -1201,8 +1271,32 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   }
   if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
+  if (job.type === 'mask.image' || job.type === 'mask.video') {
+    return (
+      job.assetId !== undefined &&
+      worker.capabilities.includes(job.type) &&
+      worker.localAssetIds.includes(job.assetId)
+    );
+  }
   // Fixture / unknown types: any connected Worker may lease (existing behavior).
   return true;
+}
+
+function validatedJobPayload(
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be JSON serializable');
+  }
+  if (serialized.length > 64 * 1024)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload exceeds 64 KiB');
+  const parsed: unknown = JSON.parse(serialized);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be an object');
+  return parsed as Readonly<Record<string, unknown>>;
 }
 
 function validatedOpaqueIds(values: readonly string[]): readonly string[] {
@@ -1294,7 +1388,7 @@ function validateDerivativeRegistration(
 ): void {
   validateOpaqueId(value.id, 'derivative id');
   validateOpaqueId(value.assetId, 'asset id');
-  if (!['thumbnail', 'proxy', 'audio'].includes(value.kind))
+  if (!['thumbnail', 'proxy', 'audio', 'mask'].includes(value.kind))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
   if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');

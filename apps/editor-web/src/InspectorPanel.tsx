@@ -48,9 +48,13 @@ import {
   useTransientPropertyControl,
 } from './components/PropertyControlAdapters.js';
 import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
+import type { BrowserJob } from './control-plane-client.js';
+import { MaskInspector } from './MaskInspector.js';
+import { readMaskSettings, type MaskSettings, type MaskTarget } from './masking.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
+  { id: 'mask', label: 'Mask', ariaLabel: 'Mask and background removal' },
   { id: 'adjust', label: 'Adjust', ariaLabel: 'Adjustment layer' },
   { id: 'effects', label: 'Effects' },
   { id: 'audio', label: 'Audio' },
@@ -154,7 +158,13 @@ interface InspectorPanelProps {
   readonly allObjects: Readonly<Record<string, VisualObjectV1>>;
   readonly playheadUs: number;
   /** Shared durable map for audio keyframes; omitted in read-only embeddings. */
-  readonly project?: Pick<JoyProjectV1, 'propertyAnimations'>;
+  readonly project?: JoyProjectV1;
+  readonly maskTarget?: MaskTarget;
+  readonly maskProjectId?: string;
+  readonly maskProjectTitle?: string;
+  readonly onMaskSettingsChange?: (next: MaskSettings) => void;
+  readonly onApplyMaskResult?: (job: BrowserJob, settings: MaskSettings) => Promise<string>;
+  readonly onClearMask?: () => void;
   readonly audioState?: AudioState;
   readonly onAudioChange?: (next: AudioState, label: string) => void;
   readonly onSetStatic: (
@@ -323,6 +333,12 @@ export function InspectorPanel({
   allObjects,
   playheadUs,
   project,
+  maskTarget,
+  maskProjectId,
+  maskProjectTitle,
+  onMaskSettingsChange,
+  onApplyMaskResult,
+  onClearMask,
   audioState,
   onAudioChange,
   onSetStatic,
@@ -376,6 +392,14 @@ export function InspectorPanel({
     if (isAdjustmentLayer) return candidate.id === 'adjust' || candidate.id === 'effects';
     if (candidate.id === 'adjust') return false;
     return (
+      (candidate.id !== 'mask' ||
+        (maskTarget !== undefined &&
+          project !== undefined &&
+          maskProjectId !== undefined &&
+          maskProjectTitle !== undefined &&
+          onMaskSettingsChange !== undefined &&
+          onApplyMaskResult !== undefined &&
+          onClearMask !== undefined)) &&
       (candidate.id !== 'audio' || clipAudio !== undefined) &&
       (candidate.id !== 'speed' || clipSpeed !== undefined)
     );
@@ -706,6 +730,25 @@ export function InspectorPanel({
           onDispatch={onDispatch}
         />
       )}
+
+      {tab === 'mask' &&
+        maskTarget !== undefined &&
+        project !== undefined &&
+        maskProjectId !== undefined &&
+        maskProjectTitle !== undefined &&
+        onMaskSettingsChange !== undefined &&
+        onApplyMaskResult !== undefined &&
+        onClearMask !== undefined && (
+          <MaskInspector
+            projectId={maskProjectId}
+            projectTitle={maskProjectTitle}
+            target={maskTarget}
+            settings={readMaskSettings(project, maskTarget.targetId, maskTarget.kind)}
+            onChange={onMaskSettingsChange}
+            onApplyResult={onApplyMaskResult}
+            onClear={onClearMask}
+          />
+        )}
 
       {tab === 'audio' &&
         (clipAudio !== undefined && selectedClipId !== undefined ? (

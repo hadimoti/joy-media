@@ -102,6 +102,15 @@ Owner direction, 2026-07-28: the editor workspace reads like CapCut's Media tab 
 
 ## 3a. The panel shell contract (binding — every panel, no exceptions)
 
+### Inspector Mask sub-tab
+
+Mask is a contextual Inspector sub-tab for selected image/video media, not a
+separate dock panel. Keep it compact and tool-shaped: model readiness,
+Subject/Person/Prompt, point/box refinement, edge controls, video tracking,
+job status, then Create Mask / Remove BG. Use shared minimal SVG glyphs and
+the standard neutral control fills. Never claim a model is ready unless a
+paired Worker advertises the matching capability and local source asset.
+
 Owner direction, 2026-07-26: **every** panel is built from one shell, so that moving between Effects, Motion, Inspector and Assets feels like moving between tabs of one Adobe application rather than between five apps. This section is a contract, not a suggestion. A panel that does not use these classes is not finished.
 
 ### Vertical order — fixed

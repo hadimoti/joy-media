@@ -204,6 +204,8 @@ export type {
   AsyncAgentRunResult,
 } from './async-jobs.js';
 export { runPlanWithAsyncJobs } from './async-jobs.js';
+export type { MaskAgentJobInput } from './masking-jobs.js';
+export { createMaskAgentJobRequest } from './masking-jobs.js';
 
 export type { AgentBranch, BranchComparison } from './branch.js';
 export { BranchManager, createBranchManager } from './branch.js';

@@ -10877,6 +10877,213 @@ label {
   gap: var(--space-2);
 }
 
+/* Inspector / Mask — compact local-first segmentation controls. */
+.mask-inspector {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.mask-section-heading,
+.mask-action-row,
+.mask-tool-row,
+.mask-switch-row,
+.mask-job-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mask-section-heading {
+  justify-content: space-between;
+}
+.mask-runtime-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mask-runtime-state > span {
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--joy-text-disabled);
+}
+.mask-runtime-state--ready {
+  color: var(--joy-success);
+}
+.mask-runtime-state--ready > span {
+  background: var(--joy-success);
+}
+.mask-runtime-state--source-missing,
+.mask-runtime-state--model-missing {
+  color: var(--joy-warning);
+}
+.mask-runtime-state--source-missing > span,
+.mask-runtime-state--model-missing > span {
+  background: var(--joy-warning);
+}
+.mask-select,
+.mask-prompt-input,
+.mask-coordinate input {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-sm);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.mask-select,
+.mask-prompt-input {
+  padding: 0 var(--space-2);
+}
+.mask-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.mask-choice {
+  display: grid;
+  place-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: calc(var(--control-md) + var(--space-2));
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+}
+.mask-choice:hover {
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-hover);
+}
+.mask-choice[aria-pressed='true'] {
+  border-color: var(--joy-accent);
+  color: var(--joy-accent);
+}
+.mask-tool-row {
+  flex-wrap: wrap;
+}
+.mask-tool-row .icon-button[aria-pressed='true'] {
+  border-color: var(--joy-accent);
+  color: var(--joy-accent);
+}
+.mask-coordinate-editor,
+.mask-box-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.mask-coordinate {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+}
+.mask-coordinate input {
+  padding: 0 var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+.mask-point-count {
+  align-self: center;
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-2xs);
+}
+.mask-range {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(3rem, 1fr) 3rem;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+}
+.mask-range input {
+  width: 100%;
+  accent-color: var(--joy-accent);
+}
+.mask-range output {
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.mask-switch-row {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.mask-switch-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+}
+.mask-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.mask-segmented button {
+  min-width: 0;
+  min-height: var(--control-sm);
+  border: 0;
+  border-inline-end: 1px solid var(--joy-border-subtle);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+  text-transform: capitalize;
+}
+.mask-segmented button:last-child {
+  border-inline-end: 0;
+}
+.mask-segmented button[aria-pressed='true'] {
+  background: var(--joy-bg-active);
+  color: var(--joy-accent);
+}
+.mask-job-status {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) 2.5rem var(--control-sm);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+  text-transform: capitalize;
+}
+.mask-job-status progress {
+  width: 100%;
+  height: 0.28rem;
+  accent-color: var(--joy-accent);
+}
+.mask-job-status strong {
+  color: var(--joy-text);
+  text-align: end;
+}
+.mask-job-status .icon-button {
+  min-width: var(--control-sm);
+  min-height: var(--control-sm);
+}
+.mask-action-row {
+  flex-wrap: wrap;
+}
+.mask-primary-action {
+  border-color: var(--joy-accent);
+  color: var(--joy-accent);
+}
+.mask-action-row > :last-child {
+  margin-inline-start: auto;
+}
+
 /* WP34: a semantic, reusable frameable property shell.  It is deliberately
    independent of Inspector layout so Effects, Color, Audio, and captions can
    share the exact same keyboard and focus behavior. */

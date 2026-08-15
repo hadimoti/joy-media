@@ -12,9 +12,11 @@ import {
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDerivativeRecord,
+  type DerivativeKind,
   type Job,
   type JobEvent,
   type LocalGpuWorkerReceipt,
+  type MaskWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
   type ProjectLifecycleMetadata,
@@ -67,6 +69,7 @@ interface JobRow {
   readonly project_id: string;
   readonly type: string;
   readonly asset_id: string | null;
+  readonly payload: unknown;
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
@@ -83,6 +86,7 @@ interface JobRow {
   readonly result_mime_type: string | null;
   readonly result_width: number | null;
   readonly result_height: number | null;
+  readonly result_duration_us: string | number | null;
   readonly error: string | null;
 }
 
@@ -705,10 +709,11 @@ export class PostgresControlPlane implements ControlPlane {
     const result = await this.pool.query<{
       readonly project_id: string;
       readonly asset_id: string | null;
+      readonly type: string;
       readonly owner_id: string;
       readonly asset_sync_enabled: boolean;
     }>(
-      `SELECT jobs.project_id, jobs.asset_id, workers.owner_id, projects.asset_sync_enabled
+      `SELECT jobs.project_id, jobs.asset_id, jobs.type, workers.owner_id, projects.asset_sync_enabled
        FROM jobs JOIN workers ON workers.id = jobs.lease_owner
        JOIN projects ON projects.id = jobs.project_id
        WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
@@ -716,7 +721,12 @@ export class PostgresControlPlane implements ControlPlane {
       [jobId, workerId, new Date(now)],
     );
     const job = result.rows[0];
-    if (job === undefined || job.asset_id !== derivative.assetId || !job.asset_sync_enabled)
+    if (
+      job === undefined ||
+      job.asset_id !== derivative.assetId ||
+      derivativeKindForJob(job.type) !== derivative.kind ||
+      !job.asset_sync_enabled
+    )
       throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
     return this.registerDerivative({ id: job.owner_id }, job.project_id, derivative, now, true);
   }
@@ -889,6 +899,7 @@ export class PostgresControlPlane implements ControlPlane {
     type: string,
     now = Date.now(),
     assetId?: string,
+    payload?: Readonly<Record<string, unknown>>,
   ): Promise<Job> {
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
@@ -897,16 +908,29 @@ export class PostgresControlPlane implements ControlPlane {
       );
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
+      if (requiresSourceAsset(type) && assetId === undefined)
         throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
-      if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
+      if (requiresSourceAsset(type) && assetId !== undefined) {
         await this.asset(actor, projectId, assetId, client);
+        if (type === 'mask.image' || type === 'mask.video') {
+          const source = await client.query<{ readonly kind: MediaAssetRecord['kind'] }>(
+            'SELECT kind FROM media_assets WHERE id = $1 AND project_id = $2',
+            [assetId, projectId],
+          );
+          const kind = requiredRow(source.rows[0], 'ASSET_NOT_FOUND').kind;
+          if (
+            (type === 'mask.image' && kind !== 'image') ||
+            (type === 'mask.video' && kind !== 'video')
+          )
+            throw new ControlPlaneError('ASSET_JOB_INVALID', `${type} source kind is invalid`);
+        }
       }
+      const safePayload = validatedJobPayload(payload ?? {});
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, $3, $4, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, type, assetId ?? null],
+          `INSERT INTO jobs (id, project_id, type, asset_id, payload, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, type, assetId ?? null, JSON.stringify(safePayload)],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -970,6 +994,13 @@ export class PostgresControlPlane implements ControlPlane {
         }
         if (item.type === 'image.comfy') return caps.includes('image.comfy');
         if (item.type === 'audio.ml-denoise') return caps.includes('audio.ml-denoise');
+        if (item.type === 'mask.image' || item.type === 'mask.video') {
+          return (
+            item.asset_id !== null &&
+            caps.includes(item.type) &&
+            workerRecord.localAssetIds.includes(item.asset_id)
+          );
+        }
         return true;
       });
       if (job === undefined) return undefined;
@@ -1027,19 +1058,22 @@ export class PostgresControlPlane implements ControlPlane {
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
-    const storesAsset = isThumb || isGpu;
+    const isMask = receipt?.kind === 'mask.image' || receipt?.kind === 'mask.video';
+    const storesAsset = isThumb || isGpu || isMask;
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
              result_kind = $4, result_sha256 = $5, result_bytes = $6,
              result_ref = $7, result_worker_ref = $8, result_verified_at = $9,
              result_asset_id = $10, result_local_ref = $11, result_mime_type = $12,
-             result_width = $13, result_height = $14
+             result_width = $13, result_height = $14, result_duration_us = $15
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
            AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
+           AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
+           AND (type <> 'mask.video' OR ($4 = 'mask.video' AND asset_id = $10))
          RETURNING *`,
         [
           jobId,
@@ -1056,14 +1090,17 @@ export class PostgresControlPlane implements ControlPlane {
           storesAsset && receipt !== undefined ? receipt.descriptor.mimeType : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.width
-            : isGpu && receipt !== undefined
+            : (isGpu || isMask) && receipt !== undefined
               ? (receipt.descriptor.width ?? null)
               : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.height
-            : isGpu && receipt !== undefined
+            : (isGpu || isMask) && receipt !== undefined
               ? (receipt.descriptor.height ?? null)
               : null,
+          (isGpu || isMask) && receipt !== undefined
+            ? (receipt.descriptor.durationUs ?? null)
+            : null,
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -1118,7 +1155,7 @@ export class PostgresControlPlane implements ControlPlane {
              result_sha256 = NULL, result_bytes = NULL, result_ref = NULL,
              result_worker_ref = NULL, result_verified_at = NULL, result_asset_id = NULL,
              result_local_ref = NULL, result_mime_type = NULL, result_width = NULL,
-             result_height = NULL, error = NULL
+             result_height = NULL, result_duration_us = NULL, error = NULL
          WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
@@ -1259,11 +1296,13 @@ function workerOf(row: WorkerRow): WorkerRecord {
 }
 
 function jobOf(row: JobRow): Job {
+  const payload = jobPayloadOf(row.payload);
   return {
     id: row.id,
     projectId: row.project_id,
     type: row.type,
     ...(row.asset_id === null ? {} : { assetId: row.asset_id }),
+    ...(Object.keys(payload).length === 0 ? {} : { payload }),
     state: row.state,
     progress: row.progress,
     cancelRequested: row.cancel_requested,
@@ -1281,6 +1320,17 @@ function jobOf(row: JobRow): Job {
         }),
     ...(row.error === null ? {} : { error: row.error }),
   };
+}
+
+function jobPayloadOf(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value === 'string') {
+    try {
+      return jsonObject(JSON.parse(value));
+    } catch {
+      throw new ControlPlaneError('DATABASE_ERROR', 'stored job payload is invalid');
+    }
+  }
+  return jsonObject(value);
 }
 
 function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
@@ -1310,7 +1360,10 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
     };
   }
   if (
-    (row.result_kind === 'image.comfy' || row.result_kind === 'audio.ml-denoise') &&
+    (row.result_kind === 'image.comfy' ||
+      row.result_kind === 'audio.ml-denoise' ||
+      row.result_kind === 'mask.image' ||
+      row.result_kind === 'mask.video') &&
     row.result_asset_id !== null &&
     row.result_local_ref !== null &&
     row.result_mime_type !== null
@@ -1324,6 +1377,9 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
         mimeType: row.result_mime_type,
         ...(row.result_width === null ? {} : { width: row.result_width }),
         ...(row.result_height === null ? {} : { height: row.result_height }),
+        ...(row.result_duration_us === null
+          ? {}
+          : { durationUs: safeNonNegativeInteger(row.result_duration_us, 'result duration') }),
       },
     };
   }
@@ -1415,7 +1471,12 @@ function isFixtureReceipt(
 }
 
 function isWorkerReceipt(value: WorkerResultReceipt): boolean {
-  return isFixtureReceipt(value) || isAssetThumbnailReceipt(value) || isLocalGpuReceipt(value);
+  return (
+    isFixtureReceipt(value) ||
+    isAssetThumbnailReceipt(value) ||
+    isLocalGpuReceipt(value) ||
+    isMaskReceipt(value)
+  );
 }
 
 function isAssetThumbnailReceipt(value: WorkerResultReceipt): value is AssetThumbnailReceipt {
@@ -1445,6 +1506,68 @@ function isLocalGpuReceipt(value: WorkerResultReceipt): value is LocalGpuWorkerR
     typeof value.descriptor.mimeType === 'string' &&
     value.descriptor.mimeType.length > 0
   );
+}
+
+function isMaskReceipt(value: WorkerResultReceipt): value is MaskWorkerReceipt {
+  const image = value.kind === 'mask.image';
+  const video = value.kind === 'mask.video';
+  return (
+    (image || video) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^mask-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    (image
+      ? value.descriptor.mimeType === 'image/png'
+      : value.descriptor.mimeType === 'video/webm') &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    (value.descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    (value.descriptor.height ?? 0) > 0 &&
+    (!video ||
+      (Number.isSafeInteger(value.descriptor.durationUs) && (value.descriptor.durationUs ?? 0) > 0))
+  );
+}
+
+function derivativeKindForJob(type: string): DerivativeKind | undefined {
+  if (type === 'asset.thumbnail') return 'thumbnail';
+  if (type === 'audio.ml-denoise') return 'audio';
+  if (type === 'mask.image' || type === 'mask.video') return 'mask';
+  return undefined;
+}
+
+function requiresSourceAsset(type: string): boolean {
+  return (
+    type === 'image.comfy' ||
+    type === 'audio.ml-denoise' ||
+    type === 'mask.image' ||
+    type === 'mask.video'
+  );
+}
+
+function validatedJobPayload(
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be JSON serializable');
+  }
+  if (serialized.length > 64 * 1024)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload exceeds 64 KiB');
+  const parsed: unknown = JSON.parse(serialized);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be an object');
+  return parsed as Readonly<Record<string, unknown>>;
+}
+
+function safeNonNegativeInteger(value: string | number, label: string): number {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 0)
+    throw new ControlPlaneError('DATABASE_ERROR', `stored ${label} is invalid`);
+  return result;
 }
 
 function normalizeOpaqueAssetIds(values: readonly string[]): readonly string[] {

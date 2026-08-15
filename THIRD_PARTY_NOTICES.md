@@ -37,3 +37,22 @@ Lower-third / title layout ideas were **re-authored** into ADR-0006 `joy-html-sc
 - [noeal-dac/Animated-Lower-Thirds](https://github.com/noeal-dac/Animated-Lower-Thirds) (MIT)
 - [rse/lowerthird](https://github.com/rse/lowerthird) (MIT)
 - Template ideas from [tomastimelock/web-overlay](https://github.com/tomastimelock/web-overlay)
+
+## Optional Local Worker masking integrations
+
+These projects are not vendored into the web application or VPS artifact.
+Owners may install them on a paired Local Worker through the runner boundary
+defined by ADR-0033.
+
+- [facebookresearch/sam3](https://github.com/facebookresearch/sam3) — optional
+  SAM 3.1 prompt/tracking adapter; gated checkpoint and custom SAM License.
+- [facebookresearch/sam2](https://github.com/facebookresearch/sam2) — optional
+  image/video segmentation adapter; Apache-2.0.
+- [IDEA-Research/Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2)
+  and [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) — optional
+  text grounding for SAM 2; Apache-2.0.
+- [ZhengPeng7/BiRefNet](https://github.com/ZhengPeng7/BiRefNet) — optional
+  high-resolution matte model; MIT.
+- [danielgatis/rembg](https://github.com/danielgatis/rembg) — used by the
+  included image runner adapter; MIT. The package/model is installed and
+  cached only on the Local Worker.

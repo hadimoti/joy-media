@@ -6,6 +6,7 @@ export interface BrowserWorker {
   readonly paired: boolean;
   readonly revoked: boolean;
   readonly capabilities: readonly string[];
+  readonly localAssetIds?: readonly string[];
   readonly lastSeenAt?: number;
 }
 
@@ -64,7 +65,7 @@ export interface BrowserDerivative {
   readonly id: string;
   readonly projectId: string;
   readonly assetId: string;
-  readonly kind: 'thumbnail' | 'proxy' | 'audio';
+  readonly kind: 'thumbnail' | 'proxy' | 'audio' | 'mask';
   readonly profile: string;
   readonly sha256: string;
   readonly bytes: number;
@@ -365,18 +366,31 @@ export class BrowserControlPlaneClient {
     id: string,
     type:
       | 'image.comfy'
+      | 'mask.image'
+      | 'mask.video'
       | 'audio.ml-denoise'
       | 'text.lm-studio'
       | 'text.openrouter'
       | 'video.runway'
       | 'edit.higgsfield',
     assetId: string,
+    payload?: Readonly<Record<string, unknown>>,
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,
       type,
       assetId,
+      ...(payload === undefined ? {} : { payload }),
     });
+  }
+  async enqueueMask(
+    projectId: string,
+    id: string,
+    type: 'mask.image' | 'mask.video',
+    assetId: string,
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<BrowserJob> {
+    return this.enqueueWorkerGeneration(projectId, id, type, assetId, payload);
   }
   async enqueueAiGeneration(
     projectId: string,
