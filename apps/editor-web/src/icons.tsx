@@ -807,7 +807,13 @@ export function GrainIcon() {
 }
 
 export function ColorWheelIcon() {
-  return <PngMaskIcon src={UI_ICONS.colors} />;
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="5.25" />
+      <path d="M8 2.75v3.6M3.45 10.625l3.1-1.8M12.55 10.625l-3.1-1.8" />
+      <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
 }
 
 export function TrackAddIcon() {
