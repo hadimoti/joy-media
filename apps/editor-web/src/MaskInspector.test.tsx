@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { MaskInspector, maskRuntimeStatus } from './MaskInspector.js';
+import { MaskInspector, maskProviderReady, maskRuntimeStatus } from './MaskInspector.js';
 import { defaultMaskSettings } from './masking.js';
 
 describe('MaskInspector', () => {
@@ -61,5 +61,27 @@ describe('MaskInspector', () => {
       state: 'offline',
       label: 'Local Worker offline',
     });
+  });
+
+  it('uses a current Worker inventory to disable unavailable providers', () => {
+    const worker = {
+      id: 'worker-models',
+      paired: true,
+      revoked: false,
+      capabilities: ['mask.image'],
+      lastSeenAt: 1_000,
+      modelInventory: {
+        managerVersion: '0.1.0',
+        cacheStatus: 'ready' as const,
+        models: [
+          { modelId: 'birefnet', version: 'local-onnx', state: 'ready' },
+          { modelId: 'sam2-grounded', version: '2.1-local', state: 'not-installed' },
+        ],
+      },
+    } as const;
+
+    expect(maskProviderReady('birefnet', [worker], 2_000)).toBe(true);
+    expect(maskProviderReady('sam2-grounded', [worker], 2_000)).toBe(false);
+    expect(maskProviderReady('sam3', [worker], 2_000)).toBe(false);
   });
 });

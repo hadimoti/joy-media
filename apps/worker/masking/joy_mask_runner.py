@@ -11,10 +11,35 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 
 from PIL import Image, ImageFilter, ImageOps
 from rembg import new_session, remove
+
+
+def provision_local_birefnet_model(model: str) -> None:
+    """Expose owner-supplied model files under rembg's expected cache names."""
+    source_directory = os.environ.get("JOY_MEDIA_BIREFNET_MODEL_DIR", "").strip()
+    if not source_directory:
+        return
+    source_name = {
+        "birefnet-general": "BiRefNet-general-epoch_244.onnx",
+        "birefnet-portrait": "BiRefNet-portrait-epoch_150.onnx",
+    }.get(model)
+    if source_name is None:
+        return
+    source = Path(source_directory) / source_name
+    cache = Path(os.environ.get("U2NET_HOME", source_directory))
+    destination = cache / f"{model}.onnx"
+    if not source.is_file() or destination.exists():
+        return
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +80,7 @@ def main() -> None:
     output_path = Path(args.output)
     source_bytes = source_path.read_bytes()
     model = "birefnet-portrait" if selection.get("mode") == "person" else "birefnet-general"
+    provision_local_birefnet_model(model)
     session = new_session(model)
     raw_mask = remove(
         source_bytes,

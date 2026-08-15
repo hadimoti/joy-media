@@ -115,6 +115,8 @@ function installLabel(state: AudioModelSpec['installState']): string {
       return 'Installed';
     case 'available':
       return 'Download';
+    case 'setup-required':
+      return 'Runtime setup required';
     case 'update':
       return 'Update';
   }

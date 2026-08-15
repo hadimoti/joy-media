@@ -247,6 +247,15 @@ function writeNoisyFixtureWav(path: string): void {
  * ML denoise on the Worker PC. Prefers `JOY_MEDIA_ML_DENOISE_CMD` (DeepFilterNet
  * etc.); otherwise uses ffmpeg `arnndn` + RNNoise model (honest CPU ML path).
  */
+export function ffmpegFilterPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return `'${normalized.replace(/'/g, String.raw`\'`).replace(/:/g, String.raw`\:`)}'`;
+}
+
+export function rnnoiseFilter(modelPath: string): string {
+  return `arnndn=m=${ffmpegFilterPath(modelPath)}`;
+}
+
 export async function runAudioMlDenoiseJob(options: LocalGpuRunOptions): Promise<LocalGpuReceipt> {
   if ((process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() !== '1')
     throw new Error('JOY_MEDIA_LOCAL_ML_DENOISE is not enabled');
@@ -288,7 +297,7 @@ export async function runAudioMlDenoiseJob(options: LocalGpuRunOptions): Promise
       if (!existsSync(model)) throw new Error(`RNNoise model missing: ${model}`);
       const result = await runCancellableProcess(
         'ffmpeg',
-        ['-y', '-i', inputWav, '-af', `arnndn=m=${model}`, outputWav],
+        ['-y', '-i', inputWav, '-af', rnnoiseFilter(model), outputWav],
         options.cancelled,
       );
       if (result.status !== 0 || !existsSync(outputWav))

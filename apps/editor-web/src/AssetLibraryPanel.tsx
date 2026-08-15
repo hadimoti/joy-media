@@ -391,8 +391,19 @@ export function AssetLibraryPanel({
     }
   }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
   const fetchCloudOriginal = useCallback(
-    (id: string) => cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id)),
-    [client, cloudPreviewQueue],
+    (id: string) => {
+      const asset = items.find((candidate) => candidate.asset.id === id)?.asset;
+      if (asset === undefined)
+        return Promise.reject(new Error('The catalog asset is no longer listed.'));
+      if (!asset.cloudBacked)
+        return Promise.reject(new Error('This asset has no cloud original yet.'));
+      // My Media entries can belong to any project under this owner. They must
+      // use their owning project endpoint; the shared-library endpoint is only
+      // for a curated cloud entry and otherwise replies with a noisy 409.
+      if (!cloudAssetIds.has(id)) return client.originalBytes(asset.projectId || projectId, id);
+      return cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id));
+    },
+    [client, cloudAssetIds, cloudPreviewQueue, items, projectId],
   );
   const addAssetToTimeline = useCallback(
     async (asset: {

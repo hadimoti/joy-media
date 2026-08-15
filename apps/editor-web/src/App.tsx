@@ -4916,6 +4916,50 @@ function EditorWorkspace({
                 controlPlaneProject.controlPlaneProjectId,
                 controlPlaneProject.title,
               );
+              // A Worker fetches its source through the control plane, not from
+              // this tab's OPFS cache. A browser reload can restore the visual
+              // project before an ephemeral/dev catalog has restored its asset
+              // row, so repair that durable source boundary before queueing.
+              const catalogAssets = await mediaControlPlaneClient.assets(
+                controlPlaneProject.controlPlaneProjectId,
+              );
+              const catalogAsset = catalogAssets.find(
+                (asset) => asset.id === selectedAudioClip.assetId,
+              );
+              if (catalogAsset?.cloudBacked !== true) {
+                const sourceAsset = context.session.visualProject.assets[selectedAudioClip.assetId];
+                if (sourceAsset === undefined)
+                  throw new Error('The selected audio source is no longer part of this project.');
+                let original = await (
+                  await originalAssetCachePromise
+                ).get(selectedAudioClip.assetId);
+                if (original === undefined) {
+                  const source = await mediaResolver.resolve(selectedAudioClip.assetId);
+                  const response = await fetch(source.url);
+                  if (!response.ok)
+                    throw new Error('The selected audio original is unavailable for Local Worker.');
+                  original = await response.blob();
+                }
+                if (catalogAsset !== undefined) {
+                  await mediaControlPlaneClient.uploadAssetOriginal(
+                    controlPlaneProject.controlPlaneProjectId,
+                    catalogAsset,
+                    original,
+                  );
+                } else {
+                  const file = new File([original], sourceAsset.displayName, {
+                    type: sourceAsset.descriptor?.mimeType || original.type,
+                  });
+                  await importMediaFile({
+                    projectId: controlPlaneProject.controlPlaneProjectId,
+                    projectTitle: controlPlaneProject.title,
+                    file,
+                    assetId: selectedAudioClip.assetId,
+                    client: mediaControlPlaneClient,
+                    originalAssetCache: originalAssetCachePromise,
+                  });
+                }
+              }
               if (existing?.status === 'failed' || existing?.status === 'cancelled')
                 await mediaControlPlaneClient.retry(
                   controlPlaneProject.controlPlaneProjectId,

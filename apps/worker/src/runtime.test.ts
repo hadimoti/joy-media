@@ -11,8 +11,14 @@ import {
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
-import { gpuDerivativeLocalRef } from './local-gpu.js';
+import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 describe('Worker runtime', () => {
+  it('escapes a Windows RNNoise path for ffmpeg filter syntax', () => {
+    const path = 'C:\\Users\\JOY Media\\models\\rnnoise\\mp.rnnn';
+    expect(ffmpegFilterPath(path)).toBe("'C\\:/Users/JOY Media/models/rnnoise/mp.rnnn'");
+    expect(rnnoiseFilter(path)).toBe("arnndn=m='C\\:/Users/JOY Media/models/rnnoise/mp.rnnn'");
+  });
+
   it('bounds retained GPU references for project-scoped job IDs', () => {
     const jobId = `audio-denoise-${'project'.repeat(12)}-${'asset'.repeat(20)}`;
     const localRef = gpuDerivativeLocalRef(jobId, 'a'.repeat(64));

@@ -5,6 +5,12 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: true,
+  // The audit uses one owner identity and a shared in-memory control plane;
+  // three desktop workers keep its project cleanup isolated while also avoiding
+  // MediaRecorder saturation on high-core local machines. CI may override this
+  // when it provides isolated browser/API resources.
+  workers:
+    process.env.PLAYWRIGHT_WORKERS === undefined ? 3 : Number(process.env.PLAYWRIGHT_WORKERS),
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['line'], ['html', { outputFolder: 'playwright-report' }]] : 'list',

@@ -135,6 +135,12 @@ export function JobsPanel({
   const revokedWorkers = sortedWorkers.filter((w) => w.revoked);
   const visibleWorkers = showRevoked ? sortedWorkers : activeWorkers;
   const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
+  // A ready authenticated session initializes its opaque project binding during
+  // refresh. Do not briefly mount an action that that same refresh immediately
+  // removes; it produces a real UI flicker and can detach a user's click.
+  const showInitialize =
+    !projectInitialized &&
+    (!controlPlaneReady || connectionStatus.startsWith('Not connected or not signed in:'));
 
   useEffect(() => {
     if (pendingPairWorkerId === undefined) return;
@@ -347,7 +353,7 @@ export function JobsPanel({
       note={status ?? connectionStatus}
       actions={
         <>
-          {!projectInitialized && (
+          {showInitialize && (
             <button
               type="button"
               className="icon-button"

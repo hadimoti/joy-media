@@ -9,7 +9,26 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
+
+
+def install_basicsr_torchvision_compat() -> None:
+    """Bridge the legacy BasicSR import removed by newer torchvision releases.
+
+    BasicSR 1.4.2 imports ``torchvision.transforms.functional_tensor``. The
+    module was folded into ``functional`` in torchvision 0.23, which is the
+    pinned Worker runtime. Aliasing the public module before importing BasicSR
+    retains the tested runner without weakening its package pins.
+    """
+    try:
+        import torchvision.transforms.functional_tensor  # type: ignore[import-not-found] # noqa: F401
+    except ModuleNotFoundError as error:
+        if error.name != "torchvision.transforms.functional_tensor":
+            raise
+        from torchvision.transforms import functional
+
+        sys.modules.setdefault("torchvision.transforms.functional_tensor", functional)
 
 
 def main() -> int:
@@ -32,6 +51,8 @@ def main() -> int:
 
     from PIL import Image
     import torch
+
+    install_basicsr_torchvision_compat()
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
 

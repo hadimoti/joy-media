@@ -261,7 +261,7 @@ export class WorkerRuntime {
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
-    const inventory = modelInventory(this.tools.upscaling);
+    const inventory = modelInventory(this.tools.upscaling, this.tools.masking);
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.ffprobe && this.tools.upscaling?.image?.modelReady === true)
@@ -604,19 +604,58 @@ export type WorkerDerivativeReceipt =
   | UpscaleWorkerDerivative;
 
 function modelInventory(
-  availability: UpscalingAvailability | undefined,
+  upscaling: UpscalingAvailability | undefined,
+  masking: MaskingAvailability | undefined,
 ): WorkerModelInventory | undefined {
-  if (availability?.image === undefined) return undefined;
+  if (
+    upscaling?.image === undefined &&
+    masking?.image === undefined &&
+    masking?.video === undefined
+  )
+    return undefined;
+  const maskingModelRoot = process.env.JOY_MEDIA_BIREFNET_MODEL_DIR?.trim() ?? '';
+  const birefnetReady =
+    maskingModelRoot.length > 0 &&
+    existsSync(join(maskingModelRoot, 'BiRefNet-general-epoch_244.onnx')) &&
+    existsSync(join(maskingModelRoot, 'BiRefNet-portrait-epoch_150.onnx'));
+  const sam2Ready =
+    (process.env.JOY_MEDIA_SAM2_RUNTIME_READY ?? '').trim() === '1' &&
+    existsSync(process.env.JOY_MEDIA_SAM2_MODEL?.trim() ?? '') &&
+    existsSync(process.env.JOY_MEDIA_GROUNDING_MODEL?.trim() ?? '');
+  const models = [
+    ...(upscaling?.image === undefined
+      ? []
+      : [
+          {
+            modelId: upscaling.image.modelId,
+            version: upscaling.image.modelVersion,
+            state: upscaling.image.modelReady ? ('ready' as const) : ('not-installed' as const),
+          },
+        ]),
+    ...(masking?.image === undefined && masking?.video === undefined
+      ? []
+      : [
+          {
+            modelId: 'birefnet',
+            version: 'local-onnx',
+            state: birefnetReady ? ('ready' as const) : ('not-installed' as const),
+          },
+          {
+            modelId: 'sam2-grounded',
+            version: '2.1-local',
+            state: sam2Ready ? ('ready' as const) : ('not-installed' as const),
+          },
+          {
+            modelId: 'sam3',
+            version: '3.1-external',
+            state: 'not-installed' as const,
+          },
+        ]),
+  ];
   return {
     managerVersion: '0.1.0',
     cacheStatus: 'ready',
-    models: [
-      {
-        modelId: availability.image.modelId,
-        version: availability.image.modelVersion,
-        state: availability.image.modelReady ? 'ready' : 'not-installed',
-      },
-    ],
+    models,
   };
 }
 

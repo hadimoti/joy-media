@@ -54,12 +54,30 @@ def inference_context(device: str) -> contextlib.AbstractContextManager[Any]:
     return contextlib.nullcontext()
 
 
+def local_sam2_checkpoint(model_id: str) -> tuple[str, Path] | None:
+    """Resolve the owner-downloaded SAM 2.1 checkpoint without Hugging Face."""
+    directory = Path(model_id)
+    checkpoint = directory / "sam2.1_hiera_large.pt"
+    if not directory.is_dir() or not checkpoint.is_file():
+        return None
+    # The SAM package registers these bundled Hydra configs; the downloaded
+    # directory supplies only the weights, so passing its local YAML would not
+    # resolve the package's config graph.
+    return "configs/sam2.1/sam2.1_hiera_l.yaml", checkpoint
+
+
 def load_image_predictor(device: str):
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
     model_id = os.environ.get(
         "JOY_MEDIA_SAM2_MODEL", "facebook/sam2.1-hiera-large"
     ).strip()
+    local = local_sam2_checkpoint(model_id)
+    if local is not None:
+        from sam2.build_sam import build_sam2
+
+        config, checkpoint = local
+        return SAM2ImagePredictor(build_sam2(config, str(checkpoint), device=device))
     return SAM2ImagePredictor.from_pretrained(model_id, device=device)
 
 
@@ -69,6 +87,12 @@ def load_video_predictor(device: str):
     model_id = os.environ.get(
         "JOY_MEDIA_SAM2_MODEL", "facebook/sam2.1-hiera-large"
     ).strip()
+    local = local_sam2_checkpoint(model_id)
+    if local is not None:
+        from sam2.build_sam import build_sam2_video_predictor
+
+        config, checkpoint = local
+        return build_sam2_video_predictor(config, str(checkpoint), device=device)
     return SAM2VideoPredictor.from_pretrained(model_id, device=device)
 
 

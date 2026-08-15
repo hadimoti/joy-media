@@ -90,9 +90,9 @@ describe('resolveAssetThumb fallback chain', () => {
     expect(result.hasOpfsOriginal).toBe(true);
   });
 
-  it('falls back to the shared cloud original for images when nothing local exists', async () => {
+  it('falls back to the shared cloud original for a cloud-backed image when nothing local exists', async () => {
     const result = await resolveAssetThumb({
-      asset: IMAGE,
+      asset: { ...IMAGE, cloudBacked: true },
       derivatives: [],
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
@@ -108,6 +108,7 @@ describe('resolveAssetThumb fallback chain', () => {
       id: 'gif-1',
       displayName: 'animated.gif',
       descriptor: { mimeType: 'image/gif' },
+      cloudBacked: true,
     };
     const result = await resolveAssetThumb({
       asset: gif,
@@ -122,9 +123,9 @@ describe('resolveAssetThumb fallback chain', () => {
     expect(result).toMatchObject({ source: 'cloud', mimeType: 'image/gif' });
   });
 
-  it('falls back to the shared cloud original for videos when nothing local exists', async () => {
+  it('falls back to the shared cloud original for cloud-backed videos when nothing local exists', async () => {
     const result = await resolveAssetThumb({
-      asset: VIDEO,
+      asset: { ...VIDEO, cloudBacked: true },
       derivatives: [],
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
@@ -146,6 +147,21 @@ describe('resolveAssetThumb fallback chain', () => {
     });
     expect(result.source).toBe('none');
     expect(result.url).toBeUndefined();
+  });
+
+  it('does not probe remote storage for an asset that is not cloud-backed', async () => {
+    const fetchCloudOriginal = vi.fn();
+    await expect(
+      resolveAssetThumb({
+        asset: IMAGE,
+        derivatives: [],
+        projectId: 'prj-1',
+        resolver: fakeResolver({ state: 'unavailable' }),
+        originalCache: fakeOriginal(undefined),
+        fetchCloudOriginal,
+      }),
+    ).resolves.toMatchObject({ source: 'none' });
+    expect(fetchCloudOriginal).not.toHaveBeenCalled();
   });
 
   it('falls back to OPFS original when the derivative resolver throws', async () => {

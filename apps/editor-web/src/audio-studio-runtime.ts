@@ -17,7 +17,7 @@ export type AudioAtomicApiId =
   | 'audio.time_stretch';
 
 export type AudioExecutionTarget = 'local-worker' | 'browser-dsp' | 'vps-orchestrated';
-export type AudioModelInstallState = 'installed' | 'available' | 'update';
+export type AudioModelInstallState = 'installed' | 'available' | 'setup-required' | 'update';
 export type AudioEnhanceScopeId = 'selection' | 'track' | 'timeline';
 
 /**
@@ -228,7 +228,7 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
     vramGb: 8,
     gpu: 'preferred',
     quantization: 'int8 / fp16',
-    installState: 'available',
+    installState: 'setup-required',
     localPath: `${DEFAULT_MODEL_CACHE_PATH}\\qwen3-tts`,
     capabilities: ['audio.tts', 'audio.clone_voice'],
   },
@@ -242,7 +242,7 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
     vramGb: 2,
     gpu: 'optional',
     quantization: 'fp32',
-    installState: 'available',
+    installState: 'installed',
     localPath: `${DEFAULT_MODEL_CACHE_PATH}\\deepfilternet`,
     capabilities: ['audio.denoise'],
   },
@@ -256,7 +256,7 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
     vramGb: 4,
     gpu: 'preferred',
     quantization: 'fp32',
-    installState: 'available',
+    installState: 'setup-required',
     localPath: `${DEFAULT_MODEL_CACHE_PATH}\\demucs`,
     capabilities: ['audio.separate'],
   },
@@ -270,7 +270,7 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
     vramGb: 4,
     gpu: 'preferred',
     quantization: 'fp16',
-    installState: 'available',
+    installState: 'setup-required',
     localPath: `${DEFAULT_MODEL_CACHE_PATH}\\speech-enhance`,
     capabilities: ['audio.enhance', 'audio.repair'],
   },

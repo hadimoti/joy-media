@@ -4,42 +4,42 @@
   "speakers": [{ "id": "speaker-1", "name": "Local speaker" }],
   "words": [
     {
-      "text": "Welcome",
+      "text": "سلام",
       "startUs": 0,
       "endUs": 400000,
       "confidence": 0.97,
       "speakerId": "speaker-1"
     },
     {
-      "text": "to",
+      "text": "به",
       "startUs": 400000,
       "endUs": 650000,
       "confidence": 0.94,
       "speakerId": "speaker-1"
     },
     {
-      "text": "JOY",
+      "text": "استودیوی",
       "startUs": 650000,
       "endUs": 1200000,
       "confidence": 0.96,
       "speakerId": "speaker-1"
     },
     {
-      "text": "Media",
+      "text": "جوی",
       "startUs": 1200000,
       "endUs": 1550000,
       "confidence": 0.98,
       "speakerId": "speaker-1"
     },
     {
-      "text": "Studio",
+      "text": "خوش",
       "startUs": 1550000,
       "endUs": 1850000,
       "confidence": 0.95,
       "speakerId": "speaker-1"
     },
     {
-      "text": "today",
+      "text": "آمدید",
       "startUs": 1850000,
       "endUs": 2400000,
       "confidence": 0.96,

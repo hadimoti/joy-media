@@ -35,6 +35,43 @@ export interface MaskRuntimeStatus {
 /** Keep the Inspector's idea of a live Worker consistent with the Audio workspace. */
 export const MASK_WORKER_FRESHNESS_MS = 35_000;
 
+function freshPairedWorkers(
+  workers: readonly BrowserWorker[],
+  nowMs: number,
+): readonly BrowserWorker[] {
+  return workers.filter(
+    (worker) =>
+      worker.paired &&
+      !worker.revoked &&
+      worker.lastSeenAt !== undefined &&
+      nowMs - worker.lastSeenAt >= 0 &&
+      nowMs - worker.lastSeenAt < MASK_WORKER_FRESHNESS_MS,
+  );
+}
+
+/**
+ * Providers stay selectable on legacy Workers without an inventory. Once a
+ * current Worker reports inventory, however, the inspector must not imply a
+ * missing model can execute locally.
+ */
+export function maskProviderReady(
+  provider: Exclude<MaskSettings['provider'], 'auto'>,
+  workers: readonly BrowserWorker[],
+  nowMs = Date.now(),
+): boolean {
+  const current = freshPairedWorkers(workers, nowMs);
+  const inventories = current
+    .map((worker) => worker.modelInventory)
+    .filter(
+      (inventory): inventory is NonNullable<BrowserWorker['modelInventory']> =>
+        inventory !== undefined,
+    );
+  if (inventories.length === 0) return true;
+  return inventories.some((inventory) =>
+    inventory.models.some((model) => model.modelId === provider && model.state === 'ready'),
+  );
+}
+
 /**
  * A paired record is not evidence of a usable local runtime. A Worker must
  * have checked in recently, advertise the exact image/video capability, and
@@ -49,12 +86,7 @@ export function maskRuntimeStatus(
   const capability = target.kind === 'image' ? 'mask.image' : 'mask.video';
   const alternateCapability = target.kind === 'image' ? 'mask.video' : 'mask.image';
   const pairedWorkers = workers.filter((worker) => worker.paired && !worker.revoked);
-  const onlineWorkers = pairedWorkers.filter(
-    (worker) =>
-      worker.lastSeenAt !== undefined &&
-      nowMs - worker.lastSeenAt >= 0 &&
-      nowMs - worker.lastSeenAt < MASK_WORKER_FRESHNESS_MS,
-  );
+  const onlineWorkers = freshPairedWorkers(workers, nowMs);
   const capableWorkers = onlineWorkers.filter((worker) => worker.capabilities.includes(capability));
   const readyWorker = capableWorkers.find((worker) =>
     (worker.localAssetIds ?? []).includes(target.assetId),
@@ -138,6 +170,12 @@ export function MaskInspector({
 
   const runtime = maskRuntimeStatus(target, workers);
   const runtimeState = runtime.state;
+  const providerReady =
+    settings.provider === 'auto' ? true : maskProviderReady(settings.provider, workers);
+  const autoNeedsSam =
+    settings.provider === 'auto' && ['prompt', 'points', 'box'].includes(settings.selection.mode);
+  const autoSamReady =
+    maskProviderReady('sam2-grounded', workers) || maskProviderReady('sam3', workers);
 
   useEffect(() => {
     const jobId = settings.lastJob?.id;
@@ -199,6 +237,14 @@ export function MaskInspector({
     patch({ edge: { ...settings.edge, ...next } });
   const queue = async (output: 'matte' | 'cutout') => {
     if (runtimeState !== 'ready') return;
+    if (!providerReady) {
+      setRuntimeError(`${settings.provider} is not installed on the current Local Worker.`);
+      return;
+    }
+    if (autoNeedsSam && !autoSamReady) {
+      setRuntimeError('Prompt, point, and box selection require an installed SAM provider.');
+      return;
+    }
     if (settings.selection.mode === 'prompt' && !settings.selection.prompt?.trim()) {
       setRuntimeError('Enter the subject to select.');
       return;
@@ -281,9 +327,15 @@ export function MaskInspector({
           }
         >
           <option value="auto">Auto · best installed</option>
-          <option value="sam3">SAM 3.1 · prompt + tracking</option>
-          <option value="sam2-grounded">SAM 2.1 + Grounding DINO</option>
-          <option value="birefnet">BiRefNet · fine edges</option>
+          <option value="sam3" disabled={!maskProviderReady('sam3', workers)}>
+            SAM 3.1 · prompt + tracking
+          </option>
+          <option value="sam2-grounded" disabled={!maskProviderReady('sam2-grounded', workers)}>
+            SAM 2.1 + Grounding DINO
+          </option>
+          <option value="birefnet" disabled={!maskProviderReady('birefnet', workers)}>
+            BiRefNet · fine edges
+          </option>
         </select>
       </section>
 

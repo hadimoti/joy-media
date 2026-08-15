@@ -28,6 +28,9 @@ function previewMimeType(asset: BrowserAsset, blob: Blob): string {
 /**
  * Resolve a card preview URL:
  * preferredDerivative -> OPFS original -> authorized cloud original -> none.
+ * A non-cloud-backed catalog record has no authorized remote original yet;
+ * never probe the shared-library endpoint for it. Besides avoiding a needless
+ * 409, this keeps other in-progress owner imports quiet in every open tab.
  */
 export async function resolveAssetThumb(options: {
   readonly asset: BrowserAsset;
@@ -83,6 +86,8 @@ export async function resolveAssetThumb(options: {
   } catch {
     /* fall through */
   }
+
+  if (!asset.cloudBacked) return { source: 'none', revoke: () => undefined, hasOpfsOriginal };
 
   try {
     const cloud = await fetchCloudOriginal(asset.id);

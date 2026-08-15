@@ -44,12 +44,12 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
     expect(document.language).toBe('fa-IR');
     expect(document.segments).toHaveLength(1);
     expect(Object.values(document.words).map((word) => word.text)).toEqual([
-      'Welcome',
-      'to',
-      'JOY',
-      'Media',
-      'Studio',
-      'today',
+      'سلام',
+      'به',
+      'استودیوی',
+      'جوی',
+      'خوش',
+      'آمدید',
     ]);
     expect(document.provenance).toMatchObject({
       providerId: 'joy.local-whisper',
