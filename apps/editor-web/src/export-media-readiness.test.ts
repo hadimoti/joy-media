@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalBindingKey, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
   hasRenderableExportMedia,
+  isExportDurationTimelineClip,
   isExportVisualTimelineClip,
   missingColorLutExportDependencies,
 } from './export-media-readiness.js';
@@ -24,6 +25,28 @@ describe('isExportVisualTimelineClip', () => {
     ['other asset', 'video' as const, 'other' as const],
   ])('rejects %s', (_label, elementKind, assetKind) => {
     expect(isExportVisualTimelineClip(elementKind, assetKind)).toBe(false);
+  });
+});
+
+describe('isExportDurationTimelineClip', () => {
+  it.each([
+    ['video media', 'video' as const, 'video' as const],
+    ['animated image media', 'video' as const, 'image' as const],
+    ['semantic audio element', 'audio' as const, 'audio' as const],
+    ['legacy audio asset', 'video' as const, 'audio' as const],
+    ['3D render media', 'scene3d' as const, 'image' as const],
+  ])('counts %s', (_label, elementKind, assetKind) => {
+    expect(isExportDurationTimelineClip(elementKind, assetKind)).toBe(true);
+  });
+
+  it.each([
+    ['caption controller', 'caption' as const, undefined],
+    ['motion controller', 'motion' as const, undefined],
+    ['filter controller', 'filter' as const, undefined],
+    ['adjustment controller', 'adjust' as const, undefined],
+    ['LUT asset', 'video' as const, 'lut' as const],
+  ])('does not let %s pad the program', (_label, elementKind, assetKind) => {
+    expect(isExportDurationTimelineClip(elementKind, assetKind)).toBe(false);
   });
 });
 

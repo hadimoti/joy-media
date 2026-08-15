@@ -24,6 +24,23 @@ export function isExportVisualTimelineClip(
 }
 
 /**
+ * Media that establishes the exported program's end time. Controller layers
+ * (captions, effects, filters, motion, and adjustments) can outlive authored
+ * media so they must not silently pad a short edit with blank frames. Audio is
+ * still program content even though it is not decoded by the visual pipeline.
+ */
+export function isExportDurationTimelineClip(
+  elementKind: TimelineElementKind,
+  assetKind: AssetRecordV1['kind'] | undefined,
+): boolean {
+  return (
+    isExportVisualTimelineClip(elementKind, assetKind) ||
+    elementKind === 'audio' ||
+    assetKind === 'audio'
+  );
+}
+
+/**
  * A prepared export record can be rendered from a detached video, a decoded
  * still image, or a decoded animated-image source. Keep this predicate shared
  * so image media is not accidentally filtered out before captureExportClip().

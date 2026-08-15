@@ -80,6 +80,7 @@ import {
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
   hasRenderableExportMedia,
+  isExportDurationTimelineClip,
   isExportVisualTimelineClip,
   missingColorLutExportDependencies,
 } from './export-media-readiness.js';
@@ -3193,7 +3194,12 @@ function EditorWorkspace({
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
           return isExportVisualTimelineClip(kind, assetKind);
         });
-        const contentEndUs = allTimelineClips.reduce(
+        const durationTimelineClips = allTimelineClips.filter((clip) => {
+          const kind = timelineElementKindForClip(clip, exportElementKinds);
+          const assetKind = exportVisualProject.assets[clip.assetId]?.kind;
+          return isExportDurationTimelineClip(kind, assetKind);
+        });
+        const contentEndUs = durationTimelineClips.reduce(
           (end, clip) => Math.max(end, clip.startUs + clip.durationUs),
           0,
         );

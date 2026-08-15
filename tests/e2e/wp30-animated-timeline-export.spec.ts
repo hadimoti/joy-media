@@ -98,33 +98,16 @@ test.describe('WP-30 animated timeline export', () => {
       expect(Number(probe.format?.duration)).toBeGreaterThan(0);
       const frameHashes = execFileSync(
         'ffmpeg',
-        [
-          '-v',
-          'error',
-          '-i',
-          path!,
-          '-map',
-          '0:v:0',
-          '-an',
-          '-vf',
-          'select=eq(n\\,0)+eq(n\\,9)',
-          '-vsync',
-          '0',
-          '-frames:v',
-          '2',
-          '-f',
-          'framemd5',
-          '-',
-        ],
+        ['-v', 'error', '-i', path!, '-map', '0:v:0', '-an', '-f', 'framemd5', '-'],
         { encoding: 'utf8' },
       )
         .split(/\r?\n/)
         .filter((line) => /^\s*0,/.test(line))
         .map((line) => line.split(',').at(-1)?.trim())
         .filter((hash): hash is string => hash !== undefined);
-      expect(frameHashes[0]).toBeDefined();
-      expect(frameHashes[1]).toBeDefined();
-      expect(frameHashes[0]).not.toBe(frameHashes[1]);
+      const uniqueFrameHashes = [...new Set(frameHashes)];
+      expect(frameHashes.length).toBeGreaterThan(1);
+      expect(uniqueFrameHashes.length).toBeGreaterThan(1);
       await info.attach('animated-export.json', {
         body: Buffer.from(
           JSON.stringify({
@@ -132,7 +115,8 @@ test.describe('WP-30 animated timeline export', () => {
             bytes,
             filename: download.suggestedFilename(),
             duration: probe.format?.duration,
-            frameHashes,
+            frameCount: frameHashes.length,
+            uniqueFrameHashes,
           }),
         ),
         contentType: 'application/json',
