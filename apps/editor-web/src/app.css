@@ -1646,6 +1646,12 @@ h2 {
   display: inline-flex;
   align-items: stretch;
 }
+.monitor-aspect-ratio > .monitor-transport-btn {
+  width: auto;
+  min-width: 7rem;
+  gap: 0.3rem;
+  padding-inline: 0.35rem;
+}
 .monitor-aspect-ratio-trigger-details {
   max-width: 12rem;
   overflow: hidden;
@@ -2340,7 +2346,7 @@ label {
   z-index: 2;
   min-height: 1.25rem;
   padding-block: 0.2rem;
-  background: color-mix(in srgb, var(--joy-bg-panel) 92%, #fff 8%);
+  background: transparent;
   border-bottom: 1px solid var(--joy-border, #2e2e32);
 }
 .timeline-scrub-gutter {
@@ -2355,7 +2361,7 @@ label {
   min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--joy-bg-panel) 92%, #fff 8%);
+  background: transparent;
 }
 .timeline-playhead-slider {
   flex: none;
@@ -2372,7 +2378,7 @@ label {
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--joy-border);
-  background: var(--joy-bg-inset);
+  background: transparent;
   overflow: hidden;
   cursor: ew-resize;
   outline: none;
@@ -2439,11 +2445,6 @@ label {
 /* Selected track: highlight both the header and a subtle lane tint so the
    active composition row reads as one connected element. */
 .timeline-track.is-selected .timeline-track-header {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--joy-accent) 14%, transparent),
-    var(--joy-bg-panel)
-  );
   box-shadow: inset 2px 0 0 var(--joy-accent);
 }
 .timeline-track.is-selected .timeline-lane {
@@ -2865,7 +2866,7 @@ label {
   min-width: var(--timeline-track-gutter-width);
   box-sizing: border-box;
   padding-inline-end: var(--space-1);
-  background: var(--joy-bg-panel);
+  background: transparent;
   position: relative;
   z-index: 1;
 }
