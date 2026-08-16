@@ -2204,7 +2204,7 @@ export function TimelinePanel({
                 <div
                   className="timeline-track-header"
                   data-track-id={track.id}
-                  draggable
+                  draggable={colorMenuTrackId !== track.id}
                   aria-roledescription="draggable timeline track"
                   onDragStart={(event) => {
                     if ((event.target as HTMLElement).closest('button') !== null) {
