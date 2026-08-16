@@ -2279,30 +2279,6 @@ export function TimelinePanel({
                   >
                     <SoloIcon />
                   </button>
-                  {source.clips.length === 0 && composition.tracks.length > 1 && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`Remove track ${track.id}`}
-                      title="Remove empty track"
-                      onClick={() =>
-                        onDispatch({
-                          label: `Remove ${track.id}`,
-                          commands: [
-                            {
-                              type: 'timeline.removeTrack',
-                              payload: {
-                                compositionId: composition.id,
-                                trackId: track.id,
-                              },
-                            },
-                          ],
-                        })
-                      }
-                    >
-                      <TrashIcon />
-                    </button>
-                  )}
                 </div>
                 <span
                   className="timeline-lane"

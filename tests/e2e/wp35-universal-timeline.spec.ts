@@ -113,6 +113,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     const trackNames = page.locator('.timeline-track-header .track-name');
     const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
     const audioTracks = page.locator('.timeline-track[data-track-family="audio"]');
+    await expect(page.getByRole('button', { name: /Remove track/ })).toHaveCount(0);
     await expect(visualTracks).toHaveCount(10);
     await expect(audioTracks).toHaveCount(1);
     await expect(page.locator('.timeline-track-header .track-code').first()).toHaveText('V1');
