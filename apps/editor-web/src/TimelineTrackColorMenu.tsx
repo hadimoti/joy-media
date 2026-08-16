@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import type { TimelineTrackLabelColor } from '@joy-media/project-schema';
 
 export const TRACK_LABEL_COLORS: readonly (TimelineTrackLabelColor | undefined)[] = [
@@ -33,22 +32,8 @@ export function TimelineTrackColorMenu({
   readonly onSelect: (color?: TimelineTrackLabelColor) => void;
   readonly onClose: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [onClose]);
   return (
-    <div
-      ref={ref}
-      className="timeline-track-color-menu"
-      role="menu"
-      aria-label="Track color"
-      onPointerDown={(event) => event.stopPropagation()}
-    >
+    <div className="timeline-track-color-menu" role="menu" aria-label="Track color">
       {TRACK_LABEL_COLORS.map((color) => (
         <button
           key={color ?? 'default'}
