@@ -85,10 +85,19 @@ export function videoFrameNodeFromDecoded(
   };
 }
 
-/** Return a new `RenderFrameIR` with the supplied node appended. */
-export function withVideoFrameNode(frame: RenderFrameIR, node: VideoFrameNode): RenderFrameIR {
-  const nextNodes: readonly RenderNode[] = [...frame.nodes, node];
+/** Return a new `RenderFrameIR` with the supplied nodes appended. */
+export function withVideoFrameNodes(
+  frame: RenderFrameIR,
+  nodes: readonly VideoFrameNode[],
+): RenderFrameIR {
+  if (nodes.length === 0) return frame;
+  const nextNodes: readonly RenderNode[] = [...frame.nodes, ...nodes];
   const next: RenderFrameIR = { ...frame, nodes: nextNodes };
   validateRenderFrameIR(next);
   return next;
+}
+
+/** Return a new `RenderFrameIR` with one decoded video node appended. */
+export function withVideoFrameNode(frame: RenderFrameIR, node: VideoFrameNode): RenderFrameIR {
+  return withVideoFrameNodes(frame, [node]);
 }

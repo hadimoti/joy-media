@@ -314,6 +314,7 @@ export class WorkerRuntime {
       }
     | { readonly state: 'canceled' }
   > {
+    if (job.type === 'fixture.thumbnail') return this.runFixtureThumbnail(job.id, options);
     if (job.type === 'upscale.image' || job.type === 'upscale.video') {
       if (!this.tools.ffprobe) throw new Error('FFprobe is required for upscaling outputs');
       if (job.assetId === undefined) throw new Error(job.type + ' requires an input asset');
@@ -538,6 +539,39 @@ export class WorkerRuntime {
     }
   }
 
+  private async runFixtureThumbnail(
+    jobId: string,
+    options: {
+      readonly cancelled: () => boolean;
+      readonly progress: (progress: number) => Promise<void>;
+    },
+  ): Promise<
+    | { readonly state: 'completed'; readonly result: FixtureThumbnailReceipt }
+    | { readonly state: 'canceled' }
+  > {
+    if (options.cancelled()) return { state: 'canceled' };
+    const bytes = Buffer.from('P6\n1 1\n255\n\x20\x80\xe0', 'binary');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const tempDir = mkdtempSync(join(tmpdir(), `joy-media-fixture-${jobId}-`));
+    try {
+      const output = join(tempDir, 'thumbnail.ppm');
+      writeFileSync(output, bytes, { mode: 0o600 });
+      await options.progress(5);
+      if (options.cancelled()) return { state: 'canceled' };
+      await options.progress(50);
+      await options.progress(90);
+      if (options.cancelled()) return { state: 'canceled' };
+      await options.progress(100);
+      this.log.write(`job ${jobId} completed (fixture.thumbnail)`);
+      return {
+        state: 'completed',
+        result: { kind: 'fixture.thumbnail', sha256, bytes: bytes.length },
+      };
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
   localAssetIds(): readonly string[] {
     return this.options.sources?.assetIds() ?? [];
   }
@@ -574,6 +608,9 @@ export class WorkerRuntime {
       }
       return bytes;
     }
+    if (result.kind === 'fixture.thumbnail') {
+      throw new Error('fixture thumbnail has no retained derivative');
+    }
     if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef!))
       throw new Error('derivative local reference is invalid');
     const directory =
@@ -598,6 +635,7 @@ function mlDenoiseRunnable(): boolean {
 
 export type WorkerDerivativeReceipt =
   | RealThumbnailReceipt
+  | FixtureThumbnailReceipt
   | LocalGpuReceipt
   | LocalAiReceipt
   | MaskWorkerDerivative
@@ -670,6 +708,12 @@ export interface RealThumbnailReceipt {
     readonly width: number;
     readonly height: number;
   };
+}
+
+export interface FixtureThumbnailReceipt {
+  readonly kind: 'fixture.thumbnail';
+  readonly sha256: string;
+  readonly bytes: number;
 }
 
 async function runBounded(

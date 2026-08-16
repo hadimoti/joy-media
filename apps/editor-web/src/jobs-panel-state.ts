@@ -3,7 +3,12 @@ import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 export type WorkerPresence = 'connected' | 'disconnected' | 'revoked';
 
 const AI_CAPS = ['text.lm-studio', 'text.openrouter', 'video.runway', 'edit.higgsfield'] as const;
-const LOCAL_GPU_CAPS = ['image.comfy', 'audio.ml-denoise', ...AI_CAPS] as const;
+const LOCAL_GPU_CAPS = [
+  'render.preview.gpu',
+  'image.comfy',
+  'audio.ml-denoise',
+  ...AI_CAPS,
+] as const;
 
 export function workerPresence(worker: BrowserWorker, now = Date.now()): WorkerPresence {
   if (worker.revoked) return 'revoked';

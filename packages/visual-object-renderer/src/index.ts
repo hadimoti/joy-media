@@ -69,6 +69,8 @@ export interface BuildRenderFrameOptions {
   readonly imageSizesByObjectId?: Readonly<
     Record<string, { readonly width: number; readonly height: number }>
   >;
+  /** Optional evaluator-provided layer order for universal timeline tracks. */
+  readonly zIndexByObjectId?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -285,7 +287,10 @@ export function buildRenderFrameIR(
     );
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
     const node = visualObjectToRenderNode(resolved, effects, imageSize);
-    if (node) nodes.push(node);
+    if (node) {
+      const zIndex = options.zIndexByObjectId?.[node.id];
+      nodes.push(zIndex === undefined ? node : { ...node, zIndex });
+    }
   }
 
   const clipTimes = options.clipTimes ?? EMPTY_CLIP_TIMES;

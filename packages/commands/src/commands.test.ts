@@ -52,8 +52,11 @@ describe('applyCommand', () => {
       'timeline.insertClip',
       'timeline.joinClips',
       'timeline.moveClip',
+      'timeline.moveElement',
       'timeline.removeClip',
       'timeline.removeTrack',
+      'timeline.renameTrack',
+      'timeline.reorderTrack',
       'timeline.restoreCompound',
       'timeline.restoreTrackClips',
       'timeline.setClipRate',
@@ -152,6 +155,62 @@ describe('applyCommand', () => {
         }),
       'COMMAND_VALIDATION_OVERLAP',
     );
+  });
+
+  it('moves an element between neutral tracks and inverts losslessly', () => {
+    const project = {
+      ...baseProject(),
+      compositions: {
+        root: {
+          ...baseProject().compositions.root!,
+          tracks: [
+            ...baseProject().compositions.root!.tracks,
+            {
+              id: 'track-1',
+              kind: 'video' as const,
+              name: 'Layer 2',
+              order: 1,
+              enabled: true,
+              clips: [],
+            },
+          ],
+        },
+      },
+    };
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.moveElement',
+      payload: {
+        compositionId: 'root',
+        sourceTrackId: 'track-0',
+        targetTrackId: 'track-1',
+        clipId: 'clip-a',
+        newStartUs: 0,
+      },
+    });
+    expect(next.compositions.root!.tracks.find((track) => track.id === 'track-0')!.clips).toEqual([
+      expect.objectContaining({ id: 'clip-b' }),
+    ]);
+    expect(next.compositions.root!.tracks.find((track) => track.id === 'track-1')!.clips).toEqual([
+      expect.objectContaining({ id: 'clip-a' }),
+    ]);
+    expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('reorders and renames a track with exact inverses', () => {
+    const project = baseProject();
+    const reordered = applyCommand(project, {
+      type: 'timeline.reorderTrack',
+      payload: { compositionId: 'root', trackId: 'track-0', newOrder: 4 },
+    });
+    expect(reordered.project.compositions.root!.tracks[0]!.order).toBe(4);
+    expect(applyCommand(reordered.project, reordered.inverse).project).toEqual(project);
+
+    const renamed = applyCommand(project, {
+      type: 'timeline.renameTrack',
+      payload: { compositionId: 'root', trackId: 'track-0', newName: 'Foreground' },
+    });
+    expect(renamed.project.compositions.root!.tracks[0]!.name).toBe('Foreground');
+    expect(applyCommand(renamed.project, renamed.inverse).project).toEqual(project);
   });
 
   it('trim start shifts the source in-point by the same delta', () => {

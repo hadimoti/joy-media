@@ -100,6 +100,8 @@ describe('Worker runtime', () => {
         },
       });
       if (result.state !== 'completed') throw new Error('real thumbnail was unexpectedly canceled');
+      if (result.result.kind !== 'asset.thumbnail')
+        throw new Error('real thumbnail returned the wrong receipt kind');
       expect(result.result.bytes).toBeGreaterThan(100);
       expect(result.result.sha256).toMatch(/^[a-f0-9]{64}$/);
       expect(result.result.localRef).toMatch(/^thumb-job-real-[a-f0-9]{16}$/);
@@ -147,6 +149,32 @@ describe('Worker runtime', () => {
     } finally {
       rmSync(derivativeDirectory, { recursive: true, force: true });
     }
+  });
+
+  it('runs the Jobs-panel fixture thumbnail without FFmpeg or a local asset', async () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-fixture', createdAt: '2026-08-16T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+    );
+    const updates: number[] = [];
+    const result = await runtime.run(
+      { id: 'job-fixture', type: 'fixture.thumbnail' },
+      {
+        cancelled: () => false,
+        progress: async (progress) => {
+          updates.push(progress);
+        },
+      },
+    );
+    expect(result).toEqual({
+      state: 'completed',
+      result: {
+        kind: 'fixture.thumbnail',
+        sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+        bytes: 14,
+      },
+    });
+    expect(updates).toEqual([5, 50, 90, 100]);
   });
   it('persists identity, Worker session, and a pending pairing separately from project data', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');

@@ -55,6 +55,24 @@ export interface MoveClipPayload extends TrackTarget {
   readonly clipId: string;
   readonly newStartUs: TimeUs;
 }
+/** Move an element between neutral tracks while preserving its duration/source timing. */
+export interface MoveElementPayload {
+  readonly compositionId: CompositionId;
+  readonly sourceTrackId: TrackId;
+  readonly targetTrackId: TrackId;
+  readonly clipId: string;
+  readonly newStartUs: TimeUs;
+}
+export interface ReorderTrackPayload {
+  readonly compositionId: CompositionId;
+  readonly trackId: TrackId;
+  readonly newOrder: number;
+}
+export interface RenameTrackPayload {
+  readonly compositionId: CompositionId;
+  readonly trackId: TrackId;
+  readonly newName?: string;
+}
 export interface TrimClipStartPayload extends TrackTarget {
   readonly clipId: string;
   /** New timeline start; source in-point / child offset shifts by the same delta. */
@@ -147,6 +165,7 @@ export type SpikeCommand =
   | { readonly type: 'timeline.insertClip'; readonly payload: InsertClipPayload }
   | { readonly type: 'timeline.removeClip'; readonly payload: RemoveClipPayload }
   | { readonly type: 'timeline.moveClip'; readonly payload: MoveClipPayload }
+  | { readonly type: 'timeline.moveElement'; readonly payload: MoveElementPayload }
   | { readonly type: 'timeline.trimClipStart'; readonly payload: TrimClipStartPayload }
   | { readonly type: 'timeline.trimClipEnd'; readonly payload: TrimClipEndPayload }
   | { readonly type: 'timeline.splitClip'; readonly payload: SplitClipPayload }
@@ -165,6 +184,8 @@ export type SpikeCommand =
     }
   | { readonly type: 'timeline.addTrack'; readonly payload: AddTrackPayload }
   | { readonly type: 'timeline.removeTrack'; readonly payload: RemoveTrackPayload }
+  | { readonly type: 'timeline.reorderTrack'; readonly payload: ReorderTrackPayload }
+  | { readonly type: 'timeline.renameTrack'; readonly payload: RenameTrackPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
 
 export type SpikeCommandType = SpikeCommand['type'];
@@ -176,6 +197,7 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.insertClip': { description: 'Insert a non-overlapping clip into a track.' },
   'timeline.removeClip': { description: 'Remove a clip while preserving it in the inverse.' },
   'timeline.moveClip': { description: 'Move a clip within its track.' },
+  'timeline.moveElement': { description: 'Move an element between neutral tracks.' },
   'timeline.trimClipStart': { description: 'Trim a clip start and shift its source offset.' },
   'timeline.trimClipEnd': { description: 'Trim a clip end.' },
   'timeline.splitClip': { description: 'Split a clip into source-continuous halves.' },
@@ -207,6 +229,8 @@ export const COMMAND_REGISTRY: Readonly<
   },
   'timeline.addTrack': { description: 'Add a track to a composition.' },
   'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
+  'timeline.reorderTrack': { description: 'Change a track visual layer order.' },
+  'timeline.renameTrack': { description: 'Rename a neutral Timeline track.' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
 };
 
@@ -237,6 +261,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyRemoveClip(project, command.payload);
     case 'timeline.moveClip':
       return applyMoveClip(project, command.payload);
+    case 'timeline.moveElement':
+      return applyMoveElement(project, command.payload);
     case 'timeline.trimClipStart':
       return applyTrimClipStart(project, command.payload);
     case 'timeline.trimClipEnd':
@@ -267,6 +293,10 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyAddTrack(project, command.payload);
     case 'timeline.removeTrack':
       return applyRemoveTrack(project, command.payload);
+    case 'timeline.reorderTrack':
+      return applyReorderTrack(project, command.payload);
+    case 'timeline.renameTrack':
+      return applyRenameTrack(project, command.payload);
     case 'property.setTrackEnabled':
       return applySetTrackEnabled(project, command.payload);
     default: {
@@ -451,6 +481,64 @@ function applyMoveClip(project: SpikeProject, payload: MoveClipPayload): ApplyRe
     inverse: {
       type: 'timeline.moveClip',
       payload: { ...payload, newStartUs: clip.startUs },
+    },
+  };
+}
+
+function applyMoveElement(project: SpikeProject, payload: MoveElementPayload): ApplyResult {
+  const sourceTrack = getTrack(project, {
+    compositionId: payload.compositionId,
+    trackId: payload.sourceTrackId,
+  });
+  const targetTrack = getTrack(project, {
+    compositionId: payload.compositionId,
+    trackId: payload.targetTrackId,
+  });
+  const clip = getClip(sourceTrack, payload.clipId);
+  assertClipRange(payload.newStartUs, clip.durationUs, 'moveElement');
+  assertNoOverlap(
+    targetTrack,
+    payload.newStartUs,
+    clip.durationUs,
+    sourceTrack.id === targetTrack.id ? clip.id : undefined,
+    'moveElement',
+  );
+  const moved: Clip = { ...clip, startUs: payload.newStartUs };
+  const composition = project.compositions[payload.compositionId]!;
+  const tracks = composition.tracks.map((track) => {
+    if (track.id === sourceTrack.id && track.id === targetTrack.id) {
+      return {
+        ...track,
+        clips: [...track.clips.filter((item) => item.id !== clip.id), moved].sort(
+          (a, b) => a.startUs - b.startUs,
+        ),
+      };
+    }
+    if (track.id === sourceTrack.id) {
+      return { ...track, clips: track.clips.filter((item) => item.id !== clip.id) };
+    }
+    if (track.id === targetTrack.id) {
+      return { ...track, clips: [...track.clips, moved].sort((a, b) => a.startUs - b.startUs) };
+    }
+    return track;
+  });
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: { ...composition, tracks },
+      },
+    },
+    inverse: {
+      type: 'timeline.moveElement',
+      payload: {
+        compositionId: payload.compositionId,
+        sourceTrackId: payload.targetTrackId,
+        targetTrackId: payload.sourceTrackId,
+        clipId: payload.clipId,
+        newStartUs: clip.startUs,
+      },
     },
   };
 }
@@ -1263,6 +1351,70 @@ function applyRemoveTrack(project: SpikeProject, payload: RemoveTrackPayload): A
     inverse: {
       type: 'timeline.addTrack',
       payload: { compositionId: payload.compositionId, track },
+    },
+  };
+}
+
+function applyReorderTrack(project: SpikeProject, payload: ReorderTrackPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  if (!Number.isSafeInteger(payload.newOrder) || payload.newOrder < 0) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'reorderTrack: newOrder must be a non-negative safe integer',
+    );
+  }
+  const composition = project.compositions[payload.compositionId]!;
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: {
+          ...composition,
+          tracks: composition.tracks.map((item) =>
+            item.id === track.id ? { ...item, order: payload.newOrder } : item,
+          ),
+        },
+      },
+    },
+    inverse: {
+      type: 'timeline.reorderTrack',
+      payload: { ...payload, newOrder: track.order },
+    },
+  };
+}
+
+function applyRenameTrack(project: SpikeProject, payload: RenameTrackPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const name = payload.newName?.trim();
+  if (name !== undefined && name.length === 0) {
+    throw new CommandError('COMMAND_VALIDATION_RANGE', 'renameTrack: name cannot be empty');
+  }
+  const composition = project.compositions[payload.compositionId]!;
+  const tracks = composition.tracks.map((item) => {
+    if (item.id !== track.id) return item;
+    if (name === undefined) {
+      const withoutName = { ...item };
+      Reflect.deleteProperty(withoutName, 'name');
+      return withoutName;
+    }
+    return { ...item, name };
+  });
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: { ...composition, tracks },
+      },
+    },
+    inverse: {
+      type: 'timeline.renameTrack',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        ...(track.name === undefined ? {} : { newName: track.name }),
+      },
     },
   };
 }

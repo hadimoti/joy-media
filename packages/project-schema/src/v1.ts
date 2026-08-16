@@ -9,6 +9,8 @@ import type { PropertyAnimationV2 } from './property-animation.js';
 import type { CaptionClipStyleV2 } from './caption-style.js';
 import type { TextDocumentV1, TextStyleV1 } from './text-style.js';
 import { validatePropertyAnimations } from './property-animation.js';
+import type { UniversalTimelineDocument } from './universal-timeline.js';
+import { validateUniversalTimelineDocument } from './universal-timeline.js';
 
 export type EffectParamValue =
   | number
@@ -62,6 +64,8 @@ export interface JoyProjectV1 {
    * (owner existence, canonical ids, ranges, key ordering) land in WP34-06.
    */
   readonly propertyAnimations?: Readonly<Record<string, PropertyAnimationV2>>;
+  /** Versioned universal Timeline bindings; absent means legacy projection. */
+  readonly universalTimeline?: UniversalTimelineDocument;
 }
 
 export interface VisualObjectTransformV1 {
@@ -543,6 +547,9 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
+  if (value.universalTimeline !== undefined) {
+    diagnostics.push(...validateUniversalTimelineDocument(value.universalTimeline));
+  }
   diagnostics.push(...validatePropertyAnimations(value.propertyAnimations));
   return diagnostics;
 }

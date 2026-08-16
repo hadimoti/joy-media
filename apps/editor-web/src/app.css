@@ -2907,6 +2907,14 @@ label {
   border-radius: var(--radius-sm);
   cursor: crosshair;
 }
+.timeline-marquee-selection {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 86%, white);
+  background: color-mix(in srgb, var(--joy-accent) 20%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-accent) 18%, transparent);
+}
 .timeline-property-lanes {
   position: relative;
   z-index: 1;

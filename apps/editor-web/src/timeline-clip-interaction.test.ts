@@ -15,7 +15,7 @@ const CLIP: Clip = {
 };
 
 describe('timeline clip interaction', () => {
-  it('builds one atomic remove/insert transaction for a cross-track move', () => {
+  it('builds one semantic atomic transaction for a cross-track move', () => {
     expect(
       buildTimelineClipMoveTransaction({
         compositionId: 'root',
@@ -29,15 +29,13 @@ describe('timeline clip interaction', () => {
       label: 'Move clip-a to V2',
       commands: [
         {
-          type: 'timeline.removeClip',
-          payload: { compositionId: 'root', trackId: 'V1', clipId: 'clip-a' },
-        },
-        {
-          type: 'timeline.insertClip',
+          type: 'timeline.moveElement',
           payload: {
             compositionId: 'root',
-            trackId: 'V2',
-            clip: { ...CLIP, startUs: 4_000_000 },
+            sourceTrackId: 'V1',
+            targetTrackId: 'V2',
+            clipId: 'clip-a',
+            newStartUs: 4_000_000,
           },
         },
       ],

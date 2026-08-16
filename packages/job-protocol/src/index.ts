@@ -32,6 +32,22 @@ export type {
   WorkerCapabilitySnapshot,
   JobEvent,
 } from './protocol.js';
+export type {
+  GpuPreviewFrameRequest,
+  GpuPreviewFrameResponse,
+  PreviewQuality,
+  PreviewAssetToken,
+  GpuPreviewSession,
+  OpenGpuPreviewSessionInput,
+  GpuPreviewRequestGateLimits,
+  GpuPreviewAdmission,
+} from './preview.js';
+export {
+  LatestPreviewRequestQueue,
+  GpuPreviewSessionBroker,
+  GpuPreviewRequestGate,
+  validateGpuPreviewFrameRequest,
+} from './preview.js';
 export {
   WORKER_PROTOCOL_VERSION,
   LOCAL_GPU_WORKER_CAPABILITIES,

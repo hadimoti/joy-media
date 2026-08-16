@@ -1,5 +1,6 @@
 import type { EditorViewMode } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
+import type { PreviewQuality } from './preview-quality.js';
 
 export const EDITOR_UI_PREFERENCES_KEY = 'joy-media.editor-ui-preferences.v2';
 
@@ -28,6 +29,10 @@ export interface EditorUiPreferencesV2 {
   readonly jobsFilter: string;
   readonly panelTabs: Readonly<Record<string, string>>;
   readonly disclosures: Readonly<Record<string, boolean>>;
+  readonly monitorPreview?: {
+    readonly quality: PreviewQuality;
+    readonly renderer: 'auto' | 'gpu-worker' | 'local';
+  };
 }
 
 export interface UiPreferenceStorage {
@@ -53,6 +58,7 @@ export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   jobsFilter: 'all',
   panelTabs: {},
   disclosures: {},
+  monitorPreview: { quality: 'quarter', renderer: 'auto' },
 };
 
 export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiPreferencesV2 {
@@ -60,7 +66,16 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
   if (raw !== null) {
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isEditorUiPreferencesV2(parsed)) return parsed;
+      if (isEditorUiPreferencesV2(parsed)) {
+        const monitorPreview = parsed.monitorPreview ?? {
+          quality: 'quarter' as const,
+          renderer: 'auto' as const,
+        };
+        return {
+          ...parsed,
+          monitorPreview,
+        };
+      }
     } catch {
       // Fall through to a safe, non-destructive default.
     }
@@ -139,6 +154,14 @@ function isEditorUiPreferencesV2(value: unknown): value is EditorUiPreferencesV2
     typeof value.processFilter === 'string' &&
     typeof value.jobsFilter === 'string' &&
     isRecord(value.panelTabs) &&
-    isRecord(value.disclosures)
+    isRecord(value.disclosures) &&
+    (value.monitorPreview === undefined ||
+      (isRecord(value.monitorPreview) &&
+        (value.monitorPreview.quality === 'quarter' ||
+          value.monitorPreview.quality === 'half' ||
+          value.monitorPreview.quality === 'full') &&
+        (value.monitorPreview.renderer === 'auto' ||
+          value.monitorPreview.renderer === 'gpu-worker' ||
+          value.monitorPreview.renderer === 'local')))
   );
 }

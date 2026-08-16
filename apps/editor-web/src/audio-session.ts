@@ -85,6 +85,22 @@ export function ensureClipAudio(state: AudioState, clipIds: readonly string[]): 
   return changed ? { ...state, clips } : state;
 }
 
+/** Removes clip-owned mixer rows and effects as part of an atomic timeline delete. */
+export function removeClipAudio(state: AudioState, clipIds: readonly string[]): AudioState {
+  if (clipIds.length === 0) return state;
+  const removed = new Set(clipIds);
+  const clips = Object.fromEntries(
+    Object.entries(state.clips).filter(([clipId]) => !removed.has(clipId)),
+  );
+  const effects = state.effects.filter((effect) => !removed.has(effect.targetId));
+  if (
+    Object.keys(clips).length === Object.keys(state.clips).length &&
+    effects.length === state.effects.length
+  )
+    return state;
+  return { ...state, clips, effects };
+}
+
 export function withProjectAudio(project: JoyProjectV1, state: AudioState): JoyProjectV1 {
   return {
     ...project,

@@ -17,6 +17,7 @@ export interface LeasedJob {
 export interface WorkerJobResult {
   readonly kind:
     | 'asset.thumbnail'
+    | 'fixture.thumbnail'
     | 'image.comfy'
     | 'upscale.image'
     | 'upscale.video'

@@ -91,3 +91,32 @@ export function timelineTrackDisplayName(kind: TimelineTrackKind, kindIndex: num
   if (kindIndex === 2) return 'B-roll';
   return `Video ${kindIndex}`;
 }
+
+/**
+ * Universal Compatibility Mode deliberately keeps semantic kind off the track
+ * header. Element kind is shown on the clip itself; the lane is a neutral
+ * layer container that accepts every supported element.
+ */
+export function universalTrackCode(trackIndex: number): string {
+  return `T${Math.max(1, trackIndex)}`;
+}
+
+export function universalTrackDisplayName(trackIndex: number, explicitName?: string): string {
+  const trimmed = explicitName?.trim();
+  return trimmed === undefined || trimmed.length === 0 || isLegacyKindLabel(trimmed)
+    ? `Layer ${Math.max(1, trackIndex)}`
+    : trimmed;
+}
+
+/**
+ * Legacy projects persisted presentation labels such as "Main Video" and
+ * "Captions" on tracks. They are not capabilities, so do not expose them as
+ * the universal row identity after the compatibility projection is enabled.
+ * User-authored names (including "Hero" or "Layer 1") remain intact.
+ */
+function isLegacyKindLabel(value: string): boolean {
+  const normalized = value.replace(/\s+/g, ' ').trim().toLowerCase();
+  return /^(main video|b-?roll|video(?: \d+)?|overlay|3d scene|text|captions?|cc captions?|motion graphic|effects?|audio(?: \d+)?|voice|script(?: \d+)?)$/.test(
+    normalized,
+  );
+}

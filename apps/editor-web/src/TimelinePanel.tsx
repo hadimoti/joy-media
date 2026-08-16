@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   buildRulerTicks,
   clipRateLabel,
@@ -56,12 +56,8 @@ import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflo
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
-import {
-  timelineTrackKind,
-  timelineTrackCode,
-  timelineTrackDisplayName,
-  type TimelineTrackKind,
-} from './timeline-track-kind.js';
+import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
+import { universalTrackCode, universalTrackDisplayName } from './timeline-track-kind.js';
 import {
   TIMELINE_END_PADDING_PX,
   TIMELINE_TRACK_GUTTER_WIDTH_PX,
@@ -94,6 +90,14 @@ import {
   type TimelineElementKindMap,
 } from './timeline-element-kind.js';
 import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
+import {
+  hasExceededMarqueeThreshold,
+  normalizeTimelineRect,
+  timelineRectsIntersect,
+  unionTimelineSelection,
+  type TimelinePoint,
+  type TimelineRect,
+} from './timeline-marquee-selection.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -598,6 +602,13 @@ export function TimelinePanel({
     | { x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string }
     | undefined
   >(undefined);
+  const [marqueeRect, setMarqueeRect] = useState<TimelineRect | undefined>(undefined);
+  const marqueeRef = useRef<{
+    origin: TimelinePoint;
+    baselineIds: readonly string[];
+    pointerId: number;
+    capture: HTMLElement;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
 
@@ -797,6 +808,93 @@ export function TimelinePanel({
     });
   };
 
+  const collectMarqueeIds = useCallback((rect: TimelineRect): readonly string[] => {
+    const root = scrollRef.current;
+    if (root === null) return [];
+    return Array.from(root.querySelectorAll<HTMLElement>('.timeline-clip[data-clip-id]'))
+      .filter((element) => {
+        const bounds = element.getBoundingClientRect();
+        return timelineRectsIntersect(rect, {
+          left: bounds.left,
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+        });
+      })
+      .map((element) => element.dataset.clipId)
+      .filter((id): id is string => id !== undefined);
+  }, []);
+
+  const endMarquee = useCallback(
+    (event: PointerEvent<HTMLElement>, canceled = false) => {
+      const gesture = marqueeRef.current;
+      if (gesture === null) return;
+      if (gesture.capture.hasPointerCapture(gesture.pointerId)) {
+        gesture.capture.releasePointerCapture(gesture.pointerId);
+      }
+      marqueeRef.current = null;
+      const rect = marqueeRect;
+      setMarqueeRect(undefined);
+      if (canceled || rect === undefined) {
+        if (
+          !canceled &&
+          !hasExceededMarqueeThreshold(gesture.origin, { x: event.clientX, y: event.clientY })
+        ) {
+          onClearSelection();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          onSeek(
+            pixelToTime(event.clientX - bounds.left, {
+              originUs: 0,
+              pixelsPerSecond: viewport.pixelsPerSecond,
+            }),
+          );
+        }
+        return;
+      }
+      const additive = event.metaKey || event.ctrlKey;
+      const nextIds = unionTimelineSelection(
+        gesture.baselineIds,
+        collectMarqueeIds(rect),
+        additive,
+      );
+      onClearSelection();
+      nextIds.forEach((id) => onToggleSelection(id));
+    },
+    [
+      collectMarqueeIds,
+      marqueeRect,
+      onClearSelection,
+      onSeek,
+      onToggleSelection,
+      viewport.pixelsPerSecond,
+    ],
+  );
+
+  const beginMarquee = useCallback(
+    (event: PointerEvent<HTMLElement>) => {
+      if (!selectToolActive || splitToolActive || event.target !== event.currentTarget) return;
+      event.preventDefault();
+      const capture = event.currentTarget;
+      capture.setPointerCapture(event.pointerId);
+      marqueeRef.current = {
+        origin: { x: event.clientX, y: event.clientY },
+        baselineIds: [...selectedIds],
+        pointerId: event.pointerId,
+        capture,
+      };
+      setMarqueeRect(undefined);
+    },
+    [selectToolActive, selectedIds, splitToolActive],
+  );
+
+  const updateMarquee = useCallback((event: PointerEvent<HTMLElement>) => {
+    const gesture = marqueeRef.current;
+    if (gesture === null) return;
+    const point = { x: event.clientX, y: event.clientY };
+    if (!hasExceededMarqueeThreshold(gesture.origin, point)) return;
+    setMarqueeRect(normalizeTimelineRect(gesture.origin, point));
+  }, []);
+
   const selected = selectedIds
     .map((id) =>
       composition.tracks
@@ -986,7 +1084,7 @@ export function TimelinePanel({
       const order = composition.tracks.length;
       // The shared schema only models video tracks; presentation taxonomy is
       // carried separately by the paired creative document.
-      const trackId = `V${order + 1}`;
+      const trackId = `track-${order + 1}`;
       const durationUs = safeAssetDuration(asset);
       const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
       const clipId = `clip-${asset.assetId}-${Date.now()}`;
@@ -1009,6 +1107,7 @@ export function TimelinePanel({
               track: {
                 id: trackId,
                 kind: 'video',
+                name: `Layer ${order + 1}`,
                 order,
                 enabled: true,
                 clips: [],
@@ -1078,7 +1177,7 @@ export function TimelinePanel({
     );
   };
 
-  const addVideoTrack = useCallback(() => {
+  const addUniversalTrack = useCallback(() => {
     const order = composition.tracks.length;
     onDispatch({
       label: 'Add track',
@@ -1088,8 +1187,9 @@ export function TimelinePanel({
           payload: {
             compositionId: composition.id,
             track: {
-              id: `V${order + 1}`,
+              id: `track-${order + 1}`,
               kind: 'video',
+              name: `Layer ${order + 1}`,
               order,
               enabled: true,
               clips: [],
@@ -1101,7 +1201,7 @@ export function TimelinePanel({
   }, [composition.id, composition.tracks.length, onDispatch]);
 
   const overflowItems: readonly ActionOverflowMenuItem[] = [
-    { id: 'add-track', label: 'Add Track', onSelect: addVideoTrack },
+    { id: 'add-track', label: 'Add Universal Track', onSelect: addUniversalTrack },
     {
       id: 'marker',
       label: 'Add Marker',
@@ -1583,9 +1683,9 @@ export function TimelinePanel({
           <button
             type="button"
             className="icon-button"
-            aria-label="Add video track"
+            aria-label="Add universal track"
             data-guide="Add track"
-            onClick={addVideoTrack}
+            onClick={addUniversalTrack}
           >
             <TrackAddIcon />
           </button>
@@ -1804,6 +1904,23 @@ export function TimelinePanel({
         </div>
         <div className="timeline-tracks-inner" ref={laneMeasureRef}>
           <TimelineTracksGrid ticks={rulerTicks} widthPx={laneWidthPx} />
+          {marqueeRect !== undefined &&
+            laneMeasureRef.current !== null &&
+            (() => {
+              const inner = laneMeasureRef.current!.getBoundingClientRect();
+              return (
+                <span
+                  className="timeline-marquee-selection"
+                  aria-hidden="true"
+                  style={{
+                    left: `${marqueeRect.left - inner.left}px`,
+                    top: `${marqueeRect.top - inner.top}px`,
+                    width: `${Math.max(0, marqueeRect.right - marqueeRect.left)}px`,
+                    height: `${Math.max(0, marqueeRect.bottom - marqueeRect.top)}px`,
+                  }}
+                />
+              );
+            })()}
           <span
             className="timeline-playhead"
             style={{
@@ -1824,10 +1941,6 @@ export function TimelinePanel({
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
             const kind = timelineTrackKind(source, elementKinds);
-            const kindIndex = visible.slice(0, index + 1).filter((t) => {
-              const s = composition.tracks.find((item) => item.id === t.id);
-              return s !== undefined && timelineTrackKind(s, elementKinds) === kind;
-            }).length;
             return (
               <div
                 className={
@@ -1849,15 +1962,16 @@ export function TimelinePanel({
                       () => {
                         const order = composition.tracks.length;
                         onDispatch({
-                          label: 'Add video track',
+                          label: 'Add universal track',
                           commands: [
                             {
                               type: 'timeline.addTrack',
                               payload: {
                                 compositionId: composition.id,
                                 track: {
-                                  id: `V${order + 1}`,
+                                  id: `track-${order + 1}`,
                                   kind: 'video',
+                                  name: `Layer ${order + 1}`,
                                   order,
                                   enabled: true,
                                   clips: [],
@@ -1885,18 +1999,15 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
-                  <span
-                    className="timeline-track-kind-icon"
-                    title={`${kind === 'scene3d' ? '3D Scene' : `${kind[0]?.toUpperCase()}${kind.slice(1)}`} track`}
-                  >
+                  <span className="timeline-track-kind-icon" title="Universal timeline layer">
                     <TimelineTrackKindIcon kind={kind} />
                   </span>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
-                      {timelineTrackCode(kind, kindIndex)}
+                      {universalTrackCode(index + 1)}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {timelineTrackDisplayName(kind, kindIndex)}
+                      {universalTrackDisplayName(index + 1, source.name)}
                     </span>
                   </div>
                   <button
@@ -1959,10 +2070,15 @@ export function TimelinePanel({
                       setSplitGuideUs(undefined);
                       return;
                     }
-                    if (selectToolActive) onClearSelection();
+                    if (selectToolActive) {
+                      beginMarquee(event);
+                      return;
+                    }
                     seekFromLane(event);
                   }}
                   onPointerMove={(event) => {
+                    updateMarquee(event);
+                    if (marqueeRef.current !== null) return;
                     if (!splitToolActive) return;
                     const rect = event.currentTarget.getBoundingClientRect();
                     const localX = event.clientX - rect.left;
@@ -1986,6 +2102,8 @@ export function TimelinePanel({
                   onPointerLeave={() => {
                     if (splitToolActive) setSplitGuideUs(undefined);
                   }}
+                  onPointerUp={(event) => endMarquee(event)}
+                  onPointerCancel={(event) => endMarquee(event, true)}
                   onDragOver={(event) => {
                     if (
                       !event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&

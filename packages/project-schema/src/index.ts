@@ -230,6 +230,23 @@ export {
 export type { JoyProjectV2, AnyJoyProject } from './v2.js';
 export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV2, validateJoyProjectV2 } from './v2.js';
 
+export type {
+  TimelineElementKind,
+  UniversalTimelineSource,
+  UniversalTimelineItem,
+  UniversalTimelineDocument,
+  NormalizedUniversalTimelineItem,
+  NormalizedUniversalTimeline,
+} from './universal-timeline.js';
+export {
+  UNIVERSAL_TIMELINE_SCHEMA_VERSION,
+  TIMELINE_ELEMENT_KINDS,
+  validateUniversalTimelineDocument,
+  normalizeUniversalTimeline,
+  universalTimelineForProject,
+} from './universal-timeline.js';
+export { mixedElementTimelineFixture } from './universal-timeline-fixture.js';
+
 export type { DualLensFlags, FlagSource } from './dual-lens-flag.js';
 export {
   DUAL_LENS_FLAG_KEY,

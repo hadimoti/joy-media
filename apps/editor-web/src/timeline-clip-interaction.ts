@@ -3,6 +3,11 @@ import type { Clip } from '@joy-media/project-schema';
 
 export const TIMELINE_KEYBOARD_NUDGE_US = 100_000;
 
+/** Pointer movement activation for clip drags; both axes count. */
+export function hasExceededDragThreshold(deltaX: number, deltaY: number, thresholdPx = 4): boolean {
+  return Math.hypot(deltaX, deltaY) >= thresholdPx;
+}
+
 export function keyboardTrimTimeUs(input: {
   readonly clip: Clip;
   readonly edge: 'start' | 'end';
@@ -66,19 +71,13 @@ export function buildTimelineClipMoveTransaction(input: {
     label: `Move ${input.clip.id} to ${input.targetTrackId}`,
     commands: [
       {
-        type: 'timeline.removeClip',
+        type: 'timeline.moveElement',
         payload: {
           compositionId: input.compositionId,
-          trackId: input.sourceTrackId,
+          sourceTrackId: input.sourceTrackId,
+          targetTrackId: input.targetTrackId,
           clipId: input.clip.id,
-        },
-      },
-      {
-        type: 'timeline.insertClip',
-        payload: {
-          compositionId: input.compositionId,
-          trackId: input.targetTrackId,
-          clip: { ...input.clip, startUs: newStartUs },
+          newStartUs,
         },
       },
     ],

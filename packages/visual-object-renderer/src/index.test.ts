@@ -345,6 +345,17 @@ describe('buildRenderFrameIR', () => {
     expect(a).toEqual(b);
   });
 
+  it('accepts track-plan z-order without kind-specific image priority', () => {
+    const image = resolved(makeObject({ id: 'image-layer', kind: 'image' }));
+    const text = resolved(makeObject({ id: 'text-layer', kind: 'text', text: 'layer' }));
+    const frame = buildRenderFrameIR('c', 0, 480, 360, [image, text], {
+      imageSizesByObjectId: { 'image-layer': { width: 40, height: 40 } },
+      zIndexByObjectId: { 'image-layer': 1, 'text-layer': 2 },
+    });
+    expect(frame.nodes.find((node) => node.id === 'image-layer')?.zIndex).toBe(1);
+    expect(frame.nodes.find((node) => node.id === 'text-layer')?.zIndex).toBe(2);
+  });
+
   it('attaches per-object effects and master color grade', () => {
     const obj = resolved(makeObject({ id: 'img', kind: 'image' }));
     const frame = buildRenderFrameIR('c', 0, 100, 100, [obj], {

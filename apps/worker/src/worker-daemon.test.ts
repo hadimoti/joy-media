@@ -7,6 +7,45 @@ import { WorkerDaemon } from './worker-daemon.js';
 import { StaticLocalAssetSourceRegistry, WorkerRuntime } from './runtime.js';
 
 describe('WorkerDaemon', () => {
+  it('completes the Jobs-panel fixture smoke job without uploading a derivative', async () => {
+    const calls: string[] = [];
+    let stop = false;
+    let leased = false;
+    const client = {
+      hello: async () => calls.push('hello'),
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'fixture-job', projectId: 'project-1', type: 'fixture.thumbnail' };
+      },
+      heartbeat: async (_jobId: string, progress: number) => {
+        calls.push(`progress:${progress}`);
+        return { cancelRequested: false };
+      },
+      uploadDerivative: async () => calls.push('unexpected-upload'),
+      complete: async (_jobId: string, result: { readonly kind: string }) => {
+        calls.push(`complete:${result.kind}`);
+        stop = true;
+      },
+      fail: async () => calls.push('fail'),
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-fixture', createdAt: '2026-07-22T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+    );
+
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
+
+    expect(calls).toEqual([
+      'hello',
+      'progress:5',
+      'progress:50',
+      'progress:90',
+      'progress:100',
+      'complete:fixture.thumbnail',
+    ]);
+  });
+
   it('announces local assets, renews progress, and reports a real thumbnail receipt', async () => {
     const calls: string[] = [];
     let stop = false;

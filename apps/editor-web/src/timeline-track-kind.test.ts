@@ -4,6 +4,8 @@ import {
   timelineTrackKind,
   timelineTrackCode,
   timelineTrackDisplayName,
+  universalTrackCode,
+  universalTrackDisplayName,
 } from './timeline-track-kind.js';
 
 function videoClip(id: string, assetId: string): Clip {
@@ -85,6 +87,14 @@ describe('timelineTrack chrome labels', () => {
     expect(timelineTrackCode('video', 1)).toBe('V1');
     expect(timelineTrackDisplayName('video', 1)).toBe('Main Video');
     expect(timelineTrackDisplayName('video', 2)).toBe('B-roll');
+  });
+
+  it('projects every legacy kind label into a neutral universal layer row', () => {
+    expect(universalTrackCode(1)).toBe('T1');
+    expect(universalTrackDisplayName(1, 'Main Video')).toBe('Layer 1');
+    expect(universalTrackDisplayName(2, 'B-roll')).toBe('Layer 2');
+    expect(universalTrackDisplayName(3, 'CC Captions')).toBe('Layer 3');
+    expect(universalTrackDisplayName(4, 'Hero')).toBe('Hero');
   });
 
   it('names audio, captions, and script rows with kind prefixes', () => {

@@ -244,7 +244,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
   // TRACKS GROUP
   {
     id: 'track.addVideo',
-    label: 'Add video track',
+    label: 'Add universal track',
     icon: TrackAddIcon,
     shortcut: 'T',
     group: 'tracks',
@@ -258,8 +258,9 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
         payload: {
           compositionId: ctx.compositionId,
           track: {
-            id: `V${order + 1}`,
+            id: `track-${order + 1}`,
             kind: 'video',
+            name: `Layer ${order + 1}`,
             order,
             enabled: true,
             clips: [],
@@ -342,7 +343,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     id: 'clip.delete',
     label: 'Ripple delete',
     icon: TrashIcon,
-    shortcut: 'Delete / Backspace',
+    shortcut: 'Menu action',
     group: 'edit',
     canExecute: (ctx) => !!ctx.selectedClip,
     execute: (ctx) => {
@@ -591,7 +592,7 @@ export function buildClipContextMenu(
       items.push({
         label: 'Ripple delete',
         icon: TrashIcon,
-        shortcut: 'Delete / Backspace',
+        shortcut: 'Menu action',
         action: () => onExecute(result),
       });
     }
@@ -626,7 +627,7 @@ export function buildTrackHeaderContextMenu(
   canRemove: boolean,
 ): readonly ContextMenuItem[] {
   return [
-    { label: 'Add Video Track', shortcut: 'T', action: onAddTrack },
+    { label: 'Add Universal Track', shortcut: 'T', action: onAddTrack },
     { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: !canRemove },
     { label: '', action: () => {}, dividerBefore: true },
     {

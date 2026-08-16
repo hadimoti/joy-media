@@ -41,6 +41,7 @@ export {
 export {
   importedClipToMediaSource,
   videoFrameNodeFromDecoded,
+  withVideoFrameNodes,
   withVideoFrameNode,
   type VideoClipSpec,
 } from './video-frame-node.js';

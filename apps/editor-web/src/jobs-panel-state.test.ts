@@ -40,6 +40,13 @@ describe('project Jobs panel state', () => {
       NOW,
     );
     expect(withGpu).toContain('GPU ready');
+    expect(
+      projectJobStatus(
+        false,
+        [worker({ lastSeenAt: NOW - 1, capabilities: ['render.preview.gpu'] })],
+        NOW,
+      ),
+    ).toContain('GPU ready');
   });
 });
 

@@ -5,6 +5,7 @@ import type { DecodedFrame } from './index.js';
 import {
   importedClipToMediaSource,
   videoFrameNodeFromDecoded,
+  withVideoFrameNodes,
   withVideoFrameNode,
 } from './video-frame-node.js';
 import type { VideoClipSpec } from './video-frame-node.js';
@@ -112,6 +113,30 @@ describe('video-frame-node bridge', () => {
     const next = withVideoFrameNode(baseFrame, node);
     expect(next.nodes).toHaveLength(1);
     expect(next.nodes[0]).toBe(node);
+    expect(() => validateRenderFrameIR(next)).not.toThrow();
+  });
+
+  it('appends multiple active layers in one validated operation', () => {
+    const first = videoFrameNodeFromDecoded(
+      baseClip,
+      {
+        assetId: 'm1',
+        sourceTimeUs: 0,
+        token: 't1',
+      },
+      { width: 10, height: 10 },
+    );
+    const second = videoFrameNodeFromDecoded(
+      { ...baseClip, id: 'clip-2', zIndex: 2 },
+      {
+        assetId: 'm2',
+        sourceTimeUs: 0,
+        token: 't2',
+      },
+      { width: 10, height: 10 },
+    );
+    const next = withVideoFrameNodes(baseFrame, [first, second]);
+    expect(next.nodes.map((node) => node.id)).toEqual(['clip-1', 'clip-2']);
     expect(() => validateRenderFrameIR(next)).not.toThrow();
   });
 });

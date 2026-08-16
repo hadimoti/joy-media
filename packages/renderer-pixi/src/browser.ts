@@ -110,6 +110,10 @@ export interface BrowserPixiRenderer {
   readonly width: number;
   /** Current canvas CSS height in pixels (tracks the last rendered frame). */
   readonly height: number;
+  /** Current internal render resolution multiplier; CSS dimensions stay authored. */
+  readonly resolution: number;
+  /** Change internal pixel density without changing the authored viewport. */
+  setResolution(resolution: number): void;
   /** Returns a bounded RGBA readback for diagnostics; overlays are not painted into it. */
   readonly readPixels: (
     maxWidth?: number,
@@ -171,6 +175,7 @@ export async function createBrowserPixiRenderer(
   const spriteMap = new Map<string, LayerContainer>();
   let frameWidth = options.width ?? 320;
   let frameHeight = options.height ?? 180;
+  let frameResolution = options.resolution ?? 1;
   let disposed = false;
   let lastGradeKey = '';
 
@@ -181,7 +186,8 @@ export async function createBrowserPixiRenderer(
   const resize = (width: number, height: number, resolution: number): void => {
     frameWidth = width;
     frameHeight = height;
-    app.renderer.resize(width, height, resolution);
+    frameResolution = Math.max(0.1, Math.min(2, resolution));
+    app.renderer.resize(width, height, frameResolution);
   };
 
   const updateRectVisual = (
@@ -524,6 +530,14 @@ export async function createBrowserPixiRenderer(
     get height() {
       return frameHeight;
     },
+    get resolution() {
+      return frameResolution;
+    },
+    setResolution(nextResolution: number): void {
+      assertAlive();
+      resize(frameWidth, frameHeight, nextResolution);
+      if (options.autoStart !== true) app.renderer.render(app.stage);
+    },
     readPixels(maxWidth = 640, maxHeight = 360) {
       if (disposed || frameWidth <= 0 || frameHeight <= 0) return undefined;
       const scale = Math.min(1, maxWidth / frameWidth, maxHeight / frameHeight);
@@ -545,7 +559,7 @@ export async function createBrowserPixiRenderer(
       assertAlive();
       validateRenderFrameIR(frame);
       const { width, height, dpr } = frame.viewport;
-      const resolution = options.resolution ?? dpr;
+      const resolution = options.resolution ?? frameResolution ?? dpr;
       resize(width, height, resolution);
       background
         .clear()

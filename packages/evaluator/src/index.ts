@@ -8,6 +8,14 @@ export const PACKAGE_NAME = '@joy-media/evaluator' as const;
 export type { EvaluatedFrame, EvaluatedVideoFrame } from './evaluate.js';
 export { evaluateFrame } from './evaluate.js';
 export type {
+  ActiveTimelineRenderItem,
+  ActiveTimelineRenderPlan,
+  ActiveTimelineRenderPlanOptions,
+  TimelineElementKind,
+  UniversalTimelineItem,
+} from './active-timeline-render-plan.js';
+export { buildActiveTimelineRenderPlan, isVideoRenderItem } from './active-timeline-render-plan.js';
+export type {
   AnimationLocalTimeRange,
   PropertyAnimationTimeContext,
   ResolvedPropertyAnimationTime,

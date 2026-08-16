@@ -1,6 +1,5 @@
 import type { CommandTransaction } from '@joy-media/commands';
 import type { Clip, Composition, Track, VideoClip } from '@joy-media/project-schema';
-import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
 
 const SNAP_US = 100_000;
 const DEFAULT_STILL_DURATION_US = 5_000_000;
@@ -34,11 +33,9 @@ export function buildTimelineMediaImportTransaction(
   const usedClipIds = new Set(workingTracks.flatMap((track) => track.clips.map((clip) => clip.id)));
 
   for (const [index, asset] of assets.entries()) {
-    const desiredKind: TimelineTrackKind = asset.kind === 'audio' ? 'audio' : 'video';
-    let track = workingTracks.find(
-      (candidate) =>
-        !lockedTrackIds.has(candidate.id) && timelineTrackKind(candidate) === desiredKind,
-    );
+    // Universal Compatibility Mode: a track is a neutral layer container.
+    // Media kind is an item capability, never a placement restriction.
+    let track = workingTracks.find((candidate) => !lockedTrackIds.has(candidate.id));
     const durationUs = safeDurationUs(asset);
     const clip: VideoClip = {
       id: uniqueClipId(createClipId(asset, index), usedClipIds),
@@ -52,8 +49,9 @@ export function buildTimelineMediaImportTransaction(
 
     if (track === undefined) {
       track = {
-        id: nextTrackId(desiredKind, workingTracks),
+        id: nextTrackId(workingTracks),
         kind: 'video',
+        name: `Layer ${workingTracks.length + 1}`,
         order: nextTrackOrder(workingTracks),
         enabled: true,
         clips: [clip],
@@ -70,11 +68,12 @@ export function buildTimelineMediaImportTransaction(
       continue;
     }
 
-    track.clips.push(clip);
-    track.clips.sort((left, right) => left.startUs - right.startUs);
+    const targetTrack = track;
+    targetTrack.clips.push(clip);
+    targetTrack.clips.sort((left, right) => left.startUs - right.startUs);
     commands.push({
       type: 'timeline.insertClip',
-      payload: { compositionId: composition.id, trackId: track.id, clip },
+      payload: { compositionId: composition.id, trackId: targetTrack.id, clip },
     });
   }
 
@@ -94,6 +93,7 @@ function cloneTrack(track: Track): MutableTrack {
 interface MutableTrack {
   readonly id: string;
   readonly kind: 'video';
+  readonly name?: string;
   readonly order: number;
   readonly enabled: boolean;
   readonly clips: Clip[];
@@ -119,11 +119,11 @@ function safeDurationUs(asset: TimelineMediaAsset): number {
     : DEFAULT_STILL_DURATION_US;
 }
 
-function nextTrackId(kind: TimelineTrackKind, tracks: readonly MutableTrack[]): string {
+function nextTrackId(tracks: readonly MutableTrack[]): string {
   const used = new Set(tracks.map((track) => track.id));
   let index = 1;
-  while (used.has(`${kind}-${index}`)) index += 1;
-  return `${kind}-${index}`;
+  while (used.has(`track-${index}`)) index += 1;
+  return `track-${index}`;
 }
 
 function nextTrackOrder(tracks: readonly MutableTrack[]): number {

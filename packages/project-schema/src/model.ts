@@ -36,6 +36,8 @@ export interface Composition {
 export interface Track {
   readonly id: TrackId;
   readonly kind: 'video';
+  /** Optional user-facing name. Missing names are rendered as generic layers. */
+  readonly name?: string;
   /** Draw order: ascending = bottom to top. */
   readonly order: number;
   readonly enabled: boolean;

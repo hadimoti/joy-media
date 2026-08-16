@@ -30,7 +30,7 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { ColorGradeIR, EffectInstanceIR, VideoFrameNode } from '@joy-media/render-ir';
-import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
+import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
   CommandTransaction,
@@ -113,6 +113,7 @@ import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
+import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
 import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
@@ -2982,22 +2983,20 @@ function EditorWorkspace({
           break;
         }
         case 'clip.delete': {
-          if (composition === undefined || selection === undefined) return;
-          dispatchTimeline(
-            rippleDelete(
-              composition.id,
-              selection.track.id,
-              selection.track.clips.map((clip) => ({
-                id: clip.id,
-                startUs: clip.startUs,
-                durationUs: clip.durationUs,
-              })),
-              selection.clip.id,
-            ),
-          );
+          if (composition === undefined || current.selectedIds.length === 0) return;
+          const plan = buildTimelineDeletePlan({
+            composition,
+            selectedIds: current.selectedIds,
+            tracks: timelineTrackFlags,
+          });
+          if (!plan.ok) {
+            showToast(plan.reason, 'info');
+            return;
+          }
+          dispatchTimeline(plan.transaction);
           setState((active) => ({
             ...active,
-            selectedIds: active.selectedIds.filter((id) => id !== selection.clip.id),
+            selectedIds: active.selectedIds.filter((id) => !plan.clipIds.includes(id)),
           }));
           break;
         }
@@ -3026,7 +3025,7 @@ function EditorWorkspace({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatchTimeline, redo, seek, session, togglePlayback, undo]);
+  }, [dispatchTimeline, redo, seek, session, showToast, timelineTrackFlags, togglePlayback, undo]);
 
   const runSelectedClipAction = useCallback(
     (kind: 'split' | 'duplicate' | 'delete') => {
@@ -3077,24 +3076,22 @@ function EditorWorkspace({
         });
         return;
       }
-      dispatchTimeline(
-        rippleDelete(
-          composition.id,
-          selection.track.id,
-          selection.track.clips.map((clip) => ({
-            id: clip.id,
-            startUs: clip.startUs,
-            durationUs: clip.durationUs,
-          })),
-          selection.clip.id,
-        ),
-      );
+      const plan = buildTimelineDeletePlan({
+        composition,
+        selectedIds: current.selectedIds,
+        tracks: timelineTrackFlags,
+      });
+      if (!plan.ok) {
+        showToast(plan.reason, 'info');
+        return;
+      }
+      dispatchTimeline(plan.transaction);
       setState((active) => ({
         ...active,
-        selectedIds: active.selectedIds.filter((id) => id !== selection.clip.id),
+        selectedIds: active.selectedIds.filter((id) => !plan.clipIds.includes(id)),
       }));
     },
-    [dispatchTimeline, session],
+    [dispatchTimeline, session, showToast, timelineTrackFlags],
   );
 
   const handleExport = useCallback(
