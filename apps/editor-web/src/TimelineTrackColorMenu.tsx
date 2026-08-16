@@ -42,7 +42,13 @@ export function TimelineTrackColorMenu({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [onClose]);
   return (
-    <div ref={ref} className="timeline-track-color-menu" role="menu" aria-label="Track color">
+    <div
+      ref={ref}
+      className="timeline-track-color-menu"
+      role="menu"
+      aria-label="Track color"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       {TRACK_LABEL_COLORS.map((color) => (
         <button
           key={color ?? 'default'}
