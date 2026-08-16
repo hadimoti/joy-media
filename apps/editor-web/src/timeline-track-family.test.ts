@@ -78,8 +78,16 @@ describe('professional timeline track families', () => {
     ).toMatchObject({
       label: 'Reorder visual layers',
       commands: [
-        { payload: { trackId: 'V-bottom', newOrder: 1 } },
-        { payload: { trackId: 'V-top', newOrder: 0 } },
+        {
+          type: 'timeline.reorderTracks',
+          payload: {
+            orders: [
+              { trackId: 'V-bottom', newOrder: 2 },
+              { trackId: 'V-top', newOrder: 1 },
+              { trackId: 'A1', newOrder: 0 },
+            ],
+          },
+        },
       ],
     });
     expect(

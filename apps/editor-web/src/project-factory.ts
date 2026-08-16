@@ -22,7 +22,21 @@ export function createBlankProjectDocuments(
     durationUs: 60_000_000,
     frameRate: { num: 30, den: 1 },
   });
-  const timeline: SpikeProject = { ...base, id: projectId };
+  const timeline: SpikeProject = {
+    ...base,
+    id: projectId,
+    compositions: {
+      ...base.compositions,
+      root: {
+        ...base.compositions.root!,
+        tracks: base.compositions.root!.tracks.map((track, index) =>
+          index === 0
+            ? { ...track, family: 'visual' as const, name: 'Visual 1', order: 1 }
+            : { ...track, family: 'audio' as const, name: 'Audio 1', order: 0 },
+        ),
+      },
+    },
+  };
   const visual: JoyProjectV1 = {
     schemaVersion: 1,
     id: projectId,

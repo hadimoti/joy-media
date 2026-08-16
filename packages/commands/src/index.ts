@@ -18,6 +18,7 @@ export type {
   MoveElementPayload,
   MoveElementsPayload,
   ReorderTrackPayload,
+  ReorderTracksPayload,
   RenameTrackPayload,
   TrimClipStartPayload,
   TrimClipEndPayload,
@@ -33,6 +34,9 @@ export type {
   RestoreTrackClipsPayload,
   SetCompositionDimensionsPayload,
   SetTrackEnabledPayload,
+  SetTrackFamilyPayload,
+  SetTrackLockedPayload,
+  SetTrackLabelColorPayload,
 } from './commands.js';
 export { applyCommand, CommandError, COMMAND_REGISTRY } from './commands.js';
 

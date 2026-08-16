@@ -1,5 +1,6 @@
 import type { CommandTransaction } from '@joy-media/commands';
 import type {
+  Clip,
   JoyProjectV1,
   TrackV1,
   TimelineElementKind,
@@ -194,7 +195,7 @@ export function updateUniversalTimelineForTransaction(
           id: command.payload.clip.id,
           compositionId: command.payload.compositionId,
           trackId: command.payload.trackId,
-          elementKind: 'video',
+          elementKind: command.payload.expectedFamily === 'audio' ? 'audio' : 'video',
           startUs: command.payload.clip.startUs,
           durationUs: command.payload.clip.durationUs,
           source:
@@ -217,7 +218,7 @@ export function updateUniversalTimelineForTransaction(
           composition.tracks.some((track) => track.id === command.payload.track.id)
         )
           break;
-        const track = command.payload.track as unknown as TrackV1;
+        const track = adaptSpikeTrack(command.payload.track);
         project = {
           ...project,
           compositions: {
@@ -308,6 +309,28 @@ export function updateUniversalTimelineForTransaction(
         changed = true;
         break;
       }
+      case 'timeline.reorderTracks': {
+        const composition = project.compositions[command.payload.compositionId];
+        if (composition === undefined) break;
+        const orders = new Map(
+          command.payload.orders.map((entry) => [entry.trackId, entry.newOrder]),
+        );
+        project = {
+          ...project,
+          compositions: {
+            ...project.compositions,
+            [command.payload.compositionId]: {
+              ...composition,
+              tracks: composition.tracks.map((track) => {
+                const order = orders.get(track.id);
+                return order === undefined ? track : { ...track, order };
+              }),
+            },
+          },
+        };
+        changed = true;
+        break;
+      }
       case 'timeline.renameTrack': {
         const composition = project.compositions[command.payload.compositionId];
         if (composition === undefined) break;
@@ -332,14 +355,140 @@ export function updateUniversalTimelineForTransaction(
         changed = true;
         break;
       }
+      case 'timeline.setTrackFamily':
+      case 'timeline.setTrackLocked': {
+        const composition = project.compositions[command.payload.compositionId];
+        if (composition === undefined) break;
+        project = {
+          ...project,
+          compositions: {
+            ...project.compositions,
+            [command.payload.compositionId]: {
+              ...composition,
+              tracks: composition.tracks.map((track) => {
+                if (track.id !== command.payload.trackId) return track;
+                if (command.type === 'timeline.setTrackFamily') {
+                  const next = { ...track };
+                  if (command.payload.family === undefined) Reflect.deleteProperty(next, 'family');
+                  else next.family = command.payload.family;
+                  return next;
+                }
+                return { ...track, locked: command.payload.locked };
+              }),
+            },
+          },
+        };
+        changed = true;
+        break;
+      }
+      case 'timeline.setTrackLabelColor': {
+        // Label color belongs to the editor deck. Keep creative tracks byte
+        // stable; a deck-aware caller mirrors this metadata separately.
+        changed = true;
+        break;
+      }
       default:
         break;
     }
   }
   if (!changed) return project;
+  const deckProject = syncTrackDeckMetadata(project, transaction);
   return {
-    ...project,
+    ...deckProject,
     universalTimeline: { schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION, items },
     updatedAt: new Date().toISOString(),
   };
+}
+
+function adaptSpikeTrack(track: {
+  readonly id: string;
+  readonly family?: 'visual' | 'audio';
+  readonly name?: string;
+  readonly order: number;
+  readonly enabled: boolean;
+  readonly locked?: boolean;
+  readonly clips: readonly Clip[];
+}): TrackV1 {
+  return {
+    id: track.id,
+    kind: track.family === 'audio' ? 'audio' : 'video',
+    ...(track.family === undefined ? {} : { family: track.family }),
+    name: track.name ?? track.id,
+    order: track.order,
+    enabled: track.enabled,
+    locked: track.locked === true,
+    clips: track.clips.map((clip) => (clip.kind === 'composition' ? { ...clip } : { ...clip })),
+  };
+}
+
+function syncTrackDeckMetadata(
+  project: JoyProjectV1,
+  transaction: CommandTransaction,
+): JoyProjectV1 {
+  const rows = [...(project.timelineTrackDeck?.rows ?? [])];
+  const rowIndex = (compositionId: string, trackId: string) =>
+    rows.findIndex((row) => row.compositionId === compositionId && row.trackId === trackId);
+  const upsert = (
+    compositionId: string,
+    trackId: string,
+    patch: Partial<(typeof rows)[number]>,
+  ) => {
+    const index = rowIndex(compositionId, trackId);
+    const creative = project.compositions[compositionId]?.tracks.find(
+      (track) => track.id === trackId,
+    );
+    const base =
+      index >= 0
+        ? rows[index]!
+        : {
+            compositionId,
+            trackId,
+            family: creative?.family === 'audio' ? ('audio' as const) : ('visual' as const),
+            name: creative?.name ?? trackId,
+            order: creative?.order ?? 0,
+            enabled: creative?.enabled ?? true,
+            locked: creative?.locked ?? false,
+          };
+    const next = { ...base, ...patch };
+    if (index >= 0) rows[index] = next;
+    else rows.push(next);
+  };
+  for (const command of transaction.commands) {
+    if (command.type === 'timeline.setTrackLabelColor')
+      upsert(
+        command.payload.compositionId,
+        command.payload.trackId,
+        command.payload.labelColor === undefined ? {} : { labelColor: command.payload.labelColor },
+      );
+    else if (command.type === 'timeline.setTrackLocked')
+      upsert(command.payload.compositionId, command.payload.trackId, {
+        locked: command.payload.locked,
+      });
+    else if (command.type === 'timeline.setTrackFamily' && command.payload.family !== undefined)
+      upsert(command.payload.compositionId, command.payload.trackId, {
+        family: command.payload.family,
+      });
+    else if (command.type === 'timeline.renameTrack' && command.payload.newName !== undefined)
+      upsert(command.payload.compositionId, command.payload.trackId, {
+        name: command.payload.newName,
+      });
+    else if (command.type === 'timeline.reorderTracks')
+      for (const entry of command.payload.orders)
+        upsert(command.payload.compositionId, entry.trackId, { order: entry.newOrder });
+    else if (command.type === 'timeline.addTrack') {
+      const track = command.payload.track;
+      upsert(command.payload.compositionId, track.id, {
+        family: track.family === 'audio' ? 'audio' : 'visual',
+        ...(track.name === undefined ? {} : { name: track.name }),
+        order: track.order,
+        enabled: track.enabled,
+        locked: track.locked === true,
+        ...(track.labelColor === undefined ? {} : { labelColor: track.labelColor }),
+      });
+    } else if (command.type === 'timeline.removeTrack') {
+      const index = rowIndex(command.payload.compositionId, command.payload.trackId);
+      if (index >= 0) rows.splice(index, 1);
+    }
+  }
+  return { ...project, timelineTrackDeck: { schemaVersion: 1, rows } };
 }

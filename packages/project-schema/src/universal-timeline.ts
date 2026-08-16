@@ -11,18 +11,30 @@ import type { Clip, ProjectDiagnostic, SpikeProject } from './model.js';
 import type { JoyProjectV1, VisualObjectV1 } from './v1.js';
 
 export const UNIVERSAL_TIMELINE_SCHEMA_VERSION = 1 as const;
+/** Latest binding shape written on copy-on-write; v1 remains readable. */
+export const UNIVERSAL_TIMELINE_LATEST_SCHEMA_VERSION = 2 as const;
 
-export type TimelineElementKind =
+export type TimelinePlacementKind =
   | 'video'
   | 'audio'
   | 'image'
   | 'text'
   | 'shape'
+  | 'overlay'
+  | 'sticker'
   | 'caption'
+  | 'motion'
+  | 'effect'
+  | 'filter'
+  | 'adjustment'
+  | 'scene3d'
   | 'html-scene'
   | 'composition'
   | 'camera'
   | 'controller';
+
+/** Backwards-compatible name used by the v1 universal binding API. */
+export type TimelineElementKind = TimelinePlacementKind;
 
 export const TIMELINE_ELEMENT_KINDS: readonly TimelineElementKind[] = [
   'video',
@@ -30,7 +42,14 @@ export const TIMELINE_ELEMENT_KINDS: readonly TimelineElementKind[] = [
   'image',
   'text',
   'shape',
+  'overlay',
+  'sticker',
   'caption',
+  'motion',
+  'effect',
+  'filter',
+  'adjustment',
+  'scene3d',
   'html-scene',
   'composition',
   'camera',
@@ -58,7 +77,8 @@ export interface UniversalTimelineItem {
 }
 
 export interface UniversalTimelineDocument {
-  readonly schemaVersion: typeof UNIVERSAL_TIMELINE_SCHEMA_VERSION;
+  readonly schemaVersion:
+    typeof UNIVERSAL_TIMELINE_SCHEMA_VERSION | typeof UNIVERSAL_TIMELINE_LATEST_SCHEMA_VERSION;
   readonly items: readonly UniversalTimelineItem[];
 }
 
@@ -85,10 +105,13 @@ export function validateUniversalTimelineDocument(
   if (!isRecord(value)) {
     return [{ code: 'UNIVERSAL_TIMELINE_OBJECT', message: 'must be an object', path }];
   }
-  if (value.schemaVersion !== UNIVERSAL_TIMELINE_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== UNIVERSAL_TIMELINE_SCHEMA_VERSION &&
+    value.schemaVersion !== UNIVERSAL_TIMELINE_LATEST_SCHEMA_VERSION
+  ) {
     diagnostics.push({
       code: 'UNIVERSAL_TIMELINE_VERSION',
-      message: `schemaVersion must be ${UNIVERSAL_TIMELINE_SCHEMA_VERSION}`,
+      message: `schemaVersion must be ${UNIVERSAL_TIMELINE_SCHEMA_VERSION} or ${UNIVERSAL_TIMELINE_LATEST_SCHEMA_VERSION}`,
       path: `${path}.schemaVersion`,
     });
   }
@@ -213,9 +236,23 @@ export function normalizeUniversalTimeline(
   const items = usePersisted ? [...persisted!.items] : legacyItems(project);
   const diagnostics = [...persistedDiagnostics];
   const tracksByKey = new Map<string, { order: number; enabled: boolean; locked: boolean }>();
+  // The universal editor deck is authoritative when present. Creative tracks
+  // remain a legacy fallback because their identities are not guaranteed to be
+  // the same as the editor rows.
+  if (project.schemaVersion === 1 && project.timelineTrackDeck !== undefined) {
+    for (const row of project.timelineTrackDeck.rows) {
+      tracksByKey.set(`${row.compositionId}:${row.trackId}`, {
+        order: row.order,
+        enabled: row.enabled,
+        locked: row.locked,
+      });
+    }
+  }
   for (const composition of Object.values(project.compositions)) {
     for (const track of composition.tracks) {
-      tracksByKey.set(`${composition.id}:${track.id}`, {
+      const key = `${composition.id}:${track.id}`;
+      if (tracksByKey.has(key)) continue;
+      tracksByKey.set(key, {
         order: track.order,
         enabled: track.enabled,
         locked: 'locked' in track && track.locked === true,

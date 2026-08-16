@@ -19,6 +19,8 @@ import type {
   TimeUs,
   Track,
   TrackId,
+  TimelineTrackFamily,
+  TimelineTrackLabelColor,
   TimeRemapV2,
   VideoClip,
 } from '@joy-media/project-schema';
@@ -47,6 +49,8 @@ export interface TrackTarget {
 
 export interface InsertClipPayload extends TrackTarget {
   readonly clip: Clip;
+  /** Resolved semantic family; old journals may omit this assertion. */
+  readonly expectedFamily?: TimelineTrackFamily;
 }
 export interface RemoveClipPayload extends TrackTarget {
   readonly clipId: string;
@@ -62,6 +66,7 @@ export interface MoveElementPayload {
   readonly targetTrackId: TrackId;
   readonly clipId: string;
   readonly newStartUs: TimeUs;
+  readonly expectedFamily?: TimelineTrackFamily;
 }
 /** Atomically move a selected group while preserving each clip's own target. */
 export interface MoveElementsPayload {
@@ -72,6 +77,10 @@ export interface ReorderTrackPayload {
   readonly compositionId: CompositionId;
   readonly trackId: TrackId;
   readonly newOrder: number;
+}
+export interface ReorderTracksPayload {
+  readonly compositionId: CompositionId;
+  readonly orders: readonly { readonly trackId: TrackId; readonly newOrder: number }[];
 }
 export interface RenameTrackPayload {
   readonly compositionId: CompositionId;
@@ -99,6 +108,15 @@ export interface JoinClipsPayload extends TrackTarget {
 }
 export interface SetTrackEnabledPayload extends TrackTarget {
   readonly enabled: boolean;
+}
+export interface SetTrackFamilyPayload extends TrackTarget {
+  readonly family?: TimelineTrackFamily;
+}
+export interface SetTrackLockedPayload extends TrackTarget {
+  readonly locked: boolean;
+}
+export interface SetTrackLabelColorPayload extends TrackTarget {
+  readonly labelColor?: TimelineTrackLabelColor;
 }
 export interface DuplicateClipPayload extends TrackTarget {
   readonly clipId: string;
@@ -191,14 +209,18 @@ export type SpikeCommand =
   | { readonly type: 'timeline.addTrack'; readonly payload: AddTrackPayload }
   | { readonly type: 'timeline.removeTrack'; readonly payload: RemoveTrackPayload }
   | { readonly type: 'timeline.reorderTrack'; readonly payload: ReorderTrackPayload }
+  | { readonly type: 'timeline.reorderTracks'; readonly payload: ReorderTracksPayload }
   | { readonly type: 'timeline.renameTrack'; readonly payload: RenameTrackPayload }
+  | { readonly type: 'timeline.setTrackFamily'; readonly payload: SetTrackFamilyPayload }
+  | { readonly type: 'timeline.setTrackLocked'; readonly payload: SetTrackLockedPayload }
+  | { readonly type: 'timeline.setTrackLabelColor'; readonly payload: SetTrackLabelColorPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
 
 export type SpikeCommandType = SpikeCommand['type'];
 
 /** Discoverable command registry used by UI/agent tooling; handlers remain pure below. */
 export const COMMAND_REGISTRY: Readonly<
-  Record<SpikeCommandType, { readonly description: string }>
+  Record<SpikeCommandType, { readonly description: string; readonly internalOnly?: boolean }>
 > = {
   'timeline.insertClip': { description: 'Insert a non-overlapping clip into a track.' },
   'timeline.removeClip': { description: 'Remove a clip while preserving it in the inverse.' },
@@ -234,10 +256,23 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.setCompositionDimensions': {
     description: 'Set a composition canvas width and height.',
   },
-  'timeline.addTrack': { description: 'Add a track to a composition.' },
-  'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
-  'timeline.reorderTrack': { description: 'Change a track visual layer order.' },
+  'timeline.addTrack': { description: 'Add a track to a composition.', internalOnly: true },
+  'timeline.removeTrack': {
+    description: 'Remove an empty track from a composition.',
+    internalOnly: true,
+  },
+  'timeline.reorderTrack': {
+    description: 'Change a track visual layer order.',
+    internalOnly: true,
+  },
+  'timeline.reorderTracks': { description: 'Atomically reorder the complete track deck.' },
   'timeline.renameTrack': { description: 'Rename a neutral Timeline track.' },
+  'timeline.setTrackFamily': {
+    description: 'Set a track compatibility family.',
+    internalOnly: true,
+  },
+  'timeline.setTrackLocked': { description: 'Set a durable track lock.' },
+  'timeline.setTrackLabelColor': { description: 'Set a persisted track label color.' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
 };
 
@@ -304,8 +339,16 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyRemoveTrack(project, command.payload);
     case 'timeline.reorderTrack':
       return applyReorderTrack(project, command.payload);
+    case 'timeline.reorderTracks':
+      return applyReorderTracks(project, command.payload);
     case 'timeline.renameTrack':
       return applyRenameTrack(project, command.payload);
+    case 'timeline.setTrackFamily':
+      return applySetTrackFamily(project, command.payload);
+    case 'timeline.setTrackLocked':
+      return applySetTrackLocked(project, command.payload);
+    case 'timeline.setTrackLabelColor':
+      return applySetTrackLabelColor(project, command.payload);
     case 'property.setTrackEnabled':
       return applySetTrackEnabled(project, command.payload);
     default: {
@@ -439,6 +482,7 @@ function withPlaybackRate(clip: VideoClip, playbackRate: number): VideoClip {
 
 function applyInsertClip(project: SpikeProject, payload: InsertClipPayload): ApplyResult {
   const track = getTrack(project, payload);
+  assertExpectedFamily(track, payload.expectedFamily, 'insertClip');
   if (track.clips.some((c) => c.id === payload.clip.id)) {
     throw new CommandError(
       'COMMAND_VALIDATION_DUPLICATE_ID',
@@ -503,6 +547,7 @@ function applyMoveElement(project: SpikeProject, payload: MoveElementPayload): A
     compositionId: payload.compositionId,
     trackId: payload.targetTrackId,
   });
+  assertExpectedFamily(targetTrack, payload.expectedFamily, 'moveElement');
   assertCompatibleTrackFamilies(sourceTrack, targetTrack, 'moveElement');
   const clip = getClip(sourceTrack, payload.clipId);
   assertClipRange(payload.newStartUs, clip.durationUs, 'moveElement');
@@ -588,6 +633,7 @@ function applyMoveElements(project: SpikeProject, payload: MoveElementsPayload):
       compositionId: payload.compositionId,
       trackId: move.targetTrackId,
     });
+    assertExpectedFamily(targetTrack, move.expectedFamily, 'moveElements');
     assertCompatibleTrackFamilies(sourceTrack, targetTrack, 'moveElements');
     const clip = getClip(sourceTrack, move.clipId);
     assertClipRange(move.newStartUs, clip.durationUs, 'moveElements');
@@ -664,6 +710,23 @@ function assertCompatibleTrackFamilies(source: Track, target: Track, operation: 
     throw new CommandError(
       'COMMAND_VALIDATION_INCOMPATIBLE_TRACK',
       `${operation}: cannot move a ${source.family} element to a ${target.family} track`,
+    );
+  }
+}
+
+function assertExpectedFamily(
+  track: Track,
+  expectedFamily: TimelineTrackFamily | undefined,
+  operation: string,
+): void {
+  if (
+    expectedFamily !== undefined &&
+    track.family !== undefined &&
+    track.family !== expectedFamily
+  ) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_INCOMPATIBLE_TRACK',
+      `${operation}: expected a ${expectedFamily} track, got ${track.family}`,
     );
   }
 }
@@ -1505,6 +1568,146 @@ function applyReorderTrack(project: SpikeProject, payload: ReorderTrackPayload):
     inverse: {
       type: 'timeline.reorderTrack',
       payload: { ...payload, newOrder: track.order },
+    },
+  };
+}
+
+function applyReorderTracks(project: SpikeProject, payload: ReorderTracksPayload): ApplyResult {
+  const composition = project.compositions[payload.compositionId];
+  if (composition === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+  if (payload.orders.length !== composition.tracks.length) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'reorderTracks: orders must cover every track',
+    );
+  }
+  const byId = new Map(payload.orders.map((entry) => [entry.trackId, entry.newOrder]));
+  if (
+    byId.size !== payload.orders.length ||
+    composition.tracks.some((track) => !byId.has(track.id))
+  ) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'reorderTracks: every track must appear exactly once',
+    );
+  }
+  const values = [...byId.values()].sort((a, b) => a - b);
+  if (values.some((value, index) => !Number.isSafeInteger(value) || value < 0 || value !== index)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'reorderTracks: orders must be contiguous from zero',
+    );
+  }
+  const previous = composition.tracks.map((track) => ({
+    trackId: track.id,
+    newOrder: track.order,
+  }));
+  const tracks = composition.tracks.map((track) => ({ ...track, order: byId.get(track.id)! }));
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: { ...composition, tracks },
+      },
+    },
+    inverse: {
+      type: 'timeline.reorderTracks',
+      payload: { compositionId: payload.compositionId, orders: previous },
+    },
+  };
+}
+
+function applySetTrackFamily(project: SpikeProject, payload: SetTrackFamilyPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  if (payload.family !== undefined && payload.family !== 'visual' && payload.family !== 'audio') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'setTrackFamily: family must be visual or audio',
+    );
+  }
+  const comp = project.compositions[payload.compositionId]!;
+  const tracks = comp.tracks.map((item) => {
+    if (item.id !== track.id) return item;
+    if (payload.family === undefined) {
+      const next = { ...item };
+      Reflect.deleteProperty(next, 'family');
+      return next;
+    }
+    return { ...item, family: payload.family };
+  });
+  return {
+    project: {
+      ...project,
+      compositions: { ...project.compositions, [comp.id]: { ...comp, tracks } },
+    },
+    inverse: {
+      type: 'timeline.setTrackFamily',
+      payload: { ...payload, ...(track.family === undefined ? {} : { family: track.family }) },
+    },
+  };
+}
+
+function applySetTrackLocked(project: SpikeProject, payload: SetTrackLockedPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const comp = project.compositions[payload.compositionId]!;
+  const tracks = comp.tracks.map((item) =>
+    item.id === track.id ? { ...item, locked: payload.locked } : item,
+  );
+  return {
+    project: {
+      ...project,
+      compositions: { ...project.compositions, [comp.id]: { ...comp, tracks } },
+    },
+    inverse: {
+      type: 'timeline.setTrackLocked',
+      payload: { ...payload, locked: track.locked === true },
+    },
+  };
+}
+
+function applySetTrackLabelColor(
+  project: SpikeProject,
+  payload: SetTrackLabelColorPayload,
+): ApplyResult {
+  const track = getTrack(project, payload);
+  if (
+    payload.labelColor !== undefined &&
+    !['violet', 'iris', 'caribbean', 'lavender', 'cerulean', 'forest', 'rose', 'mango'].includes(
+      payload.labelColor,
+    )
+  ) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'setTrackLabelColor: unsupported label color',
+    );
+  }
+  const comp = project.compositions[payload.compositionId]!;
+  const tracks = comp.tracks.map((item) => {
+    if (item.id !== track.id) return item;
+    if (payload.labelColor === undefined) {
+      const next = { ...item };
+      Reflect.deleteProperty(next, 'labelColor');
+      return next;
+    }
+    return { ...item, labelColor: payload.labelColor };
+  });
+  return {
+    project: {
+      ...project,
+      compositions: { ...project.compositions, [comp.id]: { ...comp, tracks } },
+    },
+    inverse: {
+      type: 'timeline.setTrackLabelColor',
+      payload: {
+        ...payload,
+        ...(track.labelColor === undefined ? {} : { labelColor: track.labelColor }),
+      },
     },
   };
 }

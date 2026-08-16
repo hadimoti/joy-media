@@ -29,6 +29,7 @@ export type {
   ClipId,
   AssetId,
   TimelineTrackFamily,
+  TimelineTrackLabelColor,
   SpikeProject,
   Composition,
   Track,
@@ -47,7 +48,12 @@ export {
   validateTimeRemap,
   MIN_PLAYBACK_RATE,
   MAX_PLAYBACK_RATE,
+  TIMELINE_TRACK_LABEL_COLORS,
+  isTimelineTrackLabelColor,
 } from './model.js';
+
+export type { TimelineTrackDeckRow, TimelineTrackDeckDocument } from './timeline-track-deck.js';
+export { validateTimelineTrackDeckDocument } from './timeline-track-deck.js';
 
 export type {
   JoyProjectV1,
@@ -233,6 +239,7 @@ export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV2, validateJoyProjectV2 } f
 
 export type {
   TimelineElementKind,
+  TimelinePlacementKind,
   UniversalTimelineSource,
   UniversalTimelineItem,
   UniversalTimelineDocument,
@@ -241,6 +248,7 @@ export type {
 } from './universal-timeline.js';
 export {
   UNIVERSAL_TIMELINE_SCHEMA_VERSION,
+  UNIVERSAL_TIMELINE_LATEST_SCHEMA_VERSION,
   TIMELINE_ELEMENT_KINDS,
   validateUniversalTimelineDocument,
   normalizeUniversalTimeline,

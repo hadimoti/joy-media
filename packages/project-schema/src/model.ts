@@ -18,6 +18,27 @@ export type AssetId = string;
 /** Visual tracks are composited; audio tracks are mixed below the visual stack. */
 export type TimelineTrackFamily = 'visual' | 'audio';
 
+/** Stable, theme-safe label colors persisted with a timeline row. */
+export type TimelineTrackLabelColor =
+  'violet' | 'iris' | 'caribbean' | 'lavender' | 'cerulean' | 'forest' | 'rose' | 'mango';
+
+export const TIMELINE_TRACK_LABEL_COLORS: readonly TimelineTrackLabelColor[] = [
+  'violet',
+  'iris',
+  'caribbean',
+  'lavender',
+  'cerulean',
+  'forest',
+  'rose',
+  'mango',
+];
+
+export function isTimelineTrackLabelColor(value: unknown): value is TimelineTrackLabelColor {
+  return (
+    typeof value === 'string' && (TIMELINE_TRACK_LABEL_COLORS as readonly string[]).includes(value)
+  );
+}
+
 export interface SpikeProject {
   readonly schemaVersion: 0;
   readonly id: ProjectId;
@@ -45,6 +66,10 @@ export interface Track {
   /** Draw order: ascending = bottom to top. */
   readonly order: number;
   readonly enabled: boolean;
+  /** Durable edit lock. Missing means unlocked for legacy documents. */
+  readonly locked?: boolean;
+  /** Optional persisted presentation token; omitted means the neutral theme. */
+  readonly labelColor?: TimelineTrackLabelColor;
   readonly clips: readonly Clip[];
 }
 
@@ -212,6 +237,27 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
       });
     }
     for (const track of comp.tracks) {
+      if (!Number.isSafeInteger(track.order) || track.order < 0) {
+        diagnostics.push({
+          code: 'PROJECT_SCHEMA_BAD_TRACK_ORDER',
+          message: 'track order must be a non-negative safe integer',
+          path: `compositions.${compId}.tracks.${track.id}.order`,
+        });
+      }
+      if (track.family !== undefined && track.family !== 'visual' && track.family !== 'audio') {
+        diagnostics.push({
+          code: 'PROJECT_SCHEMA_BAD_TRACK_FAMILY',
+          message: 'track family must be visual or audio',
+          path: `compositions.${compId}.tracks.${track.id}.family`,
+        });
+      }
+      if (track.labelColor !== undefined && !isTimelineTrackLabelColor(track.labelColor)) {
+        diagnostics.push({
+          code: 'PROJECT_SCHEMA_BAD_TRACK_LABEL_COLOR',
+          message: `unsupported track label color "${String(track.labelColor)}"`,
+          path: `compositions.${compId}.tracks.${track.id}.labelColor`,
+        });
+      }
       for (const clip of track.clips) {
         const path = `compositions.${compId}.tracks.${track.id}.clips.${clip.id}`;
         try {

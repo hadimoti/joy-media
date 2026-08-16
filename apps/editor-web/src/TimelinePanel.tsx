@@ -39,7 +39,6 @@ import {
   CloseIcon,
   TimelineScriptTrackIcon,
   SelectIcon,
-  TrackAddIcon,
   LayersIcon,
   ChevronLeftIcon,
 } from './icons.js';
@@ -56,7 +55,7 @@ import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflo
 import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
-import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
+import { type TimelineTrackKind } from './timeline-track-kind.js';
 import {
   canPlaceTimelineElement,
   buildTimelineTrackReorderTransaction,
@@ -102,6 +101,8 @@ import {
   type TimelineElementKindMap,
 } from './timeline-element-kind.js';
 import { TimelineTransitionJunction } from './TimelineTransitionJunction.js';
+import { TimelineTrackColorMenu } from './TimelineTrackColorMenu.js';
+import type { TimelineTrackLabelColor } from '@joy-media/project-schema';
 import {
   hasExceededMarqueeThreshold,
   normalizeTimelineRect,
@@ -113,10 +114,6 @@ import {
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
-/** Height of a virtual (not-yet-created) empty lane. */
-const EMPTY_LANE_HEIGHT_PX = 44;
-/** Extra empty lanes rendered below the visible viewport during scrolling. */
-const EMPTY_LANE_OVERSCAN = 6;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -483,6 +480,66 @@ function TimelineClip({
 
 export const JOY_MEDIA_ASSET_DND = 'application/x-joy-media-asset';
 
+function TimelineRunway({
+  family,
+  laneWidthPx,
+  onDrop,
+}: {
+  readonly family: 'visual' | 'audio';
+  readonly laneWidthPx: number;
+  readonly onDrop: (
+    asset: {
+      assetId: string;
+      kind: string;
+      displayName?: string;
+      descriptor?: { durationUs?: number };
+    },
+    clientX: number,
+    rect: DOMRect,
+  ) => void;
+}) {
+  return (
+    <div
+      className={`timeline-track timeline-runway timeline-runway--${family}`}
+      data-track-family={family}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(event) => {
+        const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+        if (!raw) return;
+        event.preventDefault();
+        try {
+          const asset = JSON.parse(raw) as {
+            assetId: string;
+            kind: string;
+            displayName?: string;
+            descriptor?: { durationUs?: number };
+          };
+          if ((asset.kind === 'audio' ? 'audio' : 'visual') !== family) return;
+          onDrop(asset, event.clientX, event.currentTarget.getBoundingClientRect());
+        } catch {
+          // Ignore malformed drag payloads.
+        }
+      }}
+    >
+      <div className="timeline-track-header timeline-runway-header">
+        <span className="timeline-runway-label">
+          {family === 'audio' ? 'Audio runway' : 'Visual runway'}
+        </span>
+      </div>
+      <span
+        className="timeline-lane timeline-runway-canvas"
+        style={{ minWidth: `${laneWidthPx}px` }}
+      >
+        Drop compatible media here to create a new layer
+      </span>
+    </div>
+  );
+}
+
 function safeAssetDuration(asset: {
   readonly descriptor?: { readonly durationUs?: number };
 }): number {
@@ -612,7 +669,6 @@ export function TimelinePanel({
   const [selectToolActive, setSelectToolActive] = useState(true);
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
-  const [tracksHeightPx, setTracksHeightPx] = useState(180);
   const [tracksViewportWidthPx, setTracksViewportWidthPx] = useState(0);
   const [tracksScrollLeft, setTracksScrollLeft] = useState(0);
   const [showAnimatedProperties, setShowAnimatedProperties] = useState(true);
@@ -628,6 +684,7 @@ export function TimelinePanel({
     | { x: number; y: number; items: readonly ContextMenuItem[]; trackId?: string; clipId?: string }
     | undefined
   >(undefined);
+  const [colorMenuTrackId, setColorMenuTrackId] = useState<string | undefined>();
   const [marqueeRect, setMarqueeRect] = useState<TimelineRect | undefined>(undefined);
   const marqueeRef = useRef<{
     origin: TimelinePoint;
@@ -717,6 +774,7 @@ export function TimelinePanel({
           solo: false,
           order: index,
         }),
+        locked: track.locked ?? saved?.locked ?? false,
         // The schema command is the output source of truth; visibility in this
         // presentation model must follow it after undo/redo or another surface.
         visible: track.enabled ?? true,
@@ -773,22 +831,12 @@ export function TimelinePanel({
   // real tracks, so the grid reaches the bottom of the panel and media can be
   // dropped to create new tracks. Computed from the observed container height
   // minus the space the real tracks occupy.
-  const realTracksHeightPx = useMemo(
-    () => tracks.reduce((sum, track) => sum + track.heightPx, 0),
-    [tracks],
-  );
-  const virtualLaneCount = useMemo(() => {
-    const avail = Math.max(0, tracksHeightPx - realTracksHeightPx);
-    return Math.ceil(avail / EMPTY_LANE_HEIGHT_PX) + EMPTY_LANE_OVERSCAN;
-  }, [tracksHeightPx, realTracksHeightPx]);
-
   useEffect(() => {
     const root = scrollRef.current;
     if (root === null) return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry === undefined) return;
-      setTracksHeightPx(entry.contentRect.height);
       setTracksViewportWidthPx(entry.contentRect.width);
       const scrollW = scrollRef.current?.clientWidth ?? entry.contentRect.width;
       const width = timelineContentWidthPx(scrollW);
@@ -835,6 +883,19 @@ export function TimelinePanel({
   }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
   const toggle = (id: string, flag: 'locked' | 'solo') => {
+    if (flag === 'locked') {
+      const current = composition.tracks.find((track) => track.id === id)?.locked === true;
+      onDispatch({
+        label: current ? `Unlock ${id}` : `Lock ${id}`,
+        commands: [
+          {
+            type: 'timeline.setTrackLocked',
+            payload: { compositionId: composition.id, trackId: id, locked: !current },
+          },
+        ],
+      });
+      return;
+    }
     const next = tracks
       .map((track) => (track.id === id ? toggleTrackFlag(track, flag) : track))
       .map(({ id: trackId, heightPx, locked, visible, solo }) => ({
@@ -1299,6 +1360,34 @@ export function TimelinePanel({
     });
   };
 
+  const visualRunwayNeeded = !tracks.some(
+    (track) => track.family === 'visual' && track.visible && !track.locked,
+  );
+  const audioRunwayNeeded = !tracks.some(
+    (track) => track.family === 'audio' && track.visible && !track.locked,
+  );
+  const handleRunwayDrop = useCallback(
+    (
+      asset: {
+        assetId: string;
+        kind: string;
+        displayName?: string;
+        descriptor?: { durationUs?: number };
+      },
+      clientX: number,
+      rect: DOMRect,
+    ) => {
+      createTrackFromAssetDrop(
+        asset,
+        pixelToTime(clientX - rect.left, {
+          originUs: 0,
+          pixelsPerSecond: viewport.pixelsPerSecond,
+        }),
+      );
+    },
+    [createTrackFromAssetDrop, viewport.pixelsPerSecond],
+  );
+
   const dispatchDelete = (trackId: string, clipId: string) => {
     const source = composition.tracks.find((t) => t.id === trackId);
     if (source === undefined) return;
@@ -1316,38 +1405,22 @@ export function TimelinePanel({
     );
   };
 
-  const addCompatibleTrack = useCallback(
-    (family: 'visual' | 'audio') => {
-      const order =
-        composition.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
-      const familyIndex =
-        composition.tracks.filter((track) => timelineTrackFamily(track, elementKinds) === family)
-          .length + 1;
-      onDispatch({
-        label: `Add ${family} track`,
-        commands: [
-          {
-            type: 'timeline.addTrack',
-            payload: {
-              compositionId: composition.id,
-              track: {
-                id: nextProfessionalTrackId(composition.tracks, family),
-                kind: 'video',
-                family,
-                name: professionalTrackName(family, familyIndex),
-                order,
-                enabled: true,
-                clips: [],
-              },
-            },
-          },
-        ],
-      });
-    },
-    [composition.id, composition.tracks, elementKinds, onDispatch],
-  );
-  const addVisualTrack = useCallback(() => addCompatibleTrack('visual'), [addCompatibleTrack]);
-  const addAudioTrack = useCallback(() => addCompatibleTrack('audio'), [addCompatibleTrack]);
+  const dispatchDeleteSelection = useCallback(() => {
+    const selectedIdSet = new Set(selectedIds);
+    const commands = composition.tracks.flatMap((track) =>
+      track.locked === true
+        ? []
+        : track.clips
+            .filter((clip) => selectedIdSet.has(clip.id))
+            .map((clip) => ({
+              type: 'timeline.removeClip' as const,
+              payload: { compositionId: composition.id, trackId: track.id, clipId: clip.id },
+            })),
+    );
+    if (commands.length > 0)
+      onDispatch({ label: `Delete ${commands.length} timeline element(s)`, commands });
+  }, [composition.id, composition.tracks, onDispatch, selectedIds]);
+
   const reorderTrack = useCallback(
     (sourceTrackId: string, targetTrackId: string) => {
       const transaction = buildTimelineTrackReorderTransaction({
@@ -1367,8 +1440,6 @@ export function TimelinePanel({
   );
 
   const overflowItems: readonly ActionOverflowMenuItem[] = [
-    { id: 'add-visual-track', label: 'Add Visual Track', onSelect: addVisualTrack },
-    { id: 'add-audio-track', label: 'Add Audio Track', onSelect: addAudioTrack },
     {
       id: 'marker',
       label: 'Add Marker',
@@ -1787,6 +1858,19 @@ export function TimelinePanel({
 
   return (
     <article
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+        const target = event.target as HTMLElement;
+        if (
+          target.closest('input, textarea, select, [contenteditable="true"], [role="menu"]') !==
+          null
+        )
+          return;
+        if (selectedIds.length === 0) return;
+        event.preventDefault();
+        dispatchDeleteSelection();
+      }}
       className={
         splitToolActive
           ? 'timeline-panel split-tool-active'
@@ -1847,26 +1931,6 @@ export function TimelinePanel({
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
         <div className="timeline-toolbar-group timeline-toolbar-secondary timeline-toolbar-edit">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Add visual track"
-            title="Add visual track"
-            data-guide="Add visual track"
-            onClick={addVisualTrack}
-          >
-            <TrackAddIcon />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Add audio track"
-            title="Add audio track"
-            data-guide="Add audio track"
-            onClick={addAudioTrack}
-          >
-            <span aria-hidden="true">A+</span>
-          </button>
           {onAddMarker !== undefined && (
             <button
               type="button"
@@ -2115,11 +2179,13 @@ export function TimelinePanel({
               aria-hidden="true"
             />
           )}
+          {visualRunwayNeeded && (
+            <TimelineRunway family="visual" laneWidthPx={laneWidthPx} onDrop={handleRunwayDrop} />
+          )}
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
-            const kind =
-              track.family === 'audio' ? 'audio' : timelineTrackKind(source, elementKinds);
+            const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
@@ -2132,6 +2198,7 @@ export function TimelinePanel({
                 key={track.id}
                 data-track-id={track.id}
                 data-track-family={track.family}
+                data-track-label-color={source.labelColor ?? 'default'}
                 style={{ height: track.heightPx }}
               >
                 <div
@@ -2184,49 +2251,8 @@ export function TimelinePanel({
                     event.preventDefault();
                     event.stopPropagation();
                     const items = buildTrackHeaderContextMenu(
-                      () => {
-                        const order =
-                          composition.tracks.reduce(
-                            (highest, candidate) => Math.max(highest, candidate.order),
-                            -1,
-                          ) + 1;
-                        const family = 'visual' as const;
-                        const familyIndex =
-                          composition.tracks.filter(
-                            (candidate) => timelineTrackFamily(candidate, elementKinds) === family,
-                          ).length + 1;
-                        onDispatch({
-                          label: 'Add visual track',
-                          commands: [
-                            {
-                              type: 'timeline.addTrack',
-                              payload: {
-                                compositionId: composition.id,
-                                track: {
-                                  id: nextProfessionalTrackId(composition.tracks, family),
-                                  kind: 'video',
-                                  family,
-                                  name: professionalTrackName(family, familyIndex),
-                                  order,
-                                  enabled: true,
-                                  clips: [],
-                                },
-                              },
-                            },
-                          ],
-                        });
-                      },
-                      () => {
-                        onDispatch({
-                          label: `Remove ${track.id}`,
-                          commands: [
-                            {
-                              type: 'timeline.removeTrack',
-                              payload: { compositionId: composition.id, trackId: track.id },
-                            },
-                          ],
-                        });
-                      },
+                      () => {},
+                      () => {},
                       (visible: boolean) => setVisibility(track.id, visible),
                       source.enabled ?? true,
                       source.clips.length === 0 && composition.tracks.length > 1,
@@ -2234,14 +2260,43 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
-                  <span
-                    className="timeline-track-kind-icon"
-                    title={
-                      track.family === 'audio' ? 'Audio timeline layer' : 'Visual timeline layer'
-                    }
+                  <button
+                    type="button"
+                    className="timeline-track-kind-icon timeline-track-kind-button"
+                    title="Change track color"
+                    aria-label={`Change label color for ${source.name ?? source.id}`}
+                    aria-haspopup="menu"
+                    aria-expanded={colorMenuTrackId === track.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setColorMenuTrackId((current) =>
+                        current === track.id ? undefined : track.id,
+                      );
+                    }}
                   >
                     <TimelineTrackKindIcon kind={kind} />
-                  </span>
+                    {colorMenuTrackId === track.id && (
+                      <TimelineTrackColorMenu
+                        current={source.labelColor}
+                        onSelect={(labelColor?: TimelineTrackLabelColor) => {
+                          onDispatch({
+                            label: `Color ${source.name ?? source.id}`,
+                            commands: [
+                              {
+                                type: 'timeline.setTrackLabelColor',
+                                payload: {
+                                  compositionId: composition.id,
+                                  trackId: track.id,
+                                  ...(labelColor === undefined ? {} : { labelColor }),
+                                },
+                              },
+                            ],
+                          });
+                        }}
+                        onClose={() => setColorMenuTrackId(undefined)}
+                      />
+                    )}
+                  </button>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
@@ -2556,6 +2611,10 @@ export function TimelinePanel({
             );
           })}
 
+          {audioRunwayNeeded && (
+            <TimelineRunway family="audio" laneWidthPx={laneWidthPx} onDrop={handleRunwayDrop} />
+          )}
+
           {selectedObject !== undefined && onPropertyDispatch !== undefined && (
             <TimelinePropertyLanes
               object={selectedObject}
@@ -2571,53 +2630,6 @@ export function TimelinePanel({
               onDispatch={onPropertyDispatch}
             />
           )}
-
-          {/* Virtual empty lanes: let the grid reach the bottom of the panel and
-              create a real track when media is dropped into an unused lane. */}
-          {Array.from({ length: virtualLaneCount }, (_, laneIndex) => (
-            <div
-              className="timeline-track timeline-virtual-lane"
-              key={`__virtual_${laneIndex}__`}
-              style={{ height: EMPTY_LANE_HEIGHT_PX }}
-              onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'copy';
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
-                if (!raw) return;
-                try {
-                  const asset = JSON.parse(raw) as {
-                    assetId: string;
-                    kind: string;
-                    displayName?: string;
-                    descriptor?: { readonly durationUs?: number };
-                  };
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const dropUs = pixelToTime(event.clientX - rect.left, {
-                    originUs: 0,
-                    pixelsPerSecond: viewport.pixelsPerSecond,
-                  });
-                  createTrackFromAssetDrop(asset, dropUs);
-                } catch {
-                  /* ignore malformed payload */
-                }
-              }}
-            >
-              <div className="timeline-track-header timeline-virtual-lane-header">
-                <span className="timeline-virtual-lane-plus" aria-hidden="true">
-                  +
-                </span>
-              </div>
-              <span
-                className="timeline-lane timeline-virtual-lane-canvas"
-                style={{ minWidth: `${laneWidthPx}px` }}
-                title="Drop media to add a track here"
-              />
-            </div>
-          ))}
 
           {dataLanesOpen &&
             dataLanes !== undefined &&

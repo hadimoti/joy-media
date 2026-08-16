@@ -11,6 +11,8 @@ import type { TextDocumentV1, TextStyleV1 } from './text-style.js';
 import { validatePropertyAnimations } from './property-animation.js';
 import type { UniversalTimelineDocument } from './universal-timeline.js';
 import { validateUniversalTimelineDocument } from './universal-timeline.js';
+import type { TimelineTrackDeckDocument } from './timeline-track-deck.js';
+import { validateTimelineTrackDeckDocument } from './timeline-track-deck.js';
 
 export type EffectParamValue =
   | number
@@ -66,6 +68,8 @@ export interface JoyProjectV1 {
   readonly propertyAnimations?: Readonly<Record<string, PropertyAnimationV2>>;
   /** Versioned universal Timeline bindings; absent means legacy projection. */
   readonly universalTimeline?: UniversalTimelineDocument;
+  /** Optional validated projection of the editor's universal row deck. */
+  readonly timelineTrackDeck?: TimelineTrackDeckDocument;
 }
 
 export interface VisualObjectTransformV1 {
@@ -551,6 +555,9 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     );
   if (value.universalTimeline !== undefined) {
     diagnostics.push(...validateUniversalTimelineDocument(value.universalTimeline));
+  }
+  if (value.timelineTrackDeck !== undefined) {
+    diagnostics.push(...validateTimelineTrackDeckDocument(value.timelineTrackDeck));
   }
   diagnostics.push(...validatePropertyAnimations(value.propertyAnimations));
   return diagnostics;

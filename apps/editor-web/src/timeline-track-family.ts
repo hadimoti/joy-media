@@ -80,8 +80,9 @@ export function professionalTrackName(
 }
 
 /**
- * Reorder one complete row within its family. Every changed order is emitted in
- * the same command transaction, so undo restores the whole stack in one step.
+ * Reorder one complete row within its family. The resulting composition-wide
+ * order map is emitted as one batch command, so validation never observes
+ * transient duplicate ranks and undo restores the whole deck in one step.
  */
 export function buildTimelineTrackReorderTransaction(input: {
   readonly compositionId: string;
@@ -106,21 +107,30 @@ export function buildTimelineTrackReorderTransaction(input: {
 
   const next = familyTracks.filter((track) => track.id !== source.id);
   next.splice(targetIndex, 0, source);
-  const availableOrders = familyTracks.map((track) => track.order).sort((a, b) => a - b);
-  const commands = next.flatMap((track, displayIndex) => {
-    const newOrder = availableOrders[availableOrders.length - 1 - displayIndex]!;
-    return track.order === newOrder
-      ? []
-      : [
-          {
-            type: 'timeline.reorderTrack' as const,
-            payload: { compositionId: input.compositionId, trackId: track.id, newOrder },
-          },
-        ];
-  });
-  if (commands.length === 0) return undefined;
+  const reorderedFamily = next;
+  const displayed = sortTracksForTimelineDisplay(input.tracks, elementKinds).filter(
+    (track) => timelineTrackFamily(track, elementKinds) !== family,
+  );
+  const deck = [...reorderedFamily, ...displayed];
+  // Track.order remains composition-wide: index 0 is the bottom-most audio row
+  // and the last index is the top-most visual row.
+  const orders = deck.map((track, index) => ({
+    trackId: track.id,
+    newOrder: deck.length - 1 - index,
+  }));
+  if (
+    orders.every(
+      (entry) => input.tracks.find((track) => track.id === entry.trackId)?.order === entry.newOrder,
+    )
+  )
+    return undefined;
   return {
     label: `Reorder ${family} layers`,
-    commands,
+    commands: [
+      {
+        type: 'timeline.reorderTracks' as const,
+        payload: { compositionId: input.compositionId, orders },
+      },
+    ],
   };
 }

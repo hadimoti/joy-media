@@ -117,6 +117,7 @@ import {
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import { updateUniversalTimelineForTransaction } from './universal-placement.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
@@ -2117,18 +2118,34 @@ function EditorWorkspace({
           presentationTarget.derivedClipIds,
           splitLocalUs === undefined ? {} : { splitLocalUs },
         );
+        const syncedPresentation = updateUniversalTimelineForTransaction(
+          presentation.project,
+          transaction,
+        );
         session.dispatchCompound(transaction.label, {
           timeline: transaction,
-          document: presentation.project,
+          document: syncedPresentation,
         });
         setAudioStateRaw(presentation.audio);
       } else if (removedClipId !== undefined) {
         session.dispatchCompound(transaction.label, {
           timeline: transaction,
-          document: removeClipPropertyAnimations(session.visualProject, removedClipId),
+          document: updateUniversalTimelineForTransaction(
+            removeClipPropertyAnimations(session.visualProject, removedClipId),
+            transaction,
+          ),
         });
       } else {
-        session.dispatchTimeline(transaction);
+        const universalProject = updateUniversalTimelineForTransaction(
+          session.visualProject,
+          transaction,
+        );
+        if (universalProject === session.visualProject) session.dispatchTimeline(transaction);
+        else
+          session.dispatchCompound(transaction.label, {
+            timeline: transaction,
+            document: universalProject,
+          });
       }
       resyncTimelineMedia();
       setRevision((revision) => revision + 1);
