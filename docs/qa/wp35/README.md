@@ -31,7 +31,7 @@ remain open.
 
 ## Gate record
 
-The complete local `pnpm check` run passed after the timeline placement, drag,
+The pre-rebase local `pnpm check` run passed after the timeline placement, drag,
 schema, and decoder-pool changes:
 
 ```text
@@ -69,9 +69,9 @@ non-ripple multi-element deletion, locked-track rejection, and clip-owned audio
 cleanup. The fresh validation pass completed with:
 
 ```text
-pnpm check       PASS — 313 test files passed, 1 skipped; 2176 tests passed, 2 skipped
-pnpm build       PASS
-pnpm audit:prod  PASS — No known vulnerabilities found
+pnpm check       historical pre-rebase result (see merged-release gates below)
+pnpm build       historical PASS
+pnpm audit:prod  historical PASS — No known vulnerabilities found
 WP-35 E2E        PASS — marquee selection + Delete + Undo/Redo (desktop-primary)
 ```
 
@@ -106,11 +106,30 @@ daemon tests cover the route.
 Fresh release validation:
 
 ```text
-pnpm check       PASS — 313 test files passed, 1 skipped; 2179 tests passed, 2 skipped
-pnpm build       PASS
-pnpm audit:prod  PASS — No known vulnerabilities found
+pnpm check       historical pre-rebase result (see merged-release gates below)
+pnpm build       historical PASS
+pnpm audit:prod  historical PASS — No known vulnerabilities found
 WP-35 E2E        PASS — universal timeline + marquee selection + Delete + Undo/Redo
 ```
+
+## Merged release validation — 2026-08-16
+
+The release commit was rebased onto upstream `1e4657f` before being pushed.
+These gates were rerun on the merged tree:
+
+```text
+pnpm typecheck    PASS
+pnpm lint         PASS
+pnpm test         PASS — 333 test files passed, 1 skipped; 2252 tests passed, 2 skipped
+pnpm build        PASS — 1362 modules transformed
+pnpm audit:prod   PASS — No known vulnerabilities found
+WP-35 E2E         PASS — universal timeline + marquee selection + Delete + Undo/Redo
+```
+
+The full `pnpm format:check` gate is not green because the rebased upstream
+tree contains 35 pre-existing formatting warnings across unrelated files.
+Every changed WP-35 file passes the targeted Prettier check; unrelated files
+were intentionally not reformatted.
 
 ## Explicit open items
 
