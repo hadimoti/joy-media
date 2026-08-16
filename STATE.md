@@ -113,6 +113,17 @@ release `/opt/joy-media/web-releases/editor-web-20260816T214205Z-9013b1f-wp35-or
 and public `https://joyst.ir/?deploy=9013b1f` bytes both hash to
 `53436e57ae7928542fb8d3cf341f1a765619d1ffdea439398247ae394fa7e18b`.
 
+### Transparent timecode-gutter follow-up (2026-08-16)
+
+Product SHA `9996c0e` makes the selected `.timeline-scrub-gutter` transparent
+while retaining the parent scrub row as the single opaque ruler surface. Live
+browser inspection confirms gutter `rgba(0, 0, 0, 0)` and row `rgb(37, 37,
+37)`. Focused WP-35 browser E2E (5/5), typecheck, ESLint, Prettier, and the
+production build passed. Immutable release
+`/opt/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
+and public `https://joyst.ir/?deploy=9996c0e` bytes both hash to
+`f9b6f36cd26c06530f669046774541983b89e414ddc1ca2e4c1aa20a52299161`.
+
 ## WP-35 initial live closeout (historical, superseded by `5273e34`)
 
 WP-35 is **FINISHED** on feature SHA
