@@ -138,8 +138,8 @@ The merged WP-35 runtime implementation was pushed as `a62d990` and deployed
 through the immutable media release path:
 
 ```text
-API release:    /opt/joy-media/releases/wp35-api-20260816T153813Z-d4e21cf
-Editor release: /opt/joy-media/web-releases/editor-web-20260816T153813Z-d4e21cf-wp35
+API release:    /opt/joy-media/releases/wp35-api-20260816T154002Z-44269b4
+Editor release: /opt/joy-media/web-releases/editor-web-20260816T154002Z-44269b4-wp35
 Service:        joy-media@api active
 Health:         http://127.0.0.1:8790/health -> {"ok":true,"service":"joy-media-api","controlPlane":true}
 Public smoke:   https://joyst.ir/ -> HTTP 200
