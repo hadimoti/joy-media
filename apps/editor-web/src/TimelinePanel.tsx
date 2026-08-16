@@ -2275,28 +2275,28 @@ export function TimelinePanel({
                     }}
                   >
                     <TimelineTrackKindIcon kind={kind} />
-                    {colorMenuTrackId === track.id && (
-                      <TimelineTrackColorMenu
-                        current={source.labelColor}
-                        onSelect={(labelColor?: TimelineTrackLabelColor) => {
-                          onDispatch({
-                            label: `Color ${source.name ?? source.id}`,
-                            commands: [
-                              {
-                                type: 'timeline.setTrackLabelColor',
-                                payload: {
-                                  compositionId: composition.id,
-                                  trackId: track.id,
-                                  ...(labelColor === undefined ? {} : { labelColor }),
-                                },
-                              },
-                            ],
-                          });
-                        }}
-                        onClose={() => setColorMenuTrackId(undefined)}
-                      />
-                    )}
                   </button>
+                  {colorMenuTrackId === track.id && (
+                    <TimelineTrackColorMenu
+                      current={source.labelColor}
+                      onSelect={(labelColor?: TimelineTrackLabelColor) => {
+                        onDispatch({
+                          label: `Color ${source.name ?? source.id}`,
+                          commands: [
+                            {
+                              type: 'timeline.setTrackLabelColor',
+                              payload: {
+                                compositionId: composition.id,
+                                trackId: track.id,
+                                ...(labelColor === undefined ? {} : { labelColor }),
+                              },
+                            },
+                          ],
+                        });
+                      }}
+                      onClose={() => setColorMenuTrackId(undefined)}
+                    />
+                  )}
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
