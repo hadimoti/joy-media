@@ -132,6 +132,10 @@ test.describe('WP-35 universal timeline closeout', () => {
     });
     expect(rulerBackground.color).not.toBe('rgba(0, 0, 0, 0)');
     expect(rulerBackground.image).toBe('none');
+    await expect(page.locator('.timeline-scrub-gutter')).toHaveCSS(
+      'background-color',
+      'rgba(0, 0, 0, 0)',
+    );
     const originTick = page.locator('.timeline-ruler-tick--origin');
     await expect(originTick).toHaveCount(1);
     expect(

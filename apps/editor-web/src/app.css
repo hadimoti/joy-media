@@ -2476,7 +2476,9 @@ label {
   min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
-  background: inherit;
+  /* Let the single opaque scrub-row surface show through rather than creating
+     a second filled block behind the timecode. */
+  background: transparent;
 }
 .timeline-playhead-slider {
   flex: none;
