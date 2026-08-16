@@ -41,6 +41,14 @@ export function TimelineTrackColorMenu({
           role="menuitemradio"
           aria-checked={current === color}
           className="timeline-track-color-choice"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
