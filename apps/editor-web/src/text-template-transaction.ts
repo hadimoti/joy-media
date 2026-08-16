@@ -52,7 +52,10 @@ export function insertTextTemplate(
       (clip) => startUs < clip.startUs + clip.durationUs && startUs + durationUs > clip.startUs,
     );
   const targetTrack = composition.tracks
-    .filter((track) => track.kind === 'video' && track.enabled && !overlaps(track))
+    .filter(
+      (track) =>
+        track.kind === 'video' && track.family !== 'audio' && track.enabled && !overlaps(track),
+    )
     .sort((a, b) => a.order - b.order)[0];
   const trackId = targetTrack?.id ?? `text-track-${suffix}`;
   const trackCommands: SpikeCommand[] =
@@ -65,6 +68,7 @@ export function insertTextTemplate(
               track: {
                 id: trackId,
                 kind: 'video',
+                family: 'visual',
                 name: 'Text',
                 order: composition.tracks.length,
                 enabled: true,

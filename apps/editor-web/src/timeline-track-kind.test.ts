@@ -30,6 +30,7 @@ describe('timelineTrackKind', () => {
   });
 
   it('recognizes audio tracks from either the row or all clip identities', () => {
+    expect(timelineTrackKind({ ...track('opaque-row'), family: 'audio' })).toBe('audio');
     expect(timelineTrackKind(track('A1-voice'))).toBe('audio');
     expect(
       timelineTrackKind(

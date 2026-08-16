@@ -28,6 +28,7 @@ export type {
   TrackId,
   ClipId,
   AssetId,
+  TimelineTrackFamily,
   SpikeProject,
   Composition,
   Track,

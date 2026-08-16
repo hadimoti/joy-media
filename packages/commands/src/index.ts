@@ -16,6 +16,7 @@ export type {
   RemoveClipPayload,
   MoveClipPayload,
   MoveElementPayload,
+  MoveElementsPayload,
   ReorderTrackPayload,
   RenameTrackPayload,
   TrimClipStartPayload,

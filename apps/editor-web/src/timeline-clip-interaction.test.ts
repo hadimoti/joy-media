@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip } from '@joy-media/project-schema';
 import {
+  buildTimelineClipGroupMoveTransaction,
   buildTimelineClipMoveTransaction,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
@@ -53,6 +54,26 @@ describe('timeline clip interaction', () => {
         newStartUs: 3_000_000,
       }),
     ).toBeUndefined();
+  });
+
+  it('builds one atomic command for a selected group move', () => {
+    expect(
+      buildTimelineClipGroupMoveTransaction({
+        compositionId: 'root',
+        moves: [
+          { sourceTrackId: 'V1', targetTrackId: 'V1', clipId: 'clip-a', newStartUs: 2_000_000 },
+          { sourceTrackId: 'V1', targetTrackId: 'V1', clipId: 'clip-b', newStartUs: 4_000_000 },
+        ],
+      }),
+    ).toMatchObject({
+      label: 'Move 2 selected clips',
+      commands: [
+        {
+          type: 'timeline.moveElements',
+          payload: { moves: [{ clipId: 'clip-a' }, { clipId: 'clip-b' }] },
+        },
+      ],
+    });
   });
 
   it('nudges either trim edge and clamps it to a valid range', () => {

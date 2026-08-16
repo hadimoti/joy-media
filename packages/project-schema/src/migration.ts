@@ -46,6 +46,7 @@ export function migrateV0ToV1(project: SpikeProject): MigrationResult {
         tracks: composition.tracks.map((track) => ({
           id: track.id,
           kind: track.kind,
+          ...(track.family === undefined ? {} : { family: track.family }),
           name: track.id,
           order: track.order,
           enabled: track.enabled,

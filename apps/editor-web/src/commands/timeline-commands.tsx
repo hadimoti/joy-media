@@ -244,7 +244,7 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
   // TRACKS GROUP
   {
     id: 'track.addVideo',
-    label: 'Add universal track',
+    label: 'Add visual track',
     icon: TrackAddIcon,
     shortcut: 'T',
     group: 'tracks',
@@ -252,15 +252,17 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
     execute: (ctx) => {
       const comp = ctx.project.compositions[ctx.compositionId];
       if (!comp) return null;
-      const order = comp.tracks.length;
+      const order = comp.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
+      const familyIndex = comp.tracks.filter((track) => track.family !== 'audio').length + 1;
       return {
         type: 'timeline.addTrack',
         payload: {
           compositionId: ctx.compositionId,
           track: {
-            id: `track-${order + 1}`,
+            id: `V${familyIndex}`,
             kind: 'video',
-            name: `Layer ${order + 1}`,
+            family: 'visual',
+            name: `Visual ${familyIndex}`,
             order,
             enabled: true,
             clips: [],
@@ -627,7 +629,7 @@ export function buildTrackHeaderContextMenu(
   canRemove: boolean,
 ): readonly ContextMenuItem[] {
   return [
-    { label: 'Add Universal Track', shortcut: 'T', action: onAddTrack },
+    { label: 'Add Visual Track', shortcut: 'T', action: onAddTrack },
     { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: !canRemove },
     { label: '', action: () => {}, dividerBefore: true },
     {

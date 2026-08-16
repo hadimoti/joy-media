@@ -83,3 +83,44 @@ export function buildTimelineClipMoveTransaction(input: {
     ],
   };
 }
+
+/** Build one undoable command for a multi-selection drag. */
+export function buildTimelineClipGroupMoveTransaction(input: {
+  readonly compositionId: string;
+  readonly moves: readonly {
+    readonly sourceTrackId: string;
+    readonly targetTrackId: string;
+    readonly clipId: string;
+    readonly newStartUs: number;
+  }[];
+}): CommandTransaction | undefined {
+  if (input.moves.length < 2) return undefined;
+  const clipIds = new Set<string>();
+  const moves: {
+    compositionId: string;
+    sourceTrackId: string;
+    targetTrackId: string;
+    clipId: string;
+    newStartUs: number;
+  }[] = [];
+  for (const move of input.moves) {
+    if (clipIds.has(move.clipId)) return undefined;
+    clipIds.add(move.clipId);
+    moves.push({
+      compositionId: input.compositionId,
+      sourceTrackId: move.sourceTrackId,
+      targetTrackId: move.targetTrackId,
+      clipId: move.clipId,
+      newStartUs: Math.max(0, Math.round(move.newStartUs)),
+    });
+  }
+  return {
+    label: `Move ${moves.length} selected clips`,
+    commands: [
+      {
+        type: 'timeline.moveElements',
+        payload: { compositionId: input.compositionId, moves },
+      },
+    ],
+  };
+}

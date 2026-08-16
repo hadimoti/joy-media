@@ -190,6 +190,7 @@ export function buildTreatmentLayerInsertion({
             track: {
               id: trackId,
               kind: 'video',
+              family: 'visual',
               order,
               enabled: true,
               clips: [],

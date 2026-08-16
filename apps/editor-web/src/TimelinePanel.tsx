@@ -57,7 +57,17 @@ import { TimelineEmptyState } from './TimelineEmptyState.js';
 import { TimelineTrackVisibilityButton } from './TimelineTrackVisibilityButton.js';
 import { TimelineRuler, TimelineTracksGrid } from './TimelineRuler.js';
 import { timelineTrackKind, type TimelineTrackKind } from './timeline-track-kind.js';
-import { universalTrackCode, universalTrackDisplayName } from './timeline-track-kind.js';
+import {
+  canPlaceTimelineElement,
+  buildTimelineTrackReorderTransaction,
+  nextProfessionalTrackId,
+  professionalTrackCode,
+  professionalTrackName,
+  sortTracksForTimelineDisplay,
+  timelineTrackFamily,
+  trackFamilyForElement,
+  type ProfessionalTrackFamily,
+} from './timeline-track-family.js';
 import {
   TIMELINE_END_PADDING_PX,
   TIMELINE_TRACK_GUTTER_WIDTH_PX,
@@ -79,7 +89,9 @@ import {
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
 import {
+  buildTimelineClipGroupMoveTransaction,
   buildTimelineClipMoveTransaction,
+  hasExceededDragThreshold,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
 import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
@@ -151,7 +163,7 @@ function TimelineClip({
   laneIndex,
   splitToolActive,
   frameUs,
-  onToggleSelection,
+  onSelect,
   onMove,
   onTrim,
   onContextMenu,
@@ -170,7 +182,8 @@ function TimelineClip({
   readonly laneIndex: number;
   readonly splitToolActive: boolean;
   readonly frameUs: number;
-  readonly onToggleSelection: (id: string) => void;
+  /** Plain selection replaces; only Ctrl/Command deliberately toggles. */
+  readonly onSelect: (id: string, additive: boolean) => void;
   readonly onMove: (clipId: string, newStartUs: number, targetTrackId?: string) => boolean;
   readonly onTrim: (clipId: string, edge: 'start' | 'end', timeUs: number) => boolean;
   readonly onContextMenu: (clipId: string, clientX: number, clientY: number) => void;
@@ -182,7 +195,7 @@ function TimelineClip({
   const [trimPreview, setTrimPreview] = useState<
     { edge: 'start' | 'end'; timeUs: number } | undefined
   >(undefined);
-  const dragRef = useRef<{ originX: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ originX: number; originY: number; moved: boolean } | null>(null);
   const trimRef = useRef<{ edge: 'start' | 'end'; originX: number } | null>(null);
   const lastCompoundOpenAtRef = useRef(0);
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
@@ -268,11 +281,10 @@ function TimelineClip({
         width: `${layoutWidthPx}px`,
       }}
       onClick={(event) => {
-        // Selecting a clip can remount the Dockview panel between the two
-        // physical clicks. Treat the second click on an already selected
-        // compound as the double-click intent, so the gesture stays reliable
-        // even when the browser cannot synthesize one native dblclick event.
-        if (clip.kind === 'composition' && !splitToolActive && (selected || event.detail >= 2)) {
+        // Selection can remount Dockview between physical clicks. Preserve the
+        // browser's second-click intent without treating one click on a member
+        // of a multi-selection as an accidental "open composition" action.
+        if (clip.kind === 'composition' && !splitToolActive && event.detail >= 2) {
           event.preventDefault();
           event.stopPropagation();
           openComposition();
@@ -285,14 +297,16 @@ function TimelineClip({
           }
           return;
         }
-        if (dragRef.current?.moved !== true && trimRef.current === null) onToggleSelection(clip.id);
+        if (dragRef.current?.moved !== true && trimRef.current === null) {
+          onSelect(clip.id, event.metaKey || event.ctrlKey);
+        }
         dragRef.current = null;
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onToggleSelection(clip.id);
+          onSelect(clip.id, event.metaKey || event.ctrlKey);
           return;
         }
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
@@ -304,6 +318,9 @@ function TimelineClip({
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        // Context actions should apply to the item under the pointer. Preserve
+        // an existing selection only when this clip is already a member of it.
+        if (!selected) onSelect(clip.id, false);
         onContextMenu(clip.id, event.clientX, event.clientY);
       }}
       onDoubleClick={(event) => {
@@ -325,8 +342,13 @@ function TimelineClip({
           event.preventDefault();
           return;
         }
+        // A drag starts before the browser emits click. Select an unselected
+        // item now so the drag moves exactly the item the user grabbed rather
+        // than the prior selection. Modifier-click remains additive/toggle on
+        // the subsequent click event.
+        if (!selected && !event.ctrlKey && !event.metaKey) onSelect(clip.id, false);
         event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { originX: event.clientX, moved: false };
+        dragRef.current = { originX: event.clientX, originY: event.clientY, moved: false };
       }}
       onPointerMove={(event) => {
         if (splitToolActive) {
@@ -345,7 +367,8 @@ function TimelineClip({
         const drag = dragRef.current;
         if (drag === null) return;
         const deltaPx = event.clientX - drag.originX;
-        if (Math.abs(deltaPx) > DRAG_THRESHOLD_PX) drag.moved = true;
+        if (hasExceededDragThreshold(deltaPx, event.clientY - drag.originY, DRAG_THRESHOLD_PX))
+          drag.moved = true;
         if (drag.moved) setDragPx(deltaPx);
       }}
       onPointerUp={(event) => {
@@ -493,6 +516,7 @@ export function TimelinePanel({
   onAutoFitChange,
   onTogglePlayback,
   onSeek,
+  onSelectClips,
   onToggleSelection,
   onClearSelection,
   onDispatch,
@@ -535,6 +559,8 @@ export function TimelinePanel({
   }[];
   readonly onTogglePlayback: () => void;
   readonly onSeek: (timeUs: number) => void;
+  /** Replaces selection atomically. Required for normal click and marquee semantics. */
+  readonly onSelectClips?: (ids: readonly string[]) => void;
   readonly onToggleSelection: (id: string) => void;
   readonly onClearSelection: () => void;
   readonly onDispatch: (transaction: CommandTransaction) => void;
@@ -606,11 +632,15 @@ export function TimelinePanel({
   const marqueeRef = useRef<{
     origin: TimelinePoint;
     baselineIds: readonly string[];
+    additive: boolean;
     pointerId: number;
     capture: HTMLElement;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
+  const activeTrackDragRef = useRef<
+    { readonly trackId: string; readonly family: ProfessionalTrackFamily } | undefined
+  >(undefined);
 
   const requestedCompositionId = activeCompositionIdProp ?? localActiveCompositionId;
   const activeCompositionId =
@@ -673,21 +703,52 @@ export function TimelinePanel({
     markers.map((marker) => marker.timeUs),
   );
 
-  const tracks = composition.tracks.map((track, index) => {
-    const saved = trackFlags.find((item) => item.id === track.id);
-    return {
-      ...(saved ?? {
-        id: track.id,
-        heightPx: 44,
-        locked: false,
-        solo: false,
-        order: index,
-      }),
-      // The schema command is the output source of truth; visibility in this
-      // presentation model must follow it after undo/redo or another surface.
-      visible: track.enabled ?? true,
-    };
-  });
+  const familyIndexes: Record<'visual' | 'audio', number> = { visual: 0, audio: 0 };
+  const tracks = sortTracksForTimelineDisplay(composition.tracks, elementKinds).map(
+    (track, index) => {
+      const saved = trackFlags.find((item) => item.id === track.id);
+      const family = timelineTrackFamily(track, elementKinds);
+      familyIndexes[family] += 1;
+      return {
+        ...(saved ?? {
+          id: track.id,
+          heightPx: 44,
+          locked: false,
+          solo: false,
+          order: index,
+        }),
+        // The schema command is the output source of truth; visibility in this
+        // presentation model must follow it after undo/redo or another surface.
+        visible: track.enabled ?? true,
+        family,
+        familyIndex: familyIndexes[family],
+      };
+    },
+  );
+  /**
+   * Selection must be committed in one render.  The fallback keeps standalone
+   * TimelinePanel consumers compatible while the controlled App path uses its
+   * real replace-selection callback.
+   */
+  const replaceSelection = useCallback(
+    (ids: readonly string[]) => {
+      const uniqueIds = [...new Set(ids)];
+      if (onSelectClips !== undefined) {
+        onSelectClips(uniqueIds);
+        return;
+      }
+      onClearSelection();
+      uniqueIds.forEach((id) => onToggleSelection(id));
+    },
+    [onClearSelection, onSelectClips, onToggleSelection],
+  );
+  const selectClip = useCallback(
+    (clipId: string, additive: boolean) => {
+      if (additive) onToggleSelection(clipId);
+      else replaceSelection([clipId]);
+    },
+    [onToggleSelection, replaceSelection],
+  );
   const compositionRef = useRef(composition);
   const tracksRef = useRef(tracks);
   const importingRef = useRef(false);
@@ -851,21 +912,19 @@ export function TimelinePanel({
         }
         return;
       }
-      const additive = event.metaKey || event.ctrlKey;
       const nextIds = unionTimelineSelection(
         gesture.baselineIds,
         collectMarqueeIds(rect),
-        additive,
+        gesture.additive,
       );
-      onClearSelection();
-      nextIds.forEach((id) => onToggleSelection(id));
+      replaceSelection(nextIds);
     },
     [
       collectMarqueeIds,
       marqueeRect,
       onClearSelection,
       onSeek,
-      onToggleSelection,
+      replaceSelection,
       viewport.pixelsPerSecond,
     ],
   );
@@ -879,6 +938,7 @@ export function TimelinePanel({
       marqueeRef.current = {
         origin: { x: event.clientX, y: event.clientY },
         baselineIds: [...selectedIds],
+        additive: event.metaKey || event.ctrlKey,
         pointerId: event.pointerId,
         capture,
       };
@@ -983,7 +1043,74 @@ export function TimelinePanel({
         const clip = source?.clips.find((candidate) => candidate.id === clipId);
         const target = composition.tracks.find((candidate) => candidate.id === targetTrackId);
         const targetView = tracks.find((candidate) => candidate.id === targetTrackId);
-        if (clip === undefined || target === undefined || targetView?.locked === true) return false;
+        if (
+          source === undefined ||
+          clip === undefined ||
+          target === undefined ||
+          targetView?.locked === true
+        )
+          return false;
+        const elementKind = timelineElementKindForClip(clip, elementKinds);
+        if (!canPlaceTimelineElement(elementKind, target, elementKinds)) {
+          showToast?.(
+            `${elementKind === 'audio' ? 'Audio' : 'Visual'} elements can only move to compatible ${trackFamilyForElement(elementKind)} tracks.`,
+            'info',
+          );
+          return false;
+        }
+        const selectedIdSet = new Set(selectedIds);
+        const selectedEntries = composition.tracks.flatMap((candidateTrack) =>
+          candidateTrack.clips
+            .filter((candidateClip) => selectedIdSet.has(candidateClip.id))
+            .map((candidateClip) => ({ track: candidateTrack, clip: candidateClip })),
+        );
+        const movingEntries =
+          selectedIds.includes(clipId) && selectedEntries.length > 1
+            ? selectedEntries
+            : [{ track: source, clip }];
+        if (
+          movingEntries.some((entry) => tracks.find((view) => view.id === entry.track.id)?.locked)
+        ) {
+          showToast?.('Unlock every selected track before moving the selection.', 'info');
+          return false;
+        }
+        const verticalMove = targetTrackId !== trackId;
+        if (verticalMove && movingEntries.some((entry) => entry.track.id !== trackId)) {
+          showToast?.(
+            'Move clips from one source row vertically, or move a multi-row selection horizontally.',
+            'info',
+          );
+          return false;
+        }
+        if (
+          verticalMove &&
+          movingEntries.some(
+            (entry) =>
+              !canPlaceTimelineElement(
+                timelineElementKindForClip(entry.clip, elementKinds),
+                target,
+                elementKinds,
+              ),
+          )
+        ) {
+          showToast?.('A selected group cannot cross the visual/audio boundary.', 'info');
+          return false;
+        }
+        if (movingEntries.length > 1) {
+          const deltaUs = newStartUs - clip.startUs;
+          const groupTransaction = buildTimelineClipGroupMoveTransaction({
+            compositionId: composition.id,
+            moves: movingEntries.map((entry) => ({
+              sourceTrackId: entry.track.id,
+              targetTrackId: verticalMove ? targetTrackId : entry.track.id,
+              clipId: entry.clip.id,
+              newStartUs: entry.clip.startUs + deltaUs,
+            })),
+          });
+          if (groupTransaction === undefined) return false;
+          onDispatch(groupTransaction);
+          return true;
+        }
         const transaction = buildTimelineClipMoveTransaction({
           compositionId: composition.id,
           sourceTrackId: trackId,
@@ -1027,6 +1154,14 @@ export function TimelinePanel({
     ) => {
       const source = composition.tracks.find((t) => t.id === trackId);
       if (source === undefined) return;
+      const elementKind = asset.kind === 'audio' ? 'audio' : 'video';
+      if (!canPlaceTimelineElement(elementKind, source, elementKinds)) {
+        showToast?.(
+          `${asset.kind === 'audio' ? 'Audio' : 'Visual'} media must be dropped on a compatible ${trackFamilyForElement(elementKind)} track.`,
+          'info',
+        );
+        return;
+      }
       const durationUs = safeAssetDuration(asset);
       const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
       let startUs = Math.max(0, snapped);
@@ -1067,7 +1202,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, onDispatch, onMediaPlaced],
+    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced, showToast],
   );
 
   /** Create a NEW real track for a dropped asset and place the clip on it. */
@@ -1081,13 +1216,16 @@ export function TimelinePanel({
       },
       dropUs: number,
     ) => {
-      const order = composition.tracks.length;
-      // The shared schema only models video tracks; presentation taxonomy is
-      // carried separately by the paired creative document.
-      const trackId = `track-${order + 1}`;
+      const order =
+        composition.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
+      const family = asset.kind === 'audio' ? 'audio' : 'visual';
+      const familyIndex =
+        composition.tracks.filter((track) => timelineTrackFamily(track, elementKinds) === family)
+          .length + 1;
+      const trackId = nextProfessionalTrackId(composition.tracks, family);
       const durationUs = safeAssetDuration(asset);
       const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
-      const clipId = `clip-${asset.assetId}-${Date.now()}`;
+      const clipId = `${family === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       onMediaPlaced?.(
         {
           id: asset.assetId,
@@ -1107,7 +1245,8 @@ export function TimelinePanel({
               track: {
                 id: trackId,
                 kind: 'video',
-                name: `Layer ${order + 1}`,
+                family,
+                name: professionalTrackName(family, familyIndex),
                 order,
                 enabled: true,
                 clips: [],
@@ -1132,7 +1271,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks.length, onDispatch, onMediaPlaced],
+    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced],
   );
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -1177,31 +1316,59 @@ export function TimelinePanel({
     );
   };
 
-  const addUniversalTrack = useCallback(() => {
-    const order = composition.tracks.length;
-    onDispatch({
-      label: 'Add track',
-      commands: [
-        {
-          type: 'timeline.addTrack',
-          payload: {
-            compositionId: composition.id,
-            track: {
-              id: `track-${order + 1}`,
-              kind: 'video',
-              name: `Layer ${order + 1}`,
-              order,
-              enabled: true,
-              clips: [],
+  const addCompatibleTrack = useCallback(
+    (family: 'visual' | 'audio') => {
+      const order =
+        composition.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
+      const familyIndex =
+        composition.tracks.filter((track) => timelineTrackFamily(track, elementKinds) === family)
+          .length + 1;
+      onDispatch({
+        label: `Add ${family} track`,
+        commands: [
+          {
+            type: 'timeline.addTrack',
+            payload: {
+              compositionId: composition.id,
+              track: {
+                id: nextProfessionalTrackId(composition.tracks, family),
+                kind: 'video',
+                family,
+                name: professionalTrackName(family, familyIndex),
+                order,
+                enabled: true,
+                clips: [],
+              },
             },
           },
-        },
-      ],
-    });
-  }, [composition.id, composition.tracks.length, onDispatch]);
+        ],
+      });
+    },
+    [composition.id, composition.tracks, elementKinds, onDispatch],
+  );
+  const addVisualTrack = useCallback(() => addCompatibleTrack('visual'), [addCompatibleTrack]);
+  const addAudioTrack = useCallback(() => addCompatibleTrack('audio'), [addCompatibleTrack]);
+  const reorderTrack = useCallback(
+    (sourceTrackId: string, targetTrackId: string) => {
+      const transaction = buildTimelineTrackReorderTransaction({
+        compositionId: composition.id,
+        tracks: composition.tracks,
+        sourceTrackId,
+        targetTrackId,
+        elementKinds,
+      });
+      if (transaction === undefined) {
+        showToast?.('Tracks can only be reordered within their visual or audio stack.', 'info');
+        return;
+      }
+      onDispatch(transaction);
+    },
+    [composition.id, composition.tracks, elementKinds, onDispatch, showToast],
+  );
 
   const overflowItems: readonly ActionOverflowMenuItem[] = [
-    { id: 'add-track', label: 'Add Universal Track', onSelect: addUniversalTrack },
+    { id: 'add-visual-track', label: 'Add Visual Track', onSelect: addVisualTrack },
+    { id: 'add-audio-track', label: 'Add Audio Track', onSelect: addAudioTrack },
     {
       id: 'marker',
       label: 'Add Marker',
@@ -1683,11 +1850,22 @@ export function TimelinePanel({
           <button
             type="button"
             className="icon-button"
-            aria-label="Add universal track"
-            data-guide="Add track"
-            onClick={addUniversalTrack}
+            aria-label="Add visual track"
+            title="Add visual track"
+            data-guide="Add visual track"
+            onClick={addVisualTrack}
           >
             <TrackAddIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Add audio track"
+            title="Add audio track"
+            data-guide="Add audio track"
+            onClick={addAudioTrack}
+          >
+            <span aria-hidden="true">A+</span>
           </button>
           {onAddMarker !== undefined && (
             <button
@@ -1940,38 +2118,95 @@ export function TimelinePanel({
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
-            const kind = timelineTrackKind(source, elementKinds);
+            const kind =
+              track.family === 'audio' ? 'audio' : timelineTrackKind(source, elementKinds);
+            const startsAudioStack =
+              track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
               <div
                 className={
                   source.clips.some((clip) => selectedIds.includes(clip.id))
-                    ? 'timeline-track is-selected'
-                    : 'timeline-track'
+                    ? `timeline-track is-selected timeline-track--${track.family}${startsAudioStack ? ' timeline-track--audio-first' : ''}`
+                    : `timeline-track timeline-track--${track.family}${startsAudioStack ? ' timeline-track--audio-first' : ''}`
                 }
                 key={track.id}
                 data-track-id={track.id}
+                data-track-family={track.family}
                 style={{ height: track.heightPx }}
               >
                 <div
                   className="timeline-track-header"
                   data-track-id={track.id}
+                  draggable
+                  aria-roledescription="draggable timeline track"
+                  onDragStart={(event) => {
+                    if ((event.target as HTMLElement).closest('button') !== null) {
+                      event.preventDefault();
+                      return;
+                    }
+                    activeTrackDragRef.current = { trackId: track.id, family: track.family };
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData(
+                      'application/x-joy-timeline-track',
+                      JSON.stringify({ trackId: track.id, family: track.family }),
+                    );
+                  }}
+                  onDragEnd={() => {
+                    activeTrackDragRef.current = undefined;
+                  }}
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types.includes('application/x-joy-timeline-track'))
+                      return;
+                    if (activeTrackDragRef.current?.family !== track.family) {
+                      event.dataTransfer.dropEffect = 'none';
+                      return;
+                    }
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => {
+                    if (activeTrackDragRef.current?.family !== track.family) return;
+                    const raw = event.dataTransfer.getData('application/x-joy-timeline-track');
+                    if (!raw) return;
+                    event.preventDefault();
+                    try {
+                      const payload = JSON.parse(raw) as { trackId?: string; family?: string };
+                      if (payload.family !== track.family || payload.trackId === undefined) {
+                        showToast?.('Visual and audio rows cannot be interleaved.', 'info');
+                        return;
+                      }
+                      reorderTrack(payload.trackId, track.id);
+                    } catch {
+                      // Ignore malformed native drag payloads.
+                    }
+                  }}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     const items = buildTrackHeaderContextMenu(
                       () => {
-                        const order = composition.tracks.length;
+                        const order =
+                          composition.tracks.reduce(
+                            (highest, candidate) => Math.max(highest, candidate.order),
+                            -1,
+                          ) + 1;
+                        const family = 'visual' as const;
+                        const familyIndex =
+                          composition.tracks.filter(
+                            (candidate) => timelineTrackFamily(candidate, elementKinds) === family,
+                          ).length + 1;
                         onDispatch({
-                          label: 'Add universal track',
+                          label: 'Add visual track',
                           commands: [
                             {
                               type: 'timeline.addTrack',
                               payload: {
                                 compositionId: composition.id,
                                 track: {
-                                  id: `track-${order + 1}`,
+                                  id: nextProfessionalTrackId(composition.tracks, family),
                                   kind: 'video',
-                                  name: `Layer ${order + 1}`,
+                                  family,
+                                  name: professionalTrackName(family, familyIndex),
                                   order,
                                   enabled: true,
                                   clips: [],
@@ -1999,15 +2234,24 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
-                  <span className="timeline-track-kind-icon" title="Universal timeline layer">
+                  <span
+                    className="timeline-track-kind-icon"
+                    title={
+                      track.family === 'audio' ? 'Audio timeline layer' : 'Visual timeline layer'
+                    }
+                  >
                     <TimelineTrackKindIcon kind={kind} />
                   </span>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
-                      {universalTrackCode(index + 1)}
+                      {professionalTrackCode(track.family, track.familyIndex)}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {universalTrackDisplayName(index + 1, source.name ?? source.id)}
+                      {professionalTrackName(
+                        track.family,
+                        track.familyIndex,
+                        source.name ?? source.id,
+                      )}
                     </span>
                   </div>
                   <button
@@ -2292,7 +2536,7 @@ export function TimelinePanel({
                       laneIndex={index}
                       splitToolActive={splitToolActive}
                       frameUs={frameUs}
-                      onToggleSelection={onToggleSelection}
+                      onSelect={selectClip}
                       onMove={track.locked ? () => false : moveClip(track.id)}
                       onTrim={track.locked ? () => false : trimClip(track.id)}
                       onContextMenu={(clipId, x, y) => {

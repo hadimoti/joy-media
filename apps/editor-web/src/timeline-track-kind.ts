@@ -28,9 +28,10 @@ function clipIdentity(clip: Clip): string {
  * track/clip identities and leave unknown or mixed rows as video.
  */
 export function timelineTrackKind(
-  track: Pick<Track, 'id' | 'clips'>,
+  track: Pick<Track, 'id' | 'clips' | 'family'>,
   elementKinds: TimelineElementKindMap = {},
 ): TimelineTrackKind {
+  if (track.family === 'audio') return 'audio';
   const explicitKinds = track.clips.map((clip) => timelineElementKindForClip(clip, elementKinds));
   const firstExplicit = explicitKinds[0];
   if (

@@ -3,6 +3,45 @@ import { rational } from '@joy-media/project-schema';
 import { buildActiveTimelineRenderPlan } from './active-timeline-render-plan.js';
 
 describe('buildActiveTimelineRenderPlan', () => {
+  it('keeps audio-family clips out of the visual compositor', () => {
+    const project = {
+      schemaVersion: 0 as const,
+      id: 'project',
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 1920,
+          height: 1080,
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          tracks: [
+            {
+              id: 'A1',
+              kind: 'video' as const,
+              family: 'audio' as const,
+              order: 10,
+              enabled: true,
+              clips: [
+                {
+                  id: 'audio',
+                  kind: 'video' as const,
+                  assetId: 'voice.wav',
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                  sourceInUs: 0,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(
+      buildActiveTimelineRenderPlan(project, 0, { elementKindByClipId: { audio: 'audio' } }).items,
+    ).toEqual([]);
+  });
   it('includes every active layer and composites the top track last', () => {
     const project = {
       schemaVersion: 0 as const,

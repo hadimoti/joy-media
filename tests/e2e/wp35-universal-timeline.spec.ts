@@ -65,16 +65,65 @@ test.describe('WP-35 universal timeline closeout', () => {
     });
   });
 
+  test('replaces selection on a plain click and adds only with Control or Command', async ({
+    page,
+  }) => {
+    await openReferenceWorkspace(page);
+    const clips = page.locator('.timeline-clip[data-clip-id]');
+    const first = clips.nth(0);
+    const second = clips.nth(1);
+
+    await first.click();
+    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(1);
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+
+    await second.click();
+    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(1);
+    await expect(second).toHaveAttribute('aria-pressed', 'true');
+
+    await page.keyboard.down('Control');
+    await first.click();
+    await page.keyboard.up('Control');
+    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(2);
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await expect(second).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('reorders visual layers from top to bottom', async ({ page }) => {
+    await page.setViewportSize({ width: 1613, height: 1066 });
+    await openTimelineShowcaseWorkspace(page);
+    const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
+    const visualNames = visualTracks.locator('.track-name');
+
+    await expect(visualNames.nth(0)).toHaveText('Adjust');
+    await expect(visualNames.nth(1)).toHaveText('Filters');
+    await visualTracks
+      .nth(0)
+      .locator('.timeline-track-header')
+      .dragTo(visualTracks.nth(1).locator('.timeline-track-header'));
+    await expect(visualNames.nth(0)).toHaveText('Filters');
+    await expect(visualNames.nth(1)).toHaveText('Adjust');
+  });
+
   test('renders backend track titles, mixed elements, and Quarter preview controls', async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
     const trackNames = page.locator('.timeline-track-header .track-name');
-    await expect(trackNames.first()).toHaveText('Video 1');
-    await expect(trackNames.nth(1)).toHaveText('Video 2');
-    await expect(trackNames.nth(2)).toHaveText('Overlay');
-    await expect(page.locator('.timeline-track-header .track-code').nth(2)).toHaveText('T3');
+    const visualTracks = page.locator('.timeline-track[data-track-family="visual"]');
+    const audioTracks = page.locator('.timeline-track[data-track-family="audio"]');
+    await expect(visualTracks).toHaveCount(10);
+    await expect(audioTracks).toHaveCount(1);
+    await expect(page.locator('.timeline-track-header .track-code').first()).toHaveText('V1');
+    await expect(trackNames.first()).toHaveText('Adjust');
+    await expect(audioTracks.locator('.track-code')).toHaveText('A1');
+    await expect(audioTracks.locator('.track-name')).toHaveText('Audio');
+    const lastVisualBox = await visualTracks.last().boundingBox();
+    const firstAudioBox = await audioTracks.first().boundingBox();
+    expect(lastVisualBox).not.toBeNull();
+    expect(firstAudioBox).not.toBeNull();
+    expect(firstAudioBox!.y).toBeGreaterThan(lastVisualBox!.y);
     await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
     await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
     const transportMetrics = await page.locator('.monitor-transport').evaluate((element) => ({
@@ -107,9 +156,9 @@ test.describe('WP-35 universal timeline closeout', () => {
       functional: 'PASS',
       uiA11y: 'PASS',
       expected:
-        'Universal row codes remain neutral while titles match backend track.name, mixed clips render, and the narrow Monitor footer contains Quarter/Auto without clipping.',
+        'Visual rows use V numbering above an A-numbered audio stack while titles match backend track.name, mixed clips render, and the narrow Monitor footer contains Quarter/Auto without clipping.',
       actual:
-        'T rows displayed Video 1/Video 2/Overlay from backend track identities, mixed clips were visible, and the two-row Monitor footer contained Quarter/Auto and every trailing control inside its dock.',
+        'V rows displayed the backend Adjust title above the A1 Audio row, mixed clips were visible, and the two-row Monitor footer contained Quarter/Auto and every trailing control inside its dock.',
     });
   });
 

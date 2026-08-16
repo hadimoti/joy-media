@@ -59,7 +59,10 @@ export function buildActiveTimelineRenderPlan(
   for (const track of [...composition.tracks].sort(
     (a, b) => a.order - b.order || a.id.localeCompare(b.id),
   )) {
-    if (!track.enabled) continue;
+    // Audio belongs to the mixer, never the visual compositor.  Older projects
+    // may not yet carry `family`, so the item-level explicit kind below remains
+    // the compatibility fallback.
+    if (!track.enabled || track.family === 'audio') continue;
     const withinTrack = [...track.clips].sort(
       (a, b) => a.startUs - b.startUs || a.id.localeCompare(b.id),
     );
@@ -75,6 +78,7 @@ export function buildActiveTimelineRenderPlan(
         options,
       );
       if (item === undefined) diagnostics.push(`Unsupported active clip ${clip.id}`);
+      else if (item.elementKind === 'audio') return;
       else items.push(item);
     });
   }
@@ -116,9 +120,11 @@ function buildV1Plan(
     // resolved by their parent composition renderer and must not leak into
     // the root at their own local timestamps.
     if (item.compositionId !== composition.id) continue;
-    if (!item.trackEnabled) continue;
+    const track = composition.tracks.find((candidate) => candidate.id === item.trackId);
+    if (!item.trackEnabled || track?.family === 'audio' || track?.kind === 'audio') continue;
     if (timeUs < item.startUs || timeUs >= item.startUs + item.durationUs) continue;
     const elementKind = options.elementKindByClipId?.[item.id] ?? item.elementKind;
+    if (elementKind === 'audio') continue;
     const zIndex = (orderIndex.get(item.trackOrder) ?? 0) + 1;
     items.push({
       ...item,

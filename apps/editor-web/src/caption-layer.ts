@@ -129,6 +129,7 @@ export function buildCaptionLayerInsertion({
             track: {
               id: `Captions-${token}`,
               kind: 'video',
+              family: 'visual',
               name: 'Captions',
               order,
               enabled: true,

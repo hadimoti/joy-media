@@ -2447,6 +2447,7 @@ function EditorWorkspace({
         .filter(
           (track) =>
             track.kind === 'video' &&
+            track.family !== 'audio' &&
             track.enabled &&
             track.order > selection.track.order &&
             !overlaps(track, startUs, durationUs),
@@ -2480,6 +2481,7 @@ function EditorWorkspace({
                   track: {
                     id: targetTrackId,
                     kind: 'video' as const,
+                    family: 'visual' as const,
                     order,
                     enabled: true,
                     clips: [],
@@ -5445,6 +5447,7 @@ function EditorWorkspace({
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}
           onSeek={(timeUs) => context.seek(timelineViewRootTime(activeTimelineView, timeUs))}
+          onSelectClips={context.selectClips}
           onToggleSelection={context.toggleSelection}
           onClearSelection={context.clearSelection}
           onDispatch={context.dispatchTimeline}

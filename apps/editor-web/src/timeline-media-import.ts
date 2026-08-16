@@ -1,5 +1,6 @@
 import type { CommandTransaction } from '@joy-media/commands';
 import type { Clip, Composition, Track, VideoClip } from '@joy-media/project-schema';
+import { timelineTrackFamily } from './timeline-track-family.js';
 
 const SNAP_US = 100_000;
 const DEFAULT_STILL_DURATION_US = 5_000_000;
@@ -33,9 +34,12 @@ export function buildTimelineMediaImportTransaction(
   const usedClipIds = new Set(workingTracks.flatMap((track) => track.clips.map((clip) => clip.id)));
 
   for (const [index, asset] of assets.entries()) {
-    // Universal Compatibility Mode: a track is a neutral layer container.
-    // Media kind is an item capability, never a placement restriction.
-    let track = workingTracks.find((candidate) => !lockedTrackIds.has(candidate.id));
+    const family = asset.kind === 'audio' ? 'audio' : 'visual';
+    // Every visual type shares a visual stack. Audio is deliberately kept in
+    // the audio stack below it, matching professional editor topology.
+    let track = workingTracks.find(
+      (candidate) => !lockedTrackIds.has(candidate.id) && timelineTrackFamily(candidate) === family,
+    );
     const durationUs = safeDurationUs(asset);
     const clip: VideoClip = {
       id: uniqueClipId(createClipId(asset, index), usedClipIds),
@@ -51,7 +55,11 @@ export function buildTimelineMediaImportTransaction(
       track = {
         id: nextTrackId(workingTracks),
         kind: 'video',
-        name: `Layer ${workingTracks.length + 1}`,
+        family,
+        name:
+          family === 'audio'
+            ? `Audio ${nextFamilyIndex(workingTracks, family)}`
+            : `Visual ${nextFamilyIndex(workingTracks, family)}`,
         order: nextTrackOrder(workingTracks),
         enabled: true,
         clips: [clip],
@@ -93,6 +101,7 @@ function cloneTrack(track: Track): MutableTrack {
 interface MutableTrack {
   readonly id: string;
   readonly kind: 'video';
+  readonly family?: 'visual' | 'audio';
   readonly name?: string;
   readonly order: number;
   readonly enabled: boolean;
@@ -128,6 +137,10 @@ function nextTrackId(tracks: readonly MutableTrack[]): string {
 
 function nextTrackOrder(tracks: readonly MutableTrack[]): number {
   return tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
+}
+
+function nextFamilyIndex(tracks: readonly MutableTrack[], family: 'visual' | 'audio'): number {
+  return tracks.filter((track) => timelineTrackFamily(track) === family).length + 1;
 }
 
 function uniqueClipId(proposed: string, used: ReadonlySet<string>): string {

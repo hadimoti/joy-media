@@ -2554,6 +2554,16 @@ label {
   min-height: 2rem;
   border-top: 1px solid color-mix(in srgb, var(--joy-border) 65%, var(--joy-bg-deep));
 }
+.timeline-track--audio-first {
+  margin-top: 0.45rem;
+  border-top: 2px solid color-mix(in srgb, var(--joy-accent) 55%, var(--joy-border));
+}
+.timeline-track--audio .timeline-track-header {
+  background: color-mix(in srgb, #3f7fd6 7%, transparent);
+}
+.timeline-track--audio .track-code {
+  color: #75a7ef;
+}
 
 /* Selected track: highlight both the header and a subtle lane tint so the
    active composition row reads as one connected element. */
@@ -2982,6 +2992,12 @@ label {
   background: transparent;
   position: relative;
   z-index: 1;
+}
+.timeline-track-header[draggable='true'] {
+  cursor: grab;
+}
+.timeline-track-header[draggable='true']:active {
+  cursor: grabbing;
 }
 .timeline-track-label {
   display: flex;

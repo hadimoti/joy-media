@@ -63,6 +63,11 @@ export interface MoveElementPayload {
   readonly clipId: string;
   readonly newStartUs: TimeUs;
 }
+/** Atomically move a selected group while preserving each clip's own target. */
+export interface MoveElementsPayload {
+  readonly compositionId: CompositionId;
+  readonly moves: readonly MoveElementPayload[];
+}
 export interface ReorderTrackPayload {
   readonly compositionId: CompositionId;
   readonly trackId: TrackId;
@@ -166,6 +171,7 @@ export type SpikeCommand =
   | { readonly type: 'timeline.removeClip'; readonly payload: RemoveClipPayload }
   | { readonly type: 'timeline.moveClip'; readonly payload: MoveClipPayload }
   | { readonly type: 'timeline.moveElement'; readonly payload: MoveElementPayload }
+  | { readonly type: 'timeline.moveElements'; readonly payload: MoveElementsPayload }
   | { readonly type: 'timeline.trimClipStart'; readonly payload: TrimClipStartPayload }
   | { readonly type: 'timeline.trimClipEnd'; readonly payload: TrimClipEndPayload }
   | { readonly type: 'timeline.splitClip'; readonly payload: SplitClipPayload }
@@ -198,6 +204,7 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.removeClip': { description: 'Remove a clip while preserving it in the inverse.' },
   'timeline.moveClip': { description: 'Move a clip within its track.' },
   'timeline.moveElement': { description: 'Move an element between neutral tracks.' },
+  'timeline.moveElements': { description: 'Move a selected clip group atomically.' },
   'timeline.trimClipStart': { description: 'Trim a clip start and shift its source offset.' },
   'timeline.trimClipEnd': { description: 'Trim a clip end.' },
   'timeline.splitClip': { description: 'Split a clip into source-continuous halves.' },
@@ -263,6 +270,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyMoveClip(project, command.payload);
     case 'timeline.moveElement':
       return applyMoveElement(project, command.payload);
+    case 'timeline.moveElements':
+      return applyMoveElements(project, command.payload);
     case 'timeline.trimClipStart':
       return applyTrimClipStart(project, command.payload);
     case 'timeline.trimClipEnd':
@@ -494,6 +503,7 @@ function applyMoveElement(project: SpikeProject, payload: MoveElementPayload): A
     compositionId: payload.compositionId,
     trackId: payload.targetTrackId,
   });
+  assertCompatibleTrackFamilies(sourceTrack, targetTrack, 'moveElement');
   const clip = getClip(sourceTrack, payload.clipId);
   assertClipRange(payload.newStartUs, clip.durationUs, 'moveElement');
   assertNoOverlap(
@@ -541,6 +551,121 @@ function applyMoveElement(project: SpikeProject, payload: MoveElementPayload): A
       },
     },
   };
+}
+
+function applyMoveElements(project: SpikeProject, payload: MoveElementsPayload): ApplyResult {
+  if (payload.moves.length === 0) {
+    throw new CommandError('COMMAND_VALIDATION_RANGE', 'moveElements: moves must not be empty');
+  }
+  const composition = project.compositions[payload.compositionId];
+  if (composition === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+
+  const movedIds = new Set<string>();
+  const prepared = payload.moves.map((move) => {
+    if (move.compositionId !== payload.compositionId) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_RANGE',
+        'moveElements: every move must target the payload composition',
+      );
+    }
+    if (movedIds.has(move.clipId)) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_DUPLICATE_ID',
+        `moveElements: duplicate clip "${move.clipId}"`,
+      );
+    }
+    movedIds.add(move.clipId);
+    const sourceTrack = getTrack(project, {
+      compositionId: payload.compositionId,
+      trackId: move.sourceTrackId,
+    });
+    const targetTrack = getTrack(project, {
+      compositionId: payload.compositionId,
+      trackId: move.targetTrackId,
+    });
+    assertCompatibleTrackFamilies(sourceTrack, targetTrack, 'moveElements');
+    const clip = getClip(sourceTrack, move.clipId);
+    assertClipRange(move.newStartUs, clip.durationUs, 'moveElements');
+    return { move, clip };
+  });
+
+  const clipsByTrack = new Map(
+    composition.tracks.map((track) => [
+      track.id,
+      [...track.clips.filter((clip) => !movedIds.has(clip.id))],
+    ]),
+  );
+  for (const { move, clip } of prepared) {
+    const targetClips = clipsByTrack.get(move.targetTrackId);
+    if (targetClips === undefined) {
+      throw new CommandError(
+        'COMMAND_VALIDATION_UNKNOWN_TARGET',
+        `unknown track "${move.targetTrackId}" in composition "${payload.compositionId}"`,
+      );
+    }
+    targetClips.push({ ...clip, startUs: move.newStartUs });
+  }
+  for (const [trackId, clips] of clipsByTrack) {
+    const sorted = [...clips].sort(
+      (left, right) => left.startUs - right.startUs || left.id.localeCompare(right.id),
+    );
+    for (let index = 1; index < sorted.length; index += 1) {
+      const previous = sorted[index - 1]!;
+      const current = sorted[index]!;
+      if (current.startUs < previous.startUs + previous.durationUs) {
+        throw new CommandError(
+          'COMMAND_VALIDATION_OVERLAP',
+          `moveElements: clip "${current.id}" overlaps "${previous.id}" on track "${trackId}"`,
+        );
+      }
+    }
+    clipsByTrack.set(trackId, sorted);
+  }
+
+  const tracks = composition.tracks.map((track) => ({
+    ...track,
+    clips: clipsByTrack.get(track.id) ?? track.clips,
+  }));
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [payload.compositionId]: { ...composition, tracks },
+      },
+    },
+    inverse: {
+      type: 'timeline.moveElements',
+      payload: {
+        compositionId: payload.compositionId,
+        moves: prepared.map(({ move, clip }) => ({
+          compositionId: payload.compositionId,
+          sourceTrackId: move.targetTrackId,
+          targetTrackId: move.sourceTrackId,
+          clipId: clip.id,
+          newStartUs: clip.startUs,
+        })),
+      },
+    },
+  };
+}
+
+function assertCompatibleTrackFamilies(source: Track, target: Track, operation: string): void {
+  if (
+    source.family !== undefined &&
+    target.family !== undefined &&
+    source.family !== target.family
+  ) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_INCOMPATIBLE_TRACK',
+      `${operation}: cannot move a ${source.family} element to a ${target.family} track`,
+    );
+  }
 }
 
 function applyTrimClipStart(project: SpikeProject, payload: TrimClipStartPayload): ApplyResult {

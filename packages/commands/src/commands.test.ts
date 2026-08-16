@@ -53,6 +53,7 @@ describe('applyCommand', () => {
       'timeline.joinClips',
       'timeline.moveClip',
       'timeline.moveElement',
+      'timeline.moveElements',
       'timeline.removeClip',
       'timeline.removeTrack',
       'timeline.renameTrack',
@@ -194,6 +195,74 @@ describe('applyCommand', () => {
       expect.objectContaining({ id: 'clip-a' }),
     ]);
     expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('moves a selected group atomically and restores every original position on undo', () => {
+    const project = baseProject();
+    const result = applyCommand(project, {
+      type: 'timeline.moveElements',
+      payload: {
+        compositionId: 'root',
+        moves: [
+          {
+            compositionId: 'root',
+            sourceTrackId: 'track-0',
+            targetTrackId: 'track-0',
+            clipId: 'clip-a',
+            newStartUs: SECOND_US,
+          },
+          {
+            compositionId: 'root',
+            sourceTrackId: 'track-0',
+            targetTrackId: 'track-0',
+            clipId: 'clip-b',
+            newStartUs: 4 * SECOND_US,
+          },
+        ],
+      },
+    });
+    expect(clipsOf(result.project)).toEqual([
+      { id: 'clip-a', startUs: SECOND_US, durationUs: 2 * SECOND_US },
+      { id: 'clip-b', startUs: 4 * SECOND_US, durationUs: 2 * SECOND_US },
+    ]);
+    expect(applyCommand(result.project, result.inverse).project).toEqual(project);
+  });
+
+  it('rejects a command-level move across explicit visual and audio families', () => {
+    const base = baseProject();
+    const project = {
+      ...base,
+      compositions: {
+        root: {
+          ...base.compositions.root!,
+          tracks: [
+            { ...base.compositions.root!.tracks[0]!, family: 'visual' as const },
+            {
+              id: 'A1',
+              kind: 'video' as const,
+              family: 'audio' as const,
+              order: 1,
+              enabled: true,
+              clips: [],
+            },
+          ],
+        },
+      },
+    };
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.moveElement',
+          payload: {
+            compositionId: 'root',
+            sourceTrackId: 'track-0',
+            targetTrackId: 'A1',
+            clipId: 'clip-a',
+            newStartUs: 0,
+          },
+        }),
+      'COMMAND_VALIDATION_INCOMPATIBLE_TRACK',
+    );
   });
 
   it('reorders and renames a track with exact inverses', () => {

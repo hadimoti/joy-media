@@ -104,6 +104,7 @@ export function buildThreeDRenderLayerInsertion({
             track: {
               id: trackId,
               kind: 'video',
+              family: 'visual',
               name: '3D Scene',
               order,
               enabled: true,

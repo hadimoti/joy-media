@@ -15,6 +15,8 @@ export type CompositionId = string;
 export type TrackId = string;
 export type ClipId = string;
 export type AssetId = string;
+/** Visual tracks are composited; audio tracks are mixed below the visual stack. */
+export type TimelineTrackFamily = 'visual' | 'audio';
 
 export interface SpikeProject {
   readonly schemaVersion: 0;
@@ -36,6 +38,8 @@ export interface Composition {
 export interface Track {
   readonly id: TrackId;
   readonly kind: 'video';
+  /** Optional only for legacy documents; new compatible rows persist this field. */
+  readonly family?: TimelineTrackFamily;
   /** Optional user-facing name. Missing names are rendered as generic layers. */
   readonly name?: string;
   /** Draw order: ascending = bottom to top. */

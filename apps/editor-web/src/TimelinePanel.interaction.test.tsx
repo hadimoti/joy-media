@@ -35,8 +35,8 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain(
       'aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"',
     );
-    expect(markup).toContain('>T1</span>');
-    expect(markup).toContain('>track-0</span>');
+    expect(markup).toContain('>V1</span>');
+    expect(markup).toContain('>V2</span>');
     expect(markup).toContain('>track-1</span>');
   });
 

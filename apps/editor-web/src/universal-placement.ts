@@ -127,6 +127,42 @@ export function updateUniversalTimelineForTransaction(
         changed = true;
         break;
       }
+      case 'timeline.moveElements': {
+        const movingClipIds = new Set(command.payload.moves.map((move) => move.clipId));
+        for (const move of command.payload.moves) {
+          const movingIds = items
+            .filter(
+              (item) => item.id === move.clipId || item.id.startsWith(`${move.clipId}:object:`),
+            )
+            .map((item) => item.id);
+          const targetOrder =
+            items
+              .filter(
+                (item) =>
+                  item.compositionId === move.compositionId &&
+                  item.trackId === move.targetTrackId &&
+                  !movingClipIds.has(item.id) &&
+                  ![...movingClipIds].some((id) => item.id.startsWith(`${id}:object:`)),
+              )
+              .reduce((highest, item) => Math.max(highest, item.withinTrackOrder), -1) + 1;
+          items = items.map((item) =>
+            item.id === move.clipId || item.id.startsWith(`${move.clipId}:object:`)
+              ? {
+                  ...item,
+                  trackId: move.targetTrackId,
+                  startUs: move.newStartUs,
+                  ...(move.sourceTrackId === move.targetTrackId
+                    ? {}
+                    : {
+                        withinTrackOrder: targetOrder + Math.max(0, movingIds.indexOf(item.id)),
+                      }),
+                }
+              : item,
+          );
+        }
+        changed = true;
+        break;
+      }
       case 'timeline.moveClip': {
         items = items.map((item) =>
           item.id === command.payload.clipId ||

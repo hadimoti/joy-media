@@ -1,6 +1,6 @@
 /** Production-facing v1 project document subset (WP-01.1). */
 
-import type { CompositionId, ProjectDiagnostic, TrackId } from './model.js';
+import type { CompositionId, ProjectDiagnostic, TimelineTrackFamily, TrackId } from './model.js';
 import type { Rational, TimeUs } from './time.js';
 import { clipTimeRange, rational } from './time.js';
 import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './model.js';
@@ -234,6 +234,8 @@ export interface CompositionV1 {
 export interface TrackV1 {
   readonly id: TrackId;
   readonly kind: 'video' | 'audio' | 'caption' | 'object' | 'control';
+  /** Explicit compatibility family for professional timeline layout. */
+  readonly family?: TimelineTrackFamily;
   readonly name: string;
   readonly order: number;
   readonly enabled: boolean;

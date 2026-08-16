@@ -43,7 +43,10 @@ export function buildContentTemplateTransaction(
     const targetExisting = composition.tracks
       .filter(
         (track) =>
-          track.enabled && !overlaps(track, startUs, durationUs) && !usedTrackIds.has(track.id),
+          track.family !== 'audio' &&
+          track.enabled &&
+          !overlaps(track, startUs, durationUs) &&
+          !usedTrackIds.has(track.id),
       )
       .sort((left, right) => left.order - right.order)[0];
     const trackId = targetExisting?.id ?? `track-${nextTrackOrder + 1}`;
@@ -55,6 +58,7 @@ export function buildContentTemplateTransaction(
           track: {
             id: trackId,
             kind: 'video',
+            family: 'visual',
             name: `Layer ${nextTrackOrder + 1}`,
             order: nextTrackOrder,
             enabled: true,

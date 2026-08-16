@@ -217,10 +217,37 @@ export function visibleRange(
 export interface TimelineSelection {
   readonly clipIds: readonly string[];
 }
+
+/**
+ * The selection operation requested by a concrete editor gesture.
+ *
+ * Keeping this separate from the UI is important: a normal click replaces a
+ * selection, whereas the platform modifier is the only gesture that toggles a
+ * second clip into it.  The old timeline only exposed `toggleSelection`, which
+ * made a normal click accumulate clips by accident.
+ */
+export type TimelineSelectionOperation = 'replace' | 'toggle' | 'clear';
+
+/** Apply one atomic, de-duplicated selection gesture. */
+export function applyTimelineSelection(
+  selection: TimelineSelection,
+  operation: TimelineSelectionOperation,
+  clipIds: readonly string[] = [],
+): TimelineSelection {
+  const nextIds = [...new Set(clipIds)];
+  if (operation === 'clear') return { clipIds: [] };
+  if (operation === 'replace') return { clipIds: nextIds };
+
+  const selected = new Set(selection.clipIds);
+  for (const clipId of nextIds) {
+    if (selected.has(clipId)) selected.delete(clipId);
+    else selected.add(clipId);
+  }
+  return { clipIds: [...selected] };
+}
+
 export function toggleSelection(selection: TimelineSelection, clipId: string): TimelineSelection {
-  return selection.clipIds.includes(clipId)
-    ? { clipIds: selection.clipIds.filter((id) => id !== clipId) }
-    : { clipIds: [...selection.clipIds, clipId] };
+  return applyTimelineSelection(selection, 'toggle', [clipId]);
 }
 export function trimCommand(
   compositionId: string,
