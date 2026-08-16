@@ -1,13 +1,25 @@
 # WP-35R — Remaining Work for Universal Timeline and GPU Preview
 
-**Status:** In progress — R0–R7 implementation and local verification are complete/partial; R8–R9 remain open  
+**Status:** **FINISHED** — R0–R10, paired GPU Worker, production browser, deployment, and GBrain gates closed
 **Owner:** Luna  
 **Audit date:** 2026-08-16  
-**Audited source HEAD:** `762a80c` (`main`)  
-**Working tree:** WP-35 implementation is present but uncommitted and not deployed  
-**Latest local gates:** `pnpm check` PASS · `pnpm build` PASS · `pnpm audit:prod` PASS · focused WP-35 browser 9/9 · E2E audit 135 passed / 15 failed / 3 skipped  
+**Audited source HEAD:** accepted closeout `ffa9ea0` (`main`)
+**Working tree:** implementation committed, pushed, and deployed immutably
+**Latest gates:** `pnpm verify:ci` PASS · 334 files / 2,256 tests PASS · WP-35 browser 3/3 PASS · production GPU/browser/health/hash receipt PASS
 **Source plan:** `plan/WP-35-universal-timeline-gpu-preview.md`  
 **Production domain:** `https://joyst.ir/`
+
+## Final closure — 2026-08-16
+
+This remaining-work plan has been fully executed. The real Worker client and
+hardware WebGL2 renderer, latest-wins authenticated relay, shared RenderFrameIR
+path, complete placement/rollback audit, browser resource-release proof,
+authenticated mixed-element screenshots, formatting cleanup, permanent local
+Worker, immutable deployment, responsive Monitor correction, and GBrain update
+are all closed. See `docs/qa/wp35/README.md` for the accepted source hashes,
+release paths, public hashes, tests, screenshot hashes, and operational receipt.
+All partial/open verdicts below describe the pre-execution audit and are kept as
+historical context only.
 
 ## 1. Purpose
 

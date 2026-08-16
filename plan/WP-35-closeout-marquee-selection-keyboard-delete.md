@@ -1,26 +1,25 @@
 # WP-35 Closeout — Universal Timeline, Marquee Selection, Atomic Keyboard Delete, and GPU Preview
 
 **Owner:** Luna  
-**Status:** Executed locally — timeline closeout complete; GPU Worker gates blocked  
+**Status:** **FINISHED** — timeline closeout, paired GPU Worker, browser/resource evidence, immutable deployment, and GBrain complete
 **Prepared:** 2026-08-16  
 **Repository:** `C:\Users\HadiMoti\joy-vps\joy-media-fix`  
 **Target branch:** current working branch; do not discard or overwrite the existing uncommitted WP-35 work
 
 ## Execution result — 2026-08-16
 
-Implemented and validated locally: universal-track marquee selection with
+Implemented, validated, and deployed: universal-track marquee selection with
 replace/additive semantics, four-way normalized hit testing, pointer-capture
 cancellation and edge scrolling, atomic non-ripple Delete/Backspace for the
 complete selection, locked-track all-or-nothing rejection, universal binding /
 property-animation / audio cleanup, and one-step Undo/Redo. The local release
-gates pass (`pnpm check`, `pnpm build`, `pnpm audit:prod`, and the focused WP-35
-desktop E2E).
-
-This execution does not claim the real GPU Worker renderer/client transport,
-paired hardware proof, authenticated mixed-element pixel evidence, browser
-resource-release evidence, or the remaining Worker/template/caption placement
-rollback audit. Those are explicit follow-up blockers, not silently replaced by
-the local fallback.
+gates pass (`pnpm verify:ci`, 334 files / 2,256 tests, production audit, and the
+3/3 WP-35 desktop E2E). The real paired RTX 5070 Ti GPU renderer/client
+transport, authenticated mixed-element production evidence, browser
+resource-release counters, and Agent/Worker/template/caption placement rollback
+audit are all complete. Product and responsive closeout SHAs, immutable release
+paths, hashes, and GBrain receipt are in `docs/qa/wp35/README.md`; there are no
+remaining blockers.
 
 ## 1. Mission
 

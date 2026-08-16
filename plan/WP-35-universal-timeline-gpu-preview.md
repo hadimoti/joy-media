@@ -1,10 +1,21 @@
 # WP-35 — Universal Timeline Compatibility, Multi-Element Layering, and GPU Preview
 
-**Status:** In progress — universal timeline, multi-layer preview, and local quality controls implemented; GPU Worker transport remains gated  
+**Status:** **FINISHED** — universal timeline, paired hardware GPU preview, placement rollback audit, authenticated browser evidence, and production closeout complete
 **Owner:** Luna  
 **Repository:** `/opt/joy-media/repo` (local checkout: `joy-media-fix`)  
 **Plan date:** 2026-08-16  
 **Production domain:** `https://joyst.ir/`
+
+## Final closeout receipt — 2026-08-16
+
+WP-35 shipped on feature SHA `07ecbe19860db91485ae8e8d2ba4fed209e86176`
+with the responsive Monitor/Dockview closeout on accepted SHA
+`ffa9ea0212719175ec028514ac2f2c0698f62f29`. The immutable API/editor releases,
+paired RTX 5070 Ti Worker proof, authenticated production screenshot, backend
+track-title receipt, compound-placement rollback matrix, resource-release
+counters, public hashes, and GBrain record are authoritative in
+`docs/qa/wp35/README.md`. Every item in the original plan is closed; historical
+"remaining" language below is retained only as the implementation audit trail.
 
 ## 1. User outcome
 

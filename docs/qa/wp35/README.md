@@ -1,7 +1,9 @@
 # WP-35 Final Closeout Evidence
 
 Audit date: 2026-08-16  
-Status: product candidate green; immutable production cutover and final GBrain receipt are recorded after this candidate commit is deployed.
+Status: **FINISHED** — product, responsive monitor correction, paired hardware
+Worker, immutable production releases, authenticated browser evidence, and
+GBrain closeout are complete.
 
 ## Closed scope
 
@@ -54,6 +56,11 @@ a late bitmap composite.
 - `authenticated-mixed-elements.png` — authenticated Playwright workspace with
   eleven universal rows and mixed video/overlay/3D/text/caption/motion/effect
   elements.
+- `production-authenticated-gpu-preview.png` — signed-in production workspace
+  on the accepted public bundle, with backend row titles, Quarter/Auto, the
+  mounted hardware-GPU frame, and the narrow two-row Monitor footer fully
+  contained in its dock. SHA-256:
+  `b7eecb2372d652e29d3e3a90896bfafa0fd28d7b50f843f28569f279280a3474`.
 
 ## Validation record
 
@@ -65,6 +72,7 @@ pnpm build           PASS — editor 1369 modules transformed
 pnpm format:check    PASS after closing all 46 warnings (35 pre-existing + 11 WP-35)
 WP-35 browser E2E    PASS — 3/3 desktop-primary
 GPU fixture          PASS — RTX 5070 Ti / D3D11 / WebGL2 / Quarter PNG
+Responsive footer    PASS — 1613×1066, no Monitor/workspace horizontal overflow
 ```
 
 The authenticated browser cases prove:
@@ -93,15 +101,62 @@ only registers the generated asset and therefore has no Timeline placement to
 roll back. When generated media is placed, it uses the shared media placement
 planner.
 
-## Deployment and GBrain
+## Production deployment
 
-The prior WP-35 release remains the rollback target until this green candidate
-is pushed and deployed. The final documentation pass records the accepted
-product SHA, immutable API/editor release paths, public hashes, Worker hardware
-capability, production browser evidence, and final GBrain page/health receipt.
+- Feature product SHA:
+  `07ecbe19860db91485ae8e8d2ba4fed209e86176`.
+- Accepted responsive closeout SHA:
+  `ffa9ea0212719175ec028514ac2f2c0698f62f29`.
+- Immutable API release:
+  `/opt/joy-media/releases/wp35-final-api-20260816T200008Z-07ecbe1`.
+- Immutable editor release:
+  `/opt/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
+- Previous editor release retained for rollback:
+  `/opt/joy-media/web-releases/editor-web-20260816T200008Z-07ecbe1-wp35-final`.
+- Pre-deploy PostgreSQL backup:
+  `/opt/joy-media/data/backups/wp35-final-predeploy-20260816T195852Z-07ecbe1.sql.gz`,
+  SHA-256
+  `a289700c2ca04a0b56fb455323445240ea53cc2813d3b72a0bb0aae158de4850`.
+- Public/editor index SHA-256:
+  `5e0ac25807c2624da6d093fdca2c70ac6971eada9540995a897add2f7ddf5476`.
+- Public entry `assets/index-BKvGb4f-.js` SHA-256:
+  `2216a7c104c53f6c2f88c7cbf57fd40b6ee5a55f54cac94aecc7ecf1a5bd0a66`.
+- `nginx -t`, `joy-media@api.service`, and public `/api/health` are green.
+- Permanent Scheduled Task `JOY Media Local Worker` is running as
+  `worker-32ab7e8c-d2e5-4ab8-bcb3-ccaf7be97188`. Production reports both
+  `asset.thumbnail` and `render.preview.gpu`; its latest heartbeat was six
+  seconds old during the final receipt.
+
+The signed-in production browser reported `T1` through `T11` with persisted
+backend names (`Video 1`, `Video 2`, `Overlay`, `3D Scene`, `Text`, `Captions`,
+`Motion`, `Effects`, `Filters`, `Adjust`, and `Audio`), selected Quarter/Auto,
+displayed status `GPU`, and mounted exactly one
+`data-preview-renderer="hardware-gpu"` image. The Monitor footer and entire
+Dockview workspace stayed inside the 1613×1066 viewport after the responsive
+release.
+
+GitHub workflows `31969031005` (feature product) and `31969924004` (responsive
+closeout) did not start any job because the repository account reported a
+billing/spending-limit failure. This is an external CI account condition, not a
+test failure. The equivalent complete local gate passed after the final source
+change: 334 test files, 2,256 passing tests, all workspace builds,
+Prettier/ESLint/typecheck, production audit, and 3/3 WP-35 browser cases.
+
+## GBrain receipt
+
+The authoritative closeout page is
+`joy-media-wp35-universal-timeline-gpu-preview-closeout-2026-08-16`; the
+`joy-media-state` timeline also records the accepted source/release/hash and
+paired-Worker facts. GBrain wrote the page, generated three fresh embedding
+chunks, and returned no unresolved auto-link errors. `gbrain doctor --json
+--fast` reported brain checks `100`, 52/52 reachable/conformant skills, and an
+overall health score of `85`. Its three warnings are pre-existing operations
+items: the fast run intentionally skipped the live connection check, the
+optional retrieval-reflex policy skill is not installed, and an old 2026-08-04
+post-upgrade migration warning remains. None is a WP-35 content, embedding,
+link, or deployment failure.
 
 ## Remaining items
 
-None in WP-35 product scope. Production cutover and the final evidence receipt
-are operational completion steps for this already-green candidate, not deferred
-feature work.
+None. GitHub billing must be fixed by the repository owner for future hosted CI
+runs, but it does not leave a WP-35 product or deployment item open.
