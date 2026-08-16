@@ -2,7 +2,8 @@
 
 Audit date: 2026-08-16  
 Audited source: `Complete WP-35 universal timeline and Worker preview closeout` (rebased onto `1e4657f`)  
-Working tree: implementation is committed; deployment and GBrain import are the final release steps.
+Working tree: implementation is committed and deployed; the final handoff is
+recorded in the deployment section below.
 
 This directory records retrospective evidence for the remaining WP-35 work. It
 does not claim a tests-first history: the product changes predate this evidence
@@ -131,6 +132,24 @@ tree contains 35 pre-existing formatting warnings across unrelated files.
 Every changed WP-35 file passes the targeted Prettier check; unrelated files
 were intentionally not reformatted.
 
+## Deployment and GBrain handoff — 2026-08-16
+
+The merged WP-35 runtime implementation was pushed as `a62d990` and deployed
+through the immutable media release path:
+
+```text
+API release:    /opt/joy-media/releases/wp35-api-20260816T153312Z-a62d990
+Editor release: /opt/joy-media/web-releases/editor-web-20260816T153312Z-a62d990-wp35
+Service:        joy-media@api active
+Health:         http://127.0.0.1:8790/health -> {"ok":true,"service":"joy-media-api","controlPlane":true}
+Public smoke:   https://joyst.ir/ -> HTTP 200
+```
+
+This closeout page was imported into GBrain as
+`joy-media-wp35-universal-timeline-gpu-preview-closeout-2026-08-16` with three
+chunks. The post-import brain health snapshot reported 74 pages, 0.9926 embed
+coverage, 0 dead links, and brain score 87.
+
 ## Explicit open items
 
 - No authenticated browser screenshots or mixed-element pixel fixture are
@@ -145,5 +164,5 @@ were intentionally not reformatted.
   disposal (one live decoder remains intentional because it is the audio clock);
   transition/partner decoders use the bounded keyed LRU pool, but browser-level
   resource-release evidence is still open.
-- The source commit is the WP-35 closeout commit on top of `1e4657f`; public deployment and the final GBrain import
-  are performed after the release checks above.
+- The source commit is the WP-35 closeout commit on top of `1e4657f`; public
+  deployment and the final GBrain import are complete.
