@@ -1,14 +1,9 @@
-/**
- * Content template transaction builder (ADR-0027a).
- *
- * Mirrors `addHtmlSceneToSelectedClip` (App.tsx:1162-1273) but generates
- * deterministic IDs from seed, requires no selection, and batches all
- * commands into single dispatch calls per domain.
- */
-import { bindClipToObject } from './sticker-bindings.js';
+/** Atomic content-template placement through the universal Timeline service. */
+import type { SpikeCommand } from '@joy-media/commands';
+import type { Clip, VisualObjectV1 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
 import type { SeededContentTemplate } from './content-template-types.js';
-import type { SpikeCommand } from '@joy-media/commands';
+import { buildTimelineElementDocument } from './place-timeline-element.js';
 
 export function buildContentTemplateTransaction(
   seeded: SeededContentTemplate,
@@ -21,133 +16,96 @@ export function buildContentTemplateTransaction(
   const composition = deps.session.timelineProject.compositions.root;
   if (composition === undefined) return;
 
-  const voCommands: Array<{
-    type: 'htmlScene.create';
-    payload: {
-      object: {
-        id: string;
-        kind: 'html-scene';
-        scenePackageId: string;
-        transform: {
-          x: number;
-          y: number;
-          scaleX: number;
-          scaleY: number;
-          rotationDeg: number;
-          opacity: number;
-          crop: { left: number; top: number; right: number; bottom: number };
-        };
-      };
-    };
-  }> = [];
-  const tlCommands: SpikeCommand[] = [];
-  const bindings: Array<[string, string]> = [];
-
-  const { actions } = seeded.template;
+  const timelineCommands: SpikeCommand[] = [];
   const usedTrackIds = new Set<string>();
+  let nextTrackOrder =
+    composition.tracks.reduce((maximum, track) => Math.max(maximum, track.order), -1) + 1;
+  let document = deps.session.visualProject;
 
-  actions.forEach((action, index) => {
+  const overlaps = (
+    track: (typeof composition.tracks)[number],
+    spanStart: number,
+    spanDuration: number,
+  ): boolean => {
+    const spanEnd = spanStart + spanDuration;
+    return track.clips.some((clip) => {
+      const clipEnd = clip.startUs + clip.durationUs;
+      return spanStart < clipEnd && spanEnd > clip.startUs;
+    });
+  };
+
+  seeded.template.actions.forEach((action, index) => {
     if (action.kind !== 'html-scene') return;
-
-    const sceneId = action.sceneId;
     const objectId = `${seeded.template.id}-${index}-${seeded.seed}`;
     const clipId = `clip-${objectId}`;
     const startUs = deps.playheadUs;
     const durationUs = 5_000_000;
-
-    const overlaps = (
-      track: (typeof composition.tracks)[number],
-      spanStart: number,
-      spanDuration: number,
-    ): boolean => {
-      const spanEnd = spanStart + spanDuration;
-      return track.clips.some((clip) => {
-        const clipEnd = clip.startUs + clip.durationUs;
-        return spanStart < clipEnd && spanEnd > clip.startUs;
-      });
-    };
-
-    const aboveTracks = composition.tracks
+    const targetExisting = composition.tracks
       .filter(
         (track) =>
-          track.kind === 'video' &&
-          track.enabled &&
-          !overlaps(track, startUs, durationUs) &&
-          !usedTrackIds.has(track.id),
+          track.enabled && !overlaps(track, startUs, durationUs) && !usedTrackIds.has(track.id),
       )
-      .sort((a, b) => a.order - b.order);
-
-    const targetExisting = aboveTracks[0];
-    let trackId: string;
-
-    if (targetExisting !== undefined) {
-      trackId = targetExisting.id;
-    } else {
-      const order = composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
-      trackId = `V${order + 1}`;
-      tlCommands.push({
+      .sort((left, right) => left.order - right.order)[0];
+    const trackId = targetExisting?.id ?? `track-${nextTrackOrder + 1}`;
+    if (targetExisting === undefined) {
+      timelineCommands.push({
         type: 'timeline.addTrack',
         payload: {
           compositionId: composition.id,
-          track: { id: trackId, kind: 'video', order, enabled: true, clips: [] },
-        },
-      });
-    }
-
-    usedTrackIds.add(trackId);
-
-    voCommands.push({
-      type: 'htmlScene.create',
-      payload: {
-        object: {
-          id: objectId,
-          kind: 'html-scene',
-          scenePackageId: sceneId,
-          transform: {
-            x: 160 + index * 40,
-            y: 120,
-            scaleX: 1,
-            scaleY: 1,
-            rotationDeg: 0,
-            opacity: 1,
-            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          track: {
+            id: trackId,
+            kind: 'video',
+            name: `Layer ${nextTrackOrder + 1}`,
+            order: nextTrackOrder,
+            enabled: true,
+            clips: [],
           },
         },
-      },
-    });
+      });
+      nextTrackOrder += 1;
+    }
+    usedTrackIds.add(trackId);
 
-    tlCommands.push({
+    const clip: Clip = {
+      id: clipId,
+      kind: 'video',
+      assetId: `html-scene:${action.sceneId}`,
+      startUs,
+      durationUs,
+      sourceInUs: 0,
+    };
+    const object: VisualObjectV1 = {
+      id: objectId,
+      kind: 'html-scene',
+      scenePackageId: action.sceneId,
+      transform: {
+        x: 160 + index * 40,
+        y: 120,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    };
+    document = buildTimelineElementDocument({
+      baseProject: document,
+      clipId,
+      planned: { compositionId: composition.id, trackId, clip },
+      elementKind: 'html-scene',
+      source: { kind: 'object', id: objectId },
+      visualObject: object,
+    });
+    timelineCommands.push({
       type: 'timeline.insertClip',
-      payload: {
-        compositionId: composition.id,
-        trackId,
-        clip: {
-          id: clipId,
-          kind: 'video',
-          assetId: `html-scene:${sceneId}`,
-          startUs,
-          durationUs,
-          sourceInUs: 0,
-        },
-      },
+      payload: { compositionId: composition.id, trackId, clip },
     });
-
-    bindings.push([clipId, objectId]);
   });
 
-  if (voCommands.length === 0) return;
-
-  deps.session.dispatchVisualObjects({
-    label: `Apply template ${seeded.template.label}`,
-    commands: voCommands,
+  if (timelineCommands.length === 0) return;
+  const label = `Apply template ${seeded.template.label}`;
+  deps.session.dispatchCompound(label, {
+    document: { ...document, updatedAt: new Date().toISOString() },
+    timeline: { label, commands: timelineCommands },
   });
-  deps.session.dispatchTimeline({
-    label: `Apply template ${seeded.template.label}`,
-    commands: tlCommands,
-  });
-  let project = deps.session.visualProject;
-  for (const [clipId, objectId] of bindings) {
-    project = bindClipToObject(project, clipId, objectId);
-  }
-  deps.session.replaceVisualProject(project);
 }

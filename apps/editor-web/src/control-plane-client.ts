@@ -1,5 +1,6 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
+import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 
 export interface BrowserWorker {
   readonly id: string;
@@ -145,6 +146,22 @@ export interface BrowserProjectDuplicateResult {
   readonly derivativeIdMap: Readonly<Record<string, string>>;
 }
 
+export interface BrowserGpuPreviewSession {
+  readonly sessionId: string;
+  readonly sessionToken: string;
+  readonly workerId: string;
+  readonly expiresAtMs: number;
+}
+
+export interface BrowserGpuPreviewFrame {
+  readonly blob: Blob;
+  readonly requestId: number;
+  readonly renderer: 'hardware-gpu';
+  readonly quality: 'quarter' | 'half' | 'full';
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface BrowserAssetRegistration {
   readonly id: string;
   readonly kind: BrowserAsset['kind'];
@@ -164,6 +181,61 @@ export class BrowserControlPlaneClient {
 
   async workers(): Promise<readonly BrowserWorker[]> {
     return this.get('/v1/workers');
+  }
+  async openGpuPreviewSession(projectId: string): Promise<BrowserGpuPreviewSession> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/preview-sessions`, {});
+  }
+  async submitGpuPreviewFrame(request: GpuPreviewFrameRequest): Promise<void> {
+    await this.post(
+      `/v1/preview-sessions/${encodeURIComponent(request.sessionId)}/frames`,
+      request,
+    );
+  }
+  async gpuPreviewFrame(
+    sessionId: string,
+    requestId: number,
+    signal?: AbortSignal,
+  ): Promise<BrowserGpuPreviewFrame | undefined> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/preview-sessions/${encodeURIComponent(sessionId)}/frames/${requestId}`,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
+    if (response.status === 202) return undefined;
+    if (!response.ok) {
+      const body = await responseBody(response);
+      throw requestError(body, response.status);
+    }
+    const renderer = response.headers.get('x-joy-preview-renderer');
+    const quality = response.headers.get('x-joy-preview-quality');
+    const width = Number(response.headers.get('x-joy-preview-width'));
+    const height = Number(response.headers.get('x-joy-preview-height'));
+    const returnedRequestId = Number(response.headers.get('x-joy-preview-request-id'));
+    if (
+      renderer !== 'hardware-gpu' ||
+      (quality !== 'quarter' && quality !== 'half' && quality !== 'full') ||
+      !Number.isSafeInteger(width) ||
+      !Number.isSafeInteger(height) ||
+      returnedRequestId !== requestId
+    )
+      throw new Error('JOY Media API returned invalid GPU preview metadata');
+    return {
+      blob: await response.blob(),
+      requestId,
+      renderer,
+      quality,
+      width,
+      height,
+    };
+  }
+  async closeGpuPreviewSession(sessionId: string): Promise<void> {
+    await this.request(`/v1/preview-sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
   }
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/jobs`);

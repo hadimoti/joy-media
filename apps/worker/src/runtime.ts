@@ -257,12 +257,14 @@ export class WorkerRuntime {
     private readonly options: {
       readonly sources?: LocalAssetSourceRegistry;
       readonly derivativeDirectory?: string;
+      readonly gpuPreviewAvailable?: boolean;
     } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
     const inventory = modelInventory(this.tools.upscaling, this.tools.masking);
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
+    if (this.options.gpuPreviewAvailable === true) capabilities.push('render.preview.gpu');
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.ffprobe && this.tools.upscaling?.image?.modelReady === true)
       capabilities.push('upscale.image');

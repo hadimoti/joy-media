@@ -36,8 +36,8 @@ describe('TimelinePanel clip interaction semantics', () => {
       'aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"',
     );
     expect(markup).toContain('>T1</span>');
-    expect(markup).toContain('>Layer 1</span>');
-    expect(markup).not.toContain('>Main Video</span>');
+    expect(markup).toContain('>track-0</span>');
+    expect(markup).toContain('>track-1</span>');
   });
 
   it('renders an explicit Back control while drilling into a merged composition', () => {

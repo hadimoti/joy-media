@@ -53,6 +53,9 @@ importers:
       '@joy-media/export-core':
         specifier: workspace:*
         version: link:../../packages/export-core
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../../packages/job-protocol
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
@@ -184,6 +187,9 @@ importers:
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
+      playwright-core:
+        specifier: ^1.62.1
+        version: 1.62.1
     devDependencies:
       '@joy-media/api':
         specifier: workspace:*
@@ -334,6 +340,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
 
   packages/media-core: {}
 

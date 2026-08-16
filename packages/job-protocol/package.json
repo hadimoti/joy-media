@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@joy-media/project-schema": "workspace:*"
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/render-ir": "workspace:*"
   }
 }

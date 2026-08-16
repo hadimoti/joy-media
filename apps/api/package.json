@@ -27,6 +27,7 @@
     "@joy-media/provider-sdk": "workspace:*",
     "nodemailer": "^9.0.5",
     "pg": "^8.22.0",
-    "@joy-media/export-core": "workspace:*"
+    "@joy-media/export-core": "workspace:*",
+    "@joy-media/job-protocol": "workspace:*"
   }
 }

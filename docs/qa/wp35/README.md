@@ -1,168 +1,107 @@
-# WP-35 QA Evidence Index
+# WP-35 Final Closeout Evidence
 
 Audit date: 2026-08-16  
-Audited source: `Complete WP-35 universal timeline and Worker preview closeout` (rebased onto `1e4657f`)  
-Working tree: implementation is committed and deployed; the final handoff is
-recorded in the deployment section below.
+Status: product candidate green; immutable production cutover and final GBrain receipt are recorded after this candidate commit is deployed.
 
-This directory records retrospective evidence for the remaining WP-35 work. It
-does not claim a tests-first history: the product changes predate this evidence
-pass. Browser mixed-element, production, CI, and real hardware-Worker evidence
-remain open.
+## Closed scope
 
-## Reproducible local evidence
+- Universal compatibility rows accept every supported Timeline element. Row
+  codes remain neutral (`T1`, `T2`, ...), while the visible title comes from
+  persisted backend `track.name`; schema-0 rows without a name use their
+  persisted track ID. The UI no longer replaces backend titles with synthetic
+  kind labels or `Layer N` when a backend identity exists.
+- Marquee selection, cross-track movement/layer ordering, keyboard `Delete`,
+  one-step Undo/Redo, and the local Worker thumbnail job path remain covered.
+- `Auto`, `GPU Worker`, and `Local` Monitor modes are available. Preview quality
+  defaults to Quarter and supports Half and Full without changing export size.
+- A paired Worker advertises `render.preview.gpu` only after Edge/Chrome creates
+  a non-software WebGL2 context. Preview requests use a project/subject/Worker-
+  bound, five-minute, random bearer session; the relay is in-memory,
+  latest-wins, bounded, replay-protected, `no-store`, and creates no durable job.
+- The Worker renders the evaluated `RenderFrameIR` on the local NVIDIA GPU,
+  composites decoded RGBA video surfaces and text/caption plates in z-order,
+  returns a bounded PNG, and rejects software rendering.
+- Agent, sticker/HTML-scene, Worker media import, content template, text
+  template, 3D, and caption placements were audited. Routes that mutate both
+  Timeline and creative documents now use one `dispatchCompound()` boundary;
+  injected persistence-failure coverage proves rollback/reload recovery.
+- Browser preview resources have QA-only exact-once counters. Primary and
+  partner decoders, audio contexts, Pixi renderers, scene caches, capture
+  canvases, and transient GPU object URLs are released when the workspace
+  closes.
+- The 35 unrelated pre-existing Prettier warnings and all new WP-35 formatting
+  warnings were mechanically cleaned.
 
-- `packages/project-schema/src/universal-timeline.test.ts` — legacy schema-0
-  projection, v1 copy-on-write fallback, explicit binding validation, and
-  audio/visual binding coverage.
-- `packages/evaluator/src/active-timeline-render-plan.test.ts` — overlapping
-  red/blue layer order and disabled-track filtering.
-- `packages/commands/src/commands.test.ts` — atomic cross-track movement,
-  track reorder, rename, and inverses.
-- `apps/editor-web/src/timeline-frame-store.test.ts` — stale-frame rejection
-  and bounded entry/byte eviction.
-- `apps/editor-web/src/bounded-decoder-pool.test.ts` — keyed LRU decoder
-  eviction and exactly-once resource disposal.
-- `apps/editor-web/src/place-timeline-element.test.ts` — shared atomic
-  document planner for media, image, and generic Timeline elements.
-- `apps/worker/src/gpu-preview-probe.test.ts` and
-  `packages/job-protocol/src/preview.test.ts` — fail-closed hardware probe,
-  ephemeral preview-session validation, replay protection, rate limits, and
-  response bounds.
+## Hardware GPU evidence
 
-## Gate record
-
-The pre-rebase local `pnpm check` run passed after the timeline placement, drag,
-schema, and decoder-pool changes:
-
-```text
-Test Files  310 passed | 1 skipped (311)
-Tests       2168 passed | 2 skipped (2170)
-```
-
-The follow-up release checks also passed:
+`node tooling/verify-wp35-gpu-preview.mjs` launched the same long-lived Worker
+host used by the daemon and rendered the committed mixed-element frame:
 
 ```text
-pnpm build       PASS
-pnpm audit:prod  PASS — No known vulnerabilities found
+Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Ti, Direct3D11)
+Backend:  WebGL 2.0 (OpenGL ES 3.0 Chromium)
+Quality:  Quarter
+Output:   160x90 PNG, 4021 bytes
+SHA-256:  9dee89ef2a67141cb2ee075e6ec5a6991eb9e639d2dee59a7a7cab6c35ee366c
 ```
 
-Focused browser verification passed:
+The decoded blue video surface overlaps the gold overlay; the committed pixel
+fixture proves the overlay stays above the video rather than being covered by
+a late bitmap composite.
+
+- `gpu-worker-mixed-frame.png` — hardware Worker pixel fixture.
+- `gpu-worker-mixed-frame.json` — GPU identity, dimensions, hash, and latency.
+- `authenticated-mixed-elements.png` — authenticated Playwright workspace with
+  eleven universal rows and mixed video/overlay/3D/text/caption/motion/effect
+  elements.
+
+## Validation record
 
 ```text
-WP-29 CASE-16 imported MP4 placement + selection       PASS (3 viewports)
-WP-29 CASE-25 asset-card placement                    PASS (3 viewports)
-WP-29 CASE-32 cross-track pointer drag                 PASS (3 viewports)
-Focused WP-35 placement/timeline/decoder/schema/protocol tests 25 passed
+pnpm typecheck       PASS
+pnpm lint            PASS
+pnpm test            PASS — 334 files passed, 1 skipped; 2256 tests passed, 2 skipped
+pnpm build           PASS — editor 1369 modules transformed
+pnpm format:check    PASS after closing all 46 warnings (35 pre-existing + 11 WP-35)
+WP-35 browser E2E    PASS — 3/3 desktop-primary
+GPU fixture          PASS — RTX 5070 Ti / D3D11 / WebGL2 / Quarter PNG
 ```
 
-The complete three-project browser audit ran 153 tests and reported 135 passed,
-15 failed, and 3 skipped. The remaining failures are in existing Cloud/audio,
-motion, WP-32 journey, two compact bulk/reload cases, and one minimum import-
-environment case; this is not a green release gate. The focused WP-35 matrix
-remains 9/9 across primary, compact, and minimum viewports.
+The authenticated browser cases prove:
 
-## Closeout execution pass — 2026-08-16
+1. reverse marquee selection plus keyboard Delete is one atomic, undoable batch;
+2. `T1 Video 1`, `T2 Video 2`, and `T3 Overlay` match persisted backend row
+   identities while mixed elements render and Monitor starts at Quarter/Auto;
+3. closing the workspace reaches zero active preview-owned resources and
+   records deterministic decoder/Pixi releases.
 
-The closeout work added the empty-lane marquee state machine, normalized
-client-space hit testing, additive/replace selection publishing, atomic
-non-ripple multi-element deletion, locked-track rejection, and clip-owned audio
-cleanup. The fresh validation pass completed with:
+## Placement and rollback audit
 
-```text
-pnpm check       historical pre-rebase result (see merged-release gates below)
-pnpm build       historical PASS
-pnpm audit:prod  historical PASS — No known vulnerabilities found
-WP-35 E2E        PASS — marquee selection + Delete + Undo/Redo (desktop-primary)
-```
+| Entry route                     | Atomic document boundary                                  | Evidence                                                               |
+| ------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Direct media/sticker/HTML scene | compound Timeline + creative document                     | shared pure placement planner and App route audit                      |
+| Agent command bus               | compound when universal binding changes                   | `agent-command-bus.test.ts`                                            |
+| Worker generated media          | verified asset import, then shared placement boundary     | Worker result/import tests; no split placement write                   |
+| Content template                | one compound commit for all inserted tracks/clips/objects | injected persistence failure in `content-template-transaction.test.ts` |
+| Text template                   | one compound commit with explicit text binding            | `text-template-transaction.test.ts`                                    |
+| Caption layer                   | one compound commit with caption-source binding           | `caption-layer.test.ts`                                                |
+| 3D layer                        | one compound commit with image/object binding             | `three-d-render-layer.test.ts`                                         |
+| Undo/redo/reload recovery       | journaled compound rollback                               | `editor-session.test.ts` persistence-failure cases                     |
 
-The focused E2E proves a single Delete keypress removes the selected batch and
-one Undo/Redo round-trip restores/removes the same batch. Unit coverage now
-includes marquee geometry and cancellation helpers, the deletion planner, and
-clip-owned audio/effect cleanup.
+Worker audio `replace` changes the project/audio snapshot atomically. `keep`
+only registers the generated asset and therefore has no Timeline placement to
+roll back. When generated media is placed, it uses the shared media placement
+planner.
 
-The following closeout gates remain explicitly open and are not claimed by the
-local pass: a real GPU Worker renderer/client transport with paired hardware,
-authenticated mixed-element screenshots/pixel evidence, browser-level resource
-release evidence, and the complete Worker/template/caption placement rollback
-audit. The GPU transport gate remains fail-closed by design; this release does
-not claim a real hardware renderer.
+## Deployment and GBrain
 
-## Universal rows and Jobs-panel Worker smoke pass — 2026-08-16
+The prior WP-35 release remains the rollback target until this green candidate
+is pushed and deployed. The final documentation pass records the accepted
+product SHA, immutable API/editor release paths, public hashes, Worker hardware
+capability, production browser evidence, and final GBrain page/health receipt.
 
-The visible timeline projection now renders every lane as a neutral universal
-layer (`T1`, `T2`, ... / `Layer 1`, `Layer 2`, ...), including legacy projects
-whose stored names were `Main Video`, `B-roll`, `Overlay`, `Text`, or captions.
-Add-track commands now create the same universal lane shape instead of a
-video-only track. The interaction contract asserts that the legacy labels no
-longer appear in the rendered timeline reference panel.
+## Remaining items
 
-The Jobs-panel thumbnail smoke route now executes end to end in the local
-Worker. `fixture.thumbnail` is handled without FFmpeg or an asset, emits the
-deterministic 1×1 PPM receipt (`14` bytes, SHA-256
-`78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735`), reports
-progress, and completes without attempting derivative upload. Runtime and
-daemon tests cover the route.
-
-Fresh release validation:
-
-```text
-pnpm check       historical pre-rebase result (see merged-release gates below)
-pnpm build       historical PASS
-pnpm audit:prod  historical PASS — No known vulnerabilities found
-WP-35 E2E        PASS — universal timeline + marquee selection + Delete + Undo/Redo
-```
-
-## Merged release validation — 2026-08-16
-
-The release commit was rebased onto upstream `1e4657f` before being pushed.
-These gates were rerun on the merged tree:
-
-```text
-pnpm typecheck    PASS
-pnpm lint         PASS
-pnpm test         PASS — 333 test files passed, 1 skipped; 2252 tests passed, 2 skipped
-pnpm build        PASS — 1362 modules transformed
-pnpm audit:prod   PASS — No known vulnerabilities found
-WP-35 E2E         PASS — universal timeline + marquee selection + Delete + Undo/Redo
-```
-
-The full `pnpm format:check` gate is not green because the rebased upstream
-tree contains 35 pre-existing formatting warnings across unrelated files.
-Every changed WP-35 file passes the targeted Prettier check; unrelated files
-were intentionally not reformatted.
-
-## Deployment and GBrain handoff — 2026-08-16
-
-The merged WP-35 runtime implementation was pushed as `a62d990` and deployed
-through the immutable media release path:
-
-```text
-API release:    /opt/joy-media/releases/wp35-api-20260816T154002Z-44269b4
-Editor release: /opt/joy-media/web-releases/editor-web-20260816T154002Z-44269b4-wp35
-Service:        joy-media@api active
-Health:         http://127.0.0.1:8790/health -> {"ok":true,"service":"joy-media-api","controlPlane":true}
-Public smoke:   https://joyst.ir/ -> HTTP 200
-```
-
-This closeout page was imported into GBrain as
-`joy-media-wp35-universal-timeline-gpu-preview-closeout-2026-08-16` with three
-chunks. The post-import brain health snapshot reported 74 pages, 0.9926 embed
-coverage, 0 dead links, and brain score 87.
-
-## Explicit open items
-
-- No authenticated browser screenshots or mixed-element pixel fixture are
-  recorded yet.
-- The Worker probe and request gate are fail-closed; no real GPU renderer host
-  or browser client transport is implemented.
-- Media Add/import/drop, sticker, and HTML-scene creation now share the pure
-  `place-timeline-element` document planner and one compound timeline +
-  document commit. Agent/Worker/template/caption routes and injected-failure
-  coverage still need a complete placement-service audit.
-- Primary playback is now behind a bounded keyed pool with deterministic
-  disposal (one live decoder remains intentional because it is the audio clock);
-  transition/partner decoders use the bounded keyed LRU pool, but browser-level
-  resource-release evidence is still open.
-- The source commit is the WP-35 closeout commit on top of `1e4657f`; public
-  deployment and the final GBrain import are complete.
+None in WP-35 product scope. Production cutover and the final evidence receipt
+are operational completion steps for this already-green candidate, not deferred
+feature work.

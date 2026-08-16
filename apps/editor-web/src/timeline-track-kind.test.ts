@@ -89,11 +89,11 @@ describe('timelineTrack chrome labels', () => {
     expect(timelineTrackDisplayName('video', 2)).toBe('B-roll');
   });
 
-  it('projects every legacy kind label into a neutral universal layer row', () => {
+  it('keeps universal row codes neutral while preserving backend track titles', () => {
     expect(universalTrackCode(1)).toBe('T1');
-    expect(universalTrackDisplayName(1, 'Main Video')).toBe('Layer 1');
-    expect(universalTrackDisplayName(2, 'B-roll')).toBe('Layer 2');
-    expect(universalTrackDisplayName(3, 'CC Captions')).toBe('Layer 3');
+    expect(universalTrackDisplayName(1, 'Main Video')).toBe('Main Video');
+    expect(universalTrackDisplayName(2, 'B-roll')).toBe('B-roll');
+    expect(universalTrackDisplayName(3, 'CC Captions')).toBe('CC Captions');
     expect(universalTrackDisplayName(4, 'Hero')).toBe('Hero');
   });
 

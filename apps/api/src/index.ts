@@ -18,6 +18,12 @@ export type {
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 export { ControlPlaneError, LocalControlPlane } from './control-plane.js';
 export {
+  GpuPreviewTransport,
+  deserializeGpuPreviewResponse,
+  type BrowserGpuPreviewSession,
+  type SerializedGpuPreviewFrameResponse,
+} from './gpu-preview-transport.js';
+export {
   PrivateObjectIntegrityError,
   RclonePrivateObjectStore,
   type PrivateObjectDescriptor,

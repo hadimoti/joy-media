@@ -1,6 +1,6 @@
 # ADR-0035: Universal Timeline and Preview Renderer Contract
 
-Status: Accepted for implementation (GPU Worker transport remains a follow-up gate)
+Status: Accepted and implemented
 
 ## Decisions
 
@@ -33,10 +33,16 @@ Status: Accepted for implementation (GPU Worker transport remains a follow-up ga
 | Composition            | yes              | yes            | nested plan       | nested audio               | yes             |
 | Camera/null controller | yes              | yes            | controller only   | no                         | controller only |
 
-## Open gate
+## Implementation record
 
-The existing Worker control plane is a durable-job channel. It does not yet
-provide the bounded latest-wins, project-scoped ephemeral frame session needed
-for live GPU preview. Until that transport and a real Worker-side hardware
-renderer probe land, `Auto` and `GPU Worker` preferences intentionally use the
-local renderer and display `Local fallback` when Worker rendering is requested.
+The durable Worker job channel remains unchanged. GPU preview uses a separate,
+in-memory, latest-wins relay with random project/subject/Worker-bound sessions,
+replay and rate limits, strict frame/PNG bounds, and `no-store` responses. The
+Worker advertises the capability only after a WebGL2 hardware probe rejects
+software renderers. A long-lived Edge/Chrome page renders evaluated
+`RenderFrameIR`, decoded RGBA video surfaces, text, and captions in z-order.
+
+The browser keeps local Pixi rendering active for playback and fallback. While
+paused or scrubbing it can display the latest matching Worker PNG; late frames
+cannot replace a newer request. Hardware identity and a deterministic Quarter
+pixel fixture are recorded under `docs/qa/wp35`.

@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@joy-media/export-core": "workspace:*",
-    "@joy-media/job-protocol": "workspace:*"
+    "@joy-media/job-protocol": "workspace:*",
+    "playwright-core": "^1.62.1"
   },
   "devDependencies": {
     "@joy-media/api": "workspace:*",

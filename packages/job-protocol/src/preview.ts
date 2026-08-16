@@ -1,4 +1,5 @@
 import { WORKER_PROTOCOL_VERSION, type WorkerCapability } from './protocol.js';
+import { validateRenderFrameIR, type RenderFrameIR } from '@joy-media/render-ir';
 
 export type PreviewQuality = 'quarter' | 'half' | 'full';
 
@@ -13,12 +14,24 @@ export interface GpuPreviewFrameRequest {
   readonly timeUs: number;
   readonly quality: PreviewQuality;
   readonly deadlineMs: number;
+  /** Evaluated, renderer-neutral current-frame snapshot. Never persisted. */
+  readonly frame: RenderFrameIR;
+  /** Optional decoded RGBA surfaces keyed by RenderFrameIR video node id. */
+  readonly bitmaps?: readonly GpuPreviewBitmap[];
   /** Ephemeral session bearer; never a durable project credential. */
   readonly sessionToken?: string;
   /** Opaque per-asset grants; filesystem paths are forbidden. */
   readonly assetTokens?: readonly PreviewAssetToken[];
   /** Preview responses must never be stored by intermediaries. */
   readonly noStore?: true;
+}
+
+export interface GpuPreviewBitmap {
+  readonly nodeId: string;
+  readonly width: number;
+  readonly height: number;
+  /** Base64 RGBA8 bytes. Paths, URLs, and durable credentials are forbidden. */
+  readonly rgbaBase64: string;
 }
 
 export interface PreviewAssetToken {
@@ -93,6 +106,7 @@ export function validateGpuPreviewFrameRequest(
 ): readonly string[] {
   const errors: string[] = [];
   if (request.protocolVersion !== WORKER_PROTOCOL_VERSION) errors.push('protocolVersion');
+  if (request.capability !== 'render.preview.gpu') errors.push('capability');
   if (
     request.sessionId.length === 0 ||
     typeof request.sessionToken !== 'string' ||
@@ -100,7 +114,15 @@ export function validateGpuPreviewFrameRequest(
   )
     errors.push('session authorization');
   if (!Number.isSafeInteger(request.requestId) || request.requestId < 0) errors.push('requestId');
+  if (
+    request.projectId.length === 0 ||
+    request.projectRevisionId.length === 0 ||
+    request.compositionId.length === 0
+  )
+    errors.push('project identity');
   if (!Number.isSafeInteger(request.timeUs) || request.timeUs < 0) errors.push('timeUs');
+  if (request.quality !== 'quarter' && request.quality !== 'half' && request.quality !== 'full')
+    errors.push('quality');
   if (
     !Number.isSafeInteger(request.deadlineMs) ||
     request.deadlineMs < 1 ||
@@ -108,6 +130,31 @@ export function validateGpuPreviewFrameRequest(
   )
     errors.push('deadlineMs');
   if (request.noStore !== true) errors.push('noStore');
+  try {
+    validateRenderFrameIR(request.frame);
+  } catch {
+    errors.push('frame');
+  }
+  if (
+    request.frame.compositionId !== request.compositionId ||
+    request.frame.timeUs !== request.timeUs
+  )
+    errors.push('frame identity');
+  if ((request.bitmaps?.length ?? 0) > 8) errors.push('bitmaps');
+  for (const bitmap of request.bitmaps ?? []) {
+    const expectedBytes = bitmap.width * bitmap.height * 4;
+    if (
+      bitmap.nodeId.length === 0 ||
+      !Number.isSafeInteger(bitmap.width) ||
+      !Number.isSafeInteger(bitmap.height) ||
+      bitmap.width < 1 ||
+      bitmap.height < 1 ||
+      expectedBytes > 8 * 1024 * 1024 ||
+      bitmap.rgbaBase64.length === 0 ||
+      bitmap.rgbaBase64.length > Math.ceil((expectedBytes * 4) / 3) + 8
+    )
+      errors.push(`bitmap:${bitmap.nodeId}`);
+  }
   for (const asset of request.assetTokens ?? []) {
     if (asset.assetId.length === 0 || asset.token.length === 0 || asset.expiresAtMs <= nowMs)
       errors.push(`assetToken:${asset.assetId}`);
@@ -188,6 +235,11 @@ export class GpuPreviewRequestGate {
     if (!this.authorize(request, nowMs)) return { accepted: false, reason: 'unauthorized' };
     if ((request.assetTokens?.length ?? 0) > this.#limits.maxAssetTokens)
       return { accepted: false, reason: 'asset-limit' };
+    if (
+      request.frame.viewport.width > this.#limits.maxDimension ||
+      request.frame.viewport.height > this.#limits.maxDimension
+    )
+      return { accepted: false, reason: 'invalid-request' };
     if ((request.assetTokens ?? []).some((asset) => asset.expiresAtMs <= nowMs))
       return { accepted: false, reason: 'expired-asset-token' };
     const lastRequestId = this.#lastRequestBySession.get(request.sessionId);
@@ -230,7 +282,14 @@ export class GpuPreviewRequestGate {
     )
       errors.push('dimensions');
     if (response.bytes.byteLength > this.#limits.maxFrameBytes) errors.push('frameBytes');
+    if (response.bytes.byteLength === 0) errors.push('frameBytes');
     if (response.renderer !== 'hardware-gpu') errors.push('renderer');
+    if (
+      response.quality !== 'quarter' &&
+      response.quality !== 'half' &&
+      response.quality !== 'full'
+    )
+      errors.push('quality');
     return errors;
   }
 }

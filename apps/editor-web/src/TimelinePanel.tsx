@@ -2007,7 +2007,7 @@ export function TimelinePanel({
                       {universalTrackCode(index + 1)}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {universalTrackDisplayName(index + 1, source.name)}
+                      {universalTrackDisplayName(index + 1, source.name ?? source.id)}
                     </span>
                   </div>
                   <button

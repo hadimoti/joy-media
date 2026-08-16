@@ -8,15 +8,30 @@ import {
   detectMediaTools,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
+import { GpuPreviewHost } from './gpu-preview-host.js';
 
 const store = new JsonFileWorkerStore(process.env.JOY_MEDIA_WORKER_STATE_PATH);
 const identity = getDeviceIdentity(store);
 const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);
-const runtime = new WorkerRuntime(
-  identity,
-  detectMediaTools(),
-  sources === undefined ? {} : { sources },
-);
+let gpuPreviewHost: GpuPreviewHost | undefined;
+try {
+  gpuPreviewHost = await GpuPreviewHost.create();
+  console.log(
+    JSON.stringify({
+      gpuPreview: 'hardware',
+      renderer: gpuPreviewHost.identity.renderer,
+      backend: gpuPreviewHost.identity.backend,
+    }),
+  );
+} catch (error) {
+  console.warn(
+    `GPU preview unavailable: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+const runtime = new WorkerRuntime(identity, detectMediaTools(), {
+  ...(sources === undefined ? {} : { sources }),
+  gpuPreviewAvailable: gpuPreviewHost !== undefined,
+});
 console.log(JSON.stringify(runtime.hello(process.platform, process.arch)));
 
 const apiUrl = process.env.JOY_MEDIA_API_URL;
@@ -29,7 +44,7 @@ if (apiUrl !== undefined) {
     });
   }
   if (store.loadWorkerSession() !== undefined) {
-    const daemon = new WorkerDaemon(client, runtime);
+    const daemon = new WorkerDaemon(client, runtime, gpuPreviewHost);
     await daemon.run({ stopped: () => false });
   }
 }

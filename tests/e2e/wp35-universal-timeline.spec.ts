@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { authenticate, openReferenceWorkspace, recordEvidence } from './wp29-r5-harness.js';
+import {
+  authenticate,
+  openReferenceWorkspace,
+  openTimelineShowcaseWorkspace,
+  recordEvidence,
+} from './wp29-r5-harness.js';
 
 test.describe('WP-35 universal timeline closeout', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
@@ -57,6 +62,92 @@ test.describe('WP-35 universal timeline closeout', () => {
         'A reverse marquee selects all intersecting timeline elements and Delete removes the batch in one undoable operation.',
       actual:
         'The marquee selected the rendered clips, Delete removed all clips without ripple, and one Undo/Redo restored and removed the same batch.',
+    });
+  });
+
+  test('renders backend track titles, mixed elements, and Quarter preview controls', async ({
+    page,
+  }, testInfo) => {
+    await openTimelineShowcaseWorkspace(page);
+    const trackNames = page.locator('.timeline-track-header .track-name');
+    await expect(trackNames.first()).toHaveText('Video 1');
+    await expect(trackNames.nth(1)).toHaveText('Video 2');
+    await expect(trackNames.nth(2)).toHaveText('Overlay');
+    await expect(page.locator('.timeline-track-header .track-code').nth(2)).toHaveText('T3');
+    await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
+    await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
+    expect(await page.locator('.timeline-clip[data-clip-id]').count()).toBeGreaterThanOrEqual(6);
+    await testInfo.attach('wp35-mixed-elements-authenticated.png', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    });
+    if (process.env.WP35_SCREENSHOT_PATH !== undefined)
+      await page.screenshot({ path: process.env.WP35_SCREENSHOT_PATH, fullPage: true });
+    await recordEvidence(testInfo, {
+      caseId: 36,
+      functional: 'PASS',
+      uiA11y: 'PASS',
+      expected:
+        'Universal row codes remain neutral while titles match backend track.name, mixed clips render, and Monitor defaults to Quarter/Auto.',
+      actual:
+        'T rows displayed Video 1/Video 2/Overlay from backend track identities, mixed clips were visible, and Monitor controls reported Quarter/Auto.',
+    });
+  });
+
+  test('releases browser decoder, audio, Pixi, and transient GPU URL resources on workspace close', async ({
+    page,
+  }, testInfo) => {
+    await openReferenceWorkspace(page);
+    await expect(page.locator('.monitor-canvas canvas')).toBeVisible();
+    const active = await page.evaluate(
+      () =>
+        (window as Window & { __JOY_MEDIA_RESOURCE_AUDIT__?: { active: Record<string, number> } })
+          .__JOY_MEDIA_RESOURCE_AUDIT__?.active,
+    );
+    expect(active?.['primary-decoder']).toBe(1);
+    expect(active?.['pixi-renderer']).toBe(1);
+
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: /Projects Library/ }).click();
+    await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const audit = (
+            window as Window & {
+              __JOY_MEDIA_RESOURCE_AUDIT__?: {
+                active: Record<string, number>;
+                released: Record<string, number>;
+              };
+            }
+          ).__JOY_MEDIA_RESOURCE_AUDIT__;
+          return (
+            (audit?.active['primary-decoder'] ?? 0) +
+            (audit?.active['partner-decoder'] ?? 0) +
+            (audit?.active['audio-context'] ?? 0) +
+            (audit?.active['pixi-renderer'] ?? 0) +
+            (audit?.active['gpu-frame-url'] ?? 0)
+          );
+        }),
+      )
+      .toBe(0);
+    expect(
+      await page.evaluate(() => {
+        const released = (
+          window as Window & {
+            __JOY_MEDIA_RESOURCE_AUDIT__?: { released: Record<string, number> };
+          }
+        ).__JOY_MEDIA_RESOURCE_AUDIT__?.released;
+        return (released?.['primary-decoder'] ?? 0) + (released?.['pixi-renderer'] ?? 0);
+      }),
+    ).toBeGreaterThanOrEqual(2);
+    await recordEvidence(testInfo, {
+      caseId: 37,
+      functional: 'PASS',
+      uiA11y: 'PASS',
+      expected: 'Closing the workspace releases every preview-owned browser resource.',
+      actual:
+        'Browser counters reached zero active resources after project close; primary decoder and Pixi renderer each reported deterministic release.',
     });
   });
 });

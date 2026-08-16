@@ -34,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/generate-media-fixtures.mjs'],
+    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/*.mjs'],
     languageOptions: {
       globals: {
         process: 'readonly',
@@ -45,6 +45,7 @@ export default tseslint.config(
         URL: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        performance: 'readonly',
       },
     },
     rules: {

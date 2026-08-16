@@ -2,6 +2,7 @@ import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/proj
 import type { CommandTransaction } from '@joy-media/commands';
 import { bindClipToObject } from './sticker-bindings.js';
 import { withTimelineElementKinds } from './timeline-element-kind.js';
+import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
 export interface ThreeDRenderLayerInsertion {
   readonly label: string;
@@ -73,9 +74,19 @@ export function buildThreeDRenderLayerInsertion({
     },
     visualObjects: { ...project.visualObjects, [objectId]: nextObject },
   };
-  const nextProject = withTimelineElementKinds(
-    bindClipToObject(withAssetAndObject, clipId, objectId),
-    { [clipId]: 'scene3d' },
+  const nextProject = upsertUniversalTimelineBinding(
+    withTimelineElementKinds(bindClipToObject(withAssetAndObject, clipId, objectId), {
+      [clipId]: 'scene3d',
+    }),
+    {
+      id: clipId,
+      compositionId: composition.id,
+      trackId,
+      elementKind: 'image',
+      startUs,
+      durationUs,
+      source: { kind: 'object', id: objectId },
+    },
   );
   const label = `Add 3D render ${asset.displayName}`;
 
@@ -90,7 +101,14 @@ export function buildThreeDRenderLayerInsertion({
           type: 'timeline.addTrack',
           payload: {
             compositionId: composition.id,
-            track: { id: trackId, kind: 'video', order, enabled: true, clips: [] },
+            track: {
+              id: trackId,
+              kind: 'video',
+              name: '3D Scene',
+              order,
+              enabled: true,
+              clips: [],
+            },
           },
         },
         {

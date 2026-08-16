@@ -149,6 +149,16 @@ export async function openReferenceWorkspace(page: Page): Promise<void> {
   await activateTimeline(page);
 }
 
+export async function openTimelineShowcaseWorkspace(page: Page): Promise<void> {
+  await openReadyProjectSelector(page);
+  await page
+    .getByRole('button', { name: /Timeline Elements Showcase/ })
+    .first()
+    .click();
+  await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
+  await activateTimeline(page);
+}
+
 export async function openDisposableWorkspace(page: Page, title: string): Promise<void> {
   await openReadyProjectSelector(page);
   await page.getByRole('button', { name: 'New project' }).click();

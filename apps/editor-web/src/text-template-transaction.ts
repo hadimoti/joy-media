@@ -3,6 +3,7 @@ import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
 import { bindClipToObject } from './sticker-bindings.js';
 import type { TextTemplateV1 } from './text-template-catalog.js';
+import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
 export interface InsertedTextTemplate {
   readonly clipId: string;
@@ -64,6 +65,7 @@ export function insertTextTemplate(
               track: {
                 id: trackId,
                 kind: 'video',
+                name: 'Text',
                 order: composition.tracks.length,
                 enabled: true,
                 clips: [],
@@ -91,7 +93,7 @@ export function insertTextTemplate(
     label: `Add text ${template.label}`,
     commands: [...trackCommands, insertClip],
   };
-  const nextProject: JoyProjectV1 = bindClipToObject(
+  const withTextObject: JoyProjectV1 = bindClipToObject(
     {
       ...session.visualProject,
       visualObjects: { ...session.visualProject.visualObjects, [objectId]: object },
@@ -106,6 +108,15 @@ export function insertTextTemplate(
     clipId,
     objectId,
   );
+  const nextProject = upsertUniversalTimelineBinding(withTextObject, {
+    id: clipId,
+    compositionId: composition.id,
+    trackId,
+    elementKind: 'text',
+    startUs,
+    durationUs,
+    source: { kind: 'object', id: objectId },
+  });
   session.dispatchCompound(`Add text ${template.label}`, {
     timeline: timelineTransaction,
     document: nextProject,

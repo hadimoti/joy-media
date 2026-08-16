@@ -2,6 +2,7 @@ import type { CommandTransaction } from '@joy-media/commands';
 import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
 import { bindClipToObject } from './sticker-bindings.js';
 import { withTimelineElementKinds } from './timeline-element-kind.js';
+import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
 export interface CaptionLayerInsertion {
   readonly label: string;
@@ -99,9 +100,20 @@ export function buildCaptionLayerInsertion({
       },
     },
   };
-  const nextProject = withTimelineElementKinds(bindClipToObject(withCaptions, clipId, objectId), {
-    [clipId]: 'caption',
-  });
+  const nextProject = upsertUniversalTimelineBinding(
+    withTimelineElementKinds(bindClipToObject(withCaptions, clipId, objectId), {
+      [clipId]: 'caption',
+    }),
+    {
+      id: clipId,
+      compositionId: timelineComposition.id,
+      trackId: `Captions-${token}`,
+      elementKind: 'caption',
+      startUs: 0,
+      durationUs,
+      source: { kind: 'caption', id: documentId },
+    },
+  );
   return {
     label,
     clipId,
@@ -117,6 +129,7 @@ export function buildCaptionLayerInsertion({
             track: {
               id: `Captions-${token}`,
               kind: 'video',
+              name: 'Captions',
               order,
               enabled: true,
               clips: [],

@@ -29,7 +29,13 @@ import {
   type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
-import type { ColorGradeIR, EffectInstanceIR, VideoFrameNode } from '@joy-media/render-ir';
+import type {
+  ColorGradeIR,
+  EffectInstanceIR,
+  RenderFrameIR,
+  VideoFrameNode,
+} from '@joy-media/render-ir';
+import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
@@ -113,6 +119,7 @@ import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
+import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
@@ -151,7 +158,11 @@ import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel, workerAudioDenoiseOperationId } from './JobsPanel.js';
 import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
-import { BrowserControlPlaneClient, type BrowserJob } from './control-plane-client.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserGpuPreviewSession,
+  type BrowserJob,
+} from './control-plane-client.js';
 import { importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -223,6 +234,11 @@ import {
   EDITOR_UI_PREFERENCES_KEY,
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
+import {
+  previewQualityLabel,
+  previewQualityResolution,
+  type PreviewQuality,
+} from './preview-quality.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
 import {
@@ -322,6 +338,10 @@ import {
   withEffectLayerTarget,
 } from './timeline-element-kind.js';
 import { reconcileTimelineSelection } from './timeline-selection.js';
+import {
+  recordPreviewResourceCreated,
+  recordPreviewResourceReleased,
+} from './preview-resource-audit.js';
 
 /** IR options for preview/export: effects, grade, and clip-timed transitions. */
 function renderFrameOptions(
@@ -372,6 +392,14 @@ function imageSizesFromCache(
     sizes[id] = { width: bitmap.width, height: bitmap.height };
   }
   return sizes;
+}
+
+function rgbaBase64(data: Uint8ClampedArray): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < data.length; offset += chunkSize)
+    binary += String.fromCharCode(...data.subarray(offset, offset + chunkSize));
+  return btoa(binary);
 }
 
 /**
@@ -1114,6 +1142,9 @@ function EditorWorkspace({
   const replacementGainNodeRef = useRef<GainNode | null>(null);
   const replacementPanNodeRef = useRef<StereoPannerNode | null>(null);
   const previewAudioDisposeTimerRef = useRef<number | undefined>(undefined);
+  const previewResourcePrefixRef = useRef(
+    `${projectId}:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
+  );
 
   const ensurePreviewAudioGraph = useCallback(() => {
     const video = videoRef.current;
@@ -1121,6 +1152,7 @@ function EditorWorkspace({
     if (!video || !replacementAudio) return;
     if (audioContextRef.current === null) {
       audioContextRef.current = new AudioContext();
+      recordPreviewResourceCreated('audio-context', `${previewResourcePrefixRef.current}:audio`);
     }
     const audioContext = audioContextRef.current;
     if (previewAudioSourceRef.current === null) {
@@ -1159,6 +1191,7 @@ function EditorWorkspace({
     replacementPanNodeRef.current = null;
     if (audioContext !== null && audioContext.state !== 'closed')
       void audioContext.close().catch(() => undefined);
+    recordPreviewResourceReleased('audio-context', `${previewResourcePrefixRef.current}:audio`);
   }, []);
   useEffect(() => {
     if (previewAudioDisposeTimerRef.current !== undefined) {
@@ -1377,9 +1410,34 @@ function EditorWorkspace({
         partnerVideoRef.current,
         partnerCanvasRef.current,
       );
+      recordPreviewResourceCreated(
+        'partner-decoder',
+        `${previewResourcePrefixRef.current}:partner`,
+      );
     }
     return { video: partnerVideoRef.current, decoder: partnerDecoderRef.current };
   }, []);
+  useEffect(
+    () => () => {
+      const partnerVideo = partnerVideoRef.current;
+      partnerVideo?.pause();
+      partnerVideo?.removeAttribute('src');
+      partnerVideo?.load();
+      partnerVideoRef.current = null;
+      partnerDecoderRef.current = null;
+      if (partnerCanvasRef.current !== null) {
+        partnerCanvasRef.current.width = 0;
+        partnerCanvasRef.current.height = 0;
+      }
+      partnerCanvasRef.current = null;
+      clipFrameCacheRef.current.clear();
+      recordPreviewResourceReleased(
+        'partner-decoder',
+        `${previewResourcePrefixRef.current}:partner`,
+      );
+    },
+    [],
+  );
 
   const captureTransitionPartnerFrames = useCallback(
     async (playheadUs: number): Promise<void> => {
@@ -1945,6 +2003,7 @@ function EditorWorkspace({
     captureTransitionPartnerFrames,
     rememberClipFrame,
     session,
+    controlPlaneProject,
     state.playing,
     syncMediaToPlayhead,
   ]);
@@ -1963,6 +2022,8 @@ function EditorWorkspace({
     captureCanvas.width = 0;
     captureCanvas.height = 0;
     const decoder = createHtmlMediaDecoder(video, captureCanvas);
+    const decoderResourceToken = `${previewResourcePrefixRef.current}:primary`;
+    recordPreviewResourceCreated('primary-decoder', decoderResourceToken);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
     const firstClip = activeVideoClipAt(session.timelineProject, 0, [], session.visualProject);
     if (firstClip !== undefined && firstClip.kind === 'video') {
@@ -1983,6 +2044,9 @@ function EditorWorkspace({
       video.load();
       replacementAudio?.removeAttribute('src');
       replacementAudio?.load();
+      captureCanvas.width = 0;
+      captureCanvas.height = 0;
+      recordPreviewResourceReleased('primary-decoder', decoderResourceToken);
     };
   }, [handleMediaReady, mediaResolver, session]);
   const togglePlayback = useCallback(() => {
@@ -2210,51 +2274,48 @@ function EditorWorkspace({
       const stickerCount = Object.values(session.visualProject.visualObjects).filter(
         (item) => item.kind === 'image',
       ).length;
-      session.dispatchVisualObjects({
-        label: `Add sticker ${asset.displayName ?? asset.assetId}`,
-        commands: [
-          {
-            type: 'image.create',
-            payload: {
-              object: {
-                id: objectId,
-                kind: 'image',
-                assetId: asset.assetId,
-                transform: {
-                  x: 120 + stickerCount * 40,
-                  y: 120 + stickerCount * 40,
-                  scaleX: 1,
-                  scaleY: 1,
-                  rotationDeg: 0,
-                  opacity: 1,
-                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                },
-              },
-            },
+      const label = `Add sticker ${asset.displayName ?? asset.assetId}`;
+      const clip: VideoClip = {
+        id: clipId,
+        kind: 'video',
+        assetId: asset.assetId,
+        startUs,
+        durationUs,
+        sourceInUs: 0,
+      };
+      const document = buildTimelineElementDocument({
+        baseProject: session.visualProject,
+        clipId,
+        planned: { compositionId: composition.id, trackId: track.id, clip },
+        elementKind: 'image',
+        source: { kind: 'object', id: objectId },
+        visualObject: {
+          id: objectId,
+          kind: 'image',
+          assetId: asset.assetId,
+          transform: {
+            x: 120 + stickerCount * 40,
+            y: 120 + stickerCount * 40,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
           },
-        ],
+        },
       });
-      session.dispatchTimeline({
-        label: `Place sticker ${asset.displayName ?? asset.assetId}`,
-        commands: [
-          {
-            type: 'timeline.insertClip',
-            payload: {
-              compositionId: composition.id,
-              trackId: track.id,
-              clip: {
-                id: clipId,
-                kind: 'video',
-                assetId: asset.assetId,
-                startUs,
-                durationUs,
-                sourceInUs: 0,
-              },
+      session.dispatchCompound(label, {
+        document,
+        timeline: {
+          label,
+          commands: [
+            {
+              type: 'timeline.insertClip',
+              payload: { compositionId: composition.id, trackId: track.id, clip },
             },
-          },
-        ],
+          ],
+        },
       });
-      session.replaceVisualProject(bindClipToObject(session.visualProject, clipId, objectId));
       await syncStickerBitmaps();
       setState((current) => ({ ...current, selectedIds: [clipId] }));
       setRevision((revision) => revision + 1);
@@ -2429,35 +2490,37 @@ function EditorWorkspace({
             ]
           : [insertClipCommand];
 
-      session.dispatchVisualObjects({
-        label: `Add HTML scene ${scenePackageId}`,
-        commands: [
-          {
-            type: 'htmlScene.create',
-            payload: {
-              object: {
-                id: objectId,
-                kind: 'html-scene',
-                scenePackageId,
-                transform: {
-                  x: 80 + sceneCount * 40,
-                  y: 120,
-                  scaleX: 1,
-                  scaleY: 1,
-                  rotationDeg: 0,
-                  opacity: 1,
-                  crop: { left: 0, top: 0, right: 0, bottom: 0 },
-                },
-              },
-            },
-          },
-        ],
+      const object: VisualObjectV1 = {
+        id: objectId,
+        kind: 'html-scene',
+        scenePackageId,
+        transform: {
+          x: 80 + sceneCount * 40,
+          y: 120,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      };
+      const document = buildTimelineElementDocument({
+        baseProject: session.visualProject,
+        clipId,
+        planned: {
+          compositionId: composition.id,
+          trackId: targetTrackId,
+          clip: insertClipCommand.payload.clip,
+        },
+        elementKind: 'html-scene',
+        source: { kind: 'object', id: objectId },
+        visualObject: object,
       });
-      session.dispatchTimeline({
-        label: `Place HTML scene ${scenePackageId}`,
-        commands: timelineCommands,
+      const label = `Place HTML scene ${scenePackageId}`;
+      session.dispatchCompound(label, {
+        document,
+        timeline: { label, commands: timelineCommands },
       });
-      session.replaceVisualProject(bindClipToObject(session.visualProject, clipId, objectId));
       setState((current) => ({ ...current, selectedIds: [clipId] }));
       setRevision((revision) => revision + 1);
     },
@@ -6345,6 +6408,7 @@ function MonitorPanel() {
     clipFrameTick,
     visualProject,
     timelineProject,
+    controlPlaneProject,
     stickerTick,
     togglePlayback,
     seek,
@@ -6359,6 +6423,7 @@ function MonitorPanel() {
   const rendererPromiseRef = useRef<Promise<BrowserPixiRenderer> | null>(null);
   const rendererDisposeTimerRef = useRef<number | undefined>(undefined);
   const paintRef = useRef<() => void>(() => {});
+  const currentFrameRef = useRef<RenderFrameIR | undefined>(undefined);
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -6371,6 +6436,25 @@ function MonitorPanel() {
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
+  const initialPreviewPreference = useRef(
+    loadEditorUiPreferences(window.localStorage).monitorPreview ??
+      DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview!,
+  );
+  const [previewQuality, setPreviewQuality] = useState<PreviewQuality>(
+    initialPreviewPreference.current.quality,
+  );
+  const [previewRenderer, setPreviewRenderer] = useState<'auto' | 'gpu-worker' | 'local'>(
+    initialPreviewPreference.current.renderer,
+  );
+  const [gpuSession, setGpuSession] = useState<BrowserGpuPreviewSession | undefined>(undefined);
+  const [gpuPreviewUrl, setGpuPreviewUrl] = useState<string | undefined>(undefined);
+  const [gpuPreviewStatus, setGpuPreviewStatus] = useState<
+    'local' | 'connecting' | 'hardware-gpu' | 'fallback'
+  >(previewRenderer === 'local' ? 'local' : 'connecting');
+  const gpuRequestIdRef = useRef(0);
+  const monitorResourceTokenRef = useRef(
+    `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
+  );
 
   useEffect(() => {
     const syncFullscreenState = () =>
@@ -6468,6 +6552,7 @@ function MonitorPanel() {
       previewVideoFrame === undefined
         ? visualFrame
         : withVideoFrameNode(visualFrame, previewVideoFrame.node);
+    currentFrameRef.current = frame;
     const videoBitmaps = new Map(clipFrameCache);
     if (previewVideoFrame !== undefined) {
       videoBitmaps.set(previewVideoFrame.node.id, previewVideoFrame.bitmap);
@@ -6484,24 +6569,31 @@ function MonitorPanel() {
       state.playheadUs,
       videoBitmaps,
     );
+    renderer.setResolution(previewQualityResolution(previewQuality));
     renderer.render(frame, videoBitmaps);
   };
 
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
+    const rendererResourceToken = monitorResourceTokenRef.current;
     if (rendererDisposeTimerRef.current !== undefined) {
       window.clearTimeout(rendererDisposeTimerRef.current);
       rendererDisposeTimerRef.current = undefined;
     }
     let disposed = false;
     const initialization =
-      rendererPromiseRef.current ?? createBrowserPixiRenderer({ parent: container });
+      rendererPromiseRef.current ??
+      createBrowserPixiRenderer({
+        parent: container,
+        resolution: previewQualityResolution(previewQuality),
+      });
     rendererPromiseRef.current = initialization;
     initialization
       .then((created) => {
         if (disposed) return;
         rendererRef.current = created;
+        recordPreviewResourceCreated('pixi-renderer', rendererResourceToken);
         setMonitorPixelReader(() => created.readPixels());
         paintRef.current();
       })
@@ -6523,11 +6615,168 @@ function MonitorPanel() {
         rendererRef.current = null;
         setMonitorPixelReader(undefined);
         if (pending !== null)
-          void pending.then((created) => created.destroy()).catch(() => undefined);
-        else existing?.destroy();
+          void pending
+            .then((created) => created.destroy())
+            .catch(() => undefined)
+            .finally(() => recordPreviewResourceReleased('pixi-renderer', rendererResourceToken));
+        else {
+          existing?.destroy();
+          recordPreviewResourceReleased('pixi-renderer', rendererResourceToken);
+        }
       }, 0);
     };
-  }, []);
+  }, [previewQuality]);
+
+  useEffect(() => {
+    const current = loadEditorUiPreferences(window.localStorage);
+    saveEditorUiPreferences(window.localStorage, {
+      ...current,
+      monitorPreview: { quality: previewQuality, renderer: previewRenderer },
+    });
+  }, [previewQuality, previewRenderer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let opened: BrowserGpuPreviewSession | undefined;
+    if (previewRenderer === 'local') {
+      setGpuSession(undefined);
+      setGpuPreviewStatus('local');
+      return;
+    }
+    setGpuPreviewStatus('connecting');
+    void mediaControlPlaneClient
+      .openGpuPreviewSession(controlPlaneProject.controlPlaneProjectId)
+      .then((session) => {
+        if (cancelled) {
+          void mediaControlPlaneClient
+            .closeGpuPreviewSession(session.sessionId)
+            .catch(() => undefined);
+          return;
+        }
+        opened = session;
+        setGpuSession(session);
+        setGpuPreviewStatus('hardware-gpu');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGpuSession(undefined);
+        setGpuPreviewStatus('fallback');
+      });
+    return () => {
+      cancelled = true;
+      setGpuSession(undefined);
+      if (opened !== undefined)
+        void mediaControlPlaneClient
+          .closeGpuPreviewSession(opened.sessionId)
+          .catch(() => undefined);
+    };
+  }, [controlPlaneProject.controlPlaneProjectId, previewRenderer]);
+
+  useEffect(() => {
+    if (previewRenderer === 'local' || gpuSession === undefined || state.playing) return;
+    const frame = currentFrameRef.current;
+    if (frame === undefined) return;
+    const requestId = ++gpuRequestIdRef.current;
+    const controller = new AbortController();
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await mediaControlPlaneClient.submitGpuPreviewFrame({
+            protocolVersion: WORKER_PROTOCOL_VERSION,
+            capability: 'render.preview.gpu',
+            sessionId: gpuSession.sessionId,
+            sessionToken: gpuSession.sessionToken,
+            requestId,
+            projectId: controlPlaneProject.controlPlaneProjectId,
+            projectRevisionId: session.projectRevisionId,
+            compositionId: frame.compositionId,
+            timeUs: frame.timeUs,
+            quality: previewQuality,
+            deadlineMs: 2_000,
+            frame,
+            bitmaps: [
+              ...(previewVideoFrame === undefined
+                ? []
+                : [
+                    {
+                      nodeId: previewVideoFrame.node.id,
+                      width: previewVideoFrame.bitmap.width,
+                      height: previewVideoFrame.bitmap.height,
+                      rgbaBase64: rgbaBase64(previewVideoFrame.bitmap.data),
+                    },
+                  ]),
+              ...[...clipFrameCache.entries()]
+                .filter(([nodeId]) => nodeId !== previewVideoFrame?.node.id)
+                .slice(-1)
+                .map(([nodeId, bitmap]) => ({
+                  nodeId,
+                  width: bitmap.width,
+                  height: bitmap.height,
+                  rgbaBase64: rgbaBase64(bitmap.data),
+                })),
+            ],
+            noStore: true,
+          });
+          const deadline = performance.now() + 2_000;
+          while (!cancelled && performance.now() < deadline) {
+            const result = await mediaControlPlaneClient.gpuPreviewFrame(
+              gpuSession.sessionId,
+              requestId,
+              controller.signal,
+            );
+            if (result !== undefined) {
+              if (cancelled || requestId !== gpuRequestIdRef.current) return;
+              const nextUrl = URL.createObjectURL(result.blob);
+              recordPreviewResourceCreated('gpu-frame-url', nextUrl);
+              setGpuPreviewUrl((previous) => {
+                if (previous !== undefined) {
+                  URL.revokeObjectURL(previous);
+                  recordPreviewResourceReleased('gpu-frame-url', previous);
+                }
+                return nextUrl;
+              });
+              setGpuPreviewStatus('hardware-gpu');
+              return;
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 40));
+          }
+          if (!cancelled) setGpuPreviewStatus('fallback');
+        } catch (error) {
+          if (!cancelled && !(error instanceof DOMException && error.name === 'AbortError'))
+            setGpuPreviewStatus('fallback');
+        }
+      })();
+    }, 80);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [
+    clipFrameTick,
+    clipFrameCache,
+    controlPlaneProject.controlPlaneProjectId,
+    gpuSession,
+    previewQuality,
+    previewRenderer,
+    previewVideoFrame,
+    sceneTick,
+    session,
+    state.playheadUs,
+    state.playing,
+    visualProject,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (gpuPreviewUrl !== undefined) {
+        URL.revokeObjectURL(gpuPreviewUrl);
+        recordPreviewResourceReleased('gpu-frame-url', gpuPreviewUrl);
+      }
+    },
+    [gpuPreviewUrl],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -6718,6 +6967,14 @@ function MonitorPanel() {
           className="monitor-canvas"
           style={viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }}
         />
+        {gpuPreviewUrl !== undefined && !state.playing && gpuPreviewStatus === 'hardware-gpu' && (
+          <img
+            className="monitor-gpu-frame"
+            src={gpuPreviewUrl}
+            alt="Hardware GPU Worker preview"
+            data-preview-renderer="hardware-gpu"
+          />
+        )}
       </div>
       <div className="monitor-transport" ref={transportRef}>
         {zoomDrawerOpen && (
@@ -6809,6 +7066,46 @@ function MonitorPanel() {
           </button>
         </div>
         <div className="monitor-transport-end">
+          <label className="monitor-preview-control">
+            <span>Quality</span>
+            <select
+              aria-label="Monitor preview quality"
+              value={previewQuality}
+              onChange={(event) => setPreviewQuality(event.target.value as PreviewQuality)}
+            >
+              {(['quarter', 'half', 'full'] as const).map((quality) => (
+                <option key={quality} value={quality}>
+                  {previewQualityLabel(quality)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="monitor-preview-control">
+            <span>Renderer</span>
+            <select
+              aria-label="Monitor preview renderer"
+              value={previewRenderer}
+              onChange={(event) =>
+                setPreviewRenderer(event.target.value as 'auto' | 'gpu-worker' | 'local')
+              }
+            >
+              <option value="auto">Auto</option>
+              <option value="gpu-worker">GPU Worker</option>
+              <option value="local">Local</option>
+            </select>
+          </label>
+          <span
+            className={`monitor-preview-status is-${gpuPreviewStatus}`}
+            title={gpuSession === undefined ? undefined : `Worker ${gpuSession.workerId}`}
+          >
+            {gpuPreviewStatus === 'hardware-gpu'
+              ? 'GPU'
+              : gpuPreviewStatus === 'connecting'
+                ? 'Connecting'
+                : gpuPreviewStatus === 'fallback'
+                  ? 'Local fallback'
+                  : 'Local'}
+          </span>
           <button
             type="button"
             className="monitor-transport-btn"

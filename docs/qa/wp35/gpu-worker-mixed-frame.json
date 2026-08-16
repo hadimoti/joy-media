@@ -1,0 +1,15 @@
+{
+  "renderer": "hardware-gpu",
+  "hardware": {
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Ti (0x00002C05) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "vendor": "Google Inc. (NVIDIA)",
+    "backend": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+  },
+  "quality": "quarter",
+  "width": 160,
+  "height": 90,
+  "bytes": 4021,
+  "sha256": "9dee89ef2a67141cb2ee075e6ec5a6991eb9e639d2dee59a7a7cab6c35ee366c",
+  "latencyMs": 163.9,
+  "png": "docs/qa/wp35/gpu-worker-mixed-frame.png"
+}

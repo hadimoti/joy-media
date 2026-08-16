@@ -1,11 +1,13 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerControlPlaneClient } from './control-plane-client.js';
 import type { WorkerRuntime } from './runtime.js';
+import type { GpuPreviewHost } from './gpu-preview-host.js';
 
 export class WorkerDaemon {
   constructor(
     private readonly client: WorkerControlPlaneClient,
     private readonly runtime: WorkerRuntime,
+    private readonly gpuPreviewHost?: GpuPreviewHost,
   ) {}
 
   /** Polls from the local machine; the VPS never opens a connection to it. */
@@ -14,6 +16,12 @@ export class WorkerDaemon {
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    if (this.gpuPreviewHost !== undefined)
+      void this.runGpuPreviewLoop(options.stopped).catch((error: unknown) => {
+        this.runtime.log.write(
+          `GPU preview loop stopped: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
+        );
+      });
     await this.client.hello(
       this.runtime.hello(process.platform, process.arch).capabilities,
       this.runtime.localAssetIds(),
@@ -103,6 +111,31 @@ export class WorkerDaemon {
           leasedJobId = undefined;
         }
         await sleep(pollIntervalMs);
+      }
+    }
+  }
+
+  private async runGpuPreviewLoop(stopped: () => boolean): Promise<void> {
+    const host = this.gpuPreviewHost;
+    if (host === undefined) return;
+    while (!stopped()) {
+      try {
+        const request = await this.client.nextGpuPreview();
+        if (request === undefined) {
+          await sleep(40);
+          continue;
+        }
+        const startedAt = Date.now();
+        const response = await host.render(request);
+        await this.client.completeGpuPreview(response);
+        this.runtime.log.write(
+          `GPU preview ${request.requestId} rendered ${response.width}x${response.height} in ${Date.now() - startedAt}ms`,
+        );
+      } catch (error) {
+        this.runtime.log.write(
+          `GPU preview failed: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
+        );
+        await sleep(500);
       }
     }
   }

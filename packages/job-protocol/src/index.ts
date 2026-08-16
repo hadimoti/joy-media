@@ -37,6 +37,7 @@ export type {
   GpuPreviewFrameResponse,
   PreviewQuality,
   PreviewAssetToken,
+  GpuPreviewBitmap,
   GpuPreviewSession,
   OpenGpuPreviewSessionInput,
   GpuPreviewRequestGateLimits,

@@ -19,6 +19,14 @@ const request = (requestId: number): GpuPreviewFrameRequest => ({
   timeUs: requestId * 1_000,
   quality: 'quarter',
   deadlineMs: 250,
+  frame: {
+    version: 1,
+    compositionId: 'root',
+    timeUs: requestId * 1_000,
+    viewport: { width: 320, height: 180, dpr: 1 },
+    background: { r: 0, g: 0, b: 0, a: 255 },
+    nodes: [],
+  },
 });
 
 describe('GPU preview request queue', () => {

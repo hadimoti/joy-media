@@ -103,20 +103,11 @@ export function universalTrackCode(trackIndex: number): string {
 
 export function universalTrackDisplayName(trackIndex: number, explicitName?: string): string {
   const trimmed = explicitName?.trim();
-  return trimmed === undefined || trimmed.length === 0 || isLegacyKindLabel(trimmed)
+  // Compatibility mode changes what a row accepts, not its persisted
+  // identity. The backend `track.name` remains the source of truth so Agent,
+  // Worker, API, and editor surfaces all describe the same row. Only genuinely
+  // unnamed legacy rows receive a neutral fallback.
+  return trimmed === undefined || trimmed.length === 0
     ? `Layer ${Math.max(1, trackIndex)}`
     : trimmed;
-}
-
-/**
- * Legacy projects persisted presentation labels such as "Main Video" and
- * "Captions" on tracks. They are not capabilities, so do not expose them as
- * the universal row identity after the compatibility projection is enabled.
- * User-authored names (including "Hero" or "Layer 1") remain intact.
- */
-function isLegacyKindLabel(value: string): boolean {
-  const normalized = value.replace(/\s+/g, ' ').trim().toLowerCase();
-  return /^(main video|b-?roll|video(?: \d+)?|overlay|3d scene|text|captions?|cc captions?|motion graphic|effects?|audio(?: \d+)?|voice|script(?: \d+)?)$/.test(
-    normalized,
-  );
 }

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import type { SeededContentTemplate } from './content-template-types.js';
@@ -44,14 +43,16 @@ function emptyVisualProject(): JoyProjectV1 {
 }
 
 function makeMockSession(timelineProject: SpikeProject, visualProject: JoyProjectV1) {
-  const dispatchTimeline = vi.fn<(tx: CommandTransaction) => SpikeProject>();
-  const dispatchVisualObjects = vi.fn<(tx: VisualObjectTransaction) => JoyProjectV1>();
-  const replaceVisualProject = vi.fn<(p: JoyProjectV1) => JoyProjectV1>();
+  const dispatchCompound =
+    vi.fn<
+      (
+        label: string,
+        parts: { readonly document?: JoyProjectV1; readonly timeline?: CommandTransaction },
+      ) => void
+    >();
 
   return {
-    dispatchTimeline,
-    dispatchVisualObjects,
-    replaceVisualProject,
+    dispatchCompound,
     session: {
       get timelineProject() {
         return timelineProject;
@@ -59,9 +60,7 @@ function makeMockSession(timelineProject: SpikeProject, visualProject: JoyProjec
       get visualProject() {
         return visualProject;
       },
-      dispatchTimeline,
-      dispatchVisualObjects,
-      replaceVisualProject,
+      dispatchCompound,
     } as unknown as EditorSession,
   };
 }
@@ -70,7 +69,7 @@ const PLAYHEAD_US = 0;
 
 describe('buildContentTemplateTransaction', () => {
   it('dispatches one visual-object command and one timeline command for a single html-scene action', () => {
-    const { session, dispatchTimeline, dispatchVisualObjects } = makeMockSession(
+    const { session, dispatchCompound } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -91,22 +90,16 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: PLAYHEAD_US,
     });
 
-    expect(dispatchVisualObjects).toHaveBeenCalledTimes(1);
-    const voCall = dispatchVisualObjects.mock.calls[0]![0];
-    expect(voCall.commands).toHaveLength(1);
-    expect(voCall.commands[0]!.type).toBe('htmlScene.create');
-    expect((voCall.commands[0] as { payload: { object: { id: string } } }).payload.object.id).toBe(
-      'joy.title-0-abc',
-    );
-
-    expect(dispatchTimeline).toHaveBeenCalledTimes(1);
-    const tlCall = dispatchTimeline.mock.calls[0]![0];
+    expect(dispatchCompound).toHaveBeenCalledTimes(1);
+    const parts = dispatchCompound.mock.calls[0]![1];
+    expect(parts.document?.visualObjects).toHaveProperty('joy.title-0-abc');
+    const tlCall = parts.timeline!;
     expect(tlCall.commands).toHaveLength(1);
     expect(tlCall.commands[0]!.type).toBe('timeline.insertClip');
   });
 
   it('binds the created clip to the visual object via replaceVisualProject', () => {
-    const { session, replaceVisualProject } = makeMockSession(
+    const { session, dispatchCompound } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -127,17 +120,16 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: PLAYHEAD_US,
     });
 
-    expect(replaceVisualProject).toHaveBeenCalledTimes(1);
-    const boundProject = replaceVisualProject.mock.calls[0]![0];
+    const boundProject = dispatchCompound.mock.calls[0]![1].document!;
     expect(boundProject.pluginData).toHaveProperty('joy.clipObjects');
   });
 
   it('same seed produces same IDs across two calls', () => {
-    const { session: s1, dispatchVisualObjects: dv1 } = makeMockSession(
+    const { session: s1, dispatchCompound: dv1 } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
-    const { session: s2, dispatchVisualObjects: dv2 } = makeMockSession(
+    const { session: s2, dispatchCompound: dv2 } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -163,21 +155,17 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: PLAYHEAD_US,
     });
 
-    const ids1 = (
-      dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
-    ).map((c) => c.payload.object.id);
-    const ids2 = (
-      dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
-    ).map((c) => c.payload.object.id);
+    const ids1 = Object.keys(dv1.mock.calls[0]![1].document!.visualObjects);
+    const ids2 = Object.keys(dv2.mock.calls[0]![1].document!.visualObjects);
     expect(ids1).toEqual(ids2);
   });
 
   it('different seed produces different IDs from same template', () => {
-    const { session: s1, dispatchVisualObjects: dv1 } = makeMockSession(
+    const { session: s1, dispatchCompound: dv1 } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
-    const { session: s2, dispatchVisualObjects: dv2 } = makeMockSession(
+    const { session: s2, dispatchCompound: dv2 } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -203,17 +191,13 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: PLAYHEAD_US,
     });
 
-    const ids1 = (
-      dv1.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
-    ).map((c) => c.payload.object.id);
-    const ids2 = (
-      dv2.mock.calls[0]![0].commands as unknown as Array<{ payload: { object: { id: string } } }>
-    ).map((c) => c.payload.object.id);
+    const ids1 = Object.keys(dv1.mock.calls[0]![1].document!.visualObjects);
+    const ids2 = Object.keys(dv2.mock.calls[0]![1].document!.visualObjects);
     expect(ids1).not.toEqual(ids2);
   });
 
   it('adds a new track when no suitable existing track is available', () => {
-    const { session, dispatchTimeline } = makeMockSession(
+    const { session, dispatchCompound } = makeMockSession(
       emptySpikeProject({ trackCount: 0 }),
       emptyVisualProject(),
     );
@@ -234,14 +218,14 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: PLAYHEAD_US,
     });
 
-    const tlCall = dispatchTimeline.mock.calls[0]![0];
+    const tlCall = dispatchCompound.mock.calls[0]![1].timeline!;
     expect(tlCall.commands).toHaveLength(2);
     expect(tlCall.commands[0]!.type).toBe('timeline.addTrack');
     expect(tlCall.commands[1]!.type).toBe('timeline.insertClip');
   });
 
   it('does not reject duplicate application of the same template', () => {
-    const { session, dispatchVisualObjects, dispatchTimeline } = makeMockSession(
+    const { session, dispatchCompound } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -269,12 +253,11 @@ describe('buildContentTemplateTransaction', () => {
       });
     }).not.toThrow();
 
-    expect(dispatchVisualObjects).toHaveBeenCalledTimes(2);
-    expect(dispatchTimeline).toHaveBeenCalledTimes(2);
+    expect(dispatchCompound).toHaveBeenCalledTimes(2);
   });
 
   it('places two clips with correct duration (5 seconds each)', () => {
-    const { session, dispatchTimeline } = makeMockSession(
+    const { session, dispatchCompound } = makeMockSession(
       emptyTimelineProject(),
       emptyVisualProject(),
     );
@@ -298,7 +281,7 @@ describe('buildContentTemplateTransaction', () => {
       playheadUs: 0,
     });
 
-    const tlCall = dispatchTimeline.mock.calls[0]![0];
+    const tlCall = dispatchCompound.mock.calls[0]![1].timeline!;
     const insertCommands = tlCall.commands.filter(
       (c: { type: string }) => c.type === 'timeline.insertClip',
     ) as Array<{ payload: { clip: { startUs: number; durationUs: number } } }>;
@@ -308,5 +291,37 @@ describe('buildContentTemplateTransaction', () => {
     expect(clip2!.payload.clip.startUs).toBe(0);
     expect(clip1!.payload.clip.durationUs).toBe(5_000_000);
     expect(clip2!.payload.clip.durationUs).toBe(5_000_000);
+  });
+
+  it('has one atomic failure boundary for document, binding, track, and clip placement', () => {
+    const { session, dispatchCompound } = makeMockSession(
+      emptyTimelineProject(),
+      emptyVisualProject(),
+    );
+    dispatchCompound.mockImplementation(() => {
+      throw new Error('injected persistence failure');
+    });
+    const seeded: SeededContentTemplate = {
+      template: {
+        id: 'joy.title',
+        label: 'JOY Title',
+        description: 'Main title',
+        category: 'Titles',
+        actions: [{ kind: 'html-scene', sceneId: 'joy.firstparty.title' }],
+      },
+      seed: 'rollback',
+    };
+    expect(() =>
+      buildContentTemplateTransaction(seeded, {
+        session,
+        selectedClipIds: [],
+        playheadUs: PLAYHEAD_US,
+      }),
+    ).toThrow('injected persistence failure');
+    expect(dispatchCompound).toHaveBeenCalledTimes(1);
+    expect(session.visualProject.visualObjects).toEqual({});
+    expect(
+      session.timelineProject.compositions.root?.tracks.every((track) => track.clips.length === 0),
+    ).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { CommandError } from '@joy-media/commands';
 import type { CommandDispatchResult, CommandDispatcher } from '@joy-media/agent-tools';
 import type { EditorSession } from './editor-session.js';
+import { updateUniversalTimelineForTransaction } from './universal-placement.js';
 
 /**
  * WP-15.1: the real seam between `@joy-media/agent-tools`' edit tools and the
@@ -25,7 +26,10 @@ export function createAgentCommandBus(
   return {
     dispatchTimeline(commands, label): CommandDispatchResult {
       try {
-        session.dispatchTimeline({ label, commands });
+        const timeline = { label, commands };
+        const document = updateUniversalTimelineForTransaction(session.visualProject, timeline);
+        if (document === session.visualProject) session.dispatchTimeline(timeline);
+        else session.dispatchCompound(label, { timeline, document });
         return { success: true };
       } catch (error) {
         if (error instanceof CommandError) {

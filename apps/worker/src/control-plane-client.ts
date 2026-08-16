@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DeviceIdentity } from './runtime.js';
+import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
@@ -111,6 +112,30 @@ export class WorkerControlPlaneClient {
     );
   }
 
+  async nextGpuPreview(): Promise<GpuPreviewFrameRequest | undefined> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/preview/next`,
+      {},
+    );
+    return result === null || result === undefined ? undefined : (result as GpuPreviewFrameRequest);
+  }
+
+  async completeGpuPreview(response: GpuPreviewFrameResponse): Promise<void> {
+    await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/preview/frames/${encodeURIComponent(response.sessionId)}/${response.requestId}`,
+      {
+        protocolVersion: response.protocolVersion,
+        sessionId: response.sessionId,
+        requestId: response.requestId,
+        renderer: response.renderer,
+        quality: response.quality,
+        width: response.width,
+        height: response.height,
+        bytesBase64: Buffer.from(response.bytes).toString('base64'),
+      },
+    );
+  }
+
   async heartbeat(jobId: string, progress: number): Promise<{ readonly cancelRequested: boolean }> {
     const result = await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/heartbeat`,
@@ -159,7 +184,10 @@ export class WorkerControlPlaneClient {
       {
         method: 'POST',
         headers,
-        body: bytes,
+        body: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer,
       },
     );
     if (response.status === 401) {

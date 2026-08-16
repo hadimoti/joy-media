@@ -948,6 +948,91 @@ describe('control-plane HTTP transport', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('relays an authenticated no-store GPU frame without creating a durable job', async () => {
+    const controlPlane = new LocalControlPlane();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    await request(origin, 'POST', '/v1/projects', { id: 'gpu-project', title: 'GPU project' });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'worker-gpu',
+      pairingCode: 'pair-code',
+    });
+    await request(origin, 'POST', '/v1/workers/worker-gpu/pair', { pairingCode: 'pair-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'worker-gpu',
+      pairingCode: 'pair-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/worker-gpu/hello',
+      { capabilities: ['render.preview.gpu'], assetIds: [] },
+      workerToken,
+    );
+    const opened = await request(origin, 'POST', '/v1/projects/gpu-project/preview-sessions', {});
+    const session = (opened.body as { data: { sessionId: string; sessionToken: string } }).data;
+    const frame = {
+      protocolVersion: 1,
+      capability: 'render.preview.gpu',
+      sessionId: session.sessionId,
+      sessionToken: session.sessionToken,
+      requestId: 1,
+      projectId: 'gpu-project',
+      projectRevisionId: 'revision-1',
+      compositionId: 'root',
+      timeUs: 0,
+      quality: 'quarter',
+      deadlineMs: 1_000,
+      noStore: true,
+      frame: {
+        version: 1,
+        compositionId: 'root',
+        timeUs: 0,
+        viewport: { width: 320, height: 180, dpr: 1 },
+        background: { r: 0, g: 0, b: 0, a: 255 },
+        nodes: [],
+      },
+    };
+    expect(
+      await request(origin, 'POST', `/v1/preview-sessions/${session.sessionId}/frames`, frame),
+    ).toMatchObject({ status: 202 });
+    expect(
+      await request(origin, 'POST', '/v1/workers/worker-gpu/preview/next', {}, workerToken),
+    ).toMatchObject({ status: 200, body: { data: { requestId: 1, noStore: true } } });
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    expect(
+      await request(
+        origin,
+        'POST',
+        `/v1/workers/worker-gpu/preview/frames/${session.sessionId}/1`,
+        {
+          protocolVersion: 1,
+          sessionId: session.sessionId,
+          requestId: 1,
+          renderer: 'hardware-gpu',
+          quality: 'quarter',
+          width: 80,
+          height: 45,
+          bytesBase64: png.toString('base64'),
+        },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 200 });
+    const result = await fetch(`${origin}/v1/preview-sessions/${session.sessionId}/frames/1`, {
+      headers: { authorization: 'Bearer owner' },
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get('cache-control')).toContain('no-store');
+    expect(result.headers.get('x-joy-preview-renderer')).toBe('hardware-gpu');
+    expect(Buffer.from(await result.arrayBuffer())).toEqual(png);
+    expect(await controlPlane.jobsForProject({ id: 'owner' }, 'gpu-project')).toEqual([]);
+  });
 });
 
 async function start(

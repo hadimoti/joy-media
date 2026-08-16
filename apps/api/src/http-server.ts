@@ -29,6 +29,12 @@ import {
   MemorySpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
+import {
+  GpuPreviewTransport,
+  deserializeGpuPreviewResponse,
+  type SerializedGpuPreviewFrameResponse,
+} from './gpu-preview-transport.js';
+import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -43,6 +49,8 @@ export interface ControlPlaneHttpServerOptions {
   readonly mistral?: MistralProviderRegistry;
   /** Durable in production; injectable so transport tests never need ffmpeg. */
   readonly audioDenoise?: SpectralDenoiseService;
+  /** In-memory only; injectable for deterministic transport tests. */
+  readonly gpuPreview?: GpuPreviewTransport;
 }
 
 /**
@@ -58,6 +66,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     audioDenoise:
       options.audioDenoise ??
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
+    gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
   };
   return createServer(async (request, response) => {
     try {
@@ -73,6 +82,7 @@ async function route(
     readonly mistral: MistralProviderRegistry;
     readonly mediaAuth: MediaAuthApi;
     readonly audioDenoise: SpectralDenoiseService;
+    readonly gpuPreview: GpuPreviewTransport;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -131,6 +141,9 @@ async function route(
   const workerDerivativeUploadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/derivative$/.exec(
     url.pathname,
   );
+  const workerPreviewNextMatch = /^\/v1\/workers\/([^/]+)\/preview\/next$/.exec(url.pathname);
+  const workerPreviewCompleteMatch =
+    /^\/v1\/workers\/([^/]+)\/preview\/frames\/([^/]+)\/([0-9]+)$/.exec(url.pathname);
   if (
     request.method === 'POST' &&
     (workerLeaseMatch !== null ||
@@ -138,7 +151,9 @@ async function route(
       workerHeartbeatMatch !== null ||
       workerCompleteMatch !== null ||
       workerFailMatch !== null ||
-      workerDerivativeUploadMatch !== null)
+      workerDerivativeUploadMatch !== null ||
+      workerPreviewNextMatch !== null ||
+      workerPreviewCompleteMatch !== null)
   ) {
     const workerId =
       workerLeaseMatch?.[1] ??
@@ -146,7 +161,9 @@ async function route(
       workerHeartbeatMatch?.[1] ??
       workerCompleteMatch?.[1] ??
       workerFailMatch?.[1] ??
-      workerDerivativeUploadMatch?.[1];
+      workerDerivativeUploadMatch?.[1] ??
+      workerPreviewNextMatch?.[1] ??
+      workerPreviewCompleteMatch?.[1];
     const sessionWorkerId = await options.controlPlane.authenticateWorker(
       workerSessionHash(request),
     );
@@ -161,6 +178,28 @@ async function route(
         durationMs,
       );
       respondJson(response, 200, { data: job ?? null });
+      return;
+    }
+    if (workerPreviewNextMatch !== null) {
+      await readJson(request, 1_024);
+      respondNoStoreJson(response, 200, {
+        data: options.gpuPreview.take(decodeURIComponent(workerId)),
+      });
+      return;
+    }
+    if (workerPreviewCompleteMatch !== null) {
+      const body = await readJson(request, 24 * 1024 * 1024);
+      const serialized = serializedGpuPreviewResponse(body);
+      if (
+        serialized.sessionId !== decodeURIComponent(workerPreviewCompleteMatch[2]!) ||
+        serialized.requestId !== Number(workerPreviewCompleteMatch[3]!)
+      )
+        throw new ControlPlaneError('REQUEST_INVALID', 'GPU preview response identity mismatch');
+      options.gpuPreview.complete(
+        decodeURIComponent(workerId),
+        deserializeGpuPreviewResponse(serialized),
+      );
+      respondNoStoreJson(response, 200, { data: { accepted: true } });
       return;
     }
     if (workerHelloMatch !== null) {
@@ -322,6 +361,61 @@ async function route(
 
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  const openPreviewSessionMatch = /^\/v1\/projects\/([^/]+)\/preview-sessions$/.exec(url.pathname);
+  if (request.method === 'POST' && openPreviewSessionMatch !== null) {
+    await readJson(request, 1_024);
+    const session = await options.gpuPreview.open(
+      actor,
+      decodeURIComponent(openPreviewSessionMatch[1]!),
+    );
+    respondNoStoreJson(response, 201, { data: session });
+    return;
+  }
+  const previewFrameMatch = /^\/v1\/preview-sessions\/([^/]+)\/frames$/.exec(url.pathname);
+  if (request.method === 'POST' && previewFrameMatch !== null) {
+    const body = await readJson(request, 24 * 1024 * 1024);
+    const frame = body as unknown as GpuPreviewFrameRequest;
+    if (frame.sessionId !== decodeURIComponent(previewFrameMatch[1]!))
+      throw new ControlPlaneError('REQUEST_INVALID', 'GPU preview request identity mismatch');
+    options.gpuPreview.offer(actor, frame);
+    respondNoStoreJson(response, 202, { data: { accepted: true, requestId: frame.requestId } });
+    return;
+  }
+  const previewResultMatch = /^\/v1\/preview-sessions\/([^/]+)\/frames\/([0-9]+)$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && previewResultMatch !== null) {
+    const result = options.gpuPreview.result(
+      actor,
+      decodeURIComponent(previewResultMatch[1]!),
+      Number(previewResultMatch[2]!),
+    );
+    if (result === undefined) {
+      respondNoStoreJson(response, 202, { data: null });
+      return;
+    }
+    response.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(result.bytes.byteLength),
+      'cache-control': 'private, no-store, max-age=0',
+      pragma: 'no-cache',
+      'x-content-type-options': 'nosniff',
+      'x-joy-preview-renderer': result.renderer,
+      'x-joy-preview-quality': result.quality,
+      'x-joy-preview-width': String(result.width),
+      'x-joy-preview-height': String(result.height),
+      'x-joy-preview-request-id': String(result.requestId),
+    });
+    response.end(Buffer.from(result.bytes));
+    return;
+  }
+  const previewSessionMatch = /^\/v1\/preview-sessions\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'DELETE' && previewSessionMatch !== null) {
+    options.gpuPreview.close(actor, decodeURIComponent(previewSessionMatch[1]!));
+    respondNoStoreJson(response, 200, { data: { closed: true } });
+    return;
+  }
 
   const browserRemuxMatch = /^\/v1\/projects\/([^/]+)\/export\/remux$/.exec(url.pathname);
   if (request.method === 'POST' && browserRemuxMatch !== null) {
@@ -1667,6 +1761,55 @@ function requiredObject(body: Record<string, unknown>, field: string): Record<st
 function respondJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
+}
+
+function respondNoStoreJson(response: ServerResponse, status: number, payload: unknown): void {
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'private, no-store, max-age=0',
+    pragma: 'no-cache',
+  });
+  response.end(JSON.stringify(payload));
+}
+
+function serializedGpuPreviewResponse(
+  body: Record<string, unknown>,
+): SerializedGpuPreviewFrameResponse {
+  const protocolVersion = body.protocolVersion;
+  const sessionId = body.sessionId;
+  const requestId = body.requestId;
+  const renderer = body.renderer;
+  const quality = body.quality;
+  const width = body.width;
+  const height = body.height;
+  const bytesBase64 = body.bytesBase64;
+  if (
+    protocolVersion !== 1 ||
+    typeof sessionId !== 'string' ||
+    sessionId.length === 0 ||
+    !Number.isSafeInteger(requestId) ||
+    (requestId as number) < 0 ||
+    renderer !== 'hardware-gpu' ||
+    (quality !== 'quarter' && quality !== 'half' && quality !== 'full') ||
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    (width as number) < 1 ||
+    (height as number) < 1 ||
+    typeof bytesBase64 !== 'string' ||
+    bytesBase64.length === 0 ||
+    bytesBase64.length > 22 * 1024 * 1024
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'GPU preview response is invalid');
+  return {
+    protocolVersion,
+    sessionId,
+    requestId: requestId as number,
+    renderer,
+    quality,
+    width: width as number,
+    height: height as number,
+    bytesBase64,
+  };
 }
 
 function respondError(response: ServerResponse, error: unknown): void {
