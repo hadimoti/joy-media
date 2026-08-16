@@ -132,6 +132,13 @@ test.describe('WP-35 universal timeline closeout', () => {
     });
     expect(rulerBackground.color).not.toBe('rgba(0, 0, 0, 0)');
     expect(rulerBackground.image).toBe('none');
+    const originTick = page.locator('.timeline-ruler-tick--origin');
+    await expect(originTick).toHaveCount(1);
+    expect(
+      await originTick.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingInlineStart),
+      ),
+    ).toBeGreaterThanOrEqual(12);
     const transportMetrics = await page.locator('.monitor-transport').evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,

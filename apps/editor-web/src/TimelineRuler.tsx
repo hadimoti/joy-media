@@ -106,7 +106,11 @@ export function TimelineRuler({
       {ticks.map((tick) => (
         <span
           key={`${tick.timeUs}-${tick.major ? 'M' : 'm'}`}
-          className={tick.major ? 'timeline-ruler-tick major' : 'timeline-ruler-tick'}
+          className={
+            tick.major
+              ? `timeline-ruler-tick major${tick.timeUs === 0 ? ' timeline-ruler-tick--origin' : ''}`
+              : 'timeline-ruler-tick'
+          }
           style={{ left: `${tick.xPx}px` }}
           aria-hidden="true"
         >

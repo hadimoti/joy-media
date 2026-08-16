@@ -2528,6 +2528,11 @@ label {
   padding: 1px 0 0 3px;
   white-space: nowrap;
 }
+/* At t=0 the playhead begins on the same tick. Give the origin label a
+   deliberate clearance so the playhead rail never obscures its timecode. */
+.timeline-ruler-tick.major.timeline-ruler-tick--origin {
+  padding-inline-start: 0.85rem;
+}
 .timeline-tracks-grid {
   position: absolute;
   top: 0;
