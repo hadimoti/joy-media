@@ -68,6 +68,7 @@ test.describe('WP-35 universal timeline closeout', () => {
   test('renders backend track titles, mixed elements, and Quarter preview controls', async ({
     page,
   }, testInfo) => {
+    await page.setViewportSize({ width: 1613, height: 1066 });
     await openTimelineShowcaseWorkspace(page);
     const trackNames = page.locator('.timeline-track-header .track-name');
     await expect(trackNames.first()).toHaveText('Video 1');
@@ -76,6 +77,24 @@ test.describe('WP-35 universal timeline closeout', () => {
     await expect(page.locator('.timeline-track-header .track-code').nth(2)).toHaveText('T3');
     await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
     await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
+    const transportMetrics = await page.locator('.monitor-transport').evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(transportMetrics.scrollWidth).toBeLessThanOrEqual(transportMetrics.clientWidth);
+    const transportBox = await page.locator('.monitor-transport').boundingBox();
+    const settingsBox = await page.locator('.monitor-transport-end').boundingBox();
+    expect(transportBox).not.toBeNull();
+    expect(settingsBox).not.toBeNull();
+    expect(settingsBox!.x).toBeGreaterThanOrEqual(transportBox!.x);
+    expect(settingsBox!.x + settingsBox!.width).toBeLessThanOrEqual(
+      transportBox!.x + transportBox!.width + 0.5,
+    );
+    const workspaceMetrics = await page.locator('.workspace').evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(workspaceMetrics.scrollWidth).toBeLessThanOrEqual(workspaceMetrics.clientWidth);
     expect(await page.locator('.timeline-clip[data-clip-id]').count()).toBeGreaterThanOrEqual(6);
     await testInfo.attach('wp35-mixed-elements-authenticated.png', {
       body: await page.screenshot({ fullPage: true }),
@@ -88,9 +107,9 @@ test.describe('WP-35 universal timeline closeout', () => {
       functional: 'PASS',
       uiA11y: 'PASS',
       expected:
-        'Universal row codes remain neutral while titles match backend track.name, mixed clips render, and Monitor defaults to Quarter/Auto.',
+        'Universal row codes remain neutral while titles match backend track.name, mixed clips render, and the narrow Monitor footer contains Quarter/Auto without clipping.',
       actual:
-        'T rows displayed Video 1/Video 2/Overlay from backend track identities, mixed clips were visible, and Monitor controls reported Quarter/Auto.',
+        'T rows displayed Video 1/Video 2/Overlay from backend track identities, mixed clips were visible, and the two-row Monitor footer contained Quarter/Auto and every trailing control inside its dock.',
     });
   });
 

@@ -1419,8 +1419,10 @@ a.icon-button {
   /* Dockview owns layout — do not use CSS grid here (it fights panel sizing). */
   display: block;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   height: auto;
+  overflow: hidden;
   background: var(--joy-bg-app);
 }
 article {
@@ -1454,6 +1456,8 @@ h2 {
   min-height: 0;
   padding: 0;
   background: var(--joy-bg-deep);
+  container-name: monitor-panel;
+  container-type: inline-size;
 }
 /* Panel section titles — centered across Motion, Inspector, Transitions, etc. */
 .dv-react-part h3,
@@ -1797,6 +1801,69 @@ h2 {
   border-color: color-mix(in srgb, var(--joy-accent) 70%, transparent);
   background: color-mix(in srgb, var(--joy-accent) 14%, transparent);
   color: var(--joy-accent);
+}
+/* The portrait workspace intentionally gives Program Monitor a narrow,
+   full-height dock. Keep every transport control reachable instead of letting
+   the settings cluster overflow beneath the neighbouring workspace. */
+@container monitor-panel (max-width: 36rem) {
+  .monitor-transport {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 1.75rem 1.75rem;
+    gap: 0;
+    height: 3.5rem;
+    padding-inline: 0.15rem;
+  }
+
+  .monitor-transport-controls {
+    grid-row: 1;
+    justify-content: center;
+    min-width: 0;
+    border-bottom: 1px solid var(--joy-border);
+  }
+
+  .monitor-transport-end {
+    grid-row: 2;
+    justify-content: center;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .monitor-preview-control {
+    min-width: 0;
+    gap: 0;
+    padding-inline: 0.12rem;
+  }
+
+  .monitor-preview-control > span {
+    /* The associated selects retain their explicit accessible names. */
+    display: none;
+  }
+
+  .monitor-preview-control select {
+    min-width: 0;
+    padding-inline: 0.1rem;
+  }
+
+  .monitor-preview-control:first-child select {
+    width: 4.5rem;
+  }
+
+  .monitor-preview-control:nth-child(2) select {
+    width: 5.6rem;
+  }
+
+  .monitor-preview-status {
+    padding-inline: 0.25rem;
+  }
+
+  .monitor-aspect-ratio > .monitor-transport-btn {
+    min-width: 4.5rem;
+    padding-inline: 0.2rem;
+  }
+
+  .monitor-aspect-ratio-trigger-details {
+    max-width: 2.65rem;
+  }
 }
 .playback-media {
   /*
