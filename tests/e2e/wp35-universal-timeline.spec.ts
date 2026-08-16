@@ -126,6 +126,12 @@ test.describe('WP-35 universal timeline closeout', () => {
     expect(firstAudioBox!.y).toBeGreaterThan(lastVisualBox!.y);
     await expect(page.getByLabel('Monitor preview quality')).toHaveValue('quarter');
     await expect(page.getByLabel('Monitor preview renderer')).toHaveValue('auto');
+    const rulerBackground = await page.locator('.timeline-scrub-row').evaluate((element) => {
+      const computed = getComputedStyle(element);
+      return { color: computed.backgroundColor, image: computed.backgroundImage };
+    });
+    expect(rulerBackground.color).not.toBe('rgba(0, 0, 0, 0)');
+    expect(rulerBackground.image).toBe('none');
     const transportMetrics = await page.locator('.monitor-transport').evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,

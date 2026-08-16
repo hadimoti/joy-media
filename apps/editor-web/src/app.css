@@ -2459,7 +2459,9 @@ label {
   z-index: 2;
   min-height: 1.25rem;
   padding-block: 0.2rem;
-  background: transparent;
+  /* The sticky ruler must be an opaque chrome surface.  Otherwise the tracks
+     grid shows through while scrolling, which makes the time scale unreadable. */
+  background: var(--joy-bg-panel);
   border-bottom: 1px solid var(--joy-border, #2e2e32);
 }
 .timeline-scrub-gutter {
@@ -2474,7 +2476,7 @@ label {
   min-width: var(--timeline-track-gutter-width);
   padding-inline: 0.35rem 0.45rem;
   box-sizing: border-box;
-  background: transparent;
+  background: inherit;
 }
 .timeline-playhead-slider {
   flex: none;
@@ -2491,7 +2493,7 @@ label {
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--joy-border);
-  background: transparent;
+  background: inherit;
   overflow: hidden;
   cursor: ew-resize;
   outline: none;
