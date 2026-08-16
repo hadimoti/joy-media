@@ -1,9 +1,65 @@
 # WP-35 Final Closeout Evidence
 
 Audit date: 2026-08-16  
-Status: **FINISHED** — product, responsive monitor correction, paired hardware
-Worker, immutable production releases, authenticated browser evidence, and
-GBrain closeout are complete.
+Status: **FINISHED** — the initial `ffa9ea0` closeout below is retained as
+historical evidence. Its timeline UX is superseded by the corrective
+professional-timeline product `5273e34`, deployed immutably on 2026-08-16.
+
+## Corrective professional-timeline release (2026-08-16)
+
+The accepted initial WP-35 release still displayed neutral `T` rows and let a
+plain click toggle selection. Product
+`5273e34aeafc8ed7fe30383b7f443cc00667302c` closes that product gap.
+
+- Visual layers are ordered top-to-bottom as `V1…V10`; audio is a separate,
+  lower `A1…` stack. Track titles come from persisted backend `track.name`,
+  with the schema-0 track ID as the legacy fallback. The track's family is now
+  persisted (`visual` or `audio`) rather than inferred from the UI label.
+- Every visual timeline element can be placed on any visual row. Audio is
+  admitted only to audio rows; neither clip moves nor row drags can interleave
+  the two families. Row reorder and selected-group movement are atomic and
+  reversible.
+- Plain click replaces the timeline selection. Ctrl/Command-click is the only
+  additive/toggle gesture; marquee records the modifier when the gesture
+  begins. Keyboard Delete, one Undo, and one Redo remain batch-atomic.
+- The compositor excludes audio-family rows from video/overlay rendering while
+  the existing audio pipeline remains responsible for sound.
+
+### Corrective verification
+
+```text
+pnpm typecheck                 PASS
+pnpm lint                      PASS
+pnpm format:check              PASS
+pnpm build                     PASS
+pnpm test (four shards)        PASS — 337 files / 2,268 tests / 2 expected skips
+WP-35 browser, desktop-primary PASS — 5/5
+```
+
+The browser suite proves marquee/Delete, ordinary-vs-modifier selection,
+visual row drag reorder, visual/audio topology plus backend titles, Quarter
+and Auto controls, and preview resource release. A signed-in production probe
+of `https://joyst.ir/?deploy=5273e34` reported V1–V10 visual rows above A1
+Audio and verified normal-click replacement followed by Ctrl-click addition.
+
+### Corrective immutable deployment
+
+- Product SHA: `5273e34aeafc8ed7fe30383b7f443cc00667302c`.
+- Editor release:
+  `/opt/joy-media/web-releases/editor-web-20260816T211800Z-5273e34-wp35-professional-timeline`.
+- Retained editor rollback:
+  `/opt/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
+- Release and public index SHA-256:
+  `7d51d92022fbd0cf24b514bfc28b8ca92eb0510dcaac17828dc56b1ad4eda641`.
+- `nginx -t`, local API `/health`, and public index verification passed. No API
+  or database migration was required; the paired GPU Worker release remains
+  unchanged and available.
+
+The GBrain page `joy-media-wp35-universal-timeline-gpu-preview-closeout-2026-08-16`
+and `joy-media-state` are reconciled to this corrective deployment after this
+evidence update.
+
+## Initial WP-35 closeout evidence (historical)
 
 ## Closed scope
 

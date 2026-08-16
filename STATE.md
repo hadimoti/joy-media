@@ -16,43 +16,79 @@ JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box,
 
 > **⚠️ Status reclassified by the 2026-07-21 evidence audit** — see [`AUDIT-2026-07-21-completion-matrix.md`](AUDIT-2026-07-21-completion-matrix.md) (keep as historical evidence; banner notes supersessions through WP-23). Live product truth: **[`Handoff for next agent`](#handoff-for-next-agent-2026-07-24)** below. Pro-tools roadmap Phases 0–6 landed 2026-07-24 (library/timeline ship, trim/DnD/audio preview, GraphEditor, Audio/Effects/Color panels, markers/tracks, export presets, honest agent audio).
 
-| Part                                   | Status      | WPs done | Last session | Next action                                                                                                                                                                           |
-| -------------------------------------- | ----------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P00 architecture proofs                | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                                                                                                  |
-| P01 platform foundation                | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                                                                                                   |
-| P02 editing slice                      | done*       | 6/6      | 2026-07-24   | Timeline NLE polish + project library gate in working tree (uncommitted); deploy next                                                                                                 |
-| P03 captions                           | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                                                                                       |
-| P04 motion + HTML scenes               | done        | 5/5      | 2026-07-24   | iframe→RGBA→Pixi live; first-party catalog expanded in P16 (11 templates + goldens)                                                                                                   |
-| P05 audio + providers                  | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                                                                                       |
-| P06 agent                              | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                                                                                    |
-| P07 workflows                          | done        | 4/4      | 2026-07-24   | WP-17 + P14.6: park/resume live; write/branch/caption ports honest-deferred (no fake `__stub` success)                                                                                |
-| P08 plugin SDK + templates             | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                                                                                            |
-| P09 marketplace/collab                 | in-progress | 5/5      | 2026-07-24   | Honestly gated; no transport; product decision remains                                                                                                                                |
-| P10 advanced                           | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                                                                                        |
-| WP-11 live preview canvas              | done*       | 5/5      | 2026-07-23   | Gate intact; WP-21 dropped absolute golden SHA pins (parity retained)                                                                                                                 |
-| WP-12 control plane + Worker E2E       | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                                                                                    |
-| WP-13 project/Worker integration       | done        | 5/5      | 2026-07-22   | Gate passed: opaque project, safe receipt, API restart/reload, and revoked temporary Worker are live                                                                                  |
-| WP-14 media asset delivery             | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified                                                                           |
-| WP-15 agent editor integration         | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean                                                                                                                                        |
-| WP-16 workflow recorder + UX           | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul                                                                             |
-| WP-17 first-party ports                | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                                                                                         |
-| WP-18 plugin host wiring               | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                                                                                                  |
-| WP-19 normalizeAudio port              | done        | —        | 2026-07-23   | Real audio-core DSP for first-party normalize                                                                                                                                         |
-| WP-20 caption transcription            | done*       | —        | 2026-07-23   | Fixtures remain fallback; live Whisper is WP-23                                                                                                                                       |
-| WP-21 baseline hygiene                 | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                                                                                              |
-| WP-22 silence/loudness/gate            | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                                                                                                   |
-| WP-23 live provider residuals          | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                                                                                           |
-| WP-25 audio Studio UI                  | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                                                                                            |
-| WP-26 timeline track visibility        | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                                       |
-| WP-28 project selector lifecycle       | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md          |
-| WP-29 first-project golden path        | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                                  |
-| WP-30 animated media reliability       | closeout    | —        | 2026-08-12   | Product `1b7e8ab` deployed; signed-in Chrome GIF→timeline→H.264/AAC export, refresh/re-download, cleanup, and GBrain hashes verified; documentation-only CI pending                   |
-| WP-32 real-project workflow            | FINISHED    | —        | 2026-08-12   | Candidate `6d3b467` deployed immutably; GitHub `31622521087` green; signed-in disposable workflow and exact cleanup passed; evidence and GBrain reconciled                            |
-| WP-34 universal animation + editor IA  | FINISHED    | —        | 2026-08-14   | Product `630c8ad` deployed immutably; GitHub `31737233944` green; production health/index parity, full ParsPack backup, cleanup, and GBrain closeout verified                         |
-| WP-35 universal timeline + GPU preview | FINISHED    | —        | 2026-08-16   | Feature `07ecbe1`, responsive closeout `ffa9ea0`; backend-named universal rows, marquee/Delete, paired RTX GPU preview, rollback/resource proofs, immutable deploy, and GBrain closed |
-| X01 VPS control plane                  | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                                       |
+| Part                                   | Status      | WPs done | Last session | Next action                                                                                                                                                                         |
+| -------------------------------------- | ----------- | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P00 architecture proofs                | done        | 8/8      | 2026-07-19   | Legit as spikes+ADRs; the only genuinely closed part                                                                                                                                |
+| P01 platform foundation                | in-progress | 6/6      | 2026-07-22   | WP-14 private-media gate is complete; continue only with the next audited milestone                                                                                                 |
+| P02 editing slice                      | done*       | 6/6      | 2026-07-24   | Timeline NLE polish + project library gate in working tree (uncommitted); deploy next                                                                                               |
+| P03 captions                           | done*       | 5/5      | 2026-07-23   | Live faster-whisper API + fixture fallback for unsigned/offline                                                                                                                     |
+| P04 motion + HTML scenes               | done        | 5/5      | 2026-07-24   | iframe→RGBA→Pixi live; first-party catalog expanded in P16 (11 templates + goldens)                                                                                                 |
+| P05 audio + providers                  | done*       | 5/5      | 2026-07-24   | Live Whisper+edge-tts+afftdn proven; Comfy/ML via local GPU Worker (ADR-0018); Piper TTS parked                                                                                     |
+| P06 agent                              | done        | 5/5      | 2026-07-23   | All WPs complete; agent now wired into live editor                                                                                                                                  |
+| P07 workflows                          | done        | 4/4      | 2026-07-24   | WP-17 + P14.6: park/resume live; write/branch/caption ports honest-deferred (no fake `__stub` success)                                                                              |
+| P08 plugin SDK + templates             | done*       | 5/5      | 2026-07-23   | WP-18 host wiring: Plugins panel + first-party demo; marketplace still P09                                                                                                          |
+| P09 marketplace/collab                 | in-progress | 5/5      | 2026-07-24   | Honestly gated; no transport; product decision remains                                                                                                                              |
+| P10 advanced                           | in-progress | 6/6      | 2026-07-21   | Proven in evaluator + software-rasterizer tests, not on screen                                                                                                                      |
+| WP-11 live preview canvas              | done*       | 5/5      | 2026-07-23   | Gate intact; WP-21 dropped absolute golden SHA pins (parity retained)                                                                                                               |
+| WP-12 control plane + Worker E2E       | done        | 5/5      | 2026-07-22   | Gate closed with entitled-browser Worker lifecycle and immutable-release rollback/restore evidence                                                                                  |
+| WP-13 project/Worker integration       | done        | 5/5      | 2026-07-22   | Gate passed: opaque project, safe receipt, API restart/reload, and revoked temporary Worker are live                                                                                |
+| WP-14 media asset delivery             | done*       | 5/5      | 2026-07-22   | Live private derivative, OPFS replay after reload, same-origin broker boundary, and Worker cleanup verified                                                                         |
+| WP-15 agent editor integration         | done        | 5/5      | 2026-07-23   | UI deployed, live gate passes, typecheck clean                                                                                                                                      |
+| WP-16 workflow recorder + UX           | done        | —        | 2026-07-23   | Recorder/runner/panel live; handoff’s browser crash + unreachable panel fixed; icon-only gray UI overhaul                                                                           |
+| WP-17 first-party ports                | done        | 4/4      | 2026-07-23   | Owner-accepted after Chromium live park/resume; residuals (stub ports, version toast) tracked                                                                                       |
+| WP-18 plugin host wiring               | done        | 4/4      | 2026-07-23   | Browser-safe SDK host + Plugins panel; demo mounts only when enabled / safe mode off                                                                                                |
+| WP-19 normalizeAudio port              | done        | —        | 2026-07-23   | Real audio-core DSP for first-party normalize                                                                                                                                       |
+| WP-20 caption transcription            | done*       | —        | 2026-07-23   | Fixtures remain fallback; live Whisper is WP-23                                                                                                                                     |
+| WP-21 baseline hygiene                 | done        | —        | 2026-07-23   | Golden parity-only; eslint bin globals; worktree ignores                                                                                                                            |
+| WP-22 silence/loudness/gate            | done        | —        | 2026-07-23   | Real audio-core analysis + noise-gate denoise ports                                                                                                                                 |
+| WP-23 live provider residuals          | done        | —        | 2026-07-23   | Whisper+edge-tts APIs; Comfy fail-closed; afftdn; identity 401 expected — see handoff below                                                                                         |
+| WP-25 audio Studio UI                  | done        | —        | 2026-08-09   | Live gate passed on fc8ef7d; final evidence recorded below                                                                                                                          |
+| WP-26 timeline track visibility        | done        | —        | 2026-08-09   | Live gate passed on 5f917b1; final evidence recorded in plan/WP-26-timeline-track-visibility.md                                                                                     |
+| WP-28 project selector lifecycle       | done        | —        | 2026-08-09   | Live gate passed on 0f4d23b; Rename, Duplicate, Trash, Restore, and permanent deletion are deployed and documented in plan/WP-28-project-selector-actions-trash-lifecycle.md        |
+| WP-29 first-project golden path        | done        | —        | 2026-08-11   | Candidate `8756325` deployed immutably; signed-in feature/golden path passed, disposable state purged, QA/GBrain closeout reconciled                                                |
+| WP-30 animated media reliability       | closeout    | —        | 2026-08-12   | Product `1b7e8ab` deployed; signed-in Chrome GIF→timeline→H.264/AAC export, refresh/re-download, cleanup, and GBrain hashes verified; documentation-only CI pending                 |
+| WP-32 real-project workflow            | FINISHED    | —        | 2026-08-12   | Candidate `6d3b467` deployed immutably; GitHub `31622521087` green; signed-in disposable workflow and exact cleanup passed; evidence and GBrain reconciled                          |
+| WP-34 universal animation + editor IA  | FINISHED    | —        | 2026-08-14   | Product `630c8ad` deployed immutably; GitHub `31737233944` green; production health/index parity, full ParsPack backup, cleanup, and GBrain closeout verified                       |
+| WP-35 universal timeline + GPU preview | FINISHED    | —        | 2026-08-16   | Corrective product `5273e34` is live: professional V/A stacks, backend titles, replacement selection, constrained vertical movement, Delete, GPU preview, and GBrain reconciliation |
+| X01 VPS control plane                  | done        | 4/4      | 2026-07-22   | Isolation, health, backup, authenticated browser Worker E2E, and rollback restore are evidenced                                                                                     |
 
-## WP-35 final live closeout (2026-08-16)
+## WP-35 corrective professional timeline release (2026-08-16)
+
+The prior WP-35 closeout UI was accepted too early: it still used neutral `T`
+row labels and plain clicks toggled rather than replaced selection. Product SHA
+`5273e34aeafc8ed7fe30383b7f443cc00667302c` corrects that behavior without
+changing the control-plane or GPU Worker protocol.
+
+- Visual layers render as `V1…V10` from top compositor order downward; audio
+  renders in the separate lower `A1…` stack. Every row retains its persisted
+  backend `track.name` (or the schema-0 track ID fallback), not a synthetic
+  element label. A track can be dragged only within its own visual or audio
+  stack; visual and audio never interleave.
+- A plain clip click atomically replaces selection. Only Ctrl/Command-click
+  toggles membership; marquee follows the same modifier-at-gesture-start
+  contract. Grabbing an unselected clip selects it before movement. Selected
+  groups move in one reversible transaction and no element can cross the
+  visual/audio boundary.
+- Every insertion route persists an explicit `family` (`visual` or `audio`),
+  media imports choose a compatible existing family, and the visual compositor
+  excludes audio rows. Captions, text, 3D, overlays, filters, effects, motion,
+  adjustment, templates, and normal video all share visual rows.
+- Local verification: typecheck, ESLint, Prettier, build, four Vitest shards
+  (**337 files, 2,268 passing tests, 2 expected skips**), and five
+  `desktop-primary` WP-35 browser cases all passed. The browser cases cover
+  marquee/Delete, ordinary-versus-modifier selection, visual row drag reorder,
+  V/A/backend-title topology, Quarter/Auto footer containment, and teardown.
+- Immutable editor release:
+  `/opt/joy-media/web-releases/editor-web-20260816T211800Z-5273e34-wp35-professional-timeline`.
+  Previous editor rollback target:
+  `/opt/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
+  The release and public `https://joyst.ir/?deploy=5273e34` index bytes both
+  hash to `7d51d92022fbd0cf24b514bfc28b8ca92eb0510dcaac17828dc56b1ad4eda641`.
+  `nginx -t`, API health, and a signed-in production probe passed. The live
+  browser observed V1–V10 visual rows, A1 Audio, backend titles, Quarter/Auto,
+  and the corrected selection contract.
+
+## WP-35 initial live closeout (historical, superseded by `5273e34`)
 
 WP-35 is **FINISHED** on feature SHA
 `07ecbe19860db91485ae8e8d2ba4fed209e86176` and responsive closeout SHA
