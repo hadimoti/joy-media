@@ -124,6 +124,18 @@ production build passed. Immutable release
 and public `https://joyst.ir/?deploy=9996c0e` bytes both hash to
 `f9b6f36cd26c06530f669046774541983b89e414ddc1ca2e4c1aa20a52299161`.
 
+### Track-header delete control follow-up (2026-08-16)
+
+Product SHA `52e4619` removes the destructive empty-track trash button from
+all timeline track headers. Empty-track removal remains available through the
+track context menu, preserving the guarded operation without crowding the
+track card. Focused WP-35 browser E2E (5/5), typecheck, ESLint, Prettier, and
+the production build passed. Immutable release
+`/opt/joy-media/web-releases/editor-web-20260816T222152Z-52e4619-wp35-track-header`
+and public `https://joyst.ir/?deploy=52e4619` bytes both hash to
+`b34a05434faeb45f09c4e0d9de892b265f015ff405bc06a4749f713d17a854a1`.
+Live browser verification found zero track-header remove buttons.
+
 ## WP-35 initial live closeout (historical, superseded by `5273e34`)
 
 WP-35 is **FINISHED** on feature SHA
