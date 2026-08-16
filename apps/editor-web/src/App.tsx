@@ -5391,6 +5391,11 @@ function EditorWorkspace({
           project={context.timelineProject}
           elementKinds={timelineElementKinds}
           transitions={visualProject.transitions ?? []}
+          trackLabelColors={Object.fromEntries(
+            (visualProject.timelineTrackDeck?.rows ?? [])
+              .filter((row) => row.compositionId === activeTimelineView.composition.id)
+              .map((row) => [row.trackId, row.labelColor]),
+          )}
           activeCompositionId={activeTimelineView.composition.id}
           onActiveCompositionChange={setActiveTimelineComposition}
           playheadUs={activeTimelinePlayheadUs}

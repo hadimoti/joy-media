@@ -597,6 +597,7 @@ export function TimelinePanel({
   onActiveCompositionChange,
   selectedObject,
   onPropertyDispatch,
+  trackLabelColors,
 }: {
   readonly project: SpikeProject;
   /** Durable clip presentation kinds from the paired creative project. */
@@ -656,6 +657,8 @@ export function TimelinePanel({
   readonly selectedObject?: VisualObjectV1;
   /** Durable visual-object transaction dispatcher for property keyframes. */
   readonly onPropertyDispatch?: (transaction: VisualObjectTransaction) => void;
+  /** Durable per-composition track label colors mirrored from the universal deck. */
+  readonly trackLabelColors?: Readonly<Record<string, TimelineTrackLabelColor | undefined>>;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
@@ -685,6 +688,9 @@ export function TimelinePanel({
     | undefined
   >(undefined);
   const [colorMenuTrackId, setColorMenuTrackId] = useState<string | undefined>();
+  const [localTrackLabelColors, setLocalTrackLabelColors] = useState<
+    Readonly<Record<string, TimelineTrackLabelColor | undefined>>
+  >({});
   const [marqueeRect, setMarqueeRect] = useState<TimelineRect | undefined>(undefined);
   const marqueeRef = useRef<{
     origin: TimelinePoint;
@@ -2185,6 +2191,8 @@ export function TimelinePanel({
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
+            const trackLabelColor =
+              localTrackLabelColors[track.id] ?? trackLabelColors?.[track.id] ?? source.labelColor;
             const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
@@ -2198,7 +2206,7 @@ export function TimelinePanel({
                 key={track.id}
                 data-track-id={track.id}
                 data-track-family={track.family}
-                data-track-label-color={source.labelColor ?? 'default'}
+                data-track-label-color={trackLabelColor ?? 'default'}
                 style={{ height: track.heightPx }}
               >
                 <div
@@ -2278,8 +2286,12 @@ export function TimelinePanel({
                   </button>
                   {colorMenuTrackId === track.id && (
                     <TimelineTrackColorMenu
-                      current={source.labelColor}
+                      current={trackLabelColor}
                       onSelect={(labelColor?: TimelineTrackLabelColor) => {
+                        setLocalTrackLabelColors((current) => ({
+                          ...current,
+                          [track.id]: labelColor,
+                        }));
                         onDispatch({
                           label: `Color ${source.name ?? source.id}`,
                           commands: [
