@@ -88,6 +88,20 @@ changing the control-plane or GPU Worker protocol.
   browser observed V1–V10 visual rows, A1 Audio, backend titles, Quarter/Auto,
   and the corrected selection contract.
 
+### Ruler-surface follow-up (2026-08-16)
+
+Product SHA `1298c17d30227c64cb89401bd7e94c9efc0503f2` fixes the final
+timeline chrome defect: the sticky scrub/ruler row, including its left gutter,
+now inherits an opaque panel surface instead of letting the scrolling track
+grid bleed through. The WP-35 browser suite now asserts that the strip is
+opaque. Focused browser E2E (5/5), typecheck, ESLint, Prettier, and the
+production build passed. Immutable release
+`/opt/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface`
+and public `https://joyst.ir/?deploy=1298c17` bytes both hash to
+`160337ce38a81ac387312edefe3923d4836032f514248a16013da598ddee4728`.
+Live browser inspection confirmed `rgb(37, 37, 37)` for both the scrub row and
+the ruler; API health and `nginx -t` passed.
+
 ## WP-35 initial live closeout (historical, superseded by `5273e34`)
 
 WP-35 is **FINISHED** on feature SHA

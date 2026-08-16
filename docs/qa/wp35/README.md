@@ -59,6 +59,20 @@ The GBrain page `joy-media-wp35-universal-timeline-gpu-preview-closeout-2026-08-
 and `joy-media-state` are reconciled to this corrective deployment after this
 evidence update.
 
+### Ruler-surface follow-up (2026-08-16)
+
+Product `1298c17d30227c64cb89401bd7e94c9efc0503f2` closes the final
+timeline-chrome issue found in production review. The sticky scrub row, ruler,
+and left gutter now use the opaque panel surface rather than exposing the
+scrolling tracks grid. The 5/5 WP-35 desktop browser suite adds an explicit
+computed-style guard for that condition; typecheck, ESLint, Prettier, and the
+editor production build pass. Immutable editor release
+`/opt/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface`
+and public `https://joyst.ir/?deploy=1298c17` index bytes both hash to
+`160337ce38a81ac387312edefe3923d4836032f514248a16013da598ddee4728`.
+The live browser verified `rgb(37, 37, 37)` on both ruler surfaces; `nginx -t`
+and API health passed. GBrain is reconciled after this documentation commit.
+
 ## Initial WP-35 closeout evidence (historical)
 
 ## Closed scope
