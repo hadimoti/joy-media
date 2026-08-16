@@ -102,6 +102,17 @@ and public `https://joyst.ir/?deploy=1298c17` bytes both hash to
 Live browser inspection confirmed `rgb(37, 37, 37)` for both the scrub row and
 the ruler; API health and `nginx -t` passed.
 
+### Origin-label clearance follow-up (2026-08-16)
+
+Product SHA `9013b1f3360484d73d3ab2f22f7a0116c4759fe0` keeps the continuous
+playhead but gives the `0:00` origin ruler label a dedicated 0.85rem clearance
+from its rail. The live browser measured 13.6px of label padding, so the
+playhead cannot obscure the origin timecode. The focused WP-35 browser suite
+(5/5), typecheck, ESLint, Prettier, and the production build passed. Immutable
+release `/opt/joy-media/web-releases/editor-web-20260816T214205Z-9013b1f-wp35-origin-label`
+and public `https://joyst.ir/?deploy=9013b1f` bytes both hash to
+`53436e57ae7928542fb8d3cf341f1a765619d1ffdea439398247ae394fa7e18b`.
+
 ## WP-35 initial live closeout (historical, superseded by `5273e34`)
 
 WP-35 is **FINISHED** on feature SHA

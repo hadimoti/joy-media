@@ -73,6 +73,18 @@ and public `https://joyst.ir/?deploy=1298c17` index bytes both hash to
 The live browser verified `rgb(37, 37, 37)` on both ruler surfaces; `nginx -t`
 and API health passed. GBrain is reconciled after this documentation commit.
 
+### Origin-label clearance follow-up (2026-08-16)
+
+Product `9013b1f3360484d73d3ab2f22f7a0116c4759fe0` resolves the remaining
+playhead/ruler collision without interrupting the continuous NLE playhead. The
+origin (`0:00`) tick gets a dedicated 0.85rem label clearance; the live browser
+measured 13.6px between the rail and label content. The updated WP-35 browser
+suite passes 5/5, as do typecheck, ESLint, Prettier, and the editor production
+build. Immutable release
+`/opt/joy-media/web-releases/editor-web-20260816T214205Z-9013b1f-wp35-origin-label`
+and public `https://joyst.ir/?deploy=9013b1f` index bytes both hash to
+`53436e57ae7928542fb8d3cf341f1a765619d1ffdea439398247ae394fa7e18b`.
+
 ## Initial WP-35 closeout evidence (historical)
 
 ## Closed scope
