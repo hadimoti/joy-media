@@ -52,8 +52,8 @@ export function TimelineTrackColorMenu({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            onSelect(color);
             onClose();
+            onSelect(color);
           }}
         >
           <span
