@@ -1,7 +1,7 @@
 # WP-36 — Managed Universal Track Deck, Placement Parity, and Track Color Labels
 
 - **Owner:** Luna
-- **Status:** **READY FOR IMPLEMENTATION — PLAN ONLY; NO WP-36 PRODUCT CODE HAS BEEN WRITTEN**
+- **Status:** **IMPLEMENTED, TESTED, AND DEPLOYED**
 - **Prepared:** 2026-08-17
 - **Local repository:** `C:\Users\HadiMoti\joy-vps\joy-media-fix`
 - **VPS repository:** `/opt/joy-media/repo`
@@ -9,6 +9,9 @@
 - **User-specified reference URL:** `https://joyst.ir/?deploy=9996c0e`
 - **Immutable reference artifact:** `9996c0e` / `/opt/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
 - **Implementation base when this plan was prepared:** `c2b9e334752e952496ff6e6a50967290a9561eac`
+- **Final implementation commit:** `733f584f18b45ae789ca8360e7e4b3637fe3e3f1`
+- **Active immutable release:** `/opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final`
+- **Verification:** full Vitest `336 passed files, 2268 passed tests, 2 skipped`; typecheck, lint, Prettier, build, nginx config, public API health, and authenticated browser smoke passed.
 
 ## 1. Mission
 
