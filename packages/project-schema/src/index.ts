@@ -280,3 +280,25 @@ export type {
   VoiceStatus,
   ProviderVoiceRef,
 } from './voice-identity.js';
+
+// ============================================================================
+// Semantic Project Snapshot V1 (WP-37 S1)
+// ============================================================================
+
+export type {
+  ProjectRevisionId,
+  EvidenceRefV1,
+  SnapshotTruncationV1,
+  SnapshotWarningV1,
+  ScenePurposeV1,
+  VisualCoverageV1,
+  CaptionCoverageV1,
+  NarrationSummaryV1,
+  SemanticElementSummaryV1,
+  SceneSummaryV1,
+  BrandSummaryV1,
+  TimelineSummaryV1,
+  AssetSummaryV1,
+  CapabilityStatus,
+  SemanticProjectSnapshotV1,
+} from './semantic-snapshot.js';
