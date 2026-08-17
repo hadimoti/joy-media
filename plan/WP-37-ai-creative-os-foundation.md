@@ -567,6 +567,14 @@ Create a decision request/ADR and stop the affected package if any of these are 
 - [x] No S2 dependencies on editor-web, provider calls, UI, or GBrain mutation.
 - [x] `STATE.md` updated with S2 commit SHA and status.
 
+### S3 completion checklist
+
+- [x] S3 is a read-only Creative Brief contract in `@joy-media/agent-tools`; implementation commit `13b819fd3748109f049b57b4a6b2e073c4f91f7a`.
+- [x] It uses a deterministic test-only adapter, not a real provider/model.
+- [x] Revision/evidence validation, Persian preservation, bounds, and forbidden-data checks are covered.
+- [x] No UI, command execution, approval, jobs, caching, deployment, provider call, or GBrain mutation was added.
+- [x] 4 test files / 171 tests passed.
+
 ## 18. Definition of success for the larger program
 
 The program reaches its first real north-star demonstration only when a user can request a branded short-form reel and JOY Media can:
