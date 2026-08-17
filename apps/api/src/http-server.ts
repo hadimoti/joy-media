@@ -29,6 +29,7 @@ import {
   MemorySpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
+import { validateCreativeBriefServerRequest } from './creative-brief-request-validation.js';
 import {
   GpuPreviewTransport,
   deserializeGpuPreviewResponse,
@@ -361,6 +362,43 @@ async function route(
 
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  const creativeBriefMatch = /^\/v1\/projects\/([^/]+)\/creative-brief$/.exec(url.pathname);
+  if (request.method === 'POST' && creativeBriefMatch !== null) {
+    const projectId = decodeURIComponent(creativeBriefMatch[1]!);
+    const project = await options.controlPlane.getProject(actor, projectId);
+    if (!project.creativeBriefOptIn) {
+      throw new ControlPlaneError('POLICY_DENIED', 'creative brief not opted in for this project');
+    }
+    const body = await readJson(request);
+    const envelopeProjectId = body?.projectId;
+    if (envelopeProjectId !== undefined && envelopeProjectId !== projectId) {
+      throw new ControlPlaneError('PROJECT_MISMATCH', 'route projectId does not match envelope projectId');
+    }
+    const envelopeSnapshotRevisionId = (body as { snapshotRevisionId?: string })?.snapshotRevisionId ?? '';
+    const validation = validateCreativeBriefServerRequest(body, projectId, envelopeSnapshotRevisionId);
+    if (!validation.valid) {
+      const firstError = validation.errors[0];
+      if (firstError) {
+        throw new ControlPlaneError(
+          firstError.code === 'invalid-request' ? 'REQUEST_INVALID' :
+          firstError.code === 'project-mismatch' ? 'PROJECT_MISMATCH' :
+          firstError.code === 'revision-mismatch' ? 'REVISION_MISMATCH' :
+          firstError.code === 'payload-too-large' ? 'PAYLOAD_TOO_LARGE' :
+          'REQUEST_INVALID',
+          firstError.message,
+        );
+      }
+      throw new ControlPlaneError('REQUEST_INVALID', 'Creative brief request validation failed');
+    }
+    respondJson(response, 503, {
+      data: {
+        kind: 'unavailable',
+        code: 'creative-brief-runtime-not-configured',
+      },
+    });
+    return;
+  }
 
   const openPreviewSessionMatch = /^\/v1\/projects\/([^/]+)\/preview-sessions$/.exec(url.pathname);
   if (request.method === 'POST' && openPreviewSessionMatch !== null) {

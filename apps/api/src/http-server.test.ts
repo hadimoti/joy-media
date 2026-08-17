@@ -1033,6 +1033,127 @@ describe('control-plane HTTP transport', () => {
     expect(Buffer.from(await result.arrayBuffer())).toEqual(png);
     expect(await controlPlane.jobsForProject({ id: 'owner' }, 'gpu-project')).toEqual([]);
   });
+
+  describe('Creative Brief route', () => {
+    it('rejects unauthenticated requests', async () => {
+      const origin = await start({ authenticate: () => undefined });
+      expect(
+        await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {}),
+      ).toMatchObject({
+        status: 401,
+        body: { error: { code: 'AUTH_REQUIRED' } },
+      });
+    });
+
+    it('rejects non-owner actor', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      const origin = await start({ authenticate: () => ({ id: 'other-user' }) }, undefined, undefined, controlPlane);
+      expect(
+        await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {}),
+      ).toMatchObject({
+        status: 409,
+        body: { error: { code: 'PROJECT_NOT_FOUND' } },
+      });
+    });
+
+    it('rejects unknown project', async () => {
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+      expect(
+        await request(origin, 'POST', '/v1/projects/unknown-project/creative-brief', {}),
+      ).toMatchObject({
+        status: 409,
+        body: { error: { code: 'PROJECT_NOT_FOUND' } },
+      });
+    });
+
+    it('rejects project without opt-in', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      expect(
+        await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const },
+          intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
+          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        }),
+      ).toMatchObject({
+        status: 409,
+        body: { error: { code: 'POLICY_DENIED' } },
+      });
+    });
+
+    it('rejects project with opt-in but invalid envelope', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      expect(
+        await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {}),
+      ).toMatchObject({
+        status: 400,
+        body: { error: { code: 'REQUEST_INVALID' } },
+      });
+    });
+
+    it('rejects project with opt-in and project mismatch', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      expect(
+        await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+          projectId: 'other-project',
+          snapshotRevisionId: 'rev-1',
+          snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const },
+          intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
+          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        }),
+      ).toMatchObject({
+        status: 409,
+        body: { error: { code: 'PROJECT_MISMATCH' } },
+      });
+    });
+
+    it('returns unavailable for valid opted-in request', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const, composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' } },
+        intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+      });
+      expect(response).toMatchObject({
+        status: 503,
+        body: { data: { kind: 'unavailable', code: 'creative-brief-runtime-not-configured' } },
+      });
+    });
+
+    it('preserves Persian text in request', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const persianRequest = 'بركتțele mele';
+      const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const, composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' } },
+        intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'general' },
+      });
+      expect(response).toMatchObject({
+        status: 503,
+        body: { data: { kind: 'unavailable', code: 'creative-brief-runtime-not-configured' } },
+      });
+    });
+  });
 });
 
 async function start(
