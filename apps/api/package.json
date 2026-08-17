@@ -24,10 +24,12 @@
   },
   "dependencies": {
     "@joy-media/adapter-mistral": "workspace:*",
+    "@joy-media/agent-tools": "workspace:*",
+    "@joy-media/export-core": "workspace:*",
+    "@joy-media/job-protocol": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
     "nodemailer": "^9.0.5",
-    "pg": "^8.22.0",
-    "@joy-media/export-core": "workspace:*",
-    "@joy-media/job-protocol": "workspace:*"
+    "pg": "^8.22.0"
   }
 }

@@ -50,12 +50,18 @@ importers:
       '@joy-media/adapter-mistral':
         specifier: workspace:*
         version: link:../../packages/adapter-mistral
+      '@joy-media/agent-tools':
+        specifier: workspace:*
+        version: link:../../packages/agent-tools
       '@joy-media/export-core':
         specifier: workspace:*
         version: link:../../packages/export-core
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../../packages/project-schema
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
