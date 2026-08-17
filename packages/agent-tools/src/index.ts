@@ -243,3 +243,51 @@ export {
   meetsBaseline,
   BASELINE_THRESHOLDS,
 } from './benchmarks/index.js';
+
+export type {
+  CreativeBriefScope,
+  DestinationPreset,
+  InferenceConfidence,
+  RecommendationRisk,
+  RecommendationKind,
+  RecommendationId,
+  CreativeEvidenceRefV1,
+  AssumptionV1,
+  CapabilityGapV1,
+  HumanDecisionV1,
+  CreativeRecommendationV1,
+  CreativeBriefRequestV1,
+  InterpretedGoalV1,
+  FactInferenceDistinctionV1,
+  CreativeBriefV1,
+  CreativeBriefInputV1,
+  CreativeBriefOptions,
+  BriefRequestValidationResult,
+  BriefValidationResult,
+} from './creative-brief.js';
+export {
+  DEFAULT_DETERMINISTIC_CLOCK,
+  FORBIDDEN_PATTERNS,
+  MAX_LENGTHS,
+  RECOMMENDATION_KINDS,
+  CREATIVE_BRIEF_SCOPES,
+  DESTINATION_PRESETS,
+  validateCreativeBriefRequest,
+  validateCreativeBrief,
+  containsForbiddenPattern,
+  deepCheckForbiddenPatterns,
+  createCreativeBrief,
+  createCreativeBriefInput,
+  verifyPersianPreservation,
+  containsPersian,
+} from './creative-brief.js';
+
+export type {
+  CreativeModelAdapter,
+  ModelAdapterInputV1,
+  ModelAdapterOutputV1,
+} from './model-adapter.js';
+export {
+  isModelAdapterInputV1,
+  isModelAdapterOutputV1,
+} from './model-adapter.js';
