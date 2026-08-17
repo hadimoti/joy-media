@@ -311,3 +311,31 @@ export {
   segmentCompositionIntoScenes,
 } from './semantic-snapshot-impl.js';
 
+// ==========================================================================
+// Semantic Intelligence V1 (WP-37 S2)
+// ==========================================================================
+
+export type {
+  IntelligenceSeverity,
+  RuleId,
+  IntelligenceEvidenceRefV1,
+  IntelligenceRuleV1,
+  BrandReadinessV1,
+  SceneCoverageV1,
+  ProjectReadinessV1,
+  RuleCategory,
+  KnownRuleId,
+} from './semantic-intelligence.js';
+
+export {
+  KNOWN_RULE_IDS,
+  computeBrandReadiness,
+  computeSceneCoverages,
+  computeProjectReadiness,
+  computeSemanticIntelligence,
+  getKnownRuleIds,
+  getRuleDefinitions,
+  getRuleDefinition,
+  formatDurationUs,
+} from './semantic-intelligence.js';
+
