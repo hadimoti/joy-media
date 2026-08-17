@@ -301,4 +301,13 @@ export type {
   AssetSummaryV1,
   CapabilityStatus,
   SemanticProjectSnapshotV1,
+  SnapshotOptions,
+  SnapshotValidationResult,
 } from './semantic-snapshot.js';
+
+export {
+  projectToSemanticSnapshot,
+  validateSemanticProjectSnapshot,
+  segmentCompositionIntoScenes,
+} from './semantic-snapshot-impl.js';
+

@@ -544,13 +544,13 @@ Create a decision request/ADR and stop the affected package if any of these are 
 
 ### G0/S1 completion checklist
 
-- [ ] Orientation facts were remeasured and any drift was recorded.
-- [ ] G0 audit/evidence and safe index plan are complete; no shared-service mutation was made without authorization.
-- [ ] S1 discovery note maps canonical state, revision, fields, package ownership, and privacy boundary.
-- [ ] Semantic snapshot schema/projector/validation/fixtures are implemented in the correct dependency direction.
-- [ ] All S1 acceptance tests and focused regressions are green, with existing unrelated exceptions itemized.
-- [ ] No UI-driven editing, direct persistence mutation, secret leakage, provider integration, or unapproved deployment was introduced.
-- [ ] `STATE.md`, GBrain’s new concise current state, QA evidence, and this plan agree on the exact commit and remaining package.
+- [x] Orientation facts were remeasured and any drift was recorded.
+- [x] G0 audit/evidence and safe index plan are complete; no shared-service mutation was made without authorization.
+- [x] S1 discovery note maps canonical state, revision, fields, package ownership, and privacy boundary.
+- [x] Semantic snapshot schema/projector/validation/fixtures are implemented in the correct dependency direction.
+- [x] All S1 acceptance tests and focused regressions are green, with existing unrelated exceptions itemized.
+- [x] No UI-driven editing, direct persistence mutation, secret leakage, provider integration, or unapproved deployment was introduced.
+- [x] `STATE.md`, GBrain’s new concise current state, QA evidence, and this plan agree on the exact commit and remaining package.
 
 ## 18. Definition of success for the larger program
 

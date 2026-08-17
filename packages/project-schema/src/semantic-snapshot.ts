@@ -101,7 +101,7 @@ export interface BrandSummaryV1 {
 export interface TimelineSummaryV1 {
   readonly compositionId: CompositionId;
   readonly durationUs: TimeUs;
-  readonly frameRate: { readonly numerator: number; readonly denominator: number };
+  readonly frameRate: { readonly num: number; readonly den: number };
   readonly width: number;
   readonly height: number;
   readonly aspectRatio: string;
@@ -133,7 +133,7 @@ export interface SemanticProjectSnapshotV1 {
   readonly capturedAt: string;
   readonly composition: {
     readonly durationUs: TimeUs;
-    readonly frameRate: { readonly numerator: number; readonly denominator: number };
+    readonly frameRate: { readonly num: number; readonly den: number };
     readonly width: number;
     readonly height: number;
     readonly aspectRatio: string;
@@ -151,3 +151,40 @@ export interface SemanticProjectSnapshotV1 {
   readonly warnings: readonly SnapshotWarningV1[];
   readonly truncation: SnapshotTruncationV1;
 }
+
+// ============================================================================
+// Snapshot Options
+// ============================================================================
+
+export interface SnapshotOptions {
+  /** ISO timestamp for capturedAt (defaults to current time if not provided) */
+  readonly clock?: () => string;
+  /** Maximum byte size for the snapshot (default: 8192 bytes = 8 KB) */
+  readonly maxBytes?: number;
+  /** Maximum number of scenes to include (default: 20) */
+  readonly maxScenes?: number;
+  /** Maximum number of assets to include (default: 50) */
+  readonly maxAssets?: number;
+  /** Maximum number of clips to include per scene (default: 10) */
+  readonly maxClipsPerScene?: number;
+}
+
+// ============================================================================
+// Validation Result
+// ============================================================================
+
+export interface SnapshotValidationResult {
+  readonly valid: boolean;
+  readonly errors: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+// ============================================================================
+// Exports from implementation
+// ============================================================================
+
+export {
+  projectToSemanticSnapshot,
+  validateSemanticProjectSnapshot,
+  segmentCompositionIntoScenes,
+} from './semantic-snapshot-impl.js';
