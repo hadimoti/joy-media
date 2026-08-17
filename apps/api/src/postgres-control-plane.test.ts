@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
-import { SHARED_LIBRARY_OWNER_ID } from './control-plane.js';
+import { SHARED_LIBRARY_OWNER_ID, LocalControlPlane } from './control-plane.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 
 describe('PostgresControlPlane', () => {
@@ -212,6 +212,49 @@ describe('PostgresControlPlane', () => {
     });
     await expect(controlPlane.assetsForProject(owner, 'copy')).resolves.toHaveLength(1);
     await pool.end();
+  });
+
+  it('creative brief opt-in defaults to false and can be enabled/disabled', async () => {
+    const controlPlane = new LocalControlPlane();
+    const owner = { id: 'opt-in-owner' };
+    const peer = { id: 'opt-in-peer' };
+
+    // Create project - should default to false
+    controlPlane.createProject(owner, 'opt-in-project', 'OptIn Project');
+    expect(controlPlane.getCreativeBriefOptIn(owner, 'opt-in-project')).toBe(false);
+
+    // Peer cannot read opt-in status
+    expect(() => controlPlane.getCreativeBriefOptIn(peer, 'opt-in-project')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
+    );
+
+    // Enable opt-in
+    const project = controlPlane.createProject(owner, 'opt-in-project-2', 'OptIn Project 2');
+    const enabled = controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', true, project.revision);
+    expect(enabled.creativeBriefOptIn).toBe(true);
+    expect(enabled.revision).toBe(project.revision + 1);
+    expect(controlPlane.getCreativeBriefOptIn(owner, 'opt-in-project-2')).toBe(true);
+
+    // Disable opt-in
+    const disabled = controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', false, enabled.revision);
+    expect(disabled.creativeBriefOptIn).toBe(false);
+    expect(disabled.revision).toBe(enabled.revision + 1);
+    expect(controlPlane.getCreativeBriefOptIn(owner, 'opt-in-project-2')).toBe(false);
+
+    // Peer cannot change opt-in
+    expect(() =>
+      controlPlane.setCreativeBriefOptIn(peer, 'opt-in-project-2', true, disabled.revision),
+    ).toThrow(expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }));
+
+    // Revision conflict
+    expect(() =>
+      controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', true, 0),
+    ).toThrow(expect.objectContaining({ code: 'REVISION_CONFLICT' }));
+
+    // Unknown project
+    expect(() => controlPlane.getCreativeBriefOptIn(owner, 'unknown-project')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
+    );
   });
 });
 

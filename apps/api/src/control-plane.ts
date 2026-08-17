@@ -13,6 +13,8 @@ export interface ProjectMetadata {
   /** Always true: originals and eligible derivatives use private durable storage. */
   readonly assetSyncEnabled: boolean;
   readonly trashedAt?: number;
+  /** Per-project Creative Brief opt-in flag. Defaults to false. */
+  readonly creativeBriefOptIn: boolean;
 }
 
 export interface ProjectLifecycleMetadata extends ProjectMetadata {
@@ -297,6 +299,13 @@ export interface ControlPlane {
     projectId: string,
     enabled: boolean,
   ): ProjectMetadata | Promise<ProjectMetadata>;
+  getCreativeBriefOptIn(actor: Actor, projectId: string): boolean | Promise<boolean>;
+  setCreativeBriefOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
   registerAsset(
     actor: Actor,
     projectId: string,
@@ -480,7 +489,14 @@ export class LocalControlPlane implements ControlPlane {
   createProject(actor: Actor, id: string, title: string): ProjectMetadata {
     this.auth(actor);
     if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
-    const result = { id, title, revision: 0, ownerId: actor.id, assetSyncEnabled: true };
+    const result: ProjectMetadata = {
+      id,
+      title,
+      revision: 0,
+      ownerId: actor.id,
+      assetSyncEnabled: true,
+      creativeBriefOptIn: false,
+    };
     this.#projects.set(id, result);
     return result;
   }
@@ -629,6 +645,26 @@ export class LocalControlPlane implements ControlPlane {
       );
     const current = this.project(actor, projectId);
     const next = { ...current, assetSyncEnabled: true };
+    this.#projects.set(projectId, next);
+    return next;
+  }
+  getCreativeBriefOptIn(actor: Actor, projectId: string): boolean {
+    const project = this.project(actor, projectId);
+    return project.creativeBriefOptIn;
+  }
+  setCreativeBriefOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    baseRevision: number,
+  ): ProjectMetadata {
+    const current = this.project(actor, projectId);
+    if (current.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${current.revision}`,
+      );
+    const next = { ...current, creativeBriefOptIn: enabled, revision: current.revision + 1 };
     this.#projects.set(projectId, next);
     return next;
   }

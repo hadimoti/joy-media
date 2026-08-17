@@ -46,6 +46,7 @@ interface ProjectRow {
   readonly revision: number;
   readonly asset_sync_enabled: boolean;
   readonly trashed_at: Date | null;
+  readonly creative_brief_opt_in: boolean;
 }
 
 interface WorkerRow {
@@ -410,6 +411,33 @@ export class PostgresControlPlane implements ControlPlane {
       `UPDATE projects SET asset_sync_enabled = true
        WHERE id = $1 AND owner_id = $2 RETURNING *`,
       [projectId, actor.id],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+    return projectOf(result.rows[0]);
+  }
+
+  async getCreativeBriefOptIn(actor: Actor, projectId: string): Promise<boolean> {
+    const project = await this.project(actor, projectId);
+    return project.creativeBriefOptIn;
+  }
+
+  async setCreativeBriefOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    baseRevision: number,
+  ): Promise<ProjectMetadata> {
+    assertActor(actor);
+    const current = await this.project(actor, projectId);
+    if (current.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${current.revision}`,
+      );
+    const result = await this.pool.query<ProjectRow>(
+      `UPDATE projects SET creative_brief_opt_in = $3, revision = revision + 1
+       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+      [projectId, actor.id, enabled, baseRevision],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     return projectOf(result.rows[0]);
@@ -1294,6 +1322,7 @@ function projectOf(row: ProjectRow): ProjectMetadata {
     title: row.title,
     revision: row.revision,
     assetSyncEnabled: row.asset_sync_enabled,
+    creativeBriefOptIn: row.creative_brief_opt_in,
     ...(row.trashed_at === null ? {} : { trashedAt: row.trashed_at.getTime() }),
   };
 }
