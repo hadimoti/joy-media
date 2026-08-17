@@ -552,6 +552,21 @@ Create a decision request/ADR and stop the affected package if any of these are 
 - [x] No UI-driven editing, direct persistence mutation, secret leakage, provider integration, or unapproved deployment was introduced.
 - [x] `STATE.md`, GBrain’s new concise current state, QA evidence, and this plan agree on the exact commit and remaining package.
 
+### S2 completion checklist
+
+- [x] `BrandReadinessV1` reports available/missing canonical brand fields without fabricating defaults.
+- [x] `SceneCoverageV1` derives per-scene duration, visual/audio/caption coverage, and visual-change signals with evidence.
+- [x] `ProjectReadinessV1` reports destination/aspect/duration alignment, caption availability, capability state, and blockers.
+- [x] Deterministic rule catalog with 16 factual rules across brand/visual/caption/audio/destination/capability categories.
+- [x] All rules have stable IDs, severity, scope, evidence, explanations, and non-executable suggested intents.
+- [x] Pure functions only: no persistence, network, model calls, GBrain access, or clock nondeterminism.
+- [x] Byte-stable output for identical snapshots; deterministic ordering.
+- [x] S1 evidence references reused; no paths, URLs, secrets, or object-store IDs exposed.
+- [x] 32 focused S2 tests covering all acceptance criteria.
+- [x] All existing project-schema tests remain green (171 tests total).
+- [x] No S2 dependencies on editor-web, provider calls, UI, or GBrain mutation.
+- [x] `STATE.md` updated with S2 commit SHA and status.
+
 ## 18. Definition of success for the larger program
 
 The program reaches its first real north-star demonstration only when a user can request a branded short-form reel and JOY Media can:
