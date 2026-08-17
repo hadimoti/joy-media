@@ -15942,3 +15942,173 @@ label {
   color: var(--joy-accent);
   font-variant-numeric: tabular-nums;
 }
+
+/* =============================================================================
+   Creative Brief Display — WP-37 S4-B
+   Read-only brief presentation. No actions, no mutation.
+   ============================================================================= */
+.creative-brief {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+}
+
+.creative-brief-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--joy-border-subtle);
+}
+
+.creative-brief-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.creative-brief-heading {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+}
+
+.creative-brief-request {
+  margin: 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.creative-brief-goal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.creative-brief-goal p {
+  margin: 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-sm);
+}
+
+.creative-brief-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.creative-brief-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+}
+
+.creative-brief-fact,
+.creative-brief-inference,
+.creative-brief-assumption,
+.creative-brief-blocker,
+.creative-brief-decision {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-recommendation {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  border-left: 3px solid var(--joy-accent-dim);
+}
+
+.creative-brief-rec-header {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--joy-type-xs);
+  color: var(--joy-text-secondary);
+}
+
+.creative-brief-rec-kind {
+  font-weight: 600;
+  color: var(--joy-accent);
+}
+
+.creative-brief-rec-risk,
+.creative-brief-rec-confidence {
+  color: var(--joy-text-muted);
+}
+
+.creative-brief-statement {
+  flex: 1;
+  min-width: 0;
+}
+
+.creative-brief-source,
+.creative-brief-verified,
+.creative-brief-confidence,
+.creative-brief-capability,
+.creative-brief-status,
+.creative-brief-evidence,
+.creative-brief-rec-evidence,
+.creative-brief-rec-scope,
+.creative-brief-rec-intent {
+  font-size: var(--joy-type-xs);
+  color: var(--joy-text-muted);
+}
+
+.creative-brief-rationale {
+  margin: var(--space-1) 0;
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-sm);
+}
+
+.creative-brief-empty {
+  margin: 0;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-sm);
+  font-style: italic;
+}
+
+.creative-brief-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-warning-info {
+  border-left: 3px solid var(--joy-accent-dim);
+}
+
+.creative-brief-warning-warning {
+  border-left: 3px solid var(--joy-warning);
+}
+
+.creative-brief-warning-error {
+  border-left: 3px solid var(--joy-danger);
+}
+
+.creative-brief-warning-label {
+  font-weight: 600;
+}
+
+.creative-brief-meta {
+  font-size: var(--joy-type-xs);
+  color: var(--joy-text-muted);
+}
+
+.creative-brief-meta p {
+  margin: 0;
+}
