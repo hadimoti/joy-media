@@ -19,10 +19,12 @@ const TABS: readonly PanelTabSpec[] = [
 ## 2. Current Project/Selection/Revision Owner
 
 `EditorSession` class in `apps/editor-web/src/editor-session.ts:160` owns:
-- `timelineProject: SpikeProject` — canonical timeline state
-- `visualProject: JoyProjectV1` — visual object state
+- `timelineProject: SpikeProject` — canonical timeline state (schemaVersion 0, tracks with `kind: 'video'` only)
+- `visualProject: JoyProjectV1` — full visual project state (schemaVersion 1, tracks with `kind: 'video' | 'audio' | 'caption' | 'object' | 'control'`, plus assets, visualObjects, captionDocuments, markers, audio)
 - `projectRevisionId: ProjectRevisionId` — durable, opaque revision getter (line 285) encoding all component revisions via `encodeProjectRevision()`
 - Selection/playhead are owned by the React state in `App.tsx` and passed as props to `AgentPanel`
+
+`AgentPanel` in `apps/editor-web/src/AgentPanel.tsx:171-197` receives **both** `project: SpikeProject` (timeline-only) **and** `session: EditorSession` (which contains `visualProject: JoyProjectV1`).
 
 ## 3. S1 + S2 Creation Without Second Project Model
 
@@ -98,14 +100,50 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
 - **Loading**: Show spinner + "Generating brief..." in Composer while `collecting`; cancelable
 - **Error**: Show inline error message in Composer; "Retry" button; never hide the input
 
-## 8. Dependency/Architecture Blockers
+## 8. S4 Input-Bridge Decision
 
-**None.**  
-All required contracts exist and are already wired:
-- S1: `projectToSemanticSnapshot()` exported from `@joy-media/project-schema`
-- S2: Deterministic intelligence functions exported from `@joy-media/project-schema`
-- S3: `createCreativeBrief()`, `CreativeModelAdapter` exported from `@joy-media/agent-tools`
-- Editor: `EditorSession` provides `timelineProject`, `visualProject`, `projectRevisionId`
-- UI: `AgentPanel` already receives `project`, `session`, `agentContext`
+**S1/S2 information sources:**
+- `projectToSemanticSnapshot()` in `packages/project-schema/src/semantic-snapshot-impl.ts:532` requires `JoyProjectV1` (schemaVersion 1) because it uses:
+  - `project.compositions[rootCompositionId]` → `CompositionV1` with `tracks: TrackV1[]` (multi-kind: video/audio/caption/object/control)
+  - `project.captionDocuments` (line 550) for scene segmentation and caption coverage
+  - `project.assets` (line 566, 592) for visual asset summaries
+  - `project.markers` (line 548) for explicit scene boundaries
+  - `project.variables` (line 594) for brand summary
+  - `project.audio` (line 627) for audio capability detection
 
-No new package dependencies. No GBrain changes. No provider integrations. No UI framework changes. No persistence layer changes.
+**Timeline/caption/audio/selection information unavailable from `SpikeProject`:**
+- `SpikeProject` (schemaVersion 0) only contains `compositions` with `Track[]` where `Track.kind` is hardcoded to `'video'`
+- Missing: caption tracks, audio tracks, object tracks, control tracks, assets, visualObjects, captionDocuments, markers, audio graph, color grades
+- Selection/playhead are available via separate `AgentPanel` props (`selectedClipIds`, `playheadUs`)
+
+**Existing bridge:**  
+`EditorSession` in `apps/editor-web/src/editor-session.ts:160` already owns **both** `timelineProject: SpikeProject` and `visualProject: JoyProjectV1`. `AgentPanel` receives the full `session` prop, so it can access `session.visualProject` (JoyProjectV1) directly. **No new bridge needed.**
+
+**S4 input-bridge resolution:**
+- Use `session.visualProject` (JoyProjectV1) + `session.projectRevisionId` → `projectToSemanticSnapshot()` → S2 functions → S3 `createCreativeBrief()`
+- Do **not** use the `project` prop (SpikeProject) for S1/S2/S3
+
+## 9. Model Adapter Policy Decision
+
+**Test-only fake adapter boundary:**
+- Fake adapter constructors (`createValidFakeAdapter`, `createMalformedFakeAdapter`, etc.) in `packages/agent-tools/src/model-adapter.ts:782-824` are **NOT** exported from `packages/agent-tools/src/index.ts`
+- Production code importing from `@joy-media/agent-tools` cannot access test-only adapters
+- **Blocker:** No production `CreativeModelAdapter` implementation exists for S4
+- **Decision required:** S4 UI needs either:
+  1. A production synchronous/deterministic adapter that does NOT call real models/providers (for read-only brief display in development/demo mode), OR
+  2. A runtime injection mechanism for adapter selection (feature flag / policy), OR
+  3. Defer brief generation to a separate service with explicit policy gates
+- **Current state:** The fake adapter is test-only; it cannot be bundled in production editor code
+
+**Future S4 test-injection/runtime-policy decision:**
+- Tests may continue importing fake adapters directly from `model-adapter.js`
+- Production must NOT import from `model-adapter.js`; use only public `@joy-media/agent-tools` exports
+- Policy decision: Who can trigger brief generation? What are the rate limits? What happens offline?
+
+## 10. Dependency/Architecture Blockers
+
+**Two S4 blockers identified:**
+
+1. **Input-bridge clarification (RESOLVED):** `AgentPanel` must use `session.visualProject` (JoyProjectV1) + `session.projectRevisionId` instead of the `project` prop (SpikeProject). The required data is already available via the existing `session` prop — no code changes to `AgentPanel` interface needed.
+
+2. **Production model adapter (BLOCKER):** No production `CreativeModelAdapter` implementation exists. The test-only fake adapters in `model-adapter.ts` are NOT exported from the package root (`index.ts`) and cannot be bundled in production. S4 requires a production-grade adapter or a runtime injection policy before brief generation can be enabled in the UI.
