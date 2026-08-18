@@ -161,6 +161,16 @@ HTTP status codes:
 
 ## 6. Cost/Spend, Rate-Limit, Cancellation, Audit, Retention
 
+### Decision record — 2026-08-18 (owner-approved)
+
+This record supersedes the earlier KiloCode transport wording in this document.
+
+- **Provider/transport:** Use OpenRouter's OpenAI-compatible chat-completions API through `@joy-media/adapter-openrouter`. KiloCode is an editor host and is not a server-side transport.
+- **Initial model policy:** Permit only an explicit, server-side allowlist of OpenRouter free-model IDs (starting with NVIDIA Nemotron or another explicitly selected `:free` model). There is no automatic paid-model fallback. A provider response that identifies a model outside the allowlist must be rejected and must trip the runtime's unavailable/circuit-breaker path.
+- **Secret-reference mapping:** Configuration carries only the opaque reference `joy-media/openrouter/creative-brief/v1`. A future server-only resolver maps that reference to a local-development secret store or to a VPS service credential. The resolver is injected into the API runtime; browser code, configuration parsing, adapters, logs, and audit records never receive the secret value. For VPS deployment, prefer a systemd-managed credential available only to the API service over a committed file or browser-visible environment value.
+- **Spend enforcement:** Initial policy is **zero payable spend**. Enforce it before egress with the free-model allowlist, no paid fallback, a bounded output-token limit, and a per-actor request-rate limit. Record provider-reported model and token usage after a request. If the provider reports a non-free/unknown model, pricing, or an unparseable usage condition, disable further requests until an owner explicitly re-enables the runtime. Do not claim that a `SPEND_LIMIT_USD_CENTS` field alone enforces cost at OpenRouter.
+- **Configuration implication:** A future configuration schema may represent the free-only policy with a zero-cent budget, but that change must be made deliberately with matching validation and runtime tests; it is not a license to enable remote calls now.
+
 ### Cost/Spend
 - Server tracks spend via existing `ProviderLifecycle` (from `@joy-media/provider-sdk`)
 - Each completion records `UsageRecord` with `providerId`, `modelId`, `inputTokens`, `outputTokens`

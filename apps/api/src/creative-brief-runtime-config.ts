@@ -26,7 +26,7 @@ export interface OpenRouterConfig {
   readonly modelId: string;
   /** Request timeout in milliseconds (1000-300000). */
   readonly timeoutMs: number;
-  /** Maximum spend limit in USD cents (1-10000). */
+  /** Maximum spend limit in USD cents (0-10000). 0 means free-only / zero payable spend policy. */
   readonly spendLimitUsdCents: number;
   /** Opaque name reference to the secret (e.g., "openrouter-api-key"). */
   readonly secretRef: string;
@@ -69,7 +69,7 @@ const VALID_KEYS: ReadonlySet<string> = new Set([
 // Validation bounds
 const TIMEOUT_MIN = 1000;
 const TIMEOUT_MAX = 300000;
-const SPEND_LIMIT_MIN = 1;
+const SPEND_LIMIT_MIN = 0;
 const SPEND_LIMIT_MAX = 10000;
 
 // ============================================================================

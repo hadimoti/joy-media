@@ -262,12 +262,12 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
     expect(result).toEqual({ mode: 'disabled' });
   });
 
-  it('should fail closed to disabled when spendLimitUsdCents is below minimum (1)', () => {
+  it('should fail closed to disabled when spendLimitUsdCents is a fractional value like 0.5', () => {
     const result = parseCreativeBriefRuntimeConfig({
       [ `${PREFIX}MODE` ]: 'openrouter',
       [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0.5',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
@@ -282,6 +282,21 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should accept spendLimitUsdCents at zero (free-only policy)', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+    });
+    if (isOpenRouterConfig(result)) {
+      expect(result.spendLimitUsdCents).toBe(0);
+    } else {
+      expect.fail('Expected openrouter config');
+    }
   });
 
   it('should accept spendLimitUsdCents at minimum boundary (1)', () => {
