@@ -243,6 +243,221 @@ export interface ProjectDocumentStore {
 }
 
 // ============================================================================
+// In-Memory Implementation
+// ============================================================================
+
+/**
+ * Sentinel revision ID indicating no previous document exists for a project.
+ * First write to a project MUST use this as the baseRevisionId.
+ */
+export const INITIAL_REVISION: ProjectRevisionId = '';
+
+/**
+ * Project-owner lookup function type.
+ * Returns the ownerId for a given projectId, or undefined if the project doesn't exist.
+ * This is injected to avoid direct ControlPlane access.
+ */
+export type ProjectOwnerLookup = (projectId: ProjectId) => OwnerId | undefined;
+
+/**
+ * Internal stored document with all revision metadata.
+ * Uses defensive copies to prevent caller mutation.
+ */
+interface StoredDocument {
+  readonly ownerId: OwnerId;
+  readonly revisionId: ProjectRevisionId;
+  readonly document: JoyProjectV1;
+}
+
+/**
+ * In-memory project document store implementation.
+ *
+ * Guarantees:
+ * - Owner-scoped access
+ * - Compare-and-swap writes
+ * - First write requires baseRevisionId === INITIAL_REVISION
+ * - Subsequent writes require baseRevisionId === current head
+ * - Invalid documents rejected without mutation
+ * - Defensive copies on all read/write operations
+ * - NO I/O: no clock, filesystem, database, network, environment, or secret access
+ */
+export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
+  private readonly store: Map<ProjectId, StoredDocument> = new Map();
+  private readonly revisions: Map<ProjectId, Set<ProjectRevisionId>> = new Map();
+
+  constructor(private readonly lookupOwner: ProjectOwnerLookup) {}
+
+  readDocument(
+    callerId: OwnerId,
+    projectId: ProjectId,
+    revisionId?: ProjectRevisionId,
+  ): ProjectDocumentReadOutcome {
+    // Check if project exists
+    const ownerId = this.lookupOwner(projectId);
+    if (ownerId === undefined) {
+      return {
+        kind: 'not-found',
+        projectId,
+        revisionId: revisionId ?? null,
+      };
+    }
+
+    // Check ownership
+    if (ownerId !== callerId) {
+      return {
+        kind: 'not-found',
+        projectId,
+        revisionId: revisionId ?? null,
+      };
+    }
+
+    // Get the current document
+    const current = this.store.get(projectId);
+    if (current === undefined) {
+      return {
+        kind: 'not-found',
+        projectId,
+        revisionId: revisionId ?? null,
+      };
+    }
+
+    // If specific revision requested, check if it matches current
+    if (revisionId !== undefined && revisionId !== current.revisionId) {
+      return {
+        kind: 'stale-revision',
+        projectId,
+        requestedRevisionId: revisionId,
+        currentRevisionId: current.revisionId,
+      };
+    }
+
+    // Return defensive copy
+    return {
+      kind: 'ready',
+      record: {
+        projectId,
+        ownerId,
+        revisionId: current.revisionId,
+        document: this.deepCopy(current.document),
+      },
+    };
+  }
+
+  writeDocument(
+    callerId: OwnerId,
+    record: ProjectDocumentRecord,
+    baseRevisionId: ProjectRevisionId,
+  ): ProjectDocumentWriteOutcome {
+    // Validate the record first
+    const diagnostics = validateProjectDocumentRecord(record);
+    if (diagnostics.length > 0) {
+      return {
+        kind: 'invalid-document',
+        projectId: record.projectId,
+        diagnostics,
+      };
+    }
+
+    // Check if project exists
+    const ownerId = this.lookupOwner(record.projectId);
+    if (ownerId === undefined) {
+      return {
+        kind: 'not-found',
+        projectId: record.projectId,
+      };
+    }
+
+    // Check ownership
+    if (ownerId !== callerId) {
+      return {
+        kind: 'owner-denied',
+        projectId: record.projectId,
+        ownerId,
+        callerId,
+      };
+    }
+
+    // Check that record.ownerId matches the project owner
+    if (record.ownerId !== ownerId) {
+      return {
+        kind: 'owner-denied',
+        projectId: record.projectId,
+        ownerId,
+        callerId,
+      };
+    }
+
+    // Get current document for CAS check
+    const current = this.store.get(record.projectId);
+    const currentRevisionId = current?.revisionId ?? INITIAL_REVISION;
+
+    // CAS: baseRevisionId must match current head
+    if (baseRevisionId !== currentRevisionId) {
+      return {
+        kind: 'revision-conflict',
+        projectId: record.projectId,
+        expectedBaseRevisionId: baseRevisionId,
+        actualBaseRevisionId: currentRevisionId,
+      };
+    }
+
+    // Store defensive copy
+    const stored: StoredDocument = {
+      ownerId,
+      revisionId: record.revisionId,
+      document: this.deepCopy(record.document),
+    };
+    this.store.set(record.projectId, stored);
+
+    // Track all revisions for this project
+    let revSet = this.revisions.get(record.projectId);
+    if (revSet === undefined) {
+      revSet = new Set();
+      this.revisions.set(record.projectId, revSet);
+    }
+    revSet.add(record.revisionId);
+
+    return {
+      kind: 'stored',
+      projectId: record.projectId,
+      ownerId: record.ownerId,
+      revisionId: record.revisionId,
+    };
+  }
+
+  listRevisions(
+    callerId: OwnerId,
+    projectId: ProjectId,
+  ): readonly ProjectRevisionId[] {
+    // Check if project exists
+    const ownerId = this.lookupOwner(projectId);
+    if (ownerId === undefined) {
+      return [];
+    }
+
+    // Check ownership
+    if (ownerId !== callerId) {
+      return [];
+    }
+
+    const revSet = this.revisions.get(projectId);
+    if (revSet === undefined) {
+      return [];
+    }
+
+    return Array.from(revSet);
+  }
+
+  /**
+   * Create a defensive deep copy of a JoyProjectV1 document.
+   * Prevents caller mutation from affecting stored canonical bytes.
+   */
+  private deepCopy<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value));
+  }
+}
+
+// ============================================================================
 // Helper Type Guards
 // ============================================================================
 

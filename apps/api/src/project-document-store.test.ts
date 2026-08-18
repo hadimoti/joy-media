@@ -19,6 +19,9 @@ import {
   OwnerId,
   validateProjectDocumentRecord,
   isValidProjectDocumentRecord,
+  InMemoryProjectDocumentStore,
+  INITIAL_REVISION,
+  ProjectOwnerLookup,
 } from './project-document-store.js';
 import type { ProjectRevisionId, JoyProjectV1 } from '@joy-media/project-schema';
 
@@ -375,5 +378,324 @@ describe('Proof of no I/O in contract module', () => {
     const result1 = isValidProjectDocumentRecord(record);
     const result2 = isValidProjectDocumentRecord(record);
     expect(result1).toBe(result2);
+  });
+});
+
+// ============================================================================
+// InMemoryProjectDocumentStore Tests
+// ============================================================================
+
+describe('InMemoryProjectDocumentStore', () => {
+  const PROJECT_A = 'project-a' as ProjectId;
+  const PROJECT_B = 'project-b' as ProjectId;
+  const OWNER_X = 'owner-x' as OwnerId;
+  const OWNER_Y = 'owner-y' as OwnerId;
+  const REV_1 = 'rev-1' as ProjectRevisionId;
+  const REV_2 = 'rev-2' as ProjectRevisionId;
+  const REV_3 = 'rev-3' as ProjectRevisionId;
+
+  function createLookup(
+    projects: Array<{ projectId: ProjectId; ownerId: OwnerId }>,
+  ): ProjectOwnerLookup {
+    const map = new Map<ProjectId, OwnerId>();
+    for (const p of projects) {
+      map.set(p.projectId, p.ownerId);
+    }
+    return (projectId) => map.get(projectId);
+  }
+
+  function createStore(
+    projects: Array<{ projectId: ProjectId; ownerId: OwnerId }>,
+  ): InMemoryProjectDocumentStore {
+    return new InMemoryProjectDocumentStore(createLookup(projects));
+  }
+
+  it('initial write/read roundtrip with correct baseRevision', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+
+    const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('stored');
+    expect(writeResult.projectId).toBe(PROJECT_A);
+    expect(writeResult.revisionId).toBe(REV_1);
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('ready');
+    expect(readResult.record.projectId).toBe(PROJECT_A);
+    expect(readResult.record.revisionId).toBe(REV_1);
+    expect(readResult.record.document).toEqual(doc);
+  });
+
+  it('unknown project returns not-found on read', () => {
+    const store = createStore([]);
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('not-found');
+    expect(readResult.projectId).toBe(PROJECT_A);
+  });
+
+  it('unknown project returns not-found on write', () => {
+    const store = createStore([]);
+    const record = validRecord(PROJECT_A, OWNER_X, REV_1);
+    const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('not-found');
+    expect(writeResult.projectId).toBe(PROJECT_A);
+  });
+
+  it('owner denied on read for different owner', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+    const readResult = store.readDocument(OWNER_Y, PROJECT_A);
+    expect(readResult.kind).toBe('not-found');
+    expect(readResult.projectId).toBe(PROJECT_A);
+  });
+
+  it('owner denied on write for different owner', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+    const record = validRecord(PROJECT_A, OWNER_Y, REV_1);
+    const writeResult = store.writeDocument(OWNER_Y, record, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('owner-denied');
+    expect(writeResult.projectId).toBe(PROJECT_A);
+    expect(writeResult.ownerId).toBe(OWNER_X);
+    expect(writeResult.callerId).toBe(OWNER_Y);
+  });
+
+  it('owner denied when record.ownerId does not match project owner', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_Y,
+      revisionId: REV_1,
+      document: minimalValidJoyProjectV1(PROJECT_A),
+    };
+    const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('owner-denied');
+    expect(writeResult.ownerId).toBe(OWNER_X);
+    expect(writeResult.callerId).toBe(OWNER_X);
+  });
+
+  it('CAS conflict when baseRevision does not match current', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'Modified' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    const writeResult = store.writeDocument(OWNER_X, record2, 'wrong-revision');
+    expect(writeResult.kind).toBe('revision-conflict');
+    expect(writeResult.expectedBaseRevisionId).toBe('wrong-revision');
+    expect(writeResult.actualBaseRevisionId).toBe(REV_1);
+  });
+
+  it('CAS succeeds when baseRevision matches current', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'Modified' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    const writeResult = store.writeDocument(OWNER_X, record2, REV_1);
+    expect(writeResult.kind).toBe('stored');
+    expect(writeResult.revisionId).toBe(REV_2);
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('ready');
+    expect(readResult.record.revisionId).toBe(REV_2);
+    expect(readResult.record.document.title).toBe('Modified');
+  });
+
+  it('invalid document returns invalid-document without mutation', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const invalidRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: { schemaVersion: 999 } as unknown as JoyProjectV1,
+    };
+
+    const writeResult = store.writeDocument(OWNER_X, invalidRecord, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('invalid-document');
+    expect(writeResult.projectId).toBe(PROJECT_A);
+    expect(writeResult.diagnostics.length).toBeGreaterThan(0);
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('not-found');
+  });
+
+  it('defensive copy prevents caller mutation of stored document', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+    store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+
+    (doc as any).title = 'MUTATED';
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('ready');
+    expect(readResult.record.document.title).toBe('Test Project');
+  });
+
+  it('defensive copy prevents caller mutation of returned document', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+    store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('ready');
+
+    (readResult.record.document as any).title = 'MUTATED';
+
+    const readResult2 = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult2.kind).toBe('ready');
+    expect(readResult2.record.document.title).toBe('Test Project');
+  });
+
+  it('stale-revision when reading with non-current revisionId', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+    store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+
+    const readResult = store.readDocument(OWNER_X, PROJECT_A, REV_2);
+    expect(readResult.kind).toBe('stale-revision');
+    expect(readResult.projectId).toBe(PROJECT_A);
+    expect(readResult.requestedRevisionId).toBe(REV_2);
+    expect(readResult.currentRevisionId).toBe(REV_1);
+  });
+
+  it('listRevisions returns all revisions for a project', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'V2' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    store.writeDocument(OWNER_X, record2, REV_1);
+
+    const revisions = store.listRevisions(OWNER_X, PROJECT_A);
+    expect(revisions).toContain(REV_1);
+    expect(revisions).toContain(REV_2);
+    expect(revisions).toHaveLength(2);
+  });
+
+  it('listRevisions returns empty for unknown project', () => {
+    const store = createStore([]);
+    const revisions = store.listRevisions(OWNER_X, PROJECT_A);
+    expect(revisions).toEqual([]);
+  });
+
+  it('listRevisions returns empty for non-owner', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+    const revisions = store.listRevisions(OWNER_Y, PROJECT_A);
+    expect(revisions).toEqual([]);
+  });
+
+  it('ownership isolation between projects', () => {
+    const store = createStore([
+      { projectId: PROJECT_A, ownerId: OWNER_X },
+      { projectId: PROJECT_B, ownerId: OWNER_Y },
+    ]);
+
+    const docA: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const recordA: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: docA,
+    };
+    store.writeDocument(OWNER_X, recordA, INITIAL_REVISION);
+
+    const docB: JoyProjectV1 = minimalValidJoyProjectV1('project-b');
+    const recordB: ProjectDocumentRecord = {
+      projectId: PROJECT_B,
+      ownerId: OWNER_Y,
+      revisionId: REV_1,
+      document: docB,
+    };
+    store.writeDocument(OWNER_Y, recordB, INITIAL_REVISION);
+
+    const readB = store.readDocument(OWNER_X, PROJECT_B);
+    expect(readB.kind).toBe('not-found');
+
+    const readA = store.readDocument(OWNER_Y, PROJECT_A);
+    expect(readA.kind).toBe('not-found');
+  });
+
+  it('first write requires INITIAL_REVISION as baseRevisionId', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+
+    const writeResult = store.writeDocument(OWNER_X, record, REV_1);
+    expect(writeResult.kind).toBe('revision-conflict');
+    expect(writeResult.expectedBaseRevisionId).toBe(REV_1);
+    expect(writeResult.actualBaseRevisionId).toBe(INITIAL_REVISION);
   });
 });
