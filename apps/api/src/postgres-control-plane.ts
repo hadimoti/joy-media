@@ -173,12 +173,121 @@ class PostgresProjectDocumentStore {
     return result.rows.map((row) => row.revision_id);
   }
 
-  writeDocument(
-    _callerId: PostgresOwnerId,
-    _record: PostgresProjectDocumentRecord,
-    _baseRevisionId: string,
-  ): PostgresProjectDocumentWriteOutcome {
-    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  async writeDocument(
+    callerId: PostgresOwnerId,
+    record: PostgresProjectDocumentRecord,
+    baseRevisionId: string,
+  ): Promise<PostgresProjectDocumentWriteOutcome> {
+    // 1. Validate the complete record before any database work
+    const diagnostics = validateProjectDocumentRecord(record);
+    if (diagnostics.length > 0) {
+      return {
+        kind: 'invalid-document',
+        projectId: record.projectId,
+        diagnostics: diagnostics.map((d) => ({
+          code: d.code,
+          message: d.message,
+          path: d.path,
+        })),
+      };
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 2. Lock and read the project to get current head and enforce ownership
+      const projectResult = await client.query<ProjectRow>(
+        'SELECT id, owner_id, document_revision_id FROM projects WHERE id = $1 FOR UPDATE',
+        [record.projectId],
+      );
+
+      const project = projectResult.rows[0];
+
+      // 3. Check if project exists
+      if (project === undefined) {
+        await client.query('ROLLBACK');
+        return { kind: 'not-found', projectId: record.projectId };
+      }
+
+      // 4. Check ownership
+      if (project.owner_id !== callerId) {
+        await client.query('ROLLBACK');
+        return {
+          kind: 'owner-denied',
+          projectId: record.projectId,
+          ownerId: project.owner_id,
+          callerId,
+        };
+      }
+
+      // 5. Check that record.ownerId matches the project owner
+      if (record.ownerId !== project.owner_id) {
+        await client.query('ROLLBACK');
+        return {
+          kind: 'owner-denied',
+          projectId: record.projectId,
+          ownerId: project.owner_id,
+          callerId,
+        };
+      }
+
+      // 6. Get current head for CAS check
+      const currentHeadRev = project.document_revision_id ?? '';
+
+      // 7. CAS: baseRevisionId must match current head
+      if (baseRevisionId !== currentHeadRev) {
+        await client.query('ROLLBACK');
+        return {
+          kind: 'revision-conflict',
+          projectId: record.projectId,
+          expectedBaseRevisionId: baseRevisionId,
+          actualBaseRevisionId: currentHeadRev,
+        };
+      }
+
+      // 8. Insert the new document revision (immutable)
+      try {
+        await client.query(
+          `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+           VALUES ($1, $2, $3, $4::jsonb, CURRENT_TIMESTAMP)`,
+          [record.projectId, record.revisionId, 1, JSON.stringify(record.document)],
+        );
+      } catch (error) {
+        await client.query('ROLLBACK');
+        return { kind: 'unavailable', message: 'Project document store is unavailable' };
+      }
+
+      // 9. Atomically update the head pointer
+      try {
+        await client.query(
+          'UPDATE projects SET document_revision_id = $2 WHERE id = $1',
+          [record.projectId, record.revisionId],
+        );
+      } catch (error) {
+        await client.query('ROLLBACK');
+        return { kind: 'unavailable', message: 'Project document store is unavailable' };
+      }
+
+      await client.query('COMMIT');
+
+      return {
+        kind: 'stored',
+        projectId: record.projectId,
+        ownerId: record.ownerId,
+        revisionId: record.revisionId,
+      };
+    } catch (error) {
+      // Any unexpected error - rollback if we have a transaction
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Ignore rollback errors
+      }
+      return { kind: 'unavailable', message: 'Project document store is unavailable' };
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -1429,11 +1538,11 @@ export class PostgresControlPlane implements ControlPlane {
     return this.#documentStore.listRevisions(actor.id, projectId);
   }
 
-  writeProjectDocument(
+  async writeProjectDocument(
     actor: Actor,
     record: PostgresProjectDocumentRecord,
     baseRevisionId: string,
-  ): PostgresProjectDocumentWriteOutcome {
+  ): Promise<PostgresProjectDocumentWriteOutcome> {
     return this.#documentStore.writeDocument(actor.id, record, baseRevisionId);
   }
 

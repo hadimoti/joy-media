@@ -623,26 +623,453 @@ describe('PostgresControlPlane project document storage - reads', () => {
   });
 });
 
-// Write remains unavailable (WP-37 S4-F10-E5-D2-A)
+// WP-37 S4-F10-E5-D2-B: Write tests
 describe('PostgresControlPlane project document storage - writes', () => {
-  it('writeProjectDocument returns unavailable', async () => {
+  const owner = { id: 'pg-write-owner' };
+  const otherOwner = { id: 'pg-write-other' };
+  const projectId = 'pg-write-project';
+  const revisionId1 = 'rev-1';
+  const revisionId2 = 'rev-2';
+
+  function createValidDocument(title: string) {
+    return {
+      schemaVersion: 1,
+      id: projectId,
+      title,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      rootCompositionId: 'comp-1',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          name: 'Main',
+          width: 1920,
+          height: 1080,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          background: '#00000000',
+          tracks: [],
+        },
+      },
+      assets: {},
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    };
+  }
+
+  it('writeProjectDocument stores initial document and updates head', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;
     const api = new PostgresControlPlane(pool, { skipLocked: false });
     await api.initialize();
-    const owner = { id: 'pg-owner' };
 
-    const result = api.writeProjectDocument(owner, {
-      projectId: 'any-project',
-      ownerId: 'pg-owner',
-      revisionId: 'rev-1',
+    // Create project first
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    const doc = createValidDocument('Initial');
+    const result = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+
+    expect(result.kind).toBe('stored');
+    if (result.kind === 'stored') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.ownerId).toBe(owner.id);
+      expect(result.revisionId).toBe(revisionId1);
+    }
+
+    // Verify head was updated
+    const headResult = await pool.query<{ document_revision_id: string }>(
+      'SELECT document_revision_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+    expect(headResult.rows[0].document_revision_id).toBe(revisionId1);
+
+    // Verify document was stored
+    const docResult = await pool.query<{ document: string }>(
+      'SELECT document FROM project_documents WHERE project_id = $1 AND revision_id = $2',
+      [projectId, revisionId1],
+    );
+    expect(docResult.rows.length).toBe(1);
+    const storedDoc = typeof docResult.rows[0].document === 'string'
+      ? JSON.parse(docResult.rows[0].document)
+      : docResult.rows[0].document;
+    expect((storedDoc as any).title).toBe('Initial');
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument stores second revision with CAS', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project with initial document
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+    const doc1 = createValidDocument('Version 1');
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1)],
+    );
+
+    const doc2 = createValidDocument('Version 2');
+    const result = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId2,
+      document: doc2,
+    }, revisionId1);
+
+    expect(result.kind).toBe('stored');
+    if (result.kind === 'stored') {
+      expect(result.revisionId).toBe(revisionId2);
+    }
+
+    // Verify head was updated
+    const headResult = await pool.query<{ document_revision_id: string }>(
+      'SELECT document_revision_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+    expect(headResult.rows[0].document_revision_id).toBe(revisionId2);
+
+    // Verify both documents exist
+    const docsResult = await pool.query<{ revision_id: string }>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1 ORDER BY created_at',
+      [projectId],
+    );
+    expect(docsResult.rows.map((r) => r.revision_id)).toEqual([revisionId1, revisionId2]);
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument returns revision-conflict on CAS mismatch', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project with initial document
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+    const doc1 = createValidDocument('Version 1');
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1)],
+    );
+
+    const doc2 = createValidDocument('Version 2');
+    const result = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId2,
+      document: doc2,
+    }, 'wrong-base-revision');
+
+    expect(result.kind).toBe('revision-conflict');
+    if (result.kind === 'revision-conflict') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.expectedBaseRevisionId).toBe('wrong-base-revision');
+      expect(result.actualBaseRevisionId).toBe(revisionId1);
+    }
+
+    // Verify no new document was inserted
+    const docsResult = await pool.query<{ revision_id: string }>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1',
+      [projectId],
+    );
+    expect(docsResult.rows.length).toBe(1);
+    expect(docsResult.rows[0].revision_id).toBe(revisionId1);
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument returns not-found for unknown project', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const doc = createValidDocument('Test');
+    const result = await api.writeProjectDocument(owner, {
+      projectId: 'unknown-project',
+      ownerId: owner.id,
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+
+    expect(result.kind).toBe('not-found');
+    if (result.kind === 'not-found') {
+      expect(result.projectId).toBe('unknown-project');
+    }
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument returns owner-denied for non-owner', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project owned by owner
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    const doc = createValidDocument('Test');
+    const result = await api.writeProjectDocument(otherOwner, {
+      projectId,
+      ownerId: otherOwner.id,
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+
+    expect(result.kind).toBe('owner-denied');
+    if (result.kind === 'owner-denied') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.ownerId).toBe(owner.id);
+      expect(result.callerId).toBe(otherOwner.id);
+    }
+
+    // Verify no document was stored
+    const docsResult = await pool.query<{ revision_id: string }>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1',
+      [projectId],
+    );
+    expect(docsResult.rows.length).toBe(0);
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument returns owner-denied when record ownerId does not match project', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project owned by owner
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    const doc = createValidDocument('Test');
+    const result = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: otherOwner.id, // Mismatch!
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+
+    expect(result.kind).toBe('owner-denied');
+    if (result.kind === 'owner-denied') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.ownerId).toBe(owner.id);
+      expect(result.callerId).toBe(owner.id);
+    }
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument returns invalid-document for invalid record', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    // Invalid document (empty object)
+    const result = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId1,
       document: {},
     }, '');
 
-    expect(result.kind).toBe('unavailable');
-    if (result.kind === 'unavailable') {
-      expect(result.message).toBe('Project document store is unavailable');
+    expect(result.kind).toBe('invalid-document');
+    if (result.kind === 'invalid-document') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.diagnostics.length).toBeGreaterThan(0);
     }
+
+    // Verify no document was stored
+    const docsResult = await pool.query<{ revision_id: string }>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1',
+      [projectId],
+    );
+    expect(docsResult.rows.length).toBe(0);
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument uses parameterized SQL', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project with a special ID that could cause SQL injection if not parameterized
+    const maliciousProjectId = "project'; DROP TABLE projects; --";
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [maliciousProjectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    const doc = createValidDocument('Test');
+    const result = await api.writeProjectDocument(owner, {
+      projectId: maliciousProjectId,
+      ownerId: owner.id,
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+
+    expect(result.kind).toBe('stored');
+
+    // Verify project still exists (no injection occurred)
+    const projectResult = await pool.query<{ id: string }>(
+      'SELECT id FROM projects WHERE id = $1',
+      [maliciousProjectId],
+    );
+    expect(projectResult.rows.length).toBe(1);
+    expect(projectResult.rows[0].id).toBe(maliciousProjectId);
+
+    await pool.end();
+  });
+
+  it('readProjectDocument can read historical revision after write', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    // Write first revision
+    const doc1 = createValidDocument('Version 1');
+    await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId1,
+      document: doc1,
+    }, '');
+
+    // Write second revision
+    const doc2 = createValidDocument('Version 2');
+    await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId2,
+      document: doc2,
+    }, revisionId1);
+
+    // Read historical revision
+    const result = await api.readProjectDocument(owner, projectId, revisionId1);
+    expect(result.kind).toBe('ready');
+    if (result.kind === 'ready') {
+      expect(result.record.revisionId).toBe(revisionId1);
+      expect((result.record.document as any).title).toBe('Version 1');
+    }
+
+    await pool.end();
+  });
+
+  it('writeProjectDocument rolls back on database failure during insert', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    // Create project
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    // We can't easily simulate a database failure in pg-mem, but we can verify
+    // that the transaction is atomic by checking that partial writes don't occur.
+    // Write a document with a duplicate revision_id (which should fail due to PK constraint)
+    const doc = createValidDocument('Test');
+
+    // First write should succeed
+    const result1 = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId1,
+      document: doc,
+    }, '');
+    expect(result1.kind).toBe('stored');
+
+    // Second write with same revision_id should fail
+    const result2 = await api.writeProjectDocument(owner, {
+      projectId,
+      ownerId: owner.id,
+      revisionId: revisionId1, // Same revision ID
+      document: doc,
+    }, revisionId1);
+    expect(result2.kind).toBe('unavailable'); // PK violation causes unavailable
+
+    // Head should still be revisionId1 (not updated to revisionId1 again, but the write failed)
+    const headResult = await pool.query<{ document_revision_id: string | null }>(
+      'SELECT document_revision_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+    expect(headResult.rows[0].document_revision_id).toBe(revisionId1);
+
+    // Only one document should exist
+    const docsResult = await pool.query<{ revision_id: string }>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1',
+      [projectId],
+    );
+    expect(docsResult.rows.length).toBe(1);
+
+    await pool.end();
   });
 });
