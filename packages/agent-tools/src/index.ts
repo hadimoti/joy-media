@@ -291,3 +291,31 @@ export {
   isModelAdapterInputV1,
   isModelAdapterOutputV1,
 } from './model-adapter.js';
+
+// ==========================================================================
+// Async Runtime Contract - WP-37 S4-F6
+// Production-facing exports only. Fake adapters are NOT exported.
+// ==========================================================================
+
+export type {
+  AsyncCreativeModelAdapter,
+  AsyncOutcomeCategory,
+  AsyncOutcome,
+  AsyncAdapterOptions,
+  AuditEventSink,
+} from './async-model-adapter.js';
+
+// ==========================================================================
+// Async Creative Brief Finalization - WP-37 S4-F7
+// Production-facing async creative brief API.
+// ==========================================================================
+
+export type {
+  AsyncCreativeBriefOptions,
+  AsyncCreativeBriefOutcome,
+  AsyncCreativeBriefInputOptions,
+} from './async-creative-brief.js';
+export {
+  createAsyncCreativeBrief,
+  createAsyncCreativeBriefWithOptions,
+} from './async-creative-brief.js';

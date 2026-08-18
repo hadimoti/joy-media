@@ -30,12 +30,18 @@ import {
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
 import { validateCreativeBriefServerRequest } from './creative-brief-request-validation.js';
+import type { CreativeBriefServerRequest } from './creative-brief-request-validation.js';
+import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
+import type { CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
+import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import {
   GpuPreviewTransport,
   deserializeGpuPreviewResponse,
   type SerializedGpuPreviewFrameResponse,
 } from './gpu-preview-transport.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
+import type { CreativeBriefV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
+import { randomUUID } from 'node:crypto';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -52,6 +58,11 @@ export interface ControlPlaneHttpServerOptions {
   readonly audioDenoise?: SpectralDenoiseService;
   /** In-memory only; injectable for deterministic transport tests. */
   readonly gpuPreview?: GpuPreviewTransport;
+  /**
+   * Creative brief runtime for async creative brief generation.
+   * Production default is unavailable. Inject for tests or real implementation.
+   */
+  readonly creativeBriefRuntime?: CreativeBriefRuntime;
 }
 
 /**
@@ -68,6 +79,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       options.audioDenoise ??
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
+    creativeBriefRuntime: options.creativeBriefRuntime ?? DEFAULT_CREATIVE_BRIEF_RUNTIME,
   };
   return createServer(async (request, response) => {
     try {
@@ -84,6 +96,7 @@ async function route(
     readonly mediaAuth: MediaAuthApi;
     readonly audioDenoise: SpectralDenoiseService;
     readonly gpuPreview: GpuPreviewTransport;
+    readonly creativeBriefRuntime: CreativeBriefRuntime;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -391,12 +404,27 @@ async function route(
       }
       throw new ControlPlaneError('REQUEST_INVALID', 'Creative brief request validation failed');
     }
-    respondJson(response, 503, {
-      data: {
-        kind: 'unavailable',
-        code: 'creative-brief-runtime-not-configured',
-      },
-    });
+
+    // All gates passed - call the injected runtime
+    const runtimeContext: CreativeBriefRuntimeContext = {
+      correlationId: randomUUID(),
+      signal: request.socket?.destroyed ? AbortSignal.abort() : undefined,
+      timeoutMs: 30_000, // 30 second default timeout
+      spendLimitUsdCents: 1000, // $10.00 default spend limit
+    };
+
+    // body has already been validated by validateCreativeBriefServerRequest
+    // Type assertion is safe because we just validated it
+    const serverRequest: CreativeBriefServerRequest = body as unknown as CreativeBriefServerRequest;
+
+    const outcome: AsyncCreativeBriefOutcome = await options.creativeBriefRuntime.execute(
+      serverRequest,
+      runtimeContext,
+    );
+
+    // Map outcome to HTTP response
+    const httpResponse = mapCreativeBriefOutcomeToHttpResponse(outcome);
+    respondJson(response, httpResponse.statusCode, httpResponse.body);
     return;
   }
 
@@ -1902,4 +1930,113 @@ function workerSessionHash(request: IncomingMessage): string {
 
 function secretHash(value: string): string {
   return createHash('sha256').update(value).digest('base64url');
+}
+
+// ============================================================================
+// Creative Brief Outcome Mapping
+// ============================================================================
+
+/**
+ * HTTP response for creative brief outcomes.
+ */
+interface CreativeBriefHttpResponse {
+  readonly statusCode: number;
+  readonly body: { data: unknown } | { error: { code: string; message?: string } };
+}
+
+/**
+ * Map async creative brief outcome to HTTP response.
+ *
+ * Mapping:
+ * - ready -> 200 with validated CreativeBriefV1
+ * - unavailable -> 503
+ * - policy-denied -> 403 (existing policy-denied status)
+ * - invalid-output / provider-failed -> 502
+ * - timeout -> 504
+ * - cancelled -> 499 (safe cancellation)
+ */
+function mapCreativeBriefOutcomeToHttpResponse(
+  outcome: AsyncCreativeBriefOutcome,
+): CreativeBriefHttpResponse {
+  switch (outcome.category) {
+    case 'ready':
+      // Success - return validated CreativeBriefV1
+      return {
+        statusCode: 200,
+        body: { data: outcome.brief },
+      };
+
+    case 'unavailable':
+      // Provider/runtime not configured
+      return {
+        statusCode: 503,
+        body: {
+          error: {
+            code: outcome.errorCode ?? 'UNAVAILABLE',
+            message: outcome.message,
+          },
+        },
+      };
+
+    case 'policy-denied':
+      // Policy denial (opt-in, ownership, etc.) - 403 Forbidden
+      return {
+        statusCode: 403,
+        body: {
+          error: {
+            code: outcome.errorCode ?? 'POLICY_DENIED',
+            message: outcome.message,
+          },
+        },
+      };
+
+    case 'invalid-output':
+    case 'provider-failed':
+      // Model returned invalid output or provider failed - 502 Bad Gateway
+      return {
+        statusCode: 502,
+        body: {
+          error: {
+            code: outcome.errorCode ?? outcome.category.toUpperCase(),
+            message: outcome.message,
+          },
+        },
+      };
+
+    case 'timeout':
+      // Request timed out - 504 Gateway Timeout
+      return {
+        statusCode: 504,
+        body: {
+          error: {
+            code: outcome.errorCode ?? 'TIMEOUT',
+            message: outcome.message ?? 'Creative brief generation timed out',
+          },
+        },
+      };
+
+    case 'cancelled':
+      // Request was cancelled - 499 Client Closed Request (safe cancellation)
+      return {
+        statusCode: 499,
+        body: {
+          error: {
+            code: outcome.errorCode ?? 'CANCELLED',
+            message: outcome.message ?? 'Creative brief generation was cancelled',
+          },
+        },
+      };
+
+    default:
+      // Unknown category - treat as unavailable
+      return {
+        statusCode: 503,
+        body: {
+          error: {
+            code: 'UNKNOWN_OUTCOME',
+            message: 'Unknown creative brief outcome category',
+          },
+        },
+      };
+  }
 }
