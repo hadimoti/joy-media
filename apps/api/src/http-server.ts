@@ -34,6 +34,15 @@ import type { CreativeBriefServerRequest } from './creative-brief-request-valida
 import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
+import type {
+  CreativeBriefInputResolver,
+  CreativeBriefInputResolverRequest,
+  CreativeBriefInputResolverResult,
+} from './creative-brief-input-resolver.js';
+import { UnavailableCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
+import { validateCreativeBriefClientRequest } from './creative-brief-client-request-validation.js';
+import type { CreativeBriefClientRequestEnvelope } from './creative-brief-client-request-validation.js';
+import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 import {
   GpuPreviewTransport,
   deserializeGpuPreviewResponse,
@@ -63,6 +72,12 @@ export interface ControlPlaneHttpServerOptions {
    * Production default is unavailable. Inject for tests or real implementation.
    */
   readonly creativeBriefRuntime?: CreativeBriefRuntime;
+  /**
+   * Creative brief input resolver for server-side resolution.
+   * Production default is UnavailableCreativeBriefInputResolver.
+   * Inject for tests or real implementation.
+   */
+  readonly creativeBriefInputResolver?: CreativeBriefInputResolver;
 }
 
 /**
@@ -80,6 +95,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
     creativeBriefRuntime: options.creativeBriefRuntime ?? DEFAULT_CREATIVE_BRIEF_RUNTIME,
+    creativeBriefInputResolver: options.creativeBriefInputResolver ?? UnavailableCreativeBriefInputResolver,
   };
   return createServer(async (request, response) => {
     try {
@@ -97,6 +113,7 @@ async function route(
     readonly audioDenoise: SpectralDenoiseService;
     readonly gpuPreview: GpuPreviewTransport;
     readonly creativeBriefRuntime: CreativeBriefRuntime;
+    readonly creativeBriefInputResolver: CreativeBriefInputResolver;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -383,42 +400,72 @@ async function route(
     if (!project.creativeBriefOptIn) {
       throw new ControlPlaneError('POLICY_DENIED', 'creative brief not opted in for this project');
     }
+
+    // Step 3: Strict client-envelope validation (browser-safe envelope only)
     const body = await readJson(request);
-    const envelopeProjectId = body?.projectId;
-    if (envelopeProjectId !== undefined && envelopeProjectId !== projectId) {
-      throw new ControlPlaneError('PROJECT_MISMATCH', 'route projectId does not match envelope projectId');
-    }
-    const envelopeSnapshotRevisionId = (body as { snapshotRevisionId?: string })?.snapshotRevisionId ?? '';
-    const validation = validateCreativeBriefServerRequest(body, projectId, envelopeSnapshotRevisionId);
-    if (!validation.valid) {
-      const firstError = validation.errors[0];
+    const clientValidation = validateCreativeBriefClientRequest(body);
+    if (!clientValidation.valid) {
+      const firstError = clientValidation.errors[0];
       if (firstError) {
         throw new ControlPlaneError(
-          firstError.code === 'invalid-request' ? 'REQUEST_INVALID' :
+          firstError.code === 'invalid-envelope' ? 'REQUEST_INVALID' :
+          firstError.code === 'payload-too-large' ? 'PAYLOAD_TOO_LARGE' :
+          firstError.code === 'unknown-field' ? 'REQUEST_INVALID' :
+          firstError.code === 'forbidden-field' ? 'REQUEST_INVALID' :
           firstError.code === 'project-mismatch' ? 'PROJECT_MISMATCH' :
           firstError.code === 'revision-mismatch' ? 'REVISION_MISMATCH' :
-          firstError.code === 'payload-too-large' ? 'PAYLOAD_TOO_LARGE' :
+          firstError.code === 'invalid-request' ? 'REQUEST_INVALID' :
           'REQUEST_INVALID',
           firstError.message,
         );
       }
-      throw new ControlPlaneError('REQUEST_INVALID', 'Creative brief request validation failed');
+      throw new ControlPlaneError('REQUEST_INVALID', 'Creative brief client request validation failed');
     }
 
-    // All gates passed - call the injected runtime
+    // Type assertion is safe because we just validated it
+    const clientEnvelope = body as unknown as CreativeBriefClientRequestEnvelope;
+
+    // Step 4: Input resolver - resolve server-side canonical input
+    const resolverRequest: CreativeBriefInputResolverRequest = {
+      projectId: clientEnvelope.projectId,
+      snapshotRevisionId: clientEnvelope.snapshotRevisionId,
+      request: clientEnvelope.request,
+    };
+    const resolverResult: CreativeBriefInputResolverResult = options.creativeBriefInputResolver.resolve(resolverRequest);
+
+    // Handle resolver failures
+    if (resolverResult.status === 'unavailable') {
+      respondJson(response, 503, {
+        data: {
+          kind: 'unavailable',
+          code: resolverResult.code,
+          message: resolverResult.message,
+        },
+      });
+      return;
+    }
+
+    if (resolverResult.status === 'stale-revision') {
+      respondJson(response, 409, {
+        error: {
+          code: 'REVISION_MISMATCH',
+          message: resolverResult.message,
+        },
+      });
+      return;
+    }
+
+    // Step 5: Runtime with resolved input
     const runtimeContext: CreativeBriefRuntimeContext = {
       correlationId: randomUUID(),
       signal: request.socket?.destroyed ? AbortSignal.abort() : undefined,
       timeoutMs: 30_000, // 30 second default timeout
-      spendLimitUsdCents: 1000, // $10.00 default spend limit
+      spendLimitUsdCents: 0, // Free-only policy
     };
 
-    // body has already been validated by validateCreativeBriefServerRequest
-    // Type assertion is safe because we just validated it
-    const serverRequest: CreativeBriefServerRequest = body as unknown as CreativeBriefServerRequest;
-
+    const resolvedInput: CreativeBriefInputV1 = resolverResult.input;
     const outcome: AsyncCreativeBriefOutcome = await options.creativeBriefRuntime.execute(
-      serverRequest,
+      resolvedInput,
       runtimeContext,
     );
 
@@ -1973,8 +2020,8 @@ function mapCreativeBriefOutcomeToHttpResponse(
         body: {
           error: {
             code: outcome.errorCode ?? 'UNAVAILABLE',
-            message: outcome.message,
-          },
+            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
+          } as { code: string; message?: string },
         },
       };
 
@@ -1985,8 +2032,8 @@ function mapCreativeBriefOutcomeToHttpResponse(
         body: {
           error: {
             code: outcome.errorCode ?? 'POLICY_DENIED',
-            message: outcome.message,
-          },
+            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
+          } as { code: string; message?: string },
         },
       };
 
@@ -1998,8 +2045,8 @@ function mapCreativeBriefOutcomeToHttpResponse(
         body: {
           error: {
             code: outcome.errorCode ?? outcome.category.toUpperCase(),
-            message: outcome.message,
-          },
+            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
+          } as { code: string; message?: string },
         },
       };
 

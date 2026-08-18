@@ -6,11 +6,9 @@
  * integrate with AsyncCreativeModelAdapter from @joy-media/agent-tools.
  */
 
-import type {
-  CreativeBriefServerRequest,
-} from './creative-brief-request-validation.js';
 import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import type { AsyncOutcomeCategory } from '@joy-media/agent-tools';
+import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 
 // ============================================================================
 // Types
@@ -46,25 +44,26 @@ export interface CreativeBriefRuntimeContext {
 
 /**
  * Creative Brief Runtime interface.
- * Accepts a validated server request plus safe execution metadata and returns
+ * Accepts resolved CreativeBriefInputV1 plus safe execution metadata and returns
  * a typed async outcome containing either a CreativeBriefV1 or a failure category.
  */
 export interface CreativeBriefRuntime {
   /**
-   * Execute creative brief generation for a validated request.
+   * Execute creative brief generation for resolved input.
    *
    * Called only after all gates pass:
    * - Authentication verified
    * - Owner confirmed
    * - Project opt-in checked
-   * - Request envelope validated
+   * - Client envelope validated
+   * - Input resolved server-side
    *
-   * @param request - Already validated server request envelope
+   * @param input - Resolved CreativeBriefInputV1 from canonical server-side state
    * @param context - Safe execution metadata (correlation, cancellation, timeout, spend)
    * @returns Promise resolving to typed outcome
    */
   execute(
-    request: CreativeBriefServerRequest,
+    input: CreativeBriefInputV1,
     context: CreativeBriefRuntimeContext,
   ): Promise<AsyncCreativeBriefOutcome>;
 }
@@ -88,8 +87,8 @@ export class UnavailableCreativeBriefRuntime implements CreativeBriefRuntime {
    * No fake success, no model call, no network request, no credential access.
    */
   async execute(
-    _request: CreativeBriefServerRequest,
-    context: CreativeBriefRuntimeContext,
+    _input: CreativeBriefInputV1,
+    _context: CreativeBriefRuntimeContext,
   ): Promise<AsyncCreativeBriefOutcome> {
     return {
       category: 'unavailable',

@@ -7,15 +7,69 @@
 import { describe, it, expect, vi } from 'vitest';
 import { UnavailableCreativeBriefRuntime, DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntime, CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
-import type { AsyncCreativeBriefOutcome, AsyncOutcomeCategory } from '@joy-media/agent-tools';
+import type { AsyncCreativeBriefOutcome, AsyncOutcomeCategory, CreativeBriefInputV1 } from '@joy-media/agent-tools';
+import type { SemanticProjectSnapshotV1, BrandReadinessV1, SceneCoverageV1, ProjectReadinessV1, IntelligenceRuleV1 } from '@joy-media/project-schema';
 
-const mockServerRequest = {
-  projectId: 'test-project-id',
-  snapshotRevisionId: 'test-revision-id',
-  snapshot: {},
-  intelligence: {},
-  request: {},
-} as const;
+const mockCreativeBriefInput: CreativeBriefInputV1 = {
+  snapshot: {
+    schemaVersion: 1,
+    projectId: 'test-project-id',
+    revisionId: 'test-revision-id',
+    capturedAt: '2026-08-17T00:00:00.000Z',
+    composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+    brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+    scenes: [],
+    timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+    assets: [],
+    capabilities: {},
+    warnings: [],
+    truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+  },
+  brandReadiness: {
+    projectId: 'test-project-id',
+    revisionId: 'test-revision-id',
+    colorsAvailable: false,
+    fontsAvailable: false,
+    logoAvailable: false,
+    voiceInstructionsAvailable: false,
+    toneInstructionsAvailable: false,
+    prohibitedClaims: [],
+    prohibitedEffects: [],
+    hasBrandKit: false,
+    brandCompleteness: 'none',
+    missingComponents: [],
+    warnings: [],
+    evidence: [],
+  },
+  sceneCoverages: [],
+  projectReadiness: {
+    projectId: 'test-project-id',
+    revisionId: 'test-revision-id',
+    destination: undefined,
+    destinationAligned: true,
+    destinationMismatch: undefined,
+    durationTargetUs: undefined,
+    compositionDurationUs: 1000000,
+    durationAligned: true,
+    durationGapUs: undefined,
+    aspectRatio: '16:9',
+    aspectRatioAligned: true,
+    aspectRatioMismatch: undefined,
+    captionAvailable: false,
+    audioAvailable: false,
+    generatedAssetsAvailable: false,
+    readinessLevel: 'unknown',
+    blockers: [],
+    warnings: [],
+    sceneCount: 0,
+    scenesWithVisuals: 0,
+    scenesWithAudio: 0,
+    scenesWithCaptions: 0,
+    evidence: [],
+  },
+  rules: [],
+  request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test brief', scope: 'video' },
+};
 
 const mockRuntimeContext: CreativeBriefRuntimeContext = {
   correlationId: 'test-correlation-id',
@@ -37,7 +91,7 @@ function makeOutcome(category: AsyncOutcomeCategory, brief?: any): AsyncCreative
 describe('UnavailableCreativeBriefRuntime', () => {
   it('should return unavailable outcome', async () => {
     const runtime = new UnavailableCreativeBriefRuntime();
-    const outcome = await runtime.execute(mockServerRequest as any, mockRuntimeContext);
+    const outcome = await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
 
     expect(outcome.category).toBe('unavailable');
     expect(outcome.errorCode).toBe('RUNTIME_UNAVAILABLE');
@@ -56,7 +110,7 @@ describe('UnavailableCreativeBriefRuntime', () => {
     });
 
     try {
-      await runtime.execute(mockServerRequest as any, mockRuntimeContext);
+      await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
       expect(fetchCalled).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
@@ -72,7 +126,7 @@ describe('DEFAULT_CREATIVE_BRIEF_RUNTIME', () => {
 
   it('should return unavailable', async () => {
     const outcome = await DEFAULT_CREATIVE_BRIEF_RUNTIME.execute(
-      mockServerRequest as any,
+      mockCreativeBriefInput,
       mockRuntimeContext,
     );
     expect(outcome.category).toBe('unavailable');
@@ -92,7 +146,7 @@ describe('CreativeBriefRuntime contract', () => {
       execute: vi.fn().mockResolvedValue(makeOutcome('ready')),
     };
 
-    const result = runtime.execute(mockServerRequest as any, mockRuntimeContext);
+    const result = runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
     expect(result).toBeInstanceOf(Promise);
 
     const outcome = await result;
@@ -111,25 +165,25 @@ describe('CreativeBriefRuntime contract', () => {
       const runtime: CreativeBriefRuntime = {
         execute: vi.fn().mockResolvedValue(makeOutcome(category)),
       };
-      const outcome = await runtime.execute(mockServerRequest as any, mockRuntimeContext);
+      const outcome = await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
       expect(outcome.category).toBe(category);
     }
   });
 
-  it('should receive request and context', async () => {
-    let receivedRequest: any;
+  it('should receive input and context', async () => {
+    let receivedInput: any;
     let receivedContext: any;
     const runtime: CreativeBriefRuntime = {
-      execute: vi.fn().mockImplementation((req, ctx) => {
-        receivedRequest = req;
+      execute: vi.fn().mockImplementation((input, ctx) => {
+        receivedInput = input;
         receivedContext = ctx;
         return Promise.resolve(makeOutcome('ready'));
       }),
     };
 
-    await runtime.execute(mockServerRequest as any, mockRuntimeContext);
+    await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
 
-    expect(receivedRequest).toEqual(mockServerRequest);
+    expect(receivedInput).toEqual(mockCreativeBriefInput);
     expect(receivedContext).toEqual(mockRuntimeContext);
   });
 });
