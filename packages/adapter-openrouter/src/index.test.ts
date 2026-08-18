@@ -596,3 +596,322 @@ describe('OpenRouterCreativeAdapter - types', () => {
     expect(outcome).toHaveProperty('durationMs');
   });
 });
+
+// ============================================================================
+// OpenRouter Response Decoder Tests - WP-37 S4-F10-B
+// ============================================================================
+
+import { decodeOpenRouterResponse } from './index.js';
+import type { OpenRouterResponse, OpenRouterDecoderOutcome } from './index.js';
+import type { ModelAdapterOutputV1 } from '@joy-media/agent-tools';
+
+// Type helpers for decoder tests - these are safe because we verify category first
+type DecoderInvalid = Extract<OpenRouterDecoderOutcome, { category: 'invalid-output' }>;
+type DecoderProviderFailed = Extract<OpenRouterDecoderOutcome, { category: 'provider-failed' }>;
+type DecoderReady = Extract<OpenRouterDecoderOutcome, { category: 'ready' }>;
+
+const VALID_OUTPUT: ModelAdapterOutputV1 = {
+  interpretedGoal: { userIntent: 'u', inferredGoal: 'i', resolvedGoal: 'r', confidence: 'high' },
+  distinction: { facts: [], inferences: [] },
+  assumptions: [],
+  recommendations: [],
+  blockedBy: [],
+  requiresHumanDecision: [],
+};
+
+const VALID_OUTPUT_PERSIAN: ModelAdapterOutputV1 = {
+  interpretedGoal: { userIntent: 'فارس', inferredGoal: 'فارس', resolvedGoal: 'فارس', confidence: 'high' },
+  distinction: { facts: [{ id: 'f1', statement: 'فارس', source: 's1', evidence: [] }], inferences: [] },
+  assumptions: [],
+  recommendations: [],
+  blockedBy: [],
+  requiresHumanDecision: [],
+};
+
+function checkInvalid(result: OpenRouterDecoderOutcome): asserts result is DecoderInvalid {
+  expect(result.category).toBe('invalid-output');
+}
+function checkProviderFailed(result: OpenRouterDecoderOutcome): asserts result is DecoderProviderFailed {
+  expect(result.category).toBe('provider-failed');
+}
+function checkReady(result: OpenRouterDecoderOutcome): asserts result is DecoderReady {
+  expect(result.category).toBe('ready');
+}
+
+describe('decodeOpenRouterResponse', () => {
+  describe('valid outputs', () => {
+    it('returns ready for valid ModelAdapterOutputV1', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkReady(result);
+      expect(result.result).toEqual(VALID_OUTPUT);
+    });
+
+    it('preserves Persian text', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT_PERSIAN) } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkReady(result);
+      expect(result.result).toEqual(VALID_OUTPUT_PERSIAN);
+    });
+
+    it('handles extra whitespace in JSON', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: `  ${JSON.stringify(VALID_OUTPUT)}  ` } }],
+      };
+      checkReady(decodeOpenRouterResponse(resp));
+    });
+  });
+
+  describe('empty/malformed envelopes', () => {
+    it('returns invalid-output for empty choices', () => {
+      const resp: OpenRouterResponse = { choices: [] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+      expect(result.message).toContain('No assistant message content');
+      expect(result.retryable).toBe(false);
+    });
+
+    it('returns invalid-output for missing choices', () => {
+      const resp: OpenRouterResponse = {};
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('returns invalid-output for missing message', () => {
+      const resp: OpenRouterResponse = { choices: [{} as any] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('returns invalid-output for missing content', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: {} }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('returns invalid-output for non-string content', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: 123 as any } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('returns invalid-output for empty string content', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: '' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('only checks first choice', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{}, { message: { content: JSON.stringify(VALID_OUTPUT) } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+
+    it('handles undefined choices', () => {
+      const resp: OpenRouterResponse = { choices: undefined };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+    });
+  });
+
+  describe('invalid JSON', () => {
+    it('returns invalid-output for malformed JSON', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: '{ bad json }' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_JSON');
+      expect(result.message).toContain('not valid JSON');
+      expect(result.retryable).toBe(false);
+    });
+
+    it('returns invalid-output for non-JSON string', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: 'plain text' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_JSON');
+    });
+
+    it('returns invalid-output for JSON with trailing comma', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: '{"k":"v",}' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_JSON');
+    });
+  });
+
+  describe('invalid schema', () => {
+    it('returns invalid-output for incomplete output', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: '{"interpretedGoal":{}}' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_SCHEMA');
+      expect(result.message).toContain('ModelAdapterOutputV1');
+      expect(result.retryable).toBe(false);
+    });
+
+    it('returns invalid-output for empty object', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: '{}' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_SCHEMA');
+    });
+
+    it('returns invalid-output for null', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: 'null' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_SCHEMA');
+    });
+
+    it('returns invalid-output for array', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: '[1,2]' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_SCHEMA');
+    });
+  });
+
+  describe('provider errors', () => {
+    it('returns provider-failed for explicit error', () => {
+      const resp: OpenRouterResponse = {
+        error: { message: 'Rate limit', type: 'BadRequestError', code: 'RATE_LIMIT' },
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkProviderFailed(result);
+      expect(result.errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+      expect(result.message).toContain('OpenRouter provider');
+      expect(result.retryable).toBe(true);
+    });
+
+    it('returns provider-failed for minimal error', () => {
+      const resp: OpenRouterResponse = { error: { message: 'Unauth' } };
+      const result = decodeOpenRouterResponse(resp);
+      checkProviderFailed(result);
+      expect(result.errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+    });
+
+    it('error takes precedence over choices', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+        error: { message: 'Internal' },
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkProviderFailed(result);
+      expect(result.errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+    });
+  });
+
+  describe('unknown keys and boundary values', () => {
+    it('ignores unknown top-level keys', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+        id: 'c1',
+        created: 123,
+        model: 'm1',
+        usage: { prompt_tokens: 10, completion_tokens: 20 },
+      } as any;
+      checkReady(decodeOpenRouterResponse(resp));
+    });
+
+    it('handles whitespace-only content', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: '   \n\t  ' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(result.errorCode).toBe('OPENROUTER_INVALID_JSON');
+    });
+  });
+
+  describe('redaction proof', () => {
+    it('does not expose secrets in invalid-output', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: '{"secret":"sk-123","key":"abc"}' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(JSON.stringify(result)).not.toContain('sk-123');
+      expect(JSON.stringify(result)).not.toContain('abc');
+      expect(JSON.stringify(result)).not.toContain('secret');
+      expect(JSON.stringify(result)).not.toContain('key');
+    });
+
+    it('does not expose provider error details', () => {
+      const resp: OpenRouterResponse = {
+        error: { message: 'API key invalid: sk-xyz', code: 'INVALID' },
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkProviderFailed(result);
+      expect(JSON.stringify(result)).not.toContain('sk-xyz');
+      expect(JSON.stringify(result)).not.toContain('API key invalid');
+      expect(result.message).toBe('OpenRouter provider returned an error');
+    });
+
+    it('does not expose URLs', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: 'https://api.openrouter.ai/v1' } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      checkInvalid(result);
+      expect(JSON.stringify(result)).not.toContain('https://');
+      expect(JSON.stringify(result)).not.toContain('api.openrouter.ai');
+    });
+
+    it('returns consistent error codes', () => {
+      expect((decodeOpenRouterResponse({} as OpenRouterResponse) as DecoderInvalid).errorCode).toBe('OPENROUTER_EMPTY_RESPONSE');
+      expect((decodeOpenRouterResponse({ choices: [{ message: { content: 'x' } }] } as OpenRouterResponse) as DecoderInvalid).errorCode).toBe('OPENROUTER_INVALID_JSON');
+      expect((decodeOpenRouterResponse({ choices: [{ message: { content: '{}' } }] } as OpenRouterResponse) as DecoderInvalid).errorCode).toBe('OPENROUTER_INVALID_SCHEMA');
+      expect((decodeOpenRouterResponse({ error: { message: 'e' } } as OpenRouterResponse) as DecoderProviderFailed).errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+    });
+  });
+
+  describe('type safety', () => {
+    it('ready has result', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+      };
+      const result = decodeOpenRouterResponse(resp);
+      if (result.category !== 'ready') throw new Error('Expected ready');
+      expect(result.result).toBeDefined();
+      expect(typeof result.result).toBe('object');
+    });
+
+    it('invalid-output has error fields', () => {
+      const resp: OpenRouterResponse = { choices: [{ message: { content: 'bad' } }] };
+      const result = decodeOpenRouterResponse(resp);
+      if (result.category !== 'invalid-output') throw new Error('Expected invalid-output');
+      expect(result.errorCode).toBeDefined();
+      expect(result.message).toBeDefined();
+      expect(typeof result.retryable).toBe('boolean');
+    });
+
+    it('provider-failed has error fields', () => {
+      const resp: OpenRouterResponse = { error: { message: 'e' } };
+      const result = decodeOpenRouterResponse(resp);
+      if (result.category !== 'provider-failed') throw new Error('Expected provider-failed');
+      expect(result.errorCode).toBeDefined();
+      expect(result.message).toBeDefined();
+      expect(typeof result.retryable).toBe('boolean');
+    });
+  });
+});

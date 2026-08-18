@@ -261,3 +261,155 @@ export type {
   Clock,
   OpenRouterAdapterOptions,
 };
+
+// ============================================================================
+// OpenRouter Response Decoder - WP-37 S4-F10-B
+// ============================================================================
+
+import { isModelAdapterOutputV1 } from '@joy-media/agent-tools';
+
+/**
+ * OpenAI-compatible/OpenRouter response envelope.
+ * This is the structure returned by OpenRouter's chat completions API.
+ */
+export interface OpenRouterResponse {
+  readonly choices?: readonly {
+    readonly message?: {
+      readonly role?: string;
+      readonly content?: string;
+    };
+  }[] | undefined;
+  readonly error?: {
+    readonly message?: string;
+    readonly type?: string;
+    readonly code?: string;
+  } | undefined;
+}
+
+/**
+ * Decoded outcome from an OpenRouter response.
+ * Uses the same AsyncOutcome categories from the async adapter contract.
+ */
+export type OpenRouterDecoderOutcome =
+  | { category: 'ready'; result: unknown } // result is validated ModelAdapterOutputV1
+  | { category: 'invalid-output'; errorCode: string; message: string; retryable: boolean }
+  | { category: 'provider-failed'; errorCode: string; message: string; retryable: boolean };
+
+/**
+ * Safe JSON parsing with redaction of error details.
+ * Returns the parsed object or undefined if parsing fails.
+ * Never exposes raw content in errors.
+ */
+function safeJsonParse(content: string): unknown | undefined {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Extract the first assistant message content from an OpenRouter response.
+ * Returns the content string if it exists and is a string, otherwise undefined.
+ */
+function extractAssistantContent(response: OpenRouterResponse): string | undefined {
+  const firstChoice = response.choices?.[0];
+  const message = firstChoice?.message;
+  const content = message?.content;
+
+  if (typeof content === 'string' && content.length > 0) {
+    return content;
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if the response indicates a provider error.
+ * OpenRouter returns errors in the top-level 'error' field.
+ */
+function isProviderError(response: OpenRouterResponse): boolean {
+  return response.error !== undefined &&
+    (response.error.message !== undefined ||
+     response.error.type !== undefined ||
+     response.error.code !== undefined);
+}
+
+/**
+ * Decode an OpenRouter response into a typed outcome.
+ *
+ * This is a pure function that:
+ * - Extracts the first assistant message content only when it is a string
+ * - Parses JSON safely
+ * - Validates the parsed content as ModelAdapterOutputV1
+ * - Returns typed outcomes: ready, invalid-output, or provider-failed
+ * - Never includes raw response content, secrets, URLs, or provider body text in errors
+ *
+ * @param response - The OpenRouter response to decode
+ * @returns A typed decoder outcome
+ *
+ * @example
+ * ```ts
+ * const response = {
+ *   choices: [{ message: { role: 'assistant', content: '{"interpretedGoal": {...}}' } }]
+ * } as OpenRouterResponse;
+ * const result = decodeOpenRouterResponse(response);
+ * if (result.category === 'ready') {
+ *   // result.result is validated ModelAdapterOutputV1
+ * }
+ * ```
+ */
+export function decodeOpenRouterResponse(
+  response: OpenRouterResponse,
+): OpenRouterDecoderOutcome {
+  // Check for provider error first
+  if (isProviderError(response)) {
+    return {
+      category: 'provider-failed',
+      errorCode: 'OPENROUTER_PROVIDER_ERROR',
+      message: 'OpenRouter provider returned an error',
+      retryable: true,
+    };
+  }
+
+  // Extract assistant content
+  const content = extractAssistantContent(response);
+
+  // No content or empty response
+  if (content === undefined) {
+    return {
+      category: 'invalid-output',
+      errorCode: 'OPENROUTER_EMPTY_RESPONSE',
+      message: 'No assistant message content found in response',
+      retryable: false,
+    };
+  }
+
+  // Parse JSON safely
+  const parsed = safeJsonParse(content);
+
+  if (parsed === undefined) {
+    return {
+      category: 'invalid-output',
+      errorCode: 'OPENROUTER_INVALID_JSON',
+      message: 'Assistant message content is not valid JSON',
+      retryable: false,
+    };
+  }
+
+  // Validate as ModelAdapterOutputV1
+  if (!isModelAdapterOutputV1(parsed)) {
+    return {
+      category: 'invalid-output',
+      errorCode: 'OPENROUTER_INVALID_SCHEMA',
+      message: 'Parsed content does not match ModelAdapterOutputV1 schema',
+      retryable: false,
+    };
+  }
+
+  // Success: valid ModelAdapterOutputV1
+  return {
+    category: 'ready',
+    result: parsed,
+  };
+}
