@@ -921,7 +921,7 @@ describe('decodeOpenRouterResponse', () => {
 // ============================================================================
 
 import { buildOpenRouterRequest, OpenRouterCodec } from './index.js';
-import type { OpenRouterRequestOutcome } from './index.js';
+import type { OpenRouterRequestOutcome, OpenRouterRequest } from './index.js';
 
 describe('buildOpenRouterRequest - basic functionality', () => {
   // Minimal test to verify the codec exports and basic functionality
@@ -934,5 +934,95 @@ describe('buildOpenRouterRequest - basic functionality', () => {
     expect(typeof OpenRouterCodec).toBe('object');
     expect(typeof OpenRouterCodec.build).toBe('function');
     expect(typeof OpenRouterCodec.decode).toBe('function');
+  });
+});
+
+// ============================================================================
+// OpenRouter Request Codec - Token Cap Tests - WP-37 S4-F10-D2
+// ============================================================================
+
+describe('buildOpenRouterRequest - output token cap', () => {
+  // Helper to create a minimal valid input
+  function createMinimalInput(): any {
+    return {
+      snapshot: {
+        projectId: 'test-project',
+        revisionId: 'test-revision',
+        composition: {
+          durationUs: 1000000,
+          aspectRatio: '16:9',
+          frameRate: { num: 30, den: 1 },
+          width: 1920,
+          height: 1080,
+        },
+        scenes: [],
+        assets: [],
+      },
+      brandReadiness: {
+        hasBrandKit: false,
+        colorsAvailable: 0,
+        fontsAvailable: 0,
+        logoAvailable: false,
+      },
+      sceneCoverages: [],
+      projectReadiness: {
+        readinessLevel: 'none',
+        durationAligned: false,
+        aspectRatioAligned: false,
+        blockers: [],
+      },
+      rules: [],
+      request: {
+        request: 'test request',
+        scope: 'full',
+      },
+    };
+  }
+
+  // Type guard for ready outcomes
+  function assertReady(result: OpenRouterRequestOutcome): asserts result is { category: 'ready'; result: OpenRouterRequest } {
+    expect(result.category).toBe('ready');
+  }
+
+  it('should build request with max_tokens set to 2048', () => {
+    const input = createMinimalInput();
+    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+
+    assertReady(result);
+    expect(result.result.max_tokens).toBe(2048);
+  });
+
+  it('should always use exactly 2048 for max_tokens regardless of input', () => {
+    const input = createMinimalInput();
+    // Test with different model IDs
+    const result1 = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+    const result2 = buildOpenRouterRequest(input, { modelId: 'openrouter/llama-3' });
+
+    assertReady(result1);
+    assertReady(result2);
+    expect(result1.result.max_tokens).toBe(2048);
+    expect(result2.result.max_tokens).toBe(2048);
+  });
+
+  it('should include temperature 0.0 for deterministic output', () => {
+    const input = createMinimalInput();
+    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+
+    assertReady(result);
+    expect(result.result.temperature).toBe(0.0);
+    expect(result.result.max_tokens).toBe(2048);
+  });
+
+  it('should not allow increasing max_tokens through public API', () => {
+    const input = createMinimalInput();
+    // The buildOpenRouterRequest function only accepts input and config with modelId
+    // There is no parameter to override max_tokens
+    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+
+    assertReady(result);
+    // No matter what, it should be 2048
+    expect(result.result.max_tokens).toBe(2048);
+    expect(result.result.max_tokens).not.toBe(8192);
+    expect(result.result.max_tokens).not.toBeGreaterThan(2048);
   });
 });

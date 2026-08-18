@@ -286,6 +286,13 @@ export {
 const MAX_PROMPT_CHARS = 32000;
 
 /**
+ * Maximum output tokens for Creative Brief responses.
+ * Hard cap of 2048 tokens for the initial free-only rollout.
+ * Cannot be increased through the current public builder API.
+ */
+const MAX_OUTPUT_TOKENS = 2048;
+
+/**
  * Forbidden patterns that should never appear in the model payload.
  * These are checked against the serialized prompt string.
  */
@@ -526,7 +533,7 @@ function buildOpenRouterRequest(
     },
     // Conservative settings for deterministic output
     temperature: 0.0,
-    max_tokens: 8192,
+    max_tokens: MAX_OUTPUT_TOKENS,
   };
 
   return {
