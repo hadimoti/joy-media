@@ -51,6 +51,7 @@ export default defineConfig({
       '@joy-media/visual-effects': pkg('./packages/visual-effects/src/index.ts'),
       '@joy-media/workflow-engine': pkg('./packages/workflow-engine/src/index.ts'),
       '@joy-media/worker': pkg('./apps/worker/src/index.ts'),
+      '@joy-media/adapter-openrouter': pkg('./packages/adapter-openrouter/src/index.ts'),
     },
   },
   test: {

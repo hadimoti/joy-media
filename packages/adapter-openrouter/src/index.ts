@@ -114,7 +114,7 @@ class DefaultClock implements Clock {
  * Does NOT make any HTTP requests, construct Authorization headers,
  * resolve environment variables, or inspect secret values.
  */
-export class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
+class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
   readonly adapterName = 'openrouter-creative-v1' as const;
   readonly isTestOnly = false as const;
 
@@ -245,7 +245,7 @@ export class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
  * });
  * ```
  */
-export function createOpenRouterCreativeAdapter(
+function createOpenRouterCreativeAdapter(
   options: OpenRouterAdapterOptions,
 ): AsyncCreativeModelAdapter {
   return new OpenRouterCreativeAdapter(options);
@@ -260,7 +260,296 @@ export type {
   HttpPostTransport,
   Clock,
   OpenRouterAdapterOptions,
+  OpenRouterRequest,
+  OpenRouterRequestConfig,
+  OpenRouterRequestOutcome,
+  OpenRouterResponse,
+  OpenRouterDecoderOutcome,
 };
+
+export {
+  OpenRouterCreativeAdapter,
+  createOpenRouterCreativeAdapter,
+  decodeOpenRouterResponse,
+  buildOpenRouterRequest,
+  OpenRouterCodec,
+};
+
+// ============================================================================
+// OpenRouter Request Codec - WP-37 S4-F10-C
+// ============================================================================
+
+/**
+ * Maximum allowed prompt size in characters (not bytes).
+ * This is a safety limit to prevent excessively large prompts.
+ */
+const MAX_PROMPT_CHARS = 32000;
+
+/**
+ * Forbidden patterns that should never appear in the model payload.
+ * These are checked against the serialized prompt string.
+ */
+const FORBIDDEN_PATTERNS = [
+  /sk-[a-zA-Z0-9]/,           // API keys
+  /https?:\/\//,             // URLs
+  /\/etc\/|\/home\/|\/root\//, // File paths
+  /password|secret|api[_-]?key/i, // Secret-related terms
+  /bearer[\s:]*/i,           // Bearer tokens
+  /authorization/i,          // Authorization headers
+] as const;
+
+/**
+ * Fixed system instruction for JOY Media Creative Brief generation.
+ * This is a concise, stable instruction that guides the model.
+ */
+const CREATIVE_BRIEF_SYSTEM_INSTRUCTION = `You are JOY Media Creative Brief assistant. Your task is to analyze the provided video project data and user request, then produce a structured JSON response containing creative recommendations, goals, and analysis.
+
+IMPORTANT RULES:
+- Respond ONLY with a valid JSON object matching the ModelAdapterOutputV1 schema
+- Never include explanations, apologies, or other text before or after the JSON
+- Never use markdown formatting or code blocks
+- Preserve all Persian/RTL text exactly as provided
+- Be concise and specific in your recommendations
+- Focus on actionable creative improvements
+
+RESPONSE SCHEMA (strict):
+{
+  "interpretedGoal": {
+    "userIntent": string,
+    "inferredGoal": string,
+    "resolvedGoal": string,
+    "confidence": "low" | "medium" | "high"
+  },
+  "distinction": {
+    "facts": [
+      {
+        "id": string,
+        "statement": string,
+        "source": "s1" | "s2" | "snapshot",
+        "evidence": array of evidence references
+      }
+    ],
+    "inferences": [
+      {
+        "id": string,
+        "statement": string,
+        "confidence": "low" | "medium" | "high",
+        "rationale": string,
+        "evidence": array of creative evidence references
+      }
+    ]
+  },
+  "assumptions": array of assumption objects,
+  "recommendations": array of recommendation objects,
+  "blockedBy": array of blocker objects,
+  "requiresHumanDecision": array of decision objects
+}`;
+
+/**
+ * OpenAI-compatible chat completions request payload.
+ */
+interface OpenRouterRequest {
+  readonly model: string;
+  readonly messages: readonly {
+    readonly role: 'system' | 'user';
+    readonly content: string;
+  }[];
+  readonly response_format?: { readonly type: 'json_object' };
+  readonly temperature?: number;
+  readonly max_tokens?: number;
+}
+
+/**
+ * Outcome type for request building.
+ * Uses the same categories from the async adapter contract for consistency.
+ */
+type OpenRouterRequestOutcome =
+  | { category: 'ready'; result: OpenRouterRequest }
+  | { category: 'invalid-output'; errorCode: string; message: string; retryable: boolean };
+
+/**
+ * Check if a string contains forbidden patterns.
+ * Returns true if any forbidden pattern is found.
+ */
+function containsForbiddenData(content: string): boolean {
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (pattern.test(content)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Serialize the user message content from ModelAdapterInputV1.
+ * Extracts only the semantic data, intelligence, and request - no metadata.
+ */
+function serializeUserMessage(input: ModelAdapterInputV1): string {
+  const lines: string[] = [];
+
+  // Project overview
+  lines.push(`Project Overview:`);
+  lines.push(`- Project ID: ${input.snapshot.projectId}`);
+  lines.push(`- Revision: ${input.snapshot.revisionId}`);
+  lines.push(`- Duration: ${input.snapshot.composition.durationUs} microseconds`);
+  lines.push(`- Aspect Ratio: ${input.snapshot.composition.aspectRatio}`);
+  lines.push(`- Frame Rate: ${input.snapshot.composition.frameRate.num}/${input.snapshot.composition.frameRate.den} fps`);
+  lines.push(`- Resolution: ${input.snapshot.composition.width}x${input.snapshot.composition.height}`);
+
+  // Brand readiness summary
+  lines.push(`\nBrand Readiness:`);
+  lines.push(`- Has Brand Kit: ${input.brandReadiness.hasBrandKit}`);
+  lines.push(`- Colors Available: ${input.brandReadiness.colorsAvailable}`);
+  lines.push(`- Fonts Available: ${input.brandReadiness.fontsAvailable}`);
+  lines.push(`- Logo Available: ${input.brandReadiness.logoAvailable}`);
+
+  // Scenes summary
+  lines.push(`\nScenes (${input.snapshot.scenes.length}):`);
+  for (const scene of input.snapshot.scenes) {
+    lines.push(`- Scene ${scene.id}: ${scene.purpose} (${scene.startUs}-${scene.endUs}us)`);
+    lines.push(`  Visual Coverage: ${scene.visualCoverage}`);
+  }
+
+  // Assets summary
+  lines.push(`\nAssets (${input.snapshot.assets.length}):`);
+  for (const asset of input.snapshot.assets) {
+    lines.push(`- Asset ${asset.id}: ${asset.kind}, name: ${asset.name}`);
+  }
+
+  // Scene coverages
+  lines.push(`\nScene Coverages (${input.sceneCoverages.length}):`);
+  for (const coverage of input.sceneCoverages) {
+    lines.push(`- Scene ${coverage.sceneId}: visualDensity=${coverage.visualDensity}, visualElements=${coverage.visualElementCount}`);
+  }
+
+  // Project readiness
+  lines.push(`\nProject Readiness:`);
+  lines.push(`- Readiness Level: ${input.projectReadiness.readinessLevel}`);
+  lines.push(`- Duration Aligned: ${input.projectReadiness.durationAligned}`);
+  lines.push(`- Aspect Ratio Aligned: ${input.projectReadiness.aspectRatioAligned}`);
+  lines.push(`- Blockers: ${input.projectReadiness.blockers.length}`);
+
+  // Intelligence rules
+  lines.push(`\nIntelligence Rules (${input.rules.length}):`);
+  for (const rule of input.rules) {
+    lines.push(`- ${rule.ruleId}: ${rule.category} (severity: ${rule.severity})`);
+  }
+
+  // User request
+  lines.push(`\nUser Request:`);
+  lines.push(`- Request: ${input.request.request}`);
+  lines.push(`- Scope: ${input.request.scope}`);
+  if (input.request.brief) {
+    lines.push(`- Brief: ${input.request.brief}`);
+  }
+  if (input.request.destination) {
+    lines.push(`- Destination: ${input.request.destination}`);
+  }
+  if (input.request.durationTargetUs) {
+    lines.push(`- Duration Target: ${input.request.durationTargetUs} microseconds`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Build an OpenRouter chat completions request from ModelAdapterInputV1.
+ *
+ * This is a pure function that:
+ * - Accepts typed ModelAdapterInputV1 plus adapter configuration
+ * - Produces an OpenAI-compatible chat-completions request payload
+ * - Uses a fixed system instruction for JOY Media Creative Brief
+ * - Includes semantic snapshot, intelligence, and user request from input
+ * - Requires JSON-only ModelAdapterOutputV1 output
+ * - Preserves Persian/RTL text exactly
+ * - Is byte-stable for identical input/configuration
+ * - Does not mutate its input
+ * - Fails closed when input contains forbidden data or exceeds prompt size
+ * - Never includes secrets, paths, URLs, or audit metadata in payload
+ *
+ * @param input - The validated model adapter input
+ * @param config - Adapter configuration with model ID
+ * @returns A typed outcome with either the request or an error
+ *
+ * @example
+ * ```ts
+ * const input = createTestInput();
+ * const request = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+ * if (request.category === 'ready') {
+ *   // request.result is a valid OpenRouterRequest
+ * }
+ * ```
+ */
+function buildOpenRouterRequest(
+  input: ModelAdapterInputV1,
+  config: { readonly modelId: string },
+): OpenRouterRequestOutcome {
+  // Serialize the user message
+  const userMessage = serializeUserMessage(input);
+
+  // Check for forbidden data in the serialized message
+  if (containsForbiddenData(userMessage)) {
+    return {
+      category: 'invalid-output',
+      errorCode: 'OPENROUTER_FORBIDDEN_DATA',
+      message: 'Input contains forbidden patterns (secrets, paths, URLs, or sensitive data)',
+      retryable: false,
+    };
+  }
+
+  // Check prompt size limit
+  const totalContent = CREATIVE_BRIEF_SYSTEM_INSTRUCTION + '\n\n' + userMessage;
+  if (totalContent.length > MAX_PROMPT_CHARS) {
+    return {
+      category: 'invalid-output',
+      errorCode: 'OPENROUTER_PROMPT_TOO_LARGE',
+      message: `Prompt exceeds maximum character limit (${MAX_PROMPT_CHARS})`,
+      retryable: false,
+    };
+  }
+
+  // Build the request payload
+  const request: OpenRouterRequest = {
+    model: config.modelId,
+    messages: [
+      {
+        role: 'system',
+        content: CREATIVE_BRIEF_SYSTEM_INSTRUCTION,
+      },
+      {
+        role: 'user',
+        content: userMessage,
+      },
+    ],
+    response_format: {
+      type: 'json_object',
+    },
+    // Conservative settings for deterministic output
+    temperature: 0.0,
+    max_tokens: 8192,
+  };
+
+  return {
+    category: 'ready',
+    result: request,
+  };
+}
+
+/**
+ * Type for the request builder configuration.
+ */
+interface OpenRouterRequestConfig {
+  readonly modelId: string;
+}
+
+/**
+ * Codec that combines both encoding and decoding capabilities.
+ * This is a convenience export for consumers that want both operations.
+ */
+const OpenRouterCodec = {
+  build: buildOpenRouterRequest,
+  decode: decodeOpenRouterResponse,
+} as const;
 
 // ============================================================================
 // OpenRouter Response Decoder - WP-37 S4-F10-B
@@ -272,7 +561,7 @@ import { isModelAdapterOutputV1 } from '@joy-media/agent-tools';
  * OpenAI-compatible/OpenRouter response envelope.
  * This is the structure returned by OpenRouter's chat completions API.
  */
-export interface OpenRouterResponse {
+interface OpenRouterResponse {
   readonly choices?: readonly {
     readonly message?: {
       readonly role?: string;
@@ -290,7 +579,7 @@ export interface OpenRouterResponse {
  * Decoded outcome from an OpenRouter response.
  * Uses the same AsyncOutcome categories from the async adapter contract.
  */
-export type OpenRouterDecoderOutcome =
+type OpenRouterDecoderOutcome =
   | { category: 'ready'; result: unknown } // result is validated ModelAdapterOutputV1
   | { category: 'invalid-output'; errorCode: string; message: string; retryable: boolean }
   | { category: 'provider-failed'; errorCode: string; message: string; retryable: boolean };
@@ -359,7 +648,7 @@ function isProviderError(response: OpenRouterResponse): boolean {
  * }
  * ```
  */
-export function decodeOpenRouterResponse(
+function decodeOpenRouterResponse(
   response: OpenRouterResponse,
 ): OpenRouterDecoderOutcome {
   // Check for provider error first
