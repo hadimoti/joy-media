@@ -237,6 +237,15 @@ importers:
         specifier: workspace:*
         version: link:../provider-sdk
 
+  packages/adapter-openrouter:
+    dependencies:
+      '@joy-media/agent-tools':
+        specifier: workspace:*
+        version: link:../agent-tools
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
+
   packages/adapter-tts:
     dependencies:
       '@joy-media/provider-sdk':
