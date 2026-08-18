@@ -134,6 +134,50 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
   ): Promise<AsyncOutcome<ModelAdapterOutputV1>> {
     const startTime = this.#clock.now();
 
+    // Check for already-aborted signal before any work
+    if (options.signal !== undefined && options.signal.aborted) {
+      const durationMs = this.#clock.now() - startTime;
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'error',
+          status: 'cancelled',
+          durationMs,
+          errorCode: 'OPENROUTER_CALL_CANCELLED',
+        });
+      }
+      return {
+        category: 'cancelled',
+        errorCode: 'OPENROUTER_CALL_CANCELLED',
+        message: 'Request was cancelled before execution',
+        retryable: false,
+        durationMs,
+      };
+    }
+
+    // Check for zero or negative timeout before any work
+    if (options.timeoutMs !== undefined && options.timeoutMs <= 0) {
+      const durationMs = this.#clock.now() - startTime;
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'error',
+          status: 'timeout',
+          durationMs,
+          errorCode: 'OPENROUTER_REQUEST_TIMEOUT',
+        });
+      }
+      return {
+        category: 'timeout',
+        errorCode: 'OPENROUTER_REQUEST_TIMEOUT',
+        message: 'Request timeout is zero or negative',
+        retryable: false,
+        durationMs,
+      };
+    }
+
     // Emit start audit event if sink is provided (redacted, no sensitive data)
     if (options.auditSink !== undefined) {
       options.auditSink.emit({
@@ -216,9 +260,55 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
       };
     }
 
+    // Track cancellation and timeout state
+    let isCancelled = false;
+    let isTimedOut = false;
+    let cleanupSignalListener: (() => void) | undefined;
+    let cleanupSignalAbortListener: (() => void) | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let abortController: AbortController | undefined;
+    let signalAbortPromise: Promise<never> | undefined;
+
+    // Create an AbortController for the transport
+    abortController = new AbortController();
+
+    // Listen to caller's signal and abort our controller
+    if (options.signal !== undefined) {
+      const listener = () => {
+        isCancelled = true;
+        abortController!.abort();
+      };
+      options.signal.addEventListener('abort', listener);
+      cleanupSignalListener = () => {
+        options.signal!.removeEventListener('abort', listener);
+      };
+      // Create a promise that rejects when the caller's signal is aborted
+      signalAbortPromise = new Promise<never>((_, reject) => {
+        const abortListener = () => {
+          reject(new Error('OPENROUTER_CALLER_ABORT'));
+        };
+        options.signal!.addEventListener('abort', abortListener);
+        cleanupSignalAbortListener = () => {
+          options.signal!.removeEventListener('abort', abortListener);
+        };
+      });
+    }
+
     try {
-      // Call the injected transport once
-      const response = await this.#options.transport.post(
+      // Create a timeout rejection promise if we have a timeout
+      let timeoutPromise: Promise<never> | undefined;
+      if (options.timeoutMs !== undefined && options.timeoutMs > 0) {
+        timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            isTimedOut = true;
+            abortController!.abort();
+            reject(new Error('OPENROUTER_TIMEOUT'));
+          }, options.timeoutMs);
+        });
+      }
+
+      // Call the injected transport with our abort signal
+      const transportPromise = this.#options.transport.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
           method: 'POST',
@@ -227,8 +317,70 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestOutcome.result),
+          signal: abortController.signal,
         },
       );
+
+      // Race transport against timeout and caller abort
+      // Swallow late transport rejection after early settlement
+      transportPromise.catch(() => {});
+
+      let response: Response;
+      try {
+        const racePromises: Promise<any>[] = [transportPromise];
+        if (timeoutPromise !== undefined) {
+          racePromises.push(timeoutPromise);
+        }
+        if (signalAbortPromise !== undefined) {
+          racePromises.push(signalAbortPromise);
+        }
+        response = await Promise.race(racePromises);
+      } catch (error) {
+        const durationMs = this.#clock.now() - startTime;
+
+        if (isTimedOut) {
+          if (options.auditSink !== undefined) {
+            options.auditSink.emit({
+              correlationId: options.correlationId,
+              adapterName: this.adapterName,
+              eventType: 'error',
+              status: 'timeout',
+              durationMs,
+              errorCode: 'OPENROUTER_REQUEST_TIMEOUT',
+            });
+          }
+          return {
+            category: 'timeout',
+            errorCode: 'OPENROUTER_REQUEST_TIMEOUT',
+            message: 'Request exceeded configured timeout',
+            retryable: true,
+            durationMs,
+          };
+        }
+
+        if (isCancelled || (options.signal !== undefined && options.signal.aborted)) {
+          if (options.auditSink !== undefined) {
+            options.auditSink.emit({
+              correlationId: options.correlationId,
+              adapterName: this.adapterName,
+              eventType: 'error',
+              status: 'cancelled',
+              durationMs,
+              errorCode: 'OPENROUTER_CALL_CANCELLED',
+            });
+          }
+          return {
+            category: 'cancelled',
+            errorCode: 'OPENROUTER_CALL_CANCELLED',
+            message: 'Request was cancelled during execution',
+            retryable: false,
+            durationMs,
+          };
+        }
+
+        // Transport error - rethrow to be caught by outer catch
+        throw error;
+      }
 
       const durationMs = this.#clock.now() - startTime;
 
@@ -315,6 +467,19 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         retryable: true,
         durationMs,
       };
+    } finally {
+      // Clean up timeout timer
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      // Clean up caller signal listener
+      if (cleanupSignalListener !== undefined) {
+        cleanupSignalListener();
+      }
+      // Clean up signal abort listener
+      if (cleanupSignalAbortListener !== undefined) {
+        cleanupSignalAbortListener();
+      }
     }
   }
 }

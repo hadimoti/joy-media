@@ -883,6 +883,296 @@ const VALID_OUTPUT_PERSIAN: ModelAdapterOutputV1 = {
   requiresHumanDecision: [],
 };
 
+// ============================================================================
+// In-flight Cancellation/Timeout - WP-37 S4-F10-D3-B2
+// ============================================================================
+
+// Mock transport that captures calls and can access the signal
+class SignalCaptureTransport implements HttpPostTransport {
+  #calls: Array<{ url: string; options: RequestInit }> = [];
+  #responseFactory: (url: string, options: RequestInit) => Promise<Response>;
+
+  constructor(
+    responseFactory?: (url: string, options: RequestInit) => Promise<Response>,
+  ) {
+    this.#responseFactory = responseFactory ?? ((_url: string, _options: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
+  }
+
+  async post(url: string, options: RequestInit): Promise<Response> {
+    this.#calls.push({ url, options });
+    return this.#responseFactory(url, options);
+  }
+
+  getCallCount(): number {
+    return this.#calls.length;
+  }
+
+  getCalls(): Array<{ url: string; options: RequestInit }> {
+    return [...this.#calls];
+  }
+
+  getLastCall(): { url: string; options: RequestInit } | undefined {
+    return this.#calls[this.#calls.length - 1];
+  }
+}
+
+describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () => {
+  const createSignal = () => {
+    const controller = new AbortController();
+    return { signal: controller.signal, abort: () => controller.abort() };
+  };
+
+  const createDelayedTransport = (delayMs: number, response: Response) => {
+    return new SignalCaptureTransport(() =>
+      new Promise((resolve) => setTimeout(() => resolve(response), delayMs)),
+    );
+  };
+
+  const createNeverTransport = () => {
+    return new SignalCaptureTransport(() => new Promise(() => {}));
+  };
+
+  const VALID_ADAPTER_OPTIONS = createAdapterOptions();
+
+  it('in-flight caller abort settles as cancelled with non-cooperative transport', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = createNeverTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const { signal, abort } = createSignal();
+
+    // Start the request
+    const promise = adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      signal,
+      timeoutMs: 10000,
+    });
+
+    // Abort after a small delay (in-flight)
+    setTimeout(() => abort(), 10);
+
+    const result = await promise;
+    expect(result.category).toBe('cancelled');
+    expect(result.errorCode).toBe('OPENROUTER_CALL_CANCELLED');
+    expect(result.retryable).toBe(false);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('in-flight timeout settles as timeout with non-cooperative transport', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = createNeverTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      timeoutMs: 10,
+    });
+
+    expect(result.category).toBe('timeout');
+    expect(result.errorCode).toBe('OPENROUTER_REQUEST_TIMEOUT');
+    expect(result.retryable).toBe(true);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('transport receives abort signal on caller cancellation', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = new SignalCaptureTransport((_url, options) => {
+      // Verify the signal is passed in RequestInit
+      expect(options.signal).toBeDefined();
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      return new Promise<Response>((_resolve, reject) => {
+        // Listen for abort on the passed signal
+        options.signal!.addEventListener('abort', () => {
+          reject(new DOMException('Aborted by caller signal', 'AbortError'));
+        });
+      });
+    });
+
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const { signal, abort } = createSignal();
+
+    const promise = adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      signal,
+      timeoutMs: 10000,
+    });
+
+    // Abort after a small delay
+    setTimeout(() => abort(), 10);
+
+    const result = await promise;
+    expect(result.category).toBe('cancelled');
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('transport receives abort signal on timeout', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = new SignalCaptureTransport((_url, options) => {
+      // Verify the signal is passed in RequestInit
+      expect(options.signal).toBeDefined();
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      return new Promise<Response>((_resolve, reject) => {
+        // Listen for abort on the passed signal
+        options.signal!.addEventListener('abort', () => {
+          reject(new DOMException('Aborted by timeout', 'AbortError'));
+        });
+      });
+    });
+
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      timeoutMs: 10,
+    });
+
+    expect(result.category).toBe('timeout');
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('late transport resolution after timeout cannot become ready', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    let resolveTransport: (() => void) | undefined;
+    const transport = new SignalCaptureTransport(() => {
+      return new Promise<Response>((resolve) => {
+        resolveTransport = () => {
+          resolve(new Response(JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }), { status: 200 }));
+        };
+      });
+    });
+
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      timeoutMs: 10,
+    });
+
+    expect(result.category).toBe('timeout');
+
+    // Now resolve the transport (late) - should not affect the already-settled result
+    if (resolveTransport) {
+      resolveTransport();
+    }
+
+    // Give time for any potential issues
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it('late transport rejection after cancellation does not create unhandled rejection', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    let rejectTransport: (() => void) | undefined;
+    const transport = new SignalCaptureTransport(() => {
+      return new Promise<Response>((_resolve, reject) => {
+        rejectTransport = () => {
+          reject(new Error('Late transport error'));
+        };
+      });
+    });
+
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const { signal, abort } = createSignal();
+
+    const promise = adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      signal,
+      timeoutMs: 10000,
+    });
+
+    // Abort in-flight
+    setTimeout(() => abort(), 10);
+
+    const result = await promise;
+    expect(result.category).toBe('cancelled');
+
+    // Now reject the transport (late)
+    if (rejectTransport) {
+      rejectTransport();
+    }
+
+    // Give time for any potential unhandled rejection
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // If we get here without an unhandled rejection error, the test passes
+  });
+
+  it('normal completion within deadline returns ready', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = createDelayedTransport(5, new Response(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
+      { status: 200 },
+    ));
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      timeoutMs: 1000,
+    });
+
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('transport receives abort signal via RequestInit.signal', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const transport = new SignalCaptureTransport((_url, options) => {
+      // Verify the signal is passed in RequestInit
+      expect(options.signal).toBeDefined();
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+
+    const adapter = createOpenRouterCreativeAdapter({
+      ...VALID_ADAPTER_OPTIONS,
+      secretResolver,
+      transport,
+    });
+
+    const { signal } = createSignal();
+
+    await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      signal,
+      timeoutMs: 10000,
+    });
+
+    expect(transport.getCallCount()).toBe(1);
+  });
+});
+
+
 function checkInvalid(result: OpenRouterDecoderOutcome): asserts result is DecoderInvalid {
   expect(result.category).toBe('invalid-output');
 }
