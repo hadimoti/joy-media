@@ -333,6 +333,7 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -464,6 +465,7 @@ describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -560,6 +562,7 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -594,6 +597,7 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -786,6 +790,7 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1126,7 +1131,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   it('normal completion within deadline returns ready', async () => {
     const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
     const transport = createDelayedTransport(5, new Response(
-      JSON.stringify({ choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
+      JSON.stringify({ model: 'openrouter/mistral-large', choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
       { status: 200 },
     ));
     const adapter = createOpenRouterCreativeAdapter({
@@ -1151,7 +1156,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
       // Verify the signal is passed in RequestInit
       expect(options.signal).toBeDefined();
       expect(options.signal).toBeInstanceOf(AbortSignal);
-      return Promise.resolve(new Response('{}', { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ model: 'openrouter/mistral-large' }), { status: 200 }));
     });
 
     const adapter = createOpenRouterCreativeAdapter({
@@ -1583,6 +1588,7 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1611,6 +1617,7 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
+            model: 'openrouter/mistral-large',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1813,5 +1820,268 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
 
     // Verify transport was NOT called
     expect(transport.getCallCount()).toBe(0);
+  });
+});
+
+// ============================================================================
+// Response Model Verification - WP-37 S4-F10-D3-D
+// ============================================================================
+
+describe('OpenRouterCreativeAdapter - response model verification', () => {
+  it('should accept response when model matches configured modelId', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'openrouter/mistral-large',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('should accept response when model matches and is in allowlist', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'openrouter/mistral-large',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama-3'],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
+  });
+
+  it('should reject response when model field is missing', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('invalid or mismatched model identifier');
+    // Verify no result is returned
+    expect(result).not.toHaveProperty('result');
+  });
+
+  it('should reject response when model is non-string', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 123,
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('invalid or mismatched model identifier');
+    expect(result).not.toHaveProperty('result');
+  });
+
+  it('should reject response when model is empty string', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: '',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('invalid or mismatched model identifier');
+    expect(result).not.toHaveProperty('result');
+  });
+
+  it('should reject response when model does not match configured modelId', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'openrouter/llama-3',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('invalid or mismatched model identifier');
+    expect(result).not.toHaveProperty('result');
+  });
+
+  it('should reject response when model is not in allowedFreeModelIds', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'openrouter/llama-3',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/mistral-large'],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    // Model in response ('openrouter/llama-3') does not match configured ('openrouter/mistral-large')
+    // and is not in allowlist, so response verification fails with provider-failed
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('invalid or mismatched model identifier');
+    expect(result).not.toHaveProperty('result');
+    // Transport was called because pre-request allowlist check passed (configured modelId is in allowlist)
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('should emit redacted audit event for model mismatch', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'openrouter/wrong-model',
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      auditSink,
+    });
+
+    const errorCall = auditSink.emit.mock.calls.find(
+      (call) => (call[0] as any).eventType === 'error',
+    );
+    expect(errorCall).toBeDefined();
+    const errorEvent = (errorCall as any[])[0] as any;
+    expect(errorEvent.eventType).toBe('error');
+    expect(errorEvent.status).toBe('provider-failed');
+    expect(errorEvent.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
+    expect(errorEvent.correlationId).toBe('test-correlation-id');
+    expect(errorEvent.adapterName).toBe('openrouter-creative-v1');
+    // Ensure no raw model ID, response body, secret, header, or URL in audit data
+    expect(JSON.stringify(errorEvent)).not.toContain('wrong-model');
+    expect(JSON.stringify(errorEvent)).not.toContain('mistral-large');
+    expect(JSON.stringify(errorEvent)).not.toContain('sk-');
+    expect(JSON.stringify(errorEvent)).not.toContain('choices');
+    expect(JSON.stringify(errorEvent)).not.toContain('content');
   });
 });

@@ -454,6 +454,35 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
 
       // Parse and decode the response using the existing decoder
       const responseBody = await response.json();
+
+      // Verify provider-reported model before accepting response (WP-37 S4-F10-D3-D)
+      const reportedModel = responseBody.model;
+      if (
+        typeof reportedModel !== 'string' ||
+        reportedModel.length === 0 ||
+        reportedModel !== this.#options.modelId ||
+        (this.#options.allowedFreeModelIds !== undefined &&
+          !this.#options.allowedFreeModelIds.includes(reportedModel))
+      ) {
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: 'provider-failed',
+            durationMs,
+            errorCode: 'OPENROUTER_RESPONSE_MODEL_MISMATCH',
+          });
+        }
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_RESPONSE_MODEL_MISMATCH',
+          message: 'OpenRouter provider returned a response with an invalid or mismatched model identifier',
+          retryable: false,
+          durationMs,
+        };
+      }
+
       const decodeOutcome = decodeOpenRouterResponse(responseBody);
 
       // Handle decode failures
@@ -880,6 +909,7 @@ import { isModelAdapterOutputV1 } from '@joy-media/agent-tools';
  * This is the structure returned by OpenRouter's chat completions API.
  */
 interface OpenRouterResponse {
+  readonly model?: string;
   readonly choices?: readonly {
     readonly message?: {
       readonly role?: string;
