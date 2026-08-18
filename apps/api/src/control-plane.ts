@@ -5,6 +5,117 @@ export interface Actor {
 /** Only this service identity may publish cross-account library media. */
 export const SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
 
+// Project Document Store types and implementations
+// Using local types to avoid module resolution issues with verbatimModuleSyntax
+type InternalProjectId = string;
+type InternalOwnerId = string;
+
+interface InternalProjectDocumentRecord {
+  readonly projectId: InternalProjectId;
+  readonly ownerId: InternalOwnerId;
+  readonly revisionId: string;
+  readonly document: unknown;
+}
+
+type InternalProjectDocumentReadOutcome =
+  | { readonly kind: 'ready'; readonly record: InternalProjectDocumentRecord }
+  | { readonly kind: 'not-found'; readonly projectId: InternalProjectId; readonly revisionId: string | null }
+  | { readonly kind: 'stale-revision'; readonly projectId: InternalProjectId; readonly requestedRevisionId: string; readonly currentRevisionId: string }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+type InternalProjectDocumentWriteOutcome =
+  | { readonly kind: 'stored'; readonly projectId: InternalProjectId; readonly ownerId: InternalOwnerId; readonly revisionId: string }
+  | { readonly kind: 'not-found'; readonly projectId: InternalProjectId }
+  | { readonly kind: 'owner-denied'; readonly projectId: InternalProjectId; readonly ownerId: InternalOwnerId; readonly callerId: InternalOwnerId }
+  | { readonly kind: 'revision-conflict'; readonly projectId: InternalProjectId; readonly expectedBaseRevisionId: string; readonly actualBaseRevisionId: string }
+  | { readonly kind: 'invalid-document'; readonly projectId: InternalProjectId; readonly diagnostics: readonly { readonly code: string; readonly message: string; readonly path: string }[] }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+type InternalProjectOwnerLookup = (projectId: InternalProjectId) => InternalOwnerId | undefined;
+
+const INTERNAL_INITIAL_REVISION = '';
+
+class InternalInMemoryProjectDocumentStore {
+  private readonly store: Map<InternalProjectId, { readonly ownerId: InternalOwnerId; readonly revisionId: string; readonly document: unknown }> = new Map();
+  private readonly revisions: Map<InternalProjectId, Set<string>> = new Map();
+
+  constructor(private readonly lookupOwner: InternalProjectOwnerLookup) {}
+
+  readDocument(
+    callerId: InternalOwnerId,
+    projectId: InternalProjectId,
+    revisionId?: string,
+  ): InternalProjectDocumentReadOutcome {
+    const ownerId = this.lookupOwner(projectId);
+    if (ownerId === undefined) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+    if (ownerId !== callerId) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+    const current = this.store.get(projectId);
+    if (current === undefined) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+    if (revisionId !== undefined && revisionId !== current.revisionId) {
+      return { kind: 'stale-revision', projectId, requestedRevisionId: revisionId, currentRevisionId: current.revisionId };
+    }
+    return { kind: 'ready', record: { projectId, ownerId, revisionId: current.revisionId, document: this.deepCopy(current.document) } };
+  }
+
+  writeDocument(
+    callerId: InternalOwnerId,
+    record: InternalProjectDocumentRecord,
+    baseRevisionId: string,
+  ): InternalProjectDocumentWriteOutcome {
+    const ownerId = this.lookupOwner(record.projectId);
+    if (ownerId === undefined) {
+      return { kind: 'not-found', projectId: record.projectId };
+    }
+    if (ownerId !== callerId) {
+      return { kind: 'owner-denied', projectId: record.projectId, ownerId, callerId };
+    }
+    if (record.ownerId !== ownerId) {
+      return { kind: 'owner-denied', projectId: record.projectId, ownerId, callerId };
+    }
+    const current = this.store.get(record.projectId);
+    const currentRevisionId = current?.revisionId ?? INTERNAL_INITIAL_REVISION;
+    if (baseRevisionId !== currentRevisionId) {
+      return { kind: 'revision-conflict', projectId: record.projectId, expectedBaseRevisionId: baseRevisionId, actualBaseRevisionId: currentRevisionId };
+    }
+    this.store.set(record.projectId, { ownerId, revisionId: record.revisionId, document: this.deepCopy(record.document) });
+    let revSet = this.revisions.get(record.projectId);
+    if (revSet === undefined) {
+      revSet = new Set();
+      this.revisions.set(record.projectId, revSet);
+    }
+    revSet.add(record.revisionId);
+    return { kind: 'stored', projectId: record.projectId, ownerId: record.ownerId, revisionId: record.revisionId };
+  }
+
+  private deepCopy<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value));
+  }
+}
+
+class InternalUnavailableProjectDocumentStore {
+  readDocument(
+    _callerId: InternalOwnerId,
+    _projectId: InternalProjectId,
+    _revisionId?: string,
+  ): InternalProjectDocumentReadOutcome {
+    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  }
+
+  writeDocument(
+    _callerId: InternalOwnerId,
+    _record: InternalProjectDocumentRecord,
+    _baseRevisionId: string,
+  ): InternalProjectDocumentWriteOutcome {
+    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  }
+}
+
 export interface ProjectMetadata {
   readonly id: string;
   readonly title: string;
@@ -459,6 +570,16 @@ export interface ControlPlane {
     projectId: string,
     cursor: number,
   ): readonly JobEvent[] | Promise<readonly JobEvent[]>;
+  readProjectDocument(
+    actor: Actor,
+    projectId: string,
+    revisionId?: string,
+  ): InternalProjectDocumentReadOutcome;
+  writeProjectDocument(
+    actor: Actor,
+    record: InternalProjectDocumentRecord,
+    baseRevisionId: string,
+  ): InternalProjectDocumentWriteOutcome;
 }
 export class ControlPlaneError extends Error {
   constructor(
@@ -478,6 +599,14 @@ export class LocalControlPlane implements ControlPlane {
   readonly #assets = new Map<string, MediaAssetRecord>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
   readonly #events: JobEvent[] = [];
+  readonly #documentStore: InternalInMemoryProjectDocumentStore;
+
+  constructor() {
+    this.#documentStore = new InternalInMemoryProjectDocumentStore((projectId) => {
+      const project = this.#projects.get(projectId);
+      return project?.ownerId;
+    });
+  }
   readonly #pairingOffers = new Map<
     string,
     { readonly pairingCodeHash: string; readonly expiresAt: number; ownerId?: string }
@@ -1207,6 +1336,20 @@ export class LocalControlPlane implements ControlPlane {
       [...this.#jobs.values()].filter((job) => job.projectId === projectId).map((job) => job.id),
     );
     return this.#events.filter((event) => event.cursor > cursor && ids.has(event.jobId));
+  }
+  readProjectDocument(
+    actor: Actor,
+    projectId: string,
+    revisionId?: string,
+  ): InternalProjectDocumentReadOutcome {
+    return this.#documentStore.readDocument(actor.id, projectId, revisionId);
+  }
+  writeProjectDocument(
+    actor: Actor,
+    record: InternalProjectDocumentRecord,
+    baseRevisionId: string,
+  ): InternalProjectDocumentWriteOutcome {
+    return this.#documentStore.writeDocument(actor.id, record, baseRevisionId);
   }
   private project(actor: Actor, id: string): ProjectMetadata {
     const project = this.projectAllowTrashed(actor, id);

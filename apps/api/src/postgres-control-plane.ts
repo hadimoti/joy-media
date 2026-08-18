@@ -39,6 +39,49 @@ import { POSTGRES_SCHEMA } from './postgres-schema.js';
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
 
+// Project Document Store types for PostgresControlPlane
+type PostgresProjectId = string;
+type PostgresOwnerId = string;
+
+interface PostgresProjectDocumentRecord {
+  readonly projectId: PostgresProjectId;
+  readonly ownerId: PostgresOwnerId;
+  readonly revisionId: string;
+  readonly document: unknown;
+}
+
+type PostgresProjectDocumentReadOutcome =
+  | { readonly kind: 'ready'; readonly record: PostgresProjectDocumentRecord }
+  | { readonly kind: 'not-found'; readonly projectId: PostgresProjectId; readonly revisionId: string | null }
+  | { readonly kind: 'stale-revision'; readonly projectId: PostgresProjectId; readonly requestedRevisionId: string; readonly currentRevisionId: string }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+type PostgresProjectDocumentWriteOutcome =
+  | { readonly kind: 'stored'; readonly projectId: PostgresProjectId; readonly ownerId: PostgresOwnerId; readonly revisionId: string }
+  | { readonly kind: 'not-found'; readonly projectId: PostgresProjectId }
+  | { readonly kind: 'owner-denied'; readonly projectId: PostgresProjectId; readonly ownerId: PostgresOwnerId; readonly callerId: PostgresOwnerId }
+  | { readonly kind: 'revision-conflict'; readonly projectId: PostgresProjectId; readonly expectedBaseRevisionId: string; readonly actualBaseRevisionId: string }
+  | { readonly kind: 'invalid-document'; readonly projectId: PostgresProjectId; readonly diagnostics: readonly { readonly code: string; readonly message: string; readonly path: string }[] }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+class PostgresUnavailableProjectDocumentStore {
+  readDocument(
+    _callerId: PostgresOwnerId,
+    _projectId: PostgresProjectId,
+    _revisionId?: string,
+  ): PostgresProjectDocumentReadOutcome {
+    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  }
+
+  writeDocument(
+    _callerId: PostgresOwnerId,
+    _record: PostgresProjectDocumentRecord,
+    _baseRevisionId: string,
+  ): PostgresProjectDocumentWriteOutcome {
+    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  }
+}
+
 interface ProjectRow {
   readonly id: string;
   readonly owner_id: string;
@@ -137,12 +180,14 @@ export interface PostgresControlPlaneOptions {
 /** Durable PostgreSQL implementation of the control-plane contract. */
 export class PostgresControlPlane implements ControlPlane {
   readonly #skipLocked: boolean;
+  readonly #documentStore: PostgresUnavailableProjectDocumentStore;
 
   constructor(
     private readonly pool: Pool,
     options: PostgresControlPlaneOptions = {},
   ) {
     this.#skipLocked = options.skipLocked ?? true;
+    this.#documentStore = new PostgresUnavailableProjectDocumentStore();
   }
 
   async initialize(): Promise<void> {
@@ -1241,6 +1286,20 @@ export class PostgresControlPlane implements ControlPlane {
       type: event.type,
       at: event.created_at.getTime(),
     }));
+  }
+  readProjectDocument(
+    actor: Actor,
+    projectId: string,
+    revisionId?: string,
+  ): PostgresProjectDocumentReadOutcome {
+    return this.#documentStore.readDocument(actor.id, projectId, revisionId);
+  }
+  writeProjectDocument(
+    actor: Actor,
+    record: PostgresProjectDocumentRecord,
+    baseRevisionId: string,
+  ): PostgresProjectDocumentWriteOutcome {
+    return this.#documentStore.writeDocument(actor.id, record, baseRevisionId);
   }
 
   private async project(

@@ -305,3 +305,41 @@ function cloudAsset(id: string, ref: string) {
     locations: [{ kind: 'private-object' as const, ref }],
   };
 }
+
+// ============================================================================
+// Project Document Store Tests (WP-37 S4-F10-E5-C2)
+// ============================================================================
+
+describe('PostgresControlPlane project document storage', () => {
+  it('readProjectDocument returns unavailable', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+    const owner = { id: 'pg-owner' };
+
+    const result = api.readProjectDocument(owner, 'any-project');
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).toBe('Project document store is unavailable');
+  });
+
+  it('writeProjectDocument returns unavailable', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+    const owner = { id: 'pg-owner' };
+
+    const result = api.writeProjectDocument(owner, {
+      projectId: 'any-project',
+      ownerId: 'pg-owner',
+      revisionId: 'rev-1',
+      document: {},
+    }, '');
+
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).toBe('Project document store is unavailable');
+  });
+});

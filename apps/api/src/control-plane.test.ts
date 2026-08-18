@@ -277,3 +277,113 @@ function localDerivativeRegistration() {
     locations: [{ kind: 'opfs-cache' as const, ref: 'opfs-d1' }],
   };
 }
+
+// ============================================================================
+// Project Document Store Tests (WP-37 S4-F10-E5-C2)
+// ============================================================================
+
+describe('LocalControlPlane project document storage', () => {
+  it('roundtrip: write then read project document', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'doc-owner' };
+    api.createProject(owner, 'doc-project', 'Doc Project');
+
+    const document = {
+      schemaVersion: 1,
+      id: 'doc-project',
+      title: 'Test Document',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      rootCompositionId: 'comp-1',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          name: 'Main',
+          width: 1920,
+          height: 1080,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          background: '#00000000',
+          tracks: [],
+        },
+      },
+      assets: {},
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    };
+
+    const writeResult = api.writeProjectDocument(owner, {
+      projectId: 'doc-project',
+      ownerId: 'doc-owner',
+      revisionId: 'rev-1',
+      document,
+    }, '');
+
+    expect(writeResult.kind).toBe('stored');
+    expect(writeResult.projectId).toBe('doc-project');
+    expect(writeResult.revisionId).toBe('rev-1');
+
+    const readResult = api.readProjectDocument(owner, 'doc-project');
+    expect(readResult.kind).toBe('ready');
+    expect(readResult.record.projectId).toBe('doc-project');
+    expect(readResult.record.revisionId).toBe('rev-1');
+    expect(readResult.record.document).toEqual(document);
+  });
+
+  it('owner isolation: different owner cannot read document', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'doc-owner' };
+    const other = { id: 'other-owner' };
+    api.createProject(owner, 'doc-project', 'Doc Project');
+
+    api.writeProjectDocument(owner, {
+      projectId: 'doc-project',
+      ownerId: 'doc-owner',
+      revisionId: 'rev-1',
+      document: { schemaVersion: 1, id: 'doc-project', title: 'Test' },
+    }, '');
+
+    const readResult = api.readProjectDocument(other, 'doc-project');
+    expect(readResult.kind).toBe('not-found');
+    expect(readResult.projectId).toBe('doc-project');
+  });
+
+  it('CAS conflict: write fails when baseRevision does not match', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'doc-owner' };
+    api.createProject(owner, 'doc-project', 'Doc Project');
+
+    api.writeProjectDocument(owner, {
+      projectId: 'doc-project',
+      ownerId: 'doc-owner',
+      revisionId: 'rev-1',
+      document: { schemaVersion: 1, id: 'doc-project', title: 'V1' },
+    }, '');
+
+    const writeResult = api.writeProjectDocument(owner, {
+      projectId: 'doc-project',
+      ownerId: 'doc-owner',
+      revisionId: 'rev-2',
+      document: { schemaVersion: 1, id: 'doc-project', title: 'V2' },
+    }, 'wrong-revision');
+
+    expect(writeResult.kind).toBe('revision-conflict');
+    expect(writeResult.expectedBaseRevisionId).toBe('wrong-revision');
+    expect(writeResult.actualBaseRevisionId).toBe('rev-1');
+  });
+
+  it('unknown project returns not-found on read', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'doc-owner' };
+
+    const readResult = api.readProjectDocument(owner, 'nonexistent');
+    expect(readResult.kind).toBe('not-found');
+    expect(readResult.projectId).toBe('nonexistent');
+    expect(readResult.revisionId).toBeNull();
+  });
+});
