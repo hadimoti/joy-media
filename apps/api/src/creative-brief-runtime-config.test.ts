@@ -41,6 +41,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({
       mode: 'openrouter',
@@ -48,6 +49,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
       timeoutMs: 60000,
       spendLimitUsdCents: 500,
       secretRef: 'my-openrouter-key',
+      allowedFreeModelIds: ['openrouter/mistral-large'],
     });
     expect(isOpenRouterConfig(result)).toBe(true);
     expect(isDisabledConfig(result)).toBe(false);
@@ -60,6 +62,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result.mode).toBe('openrouter');
   });
@@ -71,6 +74,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '  60000  ',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '  500  ',
       [ `${PREFIX}SECRET_REF` ]: '  my-openrouter-key  ',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: '  openrouter/mistral-large  ',
     });
     expect(result).toEqual({
       mode: 'openrouter',
@@ -78,6 +82,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
       timeoutMs: 60000,
       spendLimitUsdCents: 500,
       secretRef: 'my-openrouter-key',
+      allowedFreeModelIds: ['openrouter/mistral-large'],
     });
   });
 });
@@ -93,6 +98,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -103,6 +109,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -113,6 +120,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -123,6 +131,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -134,6 +143,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -145,6 +155,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: '',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -156,6 +167,7 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: '   ',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -217,6 +229,7 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '1000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(1000);
@@ -232,6 +245,7 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '300000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(300000);
@@ -291,6 +305,7 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(0);
@@ -306,6 +321,7 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '1',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(1);
@@ -321,6 +337,7 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '10000',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(10000);
@@ -342,6 +359,7 @@ describe('parseCreativeBriefRuntimeConfig - unknown prefixed keys', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
       [ `${PREFIX}UNKNOWN_KEY` ]: 'some-value',
     });
     expect(result).toEqual({ mode: 'disabled' });
@@ -415,6 +433,7 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
       // This is an invalid key, but we want to ensure no secret leakage
       [ `${PREFIX}API_KEY` ]: secretValue,
     });
@@ -432,6 +451,7 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'openrouter-api-key-ref',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     expect(isOpenRouterConfig(result)).toBe(true);
     // The secretRef is just a reference name, not an actual secret
@@ -450,6 +470,7 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
       [ `${PREFIX}MODEL_ID` ]: secretValue,
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
       // secretRef is missing - should fail closed
     });
     expect(result).toEqual({ mode: 'disabled' });
@@ -476,6 +497,7 @@ describe('type guards', () => {
       timeoutMs: 60000,
       spendLimitUsdCents: 500,
       secretRef: 'my-key',
+      allowedFreeModelIds: ['openrouter/mistral-large'],
     };
     expect(isOpenRouterConfig(config)).toBe(true);
     expect(isDisabledConfig(config)).toBe(false);
@@ -538,6 +560,7 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '0060000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(60000);
@@ -553,6 +576,7 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '00500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(500);
@@ -568,6 +592,7 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: '60000',
       [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
       [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
       SOME_OTHER_KEY: 'should-be-ignored',
       ANOTHER_KEY: 'also-ignored',
     });
@@ -585,5 +610,153 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
       [ `${PREFIX}TIMEOUT_MS` ]: undefined,
     });
     expect(result).toEqual({ mode: 'disabled' });
+  });
+});
+
+// ============================================================================
+// Allowed Free Model IDs - WP-37 S4-F10-E2
+// ============================================================================
+
+describe('parseCreativeBriefRuntimeConfig - allowed free model IDs', () => {
+  it('should parse single allowed free model ID', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+    });
+    expect(isOpenRouterConfig(result)).toBe(true);
+    if (isOpenRouterConfig(result)) {
+      expect(result.allowedFreeModelIds).toEqual(['openrouter/mistral-large']);
+    }
+  });
+
+  it('should parse multiple allowed free model IDs', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,openrouter/llama3-70b,openrouter/gemma-7b',
+    });
+    expect(isOpenRouterConfig(result)).toBe(true);
+    if (isOpenRouterConfig(result)) {
+      expect(result.allowedFreeModelIds).toEqual([
+        'openrouter/mistral-large',
+        'openrouter/llama3-70b',
+        'openrouter/gemma-7b',
+      ]);
+    }
+  });
+
+  it('should maintain deterministic ordering of allowed model IDs', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/llama3-70b',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/gemma-7b,openrouter/mistral-large,openrouter/llama3-70b',
+    });
+    expect(isOpenRouterConfig(result)).toBe(true);
+    if (isOpenRouterConfig(result)) {
+      expect(result.allowedFreeModelIds).toEqual([
+        'openrouter/gemma-7b',
+        'openrouter/mistral-large',
+        'openrouter/llama3-70b',
+      ]);
+    }
+  });
+
+  it('should fail closed when allowed free model IDs is missing', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should fail closed when allowed free model IDs is empty string', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: '',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should fail closed when allowed free model IDs contains blank entries', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,,openrouter/llama3-70b',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should fail closed when allowed free model IDs contains only whitespace entries', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,  ,openrouter/llama3-70b',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should fail closed when allowed free model IDs contains duplicates', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,openrouter/llama3-70b,openrouter/mistral-large',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should fail closed when modelId is not in allowed free model IDs', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/not-allowed-model',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,openrouter/llama3-70b',
+    });
+    expect(result).toEqual({ mode: 'disabled' });
+  });
+
+  it('should trim whitespace from allowed free model IDs', () => {
+    const result = parseCreativeBriefRuntimeConfig({
+      [ `${PREFIX}MODE` ]: 'openrouter',
+      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
+      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
+      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
+      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: '  openrouter/mistral-large  ,  openrouter/llama3-70b  ',
+    });
+    expect(isOpenRouterConfig(result)).toBe(true);
+    if (isOpenRouterConfig(result)) {
+      expect(result.allowedFreeModelIds).toEqual([
+        'openrouter/mistral-large',
+        'openrouter/llama3-70b',
+      ]);
+    }
   });
 });

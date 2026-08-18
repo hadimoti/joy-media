@@ -30,6 +30,8 @@ export interface OpenRouterConfig {
   readonly spendLimitUsdCents: number;
   /** Opaque name reference to the secret (e.g., "openrouter-api-key"). */
   readonly secretRef: string;
+  /** Non-empty readonly allowlist of exact free model IDs. */
+  readonly allowedFreeModelIds: readonly string[];
 }
 
 /**
@@ -56,6 +58,7 @@ const MODEL_ID_KEY = `${PREFIX}MODEL_ID`;
 const TIMEOUT_MS_KEY = `${PREFIX}TIMEOUT_MS`;
 const SPEND_LIMIT_USD_CENTS_KEY = `${PREFIX}SPEND_LIMIT_USD_CENTS`;
 const SECRET_REF_KEY = `${PREFIX}SECRET_REF`;
+const ALLOWED_FREE_MODEL_IDS_KEY = `${PREFIX}ALLOWED_FREE_MODEL_IDS`;
 
 /** All valid keys for this configuration prefix. */
 const VALID_KEYS: ReadonlySet<string> = new Set([
@@ -64,6 +67,7 @@ const VALID_KEYS: ReadonlySet<string> = new Set([
   TIMEOUT_MS_KEY,
   SPEND_LIMIT_USD_CENTS_KEY,
   SECRET_REF_KEY,
+  ALLOWED_FREE_MODEL_IDS_KEY,
 ]);
 
 // Validation bounds
@@ -90,8 +94,9 @@ const SPEND_LIMIT_MAX = 10000;
  *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS: '60000',
  *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS: '500',
  *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF: 'my-openrouter-key',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS: 'openrouter/mistral-large,openrouter/llama3-70b',
  * });
- * // => { mode: 'openrouter', modelId: 'openrouter/mistral-large', timeoutMs: 60000, spendLimitUsdCents: 500, secretRef: 'my-openrouter-key' }
+ * // => { mode: 'openrouter', modelId: 'openrouter/mistral-large', timeoutMs: 60000, spendLimitUsdCents: 500, secretRef: 'my-openrouter-key', allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'] }
  * ```
  *
  * @example
@@ -140,6 +145,7 @@ export function parseCreativeBriefRuntimeConfig(
   const timeoutMsRaw = env[TIMEOUT_MS_KEY];
   const spendLimitUsdCentsRaw = env[SPEND_LIMIT_USD_CENTS_KEY];
   const secretRef = env[SECRET_REF_KEY];
+  const allowedFreeModelIdsRaw = env[ALLOWED_FREE_MODEL_IDS_KEY];
 
   // All required fields must be present and non-empty
   if (
@@ -148,8 +154,20 @@ export function parseCreativeBriefRuntimeConfig(
     timeoutMsRaw === undefined ||
     spendLimitUsdCentsRaw === undefined ||
     secretRef === undefined ||
-    secretRef.trim() === ''
+    secretRef.trim() === '' ||
+    allowedFreeModelIdsRaw === undefined
   ) {
+    return { mode: 'disabled' };
+  }
+
+  // Parse allowed free model IDs
+  const allowedFreeModelIds = parseAllowedFreeModelIds(allowedFreeModelIdsRaw);
+  if (allowedFreeModelIds === null) {
+    return { mode: 'disabled' };
+  }
+
+  // Verify modelId is in the allowlist
+  if (!allowedFreeModelIds.includes(modelId.trim())) {
     return { mode: 'disabled' };
   }
 
@@ -180,6 +198,7 @@ export function parseCreativeBriefRuntimeConfig(
     timeoutMs,
     spendLimitUsdCents,
     secretRef: secretRef.trim(),
+    allowedFreeModelIds,
   };
 }
 
@@ -195,6 +214,33 @@ function parseInteger(value: string): number | null {
   // Check for safe integer range
   if (!Number.isSafeInteger(num)) return null;
   return num;
+}
+
+/**
+ * Parse a comma-separated list of model IDs into a readonly array.
+ * Returns null if the list is missing, empty, contains blank entries, or has duplicates.
+ */
+function parseAllowedFreeModelIds(value: string): readonly string[] | null {
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+
+  const rawIds = trimmed.split(',');
+
+  // Check for empty list
+  if (rawIds.length === 0) return null;
+
+  // Trim each entry and check for blank entries
+  const ids = rawIds.map((id) => id.trim());
+
+  // Reject if any entry is empty after trimming
+  if (ids.some((id) => id === '')) return null;
+
+  // Check for duplicates using a Set
+  const uniqueIds = new Set(ids);
+  if (uniqueIds.size !== ids.length) return null;
+
+  // Return as readonly array (deterministic order: original split order)
+  return ids as readonly string[];
 }
 
 // ============================================================================
