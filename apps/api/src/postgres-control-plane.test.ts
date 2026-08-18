@@ -307,23 +307,324 @@ function cloudAsset(id: string, ref: string) {
 }
 
 // ============================================================================
-// Project Document Store Tests (WP-37 S4-F10-E5-C2)
+// Project Document Store Tests (WP-37 S4-F10-E5-D2-A)
 // ============================================================================
 
-describe('PostgresControlPlane project document storage', () => {
-  it('readProjectDocument returns unavailable', async () => {
+describe('PostgresControlPlane project document storage - reads', () => {
+  const owner = { id: 'pg-owner' };
+  const otherOwner = { id: 'pg-other' };
+  const projectId = 'pg-project';
+  const revisionId1 = 'rev-1';
+  const revisionId2 = 'rev-2';
+
+  function createValidDocument(title: string) {
+    return {
+      schemaVersion: 1,
+      id: projectId,
+      title,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      rootCompositionId: 'comp-1',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          name: 'Main',
+          width: 1920,
+          height: 1080,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          background: '#00000000',
+          tracks: [],
+        },
+      },
+      assets: {},
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    };
+  }
+
+  it('readProjectDocument returns not-found for unknown project', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;
     const api = new PostgresControlPlane(pool, { skipLocked: false });
     await api.initialize();
-    const owner = { id: 'pg-owner' };
 
-    const result = api.readProjectDocument(owner, 'any-project');
-    expect(result.kind).toBe('unavailable');
-    expect(result.message).toBe('Project document store is unavailable');
+    const result = await api.readProjectDocument(owner, 'unknown-project');
+    expect(result.kind).toBe('not-found');
+    if (result.kind === 'not-found') {
+      expect(result.projectId).toBe('unknown-project');
+      expect(result.revisionId).toBeNull();
+    }
   });
 
+  it('readProjectDocument returns not-found for non-owner', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify({ schemaVersion: 1, id: projectId })],
+    );
+
+    const result = await api.readProjectDocument(otherOwner, projectId);
+    expect(result.kind).toBe('not-found');
+    if (result.kind === 'not-found') {
+      expect(result.projectId).toBe(projectId);
+    }
+  });
+
+  it('readProjectDocument returns not-found when no current head', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, null],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId);
+    expect(result.kind).toBe('not-found');
+    if (result.kind === 'not-found') {
+      expect(result.projectId).toBe(projectId);
+    }
+  });
+
+  it('readProjectDocument reads current head when no revision specified', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const doc1 = createValidDocument('Version 1');
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1)],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId);
+    expect(result.kind).toBe('ready');
+    if (result.kind === 'ready') {
+      expect(result.record.projectId).toBe(projectId);
+      expect(result.record.ownerId).toBe(owner.id);
+      expect(result.record.revisionId).toBe(revisionId1);
+      expect((result.record.document as any).title).toBe('Version 1');
+    }
+  });
+
+  it('readProjectDocument reads historical revision when specified', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const doc1 = createValidDocument('Version 1');
+    const doc2 = createValidDocument('Version 2');
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId2],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES
+       ($1, $2, $3, $4, NOW()),
+       ($5, $6, $7, $8, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1), projectId, revisionId2, 1, JSON.stringify(doc2)],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId, revisionId1);
+    expect(result.kind).toBe('ready');
+    if (result.kind === 'ready') {
+      expect(result.record.revisionId).toBe(revisionId1);
+      expect((result.record.document as any).title).toBe('Version 1');
+    }
+  });
+
+  it('readProjectDocument returns stale-revision for unknown revision', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const doc1 = createValidDocument('Version 1');
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1)],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId, 'unknown-revision');
+    expect(result.kind).toBe('stale-revision');
+    if (result.kind === 'stale-revision') {
+      expect(result.projectId).toBe(projectId);
+      expect(result.requestedRevisionId).toBe('unknown-revision');
+      expect(result.currentRevisionId).toBe(revisionId1);
+    }
+  });
+
+  it('readProjectDocument returns unavailable for corrupt document JSON', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    // pg-mem validates jsonb, so we use valid JSON that will fail schema validation
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, '{"invalid": true}'],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId);
+    expect(result.kind).toBe('unavailable');
+    if (result.kind === 'unavailable') {
+      expect(result.message).toBe('Project document store is unavailable');
+    }
+  });
+
+  it('readProjectDocument returns unavailable for invalid document schema', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, '{"schemaVersion":999}'],
+    );
+
+    const result = await api.readProjectDocument(owner, projectId);
+    expect(result.kind).toBe('unavailable');
+    if (result.kind === 'unavailable') {
+      expect(result.message).toBe('Project document store is unavailable');
+    }
+  });
+
+  it('listProjectRevisions returns empty for unknown project', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const result = await api.listProjectRevisions(owner, 'unknown-project');
+    expect(result).toEqual([]);
+  });
+
+  it('listProjectRevisions returns empty for non-owner', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId1],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [projectId, revisionId1, 1, '{}'],
+    );
+
+    const result = await api.listProjectRevisions(otherOwner, projectId);
+    expect(result).toEqual([]);
+  });
+
+  it('listProjectRevisions returns all revisions in deterministic order', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+
+    const doc1 = createValidDocument('Version 1');
+    const doc2 = createValidDocument('Version 2');
+
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in, document_revision_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [projectId, owner.id, 'Test', 0, true, false, revisionId2],
+    );
+
+    await pool.query(
+      `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
+       VALUES
+       ($1, $2, $3, $4, $5),
+       ($6, $7, $8, $9, $10)`,
+      [projectId, revisionId1, 1, JSON.stringify(doc1), new Date(Date.now() - 3600000).toISOString(),
+       projectId, revisionId2, 1, JSON.stringify(doc2), new Date().toISOString()],
+    );
+
+    const result = await api.listProjectRevisions(owner, projectId);
+    expect(result).toContain(revisionId1);
+    expect(result).toContain(revisionId2);
+    expect(result.length).toBe(2);
+    expect(result[0]).toBe(revisionId1);
+    expect(result[1]).toBe(revisionId2);
+  });
+});
+
+// Write remains unavailable (WP-37 S4-F10-E5-D2-A)
+describe('PostgresControlPlane project document storage - writes', () => {
   it('writeProjectDocument returns unavailable', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
@@ -340,6 +641,8 @@ describe('PostgresControlPlane project document storage', () => {
     }, '');
 
     expect(result.kind).toBe('unavailable');
-    expect(result.message).toBe('Project document store is unavailable');
+    if (result.kind === 'unavailable') {
+      expect(result.message).toBe('Project document store is unavailable');
+    }
   });
 });

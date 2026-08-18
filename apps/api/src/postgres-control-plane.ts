@@ -35,6 +35,7 @@ import {
   matchesCloudDerivativeRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
+import { validateProjectDocumentRecord } from './project-document-store.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -64,6 +65,123 @@ type PostgresProjectDocumentWriteOutcome =
   | { readonly kind: 'invalid-document'; readonly projectId: PostgresProjectId; readonly diagnostics: readonly { readonly code: string; readonly message: string; readonly path: string }[] }
   | { readonly kind: 'unavailable'; readonly message: string };
 
+class PostgresProjectDocumentStore {
+  constructor(private readonly pool: Pool) {}
+
+  async readDocument(
+    callerId: PostgresOwnerId,
+    projectId: PostgresProjectId,
+    revisionId?: string,
+  ): Promise<PostgresProjectDocumentReadOutcome> {
+    const projectResult = await this.pool.query<ProjectRow>(
+      'SELECT id, owner_id, document_revision_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+
+    const project = projectResult.rows[0];
+    if (project === undefined) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+
+    if (project.owner_id !== callerId) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+
+    const currentHeadRev = project.document_revision_id;
+
+    if (currentHeadRev === null) {
+      return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
+    }
+
+    const targetRevision = revisionId ?? currentHeadRev;
+
+    const docResult = await this.pool.query<ProjectDocumentRow>(
+      'SELECT schema_version, document FROM project_documents WHERE project_id = $1 AND revision_id = $2',
+      [projectId, targetRevision],
+    );
+
+    const row = docResult.rows[0];
+    if (row === undefined) {
+      if (revisionId === undefined) {
+        return { kind: 'not-found', projectId, revisionId: null };
+      }
+      return {
+        kind: 'stale-revision',
+        projectId,
+        requestedRevisionId: revisionId,
+        currentRevisionId: currentHeadRev,
+      };
+    }
+
+    let parsedDocument: unknown;
+    try {
+      if (typeof row.document === 'string') {
+        parsedDocument = JSON.parse(row.document);
+      } else {
+        parsedDocument = row.document;
+      }
+    } catch {
+      return { kind: 'unavailable', message: 'Project document store is unavailable' };
+    }
+
+    const record: PostgresProjectDocumentRecord = {
+      projectId,
+      ownerId: project.owner_id,
+      revisionId: targetRevision,
+      document: parsedDocument,
+    };
+
+    const diagnostics = validateProjectDocumentRecord(record);
+    if (diagnostics.length > 0) {
+      return { kind: 'unavailable', message: 'Project document store is unavailable' };
+    }
+
+    return {
+      kind: 'ready',
+      record: {
+        projectId,
+        ownerId: project.owner_id,
+        revisionId: targetRevision,
+        document: parsedDocument,
+      },
+    };
+  }
+
+  async listRevisions(
+    callerId: PostgresOwnerId,
+    projectId: PostgresProjectId,
+  ): Promise<readonly string[]> {
+    const projectResult = await this.pool.query<ProjectRow>(
+      'SELECT id, owner_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+
+    const project = projectResult.rows[0];
+    if (project === undefined) {
+      return [];
+    }
+
+    if (project.owner_id !== callerId) {
+      return [];
+    }
+
+    const result = await this.pool.query<ProjectDocumentRow>(
+      'SELECT revision_id FROM project_documents WHERE project_id = $1 ORDER BY created_at ASC',
+      [projectId],
+    );
+
+    return result.rows.map((row) => row.revision_id);
+  }
+
+  writeDocument(
+    _callerId: PostgresOwnerId,
+    _record: PostgresProjectDocumentRecord,
+    _baseRevisionId: string,
+  ): PostgresProjectDocumentWriteOutcome {
+    return { kind: 'unavailable', message: 'Project document store is unavailable' };
+  }
+}
+
 class PostgresUnavailableProjectDocumentStore {
   readDocument(
     _callerId: PostgresOwnerId,
@@ -90,6 +208,15 @@ interface ProjectRow {
   readonly asset_sync_enabled: boolean;
   readonly trashed_at: Date | null;
   readonly creative_brief_opt_in: boolean;
+  readonly document_revision_id: string | null;
+}
+
+interface ProjectDocumentRow {
+  readonly project_id: string;
+  readonly revision_id: string;
+  readonly schema_version: number;
+  readonly document: unknown;
+  readonly created_at: Date;
 }
 
 interface WorkerRow {
@@ -180,14 +307,14 @@ export interface PostgresControlPlaneOptions {
 /** Durable PostgreSQL implementation of the control-plane contract. */
 export class PostgresControlPlane implements ControlPlane {
   readonly #skipLocked: boolean;
-  readonly #documentStore: PostgresUnavailableProjectDocumentStore;
+  readonly #documentStore: PostgresProjectDocumentStore;
 
   constructor(
     private readonly pool: Pool,
     options: PostgresControlPlaneOptions = {},
   ) {
     this.#skipLocked = options.skipLocked ?? true;
-    this.#documentStore = new PostgresUnavailableProjectDocumentStore();
+    this.#documentStore = new PostgresProjectDocumentStore(pool);
   }
 
   async initialize(): Promise<void> {
@@ -1287,13 +1414,21 @@ export class PostgresControlPlane implements ControlPlane {
       at: event.created_at.getTime(),
     }));
   }
-  readProjectDocument(
+  async readProjectDocument(
     actor: Actor,
     projectId: string,
     revisionId?: string,
-  ): PostgresProjectDocumentReadOutcome {
+  ): Promise<PostgresProjectDocumentReadOutcome> {
     return this.#documentStore.readDocument(actor.id, projectId, revisionId);
   }
+
+  async listProjectRevisions(
+    actor: Actor,
+    projectId: string,
+  ): Promise<readonly string[]> {
+    return this.#documentStore.listRevisions(actor.id, projectId);
+  }
+
   writeProjectDocument(
     actor: Actor,
     record: PostgresProjectDocumentRecord,

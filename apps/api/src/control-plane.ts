@@ -574,12 +574,12 @@ export interface ControlPlane {
     actor: Actor,
     projectId: string,
     revisionId?: string,
-  ): InternalProjectDocumentReadOutcome;
+  ): InternalProjectDocumentReadOutcome | Promise<InternalProjectDocumentReadOutcome>;
   writeProjectDocument(
     actor: Actor,
     record: InternalProjectDocumentRecord,
     baseRevisionId: string,
-  ): InternalProjectDocumentWriteOutcome;
+  ): InternalProjectDocumentWriteOutcome | Promise<InternalProjectDocumentWriteOutcome>;
 }
 export class ControlPlaneError extends Error {
   constructor(
