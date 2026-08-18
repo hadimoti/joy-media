@@ -55,11 +55,18 @@ export interface ProjectDocumentReadOutcomeStaleRevision {
   readonly currentRevisionId: ProjectRevisionId;
 }
 
+/** Read failed - store is unavailable. */
+export interface ProjectDocumentReadOutcomeUnavailable {
+  readonly kind: 'unavailable';
+  readonly message: 'Project document store is unavailable';
+}
+
 /** All possible read outcomes. */
 export type ProjectDocumentReadOutcome =
   | ProjectDocumentReadOutcomeReady
   | ProjectDocumentReadOutcomeNotFound
-  | ProjectDocumentReadOutcomeStaleRevision;
+  | ProjectDocumentReadOutcomeStaleRevision
+  | ProjectDocumentReadOutcomeUnavailable;
 
 // ============================================================================
 // Write Outcomes (typed result discriminated union)
@@ -102,13 +109,20 @@ export interface ProjectDocumentWriteOutcomeInvalidDocument {
   readonly diagnostics: readonly ProjectDiagnostic[];
 }
 
+/** Write failed - store is unavailable. */
+export interface ProjectDocumentWriteOutcomeUnavailable {
+  readonly kind: 'unavailable';
+  readonly message: 'Project document store is unavailable';
+}
+
 /** All possible write outcomes. */
 export type ProjectDocumentWriteOutcome =
   | ProjectDocumentWriteOutcomeStored
   | ProjectDocumentWriteOutcomeNotFound
   | ProjectDocumentWriteOutcomeOwnerDenied
   | ProjectDocumentWriteOutcomeRevisionConflict
-  | ProjectDocumentWriteOutcomeInvalidDocument;
+  | ProjectDocumentWriteOutcomeInvalidDocument
+  | ProjectDocumentWriteOutcomeUnavailable;
 
 // ============================================================================
 // Store Interface
@@ -454,6 +468,49 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
    */
   private deepCopy<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
+  }
+}
+
+// ============================================================================
+// Unavailable Implementation
+// ============================================================================
+
+/**
+ * Unavailable project document store implementation.
+ *
+ * Guarantees:
+ * - Every read/write returns typed 'unavailable' outcome
+ * - No owner lookup, validation, storage mutation, I/O, logging, clock access, or secret access
+ * - Public errors/messages are fixed and redacted (no project IDs, owner IDs, revision IDs, or document content)
+ */
+export class UnavailableProjectDocumentStore implements ProjectDocumentStore {
+  readDocument(
+    _callerId: OwnerId,
+    _projectId: ProjectId,
+    _revisionId?: ProjectRevisionId,
+  ): ProjectDocumentReadOutcome {
+    return {
+      kind: 'unavailable',
+      message: 'Project document store is unavailable',
+    };
+  }
+
+  writeDocument(
+    _callerId: OwnerId,
+    _record: ProjectDocumentRecord,
+    _baseRevisionId: ProjectRevisionId,
+  ): ProjectDocumentWriteOutcome {
+    return {
+      kind: 'unavailable',
+      message: 'Project document store is unavailable',
+    };
+  }
+
+  listRevisions(
+    _callerId: OwnerId,
+    _projectId: ProjectId,
+  ): readonly ProjectRevisionId[] {
+    return [];
   }
 }
 

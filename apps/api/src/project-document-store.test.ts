@@ -10,16 +10,19 @@ import {
   ProjectDocumentReadOutcomeNotFound,
   ProjectDocumentReadOutcomeReady,
   ProjectDocumentReadOutcomeStaleRevision,
+  ProjectDocumentReadOutcomeUnavailable,
   ProjectDocumentWriteOutcomeInvalidDocument,
   ProjectDocumentWriteOutcomeNotFound,
   ProjectDocumentWriteOutcomeOwnerDenied,
   ProjectDocumentWriteOutcomeRevisionConflict,
   ProjectDocumentWriteOutcomeStored,
+  ProjectDocumentWriteOutcomeUnavailable,
   ProjectId,
   OwnerId,
   validateProjectDocumentRecord,
   isValidProjectDocumentRecord,
   InMemoryProjectDocumentStore,
+  UnavailableProjectDocumentStore,
   INITIAL_REVISION,
   ProjectOwnerLookup,
 } from './project-document-store.js';
@@ -349,6 +352,24 @@ describe('Write Outcome shapes', () => {
     expect(outcome.kind).toBe('invalid-document');
     expect(outcome.diagnostics).toHaveLength(1);
     expect(outcome.diagnostics[0].code).toBe('PROJECT_SCHEMA_V1_VERSION');
+  });
+
+  it('ProjectDocumentReadOutcomeUnavailable has correct shape', () => {
+    const outcome: ProjectDocumentReadOutcomeUnavailable = {
+      kind: 'unavailable',
+      message: 'Project document store is unavailable',
+    };
+    expect(outcome.kind).toBe('unavailable');
+    expect(outcome.message).toBe('Project document store is unavailable');
+  });
+
+  it('ProjectDocumentWriteOutcomeUnavailable has correct shape', () => {
+    const outcome: ProjectDocumentWriteOutcomeUnavailable = {
+      kind: 'unavailable',
+      message: 'Project document store is unavailable',
+    };
+    expect(outcome.kind).toBe('unavailable');
+    expect(outcome.message).toBe('Project document store is unavailable');
   });
 });
 
@@ -697,5 +718,90 @@ describe('InMemoryProjectDocumentStore', () => {
     expect(writeResult.kind).toBe('revision-conflict');
     expect(writeResult.expectedBaseRevisionId).toBe(REV_1);
     expect(writeResult.actualBaseRevisionId).toBe(INITIAL_REVISION);
+  });
+});
+
+// ============================================================================
+// UnavailableProjectDocumentStore Tests
+// ============================================================================
+
+describe('UnavailableProjectDocumentStore', () => {
+  const TEST_PROJECT = 'test-project' as ProjectId;
+  const TEST_OWNER = 'test-owner' as OwnerId;
+  const TEST_REVISION = 'test-rev' as ProjectRevisionId;
+
+  it('readDocument returns unavailable outcome', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const result = store.readDocument(TEST_OWNER, TEST_PROJECT, TEST_REVISION);
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).toBe('Project document store is unavailable');
+  });
+
+  it('readDocument returns unavailable without projectId echo', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const result = store.readDocument(TEST_OWNER, 'malicious-project-id', TEST_REVISION);
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).not.toContain('malicious-project-id');
+    expect(result.message).not.toContain(TEST_OWNER);
+    expect(result.message).not.toContain(TEST_REVISION);
+  });
+
+  it('readDocument returns unavailable without callerId echo', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const result = store.readDocument('malicious-caller-id', TEST_PROJECT);
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).not.toContain('malicious-caller-id');
+  });
+
+  it('writeDocument returns unavailable outcome', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const record = validRecord();
+    const result = store.writeDocument(TEST_OWNER, record, INITIAL_REVISION);
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).toBe('Project document store is unavailable');
+  });
+
+  it('writeDocument returns unavailable without record echo', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('secret-project');
+    const record: ProjectDocumentRecord = {
+      projectId: 'secret-project-id',
+      ownerId: 'secret-owner-id',
+      revisionId: 'secret-revision-id',
+      document: doc,
+    };
+    const result = store.writeDocument('secret-caller-id', record, 'secret-base-rev');
+    expect(result.kind).toBe('unavailable');
+    expect(result.message).not.toContain('secret-project-id');
+    expect(result.message).not.toContain('secret-owner-id');
+    expect(result.message).not.toContain('secret-revision-id');
+    expect(result.message).not.toContain('secret-caller-id');
+    expect(result.message).not.toContain('secret-base-rev');
+  });
+
+  it('listRevisions returns empty array', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const result = store.listRevisions(TEST_OWNER, TEST_PROJECT);
+    expect(result).toEqual([]);
+  });
+
+  it('listRevisions does not invoke owner lookup', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const result = store.listRevisions(TEST_OWNER, TEST_PROJECT);
+    expect(result).toEqual([]);
+  });
+
+  it('unavailable store performs no I/O', () => {
+    const store = new UnavailableProjectDocumentStore();
+    const record = validRecord();
+
+    const readResult = store.readDocument(TEST_OWNER, TEST_PROJECT);
+    expect(readResult.kind).toBe('unavailable');
+
+    const writeResult = store.writeDocument(TEST_OWNER, record, INITIAL_REVISION);
+    expect(writeResult.kind).toBe('unavailable');
+
+    const listResult = store.listRevisions(TEST_OWNER, TEST_PROJECT);
+    expect(listResult).toEqual([]);
   });
 });
