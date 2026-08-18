@@ -1,9 +1,9 @@
 /**
  * OpenRouter Creative Brief Adapter - WP-37 S4-F10-A
  *
- * Minimal OpenRouter adapter package with fail-closed core.
- * Does NOT make any HTTP requests, construct Authorization headers,
- * resolve environment variables, inspect secret values, or wire production runtime.
+ * Minimal OpenRouter adapter package with injected transport.
+ * Uses injected SecretResolver and HttpPostTransport for HTTP requests.
+ * Does NOT resolve environment variables, inspect secret values, or wire production runtime.
  */
 
 import type {
@@ -111,8 +111,8 @@ class DefaultClock implements Clock {
  * - Dependencies are absent (no secret resolver, no transport)
  * - The secret cannot be resolved (opaque reference not found)
  *
- * Does NOT make any HTTP requests, construct Authorization headers,
- * resolve environment variables, or inspect secret values.
+ * Uses injected SecretResolver and HttpPostTransport to make HTTP requests.
+ * Does NOT resolve environment variables or inspect secret values.
  */
 class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
   readonly adapterName = 'openrouter-creative-v1' as const;
@@ -129,12 +129,12 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
   }
 
   async createBrief(
-    _input: ModelAdapterInputV1,
+    input: ModelAdapterInputV1,
     options: AsyncAdapterOptions,
   ): Promise<AsyncOutcome<ModelAdapterOutputV1>> {
     const startTime = this.#clock.now();
 
-    // Emit start audit event if sink is provided
+    // Emit start audit event if sink is provided (redacted, no sensitive data)
     if (options.auditSink !== undefined) {
       options.auditSink.emit({
         correlationId: options.correlationId,
@@ -168,7 +168,6 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
     }
 
     // Fail-closed: if transport is not provided, return unavailable
-    // (Even though we don't call it, we require it for production readiness)
     if (this.#options.transport === undefined) {
       const durationMs = this.#clock.now() - startTime;
       if (options.auditSink !== undefined) {
@@ -190,33 +189,133 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
       };
     }
 
-    // NOTE: The adapter is intentionally fail-closed and does NOT make any HTTP
-    // requests in this implementation. Even with an injected transport, we return
-    // unavailable to ensure no accidental network calls.
-    //
-    // This is a safety measure. Future implementations will use the transport
-    // to make actual OpenRouter API calls, but only after explicit approval.
+    // Build the request payload using the existing codec
+    const requestOutcome = buildOpenRouterRequest(input, {
+      modelId: this.#options.modelId,
+    });
 
-    const durationMs = this.#clock.now() - startTime;
-
-    if (options.auditSink !== undefined) {
-      options.auditSink.emit({
-        correlationId: options.correlationId,
-        adapterName: this.adapterName,
-        eventType: 'error',
-        status: 'unavailable',
+    // If request building fails, return invalid-output
+    if (requestOutcome.category !== 'ready') {
+      const durationMs = this.#clock.now() - startTime;
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'error',
+          status: 'invalid-output',
+          durationMs,
+          errorCode: requestOutcome.errorCode,
+        });
+      }
+      return {
+        category: requestOutcome.category,
+        errorCode: requestOutcome.errorCode,
+        message: requestOutcome.message,
+        retryable: requestOutcome.retryable,
         durationMs,
-        errorCode: 'OPENROUTER_NOT_YET_ENABLED',
-      });
+      };
     }
 
-    return {
-      category: 'unavailable',
-      errorCode: 'OPENROUTER_NOT_YET_ENABLED',
-      message: 'OpenRouter creative brief adapter is not yet enabled for HTTP requests',
-      retryable: false,
-      durationMs,
-    };
+    try {
+      // Call the injected transport once
+      const response = await this.#options.transport.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${secret}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestOutcome.result),
+        },
+      );
+
+      const durationMs = this.#clock.now() - startTime;
+
+      // Handle non-2xx responses as provider-failed
+      if (!response.ok) {
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: 'provider-failed',
+            durationMs,
+            errorCode: 'OPENROUTER_PROVIDER_ERROR',
+          });
+        }
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_PROVIDER_ERROR',
+          message: 'OpenRouter provider returned a non-2xx status',
+          retryable: true,
+          durationMs,
+        };
+      }
+
+      // Parse and decode the response using the existing decoder
+      const responseBody = await response.json();
+      const decodeOutcome = decodeOpenRouterResponse(responseBody);
+
+      // Handle decode failures
+      if (decodeOutcome.category !== 'ready') {
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: decodeOutcome.category,
+            durationMs,
+            errorCode: decodeOutcome.errorCode,
+          });
+        }
+        return {
+          category: decodeOutcome.category,
+          errorCode: decodeOutcome.errorCode,
+          message: decodeOutcome.message,
+          retryable: decodeOutcome.retryable,
+          durationMs,
+        };
+      }
+
+      // Success: emit end audit event with redacted data
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'end',
+          status: 'ready',
+          durationMs,
+        });
+      }
+
+      return {
+        category: 'ready',
+        result: decodeOutcome.result as ModelAdapterOutputV1,
+        retryable: false,
+        durationMs,
+      };
+    } catch (error) {
+      // Map transport exceptions to provider-failed with redacted data
+      const durationMs = this.#clock.now() - startTime;
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'error',
+          status: 'provider-failed',
+          durationMs,
+          errorCode: 'OPENROUTER_PROVIDER_ERROR',
+        });
+      }
+      return {
+        category: 'provider-failed',
+        errorCode: 'OPENROUTER_PROVIDER_ERROR',
+        message: 'OpenRouter transport failed',
+        retryable: true,
+        durationMs,
+      };
+    }
   }
 }
 

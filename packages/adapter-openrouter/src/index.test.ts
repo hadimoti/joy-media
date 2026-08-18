@@ -255,13 +255,90 @@ describe('OpenRouterCreativeAdapter - unresolved opaque reference fail-closed', 
 });
 
 // ============================================================================
-// Proof That Injected Transport Is Never Called
+// Injected Transport Path - WP-37 S4-F10-D3-A
 // ============================================================================
 
-describe('OpenRouterCreativeAdapter - transport never called', () => {
-  it('should never call the injected HTTP transport', async () => {
+// Helper to create a minimal valid ModelAdapterInputV1 for testing
+export function createValidInput(): any {
+  return {
+    snapshot: {
+      projectId: 'test-project',
+      revisionId: 'test-revision',
+      composition: {
+        durationUs: 1000000,
+        aspectRatio: '16:9',
+        frameRate: { num: 30, den: 1 },
+        width: 1920,
+        height: 1080,
+      },
+      scenes: [],
+      assets: [],
+    },
+    brandReadiness: {
+      hasBrandKit: false,
+      colorsAvailable: 0,
+      fontsAvailable: 0,
+      logoAvailable: false,
+    },
+    sceneCoverages: [],
+    projectReadiness: {
+      readinessLevel: 'none' as const,
+      durationAligned: false,
+      aspectRatioAligned: false,
+      blockers: [],
+    },
+    rules: [],
+    request: {
+      request: 'test request',
+      scope: 'full' as const,
+    },
+  };
+}
+
+// Mock transport that can be configured to return different responses
+class ConfigurableMockTransport implements HttpPostTransport {
+  #calls: Array<{ url: string; options: RequestInit }> = [];
+  #responseFactory: (() => Promise<Response>) | null = null;
+
+  constructor(responseFactory?: () => Promise<Response>) {
+    this.#responseFactory = responseFactory ?? (() => Promise.resolve(new Response('{}', { status: 200 })));
+  }
+
+  async post(url: string, options: RequestInit): Promise<Response> {
+    this.#calls.push({ url, options });
+    return this.#responseFactory!();
+  }
+
+  getCallCount(): number {
+    return this.#calls.length;
+  }
+
+  getCalls(): Array<{ url: string; options: RequestInit }> {
+    return [...this.#calls];
+  }
+
+  getLastCall(): { url: string; options: RequestInit } | undefined {
+    return this.#calls[this.#calls.length - 1];
+  }
+
+  setResponseFactory(factory: () => Promise<Response>): void {
+    this.#responseFactory = factory;
+  }
+}
+
+describe('OpenRouterCreativeAdapter - injected transport path', () => {
+  it('should call transport exactly once with valid resolver/transport and return ready', async () => {
     const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
-    const transport = new MockHttpTransport();
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -271,13 +348,15 @@ describe('OpenRouterCreativeAdapter - transport never called', () => {
       transport,
     });
 
-    await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    expect(transport.getCallCount()).toBe(0);
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(transport.getCallCount()).toBe(1);
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
   });
 
-  it('should never call transport even when secret is resolved', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-resolved-key' });
-    const transport = new MockHttpTransport();
+  it('should send outgoing body with configured model and max_tokens 2048', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -287,14 +366,22 @@ describe('OpenRouterCreativeAdapter - transport never called', () => {
       transport,
     });
 
-    await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    expect(transport.getCallCount()).toBe(0);
-    expect(transport.getCalls()).toHaveLength(0);
+    await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(transport.getCallCount()).toBe(1);
+
+    const lastCall = transport.getLastCall();
+    expect(lastCall).toBeDefined();
+    expect(lastCall!.url).toBe('https://openrouter.ai/api/v1/chat/completions');
+
+    const body = JSON.parse(lastCall!.options.body as string) as any;
+    expect(body.model).toBe('openrouter/mistral-large');
+    expect(body.max_tokens).toBe(2048);
+    expect(body.temperature).toBe(0.0);
   });
 
-  it('should never construct Authorization headers', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
-    const transport = new MockHttpTransport();
+  it('should send Authorization header with resolved Bearer token', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'my-secret-value' });
+    const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -304,13 +391,156 @@ describe('OpenRouterCreativeAdapter - transport never called', () => {
       transport,
     });
 
-    await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    const calls = transport.getCalls();
-    expect(calls.length).toBe(0);
-    // Even if calls were made, none should have authorization headers
-    for (const call of calls) {
-      expect(call.options.headers).not.toHaveProperty('authorization');
-      expect(call.options.headers).not.toHaveProperty('Authorization');
+    await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    const lastCall = transport.getLastCall();
+    expect(lastCall).toBeDefined();
+
+    const headers = lastCall!.options.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer my-secret-value');
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('should map non-2xx response to redacted provider-failed', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(new Response('{"error":{"message":"Rate limited"}}', { status: 429 })),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(transport.getCallCount()).toBe(1);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+    expect(result.message).toContain('non-2xx');
+    expect(result.retryable).toBe(true);
+    // Ensure no secret in the result
+    expect(JSON.stringify(result)).not.toContain('sk-test-key');
+    expect(JSON.stringify(result)).not.toContain('Rate limited');
+  });
+
+  it('should map thrown transport error to redacted provider-failed', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.reject(new Error('Network error: connection refused')),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(transport.getCallCount()).toBe(1);
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_PROVIDER_ERROR');
+    expect(result.message).toContain('transport failed');
+    expect(result.retryable).toBe(true);
+    // Ensure no secret or error details in the result
+    expect(JSON.stringify(result)).not.toContain('sk-test-key');
+    expect(JSON.stringify(result)).not.toContain('Network error');
+    expect(JSON.stringify(result)).not.toContain('connection refused');
+  });
+});
+
+// ============================================================================
+// Audit/Error Redaction for Transport Path
+// ============================================================================
+
+describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
+  it('should never emit secret in audit events for successful transport call', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
+
+    // Check all emitted events
+    for (const call of auditSink.emit.mock.calls) {
+      const event = call[0] as any;
+      expect(JSON.stringify(event)).not.toContain('sk-secret-value');
+      expect(JSON.stringify(event)).not.toContain('sk-');
+      expect(JSON.stringify(event)).not.toContain('Bearer');
+    }
+  });
+
+  it('should never emit secret in audit events for non-2xx response', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(new Response('{"error":{"message":"Auth failed"}}', { status: 401 })),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
+
+    // Check all emitted events
+    for (const call of auditSink.emit.mock.calls) {
+      const event = call[0] as any;
+      expect(JSON.stringify(event)).not.toContain('sk-secret-value');
+      expect(JSON.stringify(event)).not.toContain('sk-');
+      expect(JSON.stringify(event)).not.toContain('Bearer');
+      expect(JSON.stringify(event)).not.toContain('Auth failed');
+    }
+  });
+
+  it('should never emit secret in audit events for transport error', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.reject(new Error('Connection timeout')),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+    });
+
+    await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
+
+    // Check all emitted events
+    for (const call of auditSink.emit.mock.calls) {
+      const event = call[0] as any;
+      expect(JSON.stringify(event)).not.toContain('sk-secret-value');
+      expect(JSON.stringify(event)).not.toContain('sk-');
+      expect(JSON.stringify(event)).not.toContain('Bearer');
+      expect(JSON.stringify(event)).not.toContain('Connection timeout');
     }
   });
 });
@@ -321,12 +551,21 @@ describe('OpenRouterCreativeAdapter - transport never called', () => {
 
 describe('OpenRouterCreativeAdapter - input immutability', () => {
   it('should not mutate the input object', async () => {
-    const input = { ...MOCK_INPUT } as any;
-    const originalSnapshot = { ...input.snapshot };
-    const originalRequest = { ...input.request };
+    const input = createValidInput();
+    const originalSnapshot = JSON.parse(JSON.stringify(input.snapshot));
+    const originalRequest = JSON.parse(JSON.stringify(input.request));
 
     const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
-    const transport = new MockHttpTransport();
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -351,7 +590,16 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
     const originalOptions = { ...options };
 
     const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
-    const transport = new MockHttpTransport();
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -361,7 +609,7 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
       transport,
     });
 
-    await adapter.createBrief(MOCK_INPUT as any, options);
+    await adapter.createBrief(createValidInput(), options);
 
     expect(options).toEqual(originalOptions);
   });
@@ -534,7 +782,16 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
   it('should measure duration using clock', async () => {
     const mockClock = new MockClock(1000);
     const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
-    const transport = new MockHttpTransport();
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
     const adapter = createOpenRouterCreativeAdapter({
       modelId: 'openrouter/mistral-large',
       timeoutMs: 60000,
@@ -545,10 +802,8 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
       clock: mockClock,
     });
 
-    const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    // Secret is resolved and transport is provided, but adapter is fail-closed
-    expect(result.category).toBe('unavailable');
-    expect(result.errorCode).toBe('OPENROUTER_NOT_YET_ENABLED');
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('ready');
     expect(result.durationMs).toBe(0);
   });
 });
