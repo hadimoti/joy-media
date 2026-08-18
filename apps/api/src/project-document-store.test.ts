@@ -719,6 +719,159 @@ describe('InMemoryProjectDocumentStore', () => {
     expect(writeResult.expectedBaseRevisionId).toBe(REV_1);
     expect(writeResult.actualBaseRevisionId).toBe(INITIAL_REVISION);
   });
+
+  it('retains and reads historical revision correctly', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'Modified' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    store.writeDocument(OWNER_X, record2, REV_1);
+
+    // Read historical revision REV_1 should return the original document
+    const readRev1 = store.readDocument(OWNER_X, PROJECT_A, REV_1);
+    expect(readRev1.kind).toBe('ready');
+    expect(readRev1.record.revisionId).toBe(REV_1);
+    expect(readRev1.record.document.title).toBe('Test Project');
+
+    // Read historical revision REV_2 should return the modified document
+    const readRev2 = store.readDocument(OWNER_X, PROJECT_A, REV_2);
+    expect(readRev2.kind).toBe('ready');
+    expect(readRev2.record.revisionId).toBe(REV_2);
+    expect(readRev2.record.document.title).toBe('Modified');
+  });
+
+  it('returns stale-revision for unknown historical revision', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc,
+    };
+    store.writeDocument(OWNER_X, record, INITIAL_REVISION);
+
+    // Request a revision that was never stored
+    const readResult = store.readDocument(OWNER_X, PROJECT_A, REV_2);
+    expect(readResult.kind).toBe('stale-revision');
+    expect(readResult.requestedRevisionId).toBe(REV_2);
+    expect(readResult.currentRevisionId).toBe(REV_1);
+  });
+
+  it('read without revisionId returns current head', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'Head' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    store.writeDocument(OWNER_X, record2, REV_1);
+
+    // Read without revisionId should return current head (REV_2)
+    const readResult = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readResult.kind).toBe('ready');
+    expect(readResult.record.revisionId).toBe(REV_2);
+    expect(readResult.record.document.title).toBe('Head');
+  });
+
+  it('historical document defensive copies remain immutable after later writes', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'Modified' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    store.writeDocument(OWNER_X, record2, REV_1);
+
+    // Mutate the original doc1
+    (doc1 as any).title = 'MUTATED';
+
+    // Historical REV_1 should still return the original document, not mutated
+    const readRev1 = store.readDocument(OWNER_X, PROJECT_A, REV_1);
+    expect(readRev1.kind).toBe('ready');
+    expect(readRev1.record.document.title).toBe('Test Project');
+
+    // Current head REV_2 should be unaffected
+    const readHead = store.readDocument(OWNER_X, PROJECT_A);
+    expect(readHead.kind).toBe('ready');
+    expect(readHead.record.document.title).toBe('Modified');
+  });
+
+  it('listRevisions returns all stored revision IDs', () => {
+    const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
+
+    const doc1: JoyProjectV1 = minimalValidJoyProjectV1('project-a');
+    const record1: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_1,
+      document: doc1,
+    };
+    store.writeDocument(OWNER_X, record1, INITIAL_REVISION);
+
+    const doc2: JoyProjectV1 = { ...doc1, title: 'V2' };
+    const record2: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_2,
+      document: doc2,
+    };
+    store.writeDocument(OWNER_X, record2, REV_1);
+
+    const doc3: JoyProjectV1 = { ...doc2, title: 'V3' };
+    const record3: ProjectDocumentRecord = {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId: REV_3,
+      document: doc3,
+    };
+    store.writeDocument(OWNER_X, record3, REV_2);
+
+    const revisions = store.listRevisions(OWNER_X, PROJECT_A);
+    expect(revisions).toContain(REV_1);
+    expect(revisions).toContain(REV_2);
+    expect(revisions).toContain(REV_3);
+    expect(revisions).toHaveLength(3);
+  });
 });
 
 // ============================================================================

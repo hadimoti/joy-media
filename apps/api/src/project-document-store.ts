@@ -293,11 +293,12 @@ interface StoredDocument {
  * - Subsequent writes require baseRevisionId === current head
  * - Invalid documents rejected without mutation
  * - Defensive copies on all read/write operations
+ * - Retains immutable historical revisions for each project
  * - NO I/O: no clock, filesystem, database, network, environment, or secret access
  */
 export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
-  private readonly store: Map<ProjectId, StoredDocument> = new Map();
-  private readonly revisions: Map<ProjectId, Set<ProjectRevisionId>> = new Map();
+  private readonly documents: Map<ProjectId, Map<ProjectRevisionId, StoredDocument>> = new Map();
+  private readonly currentHead: Map<ProjectId, ProjectRevisionId> = new Map();
 
   constructor(private readonly lookupOwner: ProjectOwnerLookup) {}
 
@@ -325,9 +326,9 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       };
     }
 
-    // Get the current document
-    const current = this.store.get(projectId);
-    if (current === undefined) {
+    // Get the document map for this project
+    const docMap = this.documents.get(projectId);
+    if (docMap === undefined || docMap.size === 0) {
       return {
         kind: 'not-found',
         projectId,
@@ -335,25 +336,63 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       };
     }
 
-    // If specific revision requested, check if it matches current
-    if (revisionId !== undefined && revisionId !== current.revisionId) {
-      return {
-        kind: 'stale-revision',
-        projectId,
-        requestedRevisionId: revisionId,
-        currentRevisionId: current.revisionId,
-      };
+    const currentHeadRev = this.currentHead.get(projectId);
+
+    // If specific revision requested
+    if (revisionId !== undefined) {
+      const stored = docMap.get(revisionId);
+      if (stored !== undefined) {
+        // Found the historical revision - return it
+        return {
+          kind: 'ready',
+          record: {
+            projectId,
+            ownerId,
+            revisionId: stored.revisionId,
+            document: this.deepCopy(stored.document),
+          },
+        };
+      } else {
+        // Revision doesn't exist - return stale with current head info
+        if (currentHeadRev !== undefined) {
+          return {
+            kind: 'stale-revision',
+            projectId,
+            requestedRevisionId: revisionId,
+            currentRevisionId: currentHeadRev,
+          };
+        } else {
+          // No current head but revision requested - shouldn't happen but safe
+          return {
+            kind: 'not-found',
+            projectId,
+            revisionId,
+          };
+        }
+      }
     }
 
-    // Return defensive copy
+    // No specific revision requested - return current head
+    if (currentHeadRev !== undefined) {
+      const stored = docMap.get(currentHeadRev);
+      if (stored !== undefined) {
+        return {
+          kind: 'ready',
+          record: {
+            projectId,
+            ownerId,
+            revisionId: stored.revisionId,
+            document: this.deepCopy(stored.document),
+          },
+        };
+      }
+    }
+
+    // Fallback: no current head stored
     return {
-      kind: 'ready',
-      record: {
-        projectId,
-        ownerId,
-        revisionId: current.revisionId,
-        document: this.deepCopy(current.document),
-      },
+      kind: 'not-found',
+      projectId,
+      revisionId: null,
     };
   }
 
@@ -401,35 +440,36 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       };
     }
 
-    // Get current document for CAS check
-    const current = this.store.get(record.projectId);
-    const currentRevisionId = current?.revisionId ?? INITIAL_REVISION;
+    // Get current head for CAS check
+    const currentHeadRev = this.currentHead.get(record.projectId) ?? INITIAL_REVISION;
 
     // CAS: baseRevisionId must match current head
-    if (baseRevisionId !== currentRevisionId) {
+    if (baseRevisionId !== currentHeadRev) {
       return {
         kind: 'revision-conflict',
         projectId: record.projectId,
         expectedBaseRevisionId: baseRevisionId,
-        actualBaseRevisionId: currentRevisionId,
+        actualBaseRevisionId: currentHeadRev,
       };
     }
 
-    // Store defensive copy
+    // Get or create the document map for this project
+    let docMap = this.documents.get(record.projectId);
+    if (docMap === undefined) {
+      docMap = new Map();
+      this.documents.set(record.projectId, docMap);
+    }
+
+    // Store defensive copy of the new document
     const stored: StoredDocument = {
       ownerId,
       revisionId: record.revisionId,
       document: this.deepCopy(record.document),
     };
-    this.store.set(record.projectId, stored);
+    docMap.set(record.revisionId, stored);
 
-    // Track all revisions for this project
-    let revSet = this.revisions.get(record.projectId);
-    if (revSet === undefined) {
-      revSet = new Set();
-      this.revisions.set(record.projectId, revSet);
-    }
-    revSet.add(record.revisionId);
+    // Update current head to the new revision
+    this.currentHead.set(record.projectId, record.revisionId);
 
     return {
       kind: 'stored',
@@ -454,12 +494,12 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       return [];
     }
 
-    const revSet = this.revisions.get(projectId);
-    if (revSet === undefined) {
+    const docMap = this.documents.get(projectId);
+    if (docMap === undefined || docMap.size === 0) {
       return [];
     }
 
-    return Array.from(revSet);
+    return Array.from(docMap.keys());
   }
 
   /**
