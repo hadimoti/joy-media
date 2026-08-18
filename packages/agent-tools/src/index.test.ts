@@ -40,6 +40,9 @@ import {
   containsPersian,
   isModelAdapterInputV1,
   isModelAdapterOutputV1,
+  // Async Runtime Contract - WP-37 S4-F6
+  createAsyncCreativeBrief,
+  createAsyncCreativeBriefWithOptions,
 } from './index.js';
 import type {
   CreativeBriefScope,
@@ -64,6 +67,15 @@ import type {
   CreativeModelAdapter,
   ModelAdapterInputV1,
   ModelAdapterOutputV1,
+  // Async Runtime Contract - WP-37 S4-F6
+  AsyncCreativeModelAdapter,
+  AsyncOutcomeCategory,
+  AsyncOutcome,
+  AsyncAdapterOptions,
+  AuditEventSink,
+  AsyncCreativeBriefOptions,
+  AsyncCreativeBriefOutcome,
+  AsyncCreativeBriefInputOptions,
 } from './index.js';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 
@@ -732,5 +744,47 @@ describe('Creative Brief orchestration integration', () => {
   it('exports createCreativeBriefInput for building input objects', () => {
     // Verify createCreativeBriefInput is exported and callable
     expect(typeof createCreativeBriefInput).toBe('function');
+  });
+});
+
+// ==========================================================================
+// Async Runtime Contract Integration Tests - WP-37 S4-F6
+// ==========================================================================
+
+describe('Async Runtime Contract from package root', () => {
+  // Type-only imports - if this compiles, the types are exported correctly
+  it('compiles with all production async adapter types', () => {
+    // Import types from package root
+    const _category: AsyncOutcomeCategory = 'ready';
+    const _adapter: AsyncCreativeModelAdapter = null as unknown as AsyncCreativeModelAdapter;
+    const _options: AsyncAdapterOptions = { correlationId: 'test' };
+    const _sink: AuditEventSink = { emit: () => {} };
+    const _outcome: AsyncOutcome = { category: 'ready', retryable: false, durationMs: 0 };
+    void _category;
+    void _adapter;
+    void _options;
+    void _sink;
+    void _outcome;
+  });
+
+  it('compiles with all production async creative brief types', () => {
+    // Import types from package root
+    const _options: AsyncCreativeBriefOptions = {
+      adapter: null as unknown as AsyncCreativeModelAdapter,
+      adapterOptions: { correlationId: 'test' },
+    };
+    const _outcome: AsyncCreativeBriefOutcome = { category: 'ready', retryable: false, durationMs: 0 };
+    const _inputOptions: AsyncCreativeBriefInputOptions = {
+      adapter: null as unknown as AsyncCreativeModelAdapter,
+      adapterOptions: { correlationId: 'test' },
+    };
+    void _options;
+    void _outcome;
+    void _inputOptions;
+  });
+
+  it('exports async creative brief production functions', () => {
+    expect(typeof createAsyncCreativeBrief).toBe('function');
+    expect(typeof createAsyncCreativeBriefWithOptions).toBe('function');
   });
 });
