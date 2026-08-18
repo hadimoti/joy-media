@@ -77,6 +77,7 @@ listProjectRevisions(actor: Actor, projectId: string): readonly { revisionId: Pr
 **Missing PostgreSQL schema (add to `apps/api/src/postgres-schema.ts:3`):
 
 ```sql
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL;
 CREATE TABLE IF NOT EXISTS project_documents (
   project_id text NOT NULL,
   revision_id text NOT NULL,
@@ -85,8 +86,10 @@ CREATE TABLE IF NOT EXISTS project_documents (
   created_at timestamptz NOT NULL,
   PRIMARY KEY (project_id, revision_id)
 );
-CREATE INDEX IF NOT EXISTS project_documents_project_idx ON project_documents (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS project_documents_project_revision_idx ON project_documents (project_id, revision_id);
 ```
+
+**Storage Contract:** `projects.document_revision_id` is the **atomic current-head pointer**. Do NOT rely on `created_at` timestamps to determine the head revision; the head is explicitly tracked by `document_revision_id`.
 
 **Missing from `PostgresControlPlane` (`apps/api/src/postgres-control-plane.ts:138`):
 - No storage/retrieval of `JoyProjectV1` documents
@@ -282,8 +285,8 @@ Without server-side `JoyProjectV1` storage:
 - Any attempt to resolve input would require trusting browser-supplied data (VIOLATES requirement)
 - The feature must remain **unavailable** in production
 
-**First implementation task:**
-> Add `getProjectDocument` and `setProjectDocument` methods to the `ControlPlane` interface, with PostgreSQL schema and `PostgresControlPlane` implementation, plus `LocalControlPlane` in-memory store, and tests proving round-trip persistence and owner isolation.
+**First implementation task (PostgreSQL schema complete):**
+> PostgreSQL schema for revisioned project documents is defined in `apps/api/src/postgres-schema.ts`. Next: implement `getProjectDocument` and `setProjectDocument` methods on the `ControlPlane` interface, with `PostgresControlPlane` implementation using the `project_documents` table and `document_revision_id` head pointer, plus `LocalControlPlane` in-memory store, and tests proving round-trip persistence and owner isolation.
 
 **Keep unavailable until then:** The current `UnavailableCreativeBriefInputResolver` (`apps/api/src/creative-brief-input-resolver.ts:93`) correctly fails closed. Production **must not** enable `RealCreativeBriefInputResolver` until Phase 1 is complete and deployed.
 
@@ -299,7 +302,7 @@ Without server-side `JoyProjectV1` storage:
 | S2 computable from S1? | YES | `semantic-intelligence.ts:1009` |
 | Input assembly possible? | YES | `creative-brief.ts:1087` |
 | Missing ControlPlane capability? | Document storage | `control-plane.ts:262` (no document methods) |
-| Missing PostgreSQL capability? | project_documents table | `postgres-schema.ts:3` (no document table) |
+| Missing PostgreSQL capability? | project_documents table | `postgres-schema.ts` (schema added: `projects.document_revision_id` head pointer + `project_documents` revision history) |
 
 ---
 

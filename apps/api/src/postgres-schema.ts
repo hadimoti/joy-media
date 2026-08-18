@@ -51,4 +51,14 @@ CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact te
 CREATE INDEX IF NOT EXISTS media_otp_codes_contact_idx ON media_otp_codes (contact, method, used, expires_at);
 CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
 CREATE UNIQUE INDEX IF NOT EXISTS media_sessions_token_idx ON media_sessions (token_hash);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL;
+CREATE TABLE IF NOT EXISTS project_documents (
+  project_id text NOT NULL,
+  revision_id text NOT NULL,
+  schema_version integer NOT NULL,
+  document jsonb NOT NULL,
+  created_at timestamptz NOT NULL,
+  PRIMARY KEY (project_id, revision_id)
+);
+CREATE INDEX IF NOT EXISTS project_documents_project_revision_idx ON project_documents (project_id, revision_id);
 `;
