@@ -1,0 +1,357 @@
+/**
+ * Creative Brief Input Resolver Tests - WP-37 S4-F10-E3-A
+ *
+ * Focused tests for the canonical server-side input resolver boundary.
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  CreativeBriefInputResolverRequest,
+  CreativeBriefInputResolverSuccess,
+  CreativeBriefInputResolverUnavailable,
+  CreativeBriefInputResolverStaleRevision,
+  CreativeBriefInputResolverResult,
+  CreativeBriefInputResolver,
+  UnavailableCreativeBriefInputResolver,
+} from './creative-brief-input-resolver.js';
+import type { CreativeBriefRequestV1, CreativeBriefInputV1 } from '@joy-media/agent-tools';
+
+// ============================================================================
+// Request Shape Tests
+// ============================================================================
+
+describe('CreativeBriefInputResolver - request shape', () => {
+  it('should have request shape with only projectId, snapshotRevisionId, and validated request', () => {
+    // The request interface intentionally cannot carry:
+    // - snapshot (server-side state)
+    // - intelligence (server-side state)
+    // - asset URL
+    // - path
+    // - credential
+    // - provider data
+    // - browser-supplied project state
+
+    // Verify the interface has exactly the required fields
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    expect(request.projectId).toBe('test-project-id');
+    expect(request.snapshotRevisionId).toBe('test-revision-id');
+    expect(request.request).toBeDefined();
+    expect(request.request.request).toBe('Create a video');
+
+    // The interface does not allow additional fields like snapshot, etc.
+    // @ts-expect-error - snapshot should not be allowed
+    const invalidRequest: CreativeBriefInputResolverRequest = {
+      projectId: 'test',
+      snapshotRevisionId: 'test',
+      request: {
+        snapshotRevisionId: 'test',
+        projectId: 'test',
+        request: 'test',
+        scope: 'video',
+      },
+      snapshot: { foo: 'bar' },
+    };
+
+    // @ts-expect-error - intelligence should not be allowed
+    const invalidRequest2: CreativeBriefInputResolverRequest = {
+      projectId: 'test',
+      snapshotRevisionId: 'test',
+      request: {
+        snapshotRevisionId: 'test',
+        projectId: 'test',
+        request: 'test',
+        scope: 'video',
+      },
+      intelligence: { foo: 'bar' },
+    };
+  });
+
+  it('should not allow request to carry S1/S2 content', () => {
+    // S1 = snapshot, S2 = intelligence - these are server-side state
+    // The request interface only carries identifiers and validated request
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    // The request.request is a CreativeBriefRequestV1 which also does not
+    // contain snapshot or intelligence
+    expect(request.request).not.toHaveProperty('snapshot');
+    expect(request.request).not.toHaveProperty('intelligence');
+  });
+});
+
+// ============================================================================
+// Default Resolver Tests
+// ============================================================================
+
+describe('UnavailableCreativeBriefInputResolver', () => {
+  it('should always return unavailable result', () => {
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    const result = UnavailableCreativeBriefInputResolver.resolve(request);
+
+    expect(result.status).toBe('unavailable');
+    expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE');
+    expect(result.message).toBe('Creative Brief input resolver is unavailable');
+  });
+
+  it('should have no side effects and perform no I/O', () => {
+    // This test verifies that the default resolver is pure and has no side effects
+    // We can only verify this by calling it multiple times and ensuring consistent results
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    const result1 = UnavailableCreativeBriefInputResolver.resolve(request);
+    const result2 = UnavailableCreativeBriefInputResolver.resolve(request);
+
+    expect(result1).toEqual(result2);
+    // No exceptions, no async operations, no I/O
+  });
+
+  it('should fail closed for any request', () => {
+    const request1: CreativeBriefInputResolverRequest = {
+      projectId: 'project-1',
+      snapshotRevisionId: 'revision-1',
+      request: {
+        snapshotRevisionId: 'revision-1',
+        projectId: 'project-1',
+        request: 'Test',
+        scope: 'video',
+      },
+    };
+
+    const request2: CreativeBriefInputResolverRequest = {
+      projectId: 'project-2',
+      snapshotRevisionId: 'revision-2',
+      request: {
+        snapshotRevisionId: 'revision-2',
+        projectId: 'project-2',
+        request: 'Another test',
+        scope: 'video',
+      },
+    };
+
+    const result1 = UnavailableCreativeBriefInputResolver.resolve(request1);
+    const result2 = UnavailableCreativeBriefInputResolver.resolve(request2);
+
+    expect(result1.status).toBe('unavailable');
+    expect(result2.status).toBe('unavailable');
+  });
+});
+
+// ============================================================================
+// Result Type Tests
+// ============================================================================
+
+describe('CreativeBriefInputResolver - result types', () => {
+  it('should have typed success result with CreativeBriefInputV1', () => {
+    // Test-only resolver that returns a valid result
+    const testInput: CreativeBriefInputV1 = {
+      snapshot: {
+        version: 1,
+        projectId: 'test-project-id',
+        revisionId: 'test-revision-id',
+        scenes: [],
+        timeline: { tracks: [], durationUs: 0 },
+        resources: { assets: new Map(), elements: new Map() },
+        metadata: { title: '', description: '', tags: [], createdAt: '' },
+      },
+      brandReadiness: { score: 0, summary: '' },
+      sceneCoverages: [],
+      projectReadiness: { score: 0, summary: '' },
+      rules: [],
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    const testResolver: CreativeBriefInputResolver = {
+      resolve(): CreativeBriefInputResolverSuccess {
+        return {
+          status: 'resolved',
+          input: testInput,
+        };
+      },
+    };
+
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'Create a video',
+        scope: 'video',
+      },
+    };
+
+    const result = testResolver.resolve(request);
+
+    expect(result.status).toBe('resolved');
+    expect(result.input).toBeDefined();
+    expect(result.input).toBe(testInput);
+  });
+
+  it('should have typed unavailable result with redacted message', () => {
+    const result: CreativeBriefInputResolverUnavailable = {
+      status: 'unavailable',
+      code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',
+      message: 'Resolver is unavailable',
+    };
+
+    expect(result.status).toBe('unavailable');
+    expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE');
+    expect(result.message).toBe('Resolver is unavailable');
+  });
+
+  it('should have typed stale-revision result with redacted message', () => {
+    const result: CreativeBriefInputResolverStaleRevision = {
+      status: 'stale-revision',
+      code: 'CREATIVE_BRIEF_INPUT_RESOLVER_STALE_REVISION',
+      message: 'Revision is stale',
+    };
+
+    expect(result.status).toBe('stale-revision');
+    expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_STALE_REVISION');
+    expect(result.message).toBe('Revision is stale');
+  });
+});
+
+// ============================================================================
+// Persian Text Test
+// ============================================================================
+
+describe('CreativeBriefInputResolver - Persian text', () => {
+  it('should preserve Persian request text unchanged through resolver', () => {
+    // Test that Persian (Farsi) text survives unchanged through the resolver boundary
+    const persianText = 'به من کمک کن یک ویدئو بسازم';
+
+    const testResolver: CreativeBriefInputResolver = {
+      resolve(request): CreativeBriefInputResolverSuccess {
+        return {
+          status: 'resolved',
+          input: {
+            snapshot: {
+              version: 1,
+              projectId: request.projectId,
+              revisionId: request.snapshotRevisionId,
+              scenes: [],
+              timeline: { tracks: [], durationUs: 0 },
+              resources: { assets: new Map(), elements: new Map() },
+              metadata: { title: '', description: '', tags: [], createdAt: '' },
+            },
+            brandReadiness: { score: 0, summary: '' },
+            sceneCoverages: [],
+            projectReadiness: { score: 0, summary: '' },
+            rules: [],
+            request: request.request,
+          },
+        };
+      },
+    };
+
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: persianText,
+        scope: 'video',
+      },
+    };
+
+    const result = testResolver.resolve(request);
+
+    expect(result.status).toBe('resolved');
+    expect(result.input.request.request).toBe(persianText);
+  });
+});
+
+// ============================================================================
+// Type Safety Tests
+// ============================================================================
+
+describe('CreativeBriefInputResolver - type safety', () => {
+  it('should have exhaustively typed result union', () => {
+    // Verify all result types are covered
+    const results: CreativeBriefInputResolverResult[] = [
+      {
+        status: 'resolved',
+        input: {
+          snapshot: {
+            version: 1,
+            projectId: 'test',
+            revisionId: 'test',
+            scenes: [],
+            timeline: { tracks: [], durationUs: 0 },
+            resources: { assets: new Map(), elements: new Map() },
+            metadata: { title: '', description: '', tags: [], createdAt: '' },
+          },
+          brandReadiness: { score: 0, summary: '' },
+          sceneCoverages: [],
+          projectReadiness: { score: 0, summary: '' },
+          rules: [],
+          request: {
+            snapshotRevisionId: 'test',
+            projectId: 'test',
+            request: 'test',
+            scope: 'video',
+          },
+        },
+      },
+      {
+        status: 'unavailable',
+        code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',
+        message: 'unavailable',
+      },
+      {
+        status: 'stale-revision',
+        code: 'CREATIVE_BRIEF_INPUT_RESOLVER_STALE_REVISION',
+        message: 'stale',
+      },
+    ];
+
+    expect(results).toHaveLength(3);
+    expect(results[0].status).toBe('resolved');
+    expect(results[1].status).toBe('unavailable');
+    expect(results[2].status).toBe('stale-revision');
+  });
+});
