@@ -1571,3 +1571,247 @@ describe('buildOpenRouterRequest - output token cap', () => {
     expect(result.result.max_tokens).not.toBeGreaterThan(2048);
   });
 });
+
+// ============================================================================
+// Free Model Allowlist Policy - WP-37 S4-F10-D3-C
+// ============================================================================
+
+describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
+  it('should allow request when modelId is in allowlist', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama-3'],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('should allow request when allowlist is absent (undefined)', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      // allowedFreeModelIds is undefined
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('ready');
+    expect(result.result).toEqual(VALID_OUTPUT);
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('should deny request with policy-denied when allowlist is empty', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: [],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('Empty free model allowlist');
+    // Verify resolver and transport were NOT called
+    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should deny request with policy-denied when modelId is not in allowlist', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/llama-3', 'openrouter/gemini-flash'],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(result.retryable).toBe(false);
+    expect(result.message).toContain('Model ID not in free model allowlist');
+    // Verify resolver and transport were NOT called
+    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should emit policy-denied audit event with redacted code when model is rejected', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/llama-3'],
+    });
+
+    await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      auditSink,
+    });
+
+    const errorCall = auditSink.emit.mock.calls.find(
+      (call) => (call[0] as any).eventType === 'error',
+    );
+    expect(errorCall).toBeDefined();
+    const errorEvent = (errorCall as any[])[0] as any;
+    expect(errorEvent.eventType).toBe('error');
+    expect(errorEvent.status).toBe('policy-denied');
+    expect(errorEvent.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(errorEvent.correlationId).toBe('test-correlation-id');
+    expect(errorEvent.adapterName).toBe('openrouter-creative-v1');
+    // Ensure no model ID or secret in the event
+    expect(JSON.stringify(errorEvent)).not.toContain('mistral-large');
+    expect(JSON.stringify(errorEvent)).not.toContain('llama-3');
+    expect(JSON.stringify(errorEvent)).not.toContain('sk-');
+    // Verify resolver and transport were NOT called
+    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should emit policy-denied audit event with redacted code when allowlist is empty', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: [],
+    });
+
+    await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      auditSink,
+    });
+
+    const errorCall = auditSink.emit.mock.calls.find(
+      (call) => (call[0] as any).eventType === 'error',
+    );
+    expect(errorCall).toBeDefined();
+    const errorEvent = (errorCall as any[])[0] as any;
+    expect(errorEvent.eventType).toBe('error');
+    expect(errorEvent.status).toBe('policy-denied');
+    expect(errorEvent.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(errorEvent.correlationId).toBe('test-correlation-id');
+    expect(errorEvent.adapterName).toBe('openrouter-creative-v1');
+    // Verify resolver and transport were NOT called
+    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should not emit start audit event when policy denies request', async () => {
+    const auditSink = { emit: vi.fn() };
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: [],
+    });
+
+    await adapter.createBrief(createValidInput(), {
+      ...MOCK_OPTIONS,
+      auditSink,
+    });
+
+    // Check that no start event was emitted
+    const startCall = auditSink.emit.mock.calls.find(
+      (call) => (call[0] as any).eventType === 'start',
+    );
+    expect(startCall).toBeUndefined();
+  });
+
+  it('should not call secretResolver when model is not in allowlist', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/llama-3'],
+    });
+
+    await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+
+    // Verify secretResolver was NOT called
+    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+  });
+
+  it('should not call transport when model is not in allowlist', async () => {
+    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'openrouter/mistral-large',
+      timeoutMs: 60000,
+      spendLimitUsdCents: 500,
+      secretRef: 'openrouter-api-key',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['openrouter/llama-3'],
+    });
+
+    await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+
+    // Verify transport was NOT called
+    expect(transport.getCallCount()).toBe(0);
+  });
+});

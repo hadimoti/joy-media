@@ -80,6 +80,8 @@ interface OpenRouterAdapterOptions {
   readonly transport?: HttpPostTransport;
   /** Optional clock for testing. */
   readonly clock?: Clock;
+  /** Non-empty readonly allowlist of exact free model IDs. Must be in this allowlist for requests to proceed. */
+  readonly allowedFreeModelIds?: readonly string[];
 }
 
 // ============================================================================
@@ -176,6 +178,51 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         retryable: false,
         durationMs,
       };
+    }
+
+    // Check allowedFreeModelIds allowlist before any work (secret resolution, request construction, audit, transport)
+    const allowedFreeModelIds = this.#options.allowedFreeModelIds;
+    if (allowedFreeModelIds !== undefined) {
+      if (allowedFreeModelIds.length === 0) {
+        const durationMs = this.#clock.now() - startTime;
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: 'policy-denied',
+            durationMs,
+            errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
+          });
+        }
+        return {
+          category: 'policy-denied',
+          errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
+          message: 'Empty free model allowlist denies all requests',
+          retryable: false,
+          durationMs,
+        };
+      }
+      if (!allowedFreeModelIds.includes(this.#options.modelId)) {
+        const durationMs = this.#clock.now() - startTime;
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: 'policy-denied',
+            durationMs,
+            errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
+          });
+        }
+        return {
+          category: 'policy-denied',
+          errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
+          message: 'Model ID not in free model allowlist',
+          retryable: false,
+          durationMs,
+        };
+      }
     }
 
     // Emit start audit event if sink is provided (redacted, no sensitive data)
