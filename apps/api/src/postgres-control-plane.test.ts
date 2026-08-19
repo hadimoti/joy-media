@@ -274,6 +274,30 @@ describe('PostgresControlPlane', () => {
     ).resolves.toBe(false);
     await pool.end();
   });
+
+  it('updates creative brief opt-in using the lifecycle revision CAS value', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'postgres-opt-in-owner' };
+
+    const created = await controlPlane.createProject(owner, 'postgres-opt-in-project', 'Opt-in');
+    const enabled = await controlPlane.setCreativeBriefOptIn(
+      owner,
+      created.id,
+      true,
+      created.revision,
+    );
+
+    expect(enabled.creativeBriefOptIn).toBe(true);
+    expect(enabled.revision).toBe(created.revision + 1);
+    await expect(
+      controlPlane.getCreativeBriefOptIn(owner, created.id),
+    ).resolves.toBe(true);
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {

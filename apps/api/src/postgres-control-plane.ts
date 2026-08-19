@@ -724,7 +724,7 @@ export class PostgresControlPlane implements ControlPlane {
          creative_brief_consent_version = $4,
          creative_brief_consent_at = $5,
          revision = revision + 1
-       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+       WHERE id = $1 AND owner_id = $2 AND revision = $6 RETURNING *`,
       [
         projectId,
         actor.id,
