@@ -1952,3 +1952,186 @@ async function request(
   );
   return { status: response.status, body: await response.json() };
 }
+
+// ============================================================================
+// Creative Brief Opt-In Route Tests - WP-37 S4 Phase 6-D1
+// ============================================================================
+
+describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
+  it('requires authentication', async () => {
+    const origin = await start({ authenticate: () => undefined });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 401,
+      body: { error: { code: 'AUTH_REQUIRED' } },
+    });
+  });
+
+  it('enables creative brief opt-in', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { creativeBriefOptIn: true, revision: 1 } },
+    });
+  });
+
+  it('disables creative brief opt-in', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: false,
+        baseRevision: 1,
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { creativeBriefOptIn: false, revision: 2 } },
+    });
+  });
+
+  it('rejects with revision conflict when baseRevision does not match', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 999,
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'REVISION_CONFLICT' } },
+    });
+  });
+
+  it('rejects for non-owner with owner isolation', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    const origin = await start({ authenticate: () => ({ id: 'other' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
+    });
+  });
+
+  it('rejects unknown project', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/unknown-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
+    });
+  });
+
+  it('rejects invalid body with missing enabled', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with missing baseRevision', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with extra fields', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 0,
+        extraField: 'not-allowed',
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with enabled not boolean', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: 'true',
+        baseRevision: 0,
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with baseRevision not a non-negative integer', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: -1,
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with baseRevision as float', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: 1.5,
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+
+  it('rejects invalid body with baseRevision as string', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
+        enabled: true,
+        baseRevision: '0',
+      }),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+  });
+});

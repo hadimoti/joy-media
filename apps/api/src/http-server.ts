@@ -819,6 +819,25 @@ async function route(
     return;
   }
 
+  const creativeBriefOptInMatch = /^\/v1\/projects\/([^/]+)\/creative-brief-opt-in$/.exec(url.pathname);
+  if (request.method === 'PUT' && creativeBriefOptInMatch !== null) {
+    const body = await readJson(request);
+    // Validate exact JSON body: { enabled: boolean, baseRevision: non-negative safe integer }
+    const keys = Object.keys(body);
+    if (keys.length !== 2 || !keys.includes('enabled') || !keys.includes('baseRevision'))
+      throw new ControlPlaneError('REQUEST_INVALID', 'exact body { enabled: boolean, baseRevision: number } required');
+    const enabled = body.enabled;
+    const baseRevision = body.baseRevision;
+    if (typeof enabled !== 'boolean')
+      throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
+    if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 0)
+      throw new ControlPlaneError('REQUEST_INVALID', 'baseRevision must be a non-negative safe integer');
+    const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
+    const result = await options.controlPlane.setCreativeBriefOptIn(actor, projectId, enabled, baseRevision);
+    respondJson(response, 200, { data: { creativeBriefOptIn: result.creativeBriefOptIn, revision: result.revision } });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/transcribe') {
     const { runWhisperOnReferenceAsset, runWhisperTranscription } =
       await import('./whisper-transcribe.js');
