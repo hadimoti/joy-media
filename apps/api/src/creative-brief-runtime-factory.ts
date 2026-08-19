@@ -13,37 +13,32 @@ import type {
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-brief-runtime-config.js';
 import { isDisabledConfig, isOpenRouterConfig } from './creative-brief-runtime-config.js';
-import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
-import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
+import type {
+  AsyncCreativeBriefOptions,
+  AsyncCreativeBriefOutcome,
+  AsyncAdapterOptions,
+  AuditEventSink,
+  AsyncCreativeModelAdapter,
+  CreativeBriefInputV1,
+} from '@joy-media/agent-tools';
 import { createAsyncCreativeBrief } from '@joy-media/agent-tools';
 import type { SecretResolver, HttpPostTransport, Clock } from '@joy-media/adapter-openrouter';
 import { createOpenRouterCreativeAdapter } from '@joy-media/adapter-openrouter';
-import type { AuditEventSink, AsyncCreativeModelAdapter } from '@joy-media/agent-tools';
-import type { AsyncAdapterOptions } from '@joy-media/agent-tools';
 
 /**
  * Optional redacted audit sink for runtime events.
  * Receives only non-sensitive metadata.
  */
-export interface RedactedAuditSink {
-  readonly emit: (event: {
-    readonly correlationId: string;
-    readonly adapterName: string;
-    readonly eventType: 'start' | 'end' | 'error';
-    readonly status: string;
-    readonly durationMs?: number;
-    readonly errorCode?: string;
-  }) => void;
-}
+export type RedactedAuditSink = AuditEventSink;
 
 /**
  * Runtime factory options for creating a creative brief runtime.
  */
 export interface CreativeBriefRuntimeFactoryOptions {
   /** Injected secret resolver for resolving opaque secret references. */
-  readonly secretResolver: SecretResolver;
+  readonly secretResolver?: SecretResolver;
   /** Injected HTTP POST transport for making requests. */
-  readonly transport: HttpPostTransport;
+  readonly transport?: HttpPostTransport;
   /** Optional redacted audit sink for runtime events. */
   readonly auditSink?: RedactedAuditSink;
   /** Optional clock for deterministic testing. */
@@ -141,25 +136,6 @@ class OpenRouterCreativeBriefRuntime implements CreativeBriefRuntime {
   ): Promise<AsyncCreativeBriefOutcome> {
     // Build adapter options from runtime context
     // Be careful with exactOptionalPropertyTypes - only include defined properties
-    const baseAdapterOptions: Omit<AsyncAdapterOptions, 'signal' | 'timeoutMs' | 'spendLimitUsdCents' | 'auditSink'> = {
-      correlationId: context.correlationId,
-    };
-    const asyncAdapterOptions: AsyncAdapterOptions = {
-      ...baseAdapterOptions,
-      timeoutMs: this.#config.timeoutMs,
-      spendLimitUsdCents: this.#config.spendLimitUsdCents,
-    };
-
-    // Only add signal if it exists in context (for exactOptionalPropertyTypes)
-    if (context.signal !== undefined) {
-      (asyncAdapterOptions as any).signal = context.signal;
-    }
-
-    // Only add auditSink if it exists (for exactOptionalPropertyTypes)
-    if (this.#auditSink !== undefined) {
-      (asyncAdapterOptions as any).auditSink = this.#auditSink as AuditEventSink;
-    }
-
     // Bound timeout to configured policy value
     // Use context timeout if it's smaller (more restrictive)
     const effectiveTimeoutMs =
@@ -167,23 +143,40 @@ class OpenRouterCreativeBriefRuntime implements CreativeBriefRuntime {
         ? Math.min(context.timeoutMs, this.#config.timeoutMs)
         : this.#config.timeoutMs;
 
-    // Override timeout with bounded value
-    (asyncAdapterOptions as any).timeoutMs = effectiveTimeoutMs;
+    // Bound spend to configured policy value. Zero is intentional: it means
+    // free-only mode. Negative context values are clamped to zero so callers
+    // can never expand the configured budget.
+    const effectiveSpendLimitUsdCents =
+      context.spendLimitUsdCents === undefined
+        ? this.#config.spendLimitUsdCents
+        : Math.min(this.#config.spendLimitUsdCents, Math.max(0, context.spendLimitUsdCents));
+
+    const asyncAdapterOptions: AsyncAdapterOptions = {
+      correlationId: context.correlationId,
+      timeoutMs: effectiveTimeoutMs,
+      spendLimitUsdCents: effectiveSpendLimitUsdCents,
+      ...(context.signal !== undefined ? { signal: context.signal } : {}),
+      ...(this.#auditSink !== undefined ? { auditSink: this.#auditSink } : {}),
+    };
 
     // Convert Clock (now(): number) to creative brief clock (() => string) if provided
     // If not provided, createAsyncCreativeBrief will use its default
     // Only include clock in options if it's defined (for exactOptionalPropertyTypes)
-    const briefOptions: Omit<Parameters<typeof createAsyncCreativeBrief>[1], 'adapter' | 'adapterOptions'> = {};
     const clock = this.#clock;
     if (clock !== undefined) {
-      (briefOptions as any).clock = () => new Date(clock.now()).toISOString();
+      const briefOptions: AsyncCreativeBriefOptions = {
+        adapter: this.#adapter,
+        adapterOptions: asyncAdapterOptions,
+        clock: () => new Date(clock.now()).toISOString(),
+      };
+      return createAsyncCreativeBrief(input, briefOptions);
     }
 
     // Execute through createAsyncCreativeBrief with bounded options
-    return createAsyncCreativeBrief(input, {
+    const briefOptions: AsyncCreativeBriefOptions = {
       adapter: this.#adapter,
       adapterOptions: asyncAdapterOptions,
-      ...briefOptions,
-    });
+    };
+    return createAsyncCreativeBrief(input, briefOptions);
   }
 }

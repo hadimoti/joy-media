@@ -7,8 +7,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
-import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
+import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeConfig, OpenRouterConfig, DisabledConfig } from './creative-brief-runtime-config.js';
 import { createCreativeBriefRuntimeFactory, type CreativeBriefRuntimeFactoryOptions, type RedactedAuditSink } from './creative-brief-runtime-factory.js';
 import type { SecretResolver, HttpPostTransport, Clock } from '@joy-media/adapter-openrouter';
@@ -91,15 +91,22 @@ const mockRuntimeContext = {
 function createFactoryOptions(
   overrides: Partial<CreativeBriefRuntimeFactoryOptions> = {},
 ): CreativeBriefRuntimeFactoryOptions {
-  return {
-    secretResolver: { resolve: (_ref: string) => 'mock-api-key' } as SecretResolver,
-    transport: { post: async (_url: string, _options?: RequestInit): Promise<Response> => {
+  const secretResolver: SecretResolver = {
+    resolve: (_ref: string) => 'mock-api-key',
+  };
+  const transport: HttpPostTransport = {
+    post: async (_url: string, _options?: RequestInit): Promise<Response> => {
       return new Response(JSON.stringify({ model: 'openrouter/mistral-large', choices: [{ message: { role: 'assistant', content: '{}' } }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
-    }} as HttpPostTransport,
-    clock: { now: () => Date.now() } as Clock,
+    },
+  };
+  const clock: Clock = { now: () => Date.now() };
+  return {
+    secretResolver,
+    transport,
+    clock,
     ...overrides,
   };
 }
@@ -138,8 +145,9 @@ describe('createCreativeBriefRuntimeFactory', () => {
         allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
-        ...createFactoryOptions(),
-        secretResolver: undefined as unknown as SecretResolver,
+        transport: {
+          post: async (_url: string, _options?: RequestInit): Promise<Response> => new Response('{}'),
+        },
       });
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
@@ -154,8 +162,7 @@ describe('createCreativeBriefRuntimeFactory', () => {
         allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
-        ...createFactoryOptions(),
-        transport: undefined as unknown as HttpPostTransport,
+        secretResolver: { resolve: (_ref: string) => 'mock-api-key' },
       });
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
@@ -170,8 +177,6 @@ describe('createCreativeBriefRuntimeFactory', () => {
         allowedFreeModelIds: ['openrouter/mistral-large'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
-        secretResolver: undefined as unknown as SecretResolver,
-        transport: undefined as unknown as HttpPostTransport,
       });
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
@@ -234,7 +239,7 @@ describe('createCreativeBriefRuntimeFactory', () => {
         allowedFreeModelIds: ['openrouter/mistral-large'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
-      expect(typeof (runtime as CreativeBriefRuntime).execute).toBe('function');
+      expect(typeof runtime.execute).toBe('function');
     });
   });
 
@@ -490,8 +495,8 @@ describe('createCreativeBriefRuntimeFactory', () => {
       };
       // No audit sink provided
       const runtime = createCreativeBriefRuntimeFactory(config, {
-        secretResolver: { resolve: () => 'key' } as SecretResolver,
-        transport: { post: async () => new Response('{}', { status: 200 }) } as HttpPostTransport,
+        secretResolver: { resolve: () => 'key' },
+        transport: { post: async () => new Response('{}', { status: 200 }) },
       });
       const outcome = await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
       expect(outcome).toBeDefined();
