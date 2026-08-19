@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@joy-media/adapter-mistral": "workspace:*",
+    "@joy-media/adapter-openrouter": "workspace:*",
     "@joy-media/agent-tools": "workspace:*",
     "@joy-media/export-core": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",

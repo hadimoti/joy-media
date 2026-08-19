@@ -50,6 +50,9 @@ importers:
       '@joy-media/adapter-mistral':
         specifier: workspace:*
         version: link:../../packages/adapter-mistral
+      '@joy-media/adapter-openrouter':
+        specifier: workspace:*
+        version: link:../../packages/adapter-openrouter
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
