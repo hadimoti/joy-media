@@ -16,6 +16,10 @@ export type {
   WorkerRecord,
 } from './control-plane.js';
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
+export {
+  composeCreativeBriefRuntime,
+  type CreativeBriefRuntimeCompositionOptions,
+} from './creative-brief-runtime-composition.js';
 export { ControlPlaneError, LocalControlPlane } from './control-plane.js';
 export {
   GpuPreviewTransport,
