@@ -694,10 +694,10 @@ const MAX_PROMPT_CHARS = 32000;
 
 /**
  * Maximum output tokens for Creative Brief responses.
- * Hard cap of 2048 tokens for the initial free-only rollout.
+ * Hard cap of 4096 tokens for the initial free-only rollout.
  * Cannot be increased through the current public builder API.
  */
-const MAX_OUTPUT_TOKENS = 2048;
+const MAX_OUTPUT_TOKENS = 4096;
 
 /**
  * Forbidden patterns that should never appear in the model payload.

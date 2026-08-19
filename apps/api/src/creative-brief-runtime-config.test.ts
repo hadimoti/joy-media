@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_CONSENT_VERSION,
   parseCreativeBriefRuntimeConfig,
   isDisabledConfig,
   isOpenRouterConfig,
@@ -16,6 +17,10 @@ import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-br
 const PREFIX = 'JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_';
 
 describe('Creative Brief free-runtime policy', () => {
+  it('exposes the versioned logging disclosure identifier', () => {
+    expect(CREATIVE_BRIEF_CONSENT_VERSION).toBe('openrouter-nvidia-free-logging-v1');
+  });
+
   it('accepts only the pinned free Nemotron model with zero payable spend', () => {
     const result = parseCreativeBriefRuntimeConfig({
       [`${PREFIX}MODE`]: 'openrouter',

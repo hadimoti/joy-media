@@ -49,6 +49,10 @@ export interface DisabledConfig {
 export const CREATIVE_BRIEF_MODEL_ID =
   'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 
+/** Versioned disclosure accepted by the owner before remote processing. */
+export const CREATIVE_BRIEF_CONSENT_VERSION =
+  'openrouter-nvidia-free-logging-v1' as const;
+
 /**
  * Parsed Creative Brief runtime configuration.
  * Always valid - parser fails closed to disabled on any error.
