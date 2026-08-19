@@ -8,6 +8,18 @@
 
 **Tech Stack:** TypeScript, Node.js 22 built-in `fetch`, Vitest, React, PostgreSQL 17, systemd credentials, pnpm workspaces, JOY Media immutable API/editor releases.
 
+## Execution status (GPT-only, 2026-08-20)
+
+Completed locally in the canonical repository through commit `dde84ea`:
+
+- Pinned `nvidia/nemotron-3-nano-30b-a3b:free`, canonical secret reference, zero spend, singleton allowlist, 30-second timeout, and versioned consent identifier.
+- Enforced adapter pre-egress policy, bounded 256 KiB responses, exact model receipt, zero-cost usage receipt, and disabled provider fallback.
+- Added fixed-origin OpenRouter transport, startup-only systemd credential source, owner/project admission gate, circuit breaker, request abort propagation, and explicit browser disclosure.
+- Hardened runtime factory composition to remain unavailable for invalid or incomplete configuration.
+- Verification: 311 focused tests pass; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings.
+
+Still intentionally not executed: production server wiring, VPS credential provisioning, deployment, provider canary, browser live canary, rollback rehearsal, and WP-37 closeout. Those require a separately approved operational step and a real owner-controlled OpenRouter credential; no key has been read or placed in this workspace.
+
 ---
 
 ## 1. Locked decisions
