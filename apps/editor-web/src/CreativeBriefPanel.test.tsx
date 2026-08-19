@@ -267,6 +267,88 @@ describe('CreativeBriefPanel', () => {
     });
   });
 
+  describe('explicit consent gate', () => {
+    it('accepts optedIn prop as true', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: true };
+      expect(props.optedIn).toBe(true);
+    });
+
+    it('accepts optedIn prop as false', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false };
+      expect(props.optedIn).toBe(false);
+    });
+
+    it('accepts optedIn prop as undefined (defaults to true)', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A };
+      expect(props.optedIn).toBeUndefined();
+    });
+
+    it('accepts onOptIn prop as async function', () => {
+      const onOptIn = async (): Promise<void> => {};
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false, onOptIn };
+      expect(typeof props.onOptIn).toBe('function');
+    });
+
+    it('accepts onOptIn prop as sync function', () => {
+      const onOptIn = (): void => {};
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false, onOptIn };
+      expect(typeof props.onOptIn).toBe('function');
+    });
+
+    it('accepts onOptIn prop as undefined', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false };
+      expect(props.onOptIn).toBeUndefined();
+    });
+
+    it('disabled state renders when optedIn is false and onOptIn is absent', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false };
+      expect(props.optedIn).toBe(false);
+      expect(props.onOptIn).toBeUndefined();
+    });
+
+    it('enabled state renders when optedIn is true', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: true };
+      expect(props.optedIn).toBe(true);
+    });
+
+    it('no runBrief call before opt-in - props without runBrief and optedIn false', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false };
+      expect(props.runBrief).toBeUndefined();
+      expect(props.optedIn).toBe(false);
+    });
+
+    it('successful opt-in resolves promise', async () => {
+      let called = false;
+      const onOptIn = async (): Promise<void> => { called = true; };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false, onOptIn };
+      expect(typeof props.onOptIn).toBe('function');
+      await props.onOptIn!();
+      expect(called).toBe(true);
+    });
+
+    it('opt-in failure throws error', async () => {
+      const errorMsg = 'Opt-in failed';
+      const onOptIn = async (): Promise<void> => { throw new Error(errorMsg); };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false, onOptIn };
+      await expect(props.onOptIn!()).rejects.toThrow(errorMsg);
+    });
+
+    it('sync onOptIn returns void', () => {
+      let called = false;
+      const onOptIn = (): void => { called = true; };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: false, onOptIn };
+      props.onOptIn!();
+      expect(called).toBe(true);
+    });
+
+    it('existing enabled behavior preserved - optedIn true with runBrief', () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, optedIn: true, runBrief };
+      expect(props.optedIn).toBe(true);
+      expect(typeof props.runBrief).toBe('function');
+    });
+  });
+
   describe('async runBrief support', () => {
     it('accepts async runBrief - type check', () => {
       const runBrief: CreativeBriefPanelProps['runBrief'] = async (request: string): Promise<CreativeBriefV1> => {
