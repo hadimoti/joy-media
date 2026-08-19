@@ -390,17 +390,15 @@ describe('validateProjectDocumentSyncRequest - invalid revisions', () => {
 // ============================================================================
 
 describe('validateProjectDocumentSyncRequest - invalid/mismatched document', () => {
-  it('should reject when document.id does not match expected projectId', () => {
+  it('should accept document with different id from expected projectId', () => {
+    // document.id is the canonical editor-document ID and can differ from URL path projectId
     const doc = minimalValidJoyProjectV1(ANOTHER_PROJECT_ID);
     const envelope = validEnvelope(INITIAL_REVISION, VALID_REVISION_ID, doc);
 
     const result = validateProjectDocumentSyncRequest(envelope, EXPECTED_PROJECT_ID);
 
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]?.code).toBe('project-mismatch');
-    expect(result.errors[0]?.path).toBe('document.id');
-    expect(result.errors[0]?.message).toContain(ANOTHER_PROJECT_ID);
-    expect(result.errors[0]?.message).toContain(EXPECTED_PROJECT_ID);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
   it('should reject invalid JoyProjectV1 document', () => {
@@ -423,6 +421,18 @@ describe('validateProjectDocumentSyncRequest - invalid/mismatched document', () 
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.code).toBe('invalid-document');
     expect(result.errors[0]?.path).toBe('document.id');
+  });
+
+  it('should reject document with empty id', () => {
+    const doc = { ...VALID_DOCUMENT, id: '' } as unknown as JoyProjectV1;
+    const envelope = validEnvelope(INITIAL_REVISION, VALID_REVISION_ID, doc);
+
+    const result = validateProjectDocumentSyncRequest(envelope, EXPECTED_PROJECT_ID);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.code).toBe('invalid-document');
+    expect(result.errors[0]?.path).toBe('document.id');
+    expect(result.errors[0]?.message).toContain('non-empty');
   });
 
   it('should reject null document', () => {

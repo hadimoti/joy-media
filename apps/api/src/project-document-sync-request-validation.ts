@@ -31,7 +31,6 @@ export type ProjectDocumentSyncValidationErrorCode =
   | 'invalid-request'
   | 'forbidden-field'
   | 'missing-field'
-  | 'project-mismatch'
   | 'revision-mismatch'
   | 'payload-too-large'
   | 'invalid-document';
@@ -81,7 +80,8 @@ export interface ProjectDocumentSyncEnvelope {
   
   /**
    * The JoyProjectV1 document to store.
-   * Must pass validateJoyProjectV1 and have document.id === expectedProjectId.
+   * Must pass validateJoyProjectV1. document.id is the canonical editor-document ID
+   * and is allowed to differ from the owner-scoped control-plane project ID in the URL path.
    */
   readonly document: JoyProjectV1;
 }
@@ -192,7 +192,7 @@ function checkUnknownFields(obj: Record<string, unknown>): string[] {
  * - baseRevisionId is either INITIAL_REVISION ('') or a non-empty string
  * - revisionId is a non-empty string
  * - document is a valid JoyProjectV1 (via validateJoyProjectV1)
- * - document.id matches the expected projectId from URL path
+ * - document.id is a non-empty string (canonical editor-document ID, independent of URL path)
  * - Total serialized payload size <= 10 MiB
  * - Input is not mutated
  *
@@ -308,22 +308,19 @@ export function validateProjectDocumentSyncRequest(
   } else {
     const doc = documentValue as JoyProjectV1;
 
-    // Check document.id exists and is a string first (before full validation)
+    // Check document.id exists and is a non-empty string
     if (typeof doc.id !== 'string') {
       errors.push({
         code: 'invalid-document',
         message: 'document.id must be a string',
         path: 'document.id',
       });
-    } else {
-      // Check document.id matches expected projectId
-      if (doc.id !== expectedProjectId) {
-        errors.push({
-          code: 'project-mismatch',
-          message: `document.id (${doc.id}) does not match expected projectId (${expectedProjectId})`,
-          path: 'document.id',
-        });
-      }
+    } else if (doc.id.length === 0) {
+      errors.push({
+        code: 'invalid-document',
+        message: 'document.id must be a non-empty string',
+        path: 'document.id',
+      });
     }
 
     // Check document is valid JoyProjectV1

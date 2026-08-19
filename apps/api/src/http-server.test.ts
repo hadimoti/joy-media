@@ -1784,14 +1784,17 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
     expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
   });
 
-  it('returns 400 REQUEST_INVALID for validation failure - document.id mismatch', async () => {
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+  it('accepts document with distinct canonical editor document ID under authorized control-plane project', async () => {
+    // document.id is the canonical editor-document ID and can differ from URL path projectId
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
     const envelope = {
       baseRevisionId: '',
       revisionId: 'rev-1',
       document: {
         schemaVersion: 1,
-        id: 'wrong-project-id',
+        id: 'editor-doc-123', // different from URL path project-1
         title: 'Test',
         createdAt: '2024-01-01T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
@@ -1819,8 +1822,8 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
       },
     };
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
-    expect(result.status).toBe(400);
-    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ data: { projectId: 'project-1', revisionId: 'rev-1' } });
   });
 
   it('returns 400 REQUEST_INVALID for oversized payload', async () => {
