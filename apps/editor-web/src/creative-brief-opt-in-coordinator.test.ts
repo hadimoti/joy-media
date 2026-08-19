@@ -45,7 +45,7 @@ describe('coordinateCreativeBriefOptIn', () => {
 
   beforeEach(() => {
     storage = memoryStorage();
-    mockTransport = vi.fn() as unknown as CreativeBriefOptInTransport;
+    mockTransport = vi.fn<CreativeBriefOptInTransport>();
   });
 
   describe('enable opt-in', () => {
@@ -207,7 +207,7 @@ describe('coordinateCreativeBriefOptIn', () => {
     it('returns invalid-revision result for non-number revision', async () => {
       const binding = baseBinding(0);
       const expectedResponse = { creativeBriefOptIn: true, revision: 'not-a-number' };
-      mockTransport.mockResolvedValue(expectedResponse as unknown as ReturnType<CreativeBriefOptInTransport>);
+      mockTransport.mockResolvedValue(expectedResponse);
 
       const result = await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 

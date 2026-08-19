@@ -92,10 +92,6 @@ export function coordinateCreativeBriefOptIn(
   const baseRevision = binding.revision ?? 0;
 
   // Never mutate the input binding
-  const bindingForPersistence: ControlPlaneProjectBinding = {
-    ...binding,
-  };
-
   return transport(binding.controlPlaneProjectId, enabled, baseRevision)
     .then((response) => {
       // Validate the revision is a valid number
@@ -117,8 +113,11 @@ export function coordinateCreativeBriefOptIn(
       }
 
       // On match, persist with the new revision
-      bindingForPersistence.revision = response.revision;
-      upsertControlPlaneProjectBinding(storage, bindingForPersistence, ownerKey);
+      upsertControlPlaneProjectBinding(
+        storage,
+        { ...binding, revision: response.revision },
+        ownerKey,
+      );
 
       return {
         kind: 'success',
