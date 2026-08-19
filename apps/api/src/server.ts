@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { readFileSync } from 'node:fs';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
 import { DisabledMediaAuth, MediaAuthService } from './media-auth.js';
@@ -18,6 +19,7 @@ import {
 import { CanonicalCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
 import { ProjectSnapshotService } from './project-snapshot-service.js';
 import { ProjectIntelligenceService } from './project-intelligence-service.js';
+import { createProductionCreativeBriefRuntime } from './creative-brief-production-runtime.js';
 
 await start();
 
@@ -42,6 +44,24 @@ async function start(): Promise<void> {
     snapshotService: new ProjectSnapshotService(),
     intelligenceService: new ProjectIntelligenceService(),
   });
+  const creativeBriefRuntime = createProductionCreativeBriefRuntime(
+    {
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS:
+        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS,
+    },
+    (path, encoding) => readFileSync(path, encoding),
+    globalThis.fetch.bind(globalThis),
+  );
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuth =
@@ -64,6 +84,7 @@ async function start(): Promise<void> {
     mediaAuth,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     creativeBriefInputResolver,
+    creativeBriefRuntime,
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
