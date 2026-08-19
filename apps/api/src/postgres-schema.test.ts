@@ -15,6 +15,15 @@ import { POSTGRES_SCHEMA } from './postgres-schema.js';
 describe('PostgreSQL Schema - Revisioned Project Documents', () => {
   const schema = POSTGRES_SCHEMA;
 
+  it('contains nullable versioned Creative Brief consent columns', () => {
+    expect(schema).toContain(
+      'ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_version text NULL',
+    );
+    expect(schema).toContain(
+      'ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_at timestamptz NULL',
+    );
+  });
+
   // --- projects.document_revision_id column ---
 
   it('contains additive ALTER TABLE for projects.document_revision_id', () => {

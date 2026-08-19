@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS projects (id text primary key, owner_id text not null
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS asset_sync_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS trashed_at timestamptz NULL;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_opt_in boolean NOT NULL DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_version text NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_at timestamptz NULL;
 UPDATE projects SET asset_sync_enabled = true WHERE asset_sync_enabled = false;
 CREATE TABLE IF NOT EXISTS workers (id text primary key, owner_id text not null, revoked_at timestamptz);
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS session_token_hash text;

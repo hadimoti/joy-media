@@ -1,3 +1,5 @@
+import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
+
 export interface Actor {
   readonly id: string;
 }
@@ -594,6 +596,7 @@ export class ControlPlaneError extends Error {
 /** In-memory adapter with the same revision/lease semantics as the PostgreSQL implementation. */
 export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
+  readonly #creativeBriefConsentVersions = new Map<string, string>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
   readonly #assets = new Map<string, MediaAssetRecord>();
@@ -779,7 +782,10 @@ export class LocalControlPlane implements ControlPlane {
   }
   getCreativeBriefOptIn(actor: Actor, projectId: string): boolean {
     const project = this.project(actor, projectId);
-    return project.creativeBriefOptIn;
+    return (
+      project.creativeBriefOptIn &&
+      this.#creativeBriefConsentVersions.get(projectId) === CREATIVE_BRIEF_CONSENT_VERSION
+    );
   }
   setCreativeBriefOptIn(
     actor: Actor,
@@ -795,6 +801,8 @@ export class LocalControlPlane implements ControlPlane {
       );
     const next = { ...current, creativeBriefOptIn: enabled, revision: current.revision + 1 };
     this.#projects.set(projectId, next);
+    if (enabled) this.#creativeBriefConsentVersions.set(projectId, CREATIVE_BRIEF_CONSENT_VERSION);
+    else this.#creativeBriefConsentVersions.delete(projectId);
     return next;
   }
   registerAsset(

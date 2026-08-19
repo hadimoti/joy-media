@@ -256,6 +256,24 @@ describe('PostgresControlPlane', () => {
       expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
     );
   });
+
+  it('treats a legacy true boolean without the current consent version as opted out', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    await pool.query(
+      `INSERT INTO projects (id, owner_id, title, revision, asset_sync_enabled, creative_brief_opt_in)
+       VALUES ($1, $2, $3, 0, true, true)`,
+      ['legacy-consent-project', 'legacy-owner', 'Legacy consent'],
+    );
+
+    await expect(
+      controlPlane.getCreativeBriefOptIn({ id: 'legacy-owner' }, 'legacy-consent-project'),
+    ).resolves.toBe(false);
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {

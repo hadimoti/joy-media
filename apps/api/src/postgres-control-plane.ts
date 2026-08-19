@@ -36,6 +36,7 @@ import {
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 import { validateProjectDocumentRecord } from './project-document-store.js';
+import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -317,6 +318,8 @@ interface ProjectRow {
   readonly asset_sync_enabled: boolean;
   readonly trashed_at: Date | null;
   readonly creative_brief_opt_in: boolean;
+  readonly creative_brief_consent_version: string | null;
+  readonly creative_brief_consent_at: Date | null;
   readonly document_revision_id: string | null;
 }
 
@@ -452,7 +455,7 @@ export class PostgresControlPlane implements ControlPlane {
     assertActor(actor);
     const result = await this.pool.query<ProjectRow>(
       `UPDATE projects SET title = $3, revision = revision + 1
-       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+       WHERE id = $1 AND owner_id = $2 AND revision = $6 RETURNING *`,
       [id, actor.id, title, baseRevision],
     );
     if (result.rows[0] !== undefined) return projectOf(result.rows[0]);
@@ -716,9 +719,20 @@ export class PostgresControlPlane implements ControlPlane {
         `expected ${baseRevision}, found ${current.revision}`,
       );
     const result = await this.pool.query<ProjectRow>(
-      `UPDATE projects SET creative_brief_opt_in = $3, revision = revision + 1
+      `UPDATE projects SET
+         creative_brief_opt_in = $3,
+         creative_brief_consent_version = $4,
+         creative_brief_consent_at = $5,
+         revision = revision + 1
        WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
-      [projectId, actor.id, enabled, baseRevision],
+      [
+        projectId,
+        actor.id,
+        enabled,
+        enabled ? CREATIVE_BRIEF_CONSENT_VERSION : null,
+        enabled ? new Date() : null,
+        baseRevision,
+      ],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     return projectOf(result.rows[0]);
@@ -1625,7 +1639,9 @@ function projectOf(row: ProjectRow): ProjectMetadata {
     title: row.title,
     revision: row.revision,
     assetSyncEnabled: row.asset_sync_enabled,
-    creativeBriefOptIn: row.creative_brief_opt_in,
+    creativeBriefOptIn:
+      row.creative_brief_opt_in &&
+      row.creative_brief_consent_version === CREATIVE_BRIEF_CONSENT_VERSION,
     ...(row.trashed_at === null ? {} : { trashedAt: row.trashed_at.getTime() }),
   };
 }
