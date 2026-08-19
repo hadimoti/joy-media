@@ -1,6 +1,7 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
+import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 
 export interface BrowserWorker {
   readonly id: string;
@@ -428,6 +429,23 @@ export class BrowserControlPlaneClient {
     readonly cloudObjectPurgeFailures: number;
   }> {
     return this.request(`/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+  async syncProjectDocument(
+    projectId: string,
+    params: {
+      readonly baseRevisionId: ProjectRevisionId;
+      readonly revisionId: ProjectRevisionId;
+      readonly document: JoyProjectV1;
+    },
+  ): Promise<{ readonly projectId: string; readonly revisionId: ProjectRevisionId }> {
+    return this.request(
+      `/v1/projects/${encodeURIComponent(projectId)}/document`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+    );
   }
   async enqueueFixture(projectId: string, id: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {

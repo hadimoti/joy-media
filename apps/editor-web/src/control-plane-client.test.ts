@@ -237,6 +237,305 @@ describe('BrowserControlPlaneClient', () => {
       'x-joy-frame-count': '90',
     });
   });
+
+  describe('syncProjectDocument', () => {
+    it('sends PUT request to the correct endpoint with URL-encoded projectId', async () => {
+      const requests: Array<{ readonly url: string; readonly method: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+        });
+        return json(200, { data: { projectId: 'project-1', revisionId: 'rev-1' } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project-1',
+          title: 'Test Project',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'en' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        await client.syncProjectDocument('project-1', {
+          baseRevisionId: '',
+          revisionId: 'rev-1',
+          document: mockDocument,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project-1/document',
+          method: 'PUT',
+        },
+      ]);
+    });
+
+    it('includes authorization header', async () => {
+      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const authorization = new Headers(init?.headers).get('authorization');
+        requests.push({ url, ...(authorization === null ? {} : { authorization }) });
+        return json(200, { data: { projectId: 'project-1', revisionId: 'rev-1' } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project-1',
+          title: 'Test Project',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'en' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        await client.syncProjectDocument('project-1', {
+          baseRevisionId: '',
+          revisionId: 'rev-1',
+          document: mockDocument,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project-1/document',
+          authorization: 'Bearer joy-session-token',
+        },
+      ]);
+    });
+
+    it('sends exact envelope shape with baseRevisionId, revisionId, and document', async () => {
+      const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+      const original = globalThis.fetch;
+      const mockDocument = {
+        schemaVersion: 1 as const,
+        id: 'project-1',
+        title: 'Test Project',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        rootCompositionId: 'comp-1',
+        settings: { defaultLocale: 'en' },
+        compositions: {},
+        assets: {},
+        variables: {},
+        markers: [],
+        visualObjects: {},
+        captionDocuments: {},
+        pluginData: {},
+      };
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        return json(200, { data: { projectId: 'project-1', revisionId: 'rev-1' } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.syncProjectDocument('project-1', {
+          baseRevisionId: 'base-rev-1',
+          revisionId: 'rev-1',
+          document: mockDocument,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toHaveLength(1);
+      const body = JSON.parse(requests[0]!.body!);
+      expect(body).toEqual({
+        baseRevisionId: 'base-rev-1',
+        revisionId: 'rev-1',
+        document: mockDocument,
+      });
+    });
+
+    it('preserves Persian/RTL text in JSON document', async () => {
+      const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        return json(200, { data: { projectId: 'project-1', revisionId: 'rev-1' } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project-1',
+          title: 'پروژه تست',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'fa' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        await client.syncProjectDocument('project-1', {
+          baseRevisionId: '',
+          revisionId: 'rev-1',
+          document: mockDocument,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toHaveLength(1);
+      const body = JSON.parse(requests[0]!.body!);
+      expect(body.document.title).toBe('پروژه تست');
+    });
+
+    it('returns typed response with projectId and revisionId', async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = async () =>
+        json(200, { data: { projectId: 'project-123', revisionId: 'rev-abc' } });
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project-123',
+          title: 'Test Project',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'en' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        const result = await client.syncProjectDocument('project-123', {
+          baseRevisionId: '',
+          revisionId: 'rev-abc',
+          document: mockDocument,
+        });
+        expect(result).toEqual({ projectId: 'project-123', revisionId: 'rev-abc' });
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+
+    it('propagates API errors', async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = async () =>
+        json(404, { error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project-1',
+          title: 'Test Project',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'en' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        await expect(
+          client.syncProjectDocument('project-1', {
+            baseRevisionId: '',
+            revisionId: 'rev-1',
+            document: mockDocument,
+          }),
+        ).rejects.toThrow('PROJECT_NOT_FOUND: Project not found');
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+
+    it('URL-encodes special characters in projectId', async () => {
+      const requests: Array<{ readonly url: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        requests.push({ url: String(input) });
+        return json(200, { data: { projectId: 'project/1', revisionId: 'rev-1' } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const mockDocument = {
+          schemaVersion: 1 as const,
+          id: 'project/1',
+          title: 'Test Project',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          rootCompositionId: 'comp-1',
+          settings: { defaultLocale: 'en' },
+          compositions: {},
+          assets: {},
+          variables: {},
+          markers: [],
+          visualObjects: {},
+          captionDocuments: {},
+          pluginData: {},
+        };
+        await client.syncProjectDocument('project/1', {
+          baseRevisionId: '',
+          revisionId: 'rev-1',
+          document: mockDocument,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project%2F1/document',
+        },
+      ]);
+    });
+  });
 });
 
 function json(status: number, value: unknown): Response {
