@@ -820,6 +820,17 @@ async function route(
   }
 
   const creativeBriefOptInMatch = /^\/v1\/projects\/([^/]+)\/creative-brief-opt-in$/.exec(url.pathname);
+  if (request.method === 'GET' && creativeBriefOptInMatch !== null) {
+    const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
+    const project = await options.controlPlane.getProject(actor, projectId);
+    respondJson(response, 200, {
+      data: {
+        creativeBriefOptIn: project.creativeBriefOptIn,
+        revision: project.revision,
+      },
+    });
+    return;
+  }
   if (request.method === 'PUT' && creativeBriefOptInMatch !== null) {
     const body = await readJson(request);
     // Validate exact JSON body: { enabled: boolean, baseRevision: non-negative safe integer }

@@ -1957,6 +1957,55 @@ async function request(
 // Creative Brief Opt-In Route Tests - WP-37 S4 Phase 6-D1
 // ============================================================================
 
+describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
+  it('requires authentication', async () => {
+    const origin = await start({ authenticate: () => undefined });
+    expect(
+      await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
+    ).toMatchObject({
+      status: 401,
+      body: { error: { code: 'AUTH_REQUIRED' } },
+    });
+  });
+
+  it('returns the owner-scoped opt-in state and lifecycle revision', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { creativeBriefOptIn: false, revision: 0 } },
+    });
+  });
+
+  it('returns the updated state after opt-in changes', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { creativeBriefOptIn: true, revision: 1 } },
+    });
+  });
+
+  it('hides unknown and non-owner projects', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+    const origin = await start({ authenticate: () => ({ id: 'other' }) }, undefined, undefined, controlPlane);
+    expect(
+      await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
+    });
+  });
+});
+
 describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('requires authentication', async () => {
     const origin = await start({ authenticate: () => undefined });

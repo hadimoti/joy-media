@@ -1332,6 +1332,22 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject],
   );
+  useEffect(() => {
+    let cancelled = false;
+    setCreativeBriefOptedIn(false);
+    if (joySession.kind !== 'ready') return () => undefined;
+    void mediaControlPlaneClient
+      .getCreativeBriefOptIn(controlPlaneProject.controlPlaneProjectId)
+      .then((result) => {
+        if (!cancelled) setCreativeBriefOptedIn(result.creativeBriefOptIn);
+      })
+      .catch(() => {
+        if (!cancelled) setCreativeBriefOptedIn(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPlaneProject.controlPlaneProjectId, joySession.kind]);
   const creativeBriefRunner = useMemo(
     () =>
       createCreativeBriefPanelRunner({
