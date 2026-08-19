@@ -546,6 +546,20 @@ export class BrowserControlPlaneClient {
       },
     );
   }
+  async setCreativeBriefOptIn(
+    projectId: string,
+    enabled: boolean,
+    baseRevision: number,
+  ): Promise<{ readonly creativeBriefOptIn: boolean; readonly revision: number }> {
+    return this.request(
+      `/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled, baseRevision }),
+      },
+    );
+  }
   async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
   }
