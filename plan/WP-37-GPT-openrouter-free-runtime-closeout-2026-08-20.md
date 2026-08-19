@@ -10,14 +10,17 @@
 
 ## Execution status (GPT-only, 2026-08-20)
 
-Completed locally in the canonical repository through commit `dde84ea`:
+Completed locally in the canonical repository through commit `7c1f9e4`:
 
 - Pinned `nvidia/nemotron-3-nano-30b-a3b:free`, canonical secret reference, zero spend, singleton allowlist, 30-second timeout, and versioned consent identifier.
 - Confirmed the live unit name is `joy-media@api.service`; the startup credential source therefore targets `/run/credentials/joy-media@api.service/openrouter-api-key`.
 - Enforced adapter pre-egress policy, bounded 256 KiB responses, exact model receipt, zero-cost usage receipt, and disabled provider fallback.
 - Added fixed-origin OpenRouter transport, startup-only systemd credential source, owner/project admission gate, circuit breaker, request abort propagation, and explicit browser disclosure.
 - Hardened runtime factory composition to remain unavailable for invalid or incomplete configuration.
-- Verification: 311 focused tests pass; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings.
+- Added guarded server composition that reads only six explicit non-secret runtime keys and remains unavailable when mode/config/credential is absent.
+- Verification: 319 focused tests pass across the final policy/HTTP/editor set; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings.
+- Read-only VPS preflight (`ssh sweden`): API/Postgres/nginx active; deployed repo clean at `0287946`; service unit `joy-media@api.service` runs as `joy-media`; `/etc/joy-media/api.env` is `0600 root:root` and has no Creative Brief runtime keys; systemd is v257 and supports encrypted credentials.
+- Repository-wide `pnpm check` remains red on the pre-existing editor-web typecheck backlog (panel runner/coordinator fixtures and related UI contracts); no unrelated cleanup was mixed into this work.
 
 Still intentionally not executed: production server wiring, VPS credential provisioning, deployment, provider canary, browser live canary, rollback rehearsal, and WP-37 closeout. Those require a separately approved operational step and a real owner-controlled OpenRouter credential; no key has been read or placed in this workspace.
 
