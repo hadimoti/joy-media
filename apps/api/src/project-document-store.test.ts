@@ -458,21 +458,24 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
     expect(writeResult.kind).toBe('stored');
-    expect(writeResult.projectId).toBe(PROJECT_A);
-    expect(writeResult.revisionId).toBe(REV_1);
+    const w = writeResult as ProjectDocumentWriteOutcomeStored;
+    expect(w.projectId).toBe(PROJECT_A);
+    expect(w.revisionId).toBe(REV_1);
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('ready');
-    expect(readResult.record.projectId).toBe(PROJECT_A);
-    expect(readResult.record.revisionId).toBe(REV_1);
-    expect(readResult.record.document).toEqual(doc);
+    const r = readResult as ProjectDocumentReadOutcomeReady;
+    expect(r.record.projectId).toBe(PROJECT_A);
+    expect(r.record.revisionId).toBe(REV_1);
+    expect(r.record.document).toEqual(doc);
   });
 
   it('unknown project returns not-found on read', () => {
     const store = createStore([]);
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('not-found');
-    expect(readResult.projectId).toBe(PROJECT_A);
+    const nf = readResult as ProjectDocumentReadOutcomeNotFound;
+    expect(nf.projectId).toBe(PROJECT_A);
   });
 
   it('unknown project returns not-found on write', () => {
@@ -480,14 +483,16 @@ describe('InMemoryProjectDocumentStore', () => {
     const record = validRecord(PROJECT_A, OWNER_X, REV_1);
     const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
     expect(writeResult.kind).toBe('not-found');
-    expect(writeResult.projectId).toBe(PROJECT_A);
+    const nf = writeResult as ProjectDocumentWriteOutcomeNotFound;
+    expect(nf.projectId).toBe(PROJECT_A);
   });
 
   it('owner denied on read for different owner', () => {
     const store = createStore([{ projectId: PROJECT_A, ownerId: OWNER_X }]);
     const readResult = store.readDocument(OWNER_Y, PROJECT_A);
     expect(readResult.kind).toBe('not-found');
-    expect(readResult.projectId).toBe(PROJECT_A);
+    const nf = readResult as ProjectDocumentReadOutcomeNotFound;
+    expect(nf.projectId).toBe(PROJECT_A);
   });
 
   it('owner denied on write for different owner', () => {
@@ -495,9 +500,10 @@ describe('InMemoryProjectDocumentStore', () => {
     const record = validRecord(PROJECT_A, OWNER_Y, REV_1);
     const writeResult = store.writeDocument(OWNER_Y, record, INITIAL_REVISION);
     expect(writeResult.kind).toBe('owner-denied');
-    expect(writeResult.projectId).toBe(PROJECT_A);
-    expect(writeResult.ownerId).toBe(OWNER_X);
-    expect(writeResult.callerId).toBe(OWNER_Y);
+    const od = writeResult as ProjectDocumentWriteOutcomeOwnerDenied;
+    expect(od.projectId).toBe(PROJECT_A);
+    expect(od.ownerId).toBe(OWNER_X);
+    expect(od.callerId).toBe(OWNER_Y);
   });
 
   it('owner denied when record.ownerId does not match project owner', () => {
@@ -510,8 +516,9 @@ describe('InMemoryProjectDocumentStore', () => {
     };
     const writeResult = store.writeDocument(OWNER_X, record, INITIAL_REVISION);
     expect(writeResult.kind).toBe('owner-denied');
-    expect(writeResult.ownerId).toBe(OWNER_X);
-    expect(writeResult.callerId).toBe(OWNER_X);
+    const od = writeResult as ProjectDocumentWriteOutcomeOwnerDenied;
+    expect(od.ownerId).toBe(OWNER_X);
+    expect(od.callerId).toBe(OWNER_X);
   });
 
   it('CAS conflict when baseRevision does not match current', () => {
@@ -535,8 +542,9 @@ describe('InMemoryProjectDocumentStore', () => {
     };
     const writeResult = store.writeDocument(OWNER_X, record2, 'wrong-revision');
     expect(writeResult.kind).toBe('revision-conflict');
-    expect(writeResult.expectedBaseRevisionId).toBe('wrong-revision');
-    expect(writeResult.actualBaseRevisionId).toBe(REV_1);
+    const rc = writeResult as ProjectDocumentWriteOutcomeRevisionConflict;
+    expect(rc.expectedBaseRevisionId).toBe('wrong-revision');
+    expect(rc.actualBaseRevisionId).toBe(REV_1);
   });
 
   it('CAS succeeds when baseRevision matches current', () => {
@@ -560,12 +568,14 @@ describe('InMemoryProjectDocumentStore', () => {
     };
     const writeResult = store.writeDocument(OWNER_X, record2, REV_1);
     expect(writeResult.kind).toBe('stored');
-    expect(writeResult.revisionId).toBe(REV_2);
+    const w = writeResult as ProjectDocumentWriteOutcomeStored;
+    expect(w.revisionId).toBe(REV_2);
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('ready');
-    expect(readResult.record.revisionId).toBe(REV_2);
-    expect(readResult.record.document.title).toBe('Modified');
+    const r = readResult as ProjectDocumentReadOutcomeReady;
+    expect(r.record.revisionId).toBe(REV_2);
+    expect(r.record.document.title).toBe('Modified');
   });
 
   it('invalid document returns invalid-document without mutation', () => {
@@ -580,8 +590,9 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const writeResult = store.writeDocument(OWNER_X, invalidRecord, INITIAL_REVISION);
     expect(writeResult.kind).toBe('invalid-document');
-    expect(writeResult.projectId).toBe(PROJECT_A);
-    expect(writeResult.diagnostics.length).toBeGreaterThan(0);
+    const id = writeResult as ProjectDocumentWriteOutcomeInvalidDocument;
+    expect(id.projectId).toBe(PROJECT_A);
+    expect(id.diagnostics.length).toBeGreaterThan(0);
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('not-found');
@@ -603,7 +614,8 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('ready');
-    expect(readResult.record.document.title).toBe('Test Project');
+    const r = readResult as ProjectDocumentReadOutcomeReady;
+    expect(r.record.document.title).toBe('Test Project');
   });
 
   it('defensive copy prevents caller mutation of returned document', () => {
@@ -620,12 +632,14 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('ready');
+    const r = readResult as ProjectDocumentReadOutcomeReady;
 
-    (readResult.record.document as any).title = 'MUTATED';
+    (r.record.document as any).title = 'MUTATED';
 
     const readResult2 = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult2.kind).toBe('ready');
-    expect(readResult2.record.document.title).toBe('Test Project');
+    const r2 = readResult2 as ProjectDocumentReadOutcomeReady;
+    expect(r2.record.document.title).toBe('Test Project');
   });
 
   it('stale-revision when reading with non-current revisionId', () => {
@@ -642,9 +656,10 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const readResult = store.readDocument(OWNER_X, PROJECT_A, REV_2);
     expect(readResult.kind).toBe('stale-revision');
-    expect(readResult.projectId).toBe(PROJECT_A);
-    expect(readResult.requestedRevisionId).toBe(REV_2);
-    expect(readResult.currentRevisionId).toBe(REV_1);
+    const sr = readResult as ProjectDocumentReadOutcomeStaleRevision;
+    expect(sr.projectId).toBe(PROJECT_A);
+    expect(sr.requestedRevisionId).toBe(REV_2);
+    expect(sr.currentRevisionId).toBe(REV_1);
   });
 
   it('listRevisions returns all revisions for a project', () => {
@@ -730,8 +745,9 @@ describe('InMemoryProjectDocumentStore', () => {
 
     const writeResult = store.writeDocument(OWNER_X, record, REV_1);
     expect(writeResult.kind).toBe('revision-conflict');
-    expect(writeResult.expectedBaseRevisionId).toBe(REV_1);
-    expect(writeResult.actualBaseRevisionId).toBe(INITIAL_REVISION);
+    const rc = writeResult as ProjectDocumentWriteOutcomeRevisionConflict;
+    expect(rc.expectedBaseRevisionId).toBe(REV_1);
+    expect(rc.actualBaseRevisionId).toBe(INITIAL_REVISION);
   });
 
   it('retains and reads historical revision correctly', () => {
@@ -758,14 +774,16 @@ describe('InMemoryProjectDocumentStore', () => {
     // Read historical revision REV_1 should return the original document
     const readRev1 = store.readDocument(OWNER_X, PROJECT_A, REV_1);
     expect(readRev1.kind).toBe('ready');
-    expect(readRev1.record.revisionId).toBe(REV_1);
-    expect(readRev1.record.document.title).toBe('Test Project');
+    const r1 = readRev1 as ProjectDocumentReadOutcomeReady;
+    expect(r1.record.revisionId).toBe(REV_1);
+    expect(r1.record.document.title).toBe('Test Project');
 
     // Read historical revision REV_2 should return the modified document
     const readRev2 = store.readDocument(OWNER_X, PROJECT_A, REV_2);
     expect(readRev2.kind).toBe('ready');
-    expect(readRev2.record.revisionId).toBe(REV_2);
-    expect(readRev2.record.document.title).toBe('Modified');
+    const r2 = readRev2 as ProjectDocumentReadOutcomeReady;
+    expect(r2.record.revisionId).toBe(REV_2);
+    expect(r2.record.document.title).toBe('Modified');
   });
 
   it('returns stale-revision for unknown historical revision', () => {
@@ -783,8 +801,9 @@ describe('InMemoryProjectDocumentStore', () => {
     // Request a revision that was never stored
     const readResult = store.readDocument(OWNER_X, PROJECT_A, REV_2);
     expect(readResult.kind).toBe('stale-revision');
-    expect(readResult.requestedRevisionId).toBe(REV_2);
-    expect(readResult.currentRevisionId).toBe(REV_1);
+    const sr = readResult as ProjectDocumentReadOutcomeStaleRevision;
+    expect(sr.requestedRevisionId).toBe(REV_2);
+    expect(sr.currentRevisionId).toBe(REV_1);
   });
 
   it('read without revisionId returns current head', () => {
@@ -811,8 +830,9 @@ describe('InMemoryProjectDocumentStore', () => {
     // Read without revisionId should return current head (REV_2)
     const readResult = store.readDocument(OWNER_X, PROJECT_A);
     expect(readResult.kind).toBe('ready');
-    expect(readResult.record.revisionId).toBe(REV_2);
-    expect(readResult.record.document.title).toBe('Head');
+    const r = readResult as ProjectDocumentReadOutcomeReady;
+    expect(r.record.revisionId).toBe(REV_2);
+    expect(r.record.document.title).toBe('Head');
   });
 
   it('historical document defensive copies remain immutable after later writes', () => {
@@ -842,12 +862,14 @@ describe('InMemoryProjectDocumentStore', () => {
     // Historical REV_1 should still return the original document, not mutated
     const readRev1 = store.readDocument(OWNER_X, PROJECT_A, REV_1);
     expect(readRev1.kind).toBe('ready');
-    expect(readRev1.record.document.title).toBe('Test Project');
+    const r1 = readRev1 as ProjectDocumentReadOutcomeReady;
+    expect(r1.record.document.title).toBe('Test Project');
 
     // Current head REV_2 should be unaffected
     const readHead = store.readDocument(OWNER_X, PROJECT_A);
     expect(readHead.kind).toBe('ready');
-    expect(readHead.record.document.title).toBe('Modified');
+    const rh = readHead as ProjectDocumentReadOutcomeReady;
+    expect(rh.record.document.title).toBe('Modified');
   });
 
   it('listRevisions returns all stored revision IDs', () => {
