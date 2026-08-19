@@ -115,6 +115,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     const result = UnavailableCreativeBriefInputResolver.resolve(request);
 
     expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') throw new Error('Expected unavailable');
     expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE');
     expect(result.message).toBe('Creative Brief input resolver is unavailable');
   });
@@ -223,6 +224,7 @@ describe('CreativeBriefInputResolver - result types', () => {
     const result = testResolver.resolve(request);
 
     expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('Expected resolved');
     expect(result.input).toBeDefined();
     expect(result.input).toBe(testInput);
   });
@@ -299,6 +301,7 @@ describe('CreativeBriefInputResolver - Persian text', () => {
     const result = testResolver.resolve(request);
 
     expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('Expected resolved');
     expect(result.input.request.request).toBe(persianText);
   });
 });
@@ -348,8 +351,12 @@ describe('CreativeBriefInputResolver - type safety', () => {
     ];
 
     expect(results).toHaveLength(3);
-    expect(results[0].status).toBe('resolved');
-    expect(results[1].status).toBe('unavailable');
-    expect(results[2].status).toBe('stale-revision');
+    const r0 = results[0];
+    const r1 = results[1];
+    const r2 = results[2];
+    if (r0 === undefined || r1 === undefined || r2 === undefined) throw new Error('Expected 3 results');
+    expect(r0.status).toBe('resolved');
+    expect(r1.status).toBe('unavailable');
+    expect(r2.status).toBe('stale-revision');
   });
 });
