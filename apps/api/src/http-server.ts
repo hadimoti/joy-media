@@ -513,6 +513,17 @@ async function route(
           runtimeContext,
         );
         options.creativeBriefAdmissionGate.recordOutcome(outcome.category, Date.now());
+        // Keep the production diagnostic redacted: outcome category/code and
+        // duration are safe metadata; provider bodies and generated content
+        // must never enter API logs.
+        console.warn(
+          JSON.stringify({
+            event: 'creative-brief-outcome',
+            category: outcome.category,
+            ...(outcome.errorCode === undefined ? {} : { errorCode: outcome.errorCode }),
+            durationMs: outcome.durationMs,
+          }),
+        );
 
         // Map outcome to HTTP response
         const httpResponse = mapCreativeBriefOutcomeToHttpResponse(outcome);
