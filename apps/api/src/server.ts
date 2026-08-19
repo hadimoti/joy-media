@@ -15,6 +15,9 @@ import {
   PostgresSpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
+import { CanonicalCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
+import { ProjectSnapshotService } from './project-snapshot-service.js';
+import { ProjectIntelligenceService } from './project-intelligence-service.js';
 
 await start();
 
@@ -33,6 +36,12 @@ async function start(): Promise<void> {
       : new PostgresSpectralDenoiseInvocationLedger(pool);
   if (audioDenoiseLedger instanceof PostgresSpectralDenoiseInvocationLedger)
     await audioDenoiseLedger.initialize();
+  const controlPlane = durableControlPlane ?? new LocalControlPlane();
+  const creativeBriefInputResolver = new CanonicalCreativeBriefInputResolver({
+    controlPlane,
+    snapshotService: new ProjectSnapshotService(),
+    intelligenceService: new ProjectIntelligenceService(),
+  });
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuth =
@@ -44,7 +53,7 @@ async function start(): Promise<void> {
           ...(telegram === undefined ? {} : { telegram }),
         });
   createControlPlaneHttpServer({
-    controlPlane: durableControlPlane ?? new LocalControlPlane(),
+    controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
     // is configured; /v1/auth is served by mediaAuth regardless (it owns its
     // own allow-list/session tables independently of the control plane).
@@ -54,6 +63,7 @@ async function start(): Promise<void> {
     },
     mediaAuth,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
+    creativeBriefInputResolver,
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
