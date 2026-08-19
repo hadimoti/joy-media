@@ -58,6 +58,7 @@ import {
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type { CreativeBriefV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import { randomUUID } from 'node:crypto';
+import { CreativeBriefAdmissionGate } from './creative-brief-admission-gate.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -85,6 +86,8 @@ export interface ControlPlaneHttpServerOptions {
    * Inject for tests or real implementation.
    */
   readonly creativeBriefInputResolver?: CreativeBriefInputResolver;
+  /** Bounded owner/project admission gate; defaults to the in-memory policy gate. */
+  readonly creativeBriefAdmissionGate?: CreativeBriefAdmissionGate;
 }
 
 /**
@@ -102,7 +105,10 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
     creativeBriefRuntime: options.creativeBriefRuntime ?? DEFAULT_CREATIVE_BRIEF_RUNTIME,
-    creativeBriefInputResolver: options.creativeBriefInputResolver ?? UnavailableCreativeBriefInputResolver,
+    creativeBriefInputResolver:
+      options.creativeBriefInputResolver ?? UnavailableCreativeBriefInputResolver,
+    creativeBriefAdmissionGate:
+      options.creativeBriefAdmissionGate ?? new CreativeBriefAdmissionGate(),
   };
   return createServer(async (request, response) => {
     try {
@@ -121,6 +127,7 @@ async function route(
     readonly gpuPreview: GpuPreviewTransport;
     readonly creativeBriefRuntime: CreativeBriefRuntime;
     readonly creativeBriefInputResolver: CreativeBriefInputResolver;
+    readonly creativeBriefAdmissionGate: CreativeBriefAdmissionGate;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -415,75 +422,108 @@ async function route(
       const firstError = clientValidation.errors[0];
       if (firstError) {
         throw new ControlPlaneError(
-          firstError.code === 'invalid-envelope' ? 'REQUEST_INVALID' :
-          firstError.code === 'payload-too-large' ? 'PAYLOAD_TOO_LARGE' :
-          firstError.code === 'unknown-field' ? 'REQUEST_INVALID' :
-          firstError.code === 'forbidden-field' ? 'REQUEST_INVALID' :
-          firstError.code === 'project-mismatch' ? 'PROJECT_MISMATCH' :
-          firstError.code === 'revision-mismatch' ? 'REVISION_MISMATCH' :
-          firstError.code === 'invalid-request' ? 'REQUEST_INVALID' :
-          'REQUEST_INVALID',
+          firstError.code === 'invalid-envelope'
+            ? 'REQUEST_INVALID'
+            : firstError.code === 'payload-too-large'
+              ? 'PAYLOAD_TOO_LARGE'
+              : firstError.code === 'unknown-field'
+                ? 'REQUEST_INVALID'
+                : firstError.code === 'forbidden-field'
+                  ? 'REQUEST_INVALID'
+                  : firstError.code === 'project-mismatch'
+                    ? 'PROJECT_MISMATCH'
+                    : firstError.code === 'revision-mismatch'
+                      ? 'REVISION_MISMATCH'
+                      : firstError.code === 'invalid-request'
+                        ? 'REQUEST_INVALID'
+                        : 'REQUEST_INVALID',
           firstError.message,
         );
       }
-      throw new ControlPlaneError('REQUEST_INVALID', 'Creative brief client request validation failed');
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'Creative brief client request validation failed',
+      );
     }
 
     // Type assertion is safe because we just validated it
     const clientEnvelope = body as unknown as CreativeBriefClientRequestEnvelope;
 
-    // Step 4: Input resolver - resolve server-side canonical input
-    const resolverRequest: CreativeBriefInputResolverRequest = {
-      projectId: clientEnvelope.projectId,
-      snapshotRevisionId: clientEnvelope.snapshotRevisionId,
-      request: clientEnvelope.request,
-    };
-    const resolverContext: CreativeBriefInputResolverContext = {
-      actor,
-      controlPlaneProjectId: projectId,
-    };
-    const resolverResult: CreativeBriefInputResolverResult = await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
-
-    // Handle resolver failures
-    if (resolverResult.status === 'unavailable') {
-      respondJson(response, 503, {
-        data: {
-          kind: 'unavailable',
-          code: resolverResult.code,
-          message: resolverResult.message,
-        },
-      });
+    const admission = options.creativeBriefAdmissionGate.admit(actor.id, projectId, Date.now());
+    if (!admission.allowed) {
+      const statusCode =
+        admission.code === 'CREATIVE_BRIEF_IN_FLIGHT'
+          ? 409
+          : admission.code === 'CREATIVE_BRIEF_CIRCUIT_OPEN'
+            ? 503
+            : 429;
+      respondJson(response, statusCode, { error: { code: admission.code } });
       return;
     }
 
-    if (resolverResult.status === 'stale-revision') {
-      respondJson(response, 409, {
-        error: {
-          code: 'REVISION_MISMATCH',
-          message: resolverResult.message,
-        },
-      });
-      return;
+    try {
+      // Step 4: Input resolver - resolve server-side canonical input
+      const resolverRequest: CreativeBriefInputResolverRequest = {
+        projectId: clientEnvelope.projectId,
+        snapshotRevisionId: clientEnvelope.snapshotRevisionId,
+        request: clientEnvelope.request,
+      };
+      const resolverContext: CreativeBriefInputResolverContext = {
+        actor,
+        controlPlaneProjectId: projectId,
+      };
+      const resolverResult: CreativeBriefInputResolverResult =
+        await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
+
+      // Handle resolver failures
+      if (resolverResult.status === 'unavailable') {
+        respondJson(response, 503, {
+          data: {
+            kind: 'unavailable',
+            code: resolverResult.code,
+            message: resolverResult.message,
+          },
+        });
+        return;
+      }
+
+      if (resolverResult.status === 'stale-revision') {
+        respondJson(response, 409, {
+          error: {
+            code: 'REVISION_MISMATCH',
+            message: resolverResult.message,
+          },
+        });
+        return;
+      }
+
+      // Step 5: Runtime with resolved input
+      const runtimeAbort = createCreativeBriefRequestAbortController(request, response);
+      try {
+        const runtimeContext: CreativeBriefRuntimeContext = {
+          correlationId: randomUUID(),
+          signal: runtimeAbort.controller.signal,
+          timeoutMs: 30_000, // 30 second default timeout
+          spendLimitUsdCents: 0, // Free-only policy
+        };
+
+        const resolvedInput: CreativeBriefInputV1 = resolverResult.input;
+        const outcome: AsyncCreativeBriefOutcome = await options.creativeBriefRuntime.execute(
+          resolvedInput,
+          runtimeContext,
+        );
+        options.creativeBriefAdmissionGate.recordOutcome(outcome.category, Date.now());
+
+        // Map outcome to HTTP response
+        const httpResponse = mapCreativeBriefOutcomeToHttpResponse(outcome);
+        respondJson(response, httpResponse.statusCode, httpResponse.body);
+        return;
+      } finally {
+        runtimeAbort.cleanup();
+      }
+    } finally {
+      options.creativeBriefAdmissionGate.release(actor.id, projectId);
     }
-
-    // Step 5: Runtime with resolved input
-    const runtimeContext: CreativeBriefRuntimeContext = {
-      correlationId: randomUUID(),
-      signal: request.socket?.destroyed ? AbortSignal.abort() : undefined,
-      timeoutMs: 30_000, // 30 second default timeout
-      spendLimitUsdCents: 0, // Free-only policy
-    };
-
-    const resolvedInput: CreativeBriefInputV1 = resolverResult.input;
-    const outcome: AsyncCreativeBriefOutcome = await options.creativeBriefRuntime.execute(
-      resolvedInput,
-      runtimeContext,
-    );
-
-    // Map outcome to HTTP response
-    const httpResponse = mapCreativeBriefOutcomeToHttpResponse(outcome);
-    respondJson(response, httpResponse.statusCode, httpResponse.body);
-    return;
   }
 
   const openPreviewSessionMatch = /^\/v1\/projects\/([^/]+)\/preview-sessions$/.exec(url.pathname);
@@ -728,7 +768,9 @@ async function route(
       validation.envelope.baseRevisionId,
     );
     if (result.kind === 'stored') {
-      respondJson(response, 200, { data: { projectId: result.projectId, revisionId: result.revisionId } });
+      respondJson(response, 200, {
+        data: { projectId: result.projectId, revisionId: result.revisionId },
+      });
       return;
     }
     if (result.kind === 'not-found' || result.kind === 'owner-denied') {
@@ -819,7 +861,9 @@ async function route(
     return;
   }
 
-  const creativeBriefOptInMatch = /^\/v1\/projects\/([^/]+)\/creative-brief-opt-in$/.exec(url.pathname);
+  const creativeBriefOptInMatch = /^\/v1\/projects\/([^/]+)\/creative-brief-opt-in$/.exec(
+    url.pathname,
+  );
   if (request.method === 'GET' && creativeBriefOptInMatch !== null) {
     const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
     const project = await options.controlPlane.getProject(actor, projectId);
@@ -836,16 +880,29 @@ async function route(
     // Validate exact JSON body: { enabled: boolean, baseRevision: non-negative safe integer }
     const keys = Object.keys(body);
     if (keys.length !== 2 || !keys.includes('enabled') || !keys.includes('baseRevision'))
-      throw new ControlPlaneError('REQUEST_INVALID', 'exact body { enabled: boolean, baseRevision: number } required');
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'exact body { enabled: boolean, baseRevision: number } required',
+      );
     const enabled = body.enabled;
     const baseRevision = body.baseRevision;
     if (typeof enabled !== 'boolean')
       throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
     if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 0)
-      throw new ControlPlaneError('REQUEST_INVALID', 'baseRevision must be a non-negative safe integer');
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'baseRevision must be a non-negative safe integer',
+      );
     const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
-    const result = await options.controlPlane.setCreativeBriefOptIn(actor, projectId, enabled, baseRevision);
-    respondJson(response, 200, { data: { creativeBriefOptIn: result.creativeBriefOptIn, revision: result.revision } });
+    const result = await options.controlPlane.setCreativeBriefOptIn(
+      actor,
+      projectId,
+      enabled,
+      baseRevision,
+    );
+    respondJson(response, 200, {
+      data: { creativeBriefOptIn: result.creativeBriefOptIn, revision: result.revision },
+    });
     return;
   }
 
@@ -2039,8 +2096,8 @@ function respondError(response: ServerResponse, error: unknown): void {
             : error.code === 'REQUEST_INVALID'
               ? 400
               : error.code === 'PROVIDER_UNAVAILABLE' ||
-                error.code === 'PROVIDER_FAILED' ||
-                error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
+                  error.code === 'PROVIDER_FAILED' ||
+                  error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
                 ? 503
                 : error.code === 'DOCUMENT_REVISION_CONFLICT'
                   ? 409
@@ -2051,6 +2108,27 @@ function respondError(response: ServerResponse, error: unknown): void {
     return;
   }
   respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
+}
+
+function createCreativeBriefRequestAbortController(
+  request: IncomingMessage,
+  response: ServerResponse,
+): { readonly controller: AbortController; readonly cleanup: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const close = () => {
+    if (!response.writableEnded) controller.abort();
+  };
+  if (request.aborted || request.destroyed) controller.abort();
+  request.once('aborted', abort);
+  request.once('close', close);
+  return {
+    controller,
+    cleanup: () => {
+      request.removeListener('aborted', abort);
+      request.removeListener('close', close);
+    },
+  };
 }
 
 function bearerToken(request: IncomingMessage): string | undefined {
