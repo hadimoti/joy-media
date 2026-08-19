@@ -33,6 +33,11 @@ import {
   type CreativeBriefInputResolverStaleRevision,
 } from './creative-brief-input-resolver.js';
 import type { CreativeBriefInputV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
+import {
+  INITIAL_REVISION,
+  MAX_PROJECT_DOCUMENT_SYNC_BYTES,
+} from './project-document-sync-request-validation.js';
 
 const servers: Server[] = [];
 const SHA256 = 'a'.repeat(64);
@@ -1589,6 +1594,302 @@ async function start(
   if (address === null || typeof address === 'string') throw new Error('test API did not bind TCP');
   return `http://127.0.0.1:${address.port}`;
 }
+
+// ============================================================================
+// Project Document Sync Route Tests - WP-37 S4 Phase 5-B
+// ============================================================================
+
+function validProjectDocumentSyncEnvelope(
+  projectId: string,
+  baseRevisionId: string = INITIAL_REVISION,
+  revisionId: string = 'rev-1',
+): { baseRevisionId: string; revisionId: string; document: JoyProjectV1 } {
+  return {
+    baseRevisionId,
+    revisionId,
+    document: {
+      schemaVersion: 1,
+      id: projectId,
+      title: 'Test Project',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      rootCompositionId: 'comp-1',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          name: 'Root Composition',
+          width: 1920,
+          height: 1080,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 10000000,
+          background: '#00000000',
+          tracks: [],
+        },
+      },
+      assets: {},
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    },
+  };
+}
+
+describe('PUT /v1/projects/:projectId/document - project document sync route', () => {
+  it('returns 401 when unauthenticated', async () => {
+    const origin = await start({ authenticate: () => undefined });
+    const result = await request(
+      origin,
+      'PUT',
+      '/v1/projects/test-project/document',
+      validProjectDocumentSyncEnvelope('test-project'),
+    );
+    expect(result.status).toBe(401);
+    expect(result.body).toMatchObject({ error: { code: 'AUTH_REQUIRED' } });
+  });
+
+  it('first CAS write succeeds with 200 and returns projectId and revisionId', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = validProjectDocumentSyncEnvelope('project-1', INITIAL_REVISION, 'rev-1');
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ data: { projectId: 'project-1', revisionId: 'rev-1' } });
+  });
+
+  it('update CAS write succeeds when baseRevisionId matches current', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const validDoc = validProjectDocumentSyncEnvelope('project-1').document;
+    await controlPlane.writeProjectDocument(
+      { id: 'owner-1' },
+      { projectId: 'project-1', ownerId: 'owner-1', revisionId: 'rev-1', document: validDoc },
+      INITIAL_REVISION,
+    );
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = validProjectDocumentSyncEnvelope('project-1', 'rev-1', 'rev-2');
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ data: { projectId: 'project-1', revisionId: 'rev-2' } });
+  });
+
+  it('returns 409 DOCUMENT_REVISION_CONFLICT when baseRevisionId does not match current', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const validDoc = validProjectDocumentSyncEnvelope('project-1').document;
+    await controlPlane.writeProjectDocument(
+      { id: 'owner-1' },
+      { projectId: 'project-1', ownerId: 'owner-1', revisionId: 'rev-1', document: validDoc },
+      INITIAL_REVISION,
+    );
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = validProjectDocumentSyncEnvelope('project-1', 'wrong-base-rev', 'rev-2');
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'DOCUMENT_REVISION_CONFLICT' } });
+  });
+
+  it('returns 404 PROJECT_NOT_FOUND for unknown project', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const envelope = validProjectDocumentSyncEnvelope('unknown-project');
+    const result = await request(origin, 'PUT', '/v1/projects/unknown-project/document', envelope);
+    expect(result.status).toBe(404);
+    expect(result.body).toMatchObject({ error: { code: 'PROJECT_NOT_FOUND' } });
+  });
+
+  it('returns 404 PROJECT_NOT_FOUND for owner-denied access', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-2' }) }, undefined, undefined, controlPlane);
+    const envelope = validProjectDocumentSyncEnvelope('project-1');
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(404);
+    expect(result.body).toMatchObject({ error: { code: 'PROJECT_NOT_FOUND' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for envelope rejection - forbidden fields', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = {
+      ...validProjectDocumentSyncEnvelope('project-1'),
+      projectId: 'project-1', // forbidden field
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for envelope rejection - ownerId in body', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = {
+      ...validProjectDocumentSyncEnvelope('project-1'),
+      ownerId: 'owner-1', // forbidden field
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for validation failure - missing fields', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const envelope = { baseRevisionId: '' }; // missing revisionId and document
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for validation failure - empty revisionId', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const envelope = {
+      baseRevisionId: '',
+      revisionId: '', // empty revisionId
+      document: {
+        schemaVersion: 1,
+        id: 'project-1',
+        title: 'Test',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        rootCompositionId: 'comp-1',
+        settings: { defaultLocale: 'en' },
+        compositions: {
+          'comp-1': {
+            id: 'comp-1',
+            name: 'Root',
+            width: 1920,
+            height: 1080,
+            pixelAspectRatio: { num: 1, den: 1 },
+            frameRate: { num: 30, den: 1 },
+            durationUs: 10000000,
+            background: '#00000000',
+            tracks: [],
+          },
+        },
+        assets: {},
+        variables: {},
+        markers: [],
+        visualObjects: {},
+        captionDocuments: {},
+        pluginData: {},
+      },
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for validation failure - document.id mismatch', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const envelope = {
+      baseRevisionId: '',
+      revisionId: 'rev-1',
+      document: {
+        schemaVersion: 1,
+        id: 'wrong-project-id',
+        title: 'Test',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        rootCompositionId: 'comp-1',
+        settings: { defaultLocale: 'en' },
+        compositions: {
+          'comp-1': {
+            id: 'comp-1',
+            name: 'Root',
+            width: 1920,
+            height: 1080,
+            pixelAspectRatio: { num: 1, den: 1 },
+            frameRate: { num: 30, den: 1 },
+            durationUs: 10000000,
+            background: '#00000000',
+            tracks: [],
+          },
+        },
+        assets: {},
+        variables: {},
+        markers: [],
+        visualObjects: {},
+        captionDocuments: {},
+        pluginData: {},
+      },
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('returns 400 REQUEST_INVALID for oversized payload', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const largeTitle = 'A'.repeat(MAX_PROJECT_DOCUMENT_SYNC_BYTES);
+    const largeDocument: JoyProjectV1 = {
+      schemaVersion: 1,
+      id: 'project-1',
+      title: largeTitle,
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      rootCompositionId: 'comp-1',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        'comp-1': {
+          id: 'comp-1',
+          name: 'Root',
+          width: 1920,
+          height: 1080,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 10000000,
+          background: '#00000000',
+          tracks: [],
+        },
+      },
+      assets: {},
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    };
+    const envelope = {
+      baseRevisionId: '',
+      revisionId: 'rev-1',
+      document: largeDocument,
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('derives ownerId only from authenticated actor - ignores body ownerId', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = {
+      ...validProjectDocumentSyncEnvelope('project-1'),
+      ownerId: 'malicious-owner', // should be ignored
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400); // validation should reject this
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('derives projectId only from URL path - ignores body projectId', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const envelope = {
+      ...validProjectDocumentSyncEnvelope('project-1'),
+      projectId: 'malicious-project', // should be ignored
+    };
+    const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
+    expect(result.status).toBe(400); // validation should reject this
+    expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+});
 
 class MemoryPrivateObjectStore implements PrivateObjectStore {
   readonly objects: Array<{

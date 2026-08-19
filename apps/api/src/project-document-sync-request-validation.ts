@@ -10,6 +10,8 @@ import type { JoyProjectV1, ProjectDiagnostic } from '@joy-media/project-schema'
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import type { ProjectRevisionId, ProjectId } from '@joy-media/project-schema';
 
+export type { ProjectId, ProjectRevisionId, JoyProjectV1 };
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -40,10 +42,20 @@ export interface ProjectDocumentSyncValidationError {
   readonly path?: string;
 }
 
-export interface ProjectDocumentSyncValidationResult {
-  readonly valid: boolean;
+export interface ProjectDocumentSyncValidationSuccess {
+  readonly valid: true;
+  readonly envelope: ProjectDocumentSyncEnvelope;
+  readonly errors: readonly [];
+}
+
+export interface ProjectDocumentSyncValidationFailure {
+  readonly valid: false;
   readonly errors: readonly ProjectDocumentSyncValidationError[];
 }
+
+export type ProjectDocumentSyncValidationResult =
+  | ProjectDocumentSyncValidationSuccess
+  | ProjectDocumentSyncValidationFailure;
 
 // ============================================================================
 // Envelope Types
@@ -186,7 +198,7 @@ function checkUnknownFields(obj: Record<string, unknown>): string[] {
  *
  * @param envelope - The raw request envelope from the browser
  * @param expectedProjectId - The projectId extracted from the URL path
- * @returns Validation result with typed errors if any
+ * @returns Validation result with typed errors if any, or the validated envelope on success
  */
 export function validateProjectDocumentSyncRequest(
   envelope: unknown,
@@ -198,10 +210,10 @@ export function validateProjectDocumentSyncRequest(
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) {
     return {
       valid: false,
-      errors: [{
+      errors: Object.freeze([{
         code: 'invalid-request',
         message: 'Request envelope must be a non-null object',
-      }],
+      }]),
     };
   }
 
@@ -245,17 +257,17 @@ export function validateProjectDocumentSyncRequest(
   }
 
   // At this point we know the envelope has exactly the right fields
-  // Now validate each field's value
+  // Now validate each field's value and build typed envelope
 
   // Validate baseRevisionId
-  const baseRevisionId = env.baseRevisionId as unknown;
-  if (typeof baseRevisionId !== 'string') {
+  const baseRevisionIdValue = env.baseRevisionId;
+  if (typeof baseRevisionIdValue !== 'string') {
     errors.push({
       code: 'invalid-request',
       message: 'baseRevisionId must be a string',
       path: 'baseRevisionId',
     });
-  } else if (baseRevisionId !== INITIAL_REVISION && baseRevisionId.length === 0) {
+  } else if (baseRevisionIdValue !== INITIAL_REVISION && baseRevisionIdValue.length === 0) {
     errors.push({
       code: 'revision-mismatch',
       message: 'baseRevisionId must be either INITIAL_REVISION (empty string) or a non-empty string',
@@ -264,14 +276,14 @@ export function validateProjectDocumentSyncRequest(
   }
 
   // Validate revisionId
-  const revisionId = env.revisionId as unknown;
-  if (typeof revisionId !== 'string') {
+  const revisionIdValue = env.revisionId;
+  if (typeof revisionIdValue !== 'string') {
     errors.push({
       code: 'invalid-request',
       message: 'revisionId must be a string',
       path: 'revisionId',
     });
-  } else if (revisionId.length === 0) {
+  } else if (revisionIdValue.length === 0) {
     errors.push({
       code: 'revision-mismatch',
       message: 'revisionId must be a non-empty string',
@@ -280,21 +292,21 @@ export function validateProjectDocumentSyncRequest(
   }
 
   // Validate document exists
-  const document = env.document as unknown;
-  if (document === undefined || document === null) {
+  const documentValue = env.document;
+  if (documentValue === undefined || documentValue === null) {
     errors.push({
       code: 'invalid-request',
       message: 'document is required',
       path: 'document',
     });
-  } else if (typeof document !== 'object' || Array.isArray(document)) {
+  } else if (typeof documentValue !== 'object' || Array.isArray(documentValue)) {
     errors.push({
       code: 'invalid-request',
       message: 'document must be a non-null object',
       path: 'document',
     });
   } else {
-    const doc = document as JoyProjectV1;
+    const doc = documentValue as JoyProjectV1;
 
     // Check document.id exists and is a string first (before full validation)
     if (typeof doc.id !== 'string') {
@@ -334,8 +346,21 @@ export function validateProjectDocumentSyncRequest(
     }
   }
 
-  const valid = errors.length === 0;
-  return { valid, errors: Object.freeze(errors.slice()) };
+  // If we have any errors, return failure
+  if (errors.length > 0) {
+    return { valid: false, errors: Object.freeze(errors.slice()) };
+  }
+
+  // All validations passed - return success with typed envelope
+  return {
+    valid: true,
+    envelope: {
+      baseRevisionId: baseRevisionIdValue as ProjectRevisionId,
+      revisionId: revisionIdValue as ProjectRevisionId,
+      document: documentValue as JoyProjectV1,
+    },
+    errors: Object.freeze([] as const),
+  };
 }
 
 // ============================================================================
@@ -343,12 +368,29 @@ export function validateProjectDocumentSyncRequest(
 // ============================================================================
 
 /**
- * Type guard that checks if a value is a valid ProjectDocumentSyncEnvelope
- * for the given expected projectId.
+ * Type guard that checks if a validation result is a success.
+ */
+export function isProjectDocumentSyncValidationSuccess(
+  result: ProjectDocumentSyncValidationResult,
+): result is ProjectDocumentSyncValidationSuccess {
+  return result.valid === true;
+}
+
+/**
+ * Type guard that checks if a validation result is a failure.
+ */
+export function isProjectDocumentSyncValidationFailure(
+  result: ProjectDocumentSyncValidationResult,
+): result is ProjectDocumentSyncValidationFailure {
+  return result.valid === false;
+}
+
+/**
+ * @deprecated Use isProjectDocumentSyncValidationSuccess with validateProjectDocumentSyncRequest instead.
  */
 export function isValidProjectDocumentSyncEnvelope(
   envelope: unknown,
   expectedProjectId: ProjectId,
-): envelope is ProjectDocumentSyncEnvelope {
+): boolean {
   return validateProjectDocumentSyncRequest(envelope, expectedProjectId).valid;
 }

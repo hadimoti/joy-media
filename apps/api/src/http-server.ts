@@ -29,6 +29,12 @@ import {
   MemorySpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
+import {
+  MAX_PROJECT_DOCUMENT_SYNC_BYTES,
+  validateProjectDocumentSyncRequest,
+  isProjectDocumentSyncValidationSuccess,
+  type ProjectDocumentSyncValidationSuccess,
+} from './project-document-sync-request-validation.js';
 import { validateCreativeBriefServerRequest } from './creative-brief-request-validation.js';
 import type { CreativeBriefServerRequest } from './creative-brief-request-validation.js';
 import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
@@ -698,6 +704,49 @@ async function route(
         requiredString(body, 'title'),
       ),
     });
+    return;
+  }
+
+  const projectDocumentSyncMatch = /^\/v1\/projects\/([^/]+)\/document$/.exec(url.pathname);
+  if (request.method === 'PUT' && projectDocumentSyncMatch !== null) {
+    const pathProjectId = decodeURIComponent(projectDocumentSyncMatch[1]!);
+    const body = await readJson(request, MAX_PROJECT_DOCUMENT_SYNC_BYTES);
+    const validation = validateProjectDocumentSyncRequest(body, pathProjectId);
+    if (!isProjectDocumentSyncValidationSuccess(validation)) {
+      respondJson(response, 400, { error: { code: 'REQUEST_INVALID' } });
+      return;
+    }
+    const result = await options.controlPlane.writeProjectDocument(
+      actor,
+      {
+        projectId: pathProjectId,
+        ownerId: actor.id,
+        revisionId: validation.envelope.revisionId,
+        document: validation.envelope.document,
+      },
+      validation.envelope.baseRevisionId,
+    );
+    if (result.kind === 'stored') {
+      respondJson(response, 200, { data: { projectId: result.projectId, revisionId: result.revisionId } });
+      return;
+    }
+    if (result.kind === 'not-found' || result.kind === 'owner-denied') {
+      respondJson(response, 404, { error: { code: 'PROJECT_NOT_FOUND' } });
+      return;
+    }
+    if (result.kind === 'revision-conflict') {
+      respondJson(response, 409, { error: { code: 'DOCUMENT_REVISION_CONFLICT' } });
+      return;
+    }
+    if (result.kind === 'invalid-document') {
+      respondJson(response, 400, { error: { code: 'REQUEST_INVALID' } });
+      return;
+    }
+    if (result.kind === 'unavailable') {
+      respondJson(response, 503, { error: { code: 'PROJECT_DOCUMENT_STORE_UNAVAILABLE' } });
+      return;
+    }
+    respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
     return;
   }
 
@@ -1954,15 +2003,19 @@ function respondError(response: ServerResponse, error: unknown): void {
         ? 401
         : error.code === 'PROVIDER_BUSY'
           ? 429
-          : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
+          : error.code === 'PROVIDER_OPERATION_NOT_FOUND' || error.code === 'PROJECT_NOT_FOUND'
             ? 404
             : error.code === 'REQUEST_INVALID'
               ? 400
-              : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
+              : error.code === 'PROVIDER_UNAVAILABLE' ||
+                error.code === 'PROVIDER_FAILED' ||
+                error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
                 ? 503
-                : error.code.startsWith('PAIRING_')
-                  ? 403
-                  : 409;
+                : error.code === 'DOCUMENT_REVISION_CONFLICT'
+                  ? 409
+                  : error.code.startsWith('PAIRING_')
+                    ? 403
+                    : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }
