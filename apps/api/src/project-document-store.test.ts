@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
+import type {
   ProjectDocumentRecord,
   ProjectDocumentReadOutcomeNotFound,
   ProjectDocumentReadOutcomeReady,
@@ -19,12 +19,14 @@ import {
   ProjectDocumentWriteOutcomeUnavailable,
   ProjectId,
   OwnerId,
+  ProjectOwnerLookup,
+} from './project-document-store.js';
+import {
   validateProjectDocumentRecord,
   isValidProjectDocumentRecord,
   InMemoryProjectDocumentStore,
   UnavailableProjectDocumentStore,
   INITIAL_REVISION,
-  ProjectOwnerLookup,
 } from './project-document-store.js';
 import type { ProjectRevisionId, JoyProjectV1 } from '@joy-media/project-schema';
 
@@ -114,8 +116,12 @@ describe('validateProjectDocumentRecord', () => {
   });
 
   it('fails closed on empty projectId', () => {
-    const record = validRecord();
-    record.projectId = '' as ProjectId;
+    const record: ProjectDocumentRecord = {
+      projectId: '' as ProjectId,
+      ownerId: VALID_OWNER_ID,
+      revisionId: VALID_REVISION_ID,
+      document: VALID_DOCUMENT,
+    };
     const diagnostics = validateProjectDocumentRecord(record);
     expect(diagnostics).toContainEqual({
       code: 'PROJECT_DOCUMENT_INVALID_PROJECT_ID',
@@ -138,8 +144,12 @@ describe('validateProjectDocumentRecord', () => {
   });
 
   it('fails closed on empty ownerId', () => {
-    const record = validRecord();
-    record.ownerId = '' as OwnerId;
+    const record: ProjectDocumentRecord = {
+      projectId: VALID_PROJECT_ID,
+      ownerId: '' as OwnerId,
+      revisionId: VALID_REVISION_ID,
+      document: VALID_DOCUMENT,
+    };
     const diagnostics = validateProjectDocumentRecord(record);
     expect(diagnostics).toContainEqual({
       code: 'PROJECT_DOCUMENT_INVALID_OWNER_ID',
@@ -149,8 +159,12 @@ describe('validateProjectDocumentRecord', () => {
   });
 
   it('fails closed on empty revisionId', () => {
-    const record = validRecord();
-    record.revisionId = '' as ProjectRevisionId;
+    const record: ProjectDocumentRecord = {
+      projectId: VALID_PROJECT_ID,
+      ownerId: VALID_OWNER_ID,
+      revisionId: '' as ProjectRevisionId,
+      document: VALID_DOCUMENT,
+    };
     const diagnostics = validateProjectDocumentRecord(record);
     expect(diagnostics).toContainEqual({
       code: 'PROJECT_DOCUMENT_INVALID_REVISION_ID',
