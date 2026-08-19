@@ -32,7 +32,9 @@ import {
   type CreativeBriefInputResolverUnavailable,
   type CreativeBriefInputResolverStaleRevision,
 } from './creative-brief-input-resolver.js';
-import type { CreativeBriefInputV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
+import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
+import type { CreativeBriefInputV1, CreativeBriefRequestV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   INITIAL_REVISION,
@@ -1568,6 +1570,142 @@ describe('control-plane HTTP transport', () => {
         body: { error: { code: 'REVISION_MISMATCH' } },
       });
     });
+
+    it('executes injected creative brief runtime through HTTP route', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+
+      let runtimeCalled = false;
+      let receivedInput: CreativeBriefInputV1 | undefined;
+
+      const testRuntime: CreativeBriefRuntime = {
+        execute: async (input: CreativeBriefInputV1): Promise<AsyncCreativeBriefOutcome> => {
+          runtimeCalled = true;
+          receivedInput = input;
+          return {
+            category: 'ready',
+            brief: {
+              schemaVersion: 1,
+              snapshotRevisionId: 'rev-1',
+              projectId: 'test-project',
+              request: 'test brief',
+              interpretedGoal: { userIntent: 'test', inferredGoal: 'test', resolvedGoal: 'test', confidence: 'high' },
+              distinction: { facts: [], inferences: [] },
+              assumptions: [],
+              recommendations: [],
+              blockedBy: [],
+              requiresHumanDecision: [],
+              intelligence: {
+                brand: { projectId: 'test-project', revisionId: 'rev-1', hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [], brandCompleteness: 'none', missingComponents: [], evidence: [] },
+                scenes: [],
+                project: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+                rules: [],
+              },
+              warnings: [],
+              meta: { generatedAt: '2026-08-19T00:00:00.000Z', modelAdapter: 'test', processingTimeMs: 100 },
+            },
+            message: 'Generated brief',
+            retryable: false,
+            durationMs: 100,
+          };
+        },
+      };
+
+      const testResolver = createTestResolver({
+        snapshot: {
+          schemaVersion: 1,
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          capturedAt: '2026-08-17T00:00:00.000Z',
+          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          scenes: [],
+          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          assets: [],
+          capabilities: {},
+          warnings: [],
+          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+        },
+        brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+        sceneCoverages: [],
+        projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+        rules: [],
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+      });
+
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        testResolver,
+        testRuntime,
+      );
+
+      const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+      });
+
+      expect(runtimeCalled).toBe(true);
+      expect(receivedInput).toBeDefined();
+      expect(receivedInput!.request.request).toBe('test brief');
+      expect(response).toMatchObject({
+        status: 200,
+        body: { data: { request: 'test brief' } },
+      });
+    });
+
+    it('uses default unavailable runtime when none is injected', async () => {
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+
+      const testResolver = createTestResolver({
+        snapshot: {
+          schemaVersion: 1,
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          capturedAt: '2026-08-17T00:00:00.000Z',
+          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          scenes: [],
+          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          assets: [],
+          capabilities: {},
+          warnings: [],
+          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+        },
+        brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+        sceneCoverages: [],
+        projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+        rules: [],
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+      });
+
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        testResolver,
+      );
+
+      const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+      });
+
+      expect(response).toMatchObject({
+        status: 503,
+        body: { error: { code: 'RUNTIME_UNAVAILABLE', message: 'Creative brief runtime is not configured' } },
+      });
+    });
   });
 });
 
@@ -1578,6 +1716,7 @@ async function start(
   controlPlane: ControlPlane = new LocalControlPlane(),
   audioDenoise?: SpectralDenoiseService,
   creativeBriefInputResolver?: CreativeBriefInputResolver,
+  creativeBriefRuntime?: CreativeBriefRuntime,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -1587,6 +1726,7 @@ async function start(
     ...(mistral === undefined ? {} : { mistral }),
     ...(audioDenoise === undefined ? {} : { audioDenoise }),
     ...(creativeBriefInputResolver === undefined ? {} : { creativeBriefInputResolver }),
+    ...(creativeBriefRuntime === undefined ? {} : { creativeBriefRuntime }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
