@@ -462,6 +462,7 @@ async function route(
     }
 
     try {
+      console.warn(JSON.stringify({ event: 'creative-brief-stage', stage: 'resolver-start' }));
       // Step 4: Input resolver - resolve server-side canonical input
       const resolverRequest: CreativeBriefInputResolverRequest = {
         projectId: clientEnvelope.projectId,
@@ -474,6 +475,13 @@ async function route(
       };
       const resolverResult: CreativeBriefInputResolverResult =
         await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
+      console.warn(
+        JSON.stringify({
+          event: 'creative-brief-stage',
+          stage: 'resolver-end',
+          status: resolverResult.status,
+        }),
+      );
 
       // Handle resolver failures
       if (resolverResult.status === 'unavailable') {
@@ -500,6 +508,7 @@ async function route(
       // Step 5: Runtime with resolved input
       const runtimeAbort = createCreativeBriefRequestAbortController(request, response);
       try {
+        console.warn(JSON.stringify({ event: 'creative-brief-stage', stage: 'runtime-start' }));
         const runtimeContext: CreativeBriefRuntimeContext = {
           correlationId: randomUUID(),
           signal: runtimeAbort.controller.signal,
