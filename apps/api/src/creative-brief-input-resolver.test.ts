@@ -32,8 +32,12 @@ import type { S2IntelligenceResult } from './project-intelligence-service.js';
 // ============================================================================
 
 /** Helper to create a test context with an authenticated actor. */
-const createTestContext = (actor: Actor): CreativeBriefInputResolverContext => ({
+const createTestContext = (
+  actor: Actor,
+  controlPlaneProjectId: string = TEST_PROJECT_ID,
+): CreativeBriefInputResolverContext => ({
   actor,
+  controlPlaneProjectId,
 });
 
 // ============================================================================
@@ -829,8 +833,11 @@ function createTestRequestForCanonicalTests(
   };
 }
 
-function createTestContextForCanonicalTests(actor: Actor = TEST_ACTOR): CreativeBriefInputResolverContext {
-  return { actor };
+function createTestContextForCanonicalTests(
+  actor: Actor = TEST_ACTOR,
+  controlPlaneProjectId: string = TEST_PROJECT_ID,
+): CreativeBriefInputResolverContext {
+  return { actor, controlPlaneProjectId };
 }
 
 // Mock ControlPlaneReader that simulates readProjectDocument behavior
@@ -926,6 +933,33 @@ describe('CanonicalCreativeBriefInputResolver', () => {
 
       const request = createTestRequestForCanonicalTests();
       const context = createTestContextForCanonicalTests();
+
+      const result = await resolver.resolve(request, context);
+
+      expect(result.status).toBe('resolved');
+      if (result.status !== 'resolved') throw new Error('Expected resolved');
+      expect(result.input).toBeDefined();
+    });
+
+    it('should resolve when JoyProjectV1.id differs from control-plane project ID', async () => {
+      // Document is stored under control-plane project 'cp-project-1' but has editor-document ID 'editor-doc-123'
+      const controlPlaneProjectId = 'cp-project-1';
+      const editorDocumentId = 'editor-doc-123';
+      const controlPlane = new MockControlPlane();
+      const project = createMinimalJoyProjectV1ForCanonicalTests(editorDocumentId);
+      // Store under control-plane project ID
+      controlPlane.storeDocument(controlPlaneProjectId, TEST_REVISION_ID, project);
+
+      const resolver = new CanonicalCreativeBriefInputResolver({
+        controlPlane,
+        snapshotService: new ProjectSnapshotService(),
+        intelligenceService: new ProjectIntelligenceService(),
+      });
+
+      // Client envelope carries the editor-document ID
+      const request = createTestRequestForCanonicalTests(editorDocumentId, TEST_REVISION_ID);
+      // Context carries the control-plane project ID
+      const context = createTestContextForCanonicalTests(TEST_ACTOR, controlPlaneProjectId);
 
       const result = await resolver.resolve(request, context);
 
@@ -1118,11 +1152,13 @@ describe('CanonicalCreativeBriefInputResolver', () => {
       expect(result.message).toBe('Project document project ID does not match the request');
     });
 
-    it('should return unavailable when project.id does not match request.projectId', async () => {
+    it('should return unavailable when JoyProjectV1.id does not match request.projectId', async () => {
+      // Document is stored under control-plane project 'cp-project-1' with internal id 'different-doc-id'
+      // Request asks for 'test-project-id' which doesn't match the internal id
+      const controlPlaneProjectId = 'cp-project-1';
       const controlPlane = new MockControlPlane();
-      const project = createMinimalJoyProjectV1ForCanonicalTests('different-project-id');
-      // Store the project with matching record projectId but different internal id
-      controlPlane.storeDocument('different-project-id', TEST_REVISION_ID, project);
+      const project = createMinimalJoyProjectV1ForCanonicalTests('different-doc-id');
+      controlPlane.storeDocument(controlPlaneProjectId, TEST_REVISION_ID, project);
 
       const resolver = new CanonicalCreativeBriefInputResolver({
         controlPlane,
@@ -1130,14 +1166,17 @@ describe('CanonicalCreativeBriefInputResolver', () => {
         intelligenceService: new ProjectIntelligenceService(),
       });
 
-      // Request for TEST_PROJECT_ID but document has different-project-id
-      const request = createTestRequestForCanonicalTests();
-      const context = createTestContextForCanonicalTests();
+      // Request for TEST_PROJECT_ID but document has different-doc-id
+      const request = createTestRequestForCanonicalTests(TEST_PROJECT_ID, TEST_REVISION_ID);
+      const context = createTestContextForCanonicalTests(TEST_ACTOR, controlPlaneProjectId);
 
       const result = await resolver.resolve(request, context);
 
-      // This should fail at not-found level since the projectId doesn't match
-      expect(result.status).toBe('stale-revision');
+      // This should fail because project.id ('different-doc-id') doesn't match request.projectId ('test-project-id')
+      expect(result.status).toBe('unavailable');
+      if (result.status !== 'unavailable') throw new Error('Expected unavailable');
+      expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE');
+      expect(result.message).toBe('Project document project ID does not match the request');
     });
   });
 

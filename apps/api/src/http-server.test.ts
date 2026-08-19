@@ -1408,6 +1408,7 @@ describe('control-plane HTTP transport', () => {
 
       expect(receivedContext).toBeDefined();
       expect(receivedContext?.actor.id).toBe('owner');
+      expect(receivedContext?.controlPlaneProjectId).toBe('test-project');
     });
 
     it('verifies client envelope contains only projectId, snapshotRevisionId, and request', async () => {

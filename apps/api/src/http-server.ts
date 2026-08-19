@@ -440,6 +440,7 @@ async function route(
     };
     const resolverContext: CreativeBriefInputResolverContext = {
       actor,
+      controlPlaneProjectId: projectId,
     };
     const resolverResult: CreativeBriefInputResolverResult = await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
 

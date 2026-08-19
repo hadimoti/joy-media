@@ -42,12 +42,14 @@ export interface CreativeBriefInputResolverRequest {
 }
 
 /**
- * Server-only resolver context containing the authenticated actor.
+ * Server-only resolver context containing the authenticated actor and control-plane project ID.
  * This is NOT browser-controlled and is only available on the server side.
  */
 export interface CreativeBriefInputResolverContext {
   /** The authenticated actor for the current request. */
   readonly actor: Actor;
+  /** The control-plane project ID from the URL path. Used for authorization and storage lookup. */
+  readonly controlPlaneProjectId: string;
 }
 
 /**
@@ -179,10 +181,10 @@ export class CanonicalCreativeBriefInputResolver implements CreativeBriefInputRe
     request: CreativeBriefInputResolverRequest,
     context: CreativeBriefInputResolverContext,
   ): Promise<CreativeBriefInputResolverResult> {
-    // Read the project document from the control plane
+    // Read the project document from the control plane using the control-plane project ID
     const readResult = await this.controlPlane.readProjectDocument(
       context.actor,
-      request.projectId,
+      context.controlPlaneProjectId,
       request.snapshotRevisionId,
     );
 
@@ -227,8 +229,8 @@ export class CanonicalCreativeBriefInputResolver implements CreativeBriefInputRe
       };
     }
 
-    // Validate that the returned project ID matches the request
-    if (returnedProjectId !== request.projectId) {
+    // Validate that the returned project ID matches the control-plane project ID (storage/authorization)
+    if (returnedProjectId !== context.controlPlaneProjectId) {
       return {
         status: 'unavailable',
         code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',
@@ -247,7 +249,7 @@ export class CanonicalCreativeBriefInputResolver implements CreativeBriefInputRe
 
     const project = document;
 
-    // Ensure the project's internal ID matches the request
+    // Ensure the project's canonical editor-document ID matches the client envelope projectId
     if (project.id !== request.projectId) {
       return {
         status: 'unavailable',
