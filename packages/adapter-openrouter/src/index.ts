@@ -91,6 +91,7 @@ const OPENROUTER_INITIAL_FREE_MODEL_ID =
 const OPENROUTER_FREE_MODEL_IDS = [
   OPENROUTER_INITIAL_FREE_MODEL_ID,
   'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-nano-9b-v2:free',
 ] as const;
 
 // ============================================================================

@@ -53,6 +53,7 @@ export const CREATIVE_BRIEF_MODEL_ID =
 export const CREATIVE_BRIEF_FREE_MODEL_IDS = [
   CREATIVE_BRIEF_MODEL_ID,
   'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-nano-9b-v2:free',
 ] as const;
 
 /** Versioned disclosure accepted by the owner before remote processing. */
