@@ -2003,7 +2003,7 @@ function respondError(response: ServerResponse, error: unknown): void {
         ? 401
         : error.code === 'PROVIDER_BUSY'
           ? 429
-          : error.code === 'PROVIDER_OPERATION_NOT_FOUND' || error.code === 'PROJECT_NOT_FOUND'
+          : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
             ? 404
             : error.code === 'REQUEST_INVALID'
               ? 400
