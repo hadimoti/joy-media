@@ -84,10 +84,42 @@ export class CreativeBriefPanelRunnerError extends Error {
   readonly details: CreativeBriefRunnerError;
 
   constructor(details: CreativeBriefRunnerError) {
-    super(`Creative brief panel runner error: ${details.kind}`);
+    const cause = runnerErrorCause(details);
+    super(
+      cause === undefined
+        ? `Creative brief panel runner error: ${details.kind}`
+        : `Creative brief panel runner error: ${details.kind} (${cause})`,
+    );
     this.name = 'CreativeBriefPanelRunnerError';
     this.details = details;
   }
+}
+
+/**
+ * Return only a bounded, already-redacted nested error summary for display.
+ * API/provider adapters expose error codes and safe messages; unknown values
+ * are intentionally omitted rather than stringified into the UI.
+ */
+function runnerErrorCause(details: CreativeBriefRunnerError): string | undefined {
+  const nested =
+    details.kind === 'sync-failure' || details.kind === 'brief-failure'
+      ? details.error
+      : details.kind === 'stale'
+        ? details.message
+        : undefined;
+  if (typeof nested === 'string') return boundedErrorText(nested);
+  if (nested instanceof Error) return boundedErrorText(nested.message);
+  if (nested === null || typeof nested !== 'object') return undefined;
+  const record = nested as Record<string, unknown>;
+  const code = typeof record.code === 'string' ? record.code : undefined;
+  const message = typeof record.message === 'string' ? record.message : undefined;
+  if (code === undefined && message === undefined) return undefined;
+  return boundedErrorText(code === undefined ? message! : message === undefined ? code : `${code}: ${message}`);
+}
+
+function boundedErrorText(value: string): string | undefined {
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  return normalized === '' ? undefined : normalized.slice(0, 240);
 }
 
 /**
