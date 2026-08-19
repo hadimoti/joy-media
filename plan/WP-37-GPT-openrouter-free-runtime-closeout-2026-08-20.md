@@ -10,7 +10,7 @@
 
 ## Execution status (GPT-only, 2026-08-20)
 
-Completed locally in the canonical repository through commit `8fb1c83`:
+Completed locally in the canonical repository through commit `cc6e822`:
 
 - Pinned `nvidia/nemotron-3-nano-30b-a3b:free`, canonical secret reference, zero spend, singleton allowlist, 30-second timeout, and versioned consent identifier.
 - Confirmed the live unit name is `joy-media@api.service`; the startup credential source therefore targets `/run/credentials/joy-media@api.service/openrouter-api-key`.
@@ -18,11 +18,12 @@ Completed locally in the canonical repository through commit `8fb1c83`:
 - Added fixed-origin OpenRouter transport, startup-only systemd credential source, owner/project admission gate, circuit breaker, request abort propagation, and explicit browser disclosure.
 - Hardened runtime factory composition to remain unavailable for invalid or incomplete configuration.
 - Added guarded server composition that reads only six explicit non-secret runtime keys and remains unavailable when mode/config/credential is absent.
-- Verification: 402 focused tests pass across the final policy/runtime/HTTP/editor set; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings. The composition fixture was aligned with the pinned model and canonical secret reference in `8fb1c83`.
-- Read-only VPS preflight (`ssh sweden`): API/Postgres/nginx active; deployed repo clean at `0287946`; service unit `joy-media@api.service` runs as `joy-media`; `/etc/joy-media/api.env` is `0600 root:root` and has no Creative Brief runtime keys; systemd is v257 and supports encrypted credentials.
+- Added server-owned versioned consent columns; legacy boolean opt-ins without the current disclosure version now read as disabled, and enabling writes the current version plus acceptance time.
+- Verification: 460 focused tests pass across the final policy/runtime/HTTP/schema/control-plane/editor set; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings. The composition fixture was aligned with the pinned model and canonical secret reference in `8fb1c83`.
+- Read-only VPS preflight (`ssh sweden`): API/Postgres/nginx active; deployed repo clean at `0287946`; service unit `joy-media@api.service` runs as `joy-media`; `/etc/joy-media/api.env` is `0600 root:root` and has no Creative Brief runtime keys; systemd is v257 and supports encrypted credentials. Owner-approved Hermes `OPENROUTER_API_KEY` was copied without echoing into `/etc/credstore.encrypted/openrouter-api-key`; the service has not been restarted or enabled from it.
 - Repository-wide `pnpm check` remains red on the pre-existing editor-web typecheck backlog (panel runner/coordinator fixtures and related UI contracts); no unrelated cleanup was mixed into this work.
 
-Still intentionally not executed: production server wiring, VPS credential provisioning, deployment, provider canary, browser live canary, rollback rehearsal, and WP-37 closeout. Those require a separately approved operational step and a real owner-controlled OpenRouter credential; no key has been read or placed in this workspace.
+Still intentionally not executed: installation of the credential-loading drop-in on the live unit, immutable deployment, provider canary, browser live canary, rollback rehearsal, and WP-37 closeout. Runtime configuration remains disabled until those gates are reviewed.
 
 ---
 
