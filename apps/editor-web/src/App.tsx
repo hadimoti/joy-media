@@ -44,7 +44,7 @@ import type {
   ArtifactStore,
   ArtifactTransaction,
 } from '@joy-media/commands';
-import type { EditorContext } from '@joy-media/agent-tools';
+import type { CreativeBriefRequestV1, CreativeBriefV1, EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
@@ -52,6 +52,7 @@ import type {
   AssetRecordV1,
   AnimatablePropertyV1,
   JoyProjectV1,
+  ProjectRevisionId,
   SpikeProject,
   TransitionV1,
   VideoClip,
@@ -100,6 +101,9 @@ const MotionStudioShell = lazy(() =>
 );
 const EffectStudioShell = lazy(() =>
   import('./effect-studio/index.js').then((module) => ({ default: module.EffectStudioShell })),
+);
+const CreativeBriefPanel = lazy(() =>
+  import('./CreativeBriefPanel.js').then((module) => ({ default: module.CreativeBriefPanel })),
 );
 
 import {
@@ -210,6 +214,8 @@ import {
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
+import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
+import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
@@ -822,6 +828,9 @@ interface EditorPanelContextValue {
   readonly agentContext: EditorContext;
   readonly agentSettings: AgentSettings;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
+  readonly creativeBriefOptedIn: boolean;
+  readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
+  readonly onCreativeBriefOptIn: () => Promise<void>;
   readonly kiloCodeAttachedAssets: readonly KiloCodeAttachedAsset[];
   readonly attachKiloCodeAsset: (asset: KiloCodeAttachedAsset) => void;
   readonly detachKiloCodeAsset: (assetId: string) => void;
@@ -1010,6 +1019,7 @@ function EditorWorkspace({
   );
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
+  const [creativeBriefOptedIn, setCreativeBriefOptedIn] = useState(false);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
@@ -1322,6 +1332,49 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject],
   );
+  const creativeBriefRunner = useMemo(
+    () =>
+      createCreativeBriefPanelRunner({
+        binding: controlPlaneProject,
+        document: session.visualProject,
+        revisionId: session.projectRevisionId,
+        storage: window.localStorage,
+        syncProjectDocument: (controlPlaneProjectId, params) =>
+          mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
+        creativeBriefTransport: (controlPlaneProjectId, request) =>
+          mediaControlPlaneClient.createCreativeBrief(controlPlaneProjectId, request),
+        requestFactory: (
+          trimmedText: string,
+          projectId: string,
+          revisionId: ProjectRevisionId,
+        ): CreativeBriefRequestV1 => ({
+          projectId,
+          snapshotRevisionId: revisionId,
+          request: trimmedText,
+          scope: 'general',
+        }),
+        ownerKey: controlPlaneOwnerKey,
+      }),
+    [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
+  );
+  const onCreativeBriefOptIn = useCallback(async () => {
+    const result = await coordinateCreativeBriefOptIn(
+      controlPlaneProject,
+      true,
+      window.localStorage,
+      (controlPlaneProjectId, enabled, baseRevision) =>
+        mediaControlPlaneClient.setCreativeBriefOptIn(
+          controlPlaneProjectId,
+          enabled,
+          baseRevision,
+        ),
+      { ownerKey: controlPlaneOwnerKey },
+    );
+    if (result.kind !== 'success') {
+      throw new Error(`Creative Brief opt-in failed (${result.kind})`);
+    }
+    setCreativeBriefOptedIn(true);
+  }, [controlPlaneOwnerKey, controlPlaneProject]);
   const mediaResolver = useMemo(
     () =>
       new ProjectMediaResolver({
@@ -5666,6 +5719,18 @@ function EditorWorkspace({
         />
       );
     }
+    if (api.id === 'creative-brief') {
+      return (
+        <Suspense fallback={<PanelShell title="Creative Brief" iconUrl={undefined} />}>
+          <CreativeBriefPanel
+            revisionId={context.session.projectRevisionId}
+            optedIn={context.creativeBriefOptedIn}
+            onOptIn={context.onCreativeBriefOptIn}
+            runBrief={context.creativeBriefOptedIn ? context.creativeBriefRunner : undefined}
+          />
+        </Suspense>
+      );
+    }
     if (api.id === 'history') {
       return <HistoryPanel entries={context.historyEntries} onJumpTo={context.jumpToHistory} />;
     }
@@ -6277,6 +6342,9 @@ function EditorWorkspace({
           agentContext,
           agentSettings,
           agentPanelCommand,
+          creativeBriefOptedIn,
+          creativeBriefRunner,
+          onCreativeBriefOptIn,
           kiloCodeAttachedAssets,
           attachKiloCodeAsset,
           detachKiloCodeAsset,
