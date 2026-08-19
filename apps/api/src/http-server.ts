@@ -2119,7 +2119,9 @@ function createCreativeBriefRequestAbortController(
   const close = () => {
     if (!response.writableEnded) controller.abort();
   };
-  if (request.aborted || request.destroyed) controller.abort();
+  // `IncomingMessage.destroyed` is also true after a normal request body has
+  // been consumed, so it cannot distinguish a disconnect at this point.
+  if (request.aborted) controller.abort();
   request.once('aborted', abort);
   // IncomingMessage.close fires after a normal request body completes as well
   // as on disconnect. Observe the response instead so a completed request body
