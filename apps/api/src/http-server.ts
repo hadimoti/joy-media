@@ -2121,12 +2121,15 @@ function createCreativeBriefRequestAbortController(
   };
   if (request.aborted || request.destroyed) controller.abort();
   request.once('aborted', abort);
-  request.once('close', close);
+  // IncomingMessage.close fires after a normal request body completes as well
+  // as on disconnect. Observe the response instead so a completed request body
+  // does not cancel the runtime before it can produce its response.
+  response.once('close', close);
   return {
     controller,
     cleanup: () => {
       request.removeListener('aborted', abort);
-      request.removeListener('close', close);
+      response.removeListener('close', close);
     },
   };
 }
