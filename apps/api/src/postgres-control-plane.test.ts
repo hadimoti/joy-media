@@ -696,7 +696,8 @@ describe('PostgresControlPlane project document storage - writes', () => {
       'SELECT document_revision_id FROM projects WHERE id = $1',
       [projectId],
     );
-    expect(headResult.rows[0].document_revision_id).toBe(revisionId1);
+    expect(headResult.rows.length).toBeGreaterThan(0);
+    expect(headResult.rows[0]!.document_revision_id).toBe(revisionId1);
 
     // Verify document was stored
     const docResult = await pool.query<{ document: string }>(
@@ -704,9 +705,9 @@ describe('PostgresControlPlane project document storage - writes', () => {
       [projectId, revisionId1],
     );
     expect(docResult.rows.length).toBe(1);
-    const storedDoc = typeof docResult.rows[0].document === 'string'
-      ? JSON.parse(docResult.rows[0].document)
-      : docResult.rows[0].document;
+    const storedDoc = typeof docResult.rows[0]!.document === 'string'
+      ? JSON.parse(docResult.rows[0]!.document)
+      : docResult.rows[0]!.document;
     expect((storedDoc as any).title).toBe('Initial');
 
     await pool.end();
@@ -750,7 +751,8 @@ describe('PostgresControlPlane project document storage - writes', () => {
       'SELECT document_revision_id FROM projects WHERE id = $1',
       [projectId],
     );
-    expect(headResult.rows[0].document_revision_id).toBe(revisionId2);
+    expect(headResult.rows.length).toBeGreaterThan(0);
+    expect(headResult.rows[0]!.document_revision_id).toBe(revisionId2);
 
     // Verify both documents exist
     const docsResult = await pool.query<{ revision_id: string }>(
@@ -803,7 +805,7 @@ describe('PostgresControlPlane project document storage - writes', () => {
       [projectId],
     );
     expect(docsResult.rows.length).toBe(1);
-    expect(docsResult.rows[0].revision_id).toBe(revisionId1);
+    expect(docsResult.rows[0]!.revision_id).toBe(revisionId1);
 
     await pool.end();
   });
@@ -971,7 +973,7 @@ describe('PostgresControlPlane project document storage - writes', () => {
       [maliciousProjectId],
     );
     expect(projectResult.rows.length).toBe(1);
-    expect(projectResult.rows[0].id).toBe(maliciousProjectId);
+    expect(projectResult.rows[0]!.id).toBe(maliciousProjectId);
 
     await pool.end();
   });
@@ -1061,7 +1063,8 @@ describe('PostgresControlPlane project document storage - writes', () => {
       'SELECT document_revision_id FROM projects WHERE id = $1',
       [projectId],
     );
-    expect(headResult.rows[0].document_revision_id).toBe(revisionId1);
+    expect(headResult.rows.length).toBeGreaterThan(0);
+    expect(headResult.rows[0]!.document_revision_id).toBe(revisionId1);
 
     // Only one document should exist
     const docsResult = await pool.query<{ revision_id: string }>(
