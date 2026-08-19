@@ -52,7 +52,7 @@ export interface CreativeBriefPanelProps {
  * Errors transition to error state.
  * No action controls to execute/apply recommendations.
  */
-export function CreativeBriefPanel({ revisionId, runBrief, optedIn = true, onOptIn }: CreativeBriefPanelProps) {
+export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOptIn }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
   const [optInError, setOptInError] = useState<string | null>(null);

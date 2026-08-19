@@ -278,7 +278,7 @@ describe('CreativeBriefPanel', () => {
       expect(props.optedIn).toBe(false);
     });
 
-    it('accepts optedIn prop as undefined (defaults to true)', () => {
+  it('accepts optedIn prop as undefined (defaults to false)', () => {
       const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A };
       expect(props.optedIn).toBeUndefined();
     });
