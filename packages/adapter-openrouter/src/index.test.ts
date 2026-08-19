@@ -298,17 +298,38 @@ export function createValidInput(): any {
 }
 
 // Mock transport that can be configured to return different responses
+const DEFAULT_USAGE = {
+  prompt_tokens: 10,
+  completion_tokens: 20,
+  total_tokens: 30,
+  cost: 0,
+} as const;
+
 class ConfigurableMockTransport implements HttpPostTransport {
   #calls: Array<{ url: string; options: RequestInit }> = [];
   #responseFactory: (() => Promise<Response>) | null = null;
+  #autoUsage: boolean;
 
-  constructor(responseFactory?: () => Promise<Response>) {
+  constructor(responseFactory?: () => Promise<Response>, autoUsage = true) {
     this.#responseFactory = responseFactory ?? (() => Promise.resolve(new Response('{}', { status: 200 })));
+    this.#autoUsage = autoUsage;
   }
 
   async post(url: string, options: RequestInit): Promise<Response> {
     this.#calls.push({ url, options });
-    return this.#responseFactory!();
+    const response = await this.#responseFactory!();
+    if (!this.#autoUsage || !response.ok) return response;
+    const body = await response.text();
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      if (parsed.usage === undefined) {
+        parsed.usage = DEFAULT_USAGE;
+        return new Response(JSON.stringify(parsed), { status: response.status });
+      }
+    } catch {
+      // Preserve malformed bodies for decoder tests.
+    }
+    return new Response(body, { status: response.status });
   }
 
   getCallCount(): number {
@@ -1153,7 +1174,11 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   it('normal completion within deadline returns ready', async () => {
     const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = createDelayedTransport(5, new Response(
-      JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free', choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
+      JSON.stringify({
+        model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        usage: DEFAULT_USAGE,
+        choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+      }),
       { status: 200 },
     ));
     const adapter = createOpenRouterCreativeAdapter({
@@ -2184,5 +2209,132 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
     expect(JSON.stringify(errorEvent)).not.toContain('sk-');
     expect(JSON.stringify(errorEvent)).not.toContain('choices');
     expect(JSON.stringify(errorEvent)).not.toContain('content');
+  });
+});
+
+describe('OpenRouterCreativeAdapter - free response accounting', () => {
+  function createAccountingAdapter(transport: HttpPostTransport) {
+    return createOpenRouterCreativeAdapter({
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
+      secretResolver: new MockSecretResolver({
+        'joy-media/openrouter/creative-brief/v1': 'sk-test-key',
+      }),
+      transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
+    });
+  }
+
+  it('rejects a successful response without explicit usage accounting', async () => {
+    const transport = new ConfigurableMockTransport(
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+              choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      false,
+    );
+
+    const result = await createAccountingAdapter(transport).createBrief(
+      createValidInput(),
+      MOCK_OPTIONS,
+    );
+
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_USAGE_MISSING');
+    expect(transport.getCallCount()).toBe(1);
+  });
+
+  it('rejects a successful response with non-zero provider cost', async () => {
+    const transport = new ConfigurableMockTransport(
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+              usage: { ...DEFAULT_USAGE, cost: 0.000001 },
+              choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      false,
+    );
+
+    const result = await createAccountingAdapter(transport).createBrief(
+      createValidInput(),
+      MOCK_OPTIONS,
+    );
+
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_NONZERO_PROVIDER_COST');
+  });
+
+  it('rejects malformed token usage accounting', async () => {
+    const transport = new ConfigurableMockTransport(
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+              usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 99, cost: 0 },
+              choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      false,
+    );
+
+    const result = await createAccountingAdapter(transport).createBrief(
+      createValidInput(),
+      MOCK_OPTIONS,
+    );
+
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_USAGE_INVALID');
+  });
+
+  it('rejects response bodies above the bounded accounting limit', async () => {
+    const transport = new ConfigurableMockTransport(
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+              usage: DEFAULT_USAGE,
+              choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
+              padding: 'x'.repeat(300_000),
+            }),
+            { status: 200 },
+          ),
+        ),
+      false,
+    );
+
+    const result = await createAccountingAdapter(transport).createBrief(
+      createValidInput(),
+      MOCK_OPTIONS,
+    );
+
+    expect(result.category).toBe('provider-failed');
+    expect(result.errorCode).toBe('OPENROUTER_RESPONSE_TOO_LARGE');
+  });
+
+  it('requests provider routing without paid fallback', async () => {
+    const transport = new ConfigurableMockTransport();
+    await createAccountingAdapter(transport).createBrief(createValidInput(), MOCK_OPTIONS);
+
+    const body = JSON.parse(transport.getLastCall()!.options.body as string) as Record<string, unknown>;
+    expect(body.provider).toEqual({ allow_fallbacks: false });
+    expect(body).not.toHaveProperty('models');
+    expect(body).not.toHaveProperty('route');
   });
 });

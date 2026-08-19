@@ -446,11 +446,84 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         };
       }
 
-      // Parse and decode the response using the existing decoder
-      const responseBody = await response.json();
+      // Bound response handling before parsing so a provider cannot force an
+      // unbounded allocation through the injected transport.
+      const responseText = await response.text();
+      const responseBytes = new TextEncoder().encode(responseText).byteLength;
+      if (responseBytes > MAX_RESPONSE_BYTES) {
+        if (options.auditSink !== undefined) {
+          options.auditSink.emit({
+            correlationId: options.correlationId,
+            adapterName: this.adapterName,
+            eventType: 'error',
+            status: 'provider-failed',
+            durationMs,
+            errorCode: 'OPENROUTER_RESPONSE_TOO_LARGE',
+          });
+        }
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_RESPONSE_TOO_LARGE',
+          message: 'OpenRouter response exceeded the bounded response limit',
+          retryable: false,
+          durationMs,
+        };
+      }
+
+      let responseBody: unknown;
+      try {
+        responseBody = JSON.parse(responseText);
+      } catch {
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_PROVIDER_ERROR',
+          message: 'OpenRouter provider returned an invalid response body',
+          retryable: true,
+          durationMs,
+        };
+      }
+
+      if (typeof responseBody !== 'object' || responseBody === null) {
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_PROVIDER_ERROR',
+          message: 'OpenRouter provider returned an invalid response envelope',
+          retryable: true,
+          durationMs,
+        };
+      }
+
+      const typedResponseBody = responseBody as OpenRouterResponse;
+
+      if (typedResponseBody.usage === undefined) {
+        return {
+          category: 'provider-failed',
+          errorCode: 'OPENROUTER_USAGE_MISSING',
+          message: 'OpenRouter response did not include usage accounting',
+          retryable: false,
+          durationMs,
+        };
+      }
+
+      if (!isValidUsage(typedResponseBody.usage)) {
+        const errorCode =
+          typeof typedResponseBody.usage.cost === 'number' &&
+          typedResponseBody.usage.cost !== 0
+          ? 'OPENROUTER_NONZERO_PROVIDER_COST'
+          : 'OPENROUTER_USAGE_INVALID';
+        return {
+          category: 'provider-failed',
+          errorCode,
+          message: errorCode === 'OPENROUTER_NONZERO_PROVIDER_COST'
+            ? 'OpenRouter response reported non-zero provider cost'
+            : 'OpenRouter response usage accounting was invalid',
+          retryable: false,
+          durationMs,
+        };
+      }
 
       // Verify provider-reported model before accepting response (WP-37 S4-F10-D3-D)
-      const reportedModel = responseBody.model;
+      const reportedModel = typedResponseBody.model;
       if (
         typeof reportedModel !== 'string' ||
         reportedModel.length === 0 ||
@@ -477,7 +550,7 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         };
       }
 
-      const decodeOutcome = decodeOpenRouterResponse(responseBody);
+      const decodeOutcome = decodeOpenRouterResponse(typedResponseBody);
 
       // Handle decode failures
       if (decodeOutcome.category !== 'ready') {
@@ -698,6 +771,8 @@ interface OpenRouterRequest {
   readonly response_format?: { readonly type: 'json_object' };
   readonly temperature?: number;
   readonly max_tokens?: number;
+  /** Disable provider fallback so a free-only request cannot silently route to paid capacity. */
+  readonly provider: { readonly allow_fallbacks: false };
 }
 
 /**
@@ -868,6 +943,9 @@ function buildOpenRouterRequest(
     // Conservative settings for deterministic output
     temperature: 0.0,
     max_tokens: MAX_OUTPUT_TOKENS,
+    provider: {
+      allow_fallbacks: false,
+    },
   };
 
   return {
@@ -904,6 +982,12 @@ import { isModelAdapterOutputV1 } from '@joy-media/agent-tools';
  */
 interface OpenRouterResponse {
   readonly model?: string;
+  readonly usage?: {
+    readonly prompt_tokens?: number;
+    readonly completion_tokens?: number;
+    readonly total_tokens?: number;
+    readonly cost?: number;
+  };
   readonly choices?: readonly {
     readonly message?: {
       readonly role?: string;
@@ -925,6 +1009,31 @@ type OpenRouterDecoderOutcome =
   | { category: 'ready'; result: unknown } // result is validated ModelAdapterOutputV1
   | { category: 'invalid-output'; errorCode: string; message: string; retryable: boolean }
   | { category: 'provider-failed'; errorCode: string; message: string; retryable: boolean };
+
+const MAX_RESPONSE_BYTES = 256 * 1024;
+
+function isValidUsage(usage: OpenRouterResponse['usage']): boolean {
+  if (usage === undefined) return false;
+  const { prompt_tokens, completion_tokens, total_tokens, cost } = usage;
+  if (
+    typeof prompt_tokens !== 'number' ||
+    typeof completion_tokens !== 'number' ||
+    typeof total_tokens !== 'number'
+  ) {
+    return false;
+  }
+  return (
+    Number.isSafeInteger(prompt_tokens) &&
+    prompt_tokens >= 0 &&
+    Number.isSafeInteger(completion_tokens) &&
+    completion_tokens >= 0 &&
+    Number.isSafeInteger(total_tokens) &&
+    total_tokens === prompt_tokens + completion_tokens &&
+    typeof cost === 'number' &&
+    Number.isFinite(cost) &&
+    cost === 0
+  );
+}
 
 /**
  * Safe JSON parsing with redaction of error details.
