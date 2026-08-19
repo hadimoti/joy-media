@@ -105,6 +105,17 @@ export function syncProjectDocumentBinding(
     });
   }
 
+  // Repeating a request for the same immutable revision is a safe no-op.
+  // This matters after a client disconnects after the server committed the
+  // document but before the Creative Brief response was received.
+  if (binding.documentRevisionId === revisionId) {
+    return Promise.resolve({
+      kind: 'success',
+      projectId: binding.controlPlaneProjectId,
+      revisionId,
+    });
+  }
+
   const baseRevisionId: ProjectRevisionId = binding.documentRevisionId ?? '';
 
   return syncProjectDocument(binding.controlPlaneProjectId, {

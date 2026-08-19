@@ -86,6 +86,30 @@ describe('project-document-sync', () => {
     expect(persisted?.documentRevisionId).toBe('cas-rev-abc123');
   });
 
+  it('treats an already-persisted revision as an idempotent sync', async () => {
+    const storage = memoryStorage();
+    const bindingWithRevision: ControlPlaneProjectBinding = {
+      ...binding,
+      documentRevisionId: revisionId,
+    };
+    const syncProjectDocument: SyncProjectDocument = vi.fn();
+
+    await expect(
+      syncProjectDocumentBinding(
+        bindingWithRevision,
+        document,
+        revisionId,
+        storage,
+        syncProjectDocument,
+      ),
+    ).resolves.toEqual({
+      kind: 'success',
+      projectId: binding.controlPlaneProjectId,
+      revisionId,
+    });
+    expect(syncProjectDocument).not.toHaveBeenCalled();
+  });
+
   it('performs subsequent CAS sync with previous documentRevisionId as base', async () => {
     const storage = memoryStorage();
     const bindingWithRevision: ControlPlaneProjectBinding = {
