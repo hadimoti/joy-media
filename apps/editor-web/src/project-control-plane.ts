@@ -11,6 +11,12 @@ export interface ControlPlaneProjectBinding {
   readonly title: string;
   /** Last server lifecycle revision observed for this owner-scoped binding. */
   readonly revision?: number;
+  /**
+   * Server-side CAS head for the persisted JoyProjectV1 document.
+   * Distinct from the lifecycle metadata `revision`; this tracks the
+   * document's content version in the server's CAS storage.
+   */
+  readonly documentRevisionId?: string;
   /** Server trash timestamp, when the bound project is in Trash. */
   readonly trashedAt?: number;
 }
@@ -171,6 +177,7 @@ function isDatabaseV2(value: unknown): value is BindingDatabaseV2 {
           isNonBlank(binding.controlPlaneProjectId) &&
           isNonBlank(binding.title) &&
           (binding.revision === undefined || isNonNegativeInteger(binding.revision)) &&
+          (binding.documentRevisionId === undefined || isNonBlank(binding.documentRevisionId)) &&
           (binding.trashedAt === undefined || isNonNegativeInteger(binding.trashedAt)),
       ),
   );
@@ -183,7 +190,8 @@ function isDatabaseV1(value: unknown): value is BindingDatabaseV1 {
       isRecord(binding) &&
       binding.editorProjectId === editorProjectId &&
       isNonBlank(binding.controlPlaneProjectId) &&
-      isNonBlank(binding.title),
+      isNonBlank(binding.title) &&
+      (binding.documentRevisionId === undefined || isNonBlank(binding.documentRevisionId)),
   );
 }
 
