@@ -26,6 +26,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   workflows: 'Workflows',
   plugins: 'Plugins',
   templates: 'Library',
+  'creative-brief': 'Creative Brief',
 };
 
 /**

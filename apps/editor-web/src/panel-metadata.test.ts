@@ -29,6 +29,7 @@ describe('panel metadata registry', () => {
       'Joy Code',
       'Workflows',
       'Jobs',
+      'Creative Brief',
     ]);
   });
 });
