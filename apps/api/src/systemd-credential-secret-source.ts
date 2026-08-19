@@ -6,7 +6,7 @@ export const OPENROUTER_SYSTEMD_CREDENTIAL_ID = 'openrouter-api-key' as const;
 
 /** Default per-service credential directory used by the JOY Media API unit. */
 export const DEFAULT_SYSTEMD_CREDENTIAL_DIRECTORY =
-  '/run/credentials/joy-media-api' as const;
+  '/run/credentials/joy-media@api.service' as const;
 
 type ReadCredentialFile = (path: string, encoding: 'utf8') => string;
 

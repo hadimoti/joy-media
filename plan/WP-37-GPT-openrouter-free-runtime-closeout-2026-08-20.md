@@ -13,6 +13,7 @@
 Completed locally in the canonical repository through commit `dde84ea`:
 
 - Pinned `nvidia/nemotron-3-nano-30b-a3b:free`, canonical secret reference, zero spend, singleton allowlist, 30-second timeout, and versioned consent identifier.
+- Confirmed the live unit name is `joy-media@api.service`; the startup credential source therefore targets `/run/credentials/joy-media@api.service/openrouter-api-key`.
 - Enforced adapter pre-egress policy, bounded 256 KiB responses, exact model receipt, zero-cost usage receipt, and disabled provider fallback.
 - Added fixed-origin OpenRouter transport, startup-only systemd credential source, owner/project admission gate, circuit breaker, request abort propagation, and explicit browser disclosure.
 - Hardened runtime factory composition to remain unavailable for invalid or incomplete configuration.
