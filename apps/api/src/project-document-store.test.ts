@@ -100,19 +100,19 @@ describe('validateProjectDocumentRecord', () => {
   it('fails closed on null input', () => {
     const diagnostics = validateProjectDocumentRecord(null);
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
+    expect(diagnostics[0]!.code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
   });
 
   it('fails closed on undefined input', () => {
     const diagnostics = validateProjectDocumentRecord(undefined);
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
+    expect(diagnostics[0]!.code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
   });
 
   it('fails closed on array input', () => {
     const diagnostics = validateProjectDocumentRecord([]);
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
+    expect(diagnostics[0]!.code).toBe('PROJECT_DOCUMENT_RECORD_NOT_OBJECT');
   });
 
   it('fails closed on empty projectId', () => {
@@ -365,7 +365,7 @@ describe('Write Outcome shapes', () => {
     };
     expect(outcome.kind).toBe('invalid-document');
     expect(outcome.diagnostics).toHaveLength(1);
-    expect(outcome.diagnostics[0].code).toBe('PROJECT_SCHEMA_V1_VERSION');
+    expect(outcome.diagnostics[0]!.code).toBe('PROJECT_SCHEMA_V1_VERSION');
   });
 
   it('ProjectDocumentReadOutcomeUnavailable has correct shape', () => {
@@ -923,23 +923,26 @@ describe('UnavailableProjectDocumentStore', () => {
     const store = new UnavailableProjectDocumentStore();
     const result = store.readDocument(TEST_OWNER, TEST_PROJECT, TEST_REVISION);
     expect(result.kind).toBe('unavailable');
-    expect(result.message).toBe('Project document store is unavailable');
+    const u = result as ProjectDocumentReadOutcomeUnavailable;
+    expect(u.message).toBe('Project document store is unavailable');
   });
 
   it('readDocument returns unavailable without projectId echo', () => {
     const store = new UnavailableProjectDocumentStore();
     const result = store.readDocument(TEST_OWNER, 'malicious-project-id', TEST_REVISION);
     expect(result.kind).toBe('unavailable');
-    expect(result.message).not.toContain('malicious-project-id');
-    expect(result.message).not.toContain(TEST_OWNER);
-    expect(result.message).not.toContain(TEST_REVISION);
+    const u = result as ProjectDocumentReadOutcomeUnavailable;
+    expect(u.message).not.toContain('malicious-project-id');
+    expect(u.message).not.toContain(TEST_OWNER);
+    expect(u.message).not.toContain(TEST_REVISION);
   });
 
   it('readDocument returns unavailable without callerId echo', () => {
     const store = new UnavailableProjectDocumentStore();
     const result = store.readDocument('malicious-caller-id', TEST_PROJECT);
     expect(result.kind).toBe('unavailable');
-    expect(result.message).not.toContain('malicious-caller-id');
+    const u = result as ProjectDocumentReadOutcomeUnavailable;
+    expect(u.message).not.toContain('malicious-caller-id');
   });
 
   it('writeDocument returns unavailable outcome', () => {
@@ -947,7 +950,8 @@ describe('UnavailableProjectDocumentStore', () => {
     const record = validRecord();
     const result = store.writeDocument(TEST_OWNER, record, INITIAL_REVISION);
     expect(result.kind).toBe('unavailable');
-    expect(result.message).toBe('Project document store is unavailable');
+    const u = result as ProjectDocumentWriteOutcomeUnavailable;
+    expect(u.message).toBe('Project document store is unavailable');
   });
 
   it('writeDocument returns unavailable without record echo', () => {
@@ -961,11 +965,12 @@ describe('UnavailableProjectDocumentStore', () => {
     };
     const result = store.writeDocument('secret-caller-id', record, 'secret-base-rev');
     expect(result.kind).toBe('unavailable');
-    expect(result.message).not.toContain('secret-project-id');
-    expect(result.message).not.toContain('secret-owner-id');
-    expect(result.message).not.toContain('secret-revision-id');
-    expect(result.message).not.toContain('secret-caller-id');
-    expect(result.message).not.toContain('secret-base-rev');
+    const u = result as ProjectDocumentWriteOutcomeUnavailable;
+    expect(u.message).not.toContain('secret-project-id');
+    expect(u.message).not.toContain('secret-owner-id');
+    expect(u.message).not.toContain('secret-revision-id');
+    expect(u.message).not.toContain('secret-caller-id');
+    expect(u.message).not.toContain('secret-base-rev');
   });
 
   it('listRevisions returns empty array', () => {
