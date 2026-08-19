@@ -68,7 +68,7 @@ const mockCreativeBriefInput: CreativeBriefInputV1 = {
     evidence: [],
   },
   rules: [],
-  request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test brief', scope: 'video' },
+  request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test brief', scope: 'general' },
 };
 
 const mockRuntimeContext: CreativeBriefRuntimeContext = {
