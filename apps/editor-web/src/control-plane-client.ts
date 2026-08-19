@@ -560,6 +560,13 @@ export class BrowserControlPlaneClient {
       },
     );
   }
+  async getCreativeBriefOptIn(
+    projectId: string,
+  ): Promise<{ readonly creativeBriefOptIn: boolean; readonly revision: number }> {
+    return this.get(
+      `/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`,
+    );
+  }
   async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
   }

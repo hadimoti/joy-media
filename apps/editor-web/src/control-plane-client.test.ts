@@ -1061,6 +1061,117 @@ describe('BrowserControlPlaneClient', () => {
       ]);
     });
   });
+
+  describe('getCreativeBriefOptIn', () => {
+    it('sends GET request to the correct endpoint with URL-encoded projectId', async () => {
+      const requests: Array<{ readonly url: string; readonly method: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+        });
+        return json(200, { data: { creativeBriefOptIn: true, revision: 1 } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.getCreativeBriefOptIn('project-1');
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project-1/creative-brief-opt-in',
+          method: 'GET',
+        },
+      ]);
+    });
+
+    it('includes authorization header', async () => {
+      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const authorization = new Headers(init?.headers).get('authorization');
+        requests.push({ url, ...(authorization === null ? {} : { authorization }) });
+        return json(200, { data: { creativeBriefOptIn: true, revision: 1 } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.getCreativeBriefOptIn('project-1');
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project-1/creative-brief-opt-in',
+          authorization: 'Bearer joy-session-token',
+        },
+      ]);
+    });
+
+    it('returns typed response with creativeBriefOptIn and revision', async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = async () =>
+        json(200, { data: { creativeBriefOptIn: true, revision: 5 } });
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const result = await client.getCreativeBriefOptIn('project-1');
+        expect(result).toEqual({ creativeBriefOptIn: true, revision: 5 });
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+
+    it('propagates API errors', async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = async () =>
+        json(404, { error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await expect(
+          client.getCreativeBriefOptIn('nonexistent'),
+        ).rejects.toThrow('PROJECT_NOT_FOUND: Project not found');
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+
+    it('URL-encodes special characters in projectId', async () => {
+      const requests: Array<{ readonly url: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        requests.push({ url: String(input) });
+        return json(200, { data: { creativeBriefOptIn: false, revision: 0 } });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.getCreativeBriefOptIn('project/with/slashes');
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project%2Fwith%2Fslashes/creative-brief-opt-in',
+        },
+      ]);
+    });
+  });
 });
 
 function json(status: number, value: unknown): Response {
