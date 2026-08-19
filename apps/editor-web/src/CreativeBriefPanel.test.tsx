@@ -85,7 +85,7 @@ describe('CreativeBriefPanel', () => {
   });
 
   it('accepts CreativeBriefPanelProps with runBrief - type check', () => {
-    const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision('rev-123', request);
+    const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision('rev-123', request);
     const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief };
     expect(props).toBeDefined();
     expect(typeof props.runBrief).toBe('function');
@@ -125,22 +125,22 @@ describe('CreativeBriefPanel', () => {
     expect(PERSIAN_BRIEF.interpretedGoal.userIntent).toBe(PERSIAN_REQUEST);
   });
 
-  it('runBrief callback receives string and returns CreativeBriefV1', () => {
-    const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision(REVISION_ID_A, request);
-    const result = runBrief('test');
+  it('runBrief callback receives string and returns CreativeBriefV1', async () => {
+    const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
+    const result = await runBrief('test');
     expect(result.schemaVersion).toBe(1);
     expect(result.snapshotRevisionId).toBe(REVISION_ID_A);
   });
 
-  it('runBrief returns brief with matching revision', () => {
-    const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision(REVISION_ID_A, request);
-    const result = runBrief('test request');
+  it('runBrief returns brief with matching revision', async () => {
+    const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
+    const result = await runBrief('test request');
     expect(result.snapshotRevisionId).toBe(REVISION_ID_A);
   });
 
-  it('runBrief can return brief with mismatched revision', () => {
-    const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision('different-rev', request);
-    const result = runBrief('test');
+  it('runBrief can return brief with mismatched revision', async () => {
+    const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision('different-rev', request);
+    const result = await runBrief('test');
     expect(result.snapshotRevisionId).toBe('different-rev');
     expect(result.snapshotRevisionId).not.toBe(REVISION_ID_A);
   });
@@ -163,7 +163,7 @@ describe('CreativeBriefPanel', () => {
     });
 
     it('panel with runBrief is valid', () => {
-      const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision(REVISION_ID_A, request);
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
       const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief };
       expect(props).toBeDefined();
       expect(typeof props.runBrief).toBe('function');
@@ -171,9 +171,9 @@ describe('CreativeBriefPanel', () => {
   });
 
   describe('successful injected read-only brief', () => {
-    it('runBrief produces valid CreativeBriefV1', () => {
-      const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision(REVISION_ID_A, request);
-      const result = runBrief('Improve pacing');
+    it('runBrief produces valid CreativeBriefV1', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
+      const result = await runBrief('Improve pacing');
       expect(result.schemaVersion).toBe(1);
       expect(result.snapshotRevisionId).toBe(REVISION_ID_A);
     });
@@ -202,24 +202,24 @@ describe('CreativeBriefPanel', () => {
   });
 
   describe('error/retry behavior', () => {
-    it('runBrief that throws produces error', () => {
-      const runBrief = (request: string): CreativeBriefV1 => {
+    it('runBrief that throws produces error', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => {
         throw new Error('Test error');
       };
-      expect(() => runBrief('test')).toThrow();
+      await expect(runBrief('test')).rejects.toThrow('Test error');
     });
 
-    it('runBrief with revision mismatch produces brief with different revision', () => {
-      const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision('different-rev', request);
-      const result = runBrief('test');
+    it('runBrief with revision mismatch produces brief with different revision', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision('different-rev', request);
+      const result = await runBrief('test');
       expect(result.snapshotRevisionId).not.toBe(REVISION_ID_A);
     });
   });
 
   describe('Persian request preservation', () => {
-    it('runBrief preserves Persian request text', () => {
-      const runBrief = (request: string): CreativeBriefV1 => PERSIAN_BRIEF;
-      const result = runBrief(PERSIAN_REQUEST);
+    it('runBrief preserves Persian request text', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => PERSIAN_BRIEF;
+      const result = await runBrief(PERSIAN_REQUEST);
       expect(result.request).toBe(PERSIAN_REQUEST);
     });
 
@@ -232,38 +232,96 @@ describe('CreativeBriefPanel', () => {
 
   describe('no Apply/Approve/Execute/Export controls', () => {
     it('CreativeBriefPanelProps has no Apply property', () => {
-      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: (r: string): CreativeBriefV1 => STATIC_BRIEF };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: async (r: string): Promise<CreativeBriefV1> => STATIC_BRIEF };
       expect((props as any).Apply).toBeUndefined();
     });
 
     it('CreativeBriefPanelProps has no Approve property', () => {
-      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: (r: string): CreativeBriefV1 => STATIC_BRIEF };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: async (r: string): Promise<CreativeBriefV1> => STATIC_BRIEF };
       expect((props as any).Approve).toBeUndefined();
     });
 
     it('CreativeBriefPanelProps has no Execute property', () => {
-      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: (r: string): CreativeBriefV1 => STATIC_BRIEF };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: async (r: string): Promise<CreativeBriefV1> => STATIC_BRIEF };
       expect((props as any).Execute).toBeUndefined();
     });
 
     it('CreativeBriefPanelProps has no Export property', () => {
-      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: (r: string): CreativeBriefV1 => STATIC_BRIEF };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: async (r: string): Promise<CreativeBriefV1> => STATIC_BRIEF };
       expect((props as any).Export).toBeUndefined();
     });
 
     it('CreativeBriefPanelProps has no Generate property', () => {
-      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: (r: string): CreativeBriefV1 => STATIC_BRIEF };
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A, runBrief: async (r: string): Promise<CreativeBriefV1> => STATIC_BRIEF };
       expect((props as any).Generate).toBeUndefined();
     });
 
-    it('runBrief callback only returns CreativeBriefV1, no commands or plans', () => {
-      const runBrief = (request: string): CreativeBriefV1 => makeBriefWithRevision(REVISION_ID_A, request);
-      const result = runBrief('test');
+    it('runBrief callback only returns CreativeBriefV1, no commands or plans', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => makeBriefWithRevision(REVISION_ID_A, request);
+      const result = await runBrief('test');
       expect(result.schemaVersion).toBe(1);
       expect((result as any).type).not.toBe('command');
       expect((result as any).type).not.toBe('approval');
       expect((result as any).type).not.toBe('job');
       expect((result as any).type).not.toBe('plan');
+    });
+  });
+
+  describe('async runBrief support', () => {
+    it('accepts async runBrief - type check', () => {
+      const runBrief: CreativeBriefPanelProps['runBrief'] = async (request: string): Promise<CreativeBriefV1> => {
+        return makeBriefWithRevision(REVISION_ID_A, request);
+      };
+      expect(runBrief).toBeDefined();
+      expect(typeof runBrief).toBe('function');
+    });
+
+    it('successful async resolution returns valid brief', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => {
+        return makeBriefWithRevision(REVISION_ID_A, request);
+      };
+      const result = await runBrief('Improve pacing');
+      expect(result.schemaVersion).toBe(1);
+      expect(result.snapshotRevisionId).toBe(REVISION_ID_A);
+    });
+
+    it('rejected async runner produces error state', async () => {
+      const runBrief = async (_request: string): Promise<CreativeBriefV1> => {
+        throw new Error('Async brief generation failed');
+      };
+      await expect(runBrief('test')).rejects.toThrow('Async brief generation failed');
+    });
+
+    it('async runner with revision mismatch after awaiting returns mismatched brief', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => {
+        return makeBriefWithRevision('different-rev', request);
+      };
+      const result = await runBrief('test');
+      expect(result.snapshotRevisionId).toBe('different-rev');
+      expect(result.snapshotRevisionId).not.toBe(REVISION_ID_A);
+    });
+
+    it('async retry preserves request text', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => {
+        return makeBriefWithRevision(REVISION_ID_A, request);
+      };
+      const request = 'Retry request';
+      const result = await runBrief(request);
+      expect(result.request).toBe(request);
+    });
+
+    it('no-runner unavailable state is type-safe', () => {
+      const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A };
+      expect(props.runBrief).toBeUndefined();
+    });
+
+    it('async runner can return brief with Persian text', async () => {
+      const runBrief = async (request: string): Promise<CreativeBriefV1> => {
+        return PERSIAN_BRIEF;
+      };
+      const result = await runBrief(PERSIAN_REQUEST);
+      expect(result.request).toBe(PERSIAN_REQUEST);
+      expect(result.interpretedGoal.userIntent).toBe(PERSIAN_REQUEST);
     });
   });
 });

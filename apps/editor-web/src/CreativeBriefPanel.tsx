@@ -25,14 +25,14 @@ import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 
 /**
  * Props for CreativeBriefPanel.
- * Accepts only revision ID and an optional synchronous brief runner.
+ * Accepts only revision ID and an optional async brief runner.
  * No raw project object, model adapter, provider, command bus, or persistence dependency.
  */
 export interface CreativeBriefPanelProps {
   /** Current project revision ID. */
   readonly revisionId: ProjectRevisionId;
-  /** Optional synchronous function to run a brief request and return a CreativeBriefV1. */
-  readonly runBrief?: (request: string) => CreativeBriefV1;
+  /** Optional async function to run a brief request and return a Promise of CreativeBriefV1. */
+  readonly runBrief?: (request: string) => Promise<CreativeBriefV1>;
 }
 
 /**
@@ -73,7 +73,7 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
   const displayedRequest = storedRequest ?? requestText;
 
   // Handle "Improve project" action
-  const handleImprove = useCallback(() => {
+  const handleImprove = useCallback(async () => {
     const request = requestText.trim();
     if (!request) {
       return;
@@ -96,7 +96,7 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
     });
 
     try {
-      const brief = runBrief(request);
+      const brief = await runBrief(request);
       // Verify the brief matches the requested revision
       if (brief.snapshotRevisionId === revisionId) {
         dispatch({
@@ -111,9 +111,10 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
         });
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       dispatch({
         type: 'collect-error',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
       });
     }
   }, [requestText, revisionId, runBrief]);
@@ -125,7 +126,7 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
   }, []);
 
   // Handle retry
-  const handleRetry = useCallback(() => {
+  const handleRetry = useCallback(async () => {
     const request = displayedRequest || requestText;
     if (!request.trim()) {
       return;
@@ -147,7 +148,7 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
     });
 
     try {
-      const brief = runBrief(request);
+      const brief = await runBrief(request);
       if (brief.snapshotRevisionId === revisionId) {
         dispatch({
           type: 'collect-success',
@@ -161,9 +162,10 @@ export function CreativeBriefPanel({ revisionId, runBrief }: CreativeBriefPanelP
         });
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       dispatch({
         type: 'collect-error',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
       });
     }
   }, [displayedRequest, requestText, revisionId, runBrief]);
