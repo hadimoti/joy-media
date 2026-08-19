@@ -1,3 +1,7 @@
+import { CREATIVE_BRIEF_SECRET_REFERENCE } from './creative-brief-secret-resolver.js';
+
+export { CREATIVE_BRIEF_SECRET_REFERENCE } from './creative-brief-secret-resolver.js';
+
 /**
  * Creative Brief Runtime Configuration Parser - WP-37 S4-F9
  *
@@ -24,9 +28,9 @@ export interface OpenRouterConfig {
   readonly mode: 'openrouter';
   /** OpenRouter model ID to use. */
   readonly modelId: string;
-  /** Request timeout in milliseconds (1000-300000). */
+  /** Request timeout in milliseconds (1000-30000). */
   readonly timeoutMs: number;
-  /** Maximum spend limit in USD cents (0-10000). 0 means free-only / zero payable spend policy. */
+  /** Maximum spend limit in USD cents. Only 0 (free-only) is accepted. */
   readonly spendLimitUsdCents: number;
   /** Opaque name reference to the secret (e.g., "openrouter-api-key"). */
   readonly secretRef: string;
@@ -40,6 +44,10 @@ export interface OpenRouterConfig {
 export interface DisabledConfig {
   readonly mode: 'disabled';
 }
+
+/** Pinned initial free model; dynamic routers are not a product runtime policy. */
+export const CREATIVE_BRIEF_MODEL_ID =
+  'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 
 /**
  * Parsed Creative Brief runtime configuration.
@@ -72,9 +80,8 @@ const VALID_KEYS: ReadonlySet<string> = new Set([
 
 // Validation bounds
 const TIMEOUT_MIN = 1000;
-const TIMEOUT_MAX = 300000;
-const SPEND_LIMIT_MIN = 0;
-const SPEND_LIMIT_MAX = 10000;
+const TIMEOUT_MAX = 30000;
+const SPEND_LIMIT = 0;
 
 // ============================================================================
 // Parser
@@ -90,13 +97,13 @@ const SPEND_LIMIT_MAX = 10000;
  * ```ts
  * const config = parseCreativeBriefRuntimeConfig({
  *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE: 'openrouter',
- *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID: 'openrouter/mistral-large',
- *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS: '60000',
- *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS: '500',
- *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF: 'my-openrouter-key',
- *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS: 'openrouter/mistral-large,openrouter/llama3-70b',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID: 'nvidia/nemotron-3-nano-30b-a3b:free',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS: '30000',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS: '0',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF: 'joy-media/openrouter/creative-brief/v1',
+ *   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS: 'nvidia/nemotron-3-nano-30b-a3b:free',
  * });
- * // => { mode: 'openrouter', modelId: 'openrouter/mistral-large', timeoutMs: 60000, spendLimitUsdCents: 500, secretRef: 'my-openrouter-key', allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'] }
+ * // => { mode: 'openrouter', modelId: 'nvidia/nemotron-3-nano-30b-a3b:free', timeoutMs: 30000, spendLimitUsdCents: 0, secretRef: 'joy-media/openrouter/creative-brief/v1', allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'] }
  * ```
  *
  * @example
@@ -167,7 +174,15 @@ export function parseCreativeBriefRuntimeConfig(
   }
 
   // Verify modelId is in the allowlist
-  if (!allowedFreeModelIds.includes(modelId.trim())) {
+  if (
+    modelId.trim() !== CREATIVE_BRIEF_MODEL_ID ||
+    allowedFreeModelIds.length !== 1 ||
+    allowedFreeModelIds[0] !== CREATIVE_BRIEF_MODEL_ID
+  ) {
+    return { mode: 'disabled' };
+  }
+
+  if (secretRef.trim() !== CREATIVE_BRIEF_SECRET_REFERENCE) {
     return { mode: 'disabled' };
   }
 
@@ -185,8 +200,7 @@ export function parseCreativeBriefRuntimeConfig(
   const spendLimitUsdCents = parseInteger(spendLimitUsdCentsRaw);
   if (
     spendLimitUsdCents === null ||
-    spendLimitUsdCents < SPEND_LIMIT_MIN ||
-    spendLimitUsdCents > SPEND_LIMIT_MAX
+    spendLimitUsdCents !== SPEND_LIMIT
   ) {
     return { mode: 'disabled' };
   }
