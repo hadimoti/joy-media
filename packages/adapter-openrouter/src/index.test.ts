@@ -94,10 +94,10 @@ function createAdapterOptions(
   overrides: Partial<OpenRouterAdapterOptions> = {},
 ): OpenRouterAdapterOptions {
   return {
-    modelId: 'openrouter/mistral-large',
-    timeoutMs: 60000,
-    spendLimitUsdCents: 500,
-    secretRef: 'openrouter-api-key',
+    modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+    timeoutMs: 30000,
+    spendLimitUsdCents: 0,
+    secretRef: 'joy-media/openrouter/creative-brief/v1',
     ...overrides,
   };
 }
@@ -109,10 +109,10 @@ function createAdapterOptions(
 describe('OpenRouterCreativeAdapter - public construction', () => {
   it('should create adapter with required options', () => {
     const adapter = new OpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
     expect(adapter).toBeInstanceOf(OpenRouterCreativeAdapter);
     expect(adapter.adapterName).toBe('openrouter-creative-v1');
@@ -121,10 +121,10 @@ describe('OpenRouterCreativeAdapter - public construction', () => {
 
   it('should create adapter via factory function', () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
     expect(adapter).toBeInstanceOf(OpenRouterCreativeAdapter);
     expect(adapter.adapterName).toBe('openrouter-creative-v1');
@@ -133,10 +133,10 @@ describe('OpenRouterCreativeAdapter - public construction', () => {
 
   it('should satisfy AsyncCreativeModelAdapter interface', () => {
     const adapter: AsyncCreativeModelAdapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
     expect(adapter.adapterName).toBe('openrouter-creative-v1');
     expect(adapter.isTestOnly).toBe(false);
@@ -151,50 +151,50 @@ describe('OpenRouterCreativeAdapter - public construction', () => {
 describe('OpenRouterCreativeAdapter - default/missing dependency fail-closed', () => {
   it('should return unavailable when no secret resolver is provided and secret is not resolvable', async () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       // No secretResolver provided, so NoOpSecretResolver is used
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    expect(result.category).toBe('unavailable');
-    expect(result.errorCode).toBe('OPENROUTER_SECRET_NOT_RESOLVED');
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
     expect(result.retryable).toBe(false);
-    expect(result.message).toContain('could not be resolved');
+    expect(result.message).toContain('Pinned free model policy');
   });
 
   it('should return unavailable when transport is not provided', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       // No transport provided
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    expect(result.category).toBe('unavailable');
-    expect(result.errorCode).toBe('OPENROUTER_TRANSPORT_NOT_CONFIGURED');
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
     expect(result.retryable).toBe(false);
-    expect(result.message).toContain('not configured');
+    expect(result.message).toContain('Pinned free model policy');
   });
 
   it('should return unavailable when both secret resolver and transport are missing', async () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
     // Secret resolution fails first
-    expect(result.category).toBe('unavailable');
-    expect(result.errorCode).toBe('OPENROUTER_SECRET_NOT_RESOLVED');
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
   });
 });
 
@@ -207,12 +207,13 @@ describe('OpenRouterCreativeAdapter - unresolved opaque reference fail-closed', 
     const secretResolver = new MockSecretResolver({}); // Empty - no secrets
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
       secretRef: 'nonexistent-key',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
@@ -225,12 +226,13 @@ describe('OpenRouterCreativeAdapter - unresolved opaque reference fail-closed', 
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
       secretRef: 'my-secret-ref',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
@@ -238,19 +240,19 @@ describe('OpenRouterCreativeAdapter - unresolved opaque reference fail-closed', 
   });
 
   it('should return unavailable even with valid secret when transport is missing', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-valid-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-valid-key' });
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       // No transport
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
-    expect(result.category).toBe('unavailable');
-    expect(result.errorCode).toBe('OPENROUTER_TRANSPORT_NOT_CONFIGURED');
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
   });
 });
 
@@ -328,12 +330,12 @@ class ConfigurableMockTransport implements HttpPostTransport {
 
 describe('OpenRouterCreativeAdapter - injected transport path', () => {
   it('should call transport exactly once with valid resolver/transport and return ready', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -341,12 +343,13 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -356,15 +359,16 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
   });
 
   it('should send outgoing body with configured model and max_tokens 2048', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -375,21 +379,22 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
     expect(lastCall!.url).toBe('https://openrouter.ai/api/v1/chat/completions');
 
     const body = JSON.parse(lastCall!.options.body as string) as any;
-    expect(body.model).toBe('openrouter/mistral-large');
+    expect(body.model).toBe('nvidia/nemotron-3-nano-30b-a3b:free');
     expect(body.max_tokens).toBe(2048);
     expect(body.temperature).toBe(0.0);
   });
 
   it('should send Authorization header with resolved Bearer token', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'my-secret-value' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'my-secret-value' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -402,17 +407,18 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
   });
 
   it('should map non-2xx response to redacted provider-failed', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(new Response('{"error":{"message":"Rate limited"}}', { status: 429 })),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -427,17 +433,18 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
   });
 
   it('should map thrown transport error to redacted provider-failed', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.reject(new Error('Network error: connection refused')),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -460,12 +467,12 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
 describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
   it('should never emit secret in audit events for successful transport call', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-secret-value' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -473,12 +480,13 @@ describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
@@ -494,17 +502,18 @@ describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
 
   it('should never emit secret in audit events for non-2xx response', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-secret-value' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(new Response('{"error":{"message":"Auth failed"}}', { status: 401 })),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
@@ -521,17 +530,18 @@ describe('OpenRouterCreativeAdapter - transport path audit redaction', () => {
 
   it('should never emit secret in audit events for transport error', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-secret-value' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.reject(new Error('Connection timeout')),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), { ...MOCK_OPTIONS, auditSink });
@@ -557,12 +567,12 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
     const originalSnapshot = JSON.parse(JSON.stringify(input.snapshot));
     const originalRequest = JSON.parse(JSON.stringify(input.request));
 
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -570,12 +580,13 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(input, MOCK_OPTIONS);
@@ -592,12 +603,12 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
     };
     const originalOptions = { ...options };
 
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -605,12 +616,13 @@ describe('OpenRouterCreativeAdapter - input immutability', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), options);
@@ -631,12 +643,13 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(MOCK_INPUT as any, {
@@ -661,12 +674,13 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(MOCK_INPUT as any, {
@@ -686,19 +700,19 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     expect(errorEvent.errorCode).toBe('OPENROUTER_SECRET_NOT_RESOLVED');
     // No secret values in the event
     expect(JSON.stringify(errorEvent)).not.toContain('sk-');
-    expect(JSON.stringify(errorEvent)).not.toContain('openrouter-api-key');
+    expect(JSON.stringify(errorEvent)).not.toContain('joy-media/openrouter/creative-brief/v1');
   });
 
   it('should emit error audit event when transport is not configured', async () => {
     const auditSink = {
       emit: vi.fn(),
     };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-secret-value' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-secret-value' });
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       // No transport
     });
@@ -713,7 +727,7 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     );
     expect(errorCall).toBeDefined();
     const errorEvent = (errorCall as any[])[0] as any;
-    expect(errorEvent.errorCode).toBe('OPENROUTER_TRANSPORT_NOT_CONFIGURED');
+    expect(errorEvent.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
     // No secret values in the event
     expect(JSON.stringify(errorEvent)).not.toContain('sk-secret-value');
     expect(JSON.stringify(errorEvent)).not.toContain('sk-');
@@ -723,17 +737,18 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
     expect(result.message).not.toContain('sk-');
-    expect(result.message).not.toContain('openrouter-api-key');
+    expect(result.message).not.toContain('joy-media/openrouter/creative-brief/v1');
     expect(result.message?.toLowerCase()).toContain('could not be resolved');
   });
 
@@ -742,12 +757,13 @@ describe('OpenRouterCreativeAdapter - audit/error redaction', () => {
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
       secretRef,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
@@ -766,13 +782,13 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
     const secretResolver = new MockSecretResolver({});
     const transport = new MockHttpTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
-      clock: mockClock,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],      clock: mockClock,
     });
 
     const result = await adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
@@ -785,12 +801,12 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
 
   it('should measure duration using clock', async () => {
     const mockClock = new MockClock(1000);
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -798,13 +814,13 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
-      clock: mockClock,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],      clock: mockClock,
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -820,10 +836,10 @@ describe('OpenRouterCreativeAdapter - clock and duration', () => {
 describe('OpenRouterCreativeAdapter - types', () => {
   it('should have correct adapterName type', () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
     expect(adapter.adapterName).toBe('openrouter-creative-v1');
     expect(typeof adapter.adapterName).toBe('string');
@@ -831,20 +847,20 @@ describe('OpenRouterCreativeAdapter - types', () => {
 
   it('should have isTestOnly as false', () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
     expect(adapter.isTestOnly).toBe(false);
   });
 
   it('should have createBrief returning Promise of AsyncOutcome', async () => {
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
     });
 
     const result = adapter.createBrief(MOCK_INPUT as any, MOCK_OPTIONS);
@@ -940,12 +956,13 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   const VALID_ADAPTER_OPTIONS = createAdapterOptions();
 
   it('in-flight caller abort settles as cancelled with non-cooperative transport', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = createNeverTransport();
     const adapter = createOpenRouterCreativeAdapter({
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const { signal, abort } = createSignal();
@@ -968,12 +985,13 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('in-flight timeout settles as timeout with non-cooperative transport', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = createNeverTransport();
     const adapter = createOpenRouterCreativeAdapter({
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), {
@@ -988,7 +1006,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('transport receives abort signal on caller cancellation', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = new SignalCaptureTransport((_url, options) => {
       // Verify the signal is passed in RequestInit
       expect(options.signal).toBeDefined();
@@ -1005,6 +1023,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const { signal, abort } = createSignal();
@@ -1024,7 +1043,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('transport receives abort signal on timeout', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = new SignalCaptureTransport((_url, options) => {
       // Verify the signal is passed in RequestInit
       expect(options.signal).toBeDefined();
@@ -1041,6 +1060,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), {
@@ -1053,7 +1073,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('late transport resolution after timeout cannot become ready', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     let resolveTransport: (() => void) | undefined;
     const transport = new SignalCaptureTransport(() => {
       return new Promise<Response>((resolve) => {
@@ -1069,6 +1089,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), {
@@ -1088,7 +1109,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('late transport rejection after cancellation does not create unhandled rejection', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     let rejectTransport: (() => void) | undefined;
     const transport = new SignalCaptureTransport(() => {
       return new Promise<Response>((_resolve, reject) => {
@@ -1102,6 +1123,7 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const { signal, abort } = createSignal();
@@ -1129,15 +1151,16 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('normal completion within deadline returns ready', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = createDelayedTransport(5, new Response(
-      JSON.stringify({ model: 'openrouter/mistral-large', choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
+      JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free', choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }] }),
       { status: 200 },
     ));
     const adapter = createOpenRouterCreativeAdapter({
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), {
@@ -1151,18 +1174,19 @@ describe('OpenRouterCreativeAdapter - in-flight cancellation and timeout', () =>
   });
 
   it('transport receives abort signal via RequestInit.signal', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test' });
     const transport = new SignalCaptureTransport((_url, options) => {
       // Verify the signal is passed in RequestInit
       expect(options.signal).toBeDefined();
       expect(options.signal).toBeInstanceOf(AbortSignal);
-      return Promise.resolve(new Response(JSON.stringify({ model: 'openrouter/mistral-large' }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free' }), { status: 200 }));
     });
 
     const adapter = createOpenRouterCreativeAdapter({
       ...VALID_ADAPTER_OPTIONS,
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const { signal } = createSignal();
@@ -1536,7 +1560,7 @@ describe('buildOpenRouterRequest - output token cap', () => {
 
   it('should build request with max_tokens set to 2048', () => {
     const input = createMinimalInput();
-    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+    const result = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
 
     assertReady(result);
     expect(result.result.max_tokens).toBe(2048);
@@ -1545,7 +1569,7 @@ describe('buildOpenRouterRequest - output token cap', () => {
   it('should always use exactly 2048 for max_tokens regardless of input', () => {
     const input = createMinimalInput();
     // Test with different model IDs
-    const result1 = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+    const result1 = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
     const result2 = buildOpenRouterRequest(input, { modelId: 'openrouter/llama-3' });
 
     assertReady(result1);
@@ -1556,7 +1580,7 @@ describe('buildOpenRouterRequest - output token cap', () => {
 
   it('should include temperature 0.0 for deterministic output', () => {
     const input = createMinimalInput();
-    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+    const result = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
 
     assertReady(result);
     expect(result.result.temperature).toBe(0.0);
@@ -1567,7 +1591,7 @@ describe('buildOpenRouterRequest - output token cap', () => {
     const input = createMinimalInput();
     // The buildOpenRouterRequest function only accepts input and config with modelId
     // There is no parameter to override max_tokens
-    const result = buildOpenRouterRequest(input, { modelId: 'openrouter/mistral-large' });
+    const result = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
 
     assertReady(result);
     // No matter what, it should be 2048
@@ -1582,13 +1606,84 @@ describe('buildOpenRouterRequest - output token cap', () => {
 // ============================================================================
 
 describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
+  it('should deny when the free model allowlist is absent before resolving secrets or transport', async () => {
+    const secretResolver = new MockSecretResolver({
+      'joy-media/openrouter/creative-brief/v1': 'sk-test-key',
+    });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
+      secretResolver,
+      transport,
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should deny a non-zero spend cap before resolving secrets or transport', async () => {
+    const secretResolver = new MockSecretResolver({
+      'joy-media/openrouter/creative-brief/v1': 'sk-test-key',
+    });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 1,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_FREE_ONLY_REQUIRED');
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
+  it('should deny multiple allowlisted models before resolving secrets or transport', async () => {
+    const secretResolver = new MockSecretResolver({
+      'joy-media/openrouter/creative-brief/v1': 'sk-test-key',
+    });
+    const transport = new ConfigurableMockTransport();
+    const adapter = createOpenRouterCreativeAdapter({
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
+      secretResolver,
+      transport,
+      allowedFreeModelIds: [
+        'nvidia/nemotron-3-nano-30b-a3b:free',
+        'another/model:free',
+      ],
+    });
+
+    const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
+
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
+    expect(transport.getCallCount()).toBe(0);
+  });
+
   it('should allow request when modelId is in allowlist', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1596,13 +1691,13 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
-      allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama-3'],
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1612,12 +1707,12 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
   });
 
   it('should allow request when allowlist is absent (undefined)', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1625,29 +1720,29 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       // allowedFreeModelIds is undefined
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
-    expect(result.category).toBe('ready');
-    expect(result.result).toEqual(VALID_OUTPUT);
-    expect(transport.getCallCount()).toBe(1);
+    expect(result.category).toBe('policy-denied');
+    expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
+    expect(transport.getCallCount()).toBe(0);
   });
 
   it('should deny request with policy-denied when allowlist is empty', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: [],
@@ -1657,20 +1752,20 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
     expect(result.category).toBe('policy-denied');
     expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
     expect(result.retryable).toBe(false);
-    expect(result.message).toContain('Empty free model allowlist');
+    expect(result.message).toContain('Pinned free model policy');
     // Verify resolver and transport were NOT called
-    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
     expect(transport.getCallCount()).toBe(0);
   });
 
   it('should deny request with policy-denied when modelId is not in allowlist', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: ['openrouter/llama-3', 'openrouter/gemini-flash'],
@@ -1680,21 +1775,21 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
     expect(result.category).toBe('policy-denied');
     expect(result.errorCode).toBe('OPENROUTER_MODEL_NOT_ALLOWED');
     expect(result.retryable).toBe(false);
-    expect(result.message).toContain('Model ID not in free model allowlist');
+    expect(result.message).toContain('Pinned free model policy');
     // Verify resolver and transport were NOT called
-    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
     expect(transport.getCallCount()).toBe(0);
   });
 
   it('should emit policy-denied audit event with redacted code when model is rejected', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: ['openrouter/llama-3'],
@@ -1720,19 +1815,19 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
     expect(JSON.stringify(errorEvent)).not.toContain('llama-3');
     expect(JSON.stringify(errorEvent)).not.toContain('sk-');
     // Verify resolver and transport were NOT called
-    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
     expect(transport.getCallCount()).toBe(0);
   });
 
   it('should emit policy-denied audit event with redacted code when allowlist is empty', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: [],
@@ -1754,19 +1849,19 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
     expect(errorEvent.correlationId).toBe('test-correlation-id');
     expect(errorEvent.adapterName).toBe('openrouter-creative-v1');
     // Verify resolver and transport were NOT called
-    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
     expect(transport.getCallCount()).toBe(0);
   });
 
   it('should not emit start audit event when policy denies request', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: [],
@@ -1785,13 +1880,13 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
   });
 
   it('should not call secretResolver when model is not in allowlist', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: ['openrouter/llama-3'],
@@ -1800,17 +1895,17 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
     await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
 
     // Verify secretResolver was NOT called
-    expect(secretResolver.getResolveCount('openrouter-api-key')).toBe(0);
+    expect(secretResolver.getResolveCount('joy-media/openrouter/creative-brief/v1')).toBe(0);
   });
 
   it('should not call transport when model is not in allowlist', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
       allowedFreeModelIds: ['openrouter/llama-3'],
@@ -1829,12 +1924,12 @@ describe('OpenRouterCreativeAdapter - free model allowlist policy', () => {
 
 describe('OpenRouterCreativeAdapter - response model verification', () => {
   it('should accept response when model matches configured modelId', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1842,12 +1937,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1857,12 +1953,12 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should accept response when model matches and is in allowlist', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
           JSON.stringify({
-            model: 'openrouter/mistral-large',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }],
           }),
           { status: 200 },
@@ -1870,13 +1966,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
-      allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama-3'],
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1885,7 +1981,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should reject response when model field is missing', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -1897,12 +1993,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1915,7 +2012,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should reject response when model is non-string', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -1928,12 +2025,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1945,7 +2043,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should reject response when model is empty string', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -1958,12 +2056,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -1975,7 +2074,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should reject response when model does not match configured modelId', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -1988,12 +2087,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
@@ -2005,7 +2105,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
   });
 
   it('should reject response when model is not in allowedFreeModelIds', async () => {
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -2018,17 +2118,17 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
-      allowedFreeModelIds: ['openrouter/mistral-large'],
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     const result = await adapter.createBrief(createValidInput(), MOCK_OPTIONS);
-    // Model in response ('openrouter/llama-3') does not match configured ('openrouter/mistral-large')
+    // Model in response ('openrouter/llama-3') does not match configured ('nvidia/nemotron-3-nano-30b-a3b:free')
     // and is not in allowlist, so response verification fails with provider-failed
     expect(result.category).toBe('provider-failed');
     expect(result.errorCode).toBe('OPENROUTER_RESPONSE_MODEL_MISMATCH');
@@ -2041,7 +2141,7 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
 
   it('should emit redacted audit event for model mismatch', async () => {
     const auditSink = { emit: vi.fn() };
-    const secretResolver = new MockSecretResolver({ 'openrouter-api-key': 'sk-test-key' });
+    const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport(() =>
       Promise.resolve(
         new Response(
@@ -2054,12 +2154,13 @@ describe('OpenRouterCreativeAdapter - response model verification', () => {
       ),
     );
     const adapter = createOpenRouterCreativeAdapter({
-      modelId: 'openrouter/mistral-large',
-      timeoutMs: 60000,
-      spendLimitUsdCents: 500,
-      secretRef: 'openrouter-api-key',
+      modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      timeoutMs: 30000,
+      spendLimitUsdCents: 0,
+      secretRef: 'joy-media/openrouter/creative-brief/v1',
       secretResolver,
       transport,
+      allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
     });
 
     await adapter.createBrief(createValidInput(), {

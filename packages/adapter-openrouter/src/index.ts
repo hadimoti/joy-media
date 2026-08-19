@@ -70,7 +70,7 @@ interface OpenRouterAdapterOptions {
   readonly modelId: string;
   /** Request timeout in milliseconds. */
   readonly timeoutMs: number;
-  /** Maximum spend limit in USD cents. */
+  /** Maximum spend limit in USD cents. Only zero is permitted for free-only mode. */
   readonly spendLimitUsdCents: number;
   /** Opaque name reference to the API key secret. */
   readonly secretRef: string;
@@ -80,9 +80,13 @@ interface OpenRouterAdapterOptions {
   readonly transport?: HttpPostTransport;
   /** Optional clock for testing. */
   readonly clock?: Clock;
-  /** Non-empty readonly allowlist of exact free model IDs. Must be in this allowlist for requests to proceed. */
+  /** Exact singleton allowlist for the pinned free model. */
   readonly allowedFreeModelIds?: readonly string[];
 }
+
+/** The only model permitted by the initial free-only production policy. */
+const OPENROUTER_INITIAL_FREE_MODEL_ID =
+  'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 
 // ============================================================================
 // Default/No-op Implementations
@@ -180,49 +184,39 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
       };
     }
 
-    // Check allowedFreeModelIds allowlist before any work (secret resolution, request construction, audit, transport)
+    // Check the complete free-only policy before any work (secret resolution,
+    // request construction, audit, or transport). Undefined or broad policy
+    // configuration is never treated as permissive.
     const allowedFreeModelIds = this.#options.allowedFreeModelIds;
-    if (allowedFreeModelIds !== undefined) {
-      if (allowedFreeModelIds.length === 0) {
-        const durationMs = this.#clock.now() - startTime;
-        if (options.auditSink !== undefined) {
-          options.auditSink.emit({
-            correlationId: options.correlationId,
-            adapterName: this.adapterName,
-            eventType: 'error',
-            status: 'policy-denied',
-            durationMs,
-            errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
-          });
-        }
-        return {
-          category: 'policy-denied',
-          errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
-          message: 'Empty free model allowlist denies all requests',
-          retryable: false,
+    const modelPolicyValid =
+      this.#options.modelId === OPENROUTER_INITIAL_FREE_MODEL_ID &&
+      allowedFreeModelIds !== undefined &&
+      allowedFreeModelIds.length === 1 &&
+      allowedFreeModelIds[0] === OPENROUTER_INITIAL_FREE_MODEL_ID;
+    if (!modelPolicyValid || this.#options.spendLimitUsdCents !== 0) {
+      const durationMs = this.#clock.now() - startTime;
+      const errorCode = modelPolicyValid
+        ? 'OPENROUTER_FREE_ONLY_REQUIRED'
+        : 'OPENROUTER_MODEL_NOT_ALLOWED';
+      if (options.auditSink !== undefined) {
+        options.auditSink.emit({
+          correlationId: options.correlationId,
+          adapterName: this.adapterName,
+          eventType: 'error',
+          status: 'policy-denied',
           durationMs,
-        };
+          errorCode,
+        });
       }
-      if (!allowedFreeModelIds.includes(this.#options.modelId)) {
-        const durationMs = this.#clock.now() - startTime;
-        if (options.auditSink !== undefined) {
-          options.auditSink.emit({
-            correlationId: options.correlationId,
-            adapterName: this.adapterName,
-            eventType: 'error',
-            status: 'policy-denied',
-            durationMs,
-            errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
-          });
-        }
-        return {
-          category: 'policy-denied',
-          errorCode: 'OPENROUTER_MODEL_NOT_ALLOWED',
-          message: 'Model ID not in free model allowlist',
-          retryable: false,
-          durationMs,
-        };
-      }
+      return {
+        category: 'policy-denied',
+        errorCode,
+        message: modelPolicyValid
+          ? 'Only zero payable spend is permitted for free-only mode'
+          : 'Pinned free model policy is not satisfied',
+        retryable: false,
+        durationMs,
+      };
     }
 
     // Emit start audit event if sink is provided (redacted, no sensitive data)
