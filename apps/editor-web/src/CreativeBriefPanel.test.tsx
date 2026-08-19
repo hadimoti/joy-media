@@ -8,7 +8,11 @@
 
 import { describe, it, expect } from 'vitest';
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
-import { CreativeBriefPanel, type CreativeBriefPanelProps } from './CreativeBriefPanel.js';
+import {
+  CreativeBriefPanel,
+  CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1,
+  type CreativeBriefPanelProps,
+} from './CreativeBriefPanel.js';
 import { creativeBriefReducer, INITIAL_BRIEF_STATE } from './creative-brief-controller.js';
 
 // Static fixture
@@ -79,6 +83,13 @@ function makeBriefWithRevision(revisionId: string, request: string = 'Improve pa
 }
 
 describe('CreativeBriefPanel', () => {
+  it('uses the versioned free-only remote-processing disclosure', () => {
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('semantic summary');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('not media files, URLs, or secrets');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('OpenRouter');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('NVIDIA Nemotron');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('Paid fallback is disabled');
+  });
   it('exports CreativeBriefPanel component', () => {
     expect(CreativeBriefPanel).toBeDefined();
     expect(typeof CreativeBriefPanel).toBe('function');

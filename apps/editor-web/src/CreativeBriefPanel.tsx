@@ -39,6 +39,10 @@ export interface CreativeBriefPanelProps {
   readonly onOptIn?: () => Promise<void> | void;
 }
 
+/** Versioned disclosure shown immediately before project-level opt-in. */
+export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
+  'A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter\'s free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled.' as const;
+
 /**
  * Creative Brief Panel Component.
  *
@@ -221,6 +225,9 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
             <>
               <p><strong>Creative Brief is currently disabled.</strong></p>
               <p>Enable Creative Brief to request improvements to your project.</p>
+              <p className="creative-brief-panel-disclosure">
+                {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
+              </p>
               {optInError && (
                 <p className="creative-brief-panel-error" aria-label="Opt-in error">
                   <strong>Error:</strong> {optInError}
