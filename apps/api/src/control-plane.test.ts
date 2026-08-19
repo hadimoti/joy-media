@@ -325,11 +325,13 @@ describe('LocalControlPlane project document storage', () => {
     }, '');
 
     expect(writeResult.kind).toBe('stored');
+    if (writeResult.kind !== 'stored') throw new Error('Expected stored outcome');
     expect(writeResult.projectId).toBe('doc-project');
     expect(writeResult.revisionId).toBe('rev-1');
 
     const readResult = api.readProjectDocument(owner, 'doc-project');
     expect(readResult.kind).toBe('ready');
+    if (readResult.kind !== 'ready') throw new Error('Expected ready outcome');
     expect(readResult.record.projectId).toBe('doc-project');
     expect(readResult.record.revisionId).toBe('rev-1');
     expect(readResult.record.document).toEqual(document);
@@ -350,6 +352,7 @@ describe('LocalControlPlane project document storage', () => {
 
     const readResult = api.readProjectDocument(other, 'doc-project');
     expect(readResult.kind).toBe('not-found');
+    if (readResult.kind !== 'not-found') throw new Error('Expected not-found outcome');
     expect(readResult.projectId).toBe('doc-project');
   });
 
@@ -373,6 +376,7 @@ describe('LocalControlPlane project document storage', () => {
     }, 'wrong-revision');
 
     expect(writeResult.kind).toBe('revision-conflict');
+    if (writeResult.kind !== 'revision-conflict') throw new Error('Expected revision-conflict outcome');
     expect(writeResult.expectedBaseRevisionId).toBe('wrong-revision');
     expect(writeResult.actualBaseRevisionId).toBe('rev-1');
   });
@@ -383,6 +387,7 @@ describe('LocalControlPlane project document storage', () => {
 
     const readResult = api.readProjectDocument(owner, 'nonexistent');
     expect(readResult.kind).toBe('not-found');
+    if (readResult.kind !== 'not-found') throw new Error('Expected not-found outcome');
     expect(readResult.projectId).toBe('nonexistent');
     expect(readResult.revisionId).toBeNull();
   });
