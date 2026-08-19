@@ -9,7 +9,8 @@
  * UI, deployment, or GBrain integration.
  */
 
-import type { CreativeBriefRequestV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefRequestV1, CreativeBriefScope } from '@joy-media/agent-tools';
+import { CREATIVE_BRIEF_SCOPES } from '@joy-media/agent-tools';
 
 // ============================================================================
 // Error Types
@@ -347,12 +348,11 @@ export function validateCreativeBriefClientRequest(
     });
   }
 
-  // Validate scope
-  const validScopes = new Set(['video', 'audio', 'image', 'motion-graphic']);
-  if (requestObj.scope !== undefined && !validScopes.has(requestObj.scope as string)) {
+  // Validate scope against canonical CreativeBriefScope contract
+  if (requestObj.scope !== undefined && !CREATIVE_BRIEF_SCOPES.includes(requestObj.scope as CreativeBriefScope)) {
     errors.push({
       code: 'invalid-request',
-      message: `request.scope must be one of: ${Array.from(validScopes).join(', ')}`,
+      message: 'request.scope must be a valid CreativeBriefScope',
       path: 'request.scope',
     });
   }

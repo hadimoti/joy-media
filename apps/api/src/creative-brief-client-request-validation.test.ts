@@ -11,6 +11,7 @@ import {
   MAX_CREATIVE_BRIEF_CLIENT_REQUEST_BYTES,
 } from './creative-brief-client-request-validation.js';
 import type { CreativeBriefRequestV1 } from '@joy-media/agent-tools';
+import { CREATIVE_BRIEF_SCOPES } from '@joy-media/agent-tools';
 
 // ============================================================================
 // Valid Requests
@@ -25,7 +26,7 @@ describe('validateCreativeBriefClientRequest - valid requests', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video about nature',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -44,7 +45,7 @@ describe('validateCreativeBriefClientRequest - valid requests', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: persianText,
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -62,7 +63,7 @@ describe('validateCreativeBriefClientRequest - valid requests', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         maxRecommendations: 5,
         brief: 'Additional context',
         durationTargetUs: 1000000,
@@ -76,16 +77,14 @@ describe('validateCreativeBriefClientRequest - valid requests', () => {
   });
 
   it('should accept valid request with different scopes', () => {
-    const scopes = ['video', 'audio', 'image', 'motion-graphic'] as const;
-
-    for (const scope of scopes) {
+    for (const scope of CREATIVE_BRIEF_SCOPES) {
       const envelope = {
         projectId: 'test-project-id',
         snapshotRevisionId: 'test-revision-id',
         request: {
           snapshotRevisionId: 'test-revision-id',
           projectId: 'test-project-id',
-          request: `Create a ${scope}`,
+          request: `Create a brief for ${scope}`,
           scope,
         },
       };
@@ -104,7 +103,7 @@ describe('validateCreativeBriefClientRequest - valid requests', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -125,7 +124,7 @@ describe('validateCreativeBriefClientRequest - project/revision mismatch', () =>
         snapshotRevisionId: 'test-revision-id',
         projectId: 'inner-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -133,7 +132,7 @@ describe('validateCreativeBriefClientRequest - project/revision mismatch', () =>
 
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].code).toBe('project-mismatch');
+    expect(result.errors[0]?.code).toBe('project-mismatch');
   });
 
   it('should reject when top-level snapshotRevisionId does not match request.snapshotRevisionId', () => {
@@ -144,7 +143,7 @@ describe('validateCreativeBriefClientRequest - project/revision mismatch', () =>
         snapshotRevisionId: 'inner-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -152,7 +151,7 @@ describe('validateCreativeBriefClientRequest - project/revision mismatch', () =>
 
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].code).toBe('revision-mismatch');
+    expect(result.errors[0]?.code).toBe('revision-mismatch');
   });
 });
 
@@ -169,7 +168,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       snapshot: { version: 1, projectId: 'test', revisionId: 'test', scenes: [], timeline: { tracks: [], durationUs: 0 }, resources: { assets: new Map(), elements: new Map() }, metadata: { title: '', description: '', tags: [], createdAt: '' } },
     };
@@ -188,7 +187,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       intelligence: { brandReadiness: { score: 0, summary: '' }, sceneCoverages: [], projectReadiness: { score: 0, summary: '' }, rules: [] },
     };
@@ -207,7 +206,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       assets: [{ id: 'asset-1', url: 'http://example.com' }],
     };
@@ -226,7 +225,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       provider: 'openrouter',
     };
@@ -245,7 +244,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       secret: 'sk-1234567890',
     };
@@ -264,7 +263,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       path: '/some/path',
     };
@@ -283,7 +282,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       url: 'http://example.com',
     };
@@ -302,7 +301,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       apiKey: 'sk-1234567890',
     };
@@ -327,7 +326,7 @@ describe('validateCreativeBriefClientRequest - unknown fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
       unknownField: 'some-value',
     };
@@ -346,7 +345,7 @@ describe('validateCreativeBriefClientRequest - unknown fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         unknownRequestField: 'some-value',
       },
     };
@@ -368,7 +367,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].code).toBe('invalid-envelope');
+    expect(result.errors[0]?.code).toBe('invalid-envelope');
   });
 
   it('should reject array envelope', () => {
@@ -376,7 +375,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].code).toBe('invalid-envelope');
+    expect(result.errors[0]?.code).toBe('invalid-envelope');
   });
 
   it('should reject missing projectId', () => {
@@ -386,7 +385,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -403,7 +402,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -433,7 +432,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -451,7 +450,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -469,7 +468,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -487,7 +486,7 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -522,7 +521,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
       snapshotRevisionId: 'test-revision-id',
       request: {
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -540,7 +539,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: '',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -593,7 +592,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         maxRecommendations: 0,
       },
     };
@@ -612,7 +611,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         maxRecommendations: 21,
       },
     };
@@ -631,7 +630,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         durationTargetUs: -1,
       },
     };
@@ -651,7 +650,7 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         brief: oversizedBrief,
       },
     };
@@ -682,7 +681,7 @@ describe('validateCreativeBriefClientRequest - payload size', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
         brief: largeBrief,
       },
     };
@@ -710,7 +709,7 @@ describe('isValidCreativeBriefClientRequest', () => {
   it('should return false for missing projectId', () => {
     const envelope = {
       snapshotRevisionId: 'test',
-      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'video' },
+      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'general' },
     };
     expect(isValidCreativeBriefClientRequest(envelope)).toBe(false);
   });
@@ -718,7 +717,7 @@ describe('isValidCreativeBriefClientRequest', () => {
   it('should return false for missing snapshotRevisionId', () => {
     const envelope = {
       projectId: 'test',
-      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'video' },
+      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'general' },
     };
     expect(isValidCreativeBriefClientRequest(envelope)).toBe(false);
   });
@@ -735,7 +734,7 @@ describe('isValidCreativeBriefClientRequest', () => {
     const envelope = {
       projectId: 'test',
       snapshotRevisionId: 'test',
-      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'video' },
+      request: { snapshotRevisionId: 'test', projectId: 'test', request: 'test', scope: 'general' },
     };
     expect(isValidCreativeBriefClientRequest(envelope)).toBe(true);
   });

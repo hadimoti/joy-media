@@ -1092,7 +1092,7 @@ describe('control-plane HTTP transport', () => {
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
           projectId: 'test-project',
           snapshotRevisionId: 'rev-1',
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'video' },
+          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
         }),
       ).toMatchObject({
         status: 409,
@@ -1124,7 +1124,7 @@ describe('control-plane HTTP transport', () => {
           snapshotRevisionId: 'rev-1',
           snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const },
           intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'video' },
+          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
         }),
       ).toMatchObject({
         status: 400,
@@ -1141,7 +1141,7 @@ describe('control-plane HTTP transport', () => {
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
           projectId: 'other-project',
           snapshotRevisionId: 'rev-1',
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'video' },
+          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
         }),
       ).toMatchObject({
         status: 409,
@@ -1157,7 +1157,7 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
       });
       expect(response).toMatchObject({
         status: 503,
@@ -1228,7 +1228,7 @@ describe('control-plane HTTP transport', () => {
           evidence: [],
         },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
       };
 
       const testResolver = createTestResolver(testInput);
@@ -1237,7 +1237,7 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
       });
       expect(response).toMatchObject({
         status: 503,
@@ -1309,7 +1309,7 @@ describe('control-plane HTTP transport', () => {
           evidence: [],
         },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'general' },
       };
 
       const testResolver = createTestResolver(testInput);
@@ -1318,7 +1318,7 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'general' },
       });
       expect(response).toMatchObject({
         status: 503,
@@ -1344,7 +1344,7 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'video' },
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
       });
       expect(response).toMatchObject({
         status: 409,
