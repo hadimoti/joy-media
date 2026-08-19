@@ -13,6 +13,7 @@ import type {
   CreativeBriefInputV1,
   CreativeBriefRequestV1,
 } from '@joy-media/agent-tools';
+import type { Actor } from './control-plane.js';
 
 // ============================================================================
 // Types
@@ -32,6 +33,15 @@ export interface CreativeBriefInputResolverRequest {
   readonly snapshotRevisionId: string;
   /** The validated creative brief request. */
   readonly request: CreativeBriefRequestV1;
+}
+
+/**
+ * Server-only resolver context containing the authenticated actor.
+ * This is NOT browser-controlled and is only available on the server side.
+ */
+export interface CreativeBriefInputResolverContext {
+  /** The authenticated actor for the current request. */
+  readonly actor: Actor;
 }
 
 /**
@@ -73,12 +83,13 @@ export type CreativeBriefInputResolverResult =
 
 /**
  * The Creative Brief input resolver interface.
- * Accepts a minimal request and returns either a resolved CreativeBriefInputV1
- * or a typed failure result.
+ * Accepts a minimal request and server-only context, returning either a resolved
+ * CreativeBriefInputV1 or a typed failure result.
  */
 export interface CreativeBriefInputResolver {
   resolve(
     request: CreativeBriefInputResolverRequest,
+    context: CreativeBriefInputResolverContext,
   ): CreativeBriefInputResolverResult;
 }
 
@@ -91,7 +102,7 @@ export interface CreativeBriefInputResolver {
  * Performs no I/O, has no side effects, and does not access any external state.
  */
 export const UnavailableCreativeBriefInputResolver: CreativeBriefInputResolver = {
-  resolve(): CreativeBriefInputResolverUnavailable {
+  resolve(_request: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverUnavailable {
     return {
       status: 'unavailable',
       code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',

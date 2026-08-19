@@ -28,6 +28,7 @@ import {
   type CreativeBriefInputResolver,
   type CreativeBriefInputResolverRequest,
   type CreativeBriefInputResolverSuccess,
+  type CreativeBriefInputResolverContext,
 } from './creative-brief-input-resolver.js';
 import type { CreativeBriefInputV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
 
@@ -1046,7 +1047,7 @@ describe('control-plane HTTP transport', () => {
     const createTestResolver = (
       input: CreativeBriefInputV1,
     ): CreativeBriefInputResolver => ({
-      resolve: (_req: CreativeBriefInputResolverRequest): CreativeBriefInputResolverSuccess => ({
+      resolve: (_req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess => ({
         status: 'resolved',
         input,
       }),
@@ -1332,7 +1333,7 @@ describe('control-plane HTTP transport', () => {
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
 
       const staleResolver: CreativeBriefInputResolver = {
-        resolve: (_req: CreativeBriefInputResolverRequest) => ({
+        resolve: (_req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext) => ({
           status: 'stale-revision',
           code: 'CREATIVE_BRIEF_INPUT_RESOLVER_STALE_REVISION',
           message: 'Revision is stale',
@@ -1350,6 +1351,112 @@ describe('control-plane HTTP transport', () => {
         status: 409,
         body: { error: { code: 'REVISION_MISMATCH' } },
       });
+    });
+
+    it('passes authenticated actor to resolver', async () => {
+      // This test verifies that the HTTP route passes the authenticated actor to the resolver
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+
+      let receivedContext: CreativeBriefInputResolverContext | undefined;
+
+      const actorCapturingResolver: CreativeBriefInputResolver = {
+        resolve(_req: CreativeBriefInputResolverRequest, context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+          receivedContext = context;
+          return {
+            status: 'resolved',
+            input: {
+              snapshot: {
+                schemaVersion: 1,
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                capturedAt: '2026-08-17T00:00:00.000Z',
+                composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+                brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+                scenes: [],
+                timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+                assets: [],
+                capabilities: {},
+                warnings: [],
+                truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+              },
+              brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+              sceneCoverages: [],
+              projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+              rules: [],
+              request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+            },
+          };
+        },
+      };
+
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, actorCapturingResolver);
+
+      await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+      });
+
+      expect(receivedContext).toBeDefined();
+      expect(receivedContext?.actor.id).toBe('owner');
+    });
+
+    it('verifies client envelope contains only projectId, snapshotRevisionId, and request', async () => {
+      // This test verifies that the client envelope passed to the resolver contains
+      // ONLY projectId, snapshotRevisionId, and request - no server-side state
+      const controlPlane = new LocalControlPlane();
+      await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
+      await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
+
+      let receivedRequest: CreativeBriefInputResolverRequest | undefined;
+
+      const requestCapturingResolver: CreativeBriefInputResolver = {
+        resolve(req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+          receivedRequest = req;
+          return {
+            status: 'resolved',
+            input: {
+              snapshot: {
+                schemaVersion: 1,
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                capturedAt: '2026-08-17T00:00:00.000Z',
+                composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+                brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+                scenes: [],
+                timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+                assets: [],
+                capabilities: {},
+                warnings: [],
+                truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+              },
+              brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+              sceneCoverages: [],
+              projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+              rules: [],
+              request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+            },
+          };
+        },
+      };
+
+      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, requestCapturingResolver);
+
+      await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
+        projectId: 'test-project',
+        snapshotRevisionId: 'rev-1',
+        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+      });
+
+      expect(receivedRequest).toBeDefined();
+      expect(receivedRequest?.projectId).toBe('test-project');
+      expect(receivedRequest?.snapshotRevisionId).toBe('rev-1');
+      expect(receivedRequest?.request).toBeDefined();
+      // Verify no additional fields are present
+      const requestKeys = Object.keys(receivedRequest!);
+      expect(requestKeys.sort()).toEqual(['projectId', 'request', 'snapshotRevisionId'].sort());
     });
   });
 });

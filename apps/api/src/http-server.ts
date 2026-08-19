@@ -38,6 +38,7 @@ import type {
   CreativeBriefInputResolver,
   CreativeBriefInputResolverRequest,
   CreativeBriefInputResolverResult,
+  CreativeBriefInputResolverContext,
 } from './creative-brief-input-resolver.js';
 import { UnavailableCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
 import { validateCreativeBriefClientRequest } from './creative-brief-client-request-validation.js';
@@ -431,7 +432,10 @@ async function route(
       snapshotRevisionId: clientEnvelope.snapshotRevisionId,
       request: clientEnvelope.request,
     };
-    const resolverResult: CreativeBriefInputResolverResult = options.creativeBriefInputResolver.resolve(resolverRequest);
+    const resolverContext: CreativeBriefInputResolverContext = {
+      actor,
+    };
+    const resolverResult: CreativeBriefInputResolverResult = options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
 
     // Handle resolver failures
     if (resolverResult.status === 'unavailable') {
