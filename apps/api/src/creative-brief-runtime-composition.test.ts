@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import { composeCreativeBriefRuntime } from './creative-brief-runtime-composition.js';
+import {
+  CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_SECRET_REFERENCE,
+} from './creative-brief-runtime-config.js';
 
 const OPENROUTER_ENV = {
   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE: 'openrouter',
-  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID: 'openrouter/free-model',
-  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS: '60000',
+  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID: CREATIVE_BRIEF_MODEL_ID,
+  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS: '30000',
   JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS: '0',
-  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF: 'openrouter-api-key',
-  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS: 'openrouter/free-model',
+  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF: CREATIVE_BRIEF_SECRET_REFERENCE,
+  JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS: CREATIVE_BRIEF_MODEL_ID,
 } satisfies Readonly<Record<string, string>>;
 
 function dependencies() {
