@@ -109,7 +109,7 @@ describe('CreativeBriefInputResolver - request shape', () => {
 // ============================================================================
 
 describe('UnavailableCreativeBriefInputResolver', () => {
-  it('should always return unavailable result', () => {
+  it('should always return unavailable result', async () => {
     const request: CreativeBriefInputResolverRequest = {
       projectId: 'test-project-id',
       snapshotRevisionId: 'test-revision-id',
@@ -122,7 +122,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     };
     const context = createTestContext({ id: 'test-actor' });
 
-    const result = UnavailableCreativeBriefInputResolver.resolve(request, context);
+    const result = await UnavailableCreativeBriefInputResolver.resolve(request, context);
 
     expect(result.status).toBe('unavailable');
     if (result.status !== 'unavailable') throw new Error('Expected unavailable');
@@ -130,7 +130,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     expect(result.message).toBe('Creative Brief input resolver is unavailable');
   });
 
-  it('should have no side effects and perform no I/O', () => {
+  it('should have no side effects and perform no I/O', async () => {
     // This test verifies that the default resolver is pure and has no side effects
     // We can only verify this by calling it multiple times and ensuring consistent results
     const request: CreativeBriefInputResolverRequest = {
@@ -145,14 +145,14 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     };
     const context = createTestContext({ id: 'test-actor' });
 
-    const result1 = UnavailableCreativeBriefInputResolver.resolve(request, context);
-    const result2 = UnavailableCreativeBriefInputResolver.resolve(request, context);
+    const result1 = await UnavailableCreativeBriefInputResolver.resolve(request, context);
+    const result2 = await UnavailableCreativeBriefInputResolver.resolve(request, context);
 
     expect(result1).toEqual(result2);
     // No exceptions, no async operations, no I/O
   });
 
-  it('should fail closed for any request', () => {
+  it('should fail closed for any request', async () => {
     const request1: CreativeBriefInputResolverRequest = {
       projectId: 'project-1',
       snapshotRevisionId: 'revision-1',
@@ -176,14 +176,74 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     };
     const context = createTestContext({ id: 'test-actor' });
 
-    const result1 = UnavailableCreativeBriefInputResolver.resolve(request1, context);
-    const result2 = UnavailableCreativeBriefInputResolver.resolve(request2, context);
+    const result1 = await UnavailableCreativeBriefInputResolver.resolve(request1, context);
+    const result2 = await UnavailableCreativeBriefInputResolver.resolve(request2, context);
 
     expect(result1.status).toBe('unavailable');
     expect(result2.status).toBe('unavailable');
   });
 
-  it('should receive the authenticated actor in context', () => {
+  it('should support async resolver returning Promise', async () => {
+    // This test verifies that async resolvers are properly awaited
+    const authenticatedActor: Actor = { id: 'async-test-actor' };
+    const context = createTestContext(authenticatedActor);
+
+    let resolveCalled = false;
+
+    const asyncResolver: CreativeBriefInputResolver = {
+      async resolve(_request: CreativeBriefInputResolverRequest, ctx: CreativeBriefInputResolverContext): Promise<CreativeBriefInputResolverSuccess> {
+        // Verify context is received
+        expect(ctx.actor.id).toBe('async-test-actor');
+        resolveCalled = true;
+        // Simulate async work
+        await new Promise<void>((r) => setImmediate(r));
+        return {
+          status: 'resolved',
+          input: {
+            snapshot: {
+              schemaVersion: 1,
+              projectId: 'test-project-id',
+              revisionId: 'test-revision-id',
+              capturedAt: '2026-08-17T00:00:00.000Z',
+              composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
+              brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+              scenes: [],
+              timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+              assets: [],
+              capabilities: {},
+              warnings: [],
+              truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+            },
+            brandReadiness: { projectId: 'test-project-id', revisionId: 'test-revision-id', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+            sceneCoverages: [],
+            projectReadiness: { projectId: 'test-project-id', revisionId: 'test-revision-id', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+            rules: [],
+            request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test', scope: 'general' },
+          },
+        };
+      },
+    };
+
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'test',
+        scope: 'general',
+      },
+    };
+
+    const result = await asyncResolver.resolve(request, context);
+
+    expect(resolveCalled).toBe(true);
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('Expected resolved');
+    expect(result.input).toBeDefined();
+  });
+
+  it('should receive the authenticated actor in context', async () => {
     // This test verifies that the resolver receives the authenticated actor through context
     const authenticatedActor: Actor = { id: 'authenticated-user-123' };
     const context = createTestContext(authenticatedActor);
@@ -271,7 +331,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
       },
     };
 
-    testResolver.resolve(request, context);
+    await testResolver.resolve(request, context);
 
     expect(receivedActor).toBeDefined();
     expect(receivedActor?.id).toBe('authenticated-user-123');
@@ -283,7 +343,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
 // ============================================================================
 
 describe('CreativeBriefInputResolver - result types', () => {
-  it('should have typed success result with CreativeBriefInputV1', () => {
+  it('should have typed success result with CreativeBriefInputV1', async () => {
     // Test-only resolver that returns a valid result
     const testInput: CreativeBriefInputV1 = {
       snapshot: {
@@ -406,7 +466,7 @@ describe('CreativeBriefInputResolver - result types', () => {
     };
     const context = createTestContext({ id: 'test-actor' });
 
-    const result = testResolver.resolve(request, context);
+    const result = await testResolver.resolve(request, context);
 
     expect(result.status).toBe('resolved');
     if (result.status !== 'resolved') throw new Error('Expected resolved');
@@ -444,7 +504,7 @@ describe('CreativeBriefInputResolver - result types', () => {
 // ============================================================================
 
 describe('CreativeBriefInputResolver - Persian text', () => {
-  it('should preserve Persian request text unchanged through resolver', () => {
+  it('should preserve Persian request text unchanged through resolver', async () => {
     // Test that Persian (Farsi) text survives unchanged through the resolver boundary
     const persianText = 'به من کمک کن یک ویدئو بسازم';
 
@@ -562,7 +622,7 @@ describe('CreativeBriefInputResolver - Persian text', () => {
     };
     const context = createTestContext({ id: 'test-actor' });
 
-    const result = testResolver.resolve(request, context);
+    const result = await testResolver.resolve(request, context);
 
     expect(result.status).toBe('resolved');
     if (result.status !== 'resolved') throw new Error('Expected resolved');

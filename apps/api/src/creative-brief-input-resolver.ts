@@ -85,12 +85,13 @@ export type CreativeBriefInputResolverResult =
  * The Creative Brief input resolver interface.
  * Accepts a minimal request and server-only context, returning either a resolved
  * CreativeBriefInputV1 or a typed failure result.
+ * Can be implemented synchronously or asynchronously.
  */
 export interface CreativeBriefInputResolver {
   resolve(
     request: CreativeBriefInputResolverRequest,
     context: CreativeBriefInputResolverContext,
-  ): CreativeBriefInputResolverResult;
+  ): CreativeBriefInputResolverResult | Promise<CreativeBriefInputResolverResult>;
 }
 
 // ============================================================================

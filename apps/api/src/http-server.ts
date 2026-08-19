@@ -435,7 +435,7 @@ async function route(
     const resolverContext: CreativeBriefInputResolverContext = {
       actor,
     };
-    const resolverResult: CreativeBriefInputResolverResult = options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
+    const resolverResult: CreativeBriefInputResolverResult = await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
 
     // Handle resolver failures
     if (resolverResult.status === 'unavailable') {
