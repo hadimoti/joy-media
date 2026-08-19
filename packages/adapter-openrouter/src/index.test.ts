@@ -1328,6 +1328,20 @@ describe('decodeOpenRouterResponse', () => {
   });
 
   describe('invalid JSON', () => {
+    it('recovers a valid object wrapped in a markdown fence', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: `Here is the JSON:\n\n\`\`\`json\n${JSON.stringify(VALID_OUTPUT)}\n\`\`\`` } }],
+      };
+      checkReady(decodeOpenRouterResponse(resp));
+    });
+
+    it('recovers a valid object surrounded by short prose', () => {
+      const resp: OpenRouterResponse = {
+        choices: [{ message: { content: `Result:\n${JSON.stringify(VALID_OUTPUT)}\nDone.` } }],
+      };
+      checkReady(decodeOpenRouterResponse(resp));
+    });
+
     it('returns invalid-output for malformed JSON', () => {
       const resp: OpenRouterResponse = {
         choices: [{ message: { content: '{ bad json }' } }],

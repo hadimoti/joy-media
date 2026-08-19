@@ -728,6 +728,8 @@ IMPORTANT RULES:
 - Respond ONLY with a valid JSON object matching the ModelAdapterOutputV1 schema
 - Never include explanations, apologies, or other text before or after the JSON
 - Never use markdown formatting or code blocks
+- Do not emit schema filenames, references, or placeholder objects
+- Use empty arrays when there is no evidence; keep each non-empty list to at most three items
 - Preserve all Persian/RTL text exactly as provided
 - Be concise and specific in your recommendations
 - Focus on actionable creative improvements
@@ -1050,8 +1052,46 @@ function safeJsonParse(content: string): unknown | undefined {
   try {
     return JSON.parse(content);
   } catch {
-    return undefined;
+    const candidate = extractFirstJsonObject(content);
+    if (candidate === undefined) return undefined;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
   }
+}
+
+/**
+ * Recover a single balanced JSON object when a free model surrounds it with
+ * a short explanation or markdown fence. This never fabricates fields; the
+ * strict ModelAdapterOutputV1 validator still decides whether it is usable.
+ */
+function extractFirstJsonObject(content: string): string | undefined {
+  const start = content.indexOf('{');
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return content.slice(start, index + 1);
+    }
+  }
+  return undefined;
 }
 
 /**
