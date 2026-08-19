@@ -536,6 +536,398 @@ describe('BrowserControlPlaneClient', () => {
       ]);
     });
   });
+
+  describe('createCreativeBrief', () => {
+    it('sends POST request to the correct endpoint with URL-encoded controlPlaneProjectId', async () => {
+      const requests: Array<{ readonly url: string; readonly method: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+        });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-project-1',
+            request: 'test request',
+            interpretedGoal: {
+              userIntent: 'test',
+              inferredGoal: 'test',
+              resolvedGoal: 'test',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.createCreativeBrief('control-plane-123', {
+          snapshotRevisionId: 'rev-1',
+          projectId: 'doc-project-1',
+          request: 'test request',
+          scope: 'general',
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/control-plane-123/creative-brief',
+          method: 'POST',
+        },
+      ]);
+    });
+
+    it('includes authorization header', async () => {
+      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const authorization = new Headers(init?.headers).get('authorization');
+        requests.push({ url, ...(authorization === null ? {} : { authorization }) });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-project-1',
+            request: 'test',
+            interpretedGoal: {
+              userIntent: 'test',
+              inferredGoal: 'test',
+              resolvedGoal: 'test',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.createCreativeBrief('project-1', {
+          snapshotRevisionId: 'rev-1',
+          projectId: 'doc-project-1',
+          request: 'test',
+          scope: 'general',
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project-1/creative-brief',
+          authorization: 'Bearer joy-session-token',
+        },
+      ]);
+    });
+
+    it('sends exact envelope with projectId, snapshotRevisionId, and request', async () => {
+      const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-project-1',
+            request: 'test request',
+            interpretedGoal: {
+              userIntent: 'test',
+              inferredGoal: 'test',
+              resolvedGoal: 'test',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        const requestInput: Parameters<typeof client.createCreativeBrief>[1] = {
+          snapshotRevisionId: 'snapshot-rev-abc',
+          projectId: 'canonical-doc-1',
+          request: 'Make it cinematic',
+          scope: 'pacing',
+          maxRecommendations: 5,
+        };
+        await client.createCreativeBrief('control-plane-xyz', requestInput);
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toHaveLength(1);
+      const body = JSON.parse(requests[0]!.body!);
+      expect(body).toEqual({
+        projectId: 'canonical-doc-1',
+        snapshotRevisionId: 'snapshot-rev-abc',
+        request: {
+          snapshotRevisionId: 'snapshot-rev-abc',
+          projectId: 'canonical-doc-1',
+          request: 'Make it cinematic',
+          scope: 'pacing',
+          maxRecommendations: 5,
+        },
+      });
+    });
+
+    it('supports distinct path and document IDs', async () => {
+      const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'snap-1',
+            projectId: 'doc-1',
+            request: 'test',
+            interpretedGoal: {
+              userIntent: 'test',
+              inferredGoal: 'test',
+              resolvedGoal: 'test',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.createCreativeBrief('control-plane-opaque-id', {
+          snapshotRevisionId: 'snap-1',
+          projectId: 'canonical-joy-doc-id',
+          request: 'test',
+          scope: 'general',
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.url).toBe(
+        'https://media.joyteam.ir/api/v1/projects/control-plane-opaque-id/creative-brief',
+      );
+      const body = JSON.parse(requests[0]!.body!);
+      expect(body.projectId).toBe('canonical-joy-doc-id');
+      expect(body.request.projectId).toBe('canonical-joy-doc-id');
+    });
+
+    it('preserves Persian/RTL text in request', async () => {
+      const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-1',
+            request: 'تست فارسی',
+            interpretedGoal: {
+              userIntent: 'تست',
+              inferredGoal: 'تست',
+              resolvedGoal: 'تست',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.createCreativeBrief('project-1', {
+          snapshotRevisionId: 'rev-1',
+          projectId: 'doc-1',
+          request: 'بریه فارسی برای تست',
+          scope: 'general',
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toHaveLength(1);
+      const body = JSON.parse(requests[0]!.body!);
+      expect(body.request.request).toBe('بریه فارسی برای تست');
+    });
+
+    it('propagates API request errors', async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = async () =>
+        json(404, { error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await expect(
+          client.createCreativeBrief('nonexistent', {
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-1',
+            request: 'test',
+            scope: 'general',
+          }),
+        ).rejects.toThrow('PROJECT_NOT_FOUND: Project not found');
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+
+    it('URL-encodes special characters in controlPlaneProjectId', async () => {
+      const requests: Array<{ readonly url: string }> = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL) => {
+        requests.push({ url: String(input) });
+        return json(200, {
+          data: {
+            schemaVersion: 1,
+            snapshotRevisionId: 'rev-1',
+            projectId: 'doc-1',
+            request: 'test',
+            interpretedGoal: {
+              userIntent: 'test',
+              inferredGoal: 'test',
+              resolvedGoal: 'test',
+              confidence: 'high',
+            },
+            distinction: { facts: [], inferences: [] },
+            assumptions: [],
+            recommendations: [],
+            blockedBy: [],
+            requiresHumanDecision: [],
+            intelligence: {
+              brand: { status: 'unknown' },
+              scenes: [],
+              project: { status: 'unknown' },
+              rules: [],
+            },
+            warnings: [],
+            meta: {
+              generatedAt: '2024-01-01T00:00:00.000Z',
+              modelAdapter: 'fake-v1',
+              processingTimeMs: 0,
+            },
+          },
+        });
+      };
+      try {
+        const client = new BrowserControlPlaneClient(
+          'https://media.joyteam.ir/api',
+          () => 'joy-session-token',
+        );
+        await client.createCreativeBrief('project/with/slashes', {
+          snapshotRevisionId: 'rev-1',
+          projectId: 'doc-1',
+          request: 'test',
+          scope: 'general',
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(requests).toEqual([
+        {
+          url: 'https://media.joyteam.ir/api/v1/projects/project%2Fwith%2Fslashes/creative-brief',
+        },
+      ]);
+    });
+  });
 });
 
 function json(status: number, value: unknown): Response {

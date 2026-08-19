@@ -1,6 +1,7 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
+import type { CreativeBriefV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 
 export interface BrowserWorker {
@@ -531,6 +532,19 @@ export class BrowserControlPlaneClient {
       ...(options?.model !== undefined ? { model: options.model } : {}),
       ...(options?.params !== undefined ? { params: options.params } : {}),
     });
+  }
+  async createCreativeBrief(
+    controlPlaneProjectId: string,
+    request: CreativeBriefRequestV1,
+  ): Promise<CreativeBriefV1> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/creative-brief`,
+      {
+        projectId: request.projectId,
+        snapshotRevisionId: request.snapshotRevisionId,
+        request,
+      },
+    );
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });
