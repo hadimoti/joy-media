@@ -5,15 +5,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
+import type {
   CreativeBriefInputResolverRequest,
   CreativeBriefInputResolverSuccess,
   CreativeBriefInputResolverUnavailable,
   CreativeBriefInputResolverStaleRevision,
   CreativeBriefInputResolverResult,
   CreativeBriefInputResolver,
-  UnavailableCreativeBriefInputResolver,
 } from './creative-brief-input-resolver.js';
+import { UnavailableCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
 import type { CreativeBriefRequestV1, CreativeBriefInputV1 } from '@joy-media/agent-tools';
 
 // ============================================================================
@@ -39,7 +39,7 @@ describe('CreativeBriefInputResolver - request shape', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -49,7 +49,6 @@ describe('CreativeBriefInputResolver - request shape', () => {
     expect(request.request.request).toBe('Create a video');
 
     // The interface does not allow additional fields like snapshot, etc.
-    // @ts-expect-error - snapshot should not be allowed
     const invalidRequest: CreativeBriefInputResolverRequest = {
       projectId: 'test',
       snapshotRevisionId: 'test',
@@ -57,12 +56,11 @@ describe('CreativeBriefInputResolver - request shape', () => {
         snapshotRevisionId: 'test',
         projectId: 'test',
         request: 'test',
-        scope: 'video',
+        scope: 'general',
       },
       snapshot: { foo: 'bar' },
     };
 
-    // @ts-expect-error - intelligence should not be allowed
     const invalidRequest2: CreativeBriefInputResolverRequest = {
       projectId: 'test',
       snapshotRevisionId: 'test',
@@ -70,7 +68,7 @@ describe('CreativeBriefInputResolver - request shape', () => {
         snapshotRevisionId: 'test',
         projectId: 'test',
         request: 'test',
-        scope: 'video',
+        scope: 'general',
       },
       intelligence: { foo: 'bar' },
     };
@@ -86,7 +84,7 @@ describe('CreativeBriefInputResolver - request shape', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -110,7 +108,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -131,7 +129,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -150,7 +148,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
         snapshotRevisionId: 'revision-1',
         projectId: 'project-1',
         request: 'Test',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -161,7 +159,7 @@ describe('UnavailableCreativeBriefInputResolver', () => {
         snapshotRevisionId: 'revision-2',
         projectId: 'project-2',
         request: 'Another test',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -198,7 +196,7 @@ describe('CreativeBriefInputResolver - result types', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -218,7 +216,7 @@ describe('CreativeBriefInputResolver - result types', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: 'Create a video',
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -294,7 +292,7 @@ describe('CreativeBriefInputResolver - Persian text', () => {
         snapshotRevisionId: 'test-revision-id',
         projectId: 'test-project-id',
         request: persianText,
-        scope: 'video',
+        scope: 'general',
       },
     };
 
@@ -333,7 +331,7 @@ describe('CreativeBriefInputResolver - type safety', () => {
             snapshotRevisionId: 'test',
             projectId: 'test',
             request: 'test',
-            scope: 'video',
+            scope: 'general',
           },
         },
       },
