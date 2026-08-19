@@ -12,7 +12,12 @@ import type {
 } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-brief-runtime-config.js';
-import { isDisabledConfig, isOpenRouterConfig } from './creative-brief-runtime-config.js';
+import {
+  CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_SECRET_REFERENCE,
+  isDisabledConfig,
+  isOpenRouterConfig,
+} from './creative-brief-runtime-config.js';
 import type {
   AsyncCreativeBriefOptions,
   AsyncCreativeBriefOutcome,
@@ -78,13 +83,18 @@ export function createCreativeBriefRuntimeFactory(
     return DEFAULT_CREATIVE_BRIEF_RUNTIME;
   }
 
-  // Validate allowlist is non-empty (parser should already enforce this, but be defensive)
-  if (config.allowedFreeModelIds.length === 0) {
-    return DEFAULT_CREATIVE_BRIEF_RUNTIME;
-  }
-
-  // Validate model is in allowlist (parser should already enforce this, but be defensive)
-  if (!config.allowedFreeModelIds.includes(config.modelId)) {
+  // Re-check the complete free-only policy at the composition boundary. This
+  // protects callers that construct OpenRouterConfig objects without using
+  // the environment parser.
+  if (
+    config.modelId !== CREATIVE_BRIEF_MODEL_ID ||
+    config.allowedFreeModelIds.length !== 1 ||
+    config.allowedFreeModelIds[0] !== CREATIVE_BRIEF_MODEL_ID ||
+    config.secretRef !== CREATIVE_BRIEF_SECRET_REFERENCE ||
+    config.spendLimitUsdCents !== 0 ||
+    config.timeoutMs < 1000 ||
+    config.timeoutMs > 30000
+  ) {
     return DEFAULT_CREATIVE_BRIEF_RUNTIME;
   }
 

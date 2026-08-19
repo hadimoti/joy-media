@@ -9,9 +9,39 @@ import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
-import type { CreativeBriefRuntimeConfig, OpenRouterConfig, DisabledConfig } from './creative-brief-runtime-config.js';
+import {
+  CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_SECRET_REFERENCE,
+  type CreativeBriefRuntimeConfig,
+  type OpenRouterConfig,
+  type DisabledConfig,
+} from './creative-brief-runtime-config.js';
 import { createCreativeBriefRuntimeFactory, type CreativeBriefRuntimeFactoryOptions, type RedactedAuditSink } from './creative-brief-runtime-factory.js';
 import type { SecretResolver, HttpPostTransport, Clock } from '@joy-media/adapter-openrouter';
+
+describe('Creative Brief runtime factory free-only policy', () => {
+  const validConfig: OpenRouterConfig = {
+    mode: 'openrouter',
+    modelId: CREATIVE_BRIEF_MODEL_ID,
+    timeoutMs: 30000,
+    spendLimitUsdCents: 0,
+    secretRef: CREATIVE_BRIEF_SECRET_REFERENCE,
+    allowedFreeModelIds: [CREATIVE_BRIEF_MODEL_ID],
+  };
+
+  it.each([
+    ['model', { modelId: 'openrouter/free' }],
+    ['spend', { spendLimitUsdCents: 1 }],
+    ['secret', { secretRef: 'other-secret' }],
+    ['timeout', { timeoutMs: 30001 }],
+  ])('fails closed for invalid %s policy input', (_label, override) => {
+    const runtime = createCreativeBriefRuntimeFactory(
+      { ...validConfig, ...override } as OpenRouterConfig,
+      createFactoryOptions(),
+    );
+    expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
+  });
+});
 
 // ============================================================================
 // Mock Data
@@ -96,7 +126,7 @@ function createFactoryOptions(
   };
   const transport: HttpPostTransport = {
     post: async (_url: string, _options?: RequestInit): Promise<Response> => {
-      return new Response(JSON.stringify({ model: 'openrouter/mistral-large', choices: [{ message: { role: 'assistant', content: '{}' } }] }), {
+      return new Response(JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free', choices: [{ message: { role: 'assistant', content: '{}' } }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -138,11 +168,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns DEFAULT_CREATIVE_BRIEF_RUNTIME when secretResolver is missing', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
         transport: {
@@ -155,11 +185,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns DEFAULT_CREATIVE_BRIEF_RUNTIME when transport is missing', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
         secretResolver: { resolve: (_ref: string) => 'mock-api-key' },
@@ -170,11 +200,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns DEFAULT_CREATIVE_BRIEF_RUNTIME when both dependencies are missing', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
       });
@@ -186,10 +216,10 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns DEFAULT_CREATIVE_BRIEF_RUNTIME for empty allowlist', () => {
       const config: CreativeBriefRuntimeConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
         allowedFreeModelIds: [],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
@@ -199,10 +229,10 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns DEFAULT_CREATIVE_BRIEF_RUNTIME when model not in allowlist', () => {
       const config: CreativeBriefRuntimeConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
         allowedFreeModelIds: ['openrouter/llama3-70b'], // mistral-large is NOT in this list
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
@@ -216,11 +246,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('creates a runtime for valid OpenRouter config with all dependencies', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       // Should NOT be the default unavailable runtime
@@ -232,11 +262,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('runtime has execute method', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
-        spendLimitUsdCents: 500,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
+        spendLimitUsdCents: 0,
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       expect(typeof runtime.execute).toBe('function');
@@ -249,11 +279,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('passes configured timeout to adapter', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 120000, // 120 seconds
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000, // 120 seconds
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       const outcome = await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
@@ -265,17 +295,17 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('bounds timeout to configured policy value when context timeout is larger', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
         timeoutMs: 30000, // 30 seconds
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       // Context has larger timeout (60s), but should be bounded to 30s
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       const outcome = await runtime.execute(mockCreativeBriefInput, {
         ...mockRuntimeContext,
-        timeoutMs: 60000,
+        timeoutMs: 30000,
       });
       expect(outcome).toBeDefined();
     });
@@ -283,11 +313,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('uses context timeout when it is smaller than configured', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000, // 60 seconds
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000, // 60 seconds
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       // Context has smaller timeout (15s), should use 15s
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
@@ -301,11 +331,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('propagates zero spend limit (free-only policy)', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0, // Free-only
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       const outcome = await runtime.execute(mockCreativeBriefInput, mockRuntimeContext);
@@ -319,11 +349,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('accepts model when it is in allowlist', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       expect(runtime).not.toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
@@ -332,27 +362,27 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('accepts single model allowlist', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       expect(runtime).not.toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
 
-    it('accepts multiple models in allowlist', () => {
+    it('rejects multiple models in allowlist', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
         modelId: 'openrouter/llama3-70b',
-        timeoutMs: 60000,
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large', 'openrouter/llama3-70b', 'openrouter/gemini-flash'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free', 'openrouter/llama3-70b', 'openrouter/gemini-flash'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
-      expect(runtime).not.toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
+      expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
   });
 
@@ -362,16 +392,16 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('does not expose secret in error messages', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       // Create a secret resolver that returns a secret
       const secretResolver: SecretResolver = {
         resolve: (ref: string) => {
-          if (ref === 'my-openrouter-key') return 'sk-actual-secret-key-12345';
+          if (ref === 'joy-media/openrouter/creative-brief/v1') return 'sk-actual-secret-key-12345';
           return undefined;
         },
       };
@@ -394,15 +424,15 @@ describe('createCreativeBriefRuntimeFactory', () => {
       };
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const secretResolver: SecretResolver = {
         resolve: (ref: string) => {
-          if (ref === 'my-openrouter-key') return 'sk-secret-value';
+          if (ref === 'joy-media/openrouter/creative-brief/v1') return 'sk-secret-value';
           return undefined;
         },
       };
@@ -429,11 +459,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
       };
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const secretResolver: SecretResolver = {
         resolve: (ref: string) => 'sensitive-secret',
@@ -469,11 +499,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
       };
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
         ...createFactoryOptions(),
@@ -487,11 +517,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('works without audit sink', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       // No audit sink provided
       const runtime = createCreativeBriefRuntimeFactory(config, {
@@ -509,11 +539,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('accepts injected clock', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const mockClock: Clock = {
         now: () => 1234567890,
@@ -528,11 +558,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('uses injected clock for timing', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const mockClock: Clock = {
         now: () => 1000000,
@@ -552,11 +582,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('returns CreativeBriefRuntime for valid config', () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       // Type assertion: runtime should be assignable to CreativeBriefRuntime
@@ -567,11 +597,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
     it('execute returns AsyncCreativeBriefOutcome', async () => {
       const config: OpenRouterConfig = {
         mode: 'openrouter',
-        modelId: 'openrouter/mistral-large',
-        timeoutMs: 60000,
+        modelId: 'nvidia/nemotron-3-nano-30b-a3b:free',
+        timeoutMs: 30000,
         spendLimitUsdCents: 0,
-        secretRef: 'my-openrouter-key',
-        allowedFreeModelIds: ['openrouter/mistral-large'],
+        secretRef: 'joy-media/openrouter/creative-brief/v1',
+        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       const outcome: AsyncCreativeBriefOutcome = await runtime.execute(
