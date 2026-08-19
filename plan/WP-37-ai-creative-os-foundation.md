@@ -575,6 +575,16 @@ Create a decision request/ADR and stop the affected package if any of these are 
 - [x] No UI, command execution, approval, jobs, caching, deployment, provider call, or GBrain mutation was added.
 - [x] 4 test files / 171 tests passed.
 
+### Integration milestones (verified completed work)
+
+- 31d0c85: Creative Brief panel registry — added durable panel ID `creative-brief` with label, intent `automation`, command label, and default preset `automate`; not added to CORE_WORKSPACE_PANELS.
+- 8aab2fd: lazy-mounted opted-in panel — mounted in App.tsx behind explicit opt-in gate; panel remains unavailable until user enables Creative Brief.
+- c028177: persisted opt-in GET route and App hydration — server-side route with typed error handling and URL encoding; App consumes hydrated opt-in state.
+- 0342c15: server wiring of canonical S1/S2 input resolver — produces Creative Brief input from persisted S1 semantic snapshot and S2 scene/brand intelligence.
+- 0425e77: browser opt-in read client — `getCreativeBriefOptIn(projectId)` returning typed `{ creativeBriefOptIn, revision }` using existing authenticated conventions.
+
+State: 49 panel tests, 103 editor integration tests, 60 HTTP tests, and 28 resolver tests pass where applicable. API/editor builds are green, with only the known editor chunk-size warning. OpenRouter remains unavailable unless explicit secret resolver and HTTP transport are injected. **WP-37 is not complete**; no deployment or provider enablement occurred.
+
 ## 18. Definition of success for the larger program
 
 The program reaches its first real north-star demonstration only when a user can request a branded short-form reel and JOY Media can:
