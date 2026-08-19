@@ -87,6 +87,11 @@ interface OpenRouterAdapterOptions {
 /** The only model permitted by the initial free-only production policy. */
 const OPENROUTER_INITIAL_FREE_MODEL_ID =
   'nvidia/nemotron-3-nano-30b-a3b:free' as const;
+/** Additional code-approved free Nemotron model with stronger JSON adherence. */
+const OPENROUTER_FREE_MODEL_IDS = [
+  OPENROUTER_INITIAL_FREE_MODEL_ID,
+  'nvidia/nemotron-3.5-lightning:free',
+] as const;
 
 // ============================================================================
 // Default/No-op Implementations
@@ -189,10 +194,11 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
     // configuration is never treated as permissive.
     const allowedFreeModelIds = this.#options.allowedFreeModelIds;
     const modelPolicyValid =
-      this.#options.modelId === OPENROUTER_INITIAL_FREE_MODEL_ID &&
+      OPENROUTER_FREE_MODEL_IDS.some((id) => id === this.#options.modelId) &&
       allowedFreeModelIds !== undefined &&
       allowedFreeModelIds.length === 1 &&
-      allowedFreeModelIds[0] === OPENROUTER_INITIAL_FREE_MODEL_ID;
+      allowedFreeModelIds[0] === this.#options.modelId &&
+      OPENROUTER_FREE_MODEL_IDS.some((id) => id === allowedFreeModelIds[0]);
     if (!modelPolicyValid || this.#options.spendLimitUsdCents !== 0) {
       const durationMs = this.#clock.now() - startTime;
       const errorCode = modelPolicyValid

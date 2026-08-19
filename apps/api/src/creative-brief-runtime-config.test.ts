@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_FREE_MODEL_IDS,
   CREATIVE_BRIEF_CONSENT_VERSION,
   parseCreativeBriefRuntimeConfig,
   isDisabledConfig,
@@ -39,6 +40,20 @@ describe('Creative Brief free-runtime policy', () => {
       secretRef: 'joy-media/openrouter/creative-brief/v1',
       allowedFreeModelIds: [CREATIVE_BRIEF_MODEL_ID],
     });
+  });
+
+  it('accepts the code-approved stronger free Nemotron model', () => {
+    const modelId = CREATIVE_BRIEF_FREE_MODEL_IDS[1];
+    const result = parseCreativeBriefRuntimeConfig({
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: modelId,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: modelId,
+    });
+
+    expect(result).toMatchObject({ mode: 'openrouter', modelId, allowedFreeModelIds: [modelId] });
   });
 
   it('fails closed for a dynamic free router', () => {

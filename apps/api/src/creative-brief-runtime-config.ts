@@ -49,6 +49,12 @@ export interface DisabledConfig {
 export const CREATIVE_BRIEF_MODEL_ID =
   'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 
+/** Code-owned free models; operators may select only one of these exact IDs. */
+export const CREATIVE_BRIEF_FREE_MODEL_IDS = [
+  CREATIVE_BRIEF_MODEL_ID,
+  'nvidia/nemotron-3.5-lightning:free',
+] as const;
+
 /** Versioned disclosure accepted by the owner before remote processing. */
 export const CREATIVE_BRIEF_CONSENT_VERSION =
   'openrouter-nvidia-free-logging-v1' as const;
@@ -179,9 +185,9 @@ export function parseCreativeBriefRuntimeConfig(
 
   // Verify modelId is in the allowlist
   if (
-    modelId.trim() !== CREATIVE_BRIEF_MODEL_ID ||
+    !CREATIVE_BRIEF_FREE_MODEL_IDS.some((id) => id === modelId.trim()) ||
     allowedFreeModelIds.length !== 1 ||
-    allowedFreeModelIds[0] !== CREATIVE_BRIEF_MODEL_ID
+    allowedFreeModelIds[0] !== modelId.trim()
   ) {
     return { mode: 'disabled' };
   }

@@ -14,6 +14,7 @@ import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-brief-runtime-config.js';
 import {
   CREATIVE_BRIEF_MODEL_ID,
+  CREATIVE_BRIEF_FREE_MODEL_IDS,
   CREATIVE_BRIEF_SECRET_REFERENCE,
   isDisabledConfig,
   isOpenRouterConfig,
@@ -87,9 +88,9 @@ export function createCreativeBriefRuntimeFactory(
   // protects callers that construct OpenRouterConfig objects without using
   // the environment parser.
   if (
-    config.modelId !== CREATIVE_BRIEF_MODEL_ID ||
+    !CREATIVE_BRIEF_FREE_MODEL_IDS.some((id) => id === config.modelId) ||
     config.allowedFreeModelIds.length !== 1 ||
-    config.allowedFreeModelIds[0] !== CREATIVE_BRIEF_MODEL_ID ||
+    config.allowedFreeModelIds[0] !== config.modelId ||
     config.secretRef !== CREATIVE_BRIEF_SECRET_REFERENCE ||
     config.spendLimitUsdCents !== 0 ||
     config.timeoutMs < 1000 ||
