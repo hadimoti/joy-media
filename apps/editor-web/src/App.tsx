@@ -1351,10 +1351,10 @@ function EditorWorkspace({
   const creativeBriefRunner = useMemo(
     () =>
       createCreativeBriefPanelRunner({
-        binding: controlPlaneProject,
-        document: session.visualProject,
-        revisionId: session.projectRevisionId,
-        storage: window.localStorage,
+        controlPlaneProjectBinding: controlPlaneProject,
+        joyProject: session.visualProject,
+        projectRevisionId: session.projectRevisionId,
+        browserKeyValueStore: window.localStorage,
         syncProjectDocument: (controlPlaneProjectId, params) =>
           mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
         creativeBriefTransport: (controlPlaneProjectId, request) =>
@@ -5737,12 +5737,12 @@ function EditorWorkspace({
     }
     if (api.id === 'creative-brief') {
       return (
-        <Suspense fallback={<PanelShell title="Creative Brief" iconUrl={undefined} />}>
+        <Suspense fallback={<PanelShell title="Creative Brief" iconUrl={undefined}>{null}</PanelShell>}>
           <CreativeBriefPanel
             revisionId={context.session.projectRevisionId}
             optedIn={context.creativeBriefOptedIn}
             onOptIn={context.onCreativeBriefOptIn}
-            runBrief={context.creativeBriefOptedIn ? context.creativeBriefRunner : undefined}
+            {...(context.creativeBriefOptedIn ? { runBrief: context.creativeBriefRunner } : {})}
           />
         </Suspense>
       );
