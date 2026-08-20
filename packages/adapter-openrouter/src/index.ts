@@ -701,12 +701,12 @@ const MAX_PROMPT_CHARS = 32000;
 
 /**
  * Maximum output tokens for Creative Brief responses.
- * Hard cap of 1536 tokens for the initial free-only rollout. The schema and
- * prompt require concise lists; this keeps free-model latency bounded while
- * leaving room for a complete validated brief.
+ * Hard cap of 1024 tokens for the initial free-only rollout. The schema and
+ * prompt require one concise item per list; this keeps free-model latency
+ * bounded while leaving room for a complete validated brief.
  * Cannot be increased through the current public builder API.
  */
-const MAX_OUTPUT_TOKENS = 1536;
+const MAX_OUTPUT_TOKENS = 1024;
 
 /**
  * Forbidden patterns that should never appear in the model payload.
@@ -732,7 +732,8 @@ IMPORTANT RULES:
 - Never include explanations, apologies, or other text before or after the JSON
 - Never use markdown formatting or code blocks
 - Do not emit schema filenames, references, or placeholder objects
-- Use empty arrays when there is no evidence; keep each non-empty list to at most three items
+- Use empty arrays when there is no evidence; keep each non-empty list to exactly one item
+- Keep every generated string under 120 characters and the complete JSON under 700 output tokens
 - Preserve all Persian/RTL text exactly as provided
 - Be concise and specific in your recommendations
 - Focus on actionable creative improvements
