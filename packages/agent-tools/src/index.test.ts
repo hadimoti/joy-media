@@ -43,6 +43,12 @@ import {
   // Async Runtime Contract - WP-37 S4-F6
   createAsyncCreativeBrief,
   createAsyncCreativeBriefWithOptions,
+  // Joy Code plan contract - WP-38 GPT-02
+  JOY_CODE_PLAN_SCHEMA_VERSION,
+  JOY_CODE_OPERATION_KINDS,
+  JOY_CODE_PLAN_LIMITS,
+  validateJoyCodeModelPlan,
+  validateJoyCodePlanProposal,
 } from './index.js';
 import type {
   CreativeBriefScope,
@@ -76,6 +82,10 @@ import type {
   AsyncCreativeBriefOptions,
   AsyncCreativeBriefOutcome,
   AsyncCreativeBriefInputOptions,
+  JoyCodeModelPlanV1,
+  JoyCodePlanProposalV1,
+  JoyCodePlanOperationV1,
+  JoyCodeValidationOptions,
 } from './index.js';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 
@@ -786,5 +796,29 @@ describe('Async Runtime Contract from package root', () => {
   it('exports async creative brief production functions', () => {
     expect(typeof createAsyncCreativeBrief).toBe('function');
     expect(typeof createAsyncCreativeBriefWithOptions).toBe('function');
+  });
+});
+
+function _joyCodeTypeCheckHelper(
+  _plan: JoyCodeModelPlanV1,
+  _proposal: JoyCodePlanProposalV1,
+  _operation: JoyCodePlanOperationV1,
+  _options: JoyCodeValidationOptions,
+): void {
+  // Compile-time-only helper for the public Joy Code contract.
+}
+
+describe('Joy Code plan contract from package root', () => {
+  it('exports the production Joy Code constants and validators', () => {
+    expect(JOY_CODE_PLAN_SCHEMA_VERSION).toBe(1);
+    expect(JOY_CODE_OPERATION_KINDS).toContain('timeline.trimClip');
+    expect(JOY_CODE_OPERATION_KINDS).toContain('text.insertTemplate');
+    expect(JOY_CODE_PLAN_LIMITS.operations).toBe(24);
+    expect(typeof validateJoyCodeModelPlan).toBe('function');
+    expect(typeof validateJoyCodePlanProposal).toBe('function');
+  });
+
+  it('exposes Joy Code types at compile time without test-only adapters', () => {
+    void _joyCodeTypeCheckHelper;
   });
 });

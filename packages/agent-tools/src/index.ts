@@ -213,6 +213,41 @@ export { BranchManager, createBranchManager } from './branch.js';
 export type { RevertResult } from './revert.js';
 export { revertAgentRun, findAgentTransactions, canRevertAgentRun } from './revert.js';
 
+export type {
+  JoyCodeOperationKind,
+  JoyCodePlacementPreset,
+  JoyCodePlanValidationError,
+  JoyCodePlanValidationResult,
+  JoyCodeValidationOptions,
+  JoyCodePlanOperationV1,
+  JoyCodeTrimClipOperationV1,
+  JoyCodeSplitClipOperationV1,
+  JoyCodeMoveClipOperationV1,
+  JoyCodeRemoveClipOperationV1,
+  JoyCodeInsertExistingAssetOperationV1,
+  JoyCodeInsertTemplateOperationV1,
+  JoyCodeSetTextContentOperationV1,
+  JoyCodeSetTextTemplateOperationV1,
+  JoyCodeSetCaptionTextOperationV1,
+  JoyCodeSetCaptionTimingOperationV1,
+  JoyCodeSetCaptionTemplateOperationV1,
+  JoyCodeSetCaptionBurnInOperationV1,
+  JoyCodeAddTransitionOperationV1,
+  JoyCodeRemoveTransitionOperationV1,
+  JoyCodeModelPlanV1,
+  JoyCodePlanProvenanceV1,
+  JoyCodePlanProposalV1,
+} from './joy-code-plan.js';
+export {
+  JOY_CODE_PLAN_SCHEMA_VERSION,
+  JOY_CODE_OPERATION_KINDS,
+  JOY_CODE_PLACEMENT_PRESETS,
+  JOY_CODE_PLAN_LIMITS,
+  validateJoyCodeModelPlan,
+  validateJoyCodePlanProposal,
+  containsJoyCodeForbiddenData,
+} from './joy-code-plan.js';
+
 export type { AuditEntry, AuditAction } from './audit.js';
 export { AuditTrail, createAuditTrail } from './audit.js';
 
