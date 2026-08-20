@@ -11,6 +11,6 @@
 
 ## Live browser matrix
 
-- Deployed editor artifact: `ab3d9c0`, `/opt/joy-media/web-releases/editor-web-20260820T101051Z-ab3d9c0`.
-- Live DOM smoke on `https://joyst.ir/` passed after reload: exactly one `.creative-brief-panel` shell and `Creative Brief` title, one `.creative-brief-composer`, one `#creative-brief-request` textarea, `Generate brief` action, no legacy `.creative-brief-panel-input`, body `scrollWidth === clientWidth`, and zero browser console errors.
+- Deployed editor artifact: `63a4a72`, `/opt/joy-media/web-releases/editor-web-20260820T102557Z-63a4a72`.
+- Live DOM smoke on `https://joyst.ir/` passed after reload: one SVG-backed Creative Brief dock tab beside one Joy Code tab, exactly one `.creative-brief-panel` shell and `Creative Brief` title after activation, one `.creative-brief-composer`, one `#creative-brief-request` textarea, `Generate brief` action, no legacy `.creative-brief-panel-input`, body `scrollWidth === clientWidth`, and zero browser console errors.
 - The narrow/standard/wide screenshot matrix (`narrow-success.png`, `standard-success.png`, `wide-success.png`, `persian-rtl.png`, `consent-disabled.png`, `provider-error.png`) remains uncaptured. No live provider request or model canary is claimed.
