@@ -18,6 +18,7 @@ import {
   RevisionConflictError,
 } from '@joy-media/agent-tools';
 import type { AgentActor, AtomicRunResult, ProjectRevisionId } from '@joy-media/agent-tools';
+import type { JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
@@ -45,6 +46,7 @@ import {
 } from './joy-code-history.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { JoyCodeServerSession } from './joy-code-server-session.js';
 
 /** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
@@ -181,6 +183,7 @@ export function AgentPanel({
   onAdd3DRender,
   settings,
   command,
+  joyCodeServerSession,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -194,6 +197,8 @@ export function AgentPanel({
   readonly onAdd3DRender?: (asset: JoyCode3DRenderAsset) => Promise<void>;
   readonly settings: AgentSettings;
   readonly command?: AgentPanelCommand;
+  /** Optional guarded server planner for unmatched free-form prompts. */
+  readonly joyCodeServerSession?: JoyCodeServerSession;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -209,6 +214,7 @@ export function AgentPanel({
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
+  const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | undefined>(undefined);
 
   const approvalEngine = useMemo(
     () => new ApprovalEngine(approvalPolicyForAgentSettings(settings)),
@@ -383,11 +389,31 @@ export function AgentPanel({
     }
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+    if (intent === undefined && joyCodeServerSession !== undefined) {
+      setThinkingThreadId(threadId);
+      void joyCodeServerSession
+        .plan(body, { clipIds: selectedClipIds })
+        .then((result) => {
+          if (result.kind === 'success') {
+            setServerProposal(result.proposal);
+            appendMessage(threadId, 'assistant', `A guarded Joy Code proposal is ready: ${result.proposal.summary}. Review it before applying; model output is untrusted.`);
+          } else if (result.kind === 'stale') {
+            appendMessage(threadId, 'assistant', 'The project changed while planning. Refresh the project and try again.');
+          } else if (result.kind === 'cancelled') {
+            appendMessage(threadId, 'assistant', 'Joy Code planning was cancelled.');
+          } else {
+            appendMessage(threadId, 'assistant', `Joy Code planning did not complete (${result.kind}). No edits were applied.`);
+          }
+        })
+        .catch(() => appendMessage(threadId, 'assistant', 'Joy Code planning failed safely. No edits were applied.'))
+        .finally(() => setThinkingThreadId((current) => (current === threadId ? undefined : current)));
+      return;
+    }
     if (intent === undefined) {
       appendMessage(
         threadId,
         'assistant',
-        'Joy Code accepts direct timeline requests such as shortening an intro, trimming, moving, joining, adding, or removing clips. Free-form KiloCode responses will appear here once the server-session adapter is connected.',
+        'Joy Code accepts direct timeline requests such as shortening an intro, trimming, moving, joining, adding, or removing clips. Server planning is not configured for this session.',
       );
       return;
     }
