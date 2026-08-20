@@ -1,8 +1,9 @@
 import { JOY_CODE_SECRET_REFERENCE } from './joy-code-secret-resolver.js';
+export { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
+import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 export { JOY_CODE_SECRET_REFERENCE } from './joy-code-secret-resolver.js';
 export const JOY_CODE_MODEL_ID = 'nvidia/nemotron-3.5-lightning:free' as const;
-export const JOY_CODE_CONSENT_VERSION = 'openrouter-nvidia-free-edit-planning-v1' as const;
 export const JOY_CODE_FREE_MODEL_IDS = [JOY_CODE_MODEL_ID] as const;
 export type JoyCodeRuntimeConfig = { readonly mode: 'disabled' } | { readonly mode: 'openrouter'; readonly modelId: string; readonly timeoutMs: number; readonly spendLimitUsdCents: 0; readonly secretRef: string; readonly allowedFreeModelIds: readonly string[] };
 const PREFIX = 'JOY_MEDIA_JOY_CODE_RUNTIME_';

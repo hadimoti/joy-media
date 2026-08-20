@@ -1,4 +1,5 @@
 import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
+import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 export interface Actor {
   readonly id: string;
@@ -128,6 +129,12 @@ export interface ProjectMetadata {
   readonly trashedAt?: number;
   /** Per-project Creative Brief opt-in flag. Defaults to false. */
   readonly creativeBriefOptIn: boolean;
+}
+
+export interface JoyCodeOptInStatus {
+  readonly enabled: boolean;
+  readonly consentVersion?: string;
+  readonly revision: number;
 }
 
 export interface ProjectLifecycleMetadata extends ProjectMetadata {
@@ -419,6 +426,14 @@ export interface ControlPlane {
     enabled: boolean,
     baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
+  getJoyCodeOptIn(actor: Actor, projectId: string): JoyCodeOptInStatus | Promise<JoyCodeOptInStatus>;
+  setJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    consentVersion: string | undefined,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
   registerAsset(
     actor: Actor,
     projectId: string,
@@ -597,6 +612,7 @@ export class ControlPlaneError extends Error {
 export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
   readonly #creativeBriefConsentVersions = new Map<string, string>();
+  readonly #joyCodeConsentVersions = new Map<string, string>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
   readonly #assets = new Map<string, MediaAssetRecord>();
@@ -803,6 +819,36 @@ export class LocalControlPlane implements ControlPlane {
     this.#projects.set(projectId, next);
     if (enabled) this.#creativeBriefConsentVersions.set(projectId, CREATIVE_BRIEF_CONSENT_VERSION);
     else this.#creativeBriefConsentVersions.delete(projectId);
+    return next;
+  }
+  getJoyCodeOptIn(actor: Actor, projectId: string): JoyCodeOptInStatus {
+    const project = this.project(actor, projectId);
+    const consentVersion = this.#joyCodeConsentVersions.get(projectId);
+    return {
+      enabled: consentVersion === JOY_CODE_CONSENT_VERSION,
+      ...(consentVersion === undefined ? {} : { consentVersion }),
+      revision: project.revision,
+    };
+  }
+  setJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    consentVersion: string | undefined,
+    baseRevision: number,
+  ): ProjectMetadata {
+    const current = this.project(actor, projectId);
+    if (current.revision !== baseRevision)
+      throw new ControlPlaneError(
+        'REVISION_CONFLICT',
+        `expected ${baseRevision}, found ${current.revision}`,
+      );
+    if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
+      throw new ControlPlaneError('JOY_CODE_CONSENT_VERSION_REQUIRED', 'current disclosure version required');
+    const next = { ...current, revision: current.revision + 1 };
+    this.#projects.set(projectId, next);
+    if (enabled) this.#joyCodeConsentVersions.set(projectId, JOY_CODE_CONSENT_VERSION);
+    else this.#joyCodeConsentVersions.delete(projectId);
     return next;
   }
   registerAsset(

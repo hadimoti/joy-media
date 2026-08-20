@@ -37,6 +37,7 @@ import {
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 import { validateProjectDocumentRecord } from './project-document-store.js';
 import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
+import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -321,6 +322,7 @@ interface ProjectRow {
   readonly creative_brief_consent_version: string | null;
   readonly creative_brief_consent_at: Date | null;
   readonly document_revision_id: string | null;
+  readonly joy_code_consent_version: string | null;
 }
 
 interface ProjectDocumentRow {
@@ -735,6 +737,46 @@ export class PostgresControlPlane implements ControlPlane {
       ],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+    return projectOf(result.rows[0]);
+  }
+
+  async getJoyCodeOptIn(actor: Actor, projectId: string): Promise<import('./control-plane.js').JoyCodeOptInStatus> {
+    assertActor(actor);
+    const result = await this.pool.query<{ readonly revision: number; readonly joy_code_consent_version: string | null }>(
+      'SELECT revision, joy_code_consent_version FROM projects WHERE id = $1 AND owner_id = $2',
+      [projectId, actor.id],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+    const consentVersion = row.joy_code_consent_version;
+    return {
+      enabled: consentVersion === JOY_CODE_CONSENT_VERSION,
+      ...(consentVersion === null ? {} : { consentVersion }),
+      revision: row.revision,
+    };
+  }
+
+  async setJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    consentVersion: string | undefined,
+    baseRevision: number,
+  ): Promise<ProjectMetadata> {
+    assertActor(actor);
+    if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
+      throw new ControlPlaneError('JOY_CODE_CONSENT_VERSION_REQUIRED', 'current disclosure version required');
+    const result = await this.pool.query<ProjectRow>(
+      `UPDATE projects SET joy_code_consent_version = $3, revision = revision + 1
+       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
+      [projectId, actor.id, enabled ? JOY_CODE_CONSENT_VERSION : null, baseRevision],
+    );
+    if (result.rows[0] === undefined) {
+      const current = await this.project(actor, projectId);
+      if (current.revision !== baseRevision)
+        throw new ControlPlaneError('REVISION_CONFLICT', `expected ${baseRevision}, found ${current.revision}`);
+      throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+    }
     return projectOf(result.rows[0]);
   }
 

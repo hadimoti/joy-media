@@ -917,6 +917,29 @@ async function route(
     return;
   }
 
+  const joyCodeOptInMatch = /^\/v1\/projects\/([^/]+)\/joy-code-opt-in$/.exec(url.pathname);
+  if (request.method === 'GET' && joyCodeOptInMatch !== null) {
+    const status = await options.controlPlane.getJoyCodeOptIn(actor, decodeURIComponent(joyCodeOptInMatch[1]!));
+    respondJson(response, 200, { data: status });
+    return;
+  }
+  if (request.method === 'PUT' && joyCodeOptInMatch !== null) {
+    const body = await readJson(request);
+    const keys = Object.keys(body);
+    if (keys.length !== 3 || !keys.includes('enabled') || !keys.includes('consentVersion') || !keys.includes('baseRevision'))
+      throw new ControlPlaneError('REQUEST_INVALID', 'exact body { enabled, consentVersion, baseRevision } required');
+    if (typeof body.enabled !== 'boolean') throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
+    if (body.consentVersion !== null && typeof body.consentVersion !== 'string')
+      throw new ControlPlaneError('REQUEST_INVALID', 'consentVersion must be string or null');
+    if (typeof body.baseRevision !== 'number' || !Number.isSafeInteger(body.baseRevision) || body.baseRevision < 0)
+      throw new ControlPlaneError('REQUEST_INVALID', 'baseRevision must be a non-negative safe integer');
+    const projectId = decodeURIComponent(joyCodeOptInMatch[1]!);
+    const result = await options.controlPlane.setJoyCodeOptIn(actor, projectId, body.enabled, body.consentVersion === null ? undefined : body.consentVersion, body.baseRevision);
+    const status = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
+    respondJson(response, 200, { data: { ...status, revision: result.revision } });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/transcribe') {
     const { runWhisperOnReferenceAsset, runWhisperTranscription } =
       await import('./whisper-transcribe.js');
