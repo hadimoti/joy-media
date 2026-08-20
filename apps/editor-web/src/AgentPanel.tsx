@@ -721,6 +721,14 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
                     <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
                     until the plan passes policy and the execution mode permits it.
                   </p>
+                  {joyCodeServerSession !== undefined && (
+                    <p className="joy-code-disclosure">
+                      Server planning sends your prompt and bounded semantic project summary (including
+                      caption text and registered asset names) to OpenRouter/NVIDIA. It never sends
+                      media bytes, URLs, filesystem paths, or secrets. Provider output is untrusted and
+                      requires explicit preview approval.
+                    </p>
+                  )}
                 </div>
               )}
 
