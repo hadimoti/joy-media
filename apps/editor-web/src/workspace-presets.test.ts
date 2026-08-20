@@ -7,9 +7,12 @@ describe('workspace presets', () => {
   });
 
   it('changes the active group to the task intent without changing panel IDs', () => {
+    const editLayout = workspacePresetLayout('edit', 'vertical') as {
+      readonly panels: Record<string, unknown>;
+    };
     const layout = workspacePresetLayout('audio-captions', 'vertical') as {
       readonly panels: Record<string, unknown>;
     };
-    expect(Object.keys(layout.panels)).toHaveLength(20);
+    expect(Object.keys(layout.panels).sort()).toEqual(Object.keys(editLayout.panels).sort());
   });
 });
