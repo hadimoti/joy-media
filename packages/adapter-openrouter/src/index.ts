@@ -701,10 +701,12 @@ const MAX_PROMPT_CHARS = 32000;
 
 /**
  * Maximum output tokens for Creative Brief responses.
- * Hard cap of 4096 tokens for the initial free-only rollout.
+ * Hard cap of 1536 tokens for the initial free-only rollout. The schema and
+ * prompt require concise lists; this keeps free-model latency bounded while
+ * leaving room for a complete validated brief.
  * Cannot be increased through the current public builder API.
  */
-const MAX_OUTPUT_TOKENS = 4096;
+const MAX_OUTPUT_TOKENS = 1536;
 
 /**
  * Forbidden patterns that should never appear in the model payload.

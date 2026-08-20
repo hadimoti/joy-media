@@ -379,7 +379,7 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
     expect(result.result).toEqual(VALID_OUTPUT);
   });
 
-  it('should send outgoing body with configured model and max_tokens 4096', async () => {
+  it('should send outgoing body with configured model and max_tokens 1536', async () => {
     const secretResolver = new MockSecretResolver({ 'joy-media/openrouter/creative-brief/v1': 'sk-test-key' });
     const transport = new ConfigurableMockTransport();
     const adapter = createOpenRouterCreativeAdapter({
@@ -401,7 +401,7 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
 
     const body = JSON.parse(lastCall!.options.body as string) as any;
     expect(body.model).toBe('nvidia/nemotron-3-nano-30b-a3b:free');
-    expect(body.max_tokens).toBe(4096);
+    expect(body.max_tokens).toBe(1536);
     expect(body.temperature).toBe(0.0);
   });
 
@@ -1597,15 +1597,15 @@ describe('buildOpenRouterRequest - output token cap', () => {
     expect(result.category).toBe('ready');
   }
 
-  it('should build request with max_tokens set to 4096', () => {
+  it('should build request with max_tokens set to 1536', () => {
     const input = createMinimalInput();
     const result = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
 
     assertReady(result);
-    expect(result.result.max_tokens).toBe(4096);
+    expect(result.result.max_tokens).toBe(1536);
   });
 
-  it('should always use exactly 4096 for max_tokens regardless of input', () => {
+  it('should always use exactly 1536 for max_tokens regardless of input', () => {
     const input = createMinimalInput();
     // Test with different model IDs
     const result1 = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
@@ -1613,8 +1613,8 @@ describe('buildOpenRouterRequest - output token cap', () => {
 
     assertReady(result1);
     assertReady(result2);
-    expect(result1.result.max_tokens).toBe(4096);
-    expect(result2.result.max_tokens).toBe(4096);
+    expect(result1.result.max_tokens).toBe(1536);
+    expect(result2.result.max_tokens).toBe(1536);
   });
 
   it('should include temperature 0.0 for deterministic output', () => {
@@ -1623,7 +1623,7 @@ describe('buildOpenRouterRequest - output token cap', () => {
 
     assertReady(result);
     expect(result.result.temperature).toBe(0.0);
-    expect(result.result.max_tokens).toBe(4096);
+    expect(result.result.max_tokens).toBe(1536);
   });
 
   it('should not allow increasing max_tokens through public API', () => {
@@ -1633,10 +1633,10 @@ describe('buildOpenRouterRequest - output token cap', () => {
     const result = buildOpenRouterRequest(input, { modelId: 'nvidia/nemotron-3-nano-30b-a3b:free' });
 
     assertReady(result);
-    // No matter what, it should be 4096
-    expect(result.result.max_tokens).toBe(4096);
+    // No matter what, it should be 1536
+    expect(result.result.max_tokens).toBe(1536);
     expect(result.result.max_tokens).not.toBe(8192);
-    expect(result.result.max_tokens).not.toBeGreaterThan(4096);
+    expect(result.result.max_tokens).not.toBeGreaterThan(1536);
   });
 });
 
