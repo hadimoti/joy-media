@@ -22,7 +22,8 @@ export class JoyCodeServerSession {
     if (signal?.aborted) return { kind: 'cancelled' };
     const request: BrowserJoyCodePlanRequest = { projectId, snapshotRevisionId: this.options.revisionId, prompt, selection };
     try {
-      return await coordinateJoyCodePlan(this.options.binding, this.options.document, this.options.revisionId, request, this.options.storage, this.options.syncProjectDocument, this.options.joyCodeTransport, { ownerKey: this.options.ownerKey }, signal);
+      const coordinationOptions = this.options.ownerKey === undefined ? {} : { ownerKey: this.options.ownerKey };
+      return await coordinateJoyCodePlan(this.options.binding, this.options.document, this.options.revisionId, request, this.options.storage, this.options.syncProjectDocument, this.options.joyCodeTransport, coordinationOptions, signal);
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) return { kind: 'cancelled' };
       throw error;

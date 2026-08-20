@@ -26,7 +26,7 @@ export function coordinateJoyCodePlan(
 ): Promise<JoyCodeCoordinationResult> {
   if (request.projectId !== document.id) return Promise.resolve({ kind: 'parity-failure', reason: 'projectId-mismatch' });
   if (request.snapshotRevisionId !== revisionId) return Promise.resolve({ kind: 'parity-failure', reason: 'snapshotRevisionId-mismatch' });
-  return syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument, options).then((syncResult) => {
+  return syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument, options).then(async (syncResult): Promise<JoyCodeCoordinationResult> => {
     if (syncResult.kind === 'conflict') return { kind: 'stale', syncConflict: syncResult } satisfies JoyCodeCoordinationResult;
     if (syncResult.kind === 'request-failure') return { kind: 'sync-failure', syncResult } satisfies JoyCodeCoordinationResult;
     return joyCodeTransport(binding.controlPlaneProjectId, request, signal)
