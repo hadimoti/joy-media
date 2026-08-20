@@ -33,7 +33,7 @@ describe('Creative Brief runtime factory free-only policy', () => {
     ['model', { modelId: 'openrouter/free' }],
     ['spend', { spendLimitUsdCents: 1 }],
     ['secret', { secretRef: 'other-secret' }],
-    ['timeout', { timeoutMs: 30001 }],
+    ['timeout', { timeoutMs: 60001 }],
   ])('fails closed for invalid %s policy input', (_label, override) => {
     const runtime = createCreativeBriefRuntimeFactory(
       { ...validConfig, ...override } as OpenRouterConfig,

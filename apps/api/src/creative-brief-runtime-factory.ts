@@ -94,7 +94,7 @@ export function createCreativeBriefRuntimeFactory(
     config.secretRef !== CREATIVE_BRIEF_SECRET_REFERENCE ||
     config.spendLimitUsdCents !== 0 ||
     config.timeoutMs < 1000 ||
-    config.timeoutMs > 30000
+    config.timeoutMs > 60000
   ) {
     return DEFAULT_CREATIVE_BRIEF_RUNTIME;
   }
