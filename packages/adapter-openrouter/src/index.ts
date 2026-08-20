@@ -744,6 +744,9 @@ IMPORTANT RULES:
   blockedBy [{id,capability,status,message,evidence:[]}],
   requiresHumanDecision [{id,question,context,options:[],evidence:[]}]
 - Use evidence:[] and scope:{} unless an exact valid identifier is present in the input
+- Copy enum spelling exactly: confidence is low|medium|high; kind is pacing|caption|visual-coverage|brand|audio|transition|color|structure;
+  risk is none|reversible-local|destructive|remote-egress|spend; status is setup-required|unavailable|unknown;
+  source is s1|s2|snapshot. Never capitalize enum values.
 
 RESPONSE SCHEMA (strict):
 {
