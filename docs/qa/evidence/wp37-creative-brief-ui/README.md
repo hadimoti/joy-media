@@ -11,6 +11,6 @@
 
 ## Live browser matrix
 
-The narrow/standard/wide `joyst.ir` screenshots and live DOM count are intentionally pending deployment of this commit. No live deployment or runtime/provider request was performed as part of this UI-only change, so this file does not claim screenshots or a live canary that has not been captured.
-
-When deployed, capture `narrow-success.png`, `standard-success.png`, `wide-success.png`, `persian-rtl.png`, `consent-disabled.png`, and `provider-error.png` here and record the deployed SHA, viewport, panel width, project/revision, and fixture/live provenance.
+- Deployed editor artifact: `ab3d9c0`, `/opt/joy-media/web-releases/editor-web-20260820T101051Z-ab3d9c0`.
+- Live DOM smoke on `https://joyst.ir/` passed after reload: exactly one `.creative-brief-panel` shell and `Creative Brief` title, one `.creative-brief-composer`, one `#creative-brief-request` textarea, `Generate brief` action, no legacy `.creative-brief-panel-input`, body `scrollWidth === clientWidth`, and zero browser console errors.
+- The narrow/standard/wide screenshot matrix (`narrow-success.png`, `standard-success.png`, `wide-success.png`, `persian-rtl.png`, `consent-disabled.png`, `provider-error.png`) remains uncaptured. No live provider request or model canary is claimed.

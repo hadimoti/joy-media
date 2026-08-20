@@ -655,4 +655,4 @@ Implement in this order: Task 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Do no
 
 ## Implementation status
 
-Tasks 1–7 are implemented in the editor and verified locally. Task 8’s automated gates pass, but the live browser screenshot matrix remains pending a separately approved deployment of this commit; no live/provider behavior is claimed here.
+Tasks 1–7 are implemented in the editor and verified locally. Task 8’s automated gates pass, and the deployed `ab3d9c0` artifact passed a live browser DOM smoke on `joyst.ir`: one Creative Brief shell/title, one labeled composer/textarea, `Generate brief`, no legacy input root, no horizontal overflow, and no console errors. The full narrow/standard/wide screenshot matrix was not captured; no provider request or live model canary is claimed.
