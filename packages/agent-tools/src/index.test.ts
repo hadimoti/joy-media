@@ -49,6 +49,7 @@ import {
   JOY_CODE_PLAN_LIMITS,
   validateJoyCodeModelPlan,
   validateJoyCodePlanProposal,
+  finalizeJoyCodePlan,
 } from './index.js';
 import type {
   CreativeBriefScope,
@@ -783,7 +784,11 @@ describe('Async Runtime Contract from package root', () => {
       adapter: null as unknown as AsyncCreativeModelAdapter,
       adapterOptions: { correlationId: 'test' },
     };
-    const _outcome: AsyncCreativeBriefOutcome = { category: 'ready', retryable: false, durationMs: 0 };
+    const _outcome: AsyncCreativeBriefOutcome = {
+      category: 'ready',
+      retryable: false,
+      durationMs: 0,
+    };
     const _inputOptions: AsyncCreativeBriefInputOptions = {
       adapter: null as unknown as AsyncCreativeModelAdapter,
       adapterOptions: { correlationId: 'test' },
@@ -820,5 +825,9 @@ describe('Joy Code plan contract from package root', () => {
 
   it('exposes Joy Code types at compile time without test-only adapters', () => {
     void _joyCodeTypeCheckHelper;
+  });
+
+  it('exposes the async planner boundary and finalizer', () => {
+    expect(typeof finalizeJoyCodePlan).toBe('function');
   });
 });

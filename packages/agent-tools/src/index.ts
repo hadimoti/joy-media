@@ -238,6 +238,12 @@ export type {
   JoyCodePlanProvenanceV1,
   JoyCodePlanProposalV1,
 } from './joy-code-plan.js';
+export type {
+  AsyncJoyCodePlannerAdapter,
+  JoyCodePlannerInputV1 as AsyncJoyCodePlannerInputV1,
+} from './async-joy-code-adapter.js';
+export type { JoyCodePlannerInputV1, JoyCodePlanFinalizerMetadata } from './async-joy-code-plan.js';
+export { finalizeJoyCodePlan } from './async-joy-code-plan.js';
 export {
   JOY_CODE_PLAN_SCHEMA_VERSION,
   JOY_CODE_OPERATION_KINDS,
@@ -322,10 +328,7 @@ export type {
   ModelAdapterInputV1,
   ModelAdapterOutputV1,
 } from './model-adapter.js';
-export {
-  isModelAdapterInputV1,
-  isModelAdapterOutputV1,
-} from './model-adapter.js';
+export { isModelAdapterInputV1, isModelAdapterOutputV1 } from './model-adapter.js';
 
 // ==========================================================================
 // Async Runtime Contract - WP-37 S4-F6
