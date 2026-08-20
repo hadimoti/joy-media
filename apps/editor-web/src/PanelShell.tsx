@@ -146,7 +146,7 @@ export function PanelShell({
   return (
     <article
       className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}
-      aria-label={hideHeader || tabsInHeader ? title : undefined}
+      aria-label={title}
     >
       {!hideHeader && (
         <div className="joy-panel-header">

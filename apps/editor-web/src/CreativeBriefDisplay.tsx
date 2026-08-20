@@ -1,41 +1,35 @@
 /**
- * Creative Brief Display - WP-37 S4-B
+ * Read-only Creative Brief presentation.
  *
- * Presentational, read-only component for displaying a CreativeBriefV1.
- * Does NOT: create snapshots, call models, call adapters, mutate state, persist data,
- * or create plans/commands/jobs.
+ * This component deliberately renders only validated brief data. It does not
+ * create snapshots, call providers, mutate project state, or expose actions.
  */
 
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
+import {
+  createCreativeBriefMetrics,
+  formatBriefEvidence,
+  type CreativeBriefEvidence,
+} from './creative-brief-presentation.js';
 
 export interface CreativeBriefDisplayProps {
-  /** The complete creative brief to display. */
   readonly brief: CreativeBriefV1;
 }
 
-/**
- * Risk level labels for display.
- */
-const RISK_LABEL: Record<'none' | 'reversible-local' | 'destructive' | 'remote-egress' | 'spend', string> = {
-  'none': 'No risk',
+const RISK_LABEL: Record<CreativeBriefV1['recommendations'][number]['risk'], string> = {
+  none: 'No risk',
   'reversible-local': 'Reversible',
-  'destructive': 'Destructive',
+  destructive: 'Destructive',
   'remote-egress': 'Network required',
-  'spend': 'Costs apply',
+  spend: 'Costs apply',
 };
 
-/**
- * Confidence level labels for display.
- */
 const CONFIDENCE_LABEL: Record<'low' | 'medium' | 'high', string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
 };
 
-/**
- * Severity level labels for display.
- */
 const SEVERITY_LABEL: Record<'info' | 'suggestion' | 'warning' | 'error', string> = {
   info: 'Info',
   suggestion: 'Suggestion',
@@ -43,210 +37,289 @@ const SEVERITY_LABEL: Record<'info' | 'suggestion' | 'warning' | 'error', string
   error: 'Error',
 };
 
-/**
- * Format evidence references for display.
- */
-function formatEvidence(evidence: readonly { readonly startUs?: number; readonly endUs?: number; readonly elementIds?: readonly string[]; readonly sceneIds?: readonly string[]; readonly detail?: string }[]): string {
-  if (evidence.length === 0) return 'No evidence';
-
-  const parts: string[] = [];
-  for (const e of evidence) {
-    if (e.sceneIds && e.sceneIds.length > 0) {
-      parts.push(`scenes: ${e.sceneIds.join(', ')}`);
-    }
-    if (e.elementIds && e.elementIds.length > 0) {
-      parts.push(`elements: ${e.elementIds.join(', ')}`);
-    }
-    if (e.startUs !== undefined && e.endUs !== undefined) {
-      parts.push(`range: ${formatDuration(e.startUs)}–${formatDuration(e.startUs + e.endUs)}`);
-    }
-    if (e.detail) {
-      parts.push(e.detail);
-    }
-  }
-  return parts.length > 0 ? parts.join('; ') : 'Evidence available';
+function evidenceText(evidence: readonly CreativeBriefEvidence[]): string {
+  return formatBriefEvidence(evidence);
 }
 
-/**
- * Format microseconds as a human-readable duration.
- */
-function formatDuration(us: number): string {
-  const seconds = Math.floor(us / 1_000_000);
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes > 0) {
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  }
-  return `${seconds}" Event: ${remainingSeconds}"`;
+function Badge({
+  children,
+  tone = 'neutral',
+}: {
+  readonly children: string;
+  readonly tone?: string;
+}) {
+  return <span className={`creative-brief-badge creative-brief-badge-${tone}`}>{children}</span>;
 }
 
-/**
- * Creative Brief Display Component.
- *
- * Renders a read-only view of a CreativeBriefV1 with:
- * - Original request and interpreted goal
- * - Facts clearly separated from model inferences
- * - Recommendations with confidence, risk, rationale, expected benefit, evidence
- * - Blockers, human decisions, and warnings when present
- */
-export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
+function FindingsList({ brief }: { readonly brief: CreativeBriefV1 }) {
   const { facts, inferences } = brief.distinction;
-
   return (
-    <article className="creative-brief" aria-label="Creative brief">
-      {/* Request and Goal */}
-      <section className="creative-brief-section" aria-label="Request and goal">
-        <h3 className="creative-brief-heading">Request</h3>
-        <p className="creative-brief-request">{brief.request}</p>
-
-        <h3 className="creative-brief-heading">Interpreted Goal</h3>
-        <div className="creative-brief-goal">
-          <p><strong>User intent:</strong> {brief.interpretedGoal.userIntent}</p>
-          <p><strong>Inferred goal:</strong> {brief.interpretedGoal.inferredGoal}</p>
-          <p><strong>Resolved goal:</strong> {brief.interpretedGoal.resolvedGoal}</p>
-          <p><small>Confidence: {CONFIDENCE_LABEL[brief.interpretedGoal.confidence]}</small></p>
+    <div className="creative-brief-findings">
+      <section className="creative-brief-section" aria-label="Factual findings">
+        <div className="creative-brief-section-heading">
+          <span className="creative-brief-eyebrow">Verified from project data</span>
+          <h3 className="creative-brief-heading">Factual findings</h3>
         </div>
-      </section>
-
-      {/* Facts vs Inferences */}
-      <section className="creative-brief-section" aria-label="Facts and inferences">
-        <h3 className="creative-brief-heading">Factual Findings</h3>
         {facts.length > 0 ? (
           <ul className="creative-brief-list">
             {facts.map((fact) => (
               <li key={fact.id} className="creative-brief-fact">
-                <span className="creative-brief-statement">{fact.statement}</span>
-                {fact.evidence.length > 0 && (
-                  <span className="creative-brief-evidence"> ({formatEvidence(fact.evidence)})</span>
-                )}
-                <span className="creative-brief-source"> [{fact.source}]</span>
+                <p className="creative-brief-statement" dir="auto">
+                  {fact.statement}
+                </p>
+                <div className="creative-brief-item-meta">
+                  <Badge tone="source">Source: {fact.source}</Badge>
+                  {fact.evidence.length > 0 && (
+                    <span className="creative-brief-evidence" dir="auto">
+                      {evidenceText(fact.evidence)}
+                    </span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="creative-brief-empty">No factual findings</p>
+          <p className="creative-brief-empty" dir="auto">
+            No factual findings.
+          </p>
         )}
+      </section>
 
-        <h3 className="creative-brief-heading">Model Inferences</h3>
+      <section className="creative-brief-section" aria-label="Model inferences">
+        <div className="creative-brief-section-heading">
+          <span className="creative-brief-eyebrow">Reasoned interpretation</span>
+          <h3 className="creative-brief-heading">Model inferences</h3>
+        </div>
         {inferences.length > 0 ? (
           <ul className="creative-brief-list">
             {inferences.map((inference) => (
               <li key={inference.id} className="creative-brief-inference">
-                <span className="creative-brief-statement">{inference.statement}</span>
-                <span className="creative-brief-confidence"> (Confidence: {CONFIDENCE_LABEL[inference.confidence]})</span>
+                <div className="creative-brief-item-heading">
+                  <p className="creative-brief-statement" dir="auto">
+                    {inference.statement}
+                  </p>
+                  <Badge tone="confidence">
+                    Confidence: {CONFIDENCE_LABEL[inference.confidence]}
+                  </Badge>
+                </div>
                 {inference.rationale && (
-                  <div className="creative-brief-rationale">Rationale: {inference.rationale}</div>
+                  <p className="creative-brief-rationale" dir="auto">
+                    {inference.rationale}
+                  </p>
                 )}
                 {inference.evidence.length > 0 && (
-                  <span className="creative-brief-evidence"> Evidence: {formatEvidence(inference.evidence)}</span>
+                  <p className="creative-brief-evidence" dir="auto">
+                    Evidence: {evidenceText(inference.evidence)}
+                  </p>
                 )}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="creative-brief-empty">No model inferences</p>
+          <p className="creative-brief-empty" dir="auto">
+            No model inferences.
+          </p>
         )}
       </section>
+    </div>
+  );
+}
 
-      {/* Assumptions */}
-      {brief.assumptions.length > 0 && (
-        <section className="creative-brief-section" aria-label="Assumptions">
-          <h3 className="creative-brief-heading">Assumptions</h3>
-          <ul className="creative-brief-list">
-            {brief.assumptions.map((assumption) => (
-              <li key={assumption.id} className="creative-brief-assumption">
-                <span className="creative-brief-statement">{assumption.statement}</span>
-                <span className="creative-brief-verified"> {assumption.verified ? '[Verified]' : '[Unverified]'}</span>
-                <span className="creative-brief-confidence"> (Confidence: {CONFIDENCE_LABEL[assumption.confidence]})</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Recommendations */}
-      <section className="creative-brief-section" aria-label="Recommendations">
+function CreativeBriefRecommendations({ brief }: { readonly brief: CreativeBriefV1 }) {
+  return (
+    <section
+      className="creative-brief-section creative-brief-recommendations"
+      aria-label="Recommendations"
+    >
+      <div className="creative-brief-section-heading">
+        <span className="creative-brief-eyebrow">Next best steps</span>
         <h3 className="creative-brief-heading">Recommendations</h3>
-        {brief.recommendations.length > 0 ? (
-          <ul className="creative-brief-list">
-            {brief.recommendations.map((rec) => (
-              <li key={rec.id} className="creative-brief-recommendation">
-                <div className="creative-brief-rec-header">
-                  <span className="creative-brief-rec-kind">{rec.kind}</span>
-                  <span className="creative-brief-rec-risk"> Risk: {RISK_LABEL[rec.risk]}</span>
-                  <span className="creative-brief-rec-confidence"> Confidence: {CONFIDENCE_LABEL[rec.confidence]}</span>
+      </div>
+      {brief.recommendations.length > 0 ? (
+        <ol className="creative-brief-list">
+          {brief.recommendations.map((recommendation) => (
+            <li key={recommendation.id} className="creative-brief-recommendation">
+              <div className="creative-brief-item-heading">
+                <span className="creative-brief-rec-kind">{recommendation.kind}</span>
+                <div className="creative-brief-badges" aria-label="Recommendation metadata">
+                  <Badge tone="risk">{RISK_LABEL[recommendation.risk]}</Badge>
+                  <Badge tone="confidence">
+                    Confidence: {CONFIDENCE_LABEL[recommendation.confidence]}
+                  </Badge>
                 </div>
-                <p className="creative-brief-rec-rationale">{rec.rationale}</p>
-                <p className="creative-brief-rec-benefit"><strong>Expected benefit:</strong> {rec.expectedBenefit}</p>
-                {rec.proposedIntent && (
-                  <p className="creative-brief-rec-intent"><small>Suggested intent: {rec.proposedIntent}</small></p>
-                )}
-                {rec.evidence.length > 0 && (
-                  <p className="creative-brief-rec-evidence"><small>Evidence: {formatEvidence(rec.evidence)}</small></p>
-                )}
-                {rec.scope && (
-                  <p className="creative-brief-rec-scope"><small>Scope: {rec.scope.sceneIds?.join(', ') ?? ''} {rec.scope.elementIds?.join(', ') ?? ''}</small></p>
-                )}
-              </li>
+              </div>
+              <p className="creative-brief-rec-rationale" dir="auto">
+                {recommendation.rationale}
+              </p>
+              <p className="creative-brief-rec-benefit" dir="auto">
+                <strong>Expected benefit:</strong> {recommendation.expectedBenefit}
+              </p>
+              {recommendation.proposedIntent && (
+                <p className="creative-brief-rec-intent" dir="auto">
+                  Suggested intent: {recommendation.proposedIntent}
+                </p>
+              )}
+              {recommendation.evidence.length > 0 && (
+                <p className="creative-brief-rec-evidence" dir="auto">
+                  Evidence: {evidenceText(recommendation.evidence)}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="creative-brief-empty" dir="auto">
+          No recommendations.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function CreativeBriefAttention({ brief }: { readonly brief: CreativeBriefV1 }) {
+  const hasAttention =
+    brief.warnings.length > 0 ||
+    brief.blockedBy.length > 0 ||
+    brief.requiresHumanDecision.length > 0;
+  if (!hasAttention) return null;
+
+  return (
+    <section className="creative-brief-section" aria-label="Needs attention">
+      <div className="creative-brief-section-heading">
+        <span className="creative-brief-eyebrow">Review before acting</span>
+        <h3 className="creative-brief-heading">Needs attention</h3>
+      </div>
+      <div className="creative-brief-attention-list">
+        {brief.warnings.map((warning, index) => (
+          <div
+            key={`warning-${index}`}
+            className={`creative-brief-attention creative-brief-warning-${warning.severity}`}
+          >
+            <Badge tone="status">{SEVERITY_LABEL[warning.severity]}</Badge>
+            <span dir="auto">{warning.message}</span>
+          </div>
+        ))}
+        {brief.blockedBy.map((blocker) => (
+          <div key={blocker.id} className="creative-brief-attention">
+            <Badge tone="status">Blocked: {blocker.status}</Badge>
+            <span dir="auto">{blocker.message}</span>
+          </div>
+        ))}
+        {brief.requiresHumanDecision.map((decision) => (
+          <div key={decision.id} className="creative-brief-attention creative-brief-decision">
+            <Badge tone="status">Decision needed</Badge>
+            <div>
+              <p dir="auto">
+                <strong dir="auto">{decision.question}</strong>
+              </p>
+              <p dir="auto">{decision.context}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CreativeBriefAssumptions({ brief }: { readonly brief: CreativeBriefV1 }) {
+  if (brief.assumptions.length === 0) return null;
+  return (
+    <section className="creative-brief-section" aria-label="Assumptions">
+      <div className="creative-brief-section-heading">
+        <span className="creative-brief-eyebrow">Context to verify</span>
+        <h3 className="creative-brief-heading">Assumptions</h3>
+      </div>
+      <ul className="creative-brief-list">
+        {brief.assumptions.map((assumption) => (
+          <li key={assumption.id} className="creative-brief-assumption">
+            <div className="creative-brief-item-heading">
+              <span className="creative-brief-statement" dir="auto">
+                {assumption.statement}
+              </span>
+              <div className="creative-brief-badges">
+                <Badge tone={assumption.verified ? 'verified' : 'status'}>
+                  {assumption.verified ? 'Verified' : 'Unverified'}
+                </Badge>
+                <Badge tone="confidence">
+                  Confidence: {CONFIDENCE_LABEL[assumption.confidence]}
+                </Badge>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
+  const metrics = createCreativeBriefMetrics(brief);
+  return (
+    <article className="creative-brief" aria-label="Creative brief">
+      <section
+        className="creative-brief-section creative-brief-overview"
+        aria-label="Creative direction"
+      >
+        <div className="creative-brief-section-heading">
+          <span className="creative-brief-eyebrow">Overview</span>
+          <h3 className="creative-brief-heading">Creative direction</h3>
+        </div>
+        <div className="creative-brief-goal">
+          <div className="creative-brief-item-heading">
+            <p className="creative-brief-goal-text" dir="auto">
+              {brief.interpretedGoal.resolvedGoal}
+            </p>
+            <Badge tone="confidence">
+              Confidence: {CONFIDENCE_LABEL[brief.interpretedGoal.confidence]}
+            </Badge>
+          </div>
+          <p className="creative-brief-request" dir="auto">
+            {brief.request}
+          </p>
+        </div>
+        {metrics.length > 0 && (
+          <dl className="creative-brief-metrics" aria-label="Project overview metrics">
+            {metrics.map((metric) => (
+              <div key={metric.id} className="creative-brief-metric">
+                <dt>{metric.label}</dt>
+                <dd dir="auto">{metric.value}</dd>
+              </div>
             ))}
-          </ul>
-        ) : (
-          <p className="creative-brief-empty">No recommendations</p>
+          </dl>
         )}
       </section>
 
-      {/* Blockers */}
-      {brief.blockedBy.length > 0 && (
-        <section className="creative-brief-section" aria-label="Blockers">
-          <h3 className="creative-brief-heading">Blocked By</h3>
-          <ul className="creative-brief-list">
-            {brief.blockedBy.map((blocker) => (
-              <li key={blocker.id} className="creative-brief-blocker">
-                <span className="creative-brief-capability">{blocker.capability}</span>
-                <span className="creative-brief-status"> [{blocker.status}]</span>
-                <p>{blocker.message}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CreativeBriefRecommendations brief={brief} />
+      <FindingsList brief={brief} />
+      <CreativeBriefAttention brief={brief} />
+      <CreativeBriefAssumptions brief={brief} />
 
-      {/* Human Decisions */}
-      {brief.requiresHumanDecision.length > 0 && (
-        <section className="creative-brief-section" aria-label="Human decisions required">
-          <h3 className="creative-brief-heading">Requires Human Decision</h3>
-          <ul className="creative-brief-list">
-            {brief.requiresHumanDecision.map((decision) => (
-              <li key={decision.id} className="creative-brief-decision">
-                <p><strong>Question:</strong> {decision.question}</p>
-                <p><strong>Context:</strong> {decision.context}</p>
-                <p><small>Options: {decision.options.join(', ')}</small></p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Warnings */}
-      {brief.warnings.length > 0 && (
-        <section className="creative-brief-section" aria-label="Warnings">
-          <h3 className="creative-brief-heading">Warnings</h3>
-          <ul className="creative-brief-list">
-            {brief.warnings.map((warning, index) => (
-              <li key={index} className={`creative-brief-warning creative-brief-warning-${warning.severity}`}>
-                <span className="creative-brief-warning-label">[{SEVERITY_LABEL[warning.severity]}]</span>
-                <span> {warning.message}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Metadata */}
-      <section className="creative-brief-section creative-brief-meta" aria-label="Brief metadata">
-        <p><small>Snapshot revision: {brief.snapshotRevisionId}</small></p>
-        <p><small>Project: {brief.projectId}</small></p>
-        <p><small>Generated: {brief.meta.generatedAt} | Adapter: {brief.meta.modelAdapter} | Processing: {brief.meta.processingTimeMs}ms</small></p>
+      <section className="creative-brief-section creative-brief-technical">
+        <details>
+          <summary>Technical details</summary>
+          <dl className="creative-brief-meta" aria-label="Brief metadata">
+            <div>
+              <dt>Snapshot revision</dt>
+              <dd>{brief.snapshotRevisionId}</dd>
+            </div>
+            <div>
+              <dt>Project</dt>
+              <dd>{brief.projectId}</dd>
+            </div>
+            <div>
+              <dt>Generated</dt>
+              <dd>{brief.meta.generatedAt}</dd>
+            </div>
+            <div>
+              <dt>Adapter</dt>
+              <dd>{brief.meta.modelAdapter}</dd>
+            </div>
+            <div>
+              <dt>Processing</dt>
+              <dd>{brief.meta.processingTimeMs}ms</dd>
+            </div>
+          </dl>
+        </details>
       </section>
     </article>
   );

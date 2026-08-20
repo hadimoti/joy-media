@@ -22,6 +22,8 @@ import {
   type CreativeBriefState,
 } from './creative-brief-controller.js';
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
+import { PanelShell } from './PanelShell.js';
+import { panelTabIconUrl } from './panel-tab-icons.js';
 
 /**
  * Props for CreativeBriefPanel.
@@ -41,7 +43,7 @@ export interface CreativeBriefPanelProps {
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
 export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
-  'A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter\'s free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled.' as const;
+  "A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter's free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled." as const;
 
 /**
  * Creative Brief Panel Component.
@@ -56,7 +58,12 @@ export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
  * Errors transition to error state.
  * No action controls to execute/apply recommendations.
  */
-export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOptIn }: CreativeBriefPanelProps) {
+export function CreativeBriefPanel({
+  revisionId,
+  runBrief,
+  optedIn = false,
+  onOptIn,
+}: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
   const [optInError, setOptInError] = useState<string | null>(null);
@@ -217,129 +224,178 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
 
   // Render based on current state
   return (
-    <div className="creative-brief-panel" aria-label="Creative brief panel">
-      {/* Consent gate - shown when optedIn is false */}
-      {!optedIn && (
-        <div className="creative-brief-panel-consent" aria-label="Creative Brief consent gate">
-          {onOptIn ? (
-            <>
-              <p><strong>Creative Brief is currently disabled.</strong></p>
-              <p>Enable Creative Brief to request improvements to your project.</p>
-              <p className="creative-brief-panel-disclosure">
-                {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
-              </p>
-              {optInError && (
-                <p className="creative-brief-panel-error" aria-label="Opt-in error">
-                  <strong>Error:</strong> {optInError}
+    <PanelShell
+      title="Creative Brief"
+      iconUrl={panelTabIconUrl('creative-brief')}
+      className="creative-brief-panel"
+    >
+      <div className="creative-brief-panel-inner" aria-label="Creative Brief">
+        {/* Consent gate - shown when optedIn is false */}
+        {!optedIn && (
+          <div className="creative-brief-panel-consent" aria-label="Creative Brief consent gate">
+            {onOptIn ? (
+              <>
+                <p>
+                  <strong>Creative Brief is currently disabled.</strong>
                 </p>
-              )}
-              <button
-                className="creative-brief-panel-button"
-                onClick={handleOptIn}
-                disabled={isOptingIn}
-                aria-label="Enable Creative Brief"
-              >
-                {isOptingIn ? 'Enabling...' : 'Enable Creative Brief'}
-              </button>
-            </>
-          ) : (
-            <p>Creative Brief is not enabled.</p>
+                <p>Enable Creative Brief to request improvements to your project.</p>
+                <p className="creative-brief-panel-disclosure">
+                  {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
+                </p>
+                {optInError && (
+                  <p className="creative-brief-panel-error" aria-label="Opt-in error">
+                    <strong>Error:</strong> {optInError}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="creative-brief-panel-button"
+                  onClick={handleOptIn}
+                  disabled={isOptingIn}
+                  aria-label="Enable Creative Brief"
+                >
+                  {isOptingIn ? 'Enabling...' : 'Enable Creative Brief'}
+                </button>
+              </>
+            ) : (
+              <p>Creative Brief is not enabled.</p>
+            )}
+          </div>
+        )}
+
+        {/* Request Input */}
+        {optedIn && (
+          <div className="creative-brief-composer" aria-label="Brief request input">
+            <div className="creative-brief-field">
+              <label className="creative-brief-field-label" htmlFor="creative-brief-request">
+                Brief request
+              </label>
+              <textarea
+                id="creative-brief-request"
+                className="creative-brief-panel-textarea"
+                value={displayedRequest}
+                onChange={(e) => setRequestText(e.target.value)}
+                placeholder="Describe what you want to improve..."
+                aria-label="Describe creative improvement"
+                dir="auto"
+                disabled={isCollecting(state)}
+              />
+            </div>
+            <button
+              type="button"
+              className="creative-brief-panel-button"
+              onClick={handleImprove}
+              disabled={isCollecting(state) || (!runBrief && !isUnavailable(state))}
+              aria-label="Generate brief"
+            >
+              {isCollecting(state) ? 'Generating…' : 'Generate brief'}
+            </button>
+
+            {isCollecting(state) && (
+              <span className="creative-brief-panel-status" aria-label="Processing request">
+                Processing...
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* State-specific UI */}
+        <div className="creative-brief-panel-content">
+          {optedIn && isUnavailable(state) && !runBrief && (
+            <div
+              className="creative-brief-state creative-brief-state-unavailable creative-brief-panel-unavailable"
+              aria-label="Feature unavailable"
+              role="status"
+              aria-live="polite"
+            >
+              <p>Creative brief feature is not currently available.</p>
+              <p>{state.reason}</p>
+            </div>
+          )}
+
+          {optedIn && hasError(state) && (
+            <div
+              className="creative-brief-state creative-brief-state-error creative-brief-panel-error"
+              aria-label="Error occurred"
+              role="alert"
+            >
+              <p>
+                <strong>Error:</strong> {state.error}
+              </p>
+              <div className="creative-brief-state-actions">
+                <button
+                  type="button"
+                  className="creative-brief-panel-retry"
+                  onClick={handleRetry}
+                  aria-label="Retry"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  className="creative-brief-panel-reset"
+                  onClick={handleReset}
+                  aria-label="Reset"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {optedIn && isStale(state) && (
+            <div
+              className="creative-brief-state creative-brief-state-stale creative-brief-panel-stale"
+              aria-label="Brief is stale"
+              role="status"
+              aria-live="polite"
+            >
+              <p>
+                <strong>Warning:</strong> The creative brief is stale. The project revision has
+                changed.
+              </p>
+              <div className="creative-brief-state-actions">
+                <button
+                  type="button"
+                  className="creative-brief-panel-retry"
+                  onClick={handleRetry}
+                  aria-label="Regenerate brief"
+                >
+                  Regenerate Brief
+                </button>
+                <button
+                  type="button"
+                  className="creative-brief-panel-reset"
+                  onClick={handleReset}
+                  aria-label="Reset"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {optedIn && isIdle(state) && !isUnavailable(state) && (
+            <div
+              className="creative-brief-state creative-brief-state-idle creative-brief-panel-idle"
+              aria-label="Enter request"
+              role="status"
+              aria-live="polite"
+            >
+              <p>Enter a request above to generate a creative brief.</p>
+            </div>
+          )}
+
+          {/* Display brief when available */}
+          {optedIn && hasBrief(state) && !isStale(state) && getBrief(state) && (
+            <CreativeBriefDisplay brief={getBrief(state)!} />
+          )}
+
+          {optedIn && isStale(state) && getBrief(state) && (
+            <CreativeBriefDisplay brief={getBrief(state)!} />
           )}
         </div>
-      )}
-
-      {/* Request Input */}
-      {optedIn && (
-        <div className="creative-brief-panel-input" aria-label="Brief request input">
-          <textarea
-            className="creative-brief-panel-textarea"
-            value={displayedRequest}
-            onChange={(e) => setRequestText(e.target.value)}
-            placeholder="Describe what you want to improve..."
-            aria-label="Describe creative improvement"
-            disabled={isCollecting(state)}
-          />
-          <button
-            className="creative-brief-panel-button"
-            onClick={handleImprove}
-            disabled={isCollecting(state) || (!runBrief && !isUnavailable(state))}
-            aria-label="Improve project"
-          >
-            Improve project
-          </button>
-
-          {isCollecting(state) && (
-            <span className="creative-brief-panel-status" aria-label="Processing request">
-              Processing...
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* State-specific UI */}
-      <div className="creative-brief-panel-content">
-        {optedIn && isUnavailable(state) && !runBrief && (
-          <div className="creative-brief-panel-unavailable" aria-label="Feature unavailable">
-            <p>Creative brief feature is not currently available.</p>
-            <p>{state.reason}</p>
-          </div>
-        )}
-
-        {optedIn && hasError(state) && (
-          <div className="creative-brief-panel-error" aria-label="Error occurred">
-            <p><strong>Error:</strong> {state.error}</p>
-            <button
-              className="creative-brief-panel-retry"
-              onClick={handleRetry}
-              aria-label="Retry"
-            >
-              Retry
-            </button>
-            <button
-              className="creative-brief-panel-reset"
-              onClick={handleReset}
-              aria-label="Reset"
-            >
-              Clear
-            </button>
-          </div>
-        )}
-
-        {optedIn && isStale(state) && (
-          <div className="creative-brief-panel-stale" aria-label="Brief is stale">
-            <p><strong>Warning:</strong> The creative brief is stale. The project revision has changed.</p>
-            <button
-              className="creative-brief-panel-retry"
-              onClick={handleRetry}
-              aria-label="Regenerate brief"
-            >
-              Regenerate Brief
-            </button>
-            <button
-              className="creative-brief-panel-reset"
-              onClick={handleReset}
-              aria-label="Reset"
-            >
-              Clear
-            </button>
-          </div>
-        )}
-
-        {optedIn && isIdle(state) && !isUnavailable(state) && (
-          <div className="creative-brief-panel-idle" aria-label="Enter request">
-            <p>Enter a request above to generate a creative brief.</p>
-          </div>
-        )}
-
-        {/* Display brief when available */}
-        {optedIn && hasBrief(state) && !isStale(state) && getBrief(state) && (
-          <CreativeBriefDisplay brief={getBrief(state)!} />
-        )}
-
-        {optedIn && isStale(state) && getBrief(state) && (
-          <CreativeBriefDisplay brief={getBrief(state)!} />
-        )}
       </div>
-    </div>
+    </PanelShell>
   );
 }

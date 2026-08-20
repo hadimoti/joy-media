@@ -16112,3 +16112,393 @@ label {
 .creative-brief-meta p {
   margin: 0;
 }
+
+/* =============================================================================
+   Creative Brief UI cleanup — WP-37
+   Shared shell content, responsive composer, and compact result hierarchy.
+   ============================================================================= */
+.creative-brief-panel {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.creative-brief-panel .joy-panel-body {
+  min-width: 0;
+}
+
+.creative-brief-panel-inner,
+.creative-brief,
+.creative-brief-section,
+.creative-brief-findings,
+.creative-brief-list,
+.creative-brief-list li {
+  min-width: 0;
+}
+
+.creative-brief-panel-inner {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.creative-brief-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--joy-border-subtle);
+}
+
+.creative-brief-field {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.creative-brief-field-label {
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+  font-weight: 600;
+}
+
+.creative-brief-panel-textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 4.5rem;
+  resize: vertical;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  padding: var(--space-2);
+  font: inherit;
+  line-height: 1.45;
+}
+
+.creative-brief-panel-button,
+.creative-brief-panel-retry,
+.creative-brief-panel-reset {
+  min-height: var(--control-sm);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+  padding: 0 var(--space-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.creative-brief-panel-button {
+  background: var(--joy-accent-dim);
+  color: var(--joy-bg-deep);
+  font-weight: 600;
+}
+
+.creative-brief-panel-button:disabled,
+.creative-brief-panel-retry:disabled,
+.creative-brief-panel-reset:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.creative-brief-panel-consent,
+.creative-brief-panel-unavailable,
+.creative-brief-panel-error,
+.creative-brief-panel-stale,
+.creative-brief-panel-idle {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  color: var(--joy-text-secondary);
+}
+
+.creative-brief-panel-consent p,
+.creative-brief-panel-unavailable p,
+.creative-brief-panel-error p,
+.creative-brief-panel-stale p,
+.creative-brief-panel-idle p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.creative-brief-panel-disclosure {
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+}
+
+.creative-brief-panel-status {
+  grid-column: 1 / -1;
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+}
+
+.creative-brief-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.creative-brief-state-error {
+  border-inline-start: 3px solid var(--joy-danger);
+}
+
+.creative-brief-state-stale {
+  border-inline-start: 3px solid var(--joy-warning);
+}
+
+.creative-brief-state-unavailable,
+.creative-brief-state-idle {
+  border-inline-start: 3px solid var(--joy-accent-dim);
+}
+
+.creative-brief-panel-content {
+  min-width: 0;
+}
+
+.creative-brief {
+  gap: var(--space-5);
+}
+
+.creative-brief-section {
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+.creative-brief-section-heading {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.creative-brief-eyebrow {
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.creative-brief-heading {
+  font-size: var(--joy-type-lg);
+}
+
+.creative-brief-goal {
+  gap: var(--space-2);
+}
+
+.creative-brief-goal-text,
+.creative-brief-request,
+.creative-brief-rec-rationale,
+.creative-brief-rec-benefit,
+.creative-brief-rec-intent,
+.creative-brief-rec-evidence,
+.creative-brief-rationale,
+.creative-brief-evidence,
+.creative-brief-statement {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.creative-brief-goal-text {
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+  font-weight: 600;
+}
+
+.creative-brief-request,
+.creative-brief-rationale,
+.creative-brief-rec-intent,
+.creative-brief-rec-evidence,
+.creative-brief-evidence {
+  color: var(--joy-text-secondary);
+}
+
+.creative-brief-item-heading,
+.creative-brief-item-meta,
+.creative-brief-badges,
+.creative-brief-attention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  align-items: center;
+}
+
+.creative-brief-item-heading {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.creative-brief-badge {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: 999px;
+  background: var(--joy-bg-raised);
+  color: var(--joy-text-muted);
+  padding: 2px var(--space-2);
+  font-size: var(--joy-type-2xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.creative-brief-badge-confidence,
+.creative-brief-badge-verified {
+  border-color: var(--joy-accent-dim);
+  color: var(--joy-accent);
+}
+
+.creative-brief-badge-risk {
+  color: var(--joy-text-secondary);
+}
+
+.creative-brief-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+
+.creative-brief-metric {
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-metric dt {
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-2xs);
+}
+
+.creative-brief-metric dd {
+  margin: var(--space-1) 0 0;
+  color: var(--joy-text);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.creative-brief-list {
+  padding-inline-start: 0;
+}
+
+.creative-brief-list li {
+  align-items: stretch;
+  padding: var(--space-3);
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-recommendation {
+  gap: var(--space-2);
+  border-inline-start: 3px solid var(--joy-accent-dim) !important;
+}
+
+.creative-brief-rec-kind {
+  color: var(--joy-accent);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+}
+
+.creative-brief-findings {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.creative-brief-attention-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.creative-brief-attention {
+  align-items: flex-start;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-attention p {
+  margin: 0;
+}
+
+.creative-brief-technical details {
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+
+.creative-brief-technical summary {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-sm);
+  font-weight: 600;
+}
+
+.creative-brief-meta {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--joy-text-muted);
+  font-size: var(--joy-type-xs);
+}
+
+.creative-brief-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.creative-brief-meta dt {
+  font-weight: 600;
+}
+
+.creative-brief-meta dd {
+  margin: 0;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+@container creative-brief-panel (max-width: 34rem) {
+  .creative-brief-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .creative-brief-composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .creative-brief-composer .creative-brief-panel-button {
+    width: 100%;
+  }
+}
+
+@container creative-brief-panel (max-width: 20rem) {
+  .creative-brief-panel-inner {
+    padding: var(--space-2);
+  }
+
+  .creative-brief-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .creative-brief-list li,
+  .creative-brief-recommendation {
+    padding: var(--space-2);
+  }
+
+  .creative-brief-item-heading,
+  .creative-brief-meta div {
+    display: grid;
+    justify-content: stretch;
+  }
+}
