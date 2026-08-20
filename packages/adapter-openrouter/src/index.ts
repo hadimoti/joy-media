@@ -85,8 +85,7 @@ interface OpenRouterAdapterOptions {
 }
 
 /** The only model permitted by the initial free-only production policy. */
-const OPENROUTER_INITIAL_FREE_MODEL_ID =
-  'nvidia/nemotron-3-nano-30b-a3b:free' as const;
+const OPENROUTER_INITIAL_FREE_MODEL_ID = 'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 /** Additional code-approved free Nemotron model with stronger JSON adherence. */
 const OPENROUTER_FREE_MODEL_IDS = [
   OPENROUTER_INITIAL_FREE_MODEL_ID,
@@ -361,7 +360,7 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${secret}`,
+            Authorization: `Bearer ${secret}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestOutcome.result),
@@ -514,16 +513,16 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
 
       if (!isValidUsage(typedResponseBody.usage)) {
         const errorCode =
-          typeof typedResponseBody.usage.cost === 'number' &&
-          typedResponseBody.usage.cost !== 0
-          ? 'OPENROUTER_NONZERO_PROVIDER_COST'
-          : 'OPENROUTER_USAGE_INVALID';
+          typeof typedResponseBody.usage.cost === 'number' && typedResponseBody.usage.cost !== 0
+            ? 'OPENROUTER_NONZERO_PROVIDER_COST'
+            : 'OPENROUTER_USAGE_INVALID';
         return {
           category: 'provider-failed',
           errorCode,
-          message: errorCode === 'OPENROUTER_NONZERO_PROVIDER_COST'
-            ? 'OpenRouter response reported non-zero provider cost'
-            : 'OpenRouter response usage accounting was invalid',
+          message:
+            errorCode === 'OPENROUTER_NONZERO_PROVIDER_COST'
+              ? 'OpenRouter response reported non-zero provider cost'
+              : 'OpenRouter response usage accounting was invalid',
           retryable: false,
           durationMs,
         };
@@ -551,7 +550,8 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         return {
           category: 'provider-failed',
           errorCode: 'OPENROUTER_RESPONSE_MODEL_MISMATCH',
-          message: 'OpenRouter provider returned a response with an invalid or mismatched model identifier',
+          message:
+            'OpenRouter provider returned a response with an invalid or mismatched model identifier',
           retryable: false,
           durationMs,
         };
@@ -689,6 +689,24 @@ export {
   OpenRouterCodec,
 };
 
+export {
+  JOY_CODE_MODEL_ID,
+  JOY_CODE_SECRET_REF,
+  JOY_CODE_ENDPOINT,
+  JOY_CODE_MAX_OUTPUT_TOKENS,
+  JOY_CODE_MAX_RESPONSE_BYTES,
+  OpenRouterJoyCodeAdapter,
+  createOpenRouterJoyCodeAdapter,
+  buildJoyCodeRequest,
+  decodeJoyCodeResponse,
+} from './joy-code.js';
+export type {
+  JoyCodeRequest,
+  JoyCodeRequestOutcome,
+  JoyCodeDecodeOutcome,
+  OpenRouterJoyCodeAdapterOptions,
+} from './joy-code.js';
+
 // ============================================================================
 // OpenRouter Request Codec - WP-37 S4-F10-C
 // ============================================================================
@@ -713,12 +731,12 @@ const MAX_OUTPUT_TOKENS = 1024;
  * These are checked against the serialized prompt string.
  */
 const FORBIDDEN_PATTERNS = [
-  /sk-[a-zA-Z0-9]/,           // API keys
-  /https?:\/\//,             // URLs
+  /sk-[a-zA-Z0-9]/, // API keys
+  /https?:\/\//, // URLs
   /\/etc\/|\/home\/|\/root\//, // File paths
   /password|secret|api[_-]?key/i, // Secret-related terms
-  /bearer[\s:]*/i,           // Bearer tokens
-  /authorization/i,          // Authorization headers
+  /bearer[\s:]*/i, // Bearer tokens
+  /authorization/i, // Authorization headers
 ] as const;
 
 /**
@@ -833,8 +851,12 @@ function serializeUserMessage(input: ModelAdapterInputV1): string {
   lines.push(`- Revision: ${input.snapshot.revisionId}`);
   lines.push(`- Duration: ${input.snapshot.composition.durationUs} microseconds`);
   lines.push(`- Aspect Ratio: ${input.snapshot.composition.aspectRatio}`);
-  lines.push(`- Frame Rate: ${input.snapshot.composition.frameRate.num}/${input.snapshot.composition.frameRate.den} fps`);
-  lines.push(`- Resolution: ${input.snapshot.composition.width}x${input.snapshot.composition.height}`);
+  lines.push(
+    `- Frame Rate: ${input.snapshot.composition.frameRate.num}/${input.snapshot.composition.frameRate.den} fps`,
+  );
+  lines.push(
+    `- Resolution: ${input.snapshot.composition.width}x${input.snapshot.composition.height}`,
+  );
 
   // Brand readiness summary
   lines.push(`\nBrand Readiness:`);
@@ -859,7 +881,9 @@ function serializeUserMessage(input: ModelAdapterInputV1): string {
   // Scene coverages
   lines.push(`\nScene Coverages (${input.sceneCoverages.length}):`);
   for (const coverage of input.sceneCoverages) {
-    lines.push(`- Scene ${coverage.sceneId}: visualDensity=${coverage.visualDensity}, visualElements=${coverage.visualElementCount}`);
+    lines.push(
+      `- Scene ${coverage.sceneId}: visualDensity=${coverage.visualDensity}, visualElements=${coverage.visualElementCount}`,
+    );
   }
 
   // Project readiness
@@ -1013,17 +1037,21 @@ interface OpenRouterResponse {
     readonly total_tokens?: number;
     readonly cost?: number;
   };
-  readonly choices?: readonly {
-    readonly message?: {
-      readonly role?: string;
-      readonly content?: string;
-    };
-  }[] | undefined;
-  readonly error?: {
-    readonly message?: string;
-    readonly type?: string;
-    readonly code?: string;
-  } | undefined;
+  readonly choices?:
+    | readonly {
+        readonly message?: {
+          readonly role?: string;
+          readonly content?: string;
+        };
+      }[]
+    | undefined;
+  readonly error?:
+    | {
+        readonly message?: string;
+        readonly type?: string;
+        readonly code?: string;
+      }
+    | undefined;
 }
 
 /**
@@ -1152,10 +1180,12 @@ function normalizeModelOutput(value: unknown): unknown {
  * OpenRouter returns errors in the top-level 'error' field.
  */
 function isProviderError(response: OpenRouterResponse): boolean {
-  return response.error !== undefined &&
+  return (
+    response.error !== undefined &&
     (response.error.message !== undefined ||
-     response.error.type !== undefined ||
-     response.error.code !== undefined);
+      response.error.type !== undefined ||
+      response.error.code !== undefined)
+  );
 }
 
 /**
@@ -1182,9 +1212,7 @@ function isProviderError(response: OpenRouterResponse): boolean {
  * }
  * ```
  */
-function decodeOpenRouterResponse(
-  response: OpenRouterResponse,
-): OpenRouterDecoderOutcome {
+function decodeOpenRouterResponse(response: OpenRouterResponse): OpenRouterDecoderOutcome {
   // Check for provider error first
   if (isProviderError(response)) {
     return {
