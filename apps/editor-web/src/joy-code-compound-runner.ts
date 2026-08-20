@@ -37,8 +37,8 @@ export class JoyCodeCompoundRunner {
       );
     const document = draft.document === session.visualProject ? undefined : draft.document;
     session.dispatchCompound(`Joy Code plan ${draft.planId}`, {
-      timeline: draft.timeline,
-      document,
+      ...(draft.timeline === undefined ? {} : { timeline: draft.timeline }),
+      ...(document === undefined ? {} : { document }),
     });
     this.#applied.add(replayKey);
     return { applied: true, replayed: false, revisionId: session.projectRevisionId };

@@ -218,6 +218,7 @@ import {
 } from './AgentPanel.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import { JoyCodeServerSession } from './joy-code-server-session.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
 import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
@@ -836,6 +837,9 @@ interface EditorPanelContextValue {
   readonly creativeBriefOptedIn: boolean;
   readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn: () => Promise<void>;
+  readonly joyCodeOptedIn: boolean;
+  readonly onJoyCodeOptIn: () => Promise<void>;
+  readonly joyCodeServerSession: JoyCodeServerSession | undefined;
   readonly kiloCodeAttachedAssets: readonly KiloCodeAttachedAsset[];
   readonly attachKiloCodeAsset: (asset: KiloCodeAttachedAsset) => void;
   readonly detachKiloCodeAsset: (assetId: string) => void;
@@ -1025,6 +1029,7 @@ function EditorWorkspace({
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [creativeBriefOptedIn, setCreativeBriefOptedIn] = useState(false);
+  const [joyCodeOptedIn, setJoyCodeOptedIn] = useState(false);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
@@ -1378,6 +1383,18 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
   );
+  const joyCodeServerSession = useMemo(() => {
+    if (!joyCodeOptedIn || joySession.kind !== 'ready') return undefined;
+    return new JoyCodeServerSession({
+      binding: controlPlaneProject,
+      document: session.visualProject,
+      revisionId: session.projectRevisionId,
+      storage: window.localStorage,
+      syncProjectDocument: (controlPlaneProjectId, params) => mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
+      joyCodeTransport: (controlPlaneProjectId, request, signal) => mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
+      ownerKey: controlPlaneOwnerKey,
+    });
+  }, [controlPlaneOwnerKey, controlPlaneProject, joyCodeOptedIn, joySession.kind, session.projectRevisionId, session.visualProject]);
   const onCreativeBriefOptIn = useCallback(async () => {
     const result = await coordinateCreativeBriefOptIn(
       controlPlaneProject,
@@ -1392,6 +1409,20 @@ function EditorWorkspace({
     }
     setCreativeBriefOptedIn(true);
   }, [controlPlaneOwnerKey, controlPlaneProject]);
+  useEffect(() => {
+    let cancelled = false;
+    setJoyCodeOptedIn(false);
+    if (joySession.kind !== 'ready') return () => undefined;
+    void mediaControlPlaneClient.getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId)
+      .then((result) => { if (!cancelled) setJoyCodeOptedIn(result.enabled); })
+      .catch(() => { if (!cancelled) setJoyCodeOptedIn(false); });
+    return () => { cancelled = true; };
+  }, [controlPlaneProject.controlPlaneProjectId, joySession.kind]);
+  const onJoyCodeOptIn = useCallback(async () => {
+    const current = await mediaControlPlaneClient.getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId);
+    const result = await mediaControlPlaneClient.setJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId, true, 'openrouter-nvidia-free-edit-planning-v1', current.revision);
+    setJoyCodeOptedIn(result.enabled);
+  }, [controlPlaneProject.controlPlaneProjectId]);
   const mediaResolver = useMemo(
     () =>
       new ProjectMediaResolver({
@@ -5750,6 +5781,9 @@ function EditorWorkspace({
           onDetachAsset={context.detachKiloCodeAsset}
           onAttachAsset={context.attachKiloCodeAsset}
           onAdd3DRender={context.addJoyCode3DRender}
+          joyCodeOptedIn={context.joyCodeOptedIn}
+          onJoyCodeOptIn={context.onJoyCodeOptIn}
+          {...(context.joyCodeServerSession === undefined ? {} : { joyCodeServerSession: context.joyCodeServerSession })}
         />
       );
     }
@@ -6385,6 +6419,9 @@ function EditorWorkspace({
           creativeBriefOptedIn,
           creativeBriefRunner,
           onCreativeBriefOptIn,
+          joyCodeOptedIn,
+          onJoyCodeOptIn,
+          joyCodeServerSession,
           kiloCodeAttachedAssets,
           attachKiloCodeAsset,
           detachKiloCodeAsset,

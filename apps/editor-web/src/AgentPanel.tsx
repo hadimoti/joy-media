@@ -186,6 +186,8 @@ export function AgentPanel({
   settings,
   command,
   joyCodeServerSession,
+  joyCodeOptedIn = false,
+  onJoyCodeOptIn,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -201,6 +203,8 @@ export function AgentPanel({
   readonly command?: AgentPanelCommand;
   /** Optional guarded server planner for unmatched free-form prompts. */
   readonly joyCodeServerSession?: JoyCodeServerSession;
+  readonly joyCodeOptedIn?: boolean;
+  readonly onJoyCodeOptIn?: () => Promise<void>;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -728,6 +732,11 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
                       media bytes, URLs, filesystem paths, or secrets. Provider output is untrusted and
                       requires explicit preview approval.
                     </p>
+                  )}
+                  {!joyCodeOptedIn && onJoyCodeOptIn !== undefined && (
+                    <button type="button" className="is-primary" onClick={() => void onJoyCodeOptIn()}>
+                      Enable server planning
+                    </button>
                   )}
                 </div>
               )}
