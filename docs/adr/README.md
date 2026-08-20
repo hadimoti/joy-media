@@ -11,6 +11,6 @@
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
 
-Accepted through **ADR-0033** (local professional image/video masking).
+Accepted through **ADR-0036** (Joy Code server planner boundary).
 
-Most recent: **ADR-0031** automatic private media backup and curated cloud visibility · **ADR-0032** universal property animation binding · **ADR-0033** local professional image/video masking.
+Most recent: **ADR-0031** automatic private media backup and curated cloud visibility · **ADR-0032** universal property animation binding · **ADR-0033** local professional image/video masking · **ADR-0036** Joy Code server planner boundary.

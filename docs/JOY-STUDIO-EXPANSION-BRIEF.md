@@ -15,6 +15,13 @@
 
 **Joy Code** (`AgentPanel`, dock id `agent`) looks like a chat composer but is **not** a live LLM today. It routes slash/keyword intents into `@joy-media/agent-tools` plans, dry-runs them, and applies via `runPlanAtomically` on the same timeline command bus as human edits. Free-form NL, KiloCode transport, and **MCP are unwired** (zero MCP references in the repo).
 
+**WP-38 boundary addendum (2026-08-20):** The planned free-form path is a
+separate joy-code-server planner using a pinned, zero-cost OpenRouter Nemotron
+transport. It is not KiloCode's gateway and does not make KiloCode's Auto Free
+selector a JOY Media runtime. The server returns an untrusted plan; the
+browser performs revision checks, dry-run, approval, and one compound edit.
+This addendum does not claim that the feature is live yet.
+
 **Expansion intent (user):**
 
 1. A first-class **Templates** surface with **Import PSD**.
