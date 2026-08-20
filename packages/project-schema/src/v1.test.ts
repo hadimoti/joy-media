@@ -132,6 +132,145 @@ describe('v1 project schema and migration harness', () => {
     expect(validateJoyProjectV1(withCaptionTrack)).toEqual([]);
   });
 
+  it('validates structured text, caption clip styles, and adjacent transitions', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const project = {
+      ...base,
+      visualObjects: {
+        title: {
+          id: 'title',
+          kind: 'text' as const,
+          transform,
+          text: 'سلام',
+          textDocument: { version: 1 as const, blocks: [{ id: 'b1', runs: [{ text: 'سلام' }] }] },
+          textStyle: {
+            fontFamily: 'YekanBakh',
+            fontSizePx: 64,
+            fontWeight: 700,
+            italic: false,
+            lineHeight: 1.2,
+            tracking: 0,
+            direction: 'rtl' as const,
+            align: 'center' as const,
+            fill: { kind: 'solid' as const, color: '#ffffff' },
+            blendMode: 'normal' as const,
+            opacity: 1,
+          },
+        },
+      },
+      compositions: {
+        root: {
+          ...base.compositions.root!,
+          tracks: [
+            {
+              ...base.compositions.root!.tracks[0]!,
+              clips: [
+                base.compositions.root!.tracks[0]!.clips[0]!,
+                {
+                  kind: 'video' as const,
+                  id: 'clip-2',
+                  startUs: 1_000_000,
+                  durationUs: 1_000_000,
+                  assetId: 'asset-1',
+                  sourceInUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+          transitions: [
+            {
+              id: 't1',
+              trackId: 'video-1',
+              leftClipId: 'clip-1',
+              rightClipId: 'clip-2',
+              type: 'dissolve',
+              durationUs: 100_000,
+            },
+          ],
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+
+  it('rejects malformed text, caption style, and transition references', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      visualObjects: {
+        bad: {
+          id: 'bad',
+          kind: 'text',
+          transform,
+          textDocument: { version: 2, blocks: [] },
+          textStyle: { fontFamily: 'Unknown', fontSizePx: -1 },
+        },
+      },
+      compositions: {
+        root: {
+          ...base.compositions.root!,
+          tracks: [
+            {
+              ...base.compositions.root!.tracks[0]!,
+              clips: [
+                ...base.compositions.root!.tracks[0]!.clips,
+                {
+                  kind: 'video',
+                  id: 'clip-2',
+                  startUs: 1_000_000,
+                  durationUs: 1_000_000,
+                  assetId: 'asset-1',
+                  sourceInUs: 1_000_000,
+                  style: { version: 2 },
+                },
+              ],
+            },
+          ],
+          transitions: [
+            {
+              id: 't1',
+              trackId: 'video-1',
+              leftClipId: 'clip-1',
+              rightClipId: 'missing',
+              type: 'dissolve',
+              durationUs: 100_000,
+            },
+            {
+              id: 't1',
+              trackId: 'video-1',
+              leftClipId: 'clip-1',
+              rightClipId: 'clip-2',
+              type: 'dissolve',
+              durationUs: 0,
+            },
+          ],
+        },
+      },
+    });
+    const codes = diagnostics.map((item) => item.code);
+    expect(codes).toContain('PROJECT_SCHEMA_V1_TEXT');
+    expect(codes).toContain('PROJECT_SCHEMA_V1_CAPTION_STYLE');
+    expect(codes).toContain('PROJECT_SCHEMA_V1_TRANSITION');
+  });
+
   it('reports caption structure violations with coded diagnostics', () => {
     const base = migrateV0ToV1(v0Fixture()).project;
     const diagnostics = validateJoyProjectV1({

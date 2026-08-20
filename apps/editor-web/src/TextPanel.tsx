@@ -6,7 +6,11 @@ import type {
   TextStyleV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
-import { DEFAULT_TEXT_STYLE_V1, textDocumentToString } from '@joy-media/project-schema';
+import {
+  CONTENT_FONT_FAMILIES,
+  DEFAULT_TEXT_STYLE_V1,
+  textDocumentToString,
+} from '@joy-media/project-schema';
 import { PanelShell } from './PanelShell.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import { TextTabIcon } from './icons.js';
@@ -25,17 +29,6 @@ const CATEGORIES: readonly TextCategory[] = [
   'Highlights',
   'Social',
 ];
-const CONTENT_FONTS = [
-  'Yekan Bakh',
-  'Vazirmatn',
-  'Tajrid',
-  'Pulad',
-  'Shoor Pro',
-  'Aviny',
-  'Katibeh',
-  'Tahrir',
-];
-
 export function TextPanel({
   project,
   session,
@@ -277,7 +270,7 @@ function TextEditor({
             value={style.fontFamily}
             onChange={(event) => update({ fontFamily: event.currentTarget.value })}
           >
-            {CONTENT_FONTS.map((font) => (
+            {CONTENT_FONT_FAMILIES.map((font) => (
               <option key={font}>{font}</option>
             ))}
           </select>

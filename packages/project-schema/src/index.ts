@@ -122,6 +122,13 @@ export {
   textDocumentFromString,
   textDocumentToString,
 } from './text-style.js';
+export type { ContentFontFamily } from './content-fonts.js';
+export {
+  CONTENT_FONT_FAMILIES,
+  CANONICAL_CONTENT_FONT_ALIASES,
+  canonicalizeContentFontFamily,
+  isContentFontFamily,
+} from './content-fonts.js';
 export type {
   ColorAdjustments,
   ColorWheel,
@@ -338,4 +345,3 @@ export {
   getRuleDefinition,
   formatDurationUs,
 } from './semantic-intelligence.js';
-

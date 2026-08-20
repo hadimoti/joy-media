@@ -84,7 +84,7 @@ export interface TextDocumentV1 {
 }
 
 export const DEFAULT_TEXT_STYLE_V1: TextStyleV1 = {
-  fontFamily: 'Yekan Bakh',
+  fontFamily: 'YekanBakh',
   fontSizePx: 96,
   fontWeight: 700,
   italic: false,

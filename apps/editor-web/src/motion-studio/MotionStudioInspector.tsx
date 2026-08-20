@@ -25,32 +25,12 @@ import {
   type AnimatablePath,
 } from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
+import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
 
 /**
  * Curated content-creation fonts (fontiran pack), registered as @font-face
  * in public/assets/fonts/content-fonts.css. 'system-ui' is the fallback.
  */
-const CONTENT_FONT_FAMILIES: readonly string[] = [
-  'system-ui',
-  'YekanBakh',
-  'Vazin',
-  'Tajrid',
-  'Pulad',
-  'Damoon Pro',
-  'Bon',
-  'Bonyade Koodak',
-  'Shoor Pro',
-  'Aviny',
-  'Katibeh',
-  'Tahrir',
-  '898 Stencil',
-  'Radio',
-  'Falsafeh',
-  'Paradox',
-  'Gramophone',
-  'Emkan Inline',
-];
-
 const TEXT_TRANSFORMS: readonly string[] = ['none', 'uppercase', 'lowercase', 'capitalize'];
 const TEXT_ALIGNS: readonly string[] = ['left', 'center', 'right', 'justify'];
 const STROKE_STYLES: readonly string[] = ['solid', 'dashed', 'dotted'];

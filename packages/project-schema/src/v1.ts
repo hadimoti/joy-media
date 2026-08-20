@@ -7,7 +7,9 @@ import { isValidPlaybackRate, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE } from './mod
 import type { ColorGradeV2 } from './color.js';
 import type { PropertyAnimationV2 } from './property-animation.js';
 import type { CaptionClipStyleV2 } from './caption-style.js';
+import { normalizeCaptionClipStyle } from './caption-style.js';
 import type { TextDocumentV1, TextStyleV1 } from './text-style.js';
+import { isContentFontFamily } from './content-fonts.js';
 import { validatePropertyAnimations } from './property-animation.js';
 import type { UniversalTimelineDocument } from './universal-timeline.js';
 import { validateUniversalTimelineDocument } from './universal-timeline.js';
@@ -994,6 +996,89 @@ function validateVisualObject(
       }
     }
   }
+  if (
+    value.textDocument !== undefined ||
+    value.textStyle !== undefined ||
+    value.text !== undefined
+  ) {
+    if (value.kind !== 'text') {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_TEXT', 'text fields are only valid on text objects', path),
+      );
+    } else {
+      if (value.textDocument !== undefined)
+        validateTextDocument(value.textDocument, `${path}.textDocument`, diagnostics);
+      if (value.textStyle !== undefined)
+        validateTextStyle(value.textStyle, `${path}.textStyle`, diagnostics);
+    }
+  }
+}
+
+function validateTextDocument(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !Array.isArray(value.blocks) ||
+    value.blocks.length === 0
+  ) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_TEXT', 'textDocument must be version 1 with blocks', path),
+    );
+    return;
+  }
+  for (const block of value.blocks) {
+    if (
+      !isRecord(block) ||
+      !isNonEmptyString(block.id) ||
+      !Array.isArray(block.runs) ||
+      block.runs.length === 0
+    ) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_TEXT', 'text blocks require id and runs', path),
+      );
+      continue;
+    }
+    for (const run of block.runs) {
+      if (!isRecord(run) || typeof run.text !== 'string')
+        diagnostics.push(
+          diagnostic('PROJECT_SCHEMA_V1_TEXT', 'text runs require string text', path),
+        );
+    }
+  }
+}
+
+function validateTextStyle(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {
+  if (
+    !isRecord(value) ||
+    !isContentFontFamily(value.fontFamily) ||
+    !Number.isFinite(value.fontSizePx) ||
+    (value.fontSizePx as number) <= 0 ||
+    !Number.isSafeInteger(value.fontWeight) ||
+    (value.fontWeight as number) < 100 ||
+    (value.fontWeight as number) > 1000 ||
+    typeof value.italic !== 'boolean' ||
+    !Number.isFinite(value.lineHeight) ||
+    (value.lineHeight as number) <= 0 ||
+    !Number.isFinite(value.tracking) ||
+    !['ltr', 'rtl', 'auto'].includes(String(value.direction)) ||
+    !['start', 'center', 'end'].includes(String(value.align)) ||
+    !isRecord(value.fill) ||
+    !['solid', 'linear-gradient'].includes(String(value.fill.kind)) ||
+    !['normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 'difference'].includes(
+      String(value.blendMode),
+    ) ||
+    !Number.isFinite(value.opacity) ||
+    (value.opacity as number) < 0 ||
+    (value.opacity as number) > 1
+  ) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_TEXT', 'textStyle is malformed or outside safe ranges', path),
+    );
+  }
 }
 
 /**
@@ -1180,6 +1265,8 @@ function validateComposition(
   }
   for (const track of value.tracks)
     validateTrack(track, `${path}.tracks`, diagnostics, captionDocumentIds);
+  if (value.transitions !== undefined)
+    validateTransitions(value.transitions, value.tracks, `${path}.transitions`, diagnostics);
 }
 
 function validateTrack(
@@ -1242,6 +1329,27 @@ function validateTrack(
             clipPath,
           ),
         );
+      if (clip.style !== undefined) {
+        try {
+          normalizeCaptionClipStyle(clip.style);
+        } catch {
+          diagnostics.push(
+            diagnostic(
+              'PROJECT_SCHEMA_V1_CAPTION_STYLE',
+              'caption clip style is malformed or outside safe ranges',
+              `${clipPath}.style`,
+            ),
+          );
+        }
+      }
+    } else if (clip.style !== undefined) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CAPTION_STYLE',
+          'only caption clips may carry a style',
+          `${path}.${value.id}.clips.${clip.id}.style`,
+        ),
+      );
     }
     if (
       clip.kind === 'video' &&
@@ -1266,6 +1374,66 @@ function validateTrack(
           'PROJECT_SCHEMA_V1_CLIP',
           'reversed must be a boolean when present',
           `${path}.${value.id}.clips.${clip.id}`,
+        ),
+      );
+    }
+  }
+}
+
+function validateTransitions(
+  value: unknown,
+  tracks: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (!Array.isArray(value)) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_TRANSITION', 'transitions must be an array', path),
+    );
+    return;
+  }
+  if (!Array.isArray(tracks)) return;
+  const seen = new Set<string>();
+  const trackMap = new Map<string, Record<string, unknown>>();
+  for (const track of tracks)
+    if (isRecord(track) && isNonEmptyString(track.id)) trackMap.set(track.id, track);
+  for (const transition of value) {
+    if (
+      !isRecord(transition) ||
+      !isNonEmptyString(transition.id) ||
+      seen.has(String(transition.id)) ||
+      !isNonEmptyString(transition.trackId) ||
+      !isNonEmptyString(transition.leftClipId) ||
+      !isNonEmptyString(transition.rightClipId) ||
+      !isNonEmptyString(transition.type) ||
+      !isPositiveInteger(transition.durationUs)
+    ) {
+      diagnostics.push(
+        diagnostic('PROJECT_SCHEMA_V1_TRANSITION', 'transition shape or id is invalid', path),
+      );
+      continue;
+    }
+    seen.add(transition.id);
+    const track = trackMap.get(transition.trackId);
+    const clips = track && Array.isArray(track.clips) ? track.clips.filter(isRecord) : [];
+    const left = clips.find((clip) => clip.id === transition.leftClipId);
+    const right = clips.find((clip) => clip.id === transition.rightClipId);
+    if (
+      !track ||
+      track.kind !== 'video' ||
+      !left ||
+      !right ||
+      left.kind !== 'video' ||
+      right.kind !== 'video' ||
+      (left.startUs as number) + (left.durationUs as number) !== right.startUs ||
+      (transition.durationUs as number) >
+        Math.min(left.durationUs as number, right.durationUs as number) / 2
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_TRANSITION',
+          'transition must reference adjacent visual clips within safe duration',
+          path,
         ),
       );
     }
