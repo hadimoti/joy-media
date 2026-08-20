@@ -5,6 +5,9 @@ import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
+import type { JoyCodeRuntime } from './joy-code-runtime.js';
+import type { JoyCodeInputResolver } from './joy-code-input-resolver.js';
+import type { JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))))); });
@@ -40,5 +43,15 @@ describe('Joy Code opt-in routes', () => {
     await controlPlane.setJoyCodeOptIn({ id: 'owner' }, 'p', true, JOY_CODE_CONSENT_VERSION, 0);
     expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', { ...envelope, snapshot: {} })).toMatchObject({ status: 400, body: { error: { code: 'REQUEST_INVALID' } } });
     expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', envelope)).toMatchObject({ status: 503, body: { error: { code: 'JOY_CODE_INPUT_UNAVAILABLE' } } });
+  });
+  it('executes only an explicitly injected runtime after canonical resolution', async () => {
+    const controlPlane = new LocalControlPlane(); controlPlane.createProject({ id: 'owner' }, 'p', 'Project');
+    await controlPlane.setJoyCodeOptIn({ id: 'owner' }, 'p', true, JOY_CODE_CONSENT_VERSION, 0);
+    const proposal: JoyCodePlanProposalV1 = { schemaVersion: 1, goal: 'trim', summary: 'trim', operations: [], assumptions: [], blockedBy: [], requiresHumanDecision: [], planId: 'plan-1', projectId: 'p', snapshotRevisionId: 'r', createdAt: '2026-08-20T00:00:00.000Z', consentVersion: JOY_CODE_CONSENT_VERSION, catalogVersion: 'v1', provenance: { actor: 'joy-code-server', adapterName: 'test', modelId: 'nvidia/nemotron-3.5-lightning:free' } };
+    const resolver: JoyCodeInputResolver = { resolve: async (request, context) => ({ status: 'resolved', input: { projectId: request.projectId, snapshotRevisionId: request.snapshotRevisionId, prompt: request.prompt, selection: request.selection, contextSummary: 'test', semanticSnapshot: {}, intelligenceSummary: {}, catalogs: { textTemplateIds: [], captionTemplateIds: [], transitionIds: [] } } }) };
+    const runtime: JoyCodeRuntime = { execute: async () => ({ category: 'ready', result: proposal, retryable: false, durationMs: 1 }) };
+    const server = createControlPlaneHttpServer({ controlPlane, authentication: { authenticate: () => ({ id: 'owner' }) }, mediaAuth: new DisabledMediaAuth(), joyCodeInputResolver: resolver, joyCodeRuntime: runtime });
+    servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address(); if (address === null || typeof address === 'string') throw new Error('not listening'); const origin = `http://127.0.0.1:${address.port}`;
+    expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', { projectId: 'p', snapshotRevisionId: 'r', prompt: 'trim', selection: { clipIds: [] } })).toMatchObject({ status: 200, body: { data: { planId: 'plan-1', provenance: { actor: 'joy-code-server' } } } });
   });
 });
