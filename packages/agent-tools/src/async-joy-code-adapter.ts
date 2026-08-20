@@ -10,6 +10,13 @@ export interface JoyCodePlannerInputV1 {
     readonly objectIds?: readonly string[];
   };
   readonly contextSummary: string;
+  readonly semanticSnapshot: unknown;
+  readonly intelligenceSummary: unknown;
+  readonly catalogs: {
+    readonly textTemplateIds: readonly string[];
+    readonly captionTemplateIds: readonly string[];
+    readonly transitionIds: readonly string[];
+  };
 }
 
 export interface AsyncJoyCodePlannerAdapter {

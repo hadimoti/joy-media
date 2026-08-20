@@ -11,6 +11,13 @@ const input = {
   prompt: 'Add a title',
   selection: { clipIds: ['clip-1'] },
   contextSummary: 'bounded semantic context',
+  semanticSnapshot: { scenes: [] },
+  intelligenceSummary: {},
+  catalogs: {
+    textTemplateIds: ['clean-title'],
+    captionTemplateIds: ['joy-clean'],
+    transitionIds: ['dissolve'],
+  },
 } as const;
 const options = { correlationId: 'corr-1', timeoutMs: 100, spendLimitUsdCents: 0 };
 
