@@ -184,6 +184,8 @@ describe('view modes', () => {
     expect(leafIds(vertical)).toContain('monitor-col');
     expect(leafIds(wide)).toContain('monitor-row');
     expect(leafIds(wide)).not.toContain('monitor-col');
+    expect(leafViews(vertical, 'agent-col')).toEqual(['agent', 'creative-brief']);
+    expect(leafViews(wide, 'agent-col')).toEqual(['agent', 'creative-brief']);
     expect(leafViews(vertical, 'monitor-col')).toEqual(['monitor']);
     expect(leafViews(wide, 'monitor-row')).toEqual(['monitor']);
     expect(wide.activeGroup).toBe('monitor-row');

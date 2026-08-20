@@ -155,6 +155,7 @@ describe('CreativeBriefPanel', () => {
 
     expect(markup).toContain('class="joy-panel-root creative-brief-panel" aria-label="Creative Brief"');
     expect(markup).toContain('joy-panel-header');
+    expect(markup).toContain('joy-panel-title-icon');
     expect(markup).toContain('aria-label="Creative Brief"');
     expect(markup).toContain('creative-brief-composer');
   });

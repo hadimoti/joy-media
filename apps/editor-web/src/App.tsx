@@ -274,6 +274,7 @@ import {
   ChevronDownIcon,
   CloseIcon,
   CommandIcon,
+  CreativeBriefIcon,
   DownloadIcon,
   ExportIcon,
   FullscreenIcon,
@@ -5794,6 +5795,7 @@ function EditorWorkspace({
             <PanelShell
               title="Creative Brief"
               iconUrl={panelTabIconUrl('creative-brief')}
+              icon={<CreativeBriefIcon />}
               className="creative-brief-panel"
             >
               {null}

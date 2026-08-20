@@ -24,6 +24,7 @@ import {
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { CreativeBriefIcon } from './icons.js';
 
 /**
  * Props for CreativeBriefPanel.
@@ -227,6 +228,7 @@ export function CreativeBriefPanel({
     <PanelShell
       title="Creative Brief"
       iconUrl={panelTabIconUrl('creative-brief')}
+      icon={<CreativeBriefIcon />}
       className="creative-brief-panel"
     >
       <div className="creative-brief-panel-inner" aria-label="Creative Brief">

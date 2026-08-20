@@ -196,6 +196,18 @@ export function TextTabIcon() {
   );
 }
 
+/** Outlined brief page with a small creative spark for the Creative Brief tab. */
+export function CreativeBriefIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M3 2.5h6.8L13 5.7v7.8H3Z" />
+      <path d="M9.5 2.8v3h3" />
+      <path d="M5.2 8h3.1M5.2 10.5h2.2" />
+      <path d="m12.8 8.2.35.9.9.35-.9.35-.35.9-.35-.9-.9-.35.9-.35Z" />
+    </Svg>
+  );
+}
+
 export function SoloIcon() {
   return (
     <Svg>

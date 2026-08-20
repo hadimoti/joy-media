@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { SpeakerOnIcon, TextTabIcon, TimelineClassicIcon } from './icons.js';
+import { CreativeBriefIcon, SpeakerOnIcon, TextTabIcon, TimelineClassicIcon } from './icons.js';
 import type { PanelId } from './workspace.js';
 import { iconUrl } from './icon-assets.js';
 
@@ -61,6 +61,7 @@ export const PANEL_TAB_SVG_ICONS: Readonly<Partial<Record<PanelId, ComponentType
   audio: SpeakerOnIcon,
   timeline: TimelineClassicIcon,
   text: TextTabIcon,
+  'creative-brief': CreativeBriefIcon,
 };
 
 export function panelLabel(panelId: string): string {

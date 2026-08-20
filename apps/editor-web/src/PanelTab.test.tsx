@@ -12,4 +12,13 @@ describe('PanelTab', () => {
     expect(markup).toContain('aria-label="Create"');
     expect(markup).toContain('class="panel-tab-label">Create</span>');
   });
+
+  it('renders the Creative Brief SVG icon in its own dock tab', () => {
+    const props = { api: { id: 'creative-brief' } } as unknown as IDockviewPanelHeaderProps;
+    const markup = renderToStaticMarkup(<PanelTab {...props} />);
+
+    expect(markup).toContain('title="Creative Brief"');
+    expect(markup).toContain('class="panel-tab-svg"');
+    expect(markup).toContain('Creative Brief</span>');
+  });
 });

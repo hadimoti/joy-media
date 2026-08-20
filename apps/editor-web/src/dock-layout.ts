@@ -35,7 +35,7 @@ export type EditorViewMode = 'vertical' | 'widescreen';
 export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
 
 /** Per-mode Dockview JSON keys (bump when a seed changes). */
-export const DOCK_LAYOUT_VERSION = 11;
+export const DOCK_LAYOUT_VERSION = 12;
 export const DOCK_LAYOUT_SCHEMA_VERSION = 2;
 
 /** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
@@ -227,7 +227,11 @@ export function verticalDockLayout(): unknown {
                   {
                     type: 'leaf',
                     size: 567,
-                    data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
+                    data: {
+                      views: ['agent', 'creative-brief'],
+                      activeView: 'agent',
+                      id: 'agent-col',
+                    },
                   },
                 ],
               },
@@ -295,7 +299,11 @@ export function widescreenDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 704,
-                data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
+                data: {
+                  views: ['agent', 'creative-brief'],
+                  activeView: 'agent',
+                  id: 'agent-col',
+                },
               },
             ],
           },
