@@ -793,6 +793,8 @@ interface OpenRouterRequest {
   readonly response_format?: { readonly type: 'json_object' };
   readonly temperature?: number;
   readonly max_tokens?: number;
+  /** Disable hidden reasoning so the free-only model spends its budget on JSON. */
+  readonly reasoning_effort?: 'none';
   /** Disable provider fallback so a free-only request cannot silently route to paid capacity. */
   readonly provider: { readonly allow_fallbacks: false };
 }
@@ -965,6 +967,7 @@ function buildOpenRouterRequest(
     // Conservative settings for deterministic output
     temperature: 0.0,
     max_tokens: MAX_OUTPUT_TOKENS,
+    reasoning_effort: 'none',
     provider: {
       allow_fallbacks: false,
     },
@@ -1125,6 +1128,26 @@ function extractAssistantContent(response: OpenRouterResponse): string | undefin
 }
 
 /**
+ * Normalize one harmless provider alias without inventing content. Some free
+ * models spell the bounded reversible risk as "low"; the JOY contract uses
+ * the explicit risk enum so final validation remains deterministic.
+ */
+function normalizeModelOutput(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.recommendations)) return value;
+  let changed = false;
+  const recommendations = record.recommendations.map((item) => {
+    if (item === null || typeof item !== 'object') return item;
+    const recommendation = item as Record<string, unknown>;
+    if (recommendation.risk !== 'low') return item;
+    changed = true;
+    return { ...recommendation, risk: 'reversible-local' };
+  });
+  return changed ? { ...record, recommendations } : value;
+}
+
+/**
  * Check if the response indicates a provider error.
  * OpenRouter returns errors in the top-level 'error' field.
  */
@@ -1197,8 +1220,10 @@ function decodeOpenRouterResponse(
     };
   }
 
-  // Validate as ModelAdapterOutputV1
-  if (!isModelAdapterOutputV1(parsed)) {
+  // Normalize only the documented provider alias, then apply the strict
+  // ModelAdapterOutputV1 guard.
+  const normalized = normalizeModelOutput(parsed);
+  if (!isModelAdapterOutputV1(normalized)) {
     return {
       category: 'invalid-output',
       errorCode: 'OPENROUTER_INVALID_SCHEMA',
@@ -1210,6 +1235,6 @@ function decodeOpenRouterResponse(
   // Success: valid ModelAdapterOutputV1
   return {
     category: 'ready',
-    result: parsed,
+    result: normalized,
   };
 }

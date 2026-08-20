@@ -403,6 +403,7 @@ describe('OpenRouterCreativeAdapter - injected transport path', () => {
     expect(body.model).toBe('nvidia/nemotron-3-nano-30b-a3b:free');
     expect(body.max_tokens).toBe(1024);
     expect(body.temperature).toBe(0.0);
+    expect(body.reasoning_effort).toBe('none');
   });
 
   it('should send Authorization header with resolved Bearer token', async () => {
@@ -1262,6 +1263,20 @@ describe('decodeOpenRouterResponse', () => {
         choices: [{ message: { content: `  ${JSON.stringify(VALID_OUTPUT)}  ` } }],
       };
       checkReady(decodeOpenRouterResponse(resp));
+    });
+
+    it('normalizes the provider low-risk alias to the bounded local risk enum', () => {
+      const aliased = {
+        ...VALID_OUTPUT,
+        recommendations: [{ ...VALID_OUTPUT.recommendations[0], risk: 'low' }],
+      };
+      const result = decodeOpenRouterResponse({
+        choices: [{ message: { content: JSON.stringify(aliased) } }],
+      });
+      checkReady(result);
+      expect(result.result).toMatchObject({
+        recommendations: [{ risk: 'reversible-local' }],
+      });
     });
   });
 
