@@ -32,4 +32,13 @@ describe('Joy Code opt-in routes', () => {
     const origin = await start(controlPlane, () => undefined);
     expect(await request(origin, 'GET', '/v1/projects/p/joy-code-opt-in')).toMatchObject({ status: 401 });
   });
+  it('orders Joy Code plan gates as opt-in then envelope then unavailable resolver', async () => {
+    const controlPlane = new LocalControlPlane(); controlPlane.createProject({ id: 'owner' }, 'p', 'Project');
+    const origin = await start(controlPlane);
+    const envelope = { projectId: 'p', snapshotRevisionId: 'r', prompt: 'trim', selection: { clipIds: [] } };
+    expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', envelope)).toMatchObject({ status: 409, body: { error: { code: 'POLICY_DENIED' } } });
+    await controlPlane.setJoyCodeOptIn({ id: 'owner' }, 'p', true, JOY_CODE_CONSENT_VERSION, 0);
+    expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', { ...envelope, snapshot: {} })).toMatchObject({ status: 400, body: { error: { code: 'REQUEST_INVALID' } } });
+    expect(await request(origin, 'POST', '/v1/projects/p/joy-code/plans', envelope)).toMatchObject({ status: 503, body: { error: { code: 'JOY_CODE_INPUT_UNAVAILABLE' } } });
+  });
 });

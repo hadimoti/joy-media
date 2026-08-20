@@ -59,6 +59,12 @@ import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type { CreativeBriefV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import { randomUUID } from 'node:crypto';
 import { CreativeBriefAdmissionGate } from './creative-brief-admission-gate.js';
+import type { JoyCodeRuntime, JoyCodeRuntimeInput } from './joy-code-runtime.js';
+import { DEFAULT_JOY_CODE_RUNTIME } from './joy-code-runtime.js';
+import type { JoyCodeInputResolver, JoyCodeInputResolverRequest, JoyCodeInputResolverContext } from './joy-code-input-resolver.js';
+import { UnavailableJoyCodeInputResolver } from './joy-code-input-resolver.js';
+import { validateJoyCodeClientRequest, isValidJoyCodeClientRequest, type JoyCodeClientRequestEnvelope } from './joy-code-client-request-validation.js';
+import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -88,6 +94,9 @@ export interface ControlPlaneHttpServerOptions {
   readonly creativeBriefInputResolver?: CreativeBriefInputResolver;
   /** Bounded owner/project admission gate; defaults to the in-memory policy gate. */
   readonly creativeBriefAdmissionGate?: CreativeBriefAdmissionGate;
+  readonly joyCodeRuntime?: JoyCodeRuntime;
+  readonly joyCodeInputResolver?: JoyCodeInputResolver;
+  readonly joyCodeAdmissionGate?: JoyCodeAdmissionGate;
 }
 
 /**
@@ -109,6 +118,9 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       options.creativeBriefInputResolver ?? UnavailableCreativeBriefInputResolver,
     creativeBriefAdmissionGate:
       options.creativeBriefAdmissionGate ?? new CreativeBriefAdmissionGate(),
+    joyCodeRuntime: options.joyCodeRuntime ?? DEFAULT_JOY_CODE_RUNTIME,
+    joyCodeInputResolver: options.joyCodeInputResolver ?? UnavailableJoyCodeInputResolver,
+    joyCodeAdmissionGate: options.joyCodeAdmissionGate ?? new JoyCodeAdmissionGate(),
   };
   return createServer(async (request, response) => {
     try {
@@ -128,6 +140,9 @@ async function route(
     readonly creativeBriefRuntime: CreativeBriefRuntime;
     readonly creativeBriefInputResolver: CreativeBriefInputResolver;
     readonly creativeBriefAdmissionGate: CreativeBriefAdmissionGate;
+    readonly joyCodeRuntime: JoyCodeRuntime;
+    readonly joyCodeInputResolver: JoyCodeInputResolver;
+    readonly joyCodeAdmissionGate: JoyCodeAdmissionGate;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -408,6 +423,38 @@ async function route(
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
 
   const creativeBriefMatch = /^\/v1\/projects\/([^/]+)\/creative-brief$/.exec(url.pathname);
+  const joyCodePlanMatch = /^\/v1\/projects\/([^/]+)\/joy-code\/plans$/.exec(url.pathname);
+  if (request.method === 'POST' && joyCodePlanMatch !== null) {
+    const projectId = decodeURIComponent(joyCodePlanMatch[1]!);
+    const consent = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
+    if (!consent.enabled) throw new ControlPlaneError('POLICY_DENIED', 'Joy Code planning is not opted in for this project');
+    const body = await readJson(request);
+    const validation = validateJoyCodeClientRequest(body);
+    if (!validation.valid) throw new ControlPlaneError('REQUEST_INVALID', validation.errors[0] ?? 'invalid Joy Code request');
+    if (!isValidJoyCodeClientRequest(body)) throw new ControlPlaneError('REQUEST_INVALID', 'invalid Joy Code request');
+    const envelope: JoyCodeClientRequestEnvelope = body;
+    if (envelope.projectId !== projectId) throw new ControlPlaneError('PROJECT_MISMATCH', 'projectId does not match route');
+    const admission = options.joyCodeAdmissionGate.admit(actor.id, projectId, Date.now());
+    if (!admission.allowed) {
+      const statusCode = admission.code === 'JOY_CODE_IN_FLIGHT' || admission.code === 'JOY_CODE_CIRCUIT_OPEN' ? 409 : 429;
+      respondJson(response, statusCode, { error: { code: admission.code } });
+      return;
+    }
+    try {
+      const resolverRequest: JoyCodeInputResolverRequest = envelope;
+      const resolverContext: JoyCodeInputResolverContext = { actor, controlPlaneProjectId: projectId };
+      const resolved = await options.joyCodeInputResolver.resolve(resolverRequest, resolverContext);
+      if (resolved.status === 'stale-revision') { respondJson(response, 409, { error: { code: 'REVISION_MISMATCH', message: resolved.message } }); return; }
+      if (resolved.status === 'unavailable') { respondJson(response, 503, { error: { code: resolved.code, message: resolved.message } }); return; }
+      const runtimeInput: JoyCodeRuntimeInput = { ...resolved.input, planId: randomUUID(), createdAt: new Date().toISOString(), catalogVersion: 'v1' };
+      const outcome = await options.joyCodeRuntime.execute(runtimeInput, { correlationId: randomUUID(), timeoutMs: 30_000, spendLimitUsdCents: 0 });
+      options.joyCodeAdmissionGate.recordOutcome(outcome.category, Date.now());
+      if (outcome.category === 'ready' && outcome.result !== undefined) { respondJson(response, 200, { data: outcome.result }); return; }
+      const statusCode = outcome.category === 'unavailable' ? 503 : outcome.category === 'policy-denied' ? 403 : outcome.category === 'timeout' ? 504 : outcome.category === 'cancelled' ? 499 : 502;
+      respondJson(response, statusCode, { error: { code: outcome.errorCode ?? 'JOY_CODE_RUNTIME_FAILED', message: outcome.message ?? 'Joy Code runtime failed' } });
+      return;
+    } finally { options.joyCodeAdmissionGate.release(actor.id, projectId); }
+  }
   if (request.method === 'POST' && creativeBriefMatch !== null) {
     const projectId = decodeURIComponent(creativeBriefMatch[1]!);
     const project = await options.controlPlane.getProject(actor, projectId);
