@@ -1,35 +1,47 @@
 import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
-import type { JoyProjectV1, VisualObjectV1 } from '@joy-media/project-schema';
+import {
+  normalizeUniversalTimeline,
+  UNIVERSAL_TIMELINE_SCHEMA_VERSION,
+  type JoyProjectV1,
+  type VisualObjectV1,
+} from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
-import { bindClipToObject } from './sticker-bindings.js';
+import { readClipObjectMap } from './sticker-bindings.js';
 import type { TextTemplateV1 } from './text-template-catalog.js';
-import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
 export interface InsertedTextTemplate {
   readonly clipId: string;
   readonly objectId: string;
 }
 
-/** Inserts a native text object and its timeline presentation in one compound undo step. */
-export function insertTextTemplate(
-  session: EditorSession,
+export interface PreparedTextTemplateInsertion {
+  readonly inserted: InsertedTextTemplate;
+  readonly timeline: CommandTransaction;
+  readonly document: JoyProjectV1;
+  readonly label: string;
+}
+
+/** Pure, deterministic preparation seam used by Joy Code and the manual wrapper. */
+export function prepareTextTemplateInsertion(
+  timeline: import('@joy-media/project-schema').SpikeProject,
+  visualProject: JoyProjectV1,
   template: TextTemplateV1,
   playheadUs: number,
-): InsertedTextTemplate | undefined {
-  const timeline = session.timelineProject;
+  idSuffix: string,
+  durationOverrideUs?: number,
+  placement: 'center' | 'top' | 'bottom' | 'lower-third' = 'center',
+): PreparedTextTemplateInsertion | undefined {
   const composition = timeline.compositions[timeline.rootCompositionId];
-  if (composition === undefined) return undefined;
-
-  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const objectId = `text-${template.id}-${suffix}`;
+  if (composition === undefined || !Number.isFinite(playheadUs)) return undefined;
+  const objectId = `text-${template.id}-${idSuffix}`;
   const clipId = `clip-${objectId}`;
+  const requestedDurationUs = durationOverrideUs ?? 5_000_000;
   const startUs = Math.max(
     0,
-    Math.min(playheadUs, Math.max(0, composition.durationUs - 5_000_000)),
+    Math.min(playheadUs, Math.max(0, composition.durationUs - requestedDurationUs)),
   );
-  const durationUs = Math.min(5_000_000, composition.durationUs - startUs);
+  const durationUs = Math.min(requestedDurationUs, composition.durationUs - startUs);
   if (durationUs <= 0) return undefined;
-
   const object: VisualObjectV1 = {
     id: objectId,
     kind: 'text',
@@ -38,7 +50,14 @@ export function insertTextTemplate(
     textStyle: template.style,
     transform: {
       x: composition.width / 2,
-      y: composition.height / 2,
+      y:
+        placement === 'top'
+          ? composition.height * 0.2
+          : placement === 'bottom'
+            ? composition.height * 0.8
+            : placement === 'lower-third'
+              ? composition.height * 0.72
+              : composition.height / 2,
       scaleX: 1,
       scaleY: 1,
       rotationDeg: 0,
@@ -46,7 +65,6 @@ export function insertTextTemplate(
       crop: { left: 0, top: 0, right: 0, bottom: 0 },
     },
   };
-
   const overlaps = (track: (typeof composition.tracks)[number]) =>
     track.clips.some(
       (clip) => startUs < clip.startUs + clip.durationUs && startUs + durationUs > clip.startUs,
@@ -54,10 +72,14 @@ export function insertTextTemplate(
   const targetTrack = composition.tracks
     .filter(
       (track) =>
-        track.kind === 'video' && track.family !== 'audio' && track.enabled && !overlaps(track),
+        track.kind === 'video' &&
+        track.family !== 'audio' &&
+        track.enabled &&
+        track.locked !== true &&
+        !overlaps(track),
     )
     .sort((a, b) => a.order - b.order)[0];
-  const trackId = targetTrack?.id ?? `text-track-${suffix}`;
+  const trackId = targetTrack?.id ?? `text-track-${idSuffix}`;
   const trackCommands: SpikeCommand[] =
     targetTrack === undefined
       ? [
@@ -78,94 +100,97 @@ export function insertTextTemplate(
           },
         ]
       : [];
-  const insertClip: SpikeCommand = {
-    type: 'timeline.insertClip',
-    payload: {
-      compositionId: composition.id,
-      trackId,
-      clip: {
-        id: clipId,
-        kind: 'video',
-        assetId: `joy.text:${template.id}`,
-        startUs,
-        durationUs,
-        sourceInUs: 0,
-      },
-    },
+  const clip = {
+    id: clipId,
+    kind: 'video' as const,
+    assetId: `joy.text:${template.id}`,
+    startUs,
+    durationUs,
+    sourceInUs: 0,
   };
   const timelineTransaction: CommandTransaction = {
     label: `Add text ${template.label}`,
-    commands: [...trackCommands, insertClip],
+    commands: [
+      ...trackCommands,
+      { type: 'timeline.insertClip', payload: { compositionId: composition.id, trackId, clip } },
+    ],
   };
-  const withTextObject: JoyProjectV1 = bindClipToObject(
-    {
-      ...session.visualProject,
-      visualObjects: { ...session.visualProject.visualObjects, [objectId]: object },
-      compositions: addVisualTextClip(session.visualProject, {
-        trackId,
-        clipId,
-        template,
-        startUs,
-        durationUs,
-      }),
+  const visualComposition = visualProject.compositions[visualProject.rootCompositionId];
+  if (visualComposition === undefined) return undefined;
+  const visualTracks = visualComposition.tracks.some((track) => track.id === trackId)
+    ? visualComposition.tracks.map((track) =>
+        track.id === trackId ? { ...track, clips: [...track.clips, clip] } : track,
+      )
+    : [
+        ...visualComposition.tracks,
+        {
+          id: trackId,
+          kind: 'video' as const,
+          name: 'Text',
+          order: visualComposition.tracks.length,
+          enabled: true,
+          locked: false,
+          clips: [clip],
+        },
+      ];
+  const map = { ...readClipObjectMap(visualProject), [clipId]: objectId };
+  const normalized = normalizeUniversalTimeline(visualProject);
+  const existingItems = normalized.document.items.filter((item) => item.id !== clipId);
+  const nextOrder =
+    existingItems
+      .filter((item) => item.compositionId === visualComposition.id && item.trackId === trackId)
+      .reduce((highest, item) => Math.max(highest, item.withinTrackOrder), -1) + 1;
+  const document: JoyProjectV1 = {
+    ...visualProject,
+    visualObjects: { ...visualProject.visualObjects, [objectId]: object },
+    compositions: {
+      ...visualProject.compositions,
+      [visualProject.rootCompositionId]: { ...visualComposition, tracks: visualTracks },
     },
-    clipId,
-    objectId,
-  );
-  const nextProject = upsertUniversalTimelineBinding(withTextObject, {
-    id: clipId,
-    compositionId: composition.id,
-    trackId,
-    elementKind: 'text',
-    startUs,
-    durationUs,
-    source: { kind: 'object', id: objectId },
-  });
-  session.dispatchCompound(`Add text ${template.label}`, {
+    pluginData: { ...visualProject.pluginData, ['joy.clipObjects']: map },
+    universalTimeline: {
+      schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION,
+      items: [
+        ...existingItems,
+        {
+          id: clipId,
+          compositionId: visualComposition.id,
+          trackId,
+          elementKind: 'text',
+          startUs,
+          durationUs,
+          source: { kind: 'object', id: objectId },
+          withinTrackOrder: nextOrder,
+        },
+      ],
+    },
+  };
+  return {
+    inserted: { clipId, objectId },
     timeline: timelineTransaction,
-    document: nextProject,
-  });
-  return { clipId, objectId };
+    document,
+    label: timelineTransaction.label,
+  };
 }
 
-function addVisualTextClip(
-  project: JoyProjectV1,
-  input: {
-    readonly trackId: string;
-    readonly clipId: string;
-    readonly template: TextTemplateV1;
-    readonly startUs: number;
-    readonly durationUs: number;
-  },
-): JoyProjectV1['compositions'] {
-  const compositionId = project.rootCompositionId;
-  const composition = project.compositions[compositionId];
-  if (composition === undefined) return project.compositions;
-  const clip = {
-    id: input.clipId,
-    kind: 'video' as const,
-    assetId: `joy.text:${input.template.id}`,
-    startUs: input.startUs,
-    durationUs: input.durationUs,
-    sourceInUs: 0,
-  };
-  const existing = composition.tracks.find((track) => track.id === input.trackId);
-  const tracks =
-    existing === undefined
-      ? [
-          ...composition.tracks,
-          {
-            id: input.trackId,
-            kind: 'video' as const,
-            name: 'Text',
-            order: composition.tracks.length,
-            enabled: true,
-            locked: false,
-            clips: [clip],
-          },
-        ]
-      : composition.tracks.map((track) =>
-          track.id === input.trackId ? { ...track, clips: [...track.clips, clip] } : track,
-        );
-  return { ...project.compositions, [compositionId]: { ...composition, tracks } };
+/** Inserts a native text object and its timeline presentation in one compound undo step. */
+export function insertTextTemplate(
+  session: EditorSession,
+  template: TextTemplateV1,
+  playheadUs: number,
+): InsertedTextTemplate | undefined {
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const prepared = prepareTextTemplateInsertion(
+    session.timelineProject,
+    session.visualProject,
+    template,
+    playheadUs,
+    suffix,
+  );
+  if (prepared === undefined) return undefined;
+  session.dispatchCompound(prepared.label, {
+    timeline: prepared.timeline,
+    document: prepared.document,
+  });
+  return prepared.inserted;
 }
