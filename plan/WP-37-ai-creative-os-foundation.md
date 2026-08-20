@@ -1,6 +1,6 @@
 # WP-37 — AI Creative OS Foundation: Semantic Project Intelligence and Critique
 
-**Status:** proposed — do not start implementation until the orientation and decision gates below are complete.  
+**Status:** implementation complete for the bounded Creative Brief/runtime surface; autonomous free-form video-cut execution remains a separate follow-up.  
 **Authoring date:** 2026-08-17  
 **Product direction:** JOY Media becomes an AI-native creative workspace: a human and an AI designer operate on the *same editable project*. It is not an MP4 generator and it is not a UI-clicking bot.
 
@@ -583,7 +583,14 @@ Create a decision request/ADR and stop the affected package if any of these are 
 - 0342c15: server wiring of canonical S1/S2 input resolver — produces Creative Brief input from persisted S1 semantic snapshot and S2 scene/brand intelligence.
 - 0425e77: browser opt-in read client — `getCreativeBriefOptIn(projectId)` returning typed `{ creativeBriefOptIn, revision }` using existing authenticated conventions.
 
-State: 49 panel tests, 103 editor integration tests, 60 HTTP tests, and 28 resolver tests pass where applicable. API/editor builds are green, with only the known editor chunk-size warning. OpenRouter remains unavailable unless explicit secret resolver and HTTP transport are injected. **WP-37 is not complete**; no deployment or provider enablement occurred.
+State: 49 panel tests, 103 editor integration tests, 60 HTTP tests, and 28 resolver tests pass where applicable. API/editor builds are green, with only the known editor chunk-size warning. The bounded runtime is now deployed behind opt-in and free-only policy; the remaining gap is autonomous free-form video-cut execution, tracked separately below.
+
+### Runtime/browser closeout — 2026-08-20
+
+- `d06baab` is the deployed API source for the current free-only runtime hardening. The adapter sends `reasoning_effort: "none"`, bounds output to 1024 tokens, keeps the exact Lightning/Nemotron `:free` allowlist, requires zero spend, and preserves strict validation.
+- Live VPS configuration maps the owner-approved encrypted systemd credential to `joy-media/openrouter/creative-brief/v1`; the active free model is `nvidia/nemotron-3.5-lightning:free`, with no paid fallback.
+- Browser canary on `https://joyst.ir/` completed successfully: the opted-in Creative Brief rendered a validated brief with goals, facts, inferences, assumptions, and a reversible pacing recommendation. Adapter tests: 101 passed; adapter/API builds: green.
+- Joy Code browser verification remains intentionally bounded: direct deterministic timeline intents produce guarded plans, while free-form KiloCode/server-session responses are not connected. Therefore a complete autonomous picture-mix + professional text-style cut is **not** claimed by WP-37; it requires a follow-up execution/adapter work package.
 
 ## 18. Definition of success for the larger program
 
