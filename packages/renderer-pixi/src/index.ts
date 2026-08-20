@@ -134,7 +134,7 @@ function paintText(
     const character = Math.floor(x / 4);
     const glyphX = x % 4;
     if (glyph(node.text[character] ?? ' ', glyphX, y)) {
-      return applyCpuEffectsToColor(node.color, effects, localX, localY);
+      return applyCpuEffectsToColor(spanColor(node, character), effects, localX, localY);
     }
     if (
       node.background !== undefined &&
@@ -147,6 +147,19 @@ function paintText(
     }
     return null;
   });
+}
+
+function spanColor(
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
+  characterIndex: number,
+): Rgba {
+  if (node.spans === undefined) return node.color;
+  let offset = 0;
+  for (const span of node.spans) {
+    if (characterIndex < offset + span.text.length) return span.color;
+    offset += span.text.length;
+  }
+  return node.color;
 }
 
 function paintTransition(

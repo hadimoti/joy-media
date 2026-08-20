@@ -98,4 +98,35 @@ describe('Pixi editor preview host', () => {
     const platePixel = (1 * frame.viewport.width + 1) * 4;
     expect([...preview.pixels.slice(platePixel, platePixel + 4)]).toEqual([200, 20, 30, 255]);
   });
+
+  it('renders inline text spans with their own colors', () => {
+    const frame: RenderFrameIR = {
+      ...content,
+      viewport: { width: 20, height: 8, dpr: 1 },
+      nodes: [
+        {
+          kind: 'text',
+          id: 'spans',
+          text: 'JOY',
+          spans: [
+            { text: 'J', color: { r: 255, g: 0, b: 0, a: 255 } },
+            { text: 'O', color: { r: 0, g: 255, b: 0, a: 255 }, emphasis: true },
+            { text: 'Y', color: { r: 0, g: 0, b: 255, a: 255 } },
+          ],
+          color: { r: 255, g: 255, b: 255, a: 255 },
+          align: 'left',
+          zIndex: 1,
+          opacity: 1,
+          transform: { translateX: 1, translateY: 1, scaleX: 1, scaleY: 1 },
+        },
+      ],
+    };
+    const preview = renderPixiPreview(frame);
+    expect([...preview.pixels.slice((1 * 20 + 2) * 4, (1 * 20 + 2) * 4 + 4)]).toEqual([
+      255, 0, 0, 255,
+    ]);
+    expect([...preview.pixels.slice((1 * 20 + 6) * 4, (1 * 20 + 6) * 4 + 4)]).toEqual([
+      0, 255, 0, 255,
+    ]);
+  });
 });

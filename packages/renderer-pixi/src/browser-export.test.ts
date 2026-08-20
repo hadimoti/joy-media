@@ -46,6 +46,25 @@ describe('browser export contracts', () => {
     expect(() => selectBrowserMp4MimeType(() => false)).toThrow(/latest Chrome.*MediaRecorder MP4/);
   });
 
+  it('waits for required content fonts before constructing capture resources', async () => {
+    const readiness = vi.fn(async () => {});
+    const harness = installRecorderHarness('video/mp4');
+    await downloadBrowserMp4({
+      manifest,
+      frameCount: 1,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4',
+      paintFrame: () => {},
+      requiredFontFamilies: ['YekanBakh', 'Vazin'],
+      fontReadiness: readiness,
+    });
+    expect(readiness).toHaveBeenCalledWith(['YekanBakh', 'Vazin']);
+    expect(readiness.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.captureStream.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('fails capability preflight before recorder construction or DOM capture', async () => {
     let recorderConstructions = 0;
     class UnsupportedRecorder {

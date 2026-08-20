@@ -118,6 +118,9 @@ export interface BrowserMp4ExportSource {
   /** When false, the caller owns the final download (for server remux). */
   readonly autoDownload?: boolean;
   readonly onProgress?: (completedFrames: number, totalFrames: number) => void;
+  /** Required content families are checked before canvas capture starts. */
+  readonly requiredFontFamilies?: readonly string[];
+  readonly fontReadiness?: (families: readonly string[]) => Promise<void>;
   /** Cancels the realtime recorder and releases all media resources. */
   readonly signal?: AbortSignal;
 }
@@ -146,6 +149,8 @@ export async function downloadBrowserMp4(
   if (source.paintFrame !== undefined && source.renderFrame !== undefined)
     throw new TypeError('provide either paintFrame or renderFrame, not both');
   if (source.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  if (source.requiredFontFamilies !== undefined && source.fontReadiness !== undefined)
+    await source.fontReadiness(source.requiredFontFamilies);
   const selectedMimeType = source.mimeType ?? selectBrowserMp4MimeType();
 
   const ownsCanvas = source.canvas === undefined;

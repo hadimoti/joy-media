@@ -44,7 +44,11 @@ import type {
   ArtifactStore,
   ArtifactTransaction,
 } from '@joy-media/commands';
-import type { CreativeBriefRequestV1, CreativeBriefV1, EditorContext } from '@joy-media/agent-tools';
+import type {
+  CreativeBriefRequestV1,
+  CreativeBriefV1,
+  EditorContext,
+} from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
@@ -119,6 +123,7 @@ import {
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
+import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { updateUniversalTimelineForTransaction } from './universal-placement.js';
@@ -1379,11 +1384,7 @@ function EditorWorkspace({
       true,
       window.localStorage,
       (controlPlaneProjectId, enabled, baseRevision) =>
-        mediaControlPlaneClient.setCreativeBriefOptIn(
-          controlPlaneProjectId,
-          enabled,
-          baseRevision,
-        ),
+        mediaControlPlaneClient.setCreativeBriefOptIn(controlPlaneProjectId, enabled, baseRevision),
       { ownerKey: controlPlaneOwnerKey },
     );
     if (result.kind !== 'success') {
@@ -3681,6 +3682,23 @@ function EditorWorkspace({
           canvas: recorderCanvas,
           audioTrack: exportAudioTrack,
           mimeType: selectedMimeType,
+          requiredFontFamilies: [
+            ...new Set(
+              Object.values(exportVisualProject.visualObjects)
+                .flatMap((object) =>
+                  object.kind === 'text'
+                    ? [
+                        object.textStyle?.fontFamily ?? '',
+                        ...(object.textDocument?.blocks ?? []).flatMap((block) =>
+                          block.runs.map((run) => run.style?.fontFamily ?? ''),
+                        ),
+                      ]
+                    : [],
+                )
+                .filter((family) => family.length > 0),
+            ),
+          ],
+          fontReadiness: waitForContentFonts,
           onRecordingStart: () => {
             mixedAudioSource.start(0);
             mixedAudioStarted = true;
@@ -5737,7 +5755,13 @@ function EditorWorkspace({
     }
     if (api.id === 'creative-brief') {
       return (
-        <Suspense fallback={<PanelShell title="Creative Brief" iconUrl={undefined}>{null}</PanelShell>}>
+        <Suspense
+          fallback={
+            <PanelShell title="Creative Brief" iconUrl={undefined}>
+              {null}
+            </PanelShell>
+          }
+        >
           <CreativeBriefPanel
             revisionId={context.session.projectRevisionId}
             optedIn={context.creativeBriefOptedIn}
