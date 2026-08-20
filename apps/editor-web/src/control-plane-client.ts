@@ -1,7 +1,7 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import type { CreativeBriefV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, CreativeBriefRequestV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 
 export interface BrowserWorker {
@@ -140,6 +140,18 @@ export interface BrowserProjectMetadata {
   readonly assetSyncEnabled: boolean;
   readonly trashedAt?: number;
   readonly activeJobCount: number;
+}
+
+export interface BrowserJoyCodeOptIn {
+  readonly enabled: boolean;
+  readonly consentVersion?: string;
+  readonly revision: number;
+}
+export interface BrowserJoyCodePlanRequest {
+  readonly projectId: string;
+  readonly snapshotRevisionId: string;
+  readonly prompt: string;
+  readonly selection: { readonly clipIds: readonly string[]; readonly objectIds?: readonly string[] };
 }
 
 export interface BrowserProjectDuplicateResult {
@@ -566,6 +578,33 @@ export class BrowserControlPlaneClient {
     return this.get(
       `/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`,
     );
+  }
+  async getJoyCodeOptIn(projectId: string): Promise<BrowserJoyCodeOptIn> {
+    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/joy-code-opt-in`);
+  }
+  async setJoyCodeOptIn(
+    projectId: string,
+    enabled: boolean,
+    consentVersion: string | null,
+    baseRevision: number,
+  ): Promise<BrowserJoyCodeOptIn> {
+    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/joy-code-opt-in`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled, consentVersion, baseRevision }),
+    });
+  }
+  async createJoyCodePlan(
+    controlPlaneProjectId: string,
+    request: BrowserJoyCodePlanRequest,
+    signal?: AbortSignal,
+  ): Promise<JoyCodePlanProposalV1> {
+    return this.request(`/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/joy-code/plans`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+      ...(signal === undefined ? {} : { signal }),
+    });
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });

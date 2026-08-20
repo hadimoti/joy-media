@@ -1174,6 +1174,29 @@ describe('BrowserControlPlaneClient', () => {
   });
 });
 
+describe('BrowserControlPlaneClient Joy Code', () => {
+  it('uses the Joy Code opt-in route and POST plan envelope with auth and encoding', async () => {
+    const requests: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ url: String(input), method: init?.method ?? 'GET', ...(init?.body === undefined ? {} : { body: String(init.body) }) });
+      return json(200, { data: { enabled: true, consentVersion: 'openrouter-nvidia-free-edit-planning-v1', revision: 2 } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => 'token');
+      await client.getJoyCodeOptIn('project/one');
+      await client.setJoyCodeOptIn('project/one', true, 'openrouter-nvidia-free-edit-planning-v1', 2);
+      await client.createJoyCodePlan('project/one', { projectId: 'project/one', snapshotRevisionId: 'rev-2', prompt: 'trim', selection: { clipIds: ['clip-1'] } });
+    } finally { globalThis.fetch = original; }
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://media.joyteam.ir/api/v1/projects/project%2Fone/joy-code-opt-in',
+      'https://media.joyteam.ir/api/v1/projects/project%2Fone/joy-code-opt-in',
+      'https://media.joyteam.ir/api/v1/projects/project%2Fone/joy-code/plans',
+    ]);
+    expect(requests[2]?.body).toContain('"snapshotRevisionId":"rev-2"');
+  });
+});
+
 function json(status: number, value: unknown): Response {
   return new Response(JSON.stringify(value), {
     status,
