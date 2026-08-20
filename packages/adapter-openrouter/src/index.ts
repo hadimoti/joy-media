@@ -737,6 +737,13 @@ IMPORTANT RULES:
 - Preserve all Persian/RTL text exactly as provided
 - Be concise and specific in your recommendations
 - Focus on actionable creative improvements
+- For nested arrays use these compact shapes (or []): facts [{id,statement,source,evidence:[]}],
+  inferences [{id,statement,confidence,rationale,evidence:[]}],
+  assumptions [{id,statement,confidence,evidence:[],verified}],
+  recommendations [{id,kind,confidence,evidence:[],rationale,expectedBenefit,risk,scope:{}}],
+  blockedBy [{id,capability,status,message,evidence:[]}],
+  requiresHumanDecision [{id,question,context,options:[],evidence:[]}]
+- Use evidence:[] and scope:{} unless an exact valid identifier is present in the input
 
 RESPONSE SCHEMA (strict):
 {
