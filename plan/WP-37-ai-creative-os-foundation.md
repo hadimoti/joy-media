@@ -1,6 +1,6 @@
 # WP-37 — AI Creative OS Foundation: Semantic Project Intelligence and Critique
 
-**Status:** implementation complete for the bounded Creative Brief/runtime surface; autonomous free-form video-cut execution remains a separate follow-up.
+**Status:** the bounded Creative Brief/runtime/editor surface is closed and deployed; autonomous free-form video-cut execution remains a separate WP-38 follow-up. The original G0 GBrain operational checklist remains explicitly deferred rather than silently marked complete.
 **Authoring date:** 2026-08-17  
 **Product direction:** JOY Media becomes an AI-native creative workspace: a human and an AI designer operate on the *same editable project*. It is not an MP4 generator and it is not a UI-clicking bot.
 
