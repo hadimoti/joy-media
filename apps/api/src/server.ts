@@ -20,6 +20,8 @@ import { CanonicalCreativeBriefInputResolver } from './creative-brief-input-reso
 import { ProjectSnapshotService } from './project-snapshot-service.js';
 import { ProjectIntelligenceService } from './project-intelligence-service.js';
 import { createProductionCreativeBriefRuntime } from './creative-brief-production-runtime.js';
+import { createProductionJoyCodeRuntime } from './joy-code-production-runtime.js';
+import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
 
 await start();
 
@@ -44,6 +46,16 @@ async function start(): Promise<void> {
     snapshotService: new ProjectSnapshotService(),
     intelligenceService: new ProjectIntelligenceService(),
   });
+  const joyCodeInputResolver = new CanonicalJoyCodeInputResolver({
+    controlPlane,
+    snapshotService: new ProjectSnapshotService(),
+    intelligenceService: new ProjectIntelligenceService(),
+    catalogs: {
+      textTemplateIds: ['clean-title', 'hero-title'],
+      captionTemplateIds: ['joy-clean', 'joy-karaoke-pop', 'joy-rtl-classic'],
+      transitionIds: ['dissolve', 'wipe', 'slide'],
+    },
+  });
   const creativeBriefRuntime = createProductionCreativeBriefRuntime(
     {
       JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE:
@@ -58,6 +70,18 @@ async function start(): Promise<void> {
         process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF,
       JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS:
         process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS,
+    },
+    (path, encoding) => readFileSync(path, encoding),
+    globalThis.fetch.bind(globalThis),
+  );
+  const joyCodeRuntime = createProductionJoyCodeRuntime(
+    {
+      JOY_MEDIA_JOY_CODE_RUNTIME_MODE: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODE,
+      JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID,
+      JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS,
+      JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS,
+      JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF,
+      JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS,
     },
     (path, encoding) => readFileSync(path, encoding),
     globalThis.fetch.bind(globalThis),
@@ -85,6 +109,8 @@ async function start(): Promise<void> {
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     creativeBriefInputResolver,
     creativeBriefRuntime,
+    joyCodeInputResolver,
+    joyCodeRuntime,
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
