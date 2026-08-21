@@ -192,6 +192,7 @@ export class BrowserProductionRunStore implements ProductionRunStore {
       nodeId: approval.nodeId,
       kind: approval.kind,
       prompt: approval.prompt,
+      ...(approval.requestPayload === undefined ? {} : { requestPayload: approval.requestPayload }),
       state: approval.state,
       requestedSeq: withEvent.updatedSeq,
     }));
@@ -358,7 +359,9 @@ function mergeApprovals(
   next: readonly ProductionApprovalV1[],
 ): readonly ProductionApprovalV1[] {
   const nextById = new Map(next.map((approval) => [approval.approvalId, approval]));
-  const merged = current.map((approval) => nextById.get(approval.approvalId) ?? approval);
+  const merged = current.map((approval) =>
+    approval.state === 'pending' ? (nextById.get(approval.approvalId) ?? approval) : approval,
+  );
   const currentIds = new Set(current.map((approval) => approval.approvalId));
   return [...merged, ...next.filter((approval) => !currentIds.has(approval.approvalId))];
 }
@@ -396,6 +399,9 @@ function sanitizeCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
             pendingRequest: {
               kind: node.pendingRequest.kind,
               prompt: node.pendingRequest.prompt,
+              ...(node.pendingRequest.payload === undefined
+                ? {}
+                : { payload: node.pendingRequest.payload }),
             },
           }),
       ...(node.resolvedInput === undefined ? {} : { resolvedInput: node.resolvedInput }),
@@ -473,11 +479,6 @@ function assertNoPrivatePayload(value: unknown, path: readonly string[]): void {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
-    if (key === 'payload' && child !== undefined) {
-      throw new Error(
-        `raw media is not allowed in local production run records (${[...path, key].join('.')})`,
-      );
-    }
     assertNoPrivatePayload(child, [...path, key]);
   }
 }

@@ -17,6 +17,7 @@ import type { WorkflowRunOutcome } from './workflow-runner.js';
 import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { ContactSheetApproval, type ContactSheetApprovalDecision } from './ContactSheetApproval.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'saved', label: 'Saved' },
@@ -35,7 +36,6 @@ interface ApprovalState {
   readonly workflowId: string;
   readonly nodeId: string;
   readonly request: HumanInputRequest;
-  readonly selected: ReadonlySet<string>;
   readonly approvalId?: string;
   readonly approvalRequestedSeq?: number;
   readonly approvalExpiresAtSeq?: number;
@@ -92,15 +92,6 @@ export function parametersFromSchema(
   });
 }
 
-function candidateKey(candidate: unknown, index: number): string {
-  if (typeof candidate === 'object' && candidate !== null) {
-    const record = candidate as Record<string, unknown>;
-    if (typeof record.title === 'string') return record.title;
-    if (typeof record.id === 'string') return record.id;
-  }
-  return `candidate-${String(index)}`;
-}
-
 export function WorkflowsPanel({
   session,
   selectedClipIds,
@@ -155,16 +146,11 @@ export function WorkflowsPanel({
 
   function applyOutcome(outcome: WorkflowRunOutcome): void {
     if (outcome.status === 'waiting_for_input') {
-      const payload = outcome.request.payload as { candidates?: readonly unknown[] } | undefined;
-      const candidates = payload?.candidates ?? [];
       setApproval({
         runId: outcome.runId,
         workflowId: outcome.workflowId,
         nodeId: outcome.nodeId,
         request: outcome.request,
-        selected: new Set(
-          candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
-        ),
         ...(outcome.approvalId === undefined ? {} : { approvalId: outcome.approvalId }),
         ...(outcome.approvalRequestedSeq === undefined
           ? {}
@@ -223,22 +209,9 @@ export function WorkflowsPanel({
     applyOutcome(outcome);
   }
 
-  async function submitApproval() {
+  async function submitApprovalDecision(decision: ContactSheetApprovalDecision) {
     if (approval === undefined) return;
-    const payload = approval.request.payload as
-      { candidates?: readonly unknown[]; items?: readonly unknown[] } | undefined;
-    let humanInputs: Record<string, unknown>;
-
-    if (approval.request.kind === 'choose-candidates') {
-      const candidates = (payload?.candidates ?? []).filter((candidate, index) =>
-        approval.selected.has(candidateKey(candidate, index)),
-      );
-      humanInputs = { [approval.nodeId]: { candidates } };
-    } else if (approval.request.kind === 'approve-render') {
-      humanInputs = { [approval.nodeId]: { approved: payload?.items ?? [] } };
-    } else {
-      humanInputs = { [approval.nodeId]: { approved: true } };
-    }
+    const humanInputs: Record<string, unknown> = { [approval.nodeId]: decision.response };
 
     const outcome = await onResume(approval.runId, humanInputs, {
       ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
@@ -250,16 +223,6 @@ export function WorkflowsPanel({
         : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
     });
     applyOutcome(outcome);
-  }
-
-  function toggleCandidate(key: string) {
-    setApproval((current) => {
-      if (current === undefined) return current;
-      const next = new Set(current.selected);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return { ...current, selected: next };
-    });
   }
 
   function renderRecordedRow(recorded: RecordedWorkflow) {
@@ -342,12 +305,6 @@ export function WorkflowsPanel({
     );
   }
 
-  const approvalCandidates =
-    approval?.request.kind === 'choose-candidates'
-      ? (((approval.request.payload as { candidates?: readonly unknown[] } | undefined)
-          ?.candidates ?? []) as readonly unknown[])
-      : [];
-
   const isEmpty = workflows.length === 0 && systemWorkflows.length === 0;
 
   return (
@@ -414,50 +371,15 @@ export function WorkflowsPanel({
 
       {approval !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Workflow approval">
-          <h4>{approval.request.prompt}</h4>
-          {approval.request.kind === 'choose-candidates' ? (
-            <ul className="workflow-candidate-list">
-              {approvalCandidates.map((candidate, index) => {
-                const key = candidateKey(candidate, index);
-                const title =
-                  typeof candidate === 'object' && candidate !== null && 'title' in candidate
-                    ? String((candidate as { title: unknown }).title)
-                    : key;
-                return (
-                  <li key={key}>
-                    <label className="workflow-candidate-option">
-                      <input
-                        type="checkbox"
-                        checked={approval.selected.has(key)}
-                        onChange={() => toggleCandidate(key)}
-                      />
-                      <span>{title}</span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="empty-hint">Review the {approval.request.kind} request and continue.</p>
-          )}
-          <div className="workflow-run-actions">
-            <button
-              className="icon-button icon-button-labeled"
-              onClick={() => void submitApproval()}
-              title="Continue workflow"
-            >
-              <PlayIcon />
-              Continue
-            </button>
-            <button
-              className="icon-button"
-              onClick={() => setApproval(undefined)}
-              title="Dismiss"
-              aria-label="Dismiss approval"
-            >
-              <TrashIcon />
-            </button>
-          </div>
+          <ContactSheetApproval
+            key={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
+            request={approval.request}
+            approvalId={approval.approvalId}
+            storageKey={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
+            storage={typeof window === 'undefined' ? undefined : window.localStorage}
+            onSubmit={(decision) => void submitApprovalDecision(decision)}
+            onDismiss={() => setApproval(undefined)}
+          />
         </div>
       )}
 

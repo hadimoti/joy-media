@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
+  HumanInputRequest,
+  ProductionApprovalV1,
   ProductionRunAuthority,
   ProductionRunRecordV1,
   RecordProductionApprovalResponseInput,
@@ -16,9 +18,10 @@ import {
   type ProductionBoardRunProjection,
   type ProductionBoardSectionId,
 } from './production-board-model.js';
-import { CheckIcon, CloseIcon, RefreshIcon } from './icons.js';
+import { CloseIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { ContactSheetApproval, type ContactSheetApprovalDecision } from './ContactSheetApproval.js';
 
 export interface ProductionBoardRunStore {
   list(options?: { readonly limit?: number; readonly cursor?: string }): Promise<{
@@ -107,13 +110,20 @@ export function ProductionBoardPanel({
     });
   }, [artifacts, assets, currentProjectRevision, dataLanes, loadState]);
 
-  const approve = async (run: ProductionBoardRunProjection, approved: boolean) => {
-    const approval = run.pendingApprovals[0];
+  const approve = async (
+    run: ProductionBoardRunProjection,
+    approval: ProductionApprovalV1,
+    decision: ContactSheetApprovalDecision,
+  ) => {
     if (approval === undefined || store.respondToApproval === undefined) return;
     const result = await store.respondToApproval(run.runId, {
       approvalId: approval.approvalId,
-      approved,
-      responseRef: `${run.runId}:${approval.approvalId}:${approved ? 'approved' : 'rejected'}`,
+      approved: decision.approved,
+      responseRef: decision.responseId,
+      response: decision.response,
+      ...(decision.rejectionReason === undefined
+        ? {}
+        : { rejectionReason: decision.rejectionReason }),
       authority,
       expectedApprovalId: approval.approvalId,
       expectedRequestedSeq: approval.requestedSeq,
@@ -122,7 +132,7 @@ export function ProductionBoardPanel({
       setStatus(`Approval failed: ${result.reason}`);
       return;
     }
-    setStatus(approved ? 'Approval recorded.' : 'Rejection recorded.');
+    setStatus(decision.approved ? 'Approval recorded.' : 'Rejection recorded.');
     await refresh();
   };
 
@@ -154,8 +164,7 @@ export function ProductionBoardPanel({
       model={model}
       status={status}
       onRefresh={() => void refresh()}
-      onApprove={(run) => void approve(run, true)}
-      onReject={(run) => void approve(run, false)}
+      onApproval={(run, approval, decision) => void approve(run, approval, decision)}
       onCancel={(run) => void cancel(run)}
       onRetry={(run) => void retry(run)}
       retryAvailable={onRetryRun !== undefined}
@@ -194,8 +203,7 @@ export function ProductionBoardPanelView({
   status,
   retryAvailable = false,
   onRefresh,
-  onApprove,
-  onReject,
+  onApproval,
   onCancel,
   onRetry,
   onOpenLink,
@@ -206,8 +214,11 @@ export function ProductionBoardPanelView({
   readonly status?: string;
   readonly retryAvailable?: boolean;
   readonly onRefresh?: () => void;
-  readonly onApprove?: (run: ProductionBoardRunProjection) => void;
-  readonly onReject?: (run: ProductionBoardRunProjection) => void;
+  readonly onApproval?: (
+    run: ProductionBoardRunProjection,
+    approval: ProductionApprovalV1,
+    decision: ContactSheetApprovalDecision,
+  ) => void;
   readonly onCancel?: (run: ProductionBoardRunProjection) => void;
   readonly onRetry?: (run: ProductionBoardRunProjection) => void;
   readonly onOpenLink?: (href: string) => void;
@@ -307,8 +318,7 @@ export function ProductionBoardPanelView({
               run={selectedRun}
               section={section}
               retryAvailable={retryAvailable}
-              onApprove={onApprove}
-              onReject={onReject}
+              onApproval={onApproval}
               onCancel={onCancel}
               onRetry={onRetry}
               onOpenLink={onOpenLink}
@@ -324,8 +334,7 @@ function RunDetails({
   run,
   section,
   retryAvailable,
-  onApprove,
-  onReject,
+  onApproval,
   onCancel,
   onRetry,
   onOpenLink,
@@ -333,8 +342,11 @@ function RunDetails({
   readonly run: ProductionBoardRunProjection;
   readonly section: ProductionBoardSectionId;
   readonly retryAvailable: boolean;
-  readonly onApprove?: (run: ProductionBoardRunProjection) => void;
-  readonly onReject?: (run: ProductionBoardRunProjection) => void;
+  readonly onApproval?: (
+    run: ProductionBoardRunProjection,
+    approval: ProductionApprovalV1,
+    decision: ContactSheetApprovalDecision,
+  ) => void;
   readonly onCancel?: (run: ProductionBoardRunProjection) => void;
   readonly onRetry?: (run: ProductionBoardRunProjection) => void;
   readonly onOpenLink?: (href: string) => void;
@@ -364,24 +376,6 @@ function RunDetails({
         <button
           type="button"
           className="icon-button icon-button-labeled"
-          disabled={!run.actions.canApprove}
-          onClick={() => onApprove?.(run)}
-        >
-          <CheckIcon />
-          Approve
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button-labeled"
-          disabled={!run.actions.canReject}
-          onClick={() => onReject?.(run)}
-        >
-          <CloseIcon />
-          Reject
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button-labeled"
           disabled={!run.actions.canRetry || !retryAvailable}
           onClick={() => onRetry?.(run)}
         >
@@ -400,6 +394,19 @@ function RunDetails({
       </div>
       <div className="production-board-section">
         <h4>{active.label}</h4>
+        {section === 'approvals' &&
+          run.pendingApprovals.map((approval) => (
+            <ContactSheetApproval
+              key={approval.approvalId}
+              request={requestFromApproval(approval)}
+              approvalId={approval.approvalId}
+              initialResponse={approval.response}
+              initialRejectionReason={approval.rejectionReason}
+              storageKey={`${run.runId}:${approval.approvalId}`}
+              storage={typeof window === 'undefined' ? undefined : window.localStorage}
+              onSubmit={(decision) => onApproval?.(run, approval, decision)}
+            />
+          ))}
         {active.items.length === 0 ? (
           <p className="production-board-empty">No {active.label.toLowerCase()} projection yet.</p>
         ) : (
@@ -437,6 +444,14 @@ function RunDetails({
       </div>
     </section>
   );
+}
+
+function requestFromApproval(approval: ProductionApprovalV1): HumanInputRequest {
+  return {
+    kind: approval.kind,
+    prompt: approval.prompt,
+    ...(approval.requestPayload === undefined ? {} : { payload: approval.requestPayload }),
+  };
 }
 
 function message(error: unknown): string {

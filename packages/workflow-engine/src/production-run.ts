@@ -63,10 +63,13 @@ export interface ProductionApprovalV1 {
   readonly nodeId: string;
   readonly kind: HumanInputRequestKind;
   readonly prompt: string;
+  readonly requestPayload?: unknown;
   readonly state: ProductionApprovalStateV1;
   readonly requestedSeq: number;
   readonly respondedSeq?: number;
   readonly responseRef?: string;
+  readonly response?: unknown;
+  readonly rejectionReason?: string;
   readonly authority?: ProductionRunAuthority;
 }
 
@@ -148,6 +151,8 @@ export interface RecordProductionApprovalResponseInput {
   readonly approvalId: string;
   readonly approved: boolean;
   readonly responseRef: string;
+  readonly response?: unknown;
+  readonly rejectionReason?: string;
   readonly authority: ProductionRunAuthority;
 }
 
@@ -160,7 +165,13 @@ export interface ProductionRunBoardApprovalV1 {
   readonly nodeId: string;
   readonly kind: HumanInputRequestKind;
   readonly prompt: string;
+  readonly requestPayload?: unknown;
   readonly state: ProductionApprovalStateV1;
+  readonly requestedSeq: number;
+  readonly respondedSeq?: number;
+  readonly responseRef?: string;
+  readonly response?: unknown;
+  readonly rejectionReason?: string;
 }
 
 export interface ProductionRunBoardRunV1 {
@@ -338,7 +349,12 @@ export function recordProductionApprovalResponse(
 
   const nextState: ProductionApprovalStateV1 = input.approved ? 'approved' : 'rejected';
   if (approval.state !== 'pending') {
-    if (approval.state === nextState && approval.responseRef === input.responseRef) {
+    if (
+      approval.state === nextState &&
+      approval.responseRef === input.responseRef &&
+      jsonEqual(approval.response, input.response) &&
+      approval.rejectionReason === input.rejectionReason
+    ) {
       return { ok: true, duplicate: true, record };
     }
     return { ok: false, reason: 'approval-conflict' };
@@ -350,6 +366,8 @@ export function recordProductionApprovalResponse(
     state: nextState,
     respondedSeq: seq,
     responseRef: input.responseRef,
+    ...(input.response === undefined ? {} : { response: input.response }),
+    ...(input.rejectionReason === undefined ? {} : { rejectionReason: input.rejectionReason }),
     authority: input.authority,
   };
   const event = createProductionRunEvent(
@@ -410,7 +428,17 @@ export function buildProductionRunBoardSnapshot(
         nodeId: approval.nodeId,
         kind: approval.kind,
         prompt: approval.prompt,
+        ...(approval.requestPayload === undefined
+          ? {}
+          : { requestPayload: approval.requestPayload }),
         state: approval.state,
+        requestedSeq: approval.requestedSeq,
+        ...(approval.respondedSeq === undefined ? {} : { respondedSeq: approval.respondedSeq }),
+        ...(approval.responseRef === undefined ? {} : { responseRef: approval.responseRef }),
+        ...(approval.response === undefined ? {} : { response: approval.response }),
+        ...(approval.rejectionReason === undefined
+          ? {}
+          : { rejectionReason: approval.rejectionReason }),
       })),
       nodes: record.nodes,
       lastEventSeq: record.events.at(-1)?.seq ?? 0,
@@ -477,6 +505,7 @@ export class InMemoryProductionRunStore implements ProductionRunStore {
       nodeId: approval.nodeId,
       kind: approval.kind,
       prompt: approval.prompt,
+      ...(approval.requestPayload === undefined ? {} : { requestPayload: approval.requestPayload }),
       state: approval.state,
       requestedSeq: event.seq,
     }));
@@ -519,9 +548,15 @@ function mergeProductionApprovals(
   next: readonly ProductionApprovalV1[],
 ): readonly ProductionApprovalV1[] {
   const nextById = new Map(next.map((approval) => [approval.approvalId, approval]));
-  const merged = current.map((approval) => nextById.get(approval.approvalId) ?? approval);
+  const merged = current.map((approval) =>
+    approval.state === 'pending' ? (nextById.get(approval.approvalId) ?? approval) : approval,
+  );
   const currentIds = new Set(current.map((approval) => approval.approvalId));
   return [...merged, ...next.filter((approval) => !currentIds.has(approval.approvalId))];
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function createProductionRunEvent(
@@ -623,6 +658,9 @@ function approvalsFromDashboard(
         nodeId: node.nodeId,
         kind: node.pendingRequest.kind,
         prompt: node.pendingRequest.prompt,
+        ...(node.pendingRequest.payload === undefined
+          ? {}
+          : { requestPayload: node.pendingRequest.payload }),
         state: 'pending',
         requestedSeq: requestedSeqByApprovalId.get(approvalId) ?? 1,
       },
@@ -732,5 +770,6 @@ function sanitizeHumanInputRequest(request: HumanInputRequest): HumanInputReques
   return {
     kind: request.kind,
     prompt: request.prompt,
+    ...(request.payload === undefined ? {} : { payload: request.payload }),
   };
 }

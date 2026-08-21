@@ -644,6 +644,8 @@ interface ApprovalStoreWithPolicy extends ProductionRunStore {
       readonly approvalId: string;
       readonly approved: boolean;
       readonly responseRef: string;
+      readonly response?: unknown;
+      readonly rejectionReason?: string;
       readonly authority: ProductionRunAuthority;
       readonly expectedApprovalId?: string;
       readonly expectedRequestedSeq?: number;
@@ -675,6 +677,11 @@ async function recordApprovalResponse(
     approvalId: approval.approvalId,
     approved: input.approved,
     responseRef: approvalResponseRef(record, approval, input.humanInputs),
+    response: input.humanInputs[approval.nodeId],
+    ...(() => {
+      const reason = approvalRejectionReason(input.humanInputs[approval.nodeId]);
+      return reason === undefined ? {} : { rejectionReason: reason };
+    })(),
     authority: input.authority,
   };
   const result = hasPolicyApprovalResponse(store)
@@ -714,6 +721,14 @@ function approvalInputApproved(input: unknown): boolean {
     if (approved === false || rejected === true) return false;
   }
   return true;
+}
+
+function approvalRejectionReason(input: unknown): string | undefined {
+  if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+    const reason = (input as { readonly rejectionReason?: unknown }).rejectionReason;
+    if (typeof reason === 'string' && reason.trim().length > 0) return reason.trim();
+  }
+  return undefined;
 }
 
 export { resolveWorkflow };
