@@ -1,8 +1,12 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import {
   analyzeReferenceVideo,
   ReferenceAnalysisError,
+  runReferenceTool,
   validateReferenceAnalysisModelFindings,
 } from './reference-analysis.js';
 import type {
@@ -150,6 +154,85 @@ describe('reference analysis', () => {
     });
   });
 
+  it('tolerates silent videos and reports zero audio beats', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-reference-silent-'));
+    const sourcePath = join(directory, 'silent-reference.mp4');
+    try {
+      const rendered = spawnSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'color=c=black:s=320x180:d=1',
+          '-an',
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          sourcePath,
+        ],
+        { shell: false, encoding: 'utf8' },
+      );
+      expect(rendered.status).toBe(0);
+      expect(existsSync(sourcePath)).toBe(true);
+
+      const receipt = await analyzeReferenceVideo({
+        jobId: 'reference-silent-1',
+        assetId: 'asset-silent',
+        sourcePath,
+        payload: {
+          assetId: 'asset-silent',
+          maxDurationUs: 5_000_000,
+          maxBytes: 2_000_000,
+          sampleCount: 2,
+          maxAudioBeats: 4,
+        },
+        cancelled: () => false,
+        progress: async () => undefined,
+      });
+
+      expect(receipt.summary.audioBeatCount).toBe(0);
+      expect(receipt.evidence.every((entry) => entry.kind !== 'audio-beat')).toBe(true);
+      expect(receipt.evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'shot' }),
+          expect.objectContaining({ kind: 'palette' }),
+          expect.objectContaining({ kind: 'composition' }),
+          expect.objectContaining({ kind: 'text-safe-zone' }),
+          expect.objectContaining({ kind: 'transcript' }),
+        ]),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('kills a running subprocess when cancellation is requested', async () => {
+    let cancelled = false;
+    let childPid: number | undefined;
+    const running = runReferenceTool({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cancelled: () => cancelled,
+      maxStdoutBytes: 1_024,
+      onSpawn: (pid) => {
+        childPid = pid;
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    cancelled = true;
+
+    await expect(running).rejects.toMatchObject({
+      code: 'REFERENCE_ANALYSIS_CANCELED',
+    });
+    expect(childPid).toBeDefined();
+    await waitForProcessExit(childPid!);
+  });
+
   it('rejects model findings that cite missing or empty evidence', () => {
     const receipt: VideoReferenceAnalyzeReceipt = {
       kind: 'video.reference-analyze',
@@ -243,3 +326,21 @@ describe('reference analysis', () => {
     ]);
   });
 });
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`process ${pid} remained alive after cancellation`);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

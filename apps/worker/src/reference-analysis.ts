@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type {
   ReferenceAnalysisEvidence,
   ReferenceAnalysisFinding,
@@ -35,7 +36,9 @@ export async function analyzeReferenceVideo(options: {
   readonly modelAnalyze?: (
     receipt: VideoReferenceAnalyzeReceipt,
   ) => Promise<readonly ReferenceAnalysisFinding[]>;
+  readonly runTool?: typeof runReferenceTool;
 }): Promise<VideoReferenceAnalyzeReceipt> {
+  const runTool = options.runTool ?? runReferenceTool;
   assertNotCanceled(options.cancelled);
   await options.progress(5);
 
@@ -47,7 +50,7 @@ export async function analyzeReferenceVideo(options: {
     );
   }
 
-  const descriptor = probeVideo(options.sourcePath);
+  const descriptor = await probeVideo(options.sourcePath, options.cancelled, runTool);
   if (descriptor.durationUs > options.payload.maxDurationUs) {
     throw new ReferenceAnalysisError(
       'REFERENCE_ANALYSIS_SOURCE_TOO_LONG',
@@ -62,11 +65,12 @@ export async function analyzeReferenceVideo(options: {
   await options.progress(25);
 
   const sampleTimesUs = buildSampleTimes(descriptor.durationUs, options.payload.sampleCount ?? 3);
-  const sampledFrames = sampleTimesUs.map((timeUs, index) => {
+  const sampledFrames: { timeUs: number; rgb: Uint8Array; index: number }[] = [];
+  for (const [index, timeUs] of sampleTimesUs.entries()) {
     assertNotCanceled(options.cancelled);
-    const rgb = sampleFrame(options.sourcePath, timeUs);
-    return { timeUs, rgb, index };
-  });
+    const rgb = await sampleFrame(options.sourcePath, timeUs, options.cancelled, runTool);
+    sampledFrames.push({ timeUs, rgb, index });
+  }
   await options.progress(45);
 
   assertNotCanceled(options.cancelled);
@@ -81,7 +85,7 @@ export async function analyzeReferenceVideo(options: {
 
   assertNotCanceled(options.cancelled);
   const audioBeatEvidence = buildAudioBeatEvidence(
-    decodeAudioPcm(options.sourcePath),
+    await decodeAudioPcm(options.sourcePath, descriptor.durationUs, options.cancelled, runTool),
     descriptor.durationUs,
     options.payload.maxAudioBeats ?? 6,
   );
@@ -165,10 +169,14 @@ function assertNotCanceled(cancelled: () => boolean): void {
   }
 }
 
-function probeVideo(sourcePath: string): VideoReferenceAnalyzeReceipt['descriptor'] {
-  const probe = spawnSync(
-    'ffprobe',
-    [
+async function probeVideo(
+  sourcePath: string,
+  cancelled: () => boolean,
+  runTool: typeof runReferenceTool,
+): Promise<VideoReferenceAnalyzeReceipt['descriptor']> {
+  const probe = await runTool({
+    command: 'ffprobe',
+    args: [
       '-v',
       'error',
       '-select_streams',
@@ -179,15 +187,16 @@ function probeVideo(sourcePath: string): VideoReferenceAnalyzeReceipt['descripto
       'json',
       sourcePath,
     ],
-    { shell: false, encoding: 'utf8' },
-  );
-  if (probe.status !== 0) {
+    cancelled,
+    maxStdoutBytes: 65_536,
+  });
+  if (probe.code !== 0) {
     throw new ReferenceAnalysisError(
       'REFERENCE_ANALYSIS_PROBE_FAILED',
       'ffprobe could not inspect the source video',
     );
   }
-  const parsed = JSON.parse(probe.stdout) as {
+  const parsed = JSON.parse(probe.stdout.toString('utf8')) as {
     readonly streams?: ReadonlyArray<{
       readonly width?: number;
       readonly height?: number;
@@ -222,11 +231,16 @@ function probeVideo(sourcePath: string): VideoReferenceAnalyzeReceipt['descripto
   };
 }
 
-function sampleFrame(sourcePath: string, timeUs: number): Uint8Array {
+async function sampleFrame(
+  sourcePath: string,
+  timeUs: number,
+  cancelled: () => boolean,
+  runTool: typeof runReferenceTool,
+): Promise<Uint8Array> {
   const seconds = (timeUs / 1_000_000).toFixed(6);
-  const ffmpeg = spawnSync(
-    'ffmpeg',
-    [
+  const ffmpeg = await runTool({
+    command: 'ffmpeg',
+    args: [
       '-v',
       'error',
       '-ss',
@@ -243,9 +257,10 @@ function sampleFrame(sourcePath: string, timeUs: number): Uint8Array {
       'rgb24',
       '-',
     ],
-    { shell: false, encoding: 'buffer', maxBuffer: FRAME_BYTES * 4 },
-  );
-  if (ffmpeg.status !== 0 || ffmpeg.stdout.length < FRAME_BYTES) {
+    cancelled,
+    maxStdoutBytes: FRAME_BYTES * 4,
+  });
+  if (ffmpeg.code !== 0 || ffmpeg.stdout.length < FRAME_BYTES) {
     throw new ReferenceAnalysisError(
       'REFERENCE_ANALYSIS_FRAME_FAILED',
       `ffmpeg could not sample the frame at ${seconds}s`,
@@ -441,14 +456,21 @@ function buildTranscriptEvidence(): Extract<
   };
 }
 
-function decodeAudioPcm(sourcePath: string): Int16Array {
-  const ffmpeg = spawnSync(
-    'ffmpeg',
-    [
+async function decodeAudioPcm(
+  sourcePath: string,
+  durationUs: number,
+  cancelled: () => boolean,
+  runTool: typeof runReferenceTool,
+): Promise<Int16Array> {
+  const ffmpeg = await runTool({
+    command: 'ffmpeg',
+    args: [
       '-v',
       'error',
       '-i',
       sourcePath,
+      '-map',
+      '0:a:0?',
       '-ac',
       '1',
       '-ar',
@@ -457,9 +479,14 @@ function decodeAudioPcm(sourcePath: string): Int16Array {
       's16le',
       '-',
     ],
-    { shell: false, encoding: 'buffer', maxBuffer: 8_000_000 },
-  );
-  if (ffmpeg.status !== 0 || ffmpeg.stdout.length === 0) {
+    cancelled,
+    maxStdoutBytes: maxAudioOutputBytes(durationUs),
+  });
+  const stderr = ffmpeg.stderr.toString('utf8');
+  if (ffmpeg.stdout.length === 0 && (ffmpeg.code === 0 || isNoAudioMessage(stderr))) {
+    return new Int16Array();
+  }
+  if (ffmpeg.code !== 0 || ffmpeg.stdout.length === 0) {
     throw new ReferenceAnalysisError(
       'REFERENCE_ANALYSIS_AUDIO_FAILED',
       'ffmpeg could not decode the audio track',
@@ -467,6 +494,99 @@ function decodeAudioPcm(sourcePath: string): Int16Array {
   }
   const buffer = ffmpeg.stdout;
   return new Int16Array(buffer.buffer, buffer.byteOffset, Math.floor(buffer.byteLength / 2));
+}
+
+export async function runReferenceTool(options: {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cancelled: () => boolean;
+  readonly maxStdoutBytes: number;
+  readonly maxStderrBytes?: number;
+  readonly onSpawn?: (pid: number) => void;
+}): Promise<{
+  readonly code: number | null;
+  readonly stdout: Buffer;
+  readonly stderr: Buffer;
+}> {
+  assertNotCanceled(options.cancelled);
+  const child = spawn(options.command, options.args, {
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (typeof child.pid === 'number') options.onSpawn?.(child.pid);
+
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutOverflow = false;
+  let stderrOverflow = false;
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  const maxStderrBytes = options.maxStderrBytes ?? 65_536;
+
+  child.stdout?.on('data', (chunk: Buffer | string) => {
+    const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    stdoutBytes += buffer.length;
+    if (stdoutBytes > options.maxStdoutBytes) {
+      stdoutOverflow = true;
+      child.kill();
+      return;
+    }
+    stdoutChunks.push(buffer);
+  });
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    stderrBytes += buffer.length;
+    if (stderrBytes > maxStderrBytes) {
+      stderrOverflow = true;
+      child.kill();
+      return;
+    }
+    stderrChunks.push(buffer);
+  });
+
+  const completed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolve({ code, signal }));
+    },
+  );
+
+  while (child.exitCode === null && child.signalCode === null) {
+    if (options.cancelled()) {
+      child.kill();
+      await completed.catch(() => undefined);
+      assertNotCanceled(options.cancelled);
+    }
+    await sleep(20);
+  }
+  const result = await completed;
+  if (stdoutOverflow) {
+    throw new ReferenceAnalysisError(
+      'REFERENCE_ANALYSIS_TOOL_OUTPUT_TOO_LARGE',
+      `${options.command} stdout exceeded ${options.maxStdoutBytes} bytes`,
+    );
+  }
+  if (stderrOverflow) {
+    throw new ReferenceAnalysisError(
+      'REFERENCE_ANALYSIS_TOOL_OUTPUT_TOO_LARGE',
+      `${options.command} stderr exceeded ${maxStderrBytes} bytes`,
+    );
+  }
+  assertNotCanceled(options.cancelled);
+  return {
+    code: result.code,
+    stdout: Buffer.concat(stdoutChunks),
+    stderr: Buffer.concat(stderrChunks),
+  };
+}
+
+function maxAudioOutputBytes(durationUs: number): number {
+  const expected = Math.ceil((durationUs / 1_000_000) * AUDIO_SAMPLE_RATE * 2);
+  return Math.min(32 * 1_024 * 1_024, Math.max(65_536, expected + 4_096));
+}
+
+function isNoAudioMessage(message: string): boolean {
+  return /does not contain any stream|matches no streams|stream map .* no streams/i.test(message);
 }
 
 function buildAudioBeatEvidence(
