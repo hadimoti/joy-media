@@ -17,7 +17,7 @@ import {
   type TimelineViewport,
 } from '@joy-media/timeline-engine';
 import type { CommandTransaction } from '@joy-media/commands';
-import type { Clip, SpikeProject } from '@joy-media/project-schema';
+import type { Clip, Composition, SpikeProject } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { TimelineTrackView } from '@joy-media/timeline-engine';
 import {
@@ -400,6 +400,166 @@ function TimelineClip({
 
 export const JOY_MEDIA_ASSET_DND = 'application/x-joy-media-asset';
 
+function defaultTrackView(trackId: string, order: number, enabled = true): TimelineTrackView {
+  return {
+    id: trackId,
+    heightPx: 44,
+    locked: false,
+    muted: !enabled,
+    solo: false,
+    order,
+  };
+}
+
+function importAssetKind(file: Pick<File, 'type'>): 'audio' | 'image' | 'video' {
+  if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type.startsWith('image/')) return 'image';
+  return 'video';
+}
+
+function buildAssetInsertTransaction(
+  composition: Composition,
+  trackId: string,
+  asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+  dropUs: number,
+  stamp: number,
+): CommandTransaction | undefined {
+  const source = composition.tracks.find((track) => track.id === trackId);
+  if (source === undefined) return undefined;
+  const durationUs = 5_000_000;
+  const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
+  let startUs = Math.max(0, snapped);
+  const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+  for (const existing of sorted) {
+    const end = existing.startUs + existing.durationUs;
+    if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
+  }
+  const isAudio = asset.kind === 'audio';
+  return {
+    label: `Insert ${asset.displayName ?? asset.assetId}`,
+    commands: [
+      {
+        type: 'timeline.insertClip',
+        payload: {
+          compositionId: composition.id,
+          trackId,
+          clip: {
+            id: `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${stamp}`,
+            kind: 'video',
+            assetId: asset.assetId,
+            startUs,
+            durationUs,
+            sourceInUs: 0,
+          },
+        },
+      },
+    ],
+  };
+}
+
+function buildAssetTrackCreateTransaction(
+  composition: Composition,
+  asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
+  dropUs: number,
+  stamp: number,
+): CommandTransaction {
+  const order = composition.tracks.length;
+  const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+  return {
+    label: `Add ${asset.displayName ?? asset.assetId}`,
+    commands: [
+      {
+        type: 'timeline.addTrack',
+        payload: {
+          compositionId: composition.id,
+          track: {
+            id: `V${order + 1}`,
+            kind: 'video',
+            order,
+            enabled: true,
+            clips: [
+              {
+                id: `clip-${asset.assetId}-${stamp}`,
+                kind: 'video',
+                assetId: asset.assetId,
+                startUs,
+                durationUs: 5_000_000,
+                sourceInUs: 0,
+              },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+function pickTimelineImportTrackId(
+  composition: Composition,
+  trackFlags: readonly TimelineTrackView[],
+): string | undefined {
+  const ordered = composition.tracks
+    .map((track, index) => ({
+      track,
+      view:
+        trackFlags.find((item) => item.id === track.id) ??
+        defaultTrackView(track.id, track.order ?? index, track.enabled),
+      fallbackOrder: index,
+    }))
+    .sort(
+      (left, right) =>
+        (left.view.order ?? left.track.order ?? left.fallbackOrder) -
+        (right.view.order ?? right.track.order ?? right.fallbackOrder),
+    );
+  return ordered.find((entry) => !entry.view.locked)?.track.id;
+}
+
+export function buildTimelineFileImportTransactions({
+  composition,
+  trackFlags,
+  playheadUs,
+  files,
+  createAssetId = () => `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  now = () => Date.now(),
+}: {
+  readonly composition: Composition;
+  readonly trackFlags: readonly TimelineTrackView[];
+  readonly playheadUs: number;
+  readonly files: readonly Pick<File, 'name' | 'type'>[];
+  readonly createAssetId?: (file: Pick<File, 'name' | 'type'>, index: number) => string;
+  readonly now?: () => number;
+}): CommandTransaction[] {
+  return files.map((file, index) => {
+    const assetId = createAssetId(file, index);
+    const targetTrackId = pickTimelineImportTrackId(composition, trackFlags);
+    const asset = {
+      assetId,
+      kind: importAssetKind(file),
+      displayName: file.name,
+    };
+    const stamp = now() + index;
+    if (targetTrackId !== undefined) {
+      return (
+        buildAssetInsertTransaction(composition, targetTrackId, asset, playheadUs, stamp) ??
+        buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp)
+      );
+    }
+    return buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp);
+  });
+}
+
+export function addTimelineMarkerAtPlayhead(
+  onAddMarker: ((timeUs: number, label: string) => void) | undefined,
+  timeUs: number,
+  markerCount: number,
+): void {
+  onAddMarker?.(timeUs, `Marker ${markerCount + 1}`);
+}
+
+export function openTimelineAssetLibrary(onOpenAssetLibrary: (() => void) | undefined): void {
+  onOpenAssetLibrary?.();
+}
+
 export function TimelinePanel({
   project,
   playheadUs,
@@ -428,6 +588,7 @@ export function TimelinePanel({
   showToast,
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
+  onOpenAssetLibrary,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -475,6 +636,7 @@ export function TimelinePanel({
   /** Shared with Dual Lens so lock/mute/solo stay one source of truth. */
   readonly trackFlags?: readonly TimelineTrackView[];
   readonly onTrackFlagsChange?: (next: readonly TimelineTrackView[]) => void;
+  readonly onOpenAssetLibrary?: () => void;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const trackFlags = trackFlagsProp ?? localTrackFlags;
@@ -503,16 +665,7 @@ export function TimelinePanel({
 
   const tracks = composition.tracks.map((track, index) => {
     const saved = trackFlags.find((item) => item.id === track.id);
-    return (
-      saved ?? {
-        id: track.id,
-        heightPx: 44,
-        locked: false,
-        muted: !track.enabled,
-        solo: false,
-        order: index,
-      }
-    );
+    return saved ?? defaultTrackView(track.id, index, track.enabled);
   });
 
   const visible = useMemo(
@@ -652,37 +805,14 @@ export function TimelinePanel({
     asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
     dropUs: number,
   ) => {
-    const source = composition.tracks.find((t) => t.id === trackId);
-    if (source === undefined) return;
-    const durationUs = 5_000_000;
-    const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
-    let startUs = Math.max(0, snapped);
-    const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
-    for (const existing of sorted) {
-      const end = existing.startUs + existing.durationUs;
-      if (startUs < end && startUs + durationUs > existing.startUs) startUs = end;
-    }
-    const isAudio = asset.kind === 'audio';
-    onDispatch({
-      label: `Insert ${asset.displayName ?? asset.assetId}`,
-      commands: [
-        {
-          type: 'timeline.insertClip',
-          payload: {
-            compositionId: composition.id,
-            trackId,
-            clip: {
-              id: `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`,
-              kind: 'video',
-              assetId: asset.assetId,
-              startUs,
-              durationUs,
-              sourceInUs: 0,
-            },
-          },
-        },
-      ],
-    });
+    const transaction = buildAssetInsertTransaction(
+      composition,
+      trackId,
+      asset,
+      dropUs,
+      Date.now(),
+    );
+    if (transaction !== undefined) onDispatch(transaction);
   };
 
   /** Create a NEW real track for a dropped asset and place the clip on it. */
@@ -690,39 +820,7 @@ export function TimelinePanel({
     asset: { readonly assetId: string; readonly kind: string; readonly displayName?: string },
     dropUs: number,
   ) => {
-    const order = composition.tracks.length;
-    // The shared schema only models video tracks; audio clips are classified by
-    // their asset (isVoiceClip) rather than by a separate audio track kind.
-    const trackId = `V${order + 1}`;
-    const durationUs = 5_000_000;
-    const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
-    onDispatch({
-      label: `Add ${asset.displayName ?? asset.assetId}`,
-      commands: [
-        {
-          type: 'timeline.addTrack',
-          payload: {
-            compositionId: composition.id,
-            track: {
-              id: trackId,
-              kind: 'video',
-              order,
-              enabled: true,
-              clips: [
-                {
-                  id: `clip-${asset.assetId}-${Date.now()}`,
-                  kind: 'video',
-                  assetId: asset.assetId,
-                  startUs,
-                  durationUs,
-                  sourceInUs: 0,
-                },
-              ],
-            },
-          },
-        },
-      ],
-    });
+    onDispatch(buildAssetTrackCreateTransaction(composition, asset, dropUs, Date.now()));
   };
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -907,65 +1005,35 @@ export function TimelinePanel({
     setMenu({ x: clientX, y: clientY, items: withReveal, trackId, clipId: clip.id });
   };
 
-  const handleImportClick = useCallback(() => {
-    // Trigger file input for importing media
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = 'video/*,audio/*,image/*,.srt,.vtt,.ass,.webp,.gif';
-    input.onchange = async (event) => {
-      const files = Array.from((event.target as HTMLInputElement).files || []);
-      if (files.length === 0) return;
-
-      // Import assets into the project
-      const composition = project.compositions[project.rootCompositionId];
-      if (!composition) return;
-
-      // For each file, create an asset and insert a clip
-      for (const file of files) {
-        const assetId = `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const isAudio = file.type.startsWith('audio/');
-
-        onDispatch({
-          label: `Import ${file.name}`,
-          commands: [
-            {
-              type: 'timeline.insertClip',
-              payload: {
-                compositionId: composition.id,
-                trackId: '', // Will be determined by finding target track
-                clip: {
-                  id: `${isAudio ? 'voice' : 'clip'}-${assetId}-${Date.now()}`,
-                  kind: 'video',
-                  assetId,
-                  startUs: 0, // Will be set by finding space
-                  durationUs: 5_000_000,
-                  sourceInUs: 0,
-                },
-              },
-            },
-          ],
+  const handleImportClick = useCallback(
+    (providedFiles?: readonly File[]) => {
+      if (providedFiles !== undefined) {
+        const transactions = buildTimelineFileImportTransactions({
+          composition,
+          trackFlags: tracks,
+          playheadUs,
+          files: providedFiles,
         });
-
-        // Insert clip on first compatible track or create new
-        const targetTrack = tracks.find((t) => t.id === (isAudio ? 'audio' : 'video') && !t.locked);
-        if (targetTrack) {
-          const dropUs = playheadUs > 0 ? playheadUs : 0;
-          insertAssetOnTrack(
-            targetTrack.id,
-            { assetId, kind: isAudio ? 'audio' : 'video', displayName: file.name },
-            dropUs,
-          );
-        }
+        for (const transaction of transactions) onDispatch(transaction);
+        return;
       }
-    };
-    input.click();
-  }, [project, composition, playheadUs, onDispatch, insertAssetOnTrack]);
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'video/*,audio/*,image/*,.srt,.vtt,.ass,.webp,.gif';
+      input.onchange = (event) => {
+        const files = Array.from((event.target as HTMLInputElement).files || []);
+        if (files.length === 0) return;
+        handleImportClick(files);
+      };
+      input.click();
+    },
+    [composition, onDispatch, playheadUs, tracks],
+  );
 
   const handleAddFromLibrary = useCallback(() => {
-    // TODO: Open media library modal
-    console.log('Add from library clicked');
-  }, []);
+    openTimelineAssetLibrary(onOpenAssetLibrary);
+  }, [onOpenAssetLibrary]);
 
   return (
     <article
@@ -1044,7 +1112,7 @@ export function TimelinePanel({
               aria-label="Add marker at playhead"
               title="Add marker at playhead"
               data-guide="Add marker"
-              onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+              onClick={() => addTimelineMarkerAtPlayhead(onAddMarker, playheadUs, markers.length)}
             >
               <MarkerIcon />
             </button>
@@ -1252,7 +1320,7 @@ export function TimelinePanel({
             onSeek={onSeek}
             onContextMenu={(timeUs, clientX, clientY) => {
               const items = buildRulerContextMenu((t) => {
-                console.log('Add marker at', t); // TODO: implement marker.add command
+                addTimelineMarkerAtPlayhead(onAddMarker, t, markers.length);
               }, timeUs);
               setMenu({ x: clientX, y: clientY, items });
             }}
@@ -1492,7 +1560,9 @@ export function TimelinePanel({
                       originUs: 0,
                       pixelsPerSecond: viewport.pixelsPerSecond,
                     });
-                    const hitClip = source.clips.find((c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs);
+                    const hitClip = source.clips.find(
+                      (c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs,
+                    );
                     setDragEffectOverClipId(hitClip?.id ?? null);
                   }}
                   onDragLeave={() => {

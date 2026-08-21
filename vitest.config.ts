@@ -56,7 +56,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['{apps,packages,tooling}/**/src/**/*.test.ts'],
+    include: [
+      '{apps,packages,tooling}/**/src/**/*.test.ts',
+      '{apps,packages,tooling}/**/src/**/*.test.tsx',
+    ],
     environment: 'node',
     // A suite that collects no files must fail instead of silently passing.
     passWithNoTests: false,

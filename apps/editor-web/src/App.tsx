@@ -2389,6 +2389,7 @@ function EditorWorkspace({
               commands: [{ type: 'marker.remove', payload: { markerId: id } }],
             })
           }
+          onOpenAssetLibrary={() => context.activatePanel('media')}
           onEffectDrop={(effectId, clipId, trackId) => {
             context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);

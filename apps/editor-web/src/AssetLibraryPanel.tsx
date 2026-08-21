@@ -71,7 +71,7 @@ interface Preview {
 export function AssetLibraryPanel({
   projectId,
   projectTitle = 'Editor project',
-  onAddSticker: _onAddSticker,
+  onAddSticker,
   onEditWithAi,
 }: {
   readonly projectId: string;
@@ -490,6 +490,20 @@ export function AssetLibraryPanel({
       }
     },
     [client, projectId, refresh],
+  );
+
+  const addSticker = useCallback(
+    async (asset: BrowserAsset) => {
+      const added = await addAssetAsSticker({
+        asset,
+        onAddSticker,
+        loadOriginalBlob: async () => (await originalAssetCache).get(asset.id),
+      });
+      if (added) {
+        setStatus(`${asset.displayName} added as a sticker.`);
+      }
+    },
+    [onAddSticker, originalAssetCache],
   );
 
   const bulkShare = useCallback(async () => {
@@ -1075,6 +1089,18 @@ export function AssetLibraryPanel({
                             <AiEffectIcon />
                           </button>
                         )}
+                        {asset.kind === 'image' && onAddSticker !== undefined && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Add ${asset.displayName} as sticker`}
+                            title="Add as sticker"
+                            data-guide="Add as sticker"
+                            onClick={() => void addSticker(asset)}
+                          >
+                            <PlusIcon />
+                          </button>
+                        )}
                         {asset.kind === 'image' && !cloudBacked && (
                           <AssetShareCloudButton
                             asset={asset}
@@ -1135,6 +1161,29 @@ function availabilityLabel(status: AssetAvailability): string {
     default:
       return 'Unknown status';
   }
+}
+
+export async function addAssetAsSticker({
+  asset,
+  onAddSticker,
+  loadOriginalBlob,
+}: {
+  readonly asset: Pick<BrowserAsset, 'id' | 'kind' | 'displayName'>;
+  readonly onAddSticker?: (asset: {
+    readonly assetId: string;
+    readonly displayName?: string;
+    readonly blob?: Blob;
+  }) => void;
+  readonly loadOriginalBlob: () => Promise<Blob | undefined>;
+}): Promise<boolean> {
+  if (asset.kind !== 'image' || onAddSticker === undefined) return false;
+  const blob = await loadOriginalBlob();
+  onAddSticker({
+    assetId: asset.id,
+    displayName: asset.displayName,
+    ...(blob === undefined ? {} : { blob }),
+  });
+  return true;
 }
 
 function AssetShareCloudButton({

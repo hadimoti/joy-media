@@ -8,10 +8,29 @@ export interface TimelineEmptyStateProps {
   readonly compositionDurationUs: number;
   readonly viewportPixelsPerSecond: number;
   readonly onSeek: (timeUs: number) => void;
-  readonly onImportClick: () => void;
+  readonly onImportClick: (files?: readonly File[]) => void;
   readonly onAddFromLibrary: () => void;
   readonly onContextMenu: (x: number, y: number) => void;
   readonly onToast?: (message: string) => void;
+}
+
+export function isTimelineEmptyStateActivationKey(key: string): boolean {
+  return key === 'Enter' || key === ' ';
+}
+
+export function extractTimelineDroppedFiles(
+  dataTransfer:
+    | Pick<DataTransfer, 'types' | 'files'>
+    | {
+        readonly types: readonly string[];
+        readonly files: FileList;
+      }
+    | null
+    | undefined,
+): File[] {
+  if (dataTransfer === null || dataTransfer === undefined) return [];
+  if (!dataTransfer.types.includes('Files')) return [];
+  return Array.from(dataTransfer.files ?? []);
 }
 
 /**
@@ -59,6 +78,11 @@ export function TimelineEmptyState({
         onToast?.('Add media to the timeline first, then drag the effect onto a clip.');
         return;
       }
+      const droppedFiles = extractTimelineDroppedFiles(event.dataTransfer);
+      if (droppedFiles.length > 0) {
+        onImportClick(droppedFiles);
+        return;
+      }
       onImportClick();
     },
     [onImportClick, onToast],
@@ -98,6 +122,11 @@ export function TimelineEmptyState({
       onDrop={handleDrop}
       onContextMenu={handleContextMenu}
       onClick={handleClick}
+      onKeyDown={(event) => {
+        if (!isTimelineEmptyStateActivationKey(event.key)) return;
+        event.preventDefault();
+        onImportClick();
+      }}
       role="button"
       tabIndex={0}
       aria-label="Empty timeline — drop media to start editing"
