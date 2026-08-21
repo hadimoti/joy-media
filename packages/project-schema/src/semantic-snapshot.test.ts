@@ -506,6 +506,25 @@ describe('validateSemanticSnapshotV1', () => {
     expect(result.errors.some((error) => error.includes('evidenceIndex'))).toBe(true);
     expect(result.errors.some((error) => error.includes('evidenceIds'))).toBe(true);
   });
+
+  it('should reject corrupted subtype-specific evidence data in the derived index', () => {
+    const snapshot = createProjectDerivedSnapshot();
+    const tamperedAudioEvidence: AudioRegionEvidenceV1 = {
+      ...projectDerivedAudioEvidence,
+      peakDb: -12.5,
+      loudnessLufs: -8.3,
+    };
+    const tamperedEvidenceIndex = new Map(snapshot.evidenceIndex);
+    tamperedEvidenceIndex.set(tamperedAudioEvidence.id, tamperedAudioEvidence);
+
+    const result = validateSemanticSnapshotV1({
+      ...snapshot,
+      evidenceIndex: tamperedEvidenceIndex,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes('audio-region-001'))).toBe(true);
+  });
 });
 
 // ============================================================================

@@ -78,16 +78,10 @@ function hasSameDerivedEvidence(
     return false;
   }
 
-  return (
-    actual.id === expected.id &&
-    actual.kind === expected.kind &&
-    actual.label === expected.label &&
-    actual.summary === expected.summary &&
-    actual.startUs === expected.startUs &&
-    actual.durationUs === expected.durationUs &&
-    actual.sourceEntityId === expected.sourceEntityId &&
-    actual.sourceEntityRevision === expected.sourceEntityRevision
-  );
+  const expectedEntries = Object.entries(expected).sort(([left], [right]) => left.localeCompare(right));
+  const actualEntries = Object.entries(actual).sort(([left], [right]) => left.localeCompare(right));
+
+  return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
 }
 
 // ============================================================================
