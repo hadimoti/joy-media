@@ -8,6 +8,7 @@
     { "path": "packages/expression-core" },
     { "path": "packages/provider-sdk" },
     { "path": "packages/adapter-mistral" },
+    { "path": "packages/production-quality" },
     { "path": "packages/export-core" },
     { "path": "packages/playback-engine" },
     { "path": "packages/property-system" },

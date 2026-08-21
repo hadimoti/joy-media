@@ -193,6 +193,9 @@ importers:
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
+      '@joy-media/production-quality':
+        specifier: workspace:*
+        version: link:../../packages/production-quality
       '@joy-media/render-host':
         specifier: workspace:*
         version: link:../render-host
@@ -325,6 +328,10 @@ importers:
         version: link:../timeline-engine
 
   packages/export-core:
+    dependencies:
+      '@joy-media/production-quality':
+        specifier: workspace:*
+        version: link:../production-quality
     devDependencies:
       '@joy-media/test-fixtures':
         specifier: workspace:*
@@ -368,6 +375,12 @@ importers:
         version: link:../render-ir
 
   packages/plugin-sdk: {}
+
+  packages/production-quality:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
 
   packages/project-persistence:
     dependencies:

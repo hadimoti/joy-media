@@ -60,12 +60,19 @@ describe('leased export job', () => {
 
     expect(result).toMatchObject({
       kind: 'render.export',
+      reportRef: 'report-job-1',
       videoCodec: 'h264',
       audioCodec: 'aac',
       bytes: expect.any(Number),
       manifest: expect.objectContaining({ projectId: 'visual', preset: 'social-h264-aac' }),
       toolVersions: expect.objectContaining({ renderHost: expect.any(String) }),
+      qualityReport: expect.objectContaining({
+        artifact: expect.objectContaining({ outputRef: expect.stringMatching(/^render-job-1-/) }),
+      }),
     });
+    expect(result.qualityReport.findings.filter((finding) => finding.status === 'fail')).toEqual(
+      [],
+    );
     expect(result.outputRef).toMatch(/^render-job-1-[a-f0-9]{16}$/);
     expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
     expect(fixtureSpy).not.toHaveBeenCalled();
@@ -145,7 +152,13 @@ describe('leased export job', () => {
     );
 
     expect(driverCalls).toEqual(['1:worker-render']);
-    expect(result).toMatchObject({ outputRef: 'render-job-1-aaaaaaaaaaaaaaaa' });
+    expect(result).toMatchObject({
+      reportRef: 'report-job-1',
+      outputRef: 'render-job-1-aaaaaaaaaaaaaaaa',
+      qualityReport: expect.objectContaining({
+        artifact: expect.objectContaining({ outputRef: 'render-job-1-aaaaaaaaaaaaaaaa' }),
+      }),
+    });
     expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
     expect(calls).toEqual(['worker-1:job-1']);
   });

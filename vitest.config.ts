@@ -30,6 +30,7 @@ export default defineConfig({
       '@joy-media/audio-core/effects': pkg('./packages/audio-core/src/effects.ts'),
       '@joy-media/audio-core': pkg('./packages/audio-core/src/index.ts'),
       '@joy-media/project-persistence': pkg('./packages/project-persistence/src/index.ts'),
+      '@joy-media/production-quality': pkg('./packages/production-quality/src/index.ts'),
       '@joy-media/export-core': pkg('./packages/export-core/src/index.ts'),
       '@joy-media/api': pkg('./apps/api/src/index.ts'),
       '@joy-media/property-system': pkg('./packages/property-system/src/index.ts'),

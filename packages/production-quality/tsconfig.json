@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
-  "references": [{ "path": "../production-quality" }, { "path": "../test-fixtures" }]
+  "references": [{ "path": "../project-schema" }]
 }

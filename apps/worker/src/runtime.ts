@@ -273,6 +273,7 @@ export class WorkerRuntime {
       readonly payload?: {
         readonly bundle?: RenderBundleV1;
         readonly frameLimit?: number;
+        readonly reportRef?: string;
         readonly prompt?: string;
         readonly model?: string;
         readonly negativePrompt?: string;
@@ -395,6 +396,7 @@ export class WorkerRuntime {
           outputDirectory: derivativeDirectory,
           mediaResolver: mediaResolverFromAssetSourceRegistry(this.options.sources),
           ...(job.payload.frameLimit === undefined ? {} : { frameLimit: job.payload.frameLimit }),
+          ...(job.payload.reportRef === undefined ? {} : { reportRef: job.payload.reportRef }),
         },
       );
       await options.progress(100);

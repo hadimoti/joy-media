@@ -1,5 +1,5 @@
 {
-  "name": "@joy-media/export-core",
+  "name": "@joy-media/production-quality",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,9 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "pnpm exec vitest run --root ../.. packages/export-core/src"
+    "test": "pnpm exec vitest run --root ../.. packages/production-quality/src"
   },
   "dependencies": {
-    "@joy-media/production-quality": "workspace:*"
-  },
-  "devDependencies": {
-    "@joy-media/test-fixtures": "workspace:*"
+    "@joy-media/project-schema": "workspace:*"
   }
 }

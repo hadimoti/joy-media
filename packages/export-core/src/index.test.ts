@@ -4,10 +4,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
+  deliveryPromiseForManifest,
   ffmpegArgs,
   freezeManifest,
   renderFixture,
   renderRgbaFrames,
+  verifyExportDelivery,
   verifyExport,
 } from './index.js';
 describe('deterministic export contract', () => {
@@ -36,6 +38,13 @@ describe('deterministic export contract', () => {
       width: 64,
       height: 36,
     });
+    const report = verifyExportDelivery(output, deliveryPromiseForManifest(manifest), {
+      outputRef: 'render-fixture-aaaaaaaaaaaaaaaa',
+    });
+    expect(report.findings.filter((finding) => finding.status === 'fail')).toEqual([
+      expect.objectContaining({ code: 'audio-silence' }),
+    ]);
+    expect(JSON.stringify(report)).not.toContain(output);
   });
   it('encodes evaluated RGBA pixels through the verified export path', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-rgba-export-'));

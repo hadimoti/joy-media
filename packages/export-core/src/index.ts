@@ -4,6 +4,12 @@ import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import type { Writable } from 'node:stream';
+import {
+  deliveryPromiseFromManifest,
+  inspectRenderedDelivery,
+  type DeliveryPromiseV1,
+  type RenderReportV1,
+} from '@joy-media/production-quality';
 export type ExportPresetId =
   'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
@@ -322,4 +328,19 @@ export function verifyExport(outputPath: string): ExportProbe {
     width: video.width,
     height: video.height,
   };
+}
+
+export function deliveryPromiseForManifest(manifest: RenderManifest): DeliveryPromiseV1 {
+  return deliveryPromiseFromManifest(freezeManifest(manifest));
+}
+
+export function verifyExportDelivery(
+  outputPath: string,
+  promise: DeliveryPromiseV1,
+  options: { readonly outputRef: string; readonly mode?: 'sampled' | 'strict' },
+): RenderReportV1 {
+  return inspectRenderedDelivery(outputPath, promise, {
+    mode: options.mode ?? 'sampled',
+    outputRef: options.outputRef,
+  });
 }
