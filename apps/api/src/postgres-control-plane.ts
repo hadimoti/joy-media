@@ -33,6 +33,17 @@ import {
   validateSortName,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
+import {
+  PostgresProductionRunStore,
+  type CancelProductionRunInput,
+  type CreateProductionRunInput,
+  type ListProductionRunsOptions,
+  type ProductionApprovalResponseResult,
+  type ProductionRunPage,
+  type ProductionRunRecordV1,
+  type ProductionRunStore,
+  type RespondToProductionApprovalInput,
+} from './production-runs.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -133,14 +144,16 @@ export interface PostgresControlPlaneOptions {
 }
 
 /** Durable PostgreSQL implementation of the control-plane contract. */
-export class PostgresControlPlane implements ControlPlane {
+export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
   readonly #skipLocked: boolean;
+  readonly #productionRuns: PostgresProductionRunStore;
 
   constructor(
     private readonly pool: Pool,
     options: PostgresControlPlaneOptions = {},
   ) {
     this.#skipLocked = options.skipLocked ?? true;
+    this.#productionRuns = new PostgresProductionRunStore(pool);
   }
 
   async initialize(): Promise<void> {
@@ -940,6 +953,48 @@ export class PostgresControlPlane implements ControlPlane {
       type: event.type,
       at: event.created_at.getTime(),
     }));
+  }
+
+  async createProductionRun(
+    actor: Actor,
+    projectId: string,
+    input: CreateProductionRunInput,
+  ): Promise<ProductionRunRecordV1> {
+    return this.#productionRuns.createProductionRun(actor, projectId, input);
+  }
+
+  async listProductionRuns(
+    actor: Actor,
+    projectId: string,
+    options?: ListProductionRunsOptions,
+  ): Promise<ProductionRunPage> {
+    return this.#productionRuns.listProductionRuns(actor, projectId, options);
+  }
+
+  async getProductionRun(
+    actor: Actor,
+    projectId: string,
+    runId: string,
+  ): Promise<ProductionRunRecordV1> {
+    return this.#productionRuns.getProductionRun(actor, projectId, runId);
+  }
+
+  async respondToProductionApproval(
+    actor: Actor,
+    projectId: string,
+    runId: string,
+    input: RespondToProductionApprovalInput,
+  ): Promise<ProductionApprovalResponseResult> {
+    return this.#productionRuns.respondToProductionApproval(actor, projectId, runId, input);
+  }
+
+  async cancelProductionRun(
+    actor: Actor,
+    projectId: string,
+    runId: string,
+    input: CancelProductionRunInput,
+  ): Promise<ProductionRunRecordV1> {
+    return this.#productionRuns.cancelProductionRun(actor, projectId, runId, input);
   }
 
   private async project(

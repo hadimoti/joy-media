@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import { once } from 'node:events';
+import type { Pool } from 'pg';
+import { newDb } from 'pg-mem';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LocalControlPlane } from './control-plane.js';
+import { LocalControlPlane, type ControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 import type { WorkerResultReceiptV1, WorkerJobType } from '@joy-media/job-protocol';
+import { PostgresControlPlane } from './postgres-control-plane.js';
+import type { ProductionRunAuthority, ProductionRunRecordV1 } from './production-runs.js';
 
 const servers: Server[] = [];
 
@@ -502,6 +506,92 @@ describe('control-plane HTTP transport', () => {
     ).toMatchObject({ status: 409, body: { error: { code: 'WORKER_JOB_INVALID' } } });
   });
 
+  it('exposes authenticated PostgreSQL production-run create, list, get, respond, and cancel routes', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Production' });
+    const authority: ProductionRunAuthority = { principalId: 'owner', role: 'owner' };
+    const record = parkedRecord('run-api', 'approval-api', authority);
+
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs', {
+        runKey: 'run-key-api',
+        authority,
+        record,
+      }),
+    ).toMatchObject({
+      status: 201,
+      body: { data: { runId: 'run-api', state: 'parked', updatedSeq: 2 } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/p/production-runs?limit=1')).toMatchObject({
+      status: 200,
+      body: { data: { runs: [{ runId: 'run-api' }] } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/p/production-runs/run-api')).toMatchObject({
+      status: 200,
+      body: { data: { runId: 'run-api', approvals: [{ approvalId: 'approval-api' }] } },
+    });
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/projects/p/production-runs/run-api/approvals/approval-api/respond',
+        {
+          approved: true,
+          responseRef: 'response-api',
+          authority,
+          expectedUpdatedSeq: 2,
+        },
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          duplicate: false,
+          record: {
+            updatedSeq: 3,
+            approvals: [{ state: 'approved', responseRef: 'response-api' }],
+          },
+        },
+      },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs/run-api/cancel', {
+        authority,
+        expectedUpdatedSeq: 2,
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'REVISION_CONFLICT' } } });
+
+    const cancelRecord = queuedRecord('run-api-cancel', authority);
+    await request(origin, 'POST', '/v1/projects/p/production-runs', {
+      runKey: 'run-key-api-cancel',
+      authority,
+      record: cancelRecord,
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs/run-api-cancel/cancel', {
+        authority,
+        expectedUpdatedSeq: 1,
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { state: 'canceled', events: [{}, { type: 'run.canceled' }] } },
+    });
+    expect(
+      JSON.stringify(await request(origin, 'GET', '/v1/projects/p/production-runs/run-api')),
+    ).not.toMatch(/C:\\|mediaBase64|https?:\/\//);
+    await pool.end();
+  });
+
   it('accepts every AI Worker receipt variant through the completion route', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
@@ -625,9 +715,10 @@ async function start(
   authentication: ApiAuthentication,
   privateObjectStore?: PrivateObjectStore,
   mistral?: MistralProviderRegistry,
+  controlPlane?: ControlPlane,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
-    controlPlane: new LocalControlPlane(),
+    controlPlane: controlPlane ?? new LocalControlPlane(),
     authentication,
     mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
@@ -678,4 +769,95 @@ async function request(
     body === undefined ? { method } : { method, headers, body: JSON.stringify(body) },
   );
   return { status: response.status, body: await response.json() };
+}
+
+function queuedRecord(
+  runId: string,
+  authority: ProductionRunAuthority,
+  overrides: Partial<ProductionRunRecordV1> = {},
+): ProductionRunRecordV1 {
+  return {
+    recordVersion: 1,
+    runId,
+    workflowId: 'wf-production',
+    workflowVersion: '1.0.0',
+    projectRevision: 'rev-1',
+    state: 'queued',
+    checkpointRevision: 0,
+    links: {},
+    events: [
+      {
+        eventVersion: 1,
+        seq: 1,
+        type: 'run.queued',
+        state: 'queued',
+        actor: authority,
+        checkpointRevision: 0,
+        message: 'production run queued',
+      },
+    ],
+    approvals: [],
+    nodes: [],
+    createdSeq: 1,
+    updatedSeq: 1,
+    ...overrides,
+  };
+}
+
+function parkedRecord(
+  runId: string,
+  approvalId: string,
+  authority: ProductionRunAuthority,
+): ProductionRunRecordV1 {
+  return queuedRecord(runId, authority, {
+    state: 'parked',
+    checkpointRevision: 1,
+    events: [
+      {
+        eventVersion: 1,
+        seq: 1,
+        type: 'run.parked',
+        state: 'parked',
+        actor: authority,
+        checkpointRevision: 1,
+        message: 'production run parked',
+      },
+      {
+        eventVersion: 1,
+        seq: 2,
+        type: 'approval.requested',
+        state: 'parked',
+        nodeId: 'review',
+        approvalId,
+        checkpointRevision: 1,
+        message: 'approve-render',
+      },
+    ],
+    approvals: [
+      {
+        approvalVersion: 1,
+        approvalId,
+        nodeId: 'review',
+        kind: 'approve-render',
+        prompt: 'Approve final?',
+        state: 'pending',
+        requestedSeq: 2,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: 'review',
+        type: 'render.review',
+        category: 'review',
+        state: 'waiting_for_input',
+        attempts: 1,
+        deterministic: false,
+        reused: false,
+        pendingApprovalId: approvalId,
+        logs: [],
+        artifactIds: [],
+      },
+    ],
+    updatedSeq: 2,
+  });
 }

@@ -18,6 +18,12 @@ import {
   MistralProviderError,
   type MistralProviderRegistry,
 } from './mistral-provider.js';
+import {
+  type ProductionRunAuthority,
+  type ProductionRunRecordV1,
+  type ProductionRunStateV1,
+  type ProductionRunStore,
+} from './production-runs.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import type { WorkerJobV1, WorkerResultReceiptV1 } from '@joy-media/job-protocol';
@@ -398,6 +404,97 @@ async function route(
         actor,
         requiredString(body, 'id'),
         requiredString(body, 'title'),
+      ),
+    });
+    return;
+  }
+
+  const productionRunCollectionMatch = /^\/v1\/projects\/([^/]+)\/production-runs$/.exec(
+    url.pathname,
+  );
+  if (productionRunCollectionMatch !== null) {
+    const projectId = decodeURIComponent(productionRunCollectionMatch[1]!);
+    const store = productionRunStore(options.controlPlane);
+    if (request.method === 'GET') {
+      const limit = optionalLimit(url.searchParams.get('limit'));
+      const cursor = optionalOpaqueQuery(url.searchParams.get('cursor'), 'cursor');
+      const state = optionalProductionRunState(url.searchParams.get('state'));
+      respondJson(response, 200, {
+        data: await store.listProductionRuns(actor, projectId, {
+          ...(limit === undefined ? {} : { limit }),
+          ...(cursor === undefined ? {} : { cursor }),
+          ...(state === undefined ? {} : { state }),
+        }),
+      });
+      return;
+    }
+    if (request.method === 'POST') {
+      const body = await readJson(request);
+      const approvalExpiresAt = optionalTimestamp(body, 'approvalExpiresAt');
+      respondJson(response, 201, {
+        data: await store.createProductionRun(actor, projectId, {
+          runKey: requiredString(body, 'runKey'),
+          record: requiredProductionRunRecord(body),
+          authority: requiredProductionRunAuthority(body, 'authority'),
+          ...(approvalExpiresAt === undefined ? {} : { approvalExpiresAt }),
+        }),
+      });
+      return;
+    }
+  }
+
+  const productionRunMatch = /^\/v1\/projects\/([^/]+)\/production-runs\/([^/]+)$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && productionRunMatch !== null) {
+    respondJson(response, 200, {
+      data: await productionRunStore(options.controlPlane).getProductionRun(
+        actor,
+        decodeURIComponent(productionRunMatch[1]!),
+        decodeURIComponent(productionRunMatch[2]!),
+      ),
+    });
+    return;
+  }
+
+  const productionRunApprovalMatch =
+    /^\/v1\/projects\/([^/]+)\/production-runs\/([^/]+)\/approvals\/([^/]+)\/respond$/.exec(
+      url.pathname,
+    );
+  if (request.method === 'POST' && productionRunApprovalMatch !== null) {
+    const body = await readJson(request);
+    const expectedUpdatedSeq = optionalNonNegativeInteger(body, 'expectedUpdatedSeq');
+    respondJson(response, 200, {
+      data: await productionRunStore(options.controlPlane).respondToProductionApproval(
+        actor,
+        decodeURIComponent(productionRunApprovalMatch[1]!),
+        decodeURIComponent(productionRunApprovalMatch[2]!),
+        {
+          approvalId: decodeURIComponent(productionRunApprovalMatch[3]!),
+          approved: requiredBoolean(body, 'approved'),
+          responseRef: requiredString(body, 'responseRef'),
+          authority: requiredProductionRunAuthority(body, 'authority'),
+          ...(expectedUpdatedSeq === undefined ? {} : { expectedUpdatedSeq }),
+        },
+      ),
+    });
+    return;
+  }
+
+  const productionRunCancelMatch =
+    /^\/v1\/projects\/([^/]+)\/production-runs\/([^/]+)\/cancel$/.exec(url.pathname);
+  if (request.method === 'POST' && productionRunCancelMatch !== null) {
+    const body = await readJson(request);
+    const expectedUpdatedSeq = optionalNonNegativeInteger(body, 'expectedUpdatedSeq');
+    respondJson(response, 200, {
+      data: await productionRunStore(options.controlPlane).cancelProductionRun(
+        actor,
+        decodeURIComponent(productionRunCancelMatch[1]!),
+        decodeURIComponent(productionRunCancelMatch[2]!),
+        {
+          authority: requiredProductionRunAuthority(body, 'authority'),
+          ...(expectedUpdatedSeq === undefined ? {} : { expectedUpdatedSeq }),
+        },
       ),
     });
     return;
@@ -888,6 +985,24 @@ function optionalPositiveInteger(body: Record<string, unknown>, field: string): 
   return value;
 }
 
+function optionalNonNegativeInteger(
+  body: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-negative integer`);
+  return value;
+}
+
+function requiredBoolean(body: Record<string, unknown>, field: string): boolean {
+  const value = body[field];
+  if (typeof value !== 'boolean')
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a boolean`);
+  return value;
+}
+
 function requiredProgress(body: Record<string, unknown>): number {
   const progress = body.progress;
   if (
@@ -1134,6 +1249,92 @@ function optionalCursor(value: string | null): number {
   if (!Number.isSafeInteger(cursor) || cursor < 0)
     throw new ControlPlaneError('REQUEST_INVALID', 'cursor must be a non-negative integer');
   return cursor;
+}
+
+function optionalLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+    throw new ControlPlaneError('REQUEST_INVALID', 'limit must be between 1 and 100');
+  return limit;
+}
+
+function optionalOpaqueQuery(value: string | null, field: string): string | undefined {
+  if (value === null) return undefined;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value))
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
+  return value;
+}
+
+function optionalProductionRunState(value: string | null): ProductionRunStateV1 | undefined {
+  if (value === null) return undefined;
+  if (
+    value !== 'queued' &&
+    value !== 'running' &&
+    value !== 'parked' &&
+    value !== 'failed' &&
+    value !== 'canceled' &&
+    value !== 'succeeded'
+  ) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'production run state is invalid');
+  }
+  return value;
+}
+
+function requiredProductionRunRecord(body: Record<string, unknown>): ProductionRunRecordV1 {
+  const value = body.record;
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', 'record must be an object');
+  return value as ProductionRunRecordV1;
+}
+
+function requiredProductionRunAuthority(
+  body: Record<string, unknown>,
+  field: string,
+): ProductionRunAuthority {
+  const value = requiredObject(body, field);
+  const principalId = requiredString(value, 'principalId');
+  const role = value.role;
+  if (role !== 'system' && role !== 'owner' && role !== 'operator' && role !== 'reviewer')
+    throw new ControlPlaneError('REQUEST_INVALID', 'authority role is invalid');
+  const displayName = typeof value.displayName === 'string' ? value.displayName : undefined;
+  return {
+    principalId,
+    role,
+    ...(displayName === undefined ? {} : { displayName }),
+  };
+}
+
+function optionalTimestamp(body: Record<string, unknown>, field: string): number | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a timestamp`);
+}
+
+function productionRunStore(controlPlane: ControlPlane): ProductionRunStore {
+  if (
+    'createProductionRun' in controlPlane &&
+    typeof controlPlane.createProductionRun === 'function' &&
+    'listProductionRuns' in controlPlane &&
+    typeof controlPlane.listProductionRuns === 'function' &&
+    'getProductionRun' in controlPlane &&
+    typeof controlPlane.getProductionRun === 'function' &&
+    'respondToProductionApproval' in controlPlane &&
+    typeof controlPlane.respondToProductionApproval === 'function' &&
+    'cancelProductionRun' in controlPlane &&
+    typeof controlPlane.cancelProductionRun === 'function'
+  ) {
+    return controlPlane as ControlPlane & ProductionRunStore;
+  }
+  throw new ControlPlaneError(
+    'PRODUCTION_RUN_STORE_UNAVAILABLE',
+    'production run storage is unavailable',
+  );
 }
 
 function assetRegistration(body: Record<string, unknown>): AssetRegistration {
