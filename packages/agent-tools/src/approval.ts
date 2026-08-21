@@ -8,6 +8,7 @@ import type {
   PrivacyImpact,
 } from './plan.js';
 import type { ToolCapability, ToolScope } from './types.js';
+import type { ProviderApprovalPreflight } from '@joy-media/provider-sdk';
 
 export type AgentExecutionMode =
   'suggest-only' | 'preview-and-approve' | 'auto-apply-low-risk' | 'full-auto-limited';
@@ -317,6 +318,37 @@ export class ApprovalEngine {
       ...(estimatedCost !== undefined ? { estimatedCost } : {}),
     };
   }
+}
+
+export function approvalRequestFromProviderPreflight(
+  preflight: ProviderApprovalPreflight,
+  stepId: string,
+  options: {
+    readonly id?: string;
+    readonly description?: string;
+  } = {},
+): ApprovalRequest {
+  const reason: ApprovalReason =
+    preflight.estimatedCost !== undefined ? 'paid-generation' : 'remote-upload';
+  return {
+    id: options.id ?? `approval-provider-${preflight.requestDigest.slice(-16)}`,
+    stepId,
+    reason,
+    description:
+      options.description ??
+      `Approval required for ${preflight.providerId} ${preflight.capability}`,
+    ...(preflight.estimatedCost === undefined ? {} : { estimatedCost: preflight.estimatedCost }),
+    privacyImpact: {
+      dataLeavesDevice: preflight.dataLeavesDevice,
+      providerId: preflight.providerId,
+      dataTypes: preflight.dataBeingSent,
+      ...(preflight.retentionDisclosure === undefined
+        ? {}
+        : { retentionDisclosure: preflight.retentionDisclosure }),
+    },
+    isReversible: true,
+    status: 'pending',
+  };
 }
 
 export function createSuggestOnlyApprovalPolicy(): ApprovalPolicy {

@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { ControlPlaneError } from './control-plane.js';
+import type { CapabilityRequest, ProviderV2 } from '@joy-media/provider-sdk';
 
 export interface SpectralDenoiseRequest {
   readonly assetId: string;
   readonly mediaBase64: string;
   readonly sampleRate?: number;
   readonly strength?: number;
+  readonly idempotencyKey?: string;
 }
 
 export interface SpectralDenoiseResult {
@@ -85,4 +87,59 @@ export function runSpectralDenoise(request: SpectralDenoiseRequest): SpectralDen
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+export function spectralDenoiseProvider(): ProviderV2 {
+  return {
+    manifest: {
+      protocolVersion: 2,
+      id: 'ffmpeg-afftdn',
+      displayName: 'ffmpeg spectral denoise',
+      adapterVersion: '1.0.0',
+      execution: 'server',
+      capabilities: [
+        {
+          id: 'audio.denoise',
+          inputSchema: { type: 'object' },
+          outputSchema: { type: 'object' },
+          models: [{ id: 'ffmpeg-afftdn', displayName: 'ffmpeg afftdn' }],
+        },
+      ],
+      configurationSchema: { type: 'object' },
+      secretFields: [],
+      privacy: {
+        dataLeavesDevice: false,
+        retentionDisclosure: 'Audio denoise runs locally with ffmpeg afftdn on this host',
+      },
+    },
+    invoke: async () => {
+      throw new Error('spectral denoise provider descriptor is preflight-only');
+    },
+  };
+}
+
+export function spectralDenoiseCapabilityRequest(
+  request: SpectralDenoiseRequest & { readonly idempotencyKey: string },
+): CapabilityRequest {
+  return {
+    requestVersion: 1,
+    capability: 'audio.denoise',
+    input: {
+      assetId: request.assetId,
+      mediaDigest: createMediaDigest(request.mediaBase64),
+      ...(request.sampleRate === undefined ? {} : { sampleRate: request.sampleRate }),
+      ...(request.strength === undefined ? {} : { strength: request.strength }),
+    },
+    constraints: { executionPreference: ['local'] },
+    idempotencyKey: request.idempotencyKey,
+  };
+}
+
+function createMediaDigest(mediaBase64: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < mediaBase64.length; index++) {
+    hash ^= mediaBase64.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
 }

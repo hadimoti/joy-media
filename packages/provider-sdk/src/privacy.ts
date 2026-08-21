@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   AnyProvider,
   CapabilityId,
@@ -79,6 +80,26 @@ const DEFAULT_SIZE_ESTIMATES: Record<CapabilityId, number> = {
   'vision.analyze': 2_000_000,
 };
 
+export interface ProviderApprovalBinding {
+  readonly actorId: string;
+  readonly providerId: string;
+  readonly capability: CapabilityId;
+  readonly requestDigest: string;
+  readonly expiresAt: string;
+  readonly costCap?: Money;
+}
+
+export interface ProviderApprovalGrant extends ProviderApprovalBinding {
+  readonly grantVersion: 1;
+  readonly grantId: string;
+  readonly status: 'approved' | 'denied';
+}
+
+export interface ProviderApprovalPreflight extends PrivacyPreflight {
+  readonly requestDigest: string;
+  readonly approvalRequiredReason?: 'remote-processing' | 'provider-spend';
+}
+
 export function computePrivacyPreflight(
   request: CapabilityRequest,
   provider: AnyProvider,
@@ -135,4 +156,49 @@ export function computePrivacyPreflight(
   }
 
   return result;
+}
+
+export function computeProviderRequestDigest(request: CapabilityRequest): string {
+  return `sha256:${createHash('sha256').update(stableJson(request)).digest('hex')}`;
+}
+
+export function computeProviderApprovalPreflight(
+  actorId: string,
+  request: CapabilityRequest,
+  provider: AnyProvider,
+): ProviderApprovalPreflight {
+  const preflight = computePrivacyPreflight(request, provider);
+  return {
+    ...preflight,
+    requestDigest: computeProviderRequestDigest(requestForApprovalDigest(actorId, request)),
+    ...(preflight.requiresUserApproval
+      ? { approvalRequiredReason: 'remote-processing' as const }
+      : preflight.estimatedCost !== undefined
+        ? { approvalRequiredReason: 'provider-spend' as const }
+        : {}),
+  };
+}
+
+function requestForApprovalDigest(
+  actorId: string,
+  request: CapabilityRequest,
+): CapabilityRequest<{ readonly actorId: string; readonly input: unknown }> {
+  return {
+    ...request,
+    input: {
+      actorId,
+      input: request.input,
+    },
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
 }

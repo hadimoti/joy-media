@@ -8,6 +8,7 @@ import { LocalControlPlane, type ControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
+import { ProviderApprovalService } from './provider-approval.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 import type { WorkerResultReceiptV1, WorkerJobType } from '@joy-media/job-protocol';
 import { PostgresControlPlane } from './postgres-control-plane.js';
@@ -73,9 +74,11 @@ describe('control-plane HTTP transport', () => {
 
   it('requires remote/spend approval and records an idempotent Mistral completion without secrets or prompts', async () => {
     let calls = 0;
+    const approvals = new ProviderApprovalService();
     const registry = new MistralProviderRegistry(
       'test-only-mistral-secret',
       new MemoryMistralInvocationLedger(),
+      approvals,
       async () => {
         calls++;
         return new Response(
@@ -86,7 +89,13 @@ describe('control-plane HTTP transport', () => {
         );
       },
     );
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, registry);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvals,
+    );
     const base = {
       model: 'mistral-small-latest',
       messages: [{ role: 'user', content: 'Do not persist this prompt.' }],
@@ -95,16 +104,34 @@ describe('control-plane HTTP transport', () => {
       approvedRemoteProcessing: true,
       approvedSpend: true,
     };
-    expect(
-      await request(origin, 'POST', '/v1/providers/mistral/complete', {
-        ...base,
-        approvedSpend: false,
-      }),
-    ).toMatchObject({
+    const approvalRequired = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    expect(approvalRequired).toMatchObject({
       status: 409,
-      body: { error: { code: 'PROVIDER_SPEND_APPROVAL_REQUIRED' } },
+      body: { error: { code: 'PROVIDER_APPROVAL_REQUIRED', preflight: { providerId: 'mistral' } } },
     });
-    const first = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: {
+            actorId?: string;
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+    const providerApprovalGrant = approvals.createGrant({
+      actorId: 'owner',
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      costCap: { amount: '0.00', currency: 'USD' },
+      grantId: 'grant-mistral-1',
+    });
+    const approved = { ...base, providerApprovalGrant };
+    const first = await request(origin, 'POST', '/v1/providers/mistral/complete', approved);
     expect(first).toMatchObject({
       status: 200,
       body: {
@@ -119,11 +146,66 @@ describe('control-plane HTTP transport', () => {
         },
       },
     });
-    const retried = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    const retried = await request(origin, 'POST', '/v1/providers/mistral/complete', approved);
     expect(retried).toEqual(first);
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        ...approved,
+        messages: [{ role: 'user', content: 'Different prompt.' }],
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROVIDER_APPROVAL_REPLAY_REJECTED' } },
+    });
     expect(calls).toBe(1);
     expect(JSON.stringify(first.body)).not.toContain('test-only-mistral-secret');
     expect(JSON.stringify(first.body)).not.toContain('Do not persist this prompt.');
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(audit).toMatchObject({
+      status: 200,
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({ status: 'denied', reason: 'approval-required' }),
+          expect.objectContaining({ status: 'succeeded', approvalGrantId: 'grant-mistral-1' }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(audit.body)).not.toContain('Do not persist this prompt.');
+  });
+
+  it('requires shared remote approval before Edge TTS can run', async () => {
+    const approvals = new ProviderApprovalService();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      undefined,
+      approvals,
+    );
+
+    const blocked = await request(origin, 'POST', '/v1/providers/speech/synthesize', {
+      text: 'Do not send before approval.',
+      language: 'en-US',
+      engine: 'edge-tts',
+      idempotencyKey: 'tts-edge-1',
+      privacyMode: 'ask-before-remote',
+    });
+
+    expect(blocked).toMatchObject({
+      status: 409,
+      body: {
+        error: {
+          code: 'PROVIDER_APPROVAL_REQUIRED',
+          preflight: { providerId: 'edge-tts', capability: 'speech.synthesize' },
+        },
+      },
+    });
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(audit).toMatchObject({
+      status: 200,
+      body: { data: [expect.objectContaining({ status: 'denied', reason: 'approval-required' })] },
+    });
+    expect(JSON.stringify(audit.body)).not.toContain('Do not send before approval.');
   });
 
   it('preserves project, Worker lease, completion, and cursor event semantics over v1', async () => {
@@ -1031,6 +1113,7 @@ async function start(
   privateObjectStore?: PrivateObjectStore,
   mistral?: MistralProviderRegistry,
   controlPlane?: ControlPlane,
+  providerApprovals?: ProviderApprovalService,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: controlPlane ?? new LocalControlPlane(),
@@ -1038,6 +1121,7 @@ async function start(
     mediaAuth: new DisabledMediaAuth(),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(mistral === undefined ? {} : { mistral }),
+    ...(providerApprovals === undefined ? {} : { providerApprovals }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { ControlPlaneError } from './control-plane.js';
+import type { CapabilityRequest, ProviderV2 } from '@joy-media/provider-sdk';
 
 export type SpeechEngineId = 'edge-tts' | 'piper';
 
@@ -14,6 +15,7 @@ export interface SpeechSynthesisRequest {
   readonly speed?: number;
   /** Default: JOY_MEDIA_TTS_ENGINE env, else edge-tts. */
   readonly engine?: SpeechEngineId;
+  readonly idempotencyKey?: string;
 }
 
 export interface SpeechSynthesisResult {
@@ -28,7 +30,10 @@ export interface SpeechSynthesisResult {
   readonly durationUs: number;
 }
 
-export function resolveEdgeVoice(language: string | undefined, voiceId: string | undefined): string {
+export function resolveEdgeVoice(
+  language: string | undefined,
+  voiceId: string | undefined,
+): string {
   if (voiceId !== undefined && voiceId.length > 0 && !voiceId.startsWith('stock:')) {
     return voiceId;
   }
@@ -39,7 +44,12 @@ export function resolveEdgeVoice(language: string | undefined, voiceId: string |
 }
 
 function resolvePiperModel(language: string | undefined, voiceId: string | undefined): string {
-  if (voiceId !== undefined && voiceId.length > 0 && voiceId.endsWith('.onnx') && existsSync(voiceId)) {
+  if (
+    voiceId !== undefined &&
+    voiceId.length > 0 &&
+    voiceId.endsWith('.onnx') &&
+    existsSync(voiceId)
+  ) {
     return voiceId;
   }
   const voicesDir =
@@ -119,8 +129,7 @@ export function runPiperSpeechSynthesis(request: SpeechSynthesisRequest): Speech
   if (typeof request.text !== 'string' || request.text.trim().length === 0) {
     throw new ControlPlaneError('REQUEST_INVALID', 'text is required');
   }
-  const command =
-    process.env.JOY_MEDIA_PIPER?.trim() || '/opt/joy-media/data/piper/piper/piper';
+  const command = process.env.JOY_MEDIA_PIPER?.trim() || '/opt/joy-media/data/piper/piper/piper';
   if (!existsSync(command)) {
     throw new ControlPlaneError(
       'PROVIDER_UNAVAILABLE',
@@ -157,7 +166,8 @@ export function runPiperSpeechSynthesis(request: SpeechSynthesisRequest): Speech
       engine: 'piper',
       modelId: 'piper-onnx',
       dataLeavesDevice: false,
-      retentionDisclosure: 'Text is synthesized locally with Piper ONNX; it does not leave this host',
+      retentionDisclosure:
+        'Text is synthesized locally with Piper ONNX; it does not leave this host',
       durationUs: estimateDurationUs(request.text),
     };
   } finally {
@@ -177,4 +187,64 @@ export function runSpeechSynthesis(request: SpeechSynthesisRequest): SpeechSynth
   const engine = resolveSpeechEngine(request.engine);
   if (engine === 'piper') return runPiperSpeechSynthesis(request);
   return runEdgeSpeechSynthesis(request);
+}
+
+export function speechSynthesisProvider(engine: SpeechEngineId): ProviderV2 {
+  return {
+    manifest: {
+      protocolVersion: 2,
+      id: engine === 'edge-tts' ? 'edge-tts' : 'piper',
+      displayName: engine === 'edge-tts' ? 'Microsoft Edge TTS' : 'Piper TTS',
+      adapterVersion: '1.0.0',
+      execution: engine === 'edge-tts' ? 'remote-api' : 'server',
+      capabilities: [
+        {
+          id: 'speech.synthesize',
+          inputSchema: { type: 'object' },
+          outputSchema: { type: 'object' },
+          models: [{ id: engine, displayName: engine === 'edge-tts' ? 'Edge TTS' : 'Piper ONNX' }],
+          ...(engine === 'edge-tts'
+            ? {
+                pricing: { model: 'per-character' as const, rate: '0.00', currency: 'USD' },
+                policyFlags: ['remote-processing', 'privacy-approval-required'],
+              }
+            : {}),
+        },
+      ],
+      configurationSchema: { type: 'object' },
+      secretFields: [],
+      privacy: {
+        dataLeavesDevice: engine === 'edge-tts',
+        retentionDisclosure:
+          engine === 'edge-tts'
+            ? 'Text is sent to Microsoft Edge online TTS for synthesis'
+            : 'Text is synthesized locally with Piper ONNX; it does not leave this host',
+      },
+    },
+    invoke: async () => {
+      throw new Error('speech synthesis provider descriptor is preflight-only');
+    },
+  };
+}
+
+export function speechSynthesisCapabilityRequest(
+  request: SpeechSynthesisRequest & { readonly idempotencyKey: string },
+): CapabilityRequest {
+  return {
+    requestVersion: 1,
+    capability: 'speech.synthesize',
+    input: {
+      text: request.text,
+      ...(request.language === undefined ? {} : { language: request.language }),
+      ...(request.voiceId === undefined ? {} : { voiceId: request.voiceId }),
+      ...(request.speed === undefined ? {} : { speed: request.speed }),
+      engine: resolveSpeechEngine(request.engine),
+    },
+    constraints: {
+      executionPreference: [
+        resolveSpeechEngine(request.engine) === 'edge-tts' ? 'remote' : 'local',
+      ],
+    },
+    idempotencyKey: request.idempotencyKey,
+  };
 }

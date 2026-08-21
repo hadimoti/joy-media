@@ -19,6 +19,11 @@ import {
   type MistralProviderRegistry,
 } from './mistral-provider.js';
 import {
+  ProviderApprovalError,
+  ProviderApprovalService,
+  providerApprovalRequiredPayload,
+} from './provider-approval.js';
+import {
   type ProductionRunAuthority,
   type ProductionRunRecordV1,
   type ProductionRunStateV1,
@@ -27,6 +32,10 @@ import {
 import type { PrivateObjectStore } from './private-object-store.js';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import type { WorkerJobV1, WorkerResultReceiptV1 } from '@joy-media/job-protocol';
+import {
+  computeProviderApprovalPreflight,
+  type ProviderApprovalGrant,
+} from '@joy-media/provider-sdk';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -39,6 +48,7 @@ export interface ControlPlaneHttpServerOptions {
   readonly privateObjectStore?: PrivateObjectStore;
   /** Server-only provider registry; it never serializes a credential. */
   readonly mistral?: MistralProviderRegistry;
+  readonly providerApprovals?: ProviderApprovalService;
 }
 
 /**
@@ -47,10 +57,13 @@ export interface ControlPlaneHttpServerOptions {
  * this module deliberately does not contain a header/token fallback.
  */
 export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOptions): Server {
+  const providerApprovals = options.providerApprovals ?? new ProviderApprovalService();
   const resolvedOptions = {
     ...options,
     mediaAuth: options.mediaAuth ?? new DisabledMediaAuth(),
-    mistral: options.mistral ?? createRuntimeMistralProviderRegistry(),
+    providerApprovals,
+    mistral:
+      options.mistral ?? createRuntimeMistralProviderRegistry({ approvals: providerApprovals }),
   };
   return createServer(async (request, response) => {
     try {
@@ -65,6 +78,7 @@ async function route(
   options: ControlPlaneHttpServerOptions & {
     readonly mistral: MistralProviderRegistry;
     readonly mediaAuth: MediaAuthApi;
+    readonly providerApprovals: ProviderApprovalService;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -304,6 +318,11 @@ async function route(
 
   if (request.method === 'GET' && url.pathname === '/v1/providers/reasoning') {
     respondJson(response, 200, { data: { providers: [options.mistral.summary()] } });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/v1/providers/approvals/audit') {
+    respondJson(response, 200, { data: await options.providerApprovals.auditRows(actor.id) });
     return;
   }
 
@@ -558,38 +577,107 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/synthesize') {
-    const { runSpeechSynthesis, resolveSpeechEngine } = await import('./speech-synthesize.js');
+    const {
+      runSpeechSynthesis,
+      resolveSpeechEngine,
+      speechSynthesisCapabilityRequest,
+      speechSynthesisProvider,
+    } = await import('./speech-synthesize.js');
     const body = await readJson(request);
     const text = requiredString(body, 'text');
     const language = typeof body.language === 'string' ? body.language : undefined;
     const voiceId = typeof body.voiceId === 'string' ? body.voiceId : undefined;
     const speed = typeof body.speed === 'number' ? body.speed : undefined;
     const engine = resolveSpeechEngine(body.engine);
-    const synthesized = runSpeechSynthesis({
+    const idempotencyKey =
+      optionalString(body, 'idempotencyKey') ??
+      providerRouteIdempotencyKey({
+        capability: 'speech.synthesize',
+        text,
+        language,
+        voiceId,
+        speed,
+        engine,
+      });
+    const synthesisRequest = {
       text,
       engine,
+      idempotencyKey,
       ...(language !== undefined ? { language } : {}),
       ...(voiceId !== undefined ? { voiceId } : {}),
       ...(speed !== undefined ? { speed } : {}),
-    });
-    respondJson(response, 200, { data: synthesized });
+    };
+    const capabilityRequest = speechSynthesisCapabilityRequest(synthesisRequest);
+    const preflight = computeProviderApprovalPreflight(
+      actor.id,
+      capabilityRequest,
+      speechSynthesisProvider(engine),
+    );
+    const approvalInput = {
+      actorId: actor.id,
+      idempotencyKey,
+      preflight,
+      privacyMode:
+        optionalPrivacyMode(body, 'privacyMode') ??
+        (engine === 'edge-tts' ? 'ask-before-remote' : 'local-only'),
+      grant: optionalProviderApprovalGrant(body),
+      fallbackCostCap: { amount: '0.00', currency: 'USD' },
+    } as const;
+    const approval = await options.providerApprovals.verify(approvalInput);
+    try {
+      const synthesized = runSpeechSynthesis(synthesisRequest);
+      await options.providerApprovals.recordSucceeded(approvalInput, approval.reservation);
+      respondJson(response, 200, { data: synthesized, preflight });
+    } catch (error) {
+      await options.providerApprovals.recordFailed(
+        approvalInput,
+        approval.reservation,
+        error instanceof Error ? error.message : 'speech-synthesis-failed',
+      );
+      throw error;
+    }
     return;
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/audio/denoise') {
-    const { runSpectralDenoise } = await import('./spectral-denoise.js');
+    const { runSpectralDenoise, spectralDenoiseCapabilityRequest, spectralDenoiseProvider } =
+      await import('./spectral-denoise.js');
     const body = await readJson(request);
     const assetId = requiredString(body, 'assetId');
     const mediaBase64 = requiredString(body, 'mediaBase64');
     const sampleRate = typeof body.sampleRate === 'number' ? body.sampleRate : undefined;
     const strength = typeof body.strength === 'number' ? body.strength : undefined;
-    const denoised = runSpectralDenoise({
+    const idempotencyKey =
+      optionalString(body, 'idempotencyKey') ??
+      providerRouteIdempotencyKey({
+        capability: 'audio.denoise',
+        assetId,
+        mediaDigest: secretHash(mediaBase64),
+        sampleRate,
+        strength,
+      });
+    const denoiseRequest = {
       assetId,
       mediaBase64,
+      idempotencyKey,
       ...(sampleRate !== undefined ? { sampleRate } : {}),
       ...(strength !== undefined ? { strength } : {}),
+    };
+    const capabilityRequest = spectralDenoiseCapabilityRequest(denoiseRequest);
+    const preflight = computeProviderApprovalPreflight(
+      actor.id,
+      capabilityRequest,
+      spectralDenoiseProvider(),
+    );
+    await options.providerApprovals.verify({
+      actorId: actor.id,
+      idempotencyKey,
+      preflight,
+      privacyMode: 'local-only',
+      fallbackCostCap: { amount: '0.00', currency: 'USD' },
     });
-    respondJson(response, 200, { data: denoised });
+    const denoised = runSpectralDenoise(denoiseRequest);
+    respondJson(response, 200, { data: denoised, preflight });
     return;
   }
 
@@ -939,6 +1027,14 @@ function requiredString(body: Record<string, unknown>, field: string): string {
   return value;
 }
 
+function optionalString(body: Record<string, unknown>, field: string): string | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length === 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
+  return value;
+}
+
 function mistralCompletionRequest(body: Record<string, unknown>) {
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 64)
@@ -978,9 +1074,74 @@ function mistralCompletionRequest(body: Record<string, unknown>) {
     privacyMode: privacyMode as 'local-only' | 'ask-before-remote',
     approvedRemoteProcessing: body.approvedRemoteProcessing === true,
     approvedSpend: body.approvedSpend === true,
+    ...(optionalProviderApprovalGrant(body) === undefined
+      ? {}
+      : { approvalGrant: optionalProviderApprovalGrant(body) }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(temperature === undefined ? {} : { temperature }),
   };
+}
+
+function optionalPrivacyMode(
+  body: Record<string, unknown>,
+  field: string,
+): 'local-only' | 'ask-before-remote' | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (value !== 'local-only' && value !== 'ask-before-remote') {
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
+  }
+  return value;
+}
+
+function optionalProviderApprovalGrant(
+  body: Record<string, unknown>,
+): ProviderApprovalGrant | undefined {
+  const value = body.providerApprovalGrant ?? body.approvalGrant;
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'providerApprovalGrant must be an object');
+  }
+  const grant = value as Record<string, unknown>;
+  if (
+    grant.grantVersion !== 1 ||
+    typeof grant.grantId !== 'string' ||
+    typeof grant.actorId !== 'string' ||
+    typeof grant.providerId !== 'string' ||
+    typeof grant.capability !== 'string' ||
+    typeof grant.requestDigest !== 'string' ||
+    typeof grant.expiresAt !== 'string' ||
+    (grant.status !== 'approved' && grant.status !== 'denied')
+  ) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'providerApprovalGrant is invalid');
+  }
+  let costCap: ProviderApprovalGrant['costCap'];
+  if (grant.costCap !== undefined) {
+    if (
+      grant.costCap === null ||
+      typeof grant.costCap !== 'object' ||
+      Array.isArray(grant.costCap)
+    ) {
+      invalidRequest('providerApprovalGrant.costCap is invalid');
+    }
+    const cap = grant.costCap as Record<string, unknown>;
+    if (typeof cap.amount !== 'string' || typeof cap.currency !== 'string') {
+      invalidRequest('providerApprovalGrant.costCap is invalid');
+    }
+    costCap = { amount: cap.amount, currency: cap.currency };
+  }
+  const parsed: ProviderApprovalGrant = {
+    grantVersion: 1,
+    grantId: grant.grantId,
+    actorId: grant.actorId,
+    providerId: grant.providerId,
+    capability: grant.capability as ProviderApprovalGrant['capability'],
+    requestDigest: grant.requestDigest,
+    expiresAt: grant.expiresAt,
+    status: grant.status,
+    ...(costCap === undefined ? {} : { costCap }),
+  };
+  return parsed;
 }
 
 function optionalPositiveInteger(body: Record<string, unknown>, field: string): number | undefined {
@@ -1470,6 +1631,19 @@ function respondJson(response: ServerResponse, status: number, payload: unknown)
 }
 
 function respondError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ProviderApprovalError) {
+    const status =
+      error.code === 'PROVIDER_APPROVAL_REQUIRED' ||
+      error.code === 'REMOTE_PROCESSING_BLOCKED' ||
+      error.code === 'PROVIDER_APPROVAL_EXPIRED' ||
+      error.code === 'PROVIDER_APPROVAL_REPLAY_REJECTED' ||
+      error.code === 'PROVIDER_APPROVAL_DENIED' ||
+      error.code === 'PROVIDER_SPEND_CAP_EXCEEDED'
+        ? 409
+        : 502;
+    respondJson(response, status, { error: providerApprovalRequiredPayload(error) });
+    return;
+  }
   if (error instanceof MistralProviderError) {
     const status =
       error.code === 'PROVIDER_UNCONFIGURED' ||
@@ -1517,4 +1691,19 @@ function workerSessionHash(request: IncomingMessage): string {
 
 function secretHash(value: string): string {
   return createHash('sha256').update(value).digest('base64url');
+}
+
+function providerRouteIdempotencyKey(value: unknown): string {
+  return `provider-${createHash('sha256').update(stableJson(value)).digest('base64url')}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
 }

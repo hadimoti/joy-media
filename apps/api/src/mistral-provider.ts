@@ -6,12 +6,19 @@ import {
   type MistralChatMessage,
 } from '@joy-media/adapter-mistral';
 import {
-  computePrivacyPreflight,
+  computeProviderApprovalPreflight,
   ProviderLifecycle,
   resolveProvider,
   type CapabilityResult,
+  type CapabilityRequest,
+  type ProviderApprovalGrant,
   type ProviderStatus,
 } from '@joy-media/provider-sdk';
+import {
+  ProviderApprovalError,
+  ProviderApprovalService,
+  type ProviderApprovalOutcome,
+} from './provider-approval.js';
 
 export interface MistralCompletionRequest {
   readonly model: string;
@@ -20,6 +27,7 @@ export interface MistralCompletionRequest {
   readonly privacyMode: 'local-only' | 'ask-before-remote';
   readonly approvedRemoteProcessing: boolean;
   readonly approvedSpend: boolean;
+  readonly approvalGrant?: ProviderApprovalGrant | undefined;
   readonly maxTokens?: number;
   readonly temperature?: number;
 }
@@ -129,17 +137,25 @@ export class PostgresMistralInvocationLedger implements MistralInvocationLedger 
 export class MistralProviderRegistry {
   readonly #provider;
   readonly #lifecycle = new ProviderLifecycle();
+  readonly #approvals: ProviderApprovalService;
 
   constructor(
     apiKey: string | undefined,
     private readonly ledger: MistralInvocationLedger = new MemoryMistralInvocationLedger(),
+    approvalsOrFetch?: ProviderApprovalService | typeof fetch,
     fetchImpl?: typeof fetch,
   ) {
+    const approvals =
+      typeof approvalsOrFetch === 'function' || approvalsOrFetch === undefined
+        ? new ProviderApprovalService()
+        : approvalsOrFetch;
+    const resolvedFetch = typeof approvalsOrFetch === 'function' ? approvalsOrFetch : fetchImpl;
+    this.#approvals = approvals;
     // An empty value is used only to construct the manifest for the
     // unconfigured state. invoke() is guarded before this adapter can run.
     this.#provider = createMistralAdapter({
       apiKey: apiKey?.trim() ?? '',
-      ...(fetchImpl === undefined ? {} : { fetchImpl }),
+      ...(resolvedFetch === undefined ? {} : { fetchImpl: resolvedFetch }),
     });
     this.#lifecycle.register(this.#provider);
     if (apiKey === undefined || apiKey.trim().length === 0)
@@ -158,46 +174,25 @@ export class MistralProviderRegistry {
   }
 
   async complete(actorId: string, input: MistralCompletionRequest): Promise<CapabilityResult> {
+    const request = mistralCapabilityRequest(input);
+    const preflight = computeProviderApprovalPreflight(actorId, request, this.#provider);
+    const approvalVerification = {
+      actorId,
+      idempotencyKey: input.idempotencyKey,
+      preflight,
+      privacyMode: input.privacyMode,
+      grant: input.approvalGrant,
+      fallbackCostCap: input.approvalGrant?.costCap ?? { amount: '0.00', currency: 'USD' },
+    } as const;
     const status = this.#lifecycle.getStatus(MISTRAL_PROVIDER_ID);
     if (status.state === 'unconfigured') {
+      await this.#approvals.recordUnavailable(approvalVerification, 'provider-unconfigured');
       throw new MistralProviderError(
         'PROVIDER_UNCONFIGURED',
         'Mistral is not configured on this server.',
       );
     }
-    if (input.privacyMode === 'local-only') {
-      throw new MistralProviderError(
-        'REMOTE_PROCESSING_BLOCKED',
-        'Local-only policy blocks Mistral remote processing.',
-      );
-    }
-    if (!input.approvedRemoteProcessing) {
-      throw new MistralProviderError(
-        'REMOTE_PROCESSING_APPROVAL_REQUIRED',
-        'Remote processing requires explicit approval.',
-      );
-    }
-    if (!input.approvedSpend) {
-      throw new MistralProviderError(
-        'PROVIDER_SPEND_APPROVAL_REQUIRED',
-        'Provider spend requires explicit approval.',
-      );
-    }
-    const previous = await this.ledger.find(actorId, input.idempotencyKey);
-    if (previous !== undefined) return previous;
 
-    const request = {
-      requestVersion: 1 as const,
-      capability: 'llm.complete' as const,
-      input: {
-        model: input.model,
-        messages: input.messages,
-        ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
-        ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
-      },
-      constraints: { executionPreference: ['remote'] as const, modelAllowlist: [input.model] },
-      idempotencyKey: input.idempotencyKey,
-    };
     const resolution = resolveProvider(request, [this.#provider], {
       allowRemote: true,
       blockedProviders: [],
@@ -205,19 +200,50 @@ export class MistralProviderRegistry {
       requireLocalFor: [],
     });
     if (resolution.status !== 'resolved' || resolution.provider === undefined) {
+      await this.#approvals.recordUnavailable(
+        approvalVerification,
+        resolution.reason ?? 'provider-not-eligible',
+      );
       throw new MistralProviderError(
         'REMOTE_PROCESSING_BLOCKED',
         resolution.reason ?? 'Mistral is not eligible for this request.',
       );
     }
-    // Compute the SDK preflight here, before egress. Approval was verified above;
-    // no prompt/body is written to logs or the durable invocation ledger.
-    const preflight = computePrivacyPreflight(request, resolution.provider);
-    if (preflight.requiresUserApproval && !input.approvedRemoteProcessing) {
-      throw new MistralProviderError(
-        'REMOTE_PROCESSING_APPROVAL_REQUIRED',
-        'Remote processing requires explicit approval.',
-      );
+
+    let approval: ProviderApprovalOutcome;
+    try {
+      approval = await this.#approvals.verify(approvalVerification);
+    } catch (error) {
+      if (error instanceof ProviderApprovalError) {
+        if (error.code === 'REMOTE_PROCESSING_BLOCKED') {
+          throw new MistralProviderError('REMOTE_PROCESSING_BLOCKED', error.message);
+        }
+        if (error.code === 'PROVIDER_APPROVAL_REQUIRED') {
+          throw error;
+        }
+        if (error.code === 'PROVIDER_SPEND_CAP_EXCEEDED') {
+          throw new MistralProviderError('PROVIDER_SPEND_APPROVAL_REQUIRED', error.message);
+        }
+      }
+      throw error;
+    }
+
+    const previous = await this.ledger.find(actorId, input.idempotencyKey);
+    if (previous !== undefined) {
+      if (previous.provenance.requestHash !== preflight.requestDigest) {
+        await this.#approvals.recordFailed(
+          approvalVerification,
+          approval.reservation,
+          'idempotency-request-digest-conflict',
+        );
+        throw new ProviderApprovalError(
+          'PROVIDER_APPROVAL_REPLAY_REJECTED',
+          'Idempotent retry does not match the original request digest.',
+          preflight,
+        );
+      }
+      await this.#approvals.recordSucceeded(approvalVerification, approval.reservation);
+      return previous;
     }
 
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
@@ -226,10 +252,21 @@ export class MistralProviderRegistry {
       if (result.status === 'succeeded') {
         this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
         this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
-        return this.ledger.record(actorId, result);
+        const approvedResult = withApprovalProvenance(result, preflight.requestDigest, approval);
+        await this.#approvals.recordSucceeded(
+          approvalVerification,
+          approval.reservation,
+          approvedResult.usage?.cost,
+        );
+        return this.ledger.record(actorId, approvedResult);
       }
       const code = result.diagnostics[0]?.code;
       this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
+      await this.#approvals.recordFailed(
+        approvalVerification,
+        approval.reservation,
+        code ?? 'provider-request-failed',
+      );
       if (code === 'MISTRAL_UNAUTHORIZED') {
         this.#lifecycle.markUnauthorized(
           MISTRAL_PROVIDER_ID,
@@ -246,9 +283,16 @@ export class MistralProviderRegistry {
         'Mistral completion failed.',
       );
     } catch (error) {
-      if (error instanceof MistralProviderError) throw error;
+      if (error instanceof MistralProviderError || error instanceof ProviderApprovalError) {
+        throw error;
+      }
       this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
       this.#lifecycle.markDegraded(MISTRAL_PROVIDER_ID, 'Mistral completion failed.', false);
+      await this.#approvals.recordFailed(
+        approvalVerification,
+        approval.reservation,
+        'provider-unavailable',
+      );
       throw new MistralProviderError('MISTRAL_UNAVAILABLE', 'Mistral is unavailable.');
     }
   }
@@ -258,8 +302,54 @@ export function createRuntimeMistralProviderRegistry(
   options: {
     readonly apiKey?: string;
     readonly ledger?: MistralInvocationLedger;
+    readonly approvals?: ProviderApprovalService;
     readonly fetchImpl?: typeof fetch;
   } = {},
 ): MistralProviderRegistry {
-  return new MistralProviderRegistry(options.apiKey, options.ledger, options.fetchImpl);
+  return new MistralProviderRegistry(
+    options.apiKey,
+    options.ledger,
+    options.approvals ?? options.fetchImpl,
+    options.approvals === undefined ? undefined : options.fetchImpl,
+  );
+}
+
+function mistralCapabilityRequest(input: MistralCompletionRequest): CapabilityRequest {
+  return {
+    requestVersion: 1,
+    capability: 'llm.complete',
+    input: {
+      model: input.model,
+      messages: input.messages,
+      ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
+      ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    },
+    constraints: { executionPreference: ['remote'] as const, modelAllowlist: [input.model] },
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
+function withApprovalProvenance(
+  result: CapabilityResult,
+  requestDigest: string,
+  approval: ProviderApprovalOutcome,
+): CapabilityResult {
+  return {
+    ...result,
+    provenance: {
+      ...result.provenance,
+      requestHash: requestDigest,
+      ...(approval.reservation === undefined
+        ? {}
+        : { budgetReservationId: approval.reservation.reservationId }),
+    },
+    ...(result.usage === undefined || approval.reservation === undefined
+      ? {}
+      : {
+          usage: {
+            ...result.usage,
+            budgetReservationId: approval.reservation.reservationId,
+          },
+        }),
+  };
 }

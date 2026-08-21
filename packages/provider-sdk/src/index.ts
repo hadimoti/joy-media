@@ -78,7 +78,16 @@ export {
   reconcileProviderBudget,
 } from './budget.js';
 export { ProviderLifecycle } from './lifecycle.js';
-export { computePrivacyPreflight } from './privacy.js';
+export {
+  computePrivacyPreflight,
+  computeProviderApprovalPreflight,
+  computeProviderRequestDigest,
+} from './privacy.js';
+export type {
+  ProviderApprovalBinding,
+  ProviderApprovalGrant,
+  ProviderApprovalPreflight,
+} from './privacy.js';
 export { createMemorySecretStore } from './secrets.js';
 export type { AgentHostManifestValidation } from './agent-host.js';
 export { validateAgentHostManifest } from './agent-host.js';

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { computePrivacyPreflight } from './privacy.js';
+import {
+  computePrivacyPreflight,
+  computeProviderApprovalPreflight,
+  computeProviderRequestDigest,
+} from './privacy.js';
 import { createMockProvider } from './testing.js';
 import type { CapabilityRequest } from './types.js';
 
@@ -125,5 +129,39 @@ describe('computePrivacyPreflight', () => {
 
     expect(preflight.dataBeingSent).toContain('text prompt');
     expect(preflight.purpose).toBe('Generate image from prompt');
+  });
+
+  it('binds approval preflight digests to actor and request payload without exposing input', () => {
+    const provider = createMockProvider('remote-provider', ['llm.complete'], {
+      execution: 'remote-api',
+      privacy: { dataLeavesDevice: true },
+    });
+    const request = createRequest({
+      capability: 'llm.complete',
+      input: { prompt: 'private prompt' },
+    });
+
+    const first = computeProviderApprovalPreflight('actor-1', request, provider);
+    const same = computeProviderApprovalPreflight('actor-1', { ...request }, provider);
+    const otherActor = computeProviderApprovalPreflight('actor-2', request, provider);
+    const otherPrompt = computeProviderApprovalPreflight(
+      'actor-1',
+      { ...request, input: { prompt: 'different prompt' } },
+      provider,
+    );
+
+    expect(first.requestDigest).toBe(same.requestDigest);
+    expect(first.requestDigest).not.toBe(otherActor.requestDigest);
+    expect(first.requestDigest).not.toBe(otherPrompt.requestDigest);
+    expect(first.requestDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first.requiresUserApproval).toBe(true);
+    expect(JSON.stringify(first)).not.toContain('private prompt');
+  });
+
+  it('computes stable request digests independent of object key insertion order', () => {
+    const left = createRequest({ input: { b: 2, a: 1 } });
+    const right = createRequest({ input: { a: 1, b: 2 } });
+
+    expect(computeProviderRequestDigest(left)).toBe(computeProviderRequestDigest(right));
   });
 });
