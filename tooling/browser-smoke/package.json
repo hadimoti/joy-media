@@ -1,0 +1,14 @@
+{
+  "name": "@joy-media/browser-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "tsx src/run.ts",
+    "smoke:real-media-loop": "tsx src/run.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "tsx": "^4.20.6"
+  }
+}
