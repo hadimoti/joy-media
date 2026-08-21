@@ -217,6 +217,15 @@ export class ApprovalEngine {
     const decisions = plan.steps.map((step) =>
       this.evaluateStep(step, context, scopeFor?.(step.tool)),
     );
+    for (const step of plan.steps) {
+      const preflight = providerPreflightFromStep(step);
+      if (preflight === undefined) continue;
+      decisions.push({
+        request: approvalRequestFromProviderPreflight(preflight, step.id),
+        decision: 'requires-manual',
+        reason: `Provider approval required for ${preflight.providerId} ${preflight.capability}`,
+      });
+    }
 
     if (plan.assumptions.length > 0 && !this.policy.allowUnresolvedAssumptions) {
       decisions.push({
@@ -508,4 +517,39 @@ function formatCapabilities(capabilities: readonly ToolCapability[]): string {
 
 function looksLikeCredentialAccess(toolName: string): boolean {
   return /(credential|secret|api[-_]?key|token)/i.test(toolName);
+}
+
+function providerPreflightFromStep(step: AgentPlanStep): ProviderApprovalPreflight | undefined {
+  if (
+    step.arguments === null ||
+    typeof step.arguments !== 'object' ||
+    Array.isArray(step.arguments)
+  ) {
+    return undefined;
+  }
+  const args = step.arguments as Record<string, unknown>;
+  return providerPreflightFromValue(
+    args.providerApprovalPreflight ?? args.providerPreflight ?? args.preflight,
+  );
+}
+
+function providerPreflightFromValue(value: unknown): ProviderApprovalPreflight | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.providerId !== 'string' ||
+    typeof record.capability !== 'string' ||
+    typeof record.requestDigest !== 'string' ||
+    typeof record.dataLeavesDevice !== 'boolean' ||
+    !Array.isArray(record.dataBeingSent) ||
+    record.dataBeingSent.some((item) => typeof item !== 'string') ||
+    typeof record.purpose !== 'string' ||
+    typeof record.estimatedSizeBytes !== 'number' ||
+    !Array.isArray(record.transformations) ||
+    record.transformations.some((item) => typeof item !== 'string') ||
+    typeof record.requiresUserApproval !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return record as unknown as ProviderApprovalPreflight;
 }

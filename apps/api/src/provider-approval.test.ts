@@ -81,6 +81,36 @@ describe('ProviderApprovalService', () => {
     ).rejects.toMatchObject({ code: 'PROVIDER_APPROVAL_REPLAY_REJECTED' });
   });
 
+  it('rejects self-made grants that were not signed by the approval service', async () => {
+    const { service, request, preflight } = fixture();
+    const forged: ProviderApprovalGrant = {
+      grantVersion: 1,
+      grantId: 'grant-forged',
+      grantSignature: 'forged-signature',
+      actorId: 'actor-1',
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      status: 'approved',
+      costCap: { amount: '0.10', currency: 'USD' },
+    };
+
+    await expect(
+      service.verify({
+        actorId: 'actor-1',
+        idempotencyKey: request.idempotencyKey,
+        preflight,
+        privacyMode: 'ask-before-remote',
+        grant: forged,
+      }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_APPROVAL_REPLAY_REJECTED' });
+
+    await expect(service.auditRows('actor-1')).resolves.toContainEqual(
+      expect.objectContaining({ status: 'denied', reason: 'approval-forgery-rejected' }),
+    );
+  });
+
   it('rejects expired grants and grants over their spend cap', async () => {
     const { service, request, preflight } = fixture();
     const expired = grantFor(service, preflight, { expiresAt: '2026-01-01T00:00:00.000Z' });
@@ -132,6 +162,41 @@ describe('ProviderApprovalService', () => {
         approvalGrantId: grant.grantId,
         budgetReservationId: first.reservation?.reservationId,
       }),
+    );
+  });
+
+  it('scopes budget idempotency by actor and request digest', async () => {
+    const service = new ProviderApprovalService();
+    const first = fixture({ service });
+    const secondRequest: CapabilityRequest = {
+      ...first.request,
+      input: { prompt: 'private prompt for another actor' },
+    };
+    const provider = createMockProvider('remote-provider', ['llm.complete'], {
+      execution: 'remote-api',
+      privacy: { dataLeavesDevice: true },
+    });
+    const secondPreflight = computeProviderApprovalPreflight('actor-2', secondRequest, provider);
+
+    const firstOutcome = await service.verify({
+      actorId: 'actor-1',
+      idempotencyKey: 'shared-idem',
+      preflight: first.preflight,
+      privacyMode: 'ask-before-remote',
+      grant: grantFor(service, first.preflight),
+    });
+    const secondOutcome = await service.verify({
+      actorId: 'actor-2',
+      idempotencyKey: 'shared-idem',
+      preflight: secondPreflight,
+      privacyMode: 'ask-before-remote',
+      grant: grantFor(service, secondPreflight, { actorId: 'actor-2' }),
+    });
+
+    expect(firstOutcome.reservation?.reservationId).toBeDefined();
+    expect(secondOutcome.reservation?.reservationId).toBeDefined();
+    expect(secondOutcome.reservation?.reservationId).not.toBe(
+      firstOutcome.reservation?.reservationId,
     );
   });
 

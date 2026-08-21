@@ -92,6 +92,7 @@ export interface ProviderApprovalBinding {
 export interface ProviderApprovalGrant extends ProviderApprovalBinding {
   readonly grantVersion: 1;
   readonly grantId: string;
+  readonly grantSignature: string;
   readonly status: 'approved' | 'denied';
 }
 

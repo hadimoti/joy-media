@@ -10,6 +10,7 @@ import {
   createRuntimeMistralProviderRegistry,
   PostgresMistralInvocationLedger,
 } from './mistral-provider.js';
+import { ProviderApprovalService } from './provider-approval.js';
 
 await start();
 
@@ -22,6 +23,7 @@ async function start(): Promise<void> {
   if (durableControlPlane !== undefined) await durableControlPlane.initialize();
   const mistralLedger = pool === undefined ? undefined : new PostgresMistralInvocationLedger(pool);
   if (mistralLedger !== undefined) await mistralLedger.initialize();
+  const providerApprovals = new ProviderApprovalService();
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuth =
@@ -42,11 +44,13 @@ async function start(): Promise<void> {
         durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
     },
     mediaAuth,
+    providerApprovals,
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
         : { apiKey: process.env.JOY_MEDIA_MISTRAL_API_KEY }),
       ...(mistralLedger === undefined ? {} : { ledger: mistralLedger }),
+      approvals: providerApprovals,
     }),
     ...(process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
       ? {}

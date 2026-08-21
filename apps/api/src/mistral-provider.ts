@@ -184,6 +184,24 @@ export class MistralProviderRegistry {
       grant: input.approvalGrant,
       fallbackCostCap: input.approvalGrant?.costCap ?? { amount: '0.00', currency: 'USD' },
     } as const;
+    const previous = await this.ledger.find(actorId, input.idempotencyKey);
+    if (previous !== undefined) {
+      if (previous.provenance.requestHash !== preflight.requestDigest) {
+        await this.#approvals.recordFailed(
+          approvalVerification,
+          undefined,
+          'idempotency-request-digest-conflict',
+        );
+        throw new ProviderApprovalError(
+          'PROVIDER_APPROVAL_REPLAY_REJECTED',
+          'Idempotent retry does not match the original request digest.',
+          preflight,
+        );
+      }
+      await this.#approvals.recordSucceeded(approvalVerification, undefined);
+      return previous;
+    }
+
     const status = this.#lifecycle.getStatus(MISTRAL_PROVIDER_ID);
     if (status.state === 'unconfigured') {
       await this.#approvals.recordUnavailable(approvalVerification, 'provider-unconfigured');
@@ -226,24 +244,6 @@ export class MistralProviderRegistry {
         }
       }
       throw error;
-    }
-
-    const previous = await this.ledger.find(actorId, input.idempotencyKey);
-    if (previous !== undefined) {
-      if (previous.provenance.requestHash !== preflight.requestDigest) {
-        await this.#approvals.recordFailed(
-          approvalVerification,
-          approval.reservation,
-          'idempotency-request-digest-conflict',
-        );
-        throw new ProviderApprovalError(
-          'PROVIDER_APPROVAL_REPLAY_REJECTED',
-          'Idempotent retry does not match the original request digest.',
-          preflight,
-        );
-      }
-      await this.#approvals.recordSucceeded(approvalVerification, approval.reservation);
-      return previous;
     }
 
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);

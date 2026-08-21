@@ -146,11 +146,11 @@ describe('control-plane HTTP transport', () => {
         },
       },
     });
-    const retried = await request(origin, 'POST', '/v1/providers/mistral/complete', approved);
+    const retried = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
     expect(retried).toEqual(first);
     expect(
       await request(origin, 'POST', '/v1/providers/mistral/complete', {
-        ...approved,
+        ...base,
         messages: [{ role: 'user', content: 'Different prompt.' }],
       }),
     ).toMatchObject({
@@ -171,6 +171,70 @@ describe('control-plane HTTP transport', () => {
       },
     });
     expect(JSON.stringify(audit.body)).not.toContain('Do not persist this prompt.');
+  });
+
+  it('rejects forged provider approval grants at the HTTP boundary', async () => {
+    const approvals = new ProviderApprovalService();
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new MemoryMistralInvocationLedger(),
+      approvals,
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'should not run' } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+        ),
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvals,
+    );
+    const base = {
+      model: 'mistral-small-latest',
+      messages: [{ role: 'user', content: 'Private forged grant prompt.' }],
+      idempotencyKey: 'mistral-forged-1',
+      privacyMode: 'ask-before-remote',
+      approvedRemoteProcessing: true,
+      approvedSpend: true,
+    };
+    const approvalRequired = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: {
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        ...base,
+        providerApprovalGrant: {
+          grantVersion: 1,
+          grantId: 'grant-forged-http',
+          grantSignature: 'forged-signature',
+          actorId: 'owner',
+          providerId: preflight.providerId,
+          capability: preflight.capability,
+          requestDigest: preflight.requestDigest,
+          expiresAt: '2026-12-31T00:00:00.000Z',
+          status: 'approved',
+          costCap: { amount: '0.00', currency: 'USD' },
+        },
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROVIDER_APPROVAL_REPLAY_REJECTED' } },
+    });
   });
 
   it('requires shared remote approval before Edge TTS can run', async () => {

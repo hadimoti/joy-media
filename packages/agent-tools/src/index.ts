@@ -89,6 +89,7 @@ export {
   createDefaultApprovalPolicy,
   createPermissiveApprovalPolicy,
   createStrictApprovalPolicy,
+  approvalRequestFromProviderPreflight,
 } from './approval.js';
 
 export type { PlanEstimation } from './estimation.js';

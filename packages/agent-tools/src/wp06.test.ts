@@ -273,6 +273,53 @@ describe('Approval Engine', () => {
     expect(assumptionDecision?.decision).toBe('requires-manual');
   });
 
+  it('surfaces provider preflight as a pending approval for Joy Code and workflow plans', () => {
+    const policy = createDefaultApprovalPolicy();
+    const engine = new ApprovalEngine(policy);
+    const plan = createPlan('Generate narration', [
+      createTestStep({
+        id: 'tts-step',
+        mode: 'job',
+        tool: 'speechSynthesize',
+        arguments: {
+          providerApprovalPreflight: {
+            providerId: 'edge-tts',
+            capability: 'speech.synthesize',
+            dataLeavesDevice: true,
+            dataBeingSent: ['text data'],
+            purpose: 'Synthesize speech from text',
+            estimatedSizeBytes: 1000,
+            transformations: ['remote API call'],
+            requiresUserApproval: true,
+            requestDigest: 'sha256:abc123',
+            retentionDisclosure: 'Text is sent to Microsoft Edge online TTS for synthesis',
+            estimatedCost: { amount: '0.00', currency: 'USD' },
+          },
+        },
+      }),
+    ]);
+    const context = createMockContext();
+
+    const decisions = engine.evaluatePlan(plan, context);
+
+    expect(decisions).toContainEqual(
+      expect.objectContaining({
+        decision: 'requires-manual',
+        request: expect.objectContaining({
+          id: 'approval-provider-sha256:abc123',
+          stepId: 'tts-step',
+          reason: 'paid-generation',
+          estimatedCost: { amount: '0.00', currency: 'USD' },
+          privacyImpact: expect.objectContaining({
+            dataLeavesDevice: true,
+            providerId: 'edge-tts',
+            dataTypes: ['text data'],
+          }),
+        }),
+      }),
+    );
+  });
+
   it('records approval correctly', () => {
     const policy = createDefaultApprovalPolicy();
     const engine = new ApprovalEngine(policy);

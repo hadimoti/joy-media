@@ -1106,6 +1106,7 @@ function optionalProviderApprovalGrant(
   if (
     grant.grantVersion !== 1 ||
     typeof grant.grantId !== 'string' ||
+    typeof grant.grantSignature !== 'string' ||
     typeof grant.actorId !== 'string' ||
     typeof grant.providerId !== 'string' ||
     typeof grant.capability !== 'string' ||
@@ -1133,6 +1134,7 @@ function optionalProviderApprovalGrant(
   const parsed: ProviderApprovalGrant = {
     grantVersion: 1,
     grantId: grant.grantId,
+    grantSignature: grant.grantSignature,
     actorId: grant.actorId,
     providerId: grant.providerId,
     capability: grant.capability as ProviderApprovalGrant['capability'],

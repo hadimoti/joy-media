@@ -1,3 +1,4 @@
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { CapabilityId, Money, ProviderApprovalGrant } from '@joy-media/provider-sdk';
 import {
   createProviderBudgetLedger,
@@ -84,17 +85,18 @@ export class ProviderApprovalService {
   constructor(
     private readonly store: ProviderApprovalStore = new MemoryProviderApprovalStore(),
     budgetLedger: ProviderBudgetLedgerV1 = createProviderBudgetLedger(),
+    private readonly signingSecret: string = randomBytes(32).toString('base64url'),
   ) {
     this.#budgetLedger = budgetLedger;
   }
 
   createGrant(
-    input: Omit<ProviderApprovalGrant, 'grantVersion' | 'grantId' | 'status'> & {
+    input: Omit<ProviderApprovalGrant, 'grantVersion' | 'grantId' | 'grantSignature' | 'status'> & {
       readonly grantId?: string | undefined;
       readonly status?: ProviderApprovalGrant['status'] | undefined;
     },
   ): ProviderApprovalGrant {
-    return {
+    const unsigned: Omit<ProviderApprovalGrant, 'grantSignature'> = {
       grantVersion: 1,
       grantId: input.grantId ?? `grant-${crypto.randomUUID()}`,
       actorId: input.actorId,
@@ -104,6 +106,10 @@ export class ProviderApprovalService {
       expiresAt: input.expiresAt,
       status: input.status ?? 'approved',
       ...(input.costCap === undefined ? {} : { costCap: input.costCap }),
+    };
+    return {
+      ...unsigned,
+      grantSignature: this.signGrant(unsigned),
     };
   }
 
@@ -139,6 +145,19 @@ export class ProviderApprovalService {
       throw new ProviderApprovalError(
         'PROVIDER_APPROVAL_REQUIRED',
         'Provider processing requires an approval grant bound to this request.',
+        input.preflight,
+      );
+    }
+
+    if (!this.isAuthenticGrant(input.grant)) {
+      await this.audit(input, 'denied', 'approval-forgery-rejected', {
+        estimatedCost,
+        costCap,
+        grant: input.grant,
+      });
+      throw new ProviderApprovalError(
+        'PROVIDER_APPROVAL_REPLAY_REJECTED',
+        'Approval grant was not issued by this server.',
         input.preflight,
       );
     }
@@ -199,9 +218,10 @@ export class ProviderApprovalService {
       );
     }
 
+    const scopedKey = scopedBudgetKey(input);
     const reserved = reserveProviderBudget(this.#budgetLedger, {
-      reservationId: `reserve-${input.idempotencyKey}`,
-      idempotencyKey: input.idempotencyKey,
+      reservationId: `reserve-${scopedKey}`,
+      idempotencyKey: scopedKey,
       providerId: input.preflight.providerId,
       capability: input.preflight.capability,
       estimatedCost,
@@ -280,9 +300,10 @@ export class ProviderApprovalService {
     providerUsageId: string,
   ): Promise<void> {
     if (reservation === undefined) return;
+    const scopedKey = scopedReconciliationKey(idempotencyKey, reservation);
     const reconciled = reconcileProviderBudget(this.#budgetLedger, {
       reservationId: reservation.reservationId,
-      idempotencyKey: `usage-${idempotencyKey}`,
+      idempotencyKey: scopedKey,
       kind: 'final',
       actualCost,
       providerUsageId,
@@ -320,6 +341,23 @@ export class ProviderApprovalService {
       ...(options.costCap === undefined ? {} : { costCap: options.costCap }),
     });
   }
+
+  private signGrant(
+    grant: Omit<ProviderApprovalGrant, 'grantSignature'>,
+  ): ProviderApprovalGrant['grantSignature'] {
+    return createHmac('sha256', this.signingSecret).update(stableJson(grant)).digest('base64url');
+  }
+
+  private isAuthenticGrant(grant: ProviderApprovalGrant): boolean {
+    const { grantSignature: provided, ...unsigned } = grant;
+    const expected = this.signGrant(unsigned);
+    const expectedBytes = Buffer.from(expected);
+    const providedBytes = Buffer.from(provided);
+    return (
+      expectedBytes.byteLength === providedBytes.byteLength &&
+      timingSafeEqual(expectedBytes, providedBytes)
+    );
+  }
 }
 
 export function providerApprovalRequiredPayload(error: ProviderApprovalError): {
@@ -343,4 +381,37 @@ function redactAuditReason(reason: string): string {
     /(secret|token|api[-_]?key|authorization)[A-Za-z0-9._:=/-]*/gi,
     '$1-redacted',
   );
+}
+
+function scopedBudgetKey(input: ProviderApprovalVerification): string {
+  return hashKey({
+    actorId: input.actorId,
+    requestDigest: input.preflight.requestDigest,
+    idempotencyKey: input.idempotencyKey,
+  });
+}
+
+function scopedReconciliationKey(
+  idempotencyKey: string,
+  reservation: ProviderBudgetReservationV1,
+): string {
+  return hashKey({
+    idempotencyKey,
+    reservationId: reservation.reservationId,
+  });
+}
+
+function hashKey(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('base64url');
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
 }
