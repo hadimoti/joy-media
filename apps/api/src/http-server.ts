@@ -1277,6 +1277,35 @@ function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceip
       ...(result.model === undefined ? {} : { model: result.model }),
     };
   }
+  if (
+    result.kind === 'video.reference-analyze' &&
+    hasOnlyKeys(result, [
+      'kind',
+      'assetId',
+      'sha256',
+      'bytes',
+      'descriptor',
+      'summary',
+      'evidence',
+      'evidenceIds',
+      'findings',
+      'model',
+    ]) &&
+    typeof result.assetId === 'string' &&
+    isReceiptHashAndBytes(result) &&
+    result.descriptor !== null &&
+    typeof result.descriptor === 'object' &&
+    !Array.isArray(result.descriptor) &&
+    result.summary !== null &&
+    typeof result.summary === 'object' &&
+    !Array.isArray(result.summary) &&
+    Array.isArray(result.evidence) &&
+    Array.isArray(result.evidenceIds) &&
+    (result.findings === undefined || Array.isArray(result.findings)) &&
+    (result.model === undefined || typeof result.model === 'string')
+  ) {
+    return result as WorkerResultReceiptV1;
+  }
   const descriptor = result.descriptor;
   if (
     (result.kind === 'image.comfy' ||

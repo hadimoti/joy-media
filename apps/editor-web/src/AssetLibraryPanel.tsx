@@ -1,10 +1,12 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
   type BrowserAsset,
   type BrowserAssetRegistration,
   type BrowserDerivative,
+  type BrowserJob,
 } from './control-plane-client.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
@@ -44,6 +46,14 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
+import {
+  buildPersistReferenceAnalysisTransaction,
+  buildReferenceMarkerTransaction,
+  parseReferenceAnalysisArtifact,
+  referenceAnalysisArtifactId,
+  referenceAnalysisReceiptFromDerivative,
+  referenceStatusForAsset,
+} from './reference-analysis-model.js';
 
 const ASSET_RENDER_PAGE_SIZE = 120;
 
@@ -73,6 +83,8 @@ export function AssetLibraryPanel({
   projectTitle = 'Editor project',
   onAddSticker,
   onEditWithAi,
+  artifacts,
+  onDispatchArtifacts,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
@@ -87,6 +99,8 @@ export function AssetLibraryPanel({
     readonly kind: 'image' | 'video';
     readonly displayName: string;
   }) => void;
+  readonly artifacts?: ArtifactStore;
+  readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const resolver = useMemo(
@@ -106,6 +120,7 @@ export function AssetLibraryPanel({
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
+  const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>('image');
@@ -124,6 +139,9 @@ export function AssetLibraryPanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
+  const [openReferenceAnalysisAssetId, setOpenReferenceAnalysisAssetId] = useState<
+    string | undefined
+  >(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
@@ -150,9 +168,10 @@ export function AssetLibraryPanel({
       // zero the whole Assets panel before cloud-assets could load.
       void client.ensureProject(projectId, projectTitle).catch(() => undefined);
 
-      const [ownedResult, sharedResult] = await Promise.allSettled([
+      const [ownedResult, sharedResult, jobsResult] = await Promise.allSettled([
         client.myAssets(),
         client.sharedCloudAssets(),
+        client.jobs(projectId),
       ]);
       const ownedAssets =
         ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
@@ -195,6 +214,7 @@ export function AssetLibraryPanel({
       if (requestId !== refreshSeqRef.current) return;
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
+      setJobs(jobsResult.status === 'fulfilled' ? jobsResult.value : []);
       if (sharedResult.status === 'rejected') {
         setStatus(
           `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
@@ -232,6 +252,51 @@ export function AssetLibraryPanel({
       previewRef.current = undefined;
     };
   }, []);
+  useEffect(() => {
+    const activeReferenceJob = jobs.some(
+      (job) =>
+        job.type === 'video.reference-analyze' &&
+        (job.state === 'queued' || job.state === 'leased'),
+    );
+    if (!activeReferenceJob) return;
+    const timeout = window.setTimeout(() => void refresh(), 1_500);
+    return () => window.clearTimeout(timeout);
+  }, [jobs, refresh]);
+
+  useEffect(() => {
+    if (artifacts === undefined || onDispatchArtifacts === undefined) return;
+    for (const job of jobs) {
+      if (
+        job.type !== 'video.reference-analyze' ||
+        job.state !== 'completed' ||
+        job.assetId === undefined ||
+        job.derivative?.kind !== 'video.reference-analyze'
+      ) {
+        continue;
+      }
+      const receipt = referenceAnalysisReceiptFromDerivative(job.derivative);
+      if (receipt === undefined) continue;
+      const asset = items.find((entry) => entry.asset.id === job.assetId)?.asset;
+      if (asset === undefined) continue;
+      const existing = parseReferenceAnalysisArtifact(
+        artifacts.artifacts[referenceAnalysisArtifactId(asset.id)],
+      );
+      if (existing?.jobId === job.id) continue;
+      try {
+        onDispatchArtifacts(
+          buildPersistReferenceAnalysisTransaction({
+            asset,
+            receipt,
+            jobId: job.id,
+            now: new Date().toISOString(),
+            store: artifacts,
+          }),
+        );
+      } catch (error) {
+        setStatus(`Reference analysis could not be persisted: ${message(error)}`);
+      }
+    }
+  }, [artifacts, items, jobs, onDispatchArtifacts]);
 
   useEffect(() => {
     if (!filterOpen && !importOpen) return;
@@ -288,6 +353,14 @@ export function AssetLibraryPanel({
     () => filterAssetLibrary(items, category, collection, deferredQuery, availability, sort),
     [items, category, collection, deferredQuery, availability, sort],
   );
+  const referenceAnalysisView = useMemo(() => {
+    if (artifacts === undefined || openReferenceAnalysisAssetId === undefined) return undefined;
+    const asset = items.find((entry) => entry.asset.id === openReferenceAnalysisAssetId)?.asset;
+    const analysis = parseReferenceAnalysisArtifact(
+      artifacts.artifacts[referenceAnalysisArtifactId(openReferenceAnalysisAssetId)],
+    );
+    return asset === undefined || analysis === undefined ? undefined : { asset, analysis };
+  }, [artifacts, items, openReferenceAnalysisAssetId]);
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [items, category, collection, deferredQuery, availability, sort]);
@@ -496,7 +569,7 @@ export function AssetLibraryPanel({
     async (asset: BrowserAsset) => {
       const added = await addAssetAsSticker({
         asset,
-        onAddSticker,
+        ...(onAddSticker === undefined ? {} : { onAddSticker }),
         loadOriginalBlob: async () => (await originalAssetCache).get(asset.id),
       });
       if (added) {
@@ -504,6 +577,62 @@ export function AssetLibraryPanel({
       }
     },
     [onAddSticker, originalAssetCache],
+  );
+  const markAsReference = useCallback(
+    (asset: BrowserAsset) => {
+      if (asset.kind !== 'video') {
+        setStatus('Only video assets can be marked as references.');
+        return;
+      }
+      if (onDispatchArtifacts === undefined) {
+        setStatus('Reference artifacts are unavailable in this session.');
+        return;
+      }
+      try {
+        onDispatchArtifacts(buildReferenceMarkerTransaction(asset, new Date().toISOString()));
+        setStatus(`${asset.displayName} marked as a reference source.`);
+      } catch (error) {
+        setStatus(`Failed to mark reference source: ${message(error)}`);
+      }
+    },
+    [onDispatchArtifacts],
+  );
+
+  const runReferenceAnalysis = useCallback(
+    async (asset: BrowserAsset) => {
+      if (asset.kind !== 'video') {
+        setStatus('Reference analysis supports video assets only.');
+        return;
+      }
+      if (artifacts === undefined || onDispatchArtifacts === undefined) {
+        setStatus('Reference analysis requires durable artifacts in this session.');
+        return;
+      }
+      const referenceState = referenceStatusForAsset({ asset, store: artifacts, jobs });
+      if (!referenceState.marked) {
+        setStatus('Mark the video as a reference first.');
+        return;
+      }
+      if (referenceState.running) {
+        setStatus(`${asset.displayName} is already being analyzed.`);
+        return;
+      }
+      const jobId = `reference-${asset.id}-${Date.now().toString(36)}`;
+      try {
+        await client.enqueueReferenceAnalysis(projectId, jobId, {
+          assetId: asset.id,
+          maxDurationUs: 15 * 60 * 1_000_000,
+          maxBytes: 256 * 1_024 * 1_024,
+          sampleCount: 3,
+          maxAudioBeats: 6,
+        });
+        setStatus(`Reference analysis queued for ${asset.displayName}.`);
+        await refresh();
+      } catch (error) {
+        setStatus(`Reference analysis failed to queue: ${message(error)}`);
+      }
+    },
+    [artifacts, client, jobs, onDispatchArtifacts, projectId, refresh],
   );
 
   const bulkShare = useCallback(async () => {
@@ -918,6 +1047,51 @@ export function AssetLibraryPanel({
               )}
             </section>
           )}
+          {referenceAnalysisView !== undefined && (
+            <section
+              className="asset-preview"
+              aria-label={`Reference analysis: ${referenceAnalysisView.asset.displayName}`}
+            >
+              <div>
+                <strong>{referenceAnalysisView.asset.displayName}</strong>
+                <span>
+                  {referenceAnalysisView.analysis.receipt.summary.shotCount} shot(s) ·{' '}
+                  {referenceAnalysisView.analysis.receipt.summary.audioBeatCount} beat cue(s)
+                </span>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close reference analysis"
+                title="Close reference analysis"
+                onClick={() => setOpenReferenceAnalysisAssetId(undefined)}
+              >
+                <CloseIcon />
+              </button>
+              <div className="asset-reference-analysis">
+                <p>
+                  Source hash {referenceAnalysisView.analysis.sourceSha256.slice(0, 12)}… ·{' '}
+                  {referenceAnalysisView.analysis.evidenceIds.length} evidence id(s)
+                </p>
+                <ul>
+                  {referenceAnalysisView.analysis.receipt.evidence.slice(0, 6).map((entry) => (
+                    <li key={entry.id}>
+                      <strong>{entry.kind}</strong> {entry.summary}
+                    </li>
+                  ))}
+                </ul>
+                {(referenceAnalysisView.analysis.receipt.findings ?? []).length > 0 && (
+                  <ul>
+                    {referenceAnalysisView.analysis.receipt.findings?.map((finding) => (
+                      <li key={finding.id}>
+                        <strong>{finding.title}</strong> {finding.summary}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          )}
           {selectedCount > 0 && (
             <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
               <span className="asset-bulk-count">{selectedCount}</span>
@@ -1024,6 +1198,10 @@ export function AssetLibraryPanel({
                     formatBytes(asset.bytes),
                     cloudBacked ? 'Cloud original' : availabilityLabel(avail),
                   ].join(' · ');
+                  const referenceState =
+                    asset.kind === 'video' && artifacts !== undefined
+                      ? referenceStatusForAsset({ asset, store: artifacts, jobs })
+                      : undefined;
                   return (
                     <li
                       key={asset.id}
@@ -1107,6 +1285,51 @@ export function AssetLibraryPanel({
                             originalCachePromise={originalAssetCache}
                             onShare={() => void shareToCloud(asset)}
                           />
+                        )}
+                        {asset.kind === 'video' &&
+                          referenceState !== undefined &&
+                          !referenceState.marked && (
+                            <button
+                              type="button"
+                              className="icon-button"
+                              aria-label={`Mark ${asset.displayName} as reference`}
+                              title="Mark as Reference"
+                              data-guide="Mark as Reference"
+                              onClick={() => markAsReference(asset)}
+                            >
+                              <CheckIcon />
+                            </button>
+                          )}
+                        {asset.kind === 'video' &&
+                          referenceState !== undefined &&
+                          referenceState.marked && (
+                            <button
+                              type="button"
+                              className="icon-button"
+                              aria-label={`Run reference analysis for ${asset.displayName}`}
+                              title={
+                                referenceState.running
+                                  ? 'Reference analysis queued'
+                                  : 'Run Reference Analysis'
+                              }
+                              data-guide="Run Reference Analysis"
+                              disabled={!referenceState.canRun}
+                              onClick={() => void runReferenceAnalysis(asset)}
+                            >
+                              <RefreshIcon />
+                            </button>
+                          )}
+                        {asset.kind === 'video' && referenceState?.canView === true && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`View reference analysis for ${asset.displayName}`}
+                            title="View Reference Analysis"
+                            data-guide="View Reference Analysis"
+                            onClick={() => setOpenReferenceAnalysisAssetId(asset.id)}
+                          >
+                            <ListIcon />
+                          </button>
                         )}
                         <button
                           type="button"

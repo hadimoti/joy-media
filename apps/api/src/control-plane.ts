@@ -6,7 +6,7 @@ import {
   WorkerProtocolError,
   WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
-import type { WorkerJobV1 } from '@joy-media/job-protocol';
+import type { VideoReferenceAnalyzeReceipt, WorkerJobV1 } from '@joy-media/job-protocol';
 
 export interface Actor {
   readonly id: string;
@@ -196,12 +196,14 @@ export interface MediaAiWorkerReceipt {
   };
   readonly model?: string;
 }
+export type ReferenceAnalysisWorkerReceipt = VideoReferenceAnalyzeReceipt;
 export type WorkerResultReceipt =
   | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
   | LocalGpuWorkerReceipt
   | TextAiWorkerReceipt
   | MediaAiWorkerReceipt
+  | ReferenceAnalysisWorkerReceipt
   | RenderExportReceipt
   | RenderInspectReceipt;
 /**
@@ -1102,6 +1104,13 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
       worker.localAssetIds.includes(job.assetId)
     );
   }
+  if (job.type === 'video.reference-analyze') {
+    return (
+      job.assetId !== undefined &&
+      worker.capabilities.includes('video.reference-analyze') &&
+      worker.localAssetIds.includes(job.assetId)
+    );
+  }
   if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
   if (isWorkerJobType(job.type)) return workerCanRunJob(worker.capabilities, job.type);
@@ -1127,6 +1136,29 @@ function legacyWorkerJob(
       type,
       payload: { assetId, maxEdgePx: 720 },
       requirements: { capabilities: ['asset.thumbnail'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'video.reference-analyze') {
+    if (assetId === undefined) {
+      throw new ControlPlaneError(
+        'ASSET_JOB_INVALID',
+        'reference analysis requires an opaque asset ID',
+      );
+    }
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        assetId,
+        maxDurationUs: 15 * 60 * 1_000_000,
+        maxBytes: 256 * 1_024 * 1_024,
+        sampleCount: 3,
+        maxAudioBeats: 6,
+      },
+      requirements: { capabilities: ['video.reference-analyze'], privacy: 'local-only' },
       idempotencyKey: id,
       maxAttempts: 3,
     });

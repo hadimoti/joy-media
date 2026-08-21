@@ -278,7 +278,7 @@ export function JobsPanel({
                             {job.derivative.sha256.slice(0, 12)}…
                           </p>
                         )}
-                        {job.derivative?.findings !== undefined && (
+                        {typeof job.derivative?.findings === 'number' && (
                           <p className="job-derivative">{job.derivative.findings} findings</p>
                         )}
                         {job.error !== undefined && <p className="jobs-error">{job.error}</p>}

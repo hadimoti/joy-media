@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { ReferenceAnalysisEvidence, ReferenceAnalysisFinding } from '@joy-media/job-protocol';
 import type { DeviceIdentity } from './runtime.js';
 
 export interface WorkerSessionStore {
@@ -25,6 +26,7 @@ export interface WorkerJobResult {
     | 'asset.thumbnail'
     | 'image.comfy'
     | 'audio.ml-denoise'
+    | 'video.reference-analyze'
     | 'render.export'
     | 'render.inspect'
     | 'text.lm-studio'
@@ -38,13 +40,25 @@ export interface WorkerJobResult {
   readonly resultRef?: string;
   readonly reportRef?: string;
   readonly outputRef?: string;
-  readonly findings?: number;
+  readonly findings?: number | readonly ReferenceAnalysisFinding[];
   readonly qualityReport?: unknown;
   readonly descriptor?: {
     readonly mimeType: string;
     readonly width?: number;
     readonly height?: number;
+    readonly durationUs?: number;
   };
+  readonly summary?: {
+    readonly shotCount: number;
+    readonly cutCount: number;
+    readonly averageShotDurationUs: number;
+    readonly fastestShotDurationUs: number;
+    readonly sampleCount: number;
+    readonly transcriptSegmentCount: number;
+    readonly audioBeatCount: number;
+  };
+  readonly evidence?: readonly ReferenceAnalysisEvidence[];
+  readonly evidenceIds?: readonly string[];
   readonly provider?: string;
   readonly text?: string;
   readonly model?: string;

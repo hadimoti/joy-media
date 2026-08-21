@@ -1,6 +1,17 @@
 /** P00.5 Worker protocol spike: outbound pairing, capability snapshots, and local-only thumbnails. */
 
 import type { RenderJob, RenderReceipt } from './render-jobs.js';
+import type {
+  MediaAnalysisJob,
+  ReferenceAnalysisEvidence,
+  ReferenceAnalysisFinding,
+  VideoReferenceAnalyzeJob,
+  VideoReferenceAnalyzeReceipt,
+} from './media-analysis-jobs.js';
+import {
+  assertValidVideoReferenceAnalyzePayload,
+  assertValidVideoReferenceAnalyzeReceipt,
+} from './media-analysis-jobs.js';
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 
@@ -8,6 +19,7 @@ export type WorkerCapability =
   | 'asset.thumbnail'
   | 'render.export'
   | 'render.inspect'
+  | 'video.reference-analyze'
   | 'image.comfy'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
@@ -30,11 +42,13 @@ export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'video.runway',
   'edit.higgsfield',
 ] as const;
-export type WorkerJobType = 'asset.thumbnail' | SpecializedJobType | RenderJob['type'];
+export type WorkerJobType =
+  'asset.thumbnail' | SpecializedJobType | MediaAnalysisJob['type'] | RenderJob['type'];
 export const WORKER_JOB_TYPES: readonly WorkerJobType[] = [
   'asset.thumbnail',
   'render.export',
   'render.inspect',
+  'video.reference-analyze',
   ...SPECIALIZED_JOB_TYPES,
 ] as const;
 
@@ -109,7 +123,7 @@ export interface AiJob {
   readonly maxAttempts: number;
 }
 
-export type WorkerJobV1 = ThumbnailJob | AiJob | RenderJob;
+export type WorkerJobV1 = ThumbnailJob | AiJob | MediaAnalysisJob | RenderJob;
 
 export interface ThumbnailAssignment {
   readonly job: ThumbnailJob;
@@ -285,6 +299,31 @@ export type WorkerResultReceiptV1 =
         readonly width?: number;
         readonly height?: number;
       };
+      readonly model?: string;
+    }
+  | {
+      readonly kind: 'video.reference-analyze';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly width: number;
+        readonly height: number;
+        readonly durationUs: number;
+      };
+      readonly summary: {
+        readonly shotCount: number;
+        readonly cutCount: number;
+        readonly averageShotDurationUs: number;
+        readonly fastestShotDurationUs: number;
+        readonly sampleCount: number;
+        readonly transcriptSegmentCount: number;
+        readonly audioBeatCount: number;
+      };
+      readonly evidence: readonly ReferenceAnalysisEvidence[];
+      readonly evidenceIds: readonly string[];
+      readonly findings?: readonly ReferenceAnalysisFinding[];
       readonly model?: string;
     }
   | RenderReceipt;
@@ -619,6 +658,16 @@ function validateWorkerJobPayload(job: WorkerJobV1): void {
         'payload references',
       );
       return;
+    case 'video.reference-analyze':
+      try {
+        assertValidVideoReferenceAnalyzePayload(job.payload, 'payload');
+      } catch (error) {
+        throw new WorkerProtocolError(
+          'WORKER_JOB_INVALID',
+          error instanceof Error ? error.message : 'payload is invalid',
+        );
+      }
+      return;
     default:
       assertObjectKeys(
         job.payload,
@@ -664,6 +713,7 @@ function validateWorkerJobRequirements(
   }
   if (
     (jobType === 'asset.thumbnail' ||
+      jobType === 'video.reference-analyze' ||
       jobType === 'render.export' ||
       jobType === 'render.inspect') &&
     requirements.privacy !== 'local-only'
@@ -712,6 +762,17 @@ function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResul
       assertOpaqueIds([value.reportRef], 'receipt references');
       if (!Number.isSafeInteger(value.findings) || value.findings < 0) {
         throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt findings are invalid');
+      }
+      return;
+    }
+    case 'video.reference-analyze': {
+      try {
+        assertValidVideoReferenceAnalyzeReceipt(receipt, 'receipt');
+      } catch (error) {
+        throw new WorkerProtocolError(
+          'WORKER_RECEIPT_INVALID',
+          error instanceof Error ? error.message : 'receipt is invalid',
+        );
       }
       return;
     }

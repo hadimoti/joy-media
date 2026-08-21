@@ -9,6 +9,7 @@ import type {
 } from '@joy-media/workflow-engine';
 import type { DataLane } from './data-lanes.js';
 import type { BrowserAsset } from './control-plane-client.js';
+import { parseReferenceAnalysisArtifact } from './reference-analysis-model.js';
 
 export type ProductionBoardSectionId =
   'brief' | 'scenes' | 'assets' | 'jobs' | 'approvals' | 'qa' | 'events';
@@ -389,7 +390,13 @@ function artifactLinks(
       : [link('asset', assetId, `Asset ${assetLabel(assetId, input.assets)}`)]),
     ...(artifact === undefined
       ? []
-      : [link('artifact', artifact.id, `Artifact ${artifact.label}`)]),
+      : [
+          link(
+            'artifact',
+            artifact.id,
+            referenceArtifactLabel(artifact, input.assets) ?? `Artifact ${artifact.label}`,
+          ),
+        ]),
     ...(lane === undefined ? [] : [link('data-lane', lane.item.id, `${lane.lane.label} lane`)]),
   ];
 }
@@ -400,6 +407,15 @@ function link(kind: ProductionBoardLink['kind'], id: string, label: string): Pro
 
 function assetLabel(assetId: string, assets: readonly BrowserAsset[] | undefined): string {
   return assets?.find((asset) => asset.id === assetId)?.displayName ?? assetId;
+}
+
+function referenceArtifactLabel(
+  artifact: NonNullable<ArtifactStore['artifacts'][string]>,
+  assets: readonly BrowserAsset[] | undefined,
+): string | undefined {
+  const analysis = parseReferenceAnalysisArtifact(artifact);
+  if (analysis === undefined) return undefined;
+  return `Reference analysis ${assetLabel(analysis.assetId, assets)}`;
 }
 
 function actionAvailability(

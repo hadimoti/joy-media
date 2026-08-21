@@ -6,7 +6,11 @@ import {
   workerCanRunJob,
   WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
-import type { WorkerJobV1 } from '@joy-media/job-protocol';
+import type {
+  VideoReferenceAnalyzeReceipt,
+  WorkerJobType,
+  WorkerJobV1,
+} from '@joy-media/job-protocol';
 import {
   ControlPlaneError,
   type AssetLocationRecord,
@@ -830,7 +834,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
            AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
            AND (type NOT IN ('render.export', 'render.inspect', 'text.lm-studio', 'text.openrouter',
-                             'video.runway', 'edit.higgsfield') OR type = $4)
+                             'video.runway', 'edit.higgsfield', 'video.reference-analyze') OR type = $4)
          RETURNING *`,
         [
           jobId,
@@ -1272,6 +1276,7 @@ function isWorkerReceipt(value: WorkerResultReceipt): boolean {
     isLocalGpuReceipt(value) ||
     isTextAiReceipt(value) ||
     isMediaAiReceipt(value) ||
+    isReferenceAnalysisReceipt(value) ||
     isRenderReceipt(value)
   );
 }
@@ -1330,6 +1335,30 @@ function isMediaAiReceipt(
     /^ai-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
     typeof value.descriptor.mimeType === 'string' &&
     value.descriptor.mimeType.length > 0 &&
+    (value.model === undefined || typeof value.model === 'string')
+  );
+}
+
+function isReferenceAnalysisReceipt(
+  value: WorkerResultReceipt,
+): value is VideoReferenceAnalyzeReceipt {
+  return (
+    value.kind === 'video.reference-analyze' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.startsWith('video/') &&
+    Number.isSafeInteger(value.descriptor.width) &&
+    value.descriptor.width > 0 &&
+    Number.isSafeInteger(value.descriptor.height) &&
+    value.descriptor.height > 0 &&
+    Number.isSafeInteger(value.descriptor.durationUs) &&
+    value.descriptor.durationUs > 0 &&
+    Array.isArray(value.evidence) &&
+    Array.isArray(value.evidenceIds) &&
+    (value.findings === undefined || Array.isArray(value.findings)) &&
     (value.model === undefined || typeof value.model === 'string')
   );
 }
@@ -1421,18 +1450,22 @@ function legacyWorkerJob(
       maxAttempts: 3,
     });
   }
+  const aiType = type as Exclude<
+    WorkerJobType,
+    'asset.thumbnail' | 'video.reference-analyze' | 'render.export' | 'render.inspect'
+  >;
   return validateWorkerJobV1({
     protocolVersion: WORKER_PROTOCOL_VERSION,
     jobId: id,
-    type,
+    type: aiType,
     payload: {
       prompt: '',
       ...(assetId === undefined ? {} : { imageAssetId: assetId }),
     },
     requirements: {
-      capabilities: [type],
+      capabilities: [aiType],
       privacy:
-        type === 'text.openrouter' || type === 'video.runway' || type === 'edit.higgsfield'
+        aiType === 'text.openrouter' || aiType === 'video.runway' || aiType === 'edit.higgsfield'
           ? 'remote-api'
           : 'local-only',
     },

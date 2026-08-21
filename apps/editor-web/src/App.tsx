@@ -2753,6 +2753,10 @@ function EditorWorkspace({
             context.attachKiloCodeAsset(asset);
             context.activatePanel('agent');
           }}
+          {...(context.artifacts === undefined ? {} : { artifacts: context.artifacts })}
+          {...(context.dispatchArtifacts === undefined
+            ? {}
+            : { onDispatchArtifacts: context.dispatchArtifacts })}
         />
       );
     if (api.id === 'agent') {

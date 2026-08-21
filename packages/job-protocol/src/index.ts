@@ -49,7 +49,14 @@ export type {
   RenderJobType,
   RenderReceipt,
 } from './render-jobs.js';
-export type { MediaAnalysisJob } from './media-analysis-jobs.js';
+export type {
+  MediaAnalysisJob,
+  ReferenceAnalysisEvidence,
+  ReferenceAnalysisFinding,
+  VideoReferenceAnalyzeJob,
+  VideoReferenceAnalyzePayload,
+  VideoReferenceAnalyzeReceipt,
+} from './media-analysis-jobs.js';
 export type {
   AgentJobState,
   AgentJobRequest,

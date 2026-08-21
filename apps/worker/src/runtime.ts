@@ -12,7 +12,12 @@ import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
+import type {
+  VideoReferenceAnalyzePayload,
+  VideoReferenceAnalyzeReceipt,
+  WorkerCapability,
+  WorkerHello,
+} from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import type { RenderBundleV1 } from '@joy-media/render-planner';
 import {
@@ -30,6 +35,7 @@ import {
 } from './local-ai.js';
 import { executeLeasedExport, type RenderExportReceiptV1 } from './export-job.js';
 import { mediaResolverFromAssetSourceRegistry } from './worker-media-resolver.js';
+import { analyzeReferenceVideo, type ReferenceAnalysisError } from './reference-analysis.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -246,7 +252,7 @@ export class WorkerRuntime {
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
     if (this.tools.ffmpeg && this.tools.ffprobe) {
-      capabilities.push('asset.thumbnail', 'render.export');
+      capabilities.push('asset.thumbnail', 'render.export', 'video.reference-analyze');
     }
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');
@@ -279,6 +285,12 @@ export class WorkerRuntime {
         readonly negativePrompt?: string;
         readonly imageAssetId?: string;
         readonly params?: Record<string, unknown>;
+        readonly assetId?: string;
+        readonly maxDurationUs?: number;
+        readonly maxBytes?: number;
+        readonly sampleCount?: number;
+        readonly maxAudioBeats?: number;
+        readonly includeModelAnalysis?: boolean;
       };
     },
     options: {
@@ -346,10 +358,70 @@ export class WorkerRuntime {
         throw error;
       }
     }
+    if (job.type === 'video.reference-analyze') {
+      if (!this.tools.ffmpeg || !this.tools.ffprobe) {
+        throw new Error('FFmpeg and FFprobe are required');
+      }
+      if (options.cancelled()) return { state: 'canceled' };
+      const payload = job.payload as
+        | (Partial<VideoReferenceAnalyzePayload> & {
+            readonly model?: string;
+          })
+        | undefined;
+      const sourceAssetId = typeof payload?.assetId === 'string' ? payload.assetId : job.assetId;
+      if (sourceAssetId === undefined) {
+        throw new Error('video.reference-analyze requires an assetId');
+      }
+      const sourcePath = this.options.sources?.resolve(sourceAssetId);
+      if (sourcePath === undefined) {
+        throw new Error(`asset ${sourceAssetId} is not available on this Worker`);
+      }
+      this.log.write(`job ${job.id} started (video.reference-analyze)`);
+      try {
+        const result = await analyzeReferenceVideo({
+          jobId: job.id,
+          assetId: sourceAssetId,
+          sourcePath,
+          payload: {
+            assetId: sourceAssetId,
+            maxDurationUs:
+              typeof payload?.maxDurationUs === 'number'
+                ? payload.maxDurationUs
+                : 15 * 60 * 1_000_000,
+            maxBytes:
+              typeof payload?.maxBytes === 'number' ? payload.maxBytes : 256 * 1_024 * 1_024,
+            ...(typeof payload?.sampleCount === 'number'
+              ? { sampleCount: payload.sampleCount }
+              : {}),
+            ...(typeof payload?.maxAudioBeats === 'number'
+              ? { maxAudioBeats: payload.maxAudioBeats }
+              : {}),
+            ...(typeof payload?.includeModelAnalysis === 'boolean'
+              ? { includeModelAnalysis: payload.includeModelAnalysis }
+              : {}),
+            ...(typeof payload?.model === 'string' ? { model: payload.model } : {}),
+          },
+          cancelled: options.cancelled,
+          progress: options.progress,
+        });
+        this.log.write(`job ${job.id} completed`);
+        return { state: 'completed', result };
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          (error as ReferenceAnalysisError).code === 'REFERENCE_ANALYSIS_CANCELED'
+        ) {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      }
+    }
     // AI provider jobs (LM Studio, OpenRouter, Runway, Higgsfield)
     if (
       job.type.startsWith('text.') ||
-      job.type.startsWith('video.') ||
+      (job.type.startsWith('video.') && job.type !== 'video.reference-analyze') ||
       job.type.startsWith('edit.')
     ) {
       const provider = job.type.replace(/^(text\.|video\.|edit\.)/, '') as AiProvider;
@@ -542,7 +614,11 @@ function retainedAiDerivativeExtension(
 }
 
 export type WorkerDerivativeReceipt =
-  RealThumbnailReceipt | LocalGpuReceipt | ProtocolAiReceipt | RenderExportReceiptV1;
+  | RealThumbnailReceipt
+  | LocalGpuReceipt
+  | ProtocolAiReceipt
+  | ReferenceAnalysisReceipt
+  | RenderExportReceiptV1;
 
 export type ProtocolAiReceipt =
   | {
@@ -578,6 +654,8 @@ export interface RealThumbnailReceipt {
     readonly height: number;
   };
 }
+
+export type ReferenceAnalysisReceipt = VideoReferenceAnalyzeReceipt;
 
 export function workerReceiptFromAiResult(
   job: { readonly id: string; readonly type: string },

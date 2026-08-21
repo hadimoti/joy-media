@@ -1,4 +1,8 @@
-import { WORKER_PROTOCOL_VERSION, type RenderJobPayload } from '@joy-media/job-protocol';
+import {
+  WORKER_PROTOCOL_VERSION,
+  type RenderJobPayload,
+  type VideoReferenceAnalyzePayload,
+} from '@joy-media/job-protocol';
 import type {
   ProductionRunAuthority,
   ProductionRunCheckpointUpdateResultV1,
@@ -22,7 +26,8 @@ export interface BrowserJob {
   readonly id: string;
   readonly projectId: string;
   readonly type: string;
-  readonly payload?: Partial<RenderJobPayload>;
+  readonly assetId?: string;
+  readonly payload?: Partial<RenderJobPayload> & Record<string, unknown>;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly progress: number;
   readonly cancelRequested: boolean;
@@ -30,15 +35,34 @@ export interface BrowserJob {
   readonly derivative?: {
     readonly jobId: string;
     readonly kind: string;
+    readonly assetId?: string;
     readonly reportRef?: string;
     readonly outputRef?: string;
-    readonly findings?: number;
+    readonly findings?: number | readonly unknown[];
     readonly qualityReport?: BrowserRenderReport;
     readonly sha256?: string;
     readonly bytes?: number;
+    readonly descriptor?: {
+      readonly mimeType: string;
+      readonly width?: number;
+      readonly height?: number;
+      readonly durationUs?: number;
+    };
+    readonly summary?: {
+      readonly shotCount: number;
+      readonly cutCount: number;
+      readonly averageShotDurationUs: number;
+      readonly fastestShotDurationUs: number;
+      readonly sampleCount: number;
+      readonly transcriptSegmentCount: number;
+      readonly audioBeatCount: number;
+    };
+    readonly evidence?: readonly unknown[];
+    readonly evidenceIds?: readonly string[];
     readonly workerRef: string;
     readonly resultRef: string;
     readonly verifiedAt: number;
+    readonly model?: string;
   };
 }
 
@@ -331,6 +355,22 @@ export class BrowserControlPlaneClient {
       ...(options?.imageAssetId !== undefined ? { assetId: options.imageAssetId } : {}),
       ...(options?.model !== undefined ? { model: options.model } : {}),
       ...(options?.params !== undefined ? { params: options.params } : {}),
+    });
+  }
+  async enqueueReferenceAnalysis(
+    projectId: string,
+    id: string,
+    payload: VideoReferenceAnalyzePayload,
+  ): Promise<BrowserJob> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+      id,
+      type: 'video.reference-analyze',
+      assetId: payload.assetId,
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      payload,
+      requirements: { capabilities: ['video.reference-analyze'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 2,
     });
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<void> {

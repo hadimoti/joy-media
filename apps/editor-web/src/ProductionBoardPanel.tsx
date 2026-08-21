@@ -160,15 +160,21 @@ export function ProductionBoardPanel({
   return (
     <ProductionBoardPanelView
       loadState={loadState.kind}
-      errorMessage={loadState.kind === 'error' ? loadState.message : undefined}
-      model={model}
-      status={status}
+      {...(loadState.kind === 'error' ? { errorMessage: loadState.message } : {})}
+      {...(model === undefined ? {} : { model })}
+      {...(status === undefined ? {} : { status })}
       onRefresh={() => void refresh()}
-      onApproval={(run, approval, decision) => void approve(run, approval, decision)}
-      onCancel={(run) => void cancel(run)}
-      onRetry={(run) => void retry(run)}
+      {...{
+        onApproval: (
+          run: ProductionBoardRunProjection,
+          approval: ProductionApprovalV1,
+          decision: ContactSheetApprovalDecision,
+        ) => void approve(run, approval, decision),
+        onCancel: (run: ProductionBoardRunProjection) => void cancel(run),
+        onRetry: (run: ProductionBoardRunProjection) => void retry(run),
+      }}
       retryAvailable={onRetryRun !== undefined}
-      onOpenLink={onOpenLink}
+      {...(onOpenLink === undefined ? {} : { onOpenLink })}
     />
   );
 }
@@ -318,10 +324,10 @@ export function ProductionBoardPanelView({
               run={selectedRun}
               section={section}
               retryAvailable={retryAvailable}
-              onApproval={onApproval}
-              onCancel={onCancel}
-              onRetry={onRetry}
-              onOpenLink={onOpenLink}
+              {...(onApproval === undefined ? {} : { onApproval })}
+              {...(onCancel === undefined ? {} : { onCancel })}
+              {...(onRetry === undefined ? {} : { onRetry })}
+              {...(onOpenLink === undefined ? {} : { onOpenLink })}
             />
           )}
         </div>
@@ -401,9 +407,11 @@ function RunDetails({
               request={requestFromApproval(approval)}
               approvalId={approval.approvalId}
               initialResponse={approval.response}
-              initialRejectionReason={approval.rejectionReason}
+              {...(approval.rejectionReason === undefined
+                ? {}
+                : { initialRejectionReason: approval.rejectionReason })}
               storageKey={`${run.runId}:${approval.approvalId}`}
-              storage={typeof window === 'undefined' ? undefined : window.localStorage}
+              {...(typeof window === 'undefined' ? {} : { storage: window.localStorage })}
               onSubmit={(decision) => onApproval?.(run, approval, decision)}
             />
           ))}
@@ -426,13 +434,14 @@ function RunDetails({
                       <a
                         key={`${link.kind}:${link.id}`}
                         href={link.href}
+                        title={link.label}
                         onClick={(event) => {
                           if (onOpenLink === undefined) return;
                           event.preventDefault();
                           onOpenLink(link.href);
                         }}
                       >
-                        {link.label}
+                        {displayBoardLinkLabel(link)}
                       </a>
                     ))}
                   </div>
@@ -456,4 +465,11 @@ function requestFromApproval(approval: ProductionApprovalV1): HumanInputRequest 
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function displayBoardLinkLabel(link: { readonly kind: string; readonly label: string }): string {
+  if (link.kind === 'artifact' && link.label.startsWith('Reference analysis ')) {
+    return `View ${link.label.toLowerCase()}`;
+  }
+  return link.label;
 }

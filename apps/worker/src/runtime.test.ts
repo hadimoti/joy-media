@@ -30,6 +30,7 @@ describe('Worker runtime', () => {
     expect(runtime.hello('win32', 'x64').capabilities).toEqual([
       'asset.thumbnail',
       'render.export',
+      'video.reference-analyze',
     ]);
   });
   it('bounds logs and cooperatively cancels jobs', async () => {
@@ -220,6 +221,7 @@ describe('Worker runtime', () => {
     expect(runtime.hello('linux', 'x64').capabilities).toEqual([
       'asset.thumbnail',
       'render.export',
+      'video.reference-analyze',
       'image.comfy',
       'audio.ml-denoise',
     ]);
