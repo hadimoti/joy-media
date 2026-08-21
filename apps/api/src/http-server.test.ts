@@ -7,6 +7,7 @@ import { createControlPlaneHttpServer, type ApiAuthentication } from './http-ser
 import { DisabledMediaAuth } from './media-auth.js';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
+import type { WorkerResultReceiptV1, WorkerJobType } from '@joy-media/job-protocol';
 
 const servers: Server[] = [];
 
@@ -484,6 +485,124 @@ describe('control-plane HTTP transport', () => {
         payload: { ...typedJob.payload, projectRef: 'C:\\private\\project.json' },
       }),
     ).toMatchObject({ status: 409, body: { error: { code: 'WORKER_JOB_INVALID' } } });
+  });
+
+  it('accepts every AI Worker receipt variant through the completion route', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    const variants: readonly {
+      readonly type: Extract<
+        WorkerJobType,
+        'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield'
+      >;
+      readonly receipt: WorkerResultReceiptV1;
+    }[] = [
+      {
+        type: 'text.lm-studio',
+        receipt: {
+          kind: 'text.lm-studio',
+          resultRef: 'ai-text-local-1',
+          sha256: 'd'.repeat(64),
+          bytes: 64,
+          model: 'local-model',
+        },
+      },
+      {
+        type: 'text.openrouter',
+        receipt: {
+          kind: 'text.openrouter',
+          resultRef: 'ai-text-remote-1',
+          sha256: 'e'.repeat(64),
+          bytes: 128,
+          model: 'openrouter-model',
+        },
+      },
+      {
+        type: 'video.runway',
+        receipt: {
+          kind: 'video.runway',
+          assetId: 'asset-video-1',
+          sha256: 'f'.repeat(64),
+          bytes: 8192,
+          localRef: 'ai-video-runway-1',
+          descriptor: { mimeType: 'video/mp4', width: 1280, height: 720 },
+          model: 'gen4',
+        },
+      },
+      {
+        type: 'edit.higgsfield',
+        receipt: {
+          kind: 'edit.higgsfield',
+          assetId: 'asset-edit-1',
+          sha256: '1'.repeat(64),
+          bytes: 4096,
+          localRef: 'ai-edit-higgsfield-1',
+          descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+          model: 'higgsfield-default',
+        },
+      },
+    ];
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: variants.map((variant) => variant.type) },
+      workerToken,
+    );
+
+    for (const [index, variant] of variants.entries()) {
+      const job = {
+        id: `ai-job-${index + 1}`,
+        type: variant.type,
+        payload: {
+          prompt: `Generate variant ${index + 1}`,
+          ...(variant.type === 'edit.higgsfield' ? { imageAssetId: 'source-image-1' } : {}),
+        },
+        requirements: {
+          capabilities: [variant.type],
+          privacy:
+            variant.type === 'text.lm-studio' ? ('local-only' as const) : ('remote-api' as const),
+        },
+        idempotencyKey: `idem-ai-job-${index + 1}`,
+        maxAttempts: 2,
+      };
+      expect(await request(origin, 'POST', '/v1/projects/p/jobs', job)).toMatchObject({
+        status: 201,
+        body: { data: { id: job.id, type: variant.type } },
+      });
+      expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
+        status: 200,
+        body: { data: { id: job.id, type: variant.type } },
+      });
+      expect(
+        await request(
+          origin,
+          'POST',
+          `/v1/workers/w/jobs/${job.id}/complete`,
+          { result: variant.receipt },
+          workerToken,
+        ),
+      ).toMatchObject({
+        status: 200,
+        body: {
+          data: {
+            id: job.id,
+            state: 'completed',
+            derivative: { kind: variant.type },
+          },
+        },
+      });
+    }
   });
 });
 

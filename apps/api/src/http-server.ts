@@ -20,7 +20,7 @@ import {
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
-import type { WorkerJobV1 } from '@joy-media/job-protocol';
+import type { WorkerJobV1, WorkerResultReceiptV1 } from '@joy-media/job-protocol';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -938,55 +938,22 @@ function workerJobEnvelope(
   } as WorkerJobV1;
 }
 
-function optionalWorkerResult(body: Record<string, unknown>):
-  | { readonly kind: 'fixture.thumbnail'; readonly sha256: string; readonly bytes: number }
-  | {
-      readonly kind: 'asset.thumbnail';
-      readonly assetId: string;
-      readonly sha256: string;
-      readonly bytes: number;
-      readonly localRef: string;
-      readonly descriptor: {
-        readonly mimeType: 'image/jpeg';
-        readonly width: number;
-        readonly height: number;
-      };
-    }
-  | {
-      readonly kind: 'image.comfy' | 'audio.ml-denoise';
-      readonly assetId: string;
-      readonly sha256: string;
-      readonly bytes: number;
-      readonly localRef: string;
-      readonly descriptor: {
-        readonly mimeType: string;
-        readonly width?: number;
-        readonly height?: number;
-      };
-    }
-  | {
-      readonly kind: 'render.export';
-      readonly reportRef: string;
-      readonly outputRef: string;
-      readonly sha256: string;
-      readonly bytes: number;
-    }
-  | {
-      readonly kind: 'render.inspect';
-      readonly reportRef: string;
-      readonly findings: number;
-    }
-  | undefined {
+function optionalWorkerResult(body: Record<string, unknown>): WorkerResultReceiptV1 | undefined {
   const value = body.result;
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new ControlPlaneError('REQUEST_INVALID', 'result must be an object');
   const result = value as Record<string, unknown>;
-  if (result.kind === 'fixture.thumbnail' && isReceiptHashAndBytes(result)) {
+  if (
+    result.kind === 'fixture.thumbnail' &&
+    hasOnlyKeys(result, ['kind', 'sha256', 'bytes']) &&
+    isReceiptHashAndBytes(result)
+  ) {
     return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
   }
   if (
     result.kind === 'render.export' &&
+    hasOnlyKeys(result, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes']) &&
     typeof result.reportRef === 'string' &&
     typeof result.outputRef === 'string' &&
     isReceiptHashAndBytes(result)
@@ -1001,26 +968,64 @@ function optionalWorkerResult(body: Record<string, unknown>):
   }
   if (
     result.kind === 'render.inspect' &&
+    hasOnlyKeys(result, ['kind', 'reportRef', 'findings']) &&
     typeof result.reportRef === 'string' &&
     typeof result.findings === 'number' &&
-    Number.isSafeInteger(result.findings)
+    Number.isSafeInteger(result.findings) &&
+    result.findings >= 0
   ) {
     return { kind: result.kind, reportRef: result.reportRef, findings: result.findings };
   }
+  if (
+    (result.kind === 'text.lm-studio' || result.kind === 'text.openrouter') &&
+    hasOnlyKeys(result, ['kind', 'resultRef', 'sha256', 'bytes', 'model']) &&
+    typeof result.resultRef === 'string' &&
+    isReceiptHashAndBytes(result) &&
+    (result.model === undefined || typeof result.model === 'string')
+  ) {
+    return {
+      kind: result.kind,
+      resultRef: result.resultRef,
+      sha256: result.sha256,
+      bytes: result.bytes,
+      ...(result.model === undefined ? {} : { model: result.model }),
+    };
+  }
   const descriptor = result.descriptor;
   if (
-    (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') &&
+    (result.kind === 'image.comfy' ||
+      result.kind === 'audio.ml-denoise' ||
+      result.kind === 'video.runway' ||
+      result.kind === 'edit.higgsfield') &&
+    hasOnlyKeys(result, [
+      'kind',
+      'assetId',
+      'sha256',
+      'bytes',
+      'localRef',
+      'descriptor',
+      'model',
+    ]) &&
     typeof result.assetId === 'string' &&
     typeof result.localRef === 'string' &&
     isReceiptHashAndBytes(result) &&
     descriptor !== null &&
     typeof descriptor === 'object' &&
     !Array.isArray(descriptor) &&
-    typeof (descriptor as Record<string, unknown>).mimeType === 'string'
+    hasOnlyKeys(descriptor as Record<string, unknown>, ['mimeType', 'width', 'height']) &&
+    typeof (descriptor as Record<string, unknown>).mimeType === 'string' &&
+    ((descriptor as Record<string, unknown>).mimeType as string).length > 0 &&
+    (result.model === undefined || typeof result.model === 'string')
   ) {
     const mimeType = (descriptor as Record<string, unknown>).mimeType as string;
     const width = (descriptor as Record<string, unknown>).width;
     const height = (descriptor as Record<string, unknown>).height;
+    if (
+      (width !== undefined && (!Number.isSafeInteger(width) || (width as number) < 1)) ||
+      (height !== undefined && (!Number.isSafeInteger(height) || (height as number) < 1))
+    ) {
+      throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+    }
     return {
       kind: result.kind,
       assetId: result.assetId,
@@ -1029,22 +1034,27 @@ function optionalWorkerResult(body: Record<string, unknown>):
       localRef: result.localRef,
       descriptor: {
         mimeType,
-        ...(typeof width === 'number' && Number.isSafeInteger(width) ? { width } : {}),
-        ...(typeof height === 'number' && Number.isSafeInteger(height) ? { height } : {}),
+        ...(width === undefined ? {} : { width: width as number }),
+        ...(height === undefined ? {} : { height: height as number }),
       },
+      ...(result.model === undefined ? {} : { model: result.model }),
     };
   }
   if (
     result.kind !== 'asset.thumbnail' ||
+    !hasOnlyKeys(result, ['kind', 'assetId', 'sha256', 'bytes', 'localRef', 'descriptor']) ||
     typeof result.assetId !== 'string' ||
     typeof result.localRef !== 'string' ||
     !isReceiptHashAndBytes(result) ||
     descriptor === null ||
     typeof descriptor !== 'object' ||
     Array.isArray(descriptor) ||
+    !hasOnlyKeys(descriptor as Record<string, unknown>, ['mimeType', 'width', 'height']) ||
     (descriptor as Record<string, unknown>).mimeType !== 'image/jpeg' ||
     !Number.isSafeInteger((descriptor as Record<string, unknown>).width) ||
-    !Number.isSafeInteger((descriptor as Record<string, unknown>).height)
+    ((descriptor as Record<string, unknown>).width as number) < 1 ||
+    !Number.isSafeInteger((descriptor as Record<string, unknown>).height) ||
+    ((descriptor as Record<string, unknown>).height as number) < 1
   ) {
     throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
   }
@@ -1060,6 +1070,11 @@ function optionalWorkerResult(body: Record<string, unknown>):
       height: (descriptor as Record<string, unknown>).height as number,
     },
   };
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
 function workerThumbnailHeaders(request: IncomingMessage): {
