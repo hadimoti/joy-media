@@ -8,6 +8,8 @@ Implemented `@joy-media/production-quality` with delivery promises, render repor
 
 Integrated delivery quality evidence into `@joy-media/export-core` and Worker `render.export` receipts with opaque `reportRef`/`outputRef` and API-safe report facts.
 
+Review follow-up: Worker export now derives the delivery promise from the original render manifest, rejects truncated or missing artifacts, rejects failed delivery findings, and calls lease completion only after quality verification passes.
+
 ## Files Changed
 
 - Created `packages/production-quality/`
@@ -22,7 +24,7 @@ Integrated delivery quality evidence into `@joy-media/export-core` and Worker `r
 pnpm exec vitest run packages/production-quality/src packages/export-core/src/index.test.ts apps/worker/src/export-job.test.ts
 ```
 
-Result: 5 test files passed, 18 tests passed.
+Result after review follow-up: 5 test files passed, 19 tests passed.
 
 ```powershell
 pnpm --filter @joy-media/production-quality build
@@ -42,4 +44,5 @@ Result: all matched files use Prettier style.
 
 - `production-quality` avoids a project-reference cycle by accepting a structural render-bundle shape for preflight instead of depending on `@joy-media/render-planner`.
 - `renderFixture` remains intentionally silent; deep delivery verification now flags that as `audio-silence` while preserving the older codec/dimension verification path.
+- Worker `render.export` does not synthesize quality pass reports from render-host return values. The MP4 artifact must exist and pass inspection before the coordinator is completed.
 - Existing unrelated dirty files were preserved and not staged.

@@ -54,7 +54,6 @@ describe('leased export job', () => {
           'asset:image-a': image,
           'html-scene:joy.firstparty.title': 'joy.firstparty.title',
         }),
-        frameLimit: 3,
       },
     );
 
@@ -77,8 +76,48 @@ describe('leased export job', () => {
     expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
     expect(fixtureSpy).not.toHaveBeenCalled();
     expect(pageSpy).toHaveBeenCalled();
-    expect(pageEvents).toEqual(['paint:0', 'paint:33333', 'paint:66666', 'destroy']);
+    expect(pageEvents.slice(0, 3)).toEqual(['paint:0', 'paint:33333', 'paint:66666']);
+    expect(pageEvents.at(-1)).toBe('destroy');
     expect(calls).toEqual(['worker-1:job-1']);
+  });
+
+  it('rejects truncated renders against the original delivery promise before completing', async () => {
+    const calls: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-truncated-export-'));
+    const video = join(directory, 'timecode-tone.mp4');
+    const image = join(directory, 'sticker.png');
+    writeFileSync(video, 'worker-private-video');
+    writeFileSync(image, 'worker-private-sticker');
+    vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
+      paint(input) {
+        return new Uint8Array(
+          input.plan.frame.viewport.width * input.plan.frame.viewport.height * 4,
+        ).fill(0x20 + (input.plan.frame.timeUs % 23));
+      },
+      destroy() {
+        return undefined;
+      },
+    });
+
+    await expect(
+      executeLeasedExport(
+        { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
+        'worker-1',
+        'job-1',
+        renderBundle(),
+        {
+          outputDirectory: directory,
+          mediaResolver: new StaticWorkerMediaResolver({
+            'asset:video-a': video,
+            'asset:video-b': video,
+            'asset:image-a': image,
+            'html-scene:joy.firstparty.title': 'joy.firstparty.title',
+          }),
+          frameLimit: 3,
+        },
+      ),
+    ).rejects.toThrow(/duration|frame-count/);
+    expect(calls).toEqual([]);
   });
 
   it('refuses bundles whose required opaque assets are missing from the Worker', async () => {
@@ -107,60 +146,54 @@ describe('leased export job', () => {
     expect(existsSync(join(directory, 'job-1.mp4'))).toBe(false);
   });
 
-  it('drives export through the render-host driver protocol', async () => {
+  it('refuses a render-host receipt that did not leave an inspectable artifact', async () => {
     const calls: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
     const driverCalls: string[] = [];
 
-    const result = await executeLeasedExport(
-      { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
-      'worker-1',
-      'job-1',
-      renderBundle(),
-      {
-        outputDirectory: directory,
-        mediaResolver: new StaticWorkerMediaResolver({}),
-        renderHostDriver: {
-          export: async (request) => {
-            driverCalls.push(`${request.protocolVersion}:${request.bundle.seed}`);
-            return {
-              manifest: {
-                projectId: 'visual',
-                revision: 0,
+    await expect(
+      executeLeasedExport(
+        { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
+        'worker-1',
+        'job-1',
+        renderBundle(),
+        {
+          outputDirectory: directory,
+          mediaResolver: new StaticWorkerMediaResolver({}),
+          renderHostDriver: {
+            export: async (request) => {
+              driverCalls.push(`${request.protocolVersion}:${request.bundle.seed}`);
+              return {
+                manifest: {
+                  projectId: 'visual',
+                  revision: 0,
+                  width: 64,
+                  height: 36,
+                  frameRate: 30,
+                  durationUs: 100_000,
+                  preset: 'social-h264-aac',
+                },
+                frames: 3,
+                videoCodec: 'h264',
+                audioCodec: 'aac',
                 width: 64,
                 height: 36,
-                frameRate: 30,
-                durationUs: 100_000,
-                preset: 'social-h264-aac',
-              },
-              frames: 3,
-              videoCodec: 'h264',
-              audioCodec: 'aac',
-              width: 64,
-              height: 36,
-              sha256: 'a'.repeat(64),
-              bytes: 1234,
-              toolVersions: {
-                renderHost: 'test-driver',
-                ffmpeg: 'test-ffmpeg',
-                ffprobe: 'test-ffprobe',
-              },
-            };
+                sha256: 'a'.repeat(64),
+                bytes: 1234,
+                toolVersions: {
+                  renderHost: 'test-driver',
+                  ffmpeg: 'test-ffmpeg',
+                  ffprobe: 'test-ffprobe',
+                },
+              };
+            },
           },
         },
-      },
-    );
+      ),
+    ).rejects.toThrow(/artifact/i);
 
     expect(driverCalls).toEqual(['1:worker-render']);
-    expect(result).toMatchObject({
-      reportRef: 'report-job-1',
-      outputRef: 'render-job-1-aaaaaaaaaaaaaaaa',
-      qualityReport: expect.objectContaining({
-        artifact: expect.objectContaining({ outputRef: 'render-job-1-aaaaaaaaaaaaaaaa' }),
-      }),
-    });
-    expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
-    expect(calls).toEqual(['worker-1:job-1']);
+    expect(calls).toEqual([]);
   });
 });
 

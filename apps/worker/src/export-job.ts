@@ -60,19 +60,19 @@ export async function executeLeasedExport(
       mediaResolver: options.mediaResolver,
       ...(options.frameLimit === undefined ? {} : { frameLimit: options.frameLimit }),
     });
-    coordinator.complete(workerId, jobId);
     const outputRef = `render-${opaqueSegment(jobId)}-${result.sha256.slice(0, 16)}`;
     const reportRef = options.reportRef ?? `report-${opaqueSegment(jobId)}`;
-    const qualityReport = existsSync(outputPath)
-      ? verifyExportDelivery(
-          outputPath,
-          deliveryPromiseForRenderedFrames(result.manifest, result.frames),
-          {
-            outputRef,
-          },
-        )
-      : qualityReportFromRenderHostResult(result, outputRef);
+    if (!existsSync(outputPath)) throw new Error('render export artifact is missing');
+    const qualityReport = verifyExportDelivery(
+      outputPath,
+      deliveryPromiseForManifest(result.manifest),
+      {
+        outputRef,
+      },
+    );
     assertApiSafeRenderReport(qualityReport);
+    rejectFailedDelivery(qualityReport);
+    coordinator.complete(workerId, jobId);
     return {
       kind: 'render.export',
       outputRef,
@@ -91,52 +91,13 @@ export async function executeLeasedExport(
   }
 }
 
-function deliveryPromiseForRenderedFrames(manifest: RenderManifest, frames: number) {
-  const durationUs = Math.round((frames / manifest.frameRate) * 1_000_000);
-  return deliveryPromiseForManifest({ ...manifest, durationUs });
-}
-
-function qualityReportFromRenderHostResult(
-  result: Awaited<ReturnType<RenderHostDriver['export']>>,
-  outputRef: string,
-): RenderReportV1 {
-  const promise = deliveryPromiseForRenderedFrames(result.manifest, result.frames);
-  const report: RenderReportV1 = {
-    version: 1,
-    promiseId: promise.id,
-    checkedAt: '1970-01-01T00:00:00.000Z',
-    artifact: { outputRef, sha256: result.sha256, bytes: result.bytes },
-    facts: {
-      container: 'mp4',
-      video: {
-        codec: result.videoCodec,
-        width: result.width,
-        height: result.height,
-        frameRate: result.manifest.frameRate,
-        durationUs: promise.video.durationUs,
-        frames: result.frames,
-        sampledFrames: 0,
-        blackFrames: 0,
-        blankFrames: 0,
-        duplicateFrames: 0,
-      },
-      audio: {
-        codec: result.audioCodec,
-        sampleRate: promise.audio.sampleRate,
-        channels: promise.audio.channels,
-        durationUs: promise.video.durationUs,
-        rms: promise.audio.minRms,
-        peak: 0,
-        clippedSamples: 0,
-      },
-      subtitles: { streams: 0 },
-    },
-    findings: [
-      { code: 'render-host-facts', status: 'pass', message: 'render host supplied delivery facts' },
-    ],
-  };
-  assertApiSafeRenderReport(report);
-  return report;
+function rejectFailedDelivery(report: RenderReportV1): void {
+  const failed = report.findings.filter((finding) => finding.status === 'fail');
+  if (failed.length > 0) {
+    throw new Error(
+      `render delivery quality failed: ${failed.map((finding) => finding.code).join(', ')}`,
+    );
+  }
 }
 
 function opaqueSegment(value: string): string {
