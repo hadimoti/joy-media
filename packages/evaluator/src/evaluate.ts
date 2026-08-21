@@ -16,6 +16,7 @@ import type {
   TimeUs,
 } from '@joy-media/project-schema';
 import { frameIndexAtUs, rangeContainsUs } from '@joy-media/project-schema';
+import { sourceTimeAtPlayhead } from '@joy-media/timeline-engine';
 
 export interface EvaluatedVideoFrame {
   /** Clip IDs from the root composition down to the leaf video clip — stable identity across nesting. */
@@ -80,10 +81,12 @@ function collectFrames(
       }
       const clipLocalUs = timeUs - clip.startUs;
       if (clip.kind === 'video') {
+        const sourceTimeUs = sourceTimeAtPlayhead(clip, timeUs);
+        if (sourceTimeUs === undefined) continue;
         frames.push({
           clipPath: [...pathPrefix, clip.id],
           assetId: clip.assetId,
-          sourceTimeUs: clip.sourceInUs + clipLocalUs,
+          sourceTimeUs,
         });
       } else {
         if (visiting.has(clip.compositionId)) {

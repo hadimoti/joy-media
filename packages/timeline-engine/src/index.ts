@@ -1,9 +1,23 @@
 import type { Clip, TimeUs } from '@joy-media/project-schema';
+import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { CommandTransaction, SpikeCommand } from '@joy-media/commands';
 
 export const MIN_PIXELS_PER_SECOND = 5;
 export const MAX_PIXELS_PER_SECOND = 200;
 export const DEFAULT_FREEZE_HOLD_US = 1_000_000;
+
+export interface SourceTimeClip {
+  readonly id: string;
+  readonly startUs: TimeUs;
+  readonly durationUs: TimeUs;
+  readonly sourceInUs: TimeUs;
+  readonly playbackRate?: number;
+}
+
+export interface SourceTimeTransition {
+  readonly rightClipId: string;
+  readonly durationUs: TimeUs;
+}
 
 export interface TimelineViewport {
   readonly originUs: TimeUs;
@@ -17,6 +31,42 @@ export function pixelToTime(pixel: number, viewport: TimelineViewport): TimeUs {
     0,
     Math.round(viewport.originUs + (pixel / viewport.pixelsPerSecond) * 1_000_000),
   );
+}
+
+/** End-exclusive composition playhead -> source time; returns undefined outside the clip body. */
+export function sourceTimeAtPlayhead(clip: SourceTimeClip, playheadUs: number): number | undefined {
+  if (playheadUs < clip.startUs || playheadUs >= clip.startUs + clip.durationUs) return undefined;
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) return clip.sourceInUs;
+  return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
+}
+
+/** Last playable source sample for a clip after its end-exclusive body. */
+export function finalSourceTimeUs(clip: SourceTimeClip): number {
+  const rate = normalizePlaybackRate(clip.playbackRate);
+  if (rate === 0) return clip.sourceInUs;
+  return clip.sourceInUs + Math.max(0, clip.durationUs * rate - 1);
+}
+
+/**
+ * Pure frame-planning helper: before a clip starts, transitions may preview the incoming clip
+ * from the overlap window; after the clip ends, clamp to the last playable sample.
+ */
+export function sourceTimeForTransitionSample(
+  clip: SourceTimeClip,
+  playheadUs: number,
+  transition?: SourceTimeTransition,
+): number {
+  if (transition !== undefined && clip.id === transition.rightClipId && playheadUs < clip.startUs) {
+    const rate = normalizePlaybackRate(clip.playbackRate);
+    if (rate === 0) return clip.sourceInUs;
+    const windowStart = clip.startUs - transition.durationUs;
+    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate;
+  }
+  const sourceTimeUs = sourceTimeAtPlayhead(clip, playheadUs);
+  if (sourceTimeUs !== undefined) return sourceTimeUs;
+  if (playheadUs < clip.startUs) return clip.sourceInUs;
+  return finalSourceTimeUs(clip);
 }
 
 /** CapCut-style fit: map full composition duration into the visible lane width. */

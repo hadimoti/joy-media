@@ -19,6 +19,7 @@
   "dependencies": {
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/camera-core": "workspace:*",
-    "@joy-media/project-schema": "workspace:*"
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/timeline-engine": "workspace:*"
   }
 }

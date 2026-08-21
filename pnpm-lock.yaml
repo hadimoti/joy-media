@@ -290,6 +290,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
+      '@joy-media/timeline-engine':
+        specifier: workspace:*
+        version: link:../timeline-engine
 
   packages/export-core:
     devDependencies:

@@ -23,6 +23,12 @@ export interface EffectDiagnostic {
   readonly status: 'applied' | 'bypassed' | 'unsupported' | 'error';
 }
 
+interface EffectSeedContext {
+  readonly compositionId: string;
+  readonly timeUs: number;
+  readonly nodeId: string;
+}
+
 export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
   validateRenderFrameIR(frame);
   const width = frame.viewport.width;
@@ -37,7 +43,11 @@ export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
     if (node.kind === 'text') drawTextRaw(nodePixels, width, height, node);
     else drawSurfaceRaw(nodePixels, width, height, node);
     if ('effects' in node && node.effects && node.effects.length > 0) {
-      applyHeadlessEffects(nodePixels, width, height, node.effects);
+      applyHeadlessEffects(nodePixels, width, height, node.effects, {
+        compositionId: frame.compositionId,
+        timeUs: frame.timeUs,
+        nodeId: node.id,
+      });
     }
     compositeNode(pixels, nodePixels, width, height, node.opacity);
   }
@@ -151,6 +161,7 @@ export function applyHeadlessEffects(
   width: number,
   height: number,
   effects: readonly EffectInstanceIR[] | undefined,
+  seedContext?: EffectSeedContext,
 ): EffectDiagnostic[] {
   if (!effects || effects.length === 0) return [];
   const diagnostics: EffectDiagnostic[] = [];
@@ -194,8 +205,9 @@ export function applyHeadlessEffects(
       case 'grain': {
         const amount = effect.params.amount ?? 0.2;
         const n = Math.round(amount * 255);
-        pixelOp(pixels, (r, g, b) => {
-          const noise = (Math.random() - 0.5) * 2 * n;
+        const seed = hash32(effectSeed(seedContext, effect));
+        pixelOp(pixels, (r, g, b, pixelIndex) => {
+          const noise = (seededUnit(seed, pixelIndex) - 0.5) * 2 * n;
           return [clamp(r + noise), clamp(g + noise), clamp(b + noise)];
         });
         diagnostics.push({ instanceId: effect.id, effectId: effect.kind, status: 'applied' });
@@ -253,14 +265,39 @@ export function applyHeadlessEffects(
 
 function pixelOp(
   pixels: Uint8Array,
-  fn: (r: number, g: number, b: number) => [number, number, number],
+  fn: (r: number, g: number, b: number, pixelIndex: number) => [number, number, number],
 ): void {
+  let pixelIndex = 0;
   for (let i = 0; i < pixels.length; i += 4) {
-    const [r, g, b] = fn(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+    const [r, g, b] = fn(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!, pixelIndex++);
     pixels[i] = r;
     pixels[i + 1] = g;
     pixels[i + 2] = b;
   }
+}
+
+function effectSeed(seedContext: EffectSeedContext | undefined, effect: EffectInstanceIR): string {
+  if (seedContext === undefined) return `headless:${effect.kind}:${effect.id}`;
+  return `${seedContext.compositionId}:${seedContext.timeUs}:${seedContext.nodeId}:${effect.kind}:${effect.id}`;
+}
+
+function hash32(value: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function seededUnit(seed: number, pixelIndex: number): number {
+  let state = (seed ^ Math.imul(pixelIndex + 1, 0x9e3779b1)) >>> 0;
+  state ^= state >>> 16;
+  state = Math.imul(state, 0x85ebca6b) >>> 0;
+  state ^= state >>> 13;
+  state = Math.imul(state, 0xc2b2ae35) >>> 0;
+  state ^= state >>> 16;
+  return state / 0xffffffff;
 }
 
 function boxBlur(pixels: Uint8Array, width: number, height: number, radius: number): void {

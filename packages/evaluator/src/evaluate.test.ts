@@ -115,6 +115,43 @@ function fixture(): SpikeProject {
   };
 }
 
+function playbackFixture(playbackRate: number | undefined): SpikeProject {
+  return {
+    schemaVersion: 0,
+    id: 'playback-eval',
+    rootCompositionId: 'root',
+    compositions: {
+      root: {
+        id: 'root',
+        name: 'Root',
+        width: 1080,
+        height: 1920,
+        frameRate: rational(30, 1),
+        durationUs: 6 * SECOND,
+        tracks: [
+          {
+            id: 'track-main',
+            kind: 'video',
+            order: 0,
+            enabled: true,
+            clips: [
+              {
+                kind: 'video',
+                id: 'clip-rate',
+                startUs: SECOND,
+                durationUs: 2 * SECOND,
+                assetId: 'asset-rate',
+                sourceInUs: 10 * SECOND,
+                ...(playbackRate === undefined ? {} : { playbackRate }),
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
 describe('spike fixture', () => {
   it('passes validation', () => {
     expect(validateSpikeProject(fixture())).toEqual([]);
@@ -148,6 +185,22 @@ describe('evaluateFrame', () => {
     const result = evaluateFrame(fixture(), 'root', 2 * SECOND);
     const mainFrames = result.frames.filter((f) => f.clipPath[0] !== 'clip-o');
     expect(mainFrames).toEqual([{ clipPath: ['clip-b'], assetId: 'asset-b', sourceTimeUs: 0 }]);
+  });
+
+  it.each([
+    { label: 'freeze', playbackRate: 0, playheadUs: SECOND, expected: 10 * SECOND },
+    { label: 'half speed', playbackRate: 0.5, playheadUs: 2 * SECOND, expected: 10.5 * SECOND },
+    { label: 'normal speed', playbackRate: 1, playheadUs: 2 * SECOND, expected: 11 * SECOND },
+    { label: 'double speed', playbackRate: 2, playheadUs: 2 * SECOND, expected: 12 * SECOND },
+  ])('honors $label playback mapping from source in-point through the active range', ({ playbackRate, playheadUs, expected }) => {
+    const result = evaluateFrame(playbackFixture(playbackRate), 'root', playheadUs);
+    expect(result.frames).toEqual([
+      { clipPath: ['clip-rate'], assetId: 'asset-rate', sourceTimeUs: expected },
+    ]);
+  });
+
+  it('keeps playback-mapped clips end-exclusive at source out', () => {
+    expect(evaluateFrame(playbackFixture(2), 'root', 3 * SECOND).frames).toEqual([]);
   });
 
   it('returns frames in draw order (ascending track order = bottom to top)', () => {

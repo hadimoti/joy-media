@@ -4,6 +4,7 @@ import {
   clampPixelsPerSecond,
   clipRateLabel,
   commitMove,
+  finalSourceTimeUs,
   fitPixelsPerSecond,
   formatRulerLabel,
   placeDuplicateAfter,
@@ -12,6 +13,8 @@ import {
   rippleDelete,
   snapTime,
   splitCommand,
+  sourceTimeAtPlayhead,
+  sourceTimeForTransitionSample,
   timeToPixel,
   toggleSelection,
   trimCommand,
@@ -102,6 +105,44 @@ describe('timeline coordinates', () => {
         playbackRate: 0,
       }),
     ).toBe('❄');
+  });
+});
+
+describe('source-time helpers', () => {
+  const clip = {
+    id: 'clip-a',
+    startUs: 2_000_000,
+    durationUs: 2_000_000,
+    sourceInUs: 10_000_000,
+  } as const;
+
+  it.each([
+    { playbackRate: 0, playheadUs: 2_000_000, expected: 10_000_000 },
+    { playbackRate: 0.5, playheadUs: 3_000_000, expected: 10_500_000 },
+    { playbackRate: 1, playheadUs: 3_000_000, expected: 11_000_000 },
+    { playbackRate: 2, playheadUs: 3_000_000, expected: 12_000_000 },
+  ])('maps playbackRate $playbackRate inside the clip body', ({ playbackRate, playheadUs, expected }) => {
+    expect(sourceTimeAtPlayhead({ ...clip, playbackRate }, playheadUs)).toBe(expected);
+  });
+
+  it('keeps the clip body end-exclusive and exposes the last playable sample separately', () => {
+    expect(sourceTimeAtPlayhead({ ...clip, playbackRate: 2 }, clip.startUs - 1)).toBeUndefined();
+    expect(sourceTimeAtPlayhead({ ...clip, playbackRate: 2 }, clip.startUs + clip.durationUs)).toBeUndefined();
+    expect(finalSourceTimeUs({ ...clip, playbackRate: 2 })).toBe(13_999_999);
+    expect(finalSourceTimeUs({ ...clip, playbackRate: 0 })).toBe(10_000_000);
+  });
+
+  it('previews the incoming clip from the transition overlap window and clamps after the clip end', () => {
+    const transition = { rightClipId: 'clip-a', durationUs: 500_000 } as const;
+    expect(
+      sourceTimeForTransitionSample({ ...clip, playbackRate: 2 }, clip.startUs - 250_000, transition),
+    ).toBe(10_500_000);
+    expect(
+      sourceTimeForTransitionSample({ ...clip, playbackRate: 0 }, clip.startUs - 250_000, transition),
+    ).toBe(10_000_000);
+    expect(sourceTimeForTransitionSample({ ...clip, playbackRate: 0.5 }, clip.startUs + clip.durationUs)).toBe(
+      10_999_999,
+    );
   });
 });
 
