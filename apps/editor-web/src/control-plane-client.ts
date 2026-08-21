@@ -136,8 +136,7 @@ export interface BrowserProductionRunCancelInput {
   readonly expectedUpdatedSeq?: number;
 }
 
-export interface BrowserProductionRunApprovalResponseInput
-  extends RecordProductionApprovalResponseInput {
+export interface BrowserProductionRunApprovalResponseInput extends RecordProductionApprovalResponseInput {
   readonly expectedUpdatedSeq?: number;
 }
 
@@ -504,7 +503,7 @@ export class BrowserControlPlaneClient {
   async cancelProductionRun(
     projectId: string,
     runId: string,
-    input: BrowserProductionRunCancelInput = {},
+    input: BrowserProductionRunCancelInput,
   ): Promise<ProductionRunRecordV1> {
     return this.post(
       `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(
