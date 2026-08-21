@@ -16,6 +16,7 @@ export const PANEL_IDS = [
   'jobs',
   'agent',
   'workflows',
+  'production',
   'plugins',
   'templates',
 ] as const;
@@ -46,6 +47,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'jobs',
     'agent',
     'workflows',
+    'production',
     'plugins',
     'templates',
   ],

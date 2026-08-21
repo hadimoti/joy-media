@@ -23,6 +23,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   jobs: 'Jobs',
   agent: 'Joy Code',
   workflows: 'Workflows',
+  production: 'Production',
   plugins: 'Plugins',
   templates: 'Templates',
 };
@@ -50,6 +51,7 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   jobs: iconUrl('job.png'),
   agent: iconUrl('ui/agent-ai_24x24.png'),
   workflows: iconUrl('workflow.png'),
+  production: iconUrl('job.png'),
   plugins: iconUrl('plugin.png'),
   templates: iconUrl('24_templates.png'),
 };

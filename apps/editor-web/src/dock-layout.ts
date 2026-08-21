@@ -35,7 +35,7 @@ export type EditorViewMode = 'vertical' | 'widescreen';
 export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
 
 /** Per-mode Dockview JSON keys (bump when a seed changes). */
-export const DOCK_LAYOUT_VERSION = 9;
+export const DOCK_LAYOUT_VERSION = 10;
 
 /** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
 export const DOCK_LAYOUT_KEY = 'joy-media.dockview.v8';
@@ -75,6 +75,7 @@ const CONTEXT_GROUP = [
   'jobs',
   'diagnostics',
   'workflows',
+  'production',
   'camera',
 ] as const;
 

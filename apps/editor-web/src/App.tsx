@@ -134,6 +134,7 @@ import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
+import { ProductionBoardPanel } from './ProductionBoardPanel.js';
 import { BrowserProductionRunStore } from './browser-production-run-store.js';
 import { PluginsPanel } from './PluginsPanel.js';
 import { TemplatesPanel } from './TemplatesPanel.js';
@@ -2841,6 +2842,35 @@ function EditorWorkspace({
                 runId,
                 error: error instanceof Error ? error.message : String(error),
               };
+            }
+          }}
+        />
+      );
+    }
+    if (api.id === 'production') {
+      return (
+        <ProductionBoardPanel
+          store={productionRunStore}
+          authority={workflowAuthority}
+          currentProjectRevision={context.session.projectRevisionId}
+          artifacts={context.artifacts ?? { artifacts: {}, versions: {} }}
+          dataLanes={context.dataLanes ?? []}
+          assets={Object.values(monitorAssetCatalog.assets)}
+          onOpenLink={(href) => {
+            if (href.startsWith('#data-lane:') || href.startsWith('#artifact:')) {
+              context.activatePanel('timeline');
+              return;
+            }
+            if (href.startsWith('#asset:')) {
+              context.activatePanel('media');
+              return;
+            }
+            if (
+              href.startsWith('#job:') ||
+              href.startsWith('#provider:') ||
+              href.startsWith('#report:')
+            ) {
+              context.activatePanel('jobs');
             }
           }}
         />
