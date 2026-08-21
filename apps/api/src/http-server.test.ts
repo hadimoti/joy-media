@@ -588,6 +588,18 @@ describe('control-plane HTTP transport', () => {
       },
     });
     expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/projects/p/production-runs/run-api/approvals/approval-api/respond',
+        {
+          approved: true,
+          responseRef: 'response-api-role-mismatch',
+          authority: { principalId: 'owner', role: 'reviewer' },
+        },
+      ),
+    ).toMatchObject({ status: 409, body: { error: { code: 'AUTHORITY_INVALID' } } });
+    expect(
       await request(origin, 'POST', '/v1/projects/p/production-runs/run-api/cancel', {
         authority,
         expectedUpdatedSeq: 2,
@@ -642,6 +654,19 @@ describe('control-plane HTTP transport', () => {
               artifactIds: [],
             },
           ],
+        }),
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'PRODUCTION_RUN_INVALID' } } });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs', {
+        runKey: 'run-key-api-nested-raw',
+        authority,
+        record: queuedRecord('run-api-nested-raw', authority, {
+          checkpoint: {
+            export: {
+              opaqueToken: 'QUJD/'.repeat(32),
+            },
+          },
         }),
       }),
     ).toMatchObject({ status: 409, body: { error: { code: 'PRODUCTION_RUN_INVALID' } } });

@@ -207,6 +207,15 @@ describe('Postgres production runs', () => {
     await expect(
       controlPlane.respondToProductionApproval(owner, 'project-approval', 'run-approval', {
         approvalId: 'approval-1',
+        approved: true,
+        responseRef: 'response-role-mismatch',
+        authority: { principalId: owner.id, role: 'reviewer' },
+        now: 502,
+      }),
+    ).rejects.toMatchObject({ code: 'AUTHORITY_INVALID' });
+    await expect(
+      controlPlane.respondToProductionApproval(owner, 'project-approval', 'run-approval', {
+        approvalId: 'approval-1',
         approved: false,
         responseRef: 'response-2',
         authority,
@@ -327,6 +336,21 @@ describe('Postgres production runs', () => {
       controlPlane.createProductionRun(owner, 'project-cancel', {
         runKey: 'run-key-raw',
         record: withRawMedia,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
+
+    const withNestedRawMedia = queuedRecord('run-nested-raw', {
+      checkpoint: {
+        review: {
+          opaqueToken: 'QUJD/'.repeat(32),
+        },
+      },
+    });
+    await expect(
+      controlPlane.createProductionRun(owner, 'project-cancel', {
+        runKey: 'run-key-nested-raw',
+        record: withNestedRawMedia,
         authority,
       }),
     ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });

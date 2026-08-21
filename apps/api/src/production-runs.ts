@@ -308,6 +308,7 @@ export class PostgresProductionRunStore implements ProductionRunStore {
     return this.transaction(async (client) => {
       await ownedProject(client, actor, projectId);
       const current = await loadForUpdate(client, projectId, runId);
+      requireRunAuthority(current, input.authority);
       const replay = applyApprovalResponse(current, input);
       if (
         input.expectedUpdatedSeq !== undefined &&
@@ -757,7 +758,7 @@ function rejectUnsafePayload(value: unknown, key = ''): void {
   if (typeof value === 'string') {
     if (value.length > MAX_PUBLIC_STRING_LENGTH)
       invalidRun(`${key || 'string'} exceeds the size limit`);
-    if (PATH_OR_MEDIA_LEAK.test(value))
+    if (PATH_OR_MEDIA_LEAK.test(value) || looksLikeRawMediaPayload(value))
       invalidRun('production run record must not contain paths, URLs, or raw media');
     return;
   }
@@ -799,6 +800,19 @@ function requireCreationAuthority(
         'production run approvals must not mix authorities',
       );
     }
+  }
+}
+
+function requireRunAuthority(
+  record: ProductionRunRecordV1,
+  authority: ProductionRunAuthority,
+): void {
+  const runAuthority = record.events[0]?.actor;
+  if (runAuthority === undefined || !sameAuthority(runAuthority, authority)) {
+    throw new ControlPlaneError(
+      'AUTHORITY_INVALID',
+      'authority must match the production run authority',
+    );
   }
 }
 
