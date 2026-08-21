@@ -1,9 +1,9 @@
+import * as assetResolverModule from './asset-resolver.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AuthorizedDerivativeResolver,
   DerivativeAuthorityRevokedError,
   PlayableAssetResolver,
-  createDemoOnlyFixturePlayableAssetResolver,
   type AuthorizedDerivativeTransport,
   type AuthorizedOriginalTransport,
   type PlayableAssetRequest,
@@ -105,6 +105,40 @@ describe('playable asset resolver', () => {
     expect(originalTransport.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('prefers an authorized private original over a pending proxy when original bytes are fetchable', async () => {
+    const opfs = memoryOpfs('asset');
+    const originalTransport = {
+      fetch: vi.fn(async () => new Blob([bytes], { type: 'video/mp4' })),
+    } satisfies AuthorizedOriginalTransport;
+    const resolver = new PlayableAssetResolver(
+      new OpfsOriginalAssetCache({
+        root: opfs.root,
+        objectUrls: opfs.urls,
+        digest: digestOfKnownBytes,
+      }),
+      derivativeResolverReturning({ state: 'unavailable' }),
+      originalTransport,
+    );
+
+    const result = await resolver.resolve(
+      request({
+        derivative: {
+          ...derivativeDescriptor(),
+          kind: 'proxy',
+          availability: 'pending',
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      state: 'ready',
+      source: 'authorized-private',
+      url: 'blob:asset-1',
+      mimeType: 'video/mp4',
+    });
+    expect(originalTransport.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('returns pending while a proxy derivative is still being prepared and no original is available', async () => {
     const resolver = new PlayableAssetResolver(
       new OpfsOriginalAssetCache({ digest: digestOfKnownBytes }),
@@ -176,8 +210,12 @@ describe('playable asset resolver', () => {
     expect(opfs.revoked).toEqual(['blob:asset-1']);
   });
 
-  it('creates fixture-only resolvers through the explicit demo/test factory', async () => {
-    const resolver = createDemoOnlyFixturePlayableAssetResolver({
+  it('keeps the production resolver module free of fixture-factory exports', () => {
+    expect(assetResolverModule).not.toHaveProperty('createDemoOnlyFixturePlayableAssetResolver');
+  });
+
+  it('creates fixture-only resolvers through explicit test/demo bootstrap', async () => {
+    const resolver = createFixturePlayableAssetResolverForTests({
       'asset-intro': {
         url: '/media/reference/asset-intro.mp4',
         mimeType: 'video/mp4',
@@ -217,6 +255,24 @@ function request(
     ...(overrides.derivative !== undefined ? { derivative: overrides.derivative } : {}),
     ...(overrides.projectId !== undefined ? { projectId: overrides.projectId } : {}),
     ...(overrides.asset !== undefined ? { asset: overrides.asset } : {}),
+  };
+}
+
+function createFixturePlayableAssetResolverForTests(
+  fixtures: Readonly<Record<string, { readonly url: string; readonly mimeType: string }>>,
+): Pick<PlayableAssetResolver, 'resolve'> {
+  return {
+    async resolve(playable) {
+      const fixture = fixtures[playable.asset.assetId];
+      if (fixture === undefined) return { state: 'unavailable' };
+      return {
+        state: 'ready',
+        source: 'fixture',
+        url: fixture.url,
+        mimeType: fixture.mimeType,
+        release: () => undefined,
+      };
+    },
   };
 }
 

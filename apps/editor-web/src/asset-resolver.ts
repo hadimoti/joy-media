@@ -113,9 +113,8 @@ export class PlayableAssetResolver {
       return readyFromOriginal(localOriginal, request.asset.mimeType, 'opfs-original');
     }
 
-    if (request.derivative?.kind === 'proxy' && request.derivative.availability === 'pending') {
-      return { state: 'pending' };
-    }
+    const proxyPending =
+      request.derivative?.kind === 'proxy' && request.derivative.availability === 'pending';
 
     if (
       request.derivative !== undefined &&
@@ -148,7 +147,7 @@ export class PlayableAssetResolver {
         await this.originalCache.put(originalDescriptor(request.asset), data);
       } catch (error) {
         if (isRevoked(error)) return { state: 'revoked' };
-        return { state: 'unavailable' };
+        return proxyPending ? { state: 'pending' } : { state: 'unavailable' };
       }
       const verifiedOriginal = await this.originalCache.resolve(originalDescriptor(request.asset));
       if (verifiedOriginal.state === 'available-local') {
@@ -156,27 +155,9 @@ export class PlayableAssetResolver {
       }
     }
 
+    if (proxyPending) return { state: 'pending' };
     return { state: 'unavailable' };
   }
-}
-
-export function createDemoOnlyFixturePlayableAssetResolver(
-  fixtures: Readonly<Record<string, { readonly url: string; readonly mimeType: string }>>,
-): Pick<PlayableAssetResolver, 'resolve'> {
-  return {
-    async resolve(request) {
-      validatePlayableRequest(request);
-      const fixture = fixtures[request.asset.assetId];
-      if (fixture === undefined) return { state: 'unavailable' };
-      return {
-        state: 'ready',
-        source: 'fixture',
-        url: fixture.url,
-        mimeType: fixture.mimeType,
-        release: () => undefined,
-      };
-    },
-  };
 }
 
 function validateRequest(request: AuthorizedDerivativeRequest): void {
