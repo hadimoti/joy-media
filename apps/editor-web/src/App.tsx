@@ -54,7 +54,7 @@ import {
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
-import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
+import { createDeliverySceneFrameSource, HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { TimelinePanel } from './TimelinePanel.js';
@@ -94,13 +94,10 @@ import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
 import { TransitionsPanel } from './TransitionsPanel.js';
-import {
-  bindClipToObject,
-  readImageMatteMap,
-  resolveObjectIdForSelection,
-} from './sticker-bindings.js';
+import { bindClipToObject, resolveObjectIdForSelection } from './sticker-bindings.js';
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
+import { plannedStillBitmapTargets } from './render-plan-capture-targets.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { createMediaSessionPlayableAssetResolver } from './media-session.js';
@@ -212,6 +209,24 @@ function imageSizesFromCache(): Readonly<
     sizes[id] = { width: bitmap.width, height: bitmap.height };
   }
   return sizes;
+}
+
+async function syncStickerBitmapTargets(
+  targets: ReturnType<typeof plannedStillBitmapTargets>,
+): Promise<void> {
+  const activeStickerIds = new Set(targets.map((target) => target.objectId));
+  stickerImageCache.clearMissing(activeStickerIds);
+  await Promise.all(
+    targets.map((target) =>
+      stickerImageCache.syncObject({
+        objectId: target.objectId,
+        assetId: target.assetId,
+        ...(target.matteAssetId !== undefined ? { matteAssetId: target.matteAssetId } : {}),
+        crop: target.crop,
+        loadBlob: loadStickerAssetBlob,
+      }),
+    ),
+  );
 }
 
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
@@ -1141,27 +1156,19 @@ function EditorWorkspace({
   );
 
   const syncStickerBitmaps = useCallback(async () => {
-    const mattes = readImageMatteMap(session.visualProject);
-    const activeStickerIds = new Set(
-      Object.values(session.visualProject.visualObjects)
-        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
-        .map((object) => object.id),
-    );
-    stickerImageCache.clearMissing(activeStickerIds);
-    await Promise.all(
-      Object.values(session.visualProject.visualObjects).map(async (object) => {
-        if (object.kind !== 'image' || object.assetId === undefined) return;
-        await stickerImageCache.syncObject({
-          objectId: object.id,
-          assetId: object.assetId,
-          ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
-          crop: object.transform.crop,
-          loadBlob: loadStickerAssetBlob,
-        });
+    const plan = planRenderFrame({
+      bundle: createRenderBundle({
+        timelineProject: session.timelineProject,
+        visualProject: session.visualProject,
+        seed: `preview:${session.visualProject.id}`,
       }),
+      timeUs: state.playheadUs,
+    });
+    await syncStickerBitmapTargets(
+      plannedStillBitmapTargets(session.visualProject, plan.captureRequirements),
     );
     setStickerTick((tick) => tick + 1);
-  }, [session]);
+  }, [session, state.playheadUs]);
 
   const addStickerFromAsset = useCallback(
     async (asset: {
@@ -1879,15 +1886,27 @@ function EditorWorkspace({
           imageSizesByObjectId: imageSizesFromCache(),
         });
       const plannedExportClipIds = new Set<string>();
+      const plannedExportStillTargets = new Map<
+        string,
+        ReturnType<typeof plannedStillBitmapTargets>[number]
+      >();
       for (let index = 0; index < totalFrames; index++) {
         const plan = buildFramePlan(frameTimeUs(index));
         for (const sample of plan.videoSamples) plannedExportClipIds.add(sample.clipId);
+        for (const target of plannedStillBitmapTargets(
+          session.visualProject,
+          plan.captureRequirements,
+        )) {
+          plannedExportStillTargets.set(target.objectId, target);
+        }
       }
       const exportClips = [...plannedExportClipIds]
         .map((clipId) => findVideoClipById(session.timelineProject, clipId))
         .filter((clip): clip is VideoClip => clip !== undefined);
       if (exportClips.length === 0)
         throw new Error('No playable video clips are available for export');
+      await syncStickerBitmapTargets([...plannedExportStillTargets.values()]);
+      setStickerTick((tick) => tick + 1);
 
       setExportStatus('Preloading preview-equivalent video and audio…');
       setExportProgress(0.05);
@@ -1956,7 +1975,9 @@ function EditorWorkspace({
         releaseMonitorMediaSources(exportSources);
         throw failedExportMedia.reason;
       }
-      const exportMedia = preparedExportMedia.map((result) => result.value);
+      const exportMedia = preparedExportMedia.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
       const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
       const mixedAudio = buildMixerBuffer(
         exportMedia.map((media) => ({ clipId: media.clip.id, samples: media.audio.samples })),
@@ -1979,30 +2000,7 @@ function EditorWorkspace({
       if (exportAudioTrack === undefined)
         throw new Error('Export audio mix did not produce a track');
       const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
-      const hasHtmlScenes = Object.values(session.visualProject.visualObjects).some(
-        (object) => object.kind === 'html-scene',
-      );
-      const sceneFrames = new Map<
-        number,
-        Map<string, { width: number; height: number; data: Uint8ClampedArray }>
-      >();
-      if (hasHtmlScenes) {
-        setExportStatus('Capturing HTML scene frames…');
-        const sceneCache = new HtmlSceneSurfaceCache();
-        try {
-          for (let index = 0; index < totalFrames; index++) {
-            const timeUs = frameTimeUs(index);
-            sceneFrames.set(
-              index,
-              new Map(await sceneCache.captureFull(session.visualProject.visualObjects, timeUs)),
-            );
-            if (index % frameRate === 0)
-              setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
-          }
-        } finally {
-          sceneCache.destroy();
-        }
-      }
+      const sceneFrameSource = createDeliverySceneFrameSource(new HtmlSceneSurfaceCache());
       const startTimers: number[] = [];
       const audioSources: AudioBufferSourceNode[] = [];
       try {
@@ -2071,11 +2069,20 @@ function EditorWorkspace({
               if (bitmaps.has(sample.clipId)) continue;
               await captureExportSample(sample);
             }
-            const scenes = sceneFrames.get(index);
-            if (scenes !== undefined) {
-              for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
+            await sceneFrameSource.captureInto(
+              bitmaps,
+              htmlSceneCaptureTargetsForRequirements(
+                session.visualProject,
+                plan.captureRequirements,
+              ),
+            );
+            for (const target of plannedStillBitmapTargets(
+              session.visualProject,
+              plan.captureRequirements,
+            )) {
+              const bitmap = stickerImageCache.get(target.objectId);
+              if (bitmap !== undefined) bitmaps.set(target.objectId, bitmap);
             }
-            for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
             renderer.render(withVideoFrameNode(plan.frame, node), bitmaps);
           },
           onProgress: (completed, total) => {
@@ -2117,6 +2124,7 @@ function EditorWorkspace({
           media.video.pause();
           media.source.release();
         }
+        sceneFrameSource.destroy();
         renderer.destroy();
         await audioContext.close();
       }
@@ -3263,24 +3271,17 @@ function MonitorPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    const mattes = readImageMatteMap(visualProject);
-    const activeStickerIds = new Set(
-      Object.values(visualProject.visualObjects)
-        .filter((object) => object.kind === 'image' && object.assetId !== undefined)
-        .map((object) => object.id),
-    );
-    stickerImageCache.clearMissing(activeStickerIds);
-    void Promise.all(
-      Object.values(visualProject.visualObjects).map(async (object) => {
-        if (object.kind !== 'image' || object.assetId === undefined) return;
-        await stickerImageCache.syncObject({
-          objectId: object.id,
-          assetId: object.assetId,
-          ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
-          crop: object.transform.crop,
-          loadBlob: loadStickerAssetBlob,
-        });
+    const plan = planRenderFrame({
+      bundle: createRenderBundle({
+        timelineProject,
+        visualProject,
+        seed: `preview:${visualProject.id}`,
       }),
+      timeUs: state.playheadUs,
+      imageSizesByObjectId: imageSizesFromCache(),
+    });
+    void syncStickerBitmapTargets(
+      plannedStillBitmapTargets(visualProject, plan.captureRequirements),
     )
       .then(() => {
         if (cancelled) return;
@@ -3293,14 +3294,14 @@ function MonitorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [visualProject, stickerTick]);
+  }, [state.playheadUs, stickerTick, timelineProject, visualProject]);
 
   paintRef.current = (): void => {
     const renderer = rendererRef.current;
     if (renderer === null) return;
     const composition = visualProject.compositions[visualProject.rootCompositionId];
     if (composition === undefined) return;
-    const visualFrame = planRenderFrame({
+    const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject,
         visualProject,
@@ -3309,7 +3310,8 @@ function MonitorPanel() {
       timeUs: state.playheadUs,
       viewport: { width: composition.width, height: composition.height },
       imageSizesByObjectId: imageSizesFromCache(),
-    }).frame;
+    });
+    const visualFrame = plan.frame;
     const frame =
       previewVideoFrame === undefined
         ? visualFrame
@@ -3318,11 +3320,16 @@ function MonitorPanel() {
     if (previewVideoFrame !== undefined) {
       videoBitmaps.set(previewVideoFrame.node.id, previewVideoFrame.bitmap);
     }
-    for (const [id, bitmap] of sceneCacheRef.current.bitmaps()) {
-      videoBitmaps.set(id, bitmap);
+    for (const target of htmlSceneCaptureTargetsForRequirements(
+      visualProject,
+      plan.captureRequirements,
+    )) {
+      const bitmap = sceneCacheRef.current.bitmaps().get(target.objectId);
+      if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
     }
-    for (const [id, bitmap] of stickerImageCache.bitmaps()) {
-      videoBitmaps.set(id, bitmap);
+    for (const target of plannedStillBitmapTargets(visualProject, plan.captureRequirements)) {
+      const bitmap = stickerImageCache.get(target.objectId);
+      if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
     }
     renderer.render(frame, videoBitmaps);
   };
@@ -3354,14 +3361,25 @@ function MonitorPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    void sceneCacheRef.current.sync(visualProject.visualObjects, state.playheadUs).then(() => {
-      if (cancelled) return;
-      setSceneTick((value) => value + 1);
+    const plan = planRenderFrame({
+      bundle: createRenderBundle({
+        timelineProject,
+        visualProject,
+        seed: `preview:${visualProject.id}`,
+      }),
+      timeUs: state.playheadUs,
+      imageSizesByObjectId: imageSizesFromCache(),
     });
+    void sceneCacheRef.current
+      .sync(htmlSceneCaptureTargetsForRequirements(visualProject, plan.captureRequirements))
+      .then(() => {
+        if (cancelled) return;
+        setSceneTick((value) => value + 1);
+      });
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, visualProject]);
+  }, [state.playheadUs, timelineProject, visualProject]);
 
   useEffect(() => () => sceneCacheRef.current.destroy(), []);
 
