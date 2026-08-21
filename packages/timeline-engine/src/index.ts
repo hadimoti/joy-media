@@ -33,19 +33,23 @@ export function pixelToTime(pixel: number, viewport: TimelineViewport): TimeUs {
   );
 }
 
-/** End-exclusive composition playhead -> source time; returns undefined outside the clip body. */
+/**
+ * End-exclusive composition playhead -> source time; returns undefined outside the clip body.
+ * Fractional playback-rate math rounds down so every returned source time stays on an integer
+ * microsecond boundary.
+ */
 export function sourceTimeAtPlayhead(clip: SourceTimeClip, playheadUs: number): number | undefined {
   if (playheadUs < clip.startUs || playheadUs >= clip.startUs + clip.durationUs) return undefined;
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return clip.sourceInUs;
-  return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
+  return floorSourceTime(clip.sourceInUs + (playheadUs - clip.startUs) * rate);
 }
 
-/** Last playable source sample for a clip after its end-exclusive body. */
+/** Last playable integer source sample before the clip's source-out boundary. */
 export function finalSourceTimeUs(clip: SourceTimeClip): number {
   const rate = normalizePlaybackRate(clip.playbackRate);
   if (rate === 0) return clip.sourceInUs;
-  return clip.sourceInUs + Math.max(0, clip.durationUs * rate - 1);
+  return Math.max(clip.sourceInUs, ceilSourceTime(clip.sourceInUs + clip.durationUs * rate) - 1);
 }
 
 /**
@@ -61,12 +65,23 @@ export function sourceTimeForTransitionSample(
     const rate = normalizePlaybackRate(clip.playbackRate);
     if (rate === 0) return clip.sourceInUs;
     const windowStart = clip.startUs - transition.durationUs;
-    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate;
+    return Math.min(
+      finalSourceTimeUs(clip),
+      floorSourceTime(clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate),
+    );
   }
   const sourceTimeUs = sourceTimeAtPlayhead(clip, playheadUs);
   if (sourceTimeUs !== undefined) return sourceTimeUs;
   if (playheadUs < clip.startUs) return clip.sourceInUs;
   return finalSourceTimeUs(clip);
+}
+
+function floorSourceTime(value: number): number {
+  return Math.floor(value);
+}
+
+function ceilSourceTime(value: number): number {
+  return Math.ceil(value);
 }
 
 /** CapCut-style fit: map full composition duration into the visible lane width. */

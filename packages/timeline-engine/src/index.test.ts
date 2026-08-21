@@ -134,6 +134,20 @@ describe('source-time helpers', () => {
     expect(finalSourceTimeUs({ ...clip, playbackRate: 0 })).toBe(10_000_000);
   });
 
+  it('rounds fractional playback-rate source times down to integer microseconds deterministically', () => {
+    const fractionalClip = {
+      id: 'clip-fractional',
+      startUs: 0,
+      durationUs: 11,
+      sourceInUs: 7,
+      playbackRate: 0.1,
+    } as const;
+
+    expect(sourceTimeAtPlayhead(fractionalClip, 1)).toBe(7);
+    expect(sourceTimeAtPlayhead(fractionalClip, 10)).toBe(8);
+    expect(finalSourceTimeUs(fractionalClip)).toBe(8);
+  });
+
   it('previews the incoming clip from the transition overlap window and clamps after the clip end', () => {
     const transition = { rightClipId: 'clip-a', durationUs: 500_000 } as const;
     expect(
@@ -153,6 +167,15 @@ describe('source-time helpers', () => {
     expect(
       sourceTimeForTransitionSample({ ...clip, playbackRate: 0.5 }, clip.startUs + clip.durationUs),
     ).toBe(10_999_999);
+  });
+
+  it('clamps long transition overlap previews to the final playable source sample', () => {
+    expect(
+      sourceTimeForTransitionSample({ ...clip, playbackRate: 2 }, clip.startUs - 1, {
+        rightClipId: clip.id,
+        durationUs: 3_000_000,
+      }),
+    ).toBe(13_999_999);
   });
 });
 
