@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test": "vitest run"
+    "test": "pnpm exec vitest run --root ../.. apps/editor-web/src"
   },
   "dependencies": {
     "@joy-media/agent-tools": "workspace:*",

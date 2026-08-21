@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "pnpm exec vitest run --root ../.. packages/provider-sdk/src"
   },
   "dependencies": {
     "@joy-media/project-schema": "workspace:*"

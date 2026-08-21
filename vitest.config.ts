@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const pkg = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
+  root: repoRoot,
   resolve: {
     // Resolve workspace packages to source so tests never require a prior build.
     alias: {
@@ -56,5 +58,7 @@ export default defineConfig({
   test: {
     include: ['{apps,packages,tooling}/**/src/**/*.test.ts'],
     environment: 'node',
+    // A suite that collects no files must fail instead of silently passing.
+    passWithNoTests: false,
   },
 });

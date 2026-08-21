@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "pnpm exec vitest run --root ../.. packages/job-protocol/src"
   },
   "dependencies": {
     "@joy-media/project-schema": "workspace:*"

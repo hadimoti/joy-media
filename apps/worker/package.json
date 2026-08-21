@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/index.ts",
-    "test": "vitest run"
+    "test": "pnpm exec vitest run --root ../.. apps/worker/src"
   },
   "dependencies": {
     "@joy-media/export-core": "workspace:*",

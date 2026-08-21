@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "pnpm exec vitest run --root ../.. packages/agent-tools/src"
   },
   "dependencies": {
     "@joy-media/audio-core": "workspace:*",

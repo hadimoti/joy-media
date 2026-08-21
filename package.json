@@ -9,6 +9,11 @@
   "scripts": {
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:unit": "vitest run packages tooling",
+    "test:editor": "vitest run apps/editor-web/src",
+    "test:api": "vitest run apps/api/src",
+    "test:worker": "vitest run apps/worker/src",
+    "test:release": "pnpm test:unit && pnpm test:editor && pnpm test:api && pnpm test:worker",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
