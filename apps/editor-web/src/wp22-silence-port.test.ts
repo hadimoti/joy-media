@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createStubFirstPartyLibrary } from './first-party-handlers.js';
+import { createFixtureFirstPartyLibrary } from './first-party-handlers.js';
 
 describe('WP-22 analysis.detectSilence port', () => {
   it('runs real audio-core DSP without __stub', () => {
-    const library = createStubFirstPartyLibrary();
+    const library = createFixtureFirstPartyLibrary();
     const handler = library.handlers['analysis.silence'];
     expect(handler).toBeDefined();
     if (handler === undefined) return;

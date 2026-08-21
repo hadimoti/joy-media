@@ -40,6 +40,7 @@ import type { JoyProjectV1, SpikeProject, VideoClip } from '@joy-media/project-s
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
+import type { ProductionRunAuthority } from '@joy-media/workflow-engine';
 
 registerBuiltins();
 
@@ -133,11 +134,13 @@ import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
+import { BrowserProductionRunStore } from './browser-production-run-store.js';
 import { PluginsPanel } from './PluginsPanel.js';
 import { TemplatesPanel } from './TemplatesPanel.js';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
+import { createProductionFirstPartyLibrary } from './first-party-handlers.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import {
   getOrCreateControlPlaneProjectBinding,
@@ -668,6 +671,26 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
   );
+  const workflowAuthority = useMemo<ProductionRunAuthority>(
+    () => ({
+      principalId:
+        joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'local-owner',
+      role: 'owner',
+      ...(joySession.kind === 'ready' && joySession.displayName !== undefined
+        ? { displayName: joySession.displayName }
+        : { displayName: 'Local owner' }),
+    }),
+    [joySession],
+  );
+  const productionRunStore = useMemo(
+    () =>
+      new BrowserProductionRunStore(window.localStorage, {
+        projectId: session.timelineProject.id,
+        authority: workflowAuthority,
+      }),
+    [session.timelineProject.id, workflowAuthority],
+  );
+  const firstPartyWorkflowLibrary = useMemo(() => createProductionFirstPartyLibrary(), []);
   useEffect(() => {
     let cancelled = false;
     void mediaClient
@@ -2777,7 +2800,11 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           onRun={async (workflowId, inputs) => {
             try {
-              const outcome = await runWorkflow(context.session, workflowId, inputs);
+              const outcome = await runWorkflow(context.session, workflowId, inputs, {
+                productionRunStore,
+                authority: workflowAuthority,
+                firstPartyLibrary: firstPartyWorkflowLibrary,
+              });
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {
@@ -2790,9 +2817,16 @@ function EditorWorkspace({
               };
             }
           }}
-          onResume={async (runId, humanInputs) => {
+          onResume={async (runId, humanInputs, approval) => {
             try {
-              const outcome = await resumeWorkflow(context.session, runId, humanInputs);
+              const outcome = await resumeWorkflow(context.session, runId, humanInputs, {
+                productionRunStore,
+                authority: workflowAuthority,
+                firstPartyLibrary: firstPartyWorkflowLibrary,
+                ...(approval.approvalExpiresAtSeq === undefined
+                  ? {}
+                  : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
+              });
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {

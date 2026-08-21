@@ -9,6 +9,7 @@ import {
   type ProductionRunCheckpointUpdateResultV1,
   type ProductionRunCheckpointUpdateV1,
   type ProductionRunEventTypeV1,
+  type ProductionApprovalV1,
   type ProductionRunRecordV1,
   type ProductionRunStateV1,
   type ProductionRunStore,
@@ -184,21 +185,24 @@ export class BrowserProductionRunStore implements ProductionRunStore {
       checkpointRevision,
       message: `checkpoint revision ${String(checkpointRevision)}`,
     });
+    const nextApprovals = update.dashboard?.approvals.map((approval) => ({
+      approvalVersion: PRODUCTION_APPROVAL_VERSION,
+      approvalId: approval.approvalId,
+      nodeId: approval.nodeId,
+      kind: approval.kind,
+      prompt: approval.prompt,
+      state: approval.state,
+      requestedSeq: withEvent.updatedSeq,
+    }));
     const record: ProductionRunRecordV1 = {
       ...withEvent,
       checkpointRevision,
       checkpoint: sanitizeCheckpoint(update.checkpoint),
       nodes: update.dashboard?.nodes ?? current.nodes,
       approvals:
-        update.dashboard?.approvals.map((approval) => ({
-          approvalVersion: PRODUCTION_APPROVAL_VERSION,
-          approvalId: approval.approvalId,
-          nodeId: approval.nodeId,
-          kind: approval.kind,
-          prompt: approval.prompt,
-          state: approval.state,
-          requestedSeq: withEvent.updatedSeq,
-        })) ?? current.approvals,
+        nextApprovals === undefined
+          ? current.approvals
+          : mergeApprovals(current.approvals, nextApprovals),
     };
     this.#assertRecordCanPersist(record);
     this.#records.set(update.runId, cloneJson(record));
@@ -272,10 +276,7 @@ export class BrowserProductionRunStore implements ProductionRunStore {
     if (current === undefined) {
       return { ok: false, reason: 'not-found' };
     }
-    if (
-      input.expectedUpdatedSeq !== undefined &&
-      current.updatedSeq !== input.expectedUpdatedSeq
-    ) {
+    if (input.expectedUpdatedSeq !== undefined && current.updatedSeq !== input.expectedUpdatedSeq) {
       return {
         ok: false,
         reason: 'revision-conflict',
@@ -345,6 +346,16 @@ export class BrowserProductionRunStore implements ProductionRunStore {
   }
 }
 
+function mergeApprovals(
+  current: readonly ProductionApprovalV1[],
+  next: readonly ProductionApprovalV1[],
+): readonly ProductionApprovalV1[] {
+  const nextById = new Map(next.map((approval) => [approval.approvalId, approval]));
+  const merged = current.map((approval) => nextById.get(approval.approvalId) ?? approval);
+  const currentIds = new Set(current.map((approval) => approval.approvalId));
+  return [...merged, ...next.filter((approval) => !currentIds.has(approval.approvalId))];
+}
+
 function eventTypeForState(state: ProductionRunStateV1): ProductionRunEventTypeV1 {
   switch (state) {
     case 'queued':
@@ -371,6 +382,7 @@ function sanitizeCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
       attempts: node.attempts,
       deterministic: node.deterministic,
       ...(node.failureCode === undefined ? {} : { failureCode: node.failureCode }),
+      ...(node.output === undefined ? {} : { output: node.output }),
       ...(node.pendingRequest === undefined
         ? {}
         : {
@@ -379,6 +391,7 @@ function sanitizeCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
               prompt: node.pendingRequest.prompt,
             },
           }),
+      ...(node.resolvedInput === undefined ? {} : { resolvedInput: node.resolvedInput }),
     };
   }
   return {
@@ -453,7 +466,7 @@ function assertNoPrivatePayload(value: unknown, path: readonly string[]): void {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
-    if ((key === 'output' || key === 'resolvedInput' || key === 'payload') && child !== undefined) {
+    if (key === 'payload' && child !== undefined) {
       throw new Error(
         `raw media is not allowed in local production run records (${[...path, key].join('.')})`,
       );

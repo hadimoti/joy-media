@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createStubFirstPartyLibrary } from './first-party-handlers.js';
+import { createFixtureFirstPartyLibrary } from './first-party-handlers.js';
 
 describe('generation.speech edge-tts port', () => {
   it('drops __stub and discloses remote Edge TTS deferral', () => {
-    const library = createStubFirstPartyLibrary();
+    const library = createFixtureFirstPartyLibrary();
     const handler = library.handlers['generation.speech'];
     expect(handler).toBeDefined();
     if (handler === undefined) return;

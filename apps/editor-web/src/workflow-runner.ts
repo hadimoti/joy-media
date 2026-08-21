@@ -2,10 +2,22 @@
 
 import type { EditorSession } from './editor-session.js';
 import {
+  buildProductionRunBoardSnapshot,
+  buildRunDashboard,
+  computeRunKey,
+  createProductionRunRecordFromDashboard,
+  createQueuedProductionRunRecord,
   executeWorkflow,
   type HumanInputRequest,
   type JoyWorkflow,
+  type NodeLibrary,
+  type ProductionApprovalV1,
+  type ProductionRunAuthority,
+  type ProductionRunRecordV1,
+  type ProductionRunStore,
   type RunCheckpoint,
+  RunRecorder,
+  instrumentHandlers,
   type WorkflowEdge,
   type WorkflowNode,
 } from '@joy-media/workflow-engine';
@@ -13,7 +25,7 @@ import type { SpikeCommand } from '@joy-media/commands';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { loadWorkflow, resolveParameterizedValue } from './workflow-recorder.js';
 import { getFirstPartyWorkflow } from './first-party-workflows.js';
-import { createStubFirstPartyLibrary } from './first-party-handlers.js';
+import { createProductionFirstPartyLibrary } from './first-party-handlers.js';
 
 interface NodeRunResult {
   readonly nodeId: string;
@@ -47,6 +59,9 @@ export type WorkflowRunOutcome =
       readonly nodeId: string;
       readonly request: HumanInputRequest;
       readonly checkpoint: RunCheckpoint;
+      readonly approvalId?: string;
+      readonly approvalRequestedSeq?: number;
+      readonly approvalExpiresAtSeq?: number;
     }
   | {
       readonly status: 'failed';
@@ -55,21 +70,34 @@ export type WorkflowRunOutcome =
       readonly error: string;
     };
 
-const parkedRuns = new Map<string, ParkedWorkflowRun>();
-let stubLibrary = createStubFirstPartyLibrary();
+export interface WorkflowRunnerOptions {
+  readonly productionRunStore?: ProductionRunStore;
+  readonly authority?: ProductionRunAuthority;
+  readonly firstPartyLibrary?: NodeLibrary;
+}
 
-/** Test seam: replace the stub library (e.g. to assert call counts). */
-export function setFirstPartyLibraryForTests(library: ReturnType<typeof createStubFirstPartyLibrary>): void {
-  stubLibrary = library;
+export interface WorkflowResumeOptions extends WorkflowRunnerOptions {
+  readonly approvalExpiresAtSeq?: number;
+}
+
+const LOCAL_WORKFLOW_AUTHORITY: ProductionRunAuthority = {
+  principalId: 'local-owner',
+  role: 'owner',
+  displayName: 'Local owner',
+};
+let runIdSequence = 0;
+
+export function defaultWorkflowAuthority(): ProductionRunAuthority {
+  return LOCAL_WORKFLOW_AUTHORITY;
 }
 
 export function resetFirstPartyLibraryForTests(): void {
-  stubLibrary = createStubFirstPartyLibrary();
-  parkedRuns.clear();
+  // Kept as a no-op compatibility seam for older focused tests. First-party
+  // tests must now pass an explicit fixture library to `runWorkflow`.
 }
 
-export function getParkedWorkflowRun(runId: string): ParkedWorkflowRun | undefined {
-  return parkedRuns.get(runId);
+function productionLibraryFor(options: WorkflowRunnerOptions): NodeLibrary {
+  return options.firstPartyLibrary ?? createProductionFirstPartyLibrary();
 }
 
 function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
@@ -108,7 +136,10 @@ function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
   return mapped;
 }
 
-function kahnTopoOrder(nodes: readonly WorkflowNode[], edges: readonly WorkflowEdge[]): readonly string[] {
+function kahnTopoOrder(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+): readonly string[] {
   const indegree = new Map<string, number>();
   const downstream = new Map<string, string[]>();
   for (const node of nodes) {
@@ -156,7 +187,11 @@ export function normalizeFirstPartyInputs(
   inputs: Readonly<Record<string, unknown>>,
 ): unknown {
   const required = (workflow.inputs.required as string[] | undefined) ?? [];
-  if (required.includes('asset') && inputs.asset === undefined && typeof inputs.assetId === 'string') {
+  if (
+    required.includes('asset') &&
+    inputs.asset === undefined &&
+    typeof inputs.assetId === 'string'
+  ) {
     return { ...inputs, asset: { assetId: inputs.assetId, fixture: true } };
   }
   if (typeof inputs.asset === 'string') {
@@ -165,10 +200,12 @@ export function normalizeFirstPartyInputs(
   return inputs;
 }
 
-function findPendingApproval(checkpoint: RunCheckpoint): {
-  readonly nodeId: string;
-  readonly request: HumanInputRequest;
-} | undefined {
+function findPendingApproval(checkpoint: RunCheckpoint):
+  | {
+      readonly nodeId: string;
+      readonly request: HumanInputRequest;
+    }
+  | undefined {
   for (const [nodeId, record] of Object.entries(checkpoint.nodes)) {
     if (record.state === 'waiting_for_input' && record.pendingRequest !== undefined) {
       return { nodeId, request: record.pendingRequest };
@@ -178,7 +215,8 @@ function findPendingApproval(checkpoint: RunCheckpoint): {
 }
 
 function newRunId(workflowId: string): string {
-  return `editor-${workflowId.replaceAll('.', '-')}-${String(Date.now())}`;
+  runIdSequence += 1;
+  return `editor-${workflowId.replaceAll('.', '-')}-${String(Date.now())}-${String(runIdSequence)}`;
 }
 
 async function runRecordedWorkflow(
@@ -222,7 +260,11 @@ async function runRecordedWorkflow(
       const label = (node.params.label as string | undefined) ?? nodeId;
       const result = bus.dispatchTimeline(spikeCommands, label);
       const success = result.success ?? false;
-      const nodeResult: NodeRunResult = { ...(!success ? { error: result.error } : {}), nodeId, success };
+      const nodeResult: NodeRunResult = {
+        ...(!success ? { error: result.error } : {}),
+        nodeId,
+        success,
+      };
       results.set(nodeId, nodeResult);
       if (!success && workflow.policy.failure === 'stop') {
         return {
@@ -233,7 +275,11 @@ async function runRecordedWorkflow(
         };
       }
     } else {
-      const nodeResult: NodeRunResult = { nodeId, success: false, error: `unsupported node type ${node.type}` };
+      const nodeResult: NodeRunResult = {
+        nodeId,
+        success: false,
+        error: `unsupported node type ${node.type}`,
+      };
       results.set(nodeId, nodeResult);
       if (workflow.policy.failure === 'stop') {
         return {
@@ -249,82 +295,194 @@ async function runRecordedWorkflow(
   return { status: 'succeeded', workflowId: workflow.id, runId };
 }
 
-function runFirstPartyWorkflow(
+function checkpointRecordFor(
   workflow: JoyWorkflow,
-  inputs: Readonly<Record<string, unknown>>,
-  options: {
-    readonly runId?: string;
-    readonly resumeFrom?: RunCheckpoint;
-    readonly humanInputs?: Readonly<Record<string, unknown>>;
-  } = {},
-): WorkflowRunOutcome {
-  const runId = options.runId ?? newRunId(workflow.id);
-  const workflowInputs = normalizeFirstPartyInputs(workflow, inputs);
-  const result = executeWorkflow({
-    workflow,
-    runId,
-    projectRevision: 'editor-local',
-    workflowInputs,
-    handlers: stubLibrary.handlers,
-    ...(options.resumeFrom !== undefined ? { resumeFrom: options.resumeFrom } : {}),
-    ...(options.humanInputs !== undefined ? { humanInputs: options.humanInputs } : {}),
+  result: ReturnType<typeof executeWorkflow>,
+  recorder: RunRecorder,
+  authority: ProductionRunAuthority,
+): ProductionRunRecordV1 {
+  return createProductionRunRecordFromDashboard({
+    dashboard: buildRunDashboard({ workflow, result, recorder }),
+    checkpoint: result.checkpoint,
+    authority,
   });
+}
 
-  const checkpoint = result.checkpoint;
+function boardRunFor(record: ProductionRunRecordV1) {
+  const boardRun = buildProductionRunBoardSnapshot([record]).runs[0];
+  if (boardRun === undefined) throw new Error('Unable to build production run board projection');
+  return boardRun;
+}
+
+function waitingOutcomeFromCheckpoint(
+  workflowId: string,
+  runId: string,
+  checkpoint: RunCheckpoint,
+  record: ProductionRunRecordV1,
+): WorkflowRunOutcome | undefined {
+  const pending = findPendingApproval(checkpoint);
+  if (pending === undefined) return undefined;
+  const approval = record.approvals.find(
+    (candidate) => candidate.nodeId === pending.nodeId && candidate.state === 'pending',
+  );
+  return {
+    status: 'waiting_for_input',
+    workflowId,
+    runId,
+    nodeId: pending.nodeId,
+    request: pending.request,
+    checkpoint,
+    ...(approval === undefined
+      ? {}
+      : {
+          approvalId: approval.approvalId,
+          approvalRequestedSeq: approval.requestedSeq,
+          approvalExpiresAtSeq: approval.requestedSeq,
+        }),
+  };
+}
+
+function outcomeFromCheckpoint(
+  workflowId: string,
+  runId: string,
+  checkpoint: RunCheckpoint,
+  record: ProductionRunRecordV1,
+): WorkflowRunOutcome {
   if (checkpoint.state === 'waiting_for_input') {
-    const pending = findPendingApproval(checkpoint);
-    if (pending === undefined) {
-      return {
-        status: 'failed',
-        workflowId: workflow.id,
-        runId,
-        error: 'Workflow parked without a pending approval request',
-      };
-    }
-    parkedRuns.set(runId, {
-      runId,
-      workflowId: workflow.id,
-      workflow,
-      workflowInputs,
-      checkpoint,
-      nodeId: pending.nodeId,
-      request: pending.request,
-    });
+    const waiting = waitingOutcomeFromCheckpoint(workflowId, runId, checkpoint, record);
+    if (waiting !== undefined) return waiting;
     return {
-      status: 'waiting_for_input',
-      workflowId: workflow.id,
+      status: 'failed',
+      workflowId,
       runId,
-      nodeId: pending.nodeId,
-      request: pending.request,
-      checkpoint,
+      error: 'Workflow parked without a pending approval request',
     };
   }
-
-  parkedRuns.delete(runId);
 
   if (checkpoint.state === 'failed' || checkpoint.state === 'waiting_for_manual_intervention') {
     const failedNode = Object.entries(checkpoint.nodes).find(([, node]) => node.state === 'failed');
     return {
       status: 'failed',
-      workflowId: workflow.id,
+      workflowId,
       runId,
       error: failedNode?.[1].failureCode ?? `Workflow ended in state ${checkpoint.state}`,
+    };
+  }
+
+  if (checkpoint.state === 'canceled') {
+    return {
+      status: 'failed',
+      workflowId,
+      runId,
+      error: 'Workflow run was canceled',
     };
   }
 
   const outputsNode = checkpoint.nodes['manifest'] ?? checkpoint.nodes['write-manifest'];
   return {
     status: 'succeeded',
-    workflowId: workflow.id,
+    workflowId,
     runId,
     ...(outputsNode?.output !== undefined ? { outputs: outputsNode.output } : {}),
   };
+}
+
+async function executeAndPersistFirstPartyWorkflow(
+  workflow: JoyWorkflow,
+  runId: string,
+  projectRevision: string,
+  workflowInputs: unknown,
+  store: ProductionRunStore,
+  authority: ProductionRunAuthority,
+  options: {
+    readonly expectedRevision: number;
+    readonly library: NodeLibrary;
+    readonly resumeFrom?: RunCheckpoint;
+    readonly humanInputs?: Readonly<Record<string, unknown>>;
+  },
+): Promise<WorkflowRunOutcome> {
+  const recorder = new RunRecorder();
+  const result = executeWorkflow({
+    workflow,
+    runId,
+    projectRevision,
+    workflowInputs,
+    handlers: instrumentHandlers(options.library.handlers, recorder),
+    ...(options.resumeFrom !== undefined ? { resumeFrom: options.resumeFrom } : {}),
+    ...(options.humanInputs !== undefined ? { humanInputs: options.humanInputs } : {}),
+  });
+  const checkpointRecord = checkpointRecordFor(workflow, result, recorder, authority);
+  const update = await store.compareAndSwapCheckpoint({
+    runId,
+    expectedRevision: options.expectedRevision,
+    checkpoint: result.checkpoint,
+    dashboard: boardRunFor(checkpointRecord),
+    authority,
+  });
+  if (!update.ok) {
+    return {
+      status: 'failed',
+      workflowId: workflow.id,
+      runId,
+      error:
+        update.reason === 'revision-conflict'
+          ? `Production run checkpoint revision conflict: expected ${String(
+              options.expectedRevision,
+            )}, current ${String(update.currentRevision ?? 'unknown')}`
+          : `Production run checkpoint update failed: ${update.reason}`,
+    };
+  }
+  return outcomeFromCheckpoint(workflow.id, runId, result.checkpoint, update.record);
+}
+
+async function runFirstPartyWorkflow(
+  session: EditorSession,
+  workflow: JoyWorkflow,
+  inputs: Readonly<Record<string, unknown>>,
+  options: WorkflowRunnerOptions = {},
+): Promise<WorkflowRunOutcome> {
+  const runId = newRunId(workflow.id);
+  const store = options.productionRunStore;
+  if (store === undefined) {
+    return {
+      status: 'failed',
+      workflowId: workflow.id,
+      runId,
+      error: 'ProductionRunStore is required for first-party workflow runs',
+    };
+  }
+
+  const authority = options.authority ?? defaultWorkflowAuthority();
+  const workflowInputs = normalizeFirstPartyInputs(workflow, inputs);
+  const projectRevision = session.projectRevisionId;
+  const queued: ProductionRunRecordV1 = {
+    ...createQueuedProductionRunRecord({
+      runId,
+      workflowId: workflow.id,
+      workflowVersion: workflow.version,
+      projectRevision,
+      authority,
+    }),
+    workflowInputs,
+  };
+  await store.create(queued);
+
+  return executeAndPersistFirstPartyWorkflow(
+    workflow,
+    runId,
+    projectRevision,
+    workflowInputs,
+    store,
+    authority,
+    { expectedRevision: 0, library: productionLibraryFor(options) },
+  );
 }
 
 export async function runWorkflow(
   session: EditorSession,
   workflowId: string,
   inputs: Readonly<Record<string, unknown>> = {},
+  options: WorkflowRunnerOptions = {},
 ): Promise<WorkflowRunOutcome> {
   const recorded = loadWorkflow(session, workflowId);
   if (recorded !== undefined) {
@@ -335,34 +493,200 @@ export async function runWorkflow(
   if (system === undefined) {
     throw new Error(`Workflow not found: ${workflowId}`);
   }
-  return runFirstPartyWorkflow(system.workflow, inputs);
+  return runFirstPartyWorkflow(session, system.workflow, inputs, options);
 }
 
 export async function resumeWorkflow(
-  _session: EditorSession,
+  session: EditorSession,
   runId: string,
   humanInputs: Readonly<Record<string, unknown>>,
+  options: WorkflowResumeOptions = {},
 ): Promise<WorkflowRunOutcome> {
-  const parked = parkedRuns.get(runId);
-  if (parked === undefined) {
+  const store = options.productionRunStore;
+  if (store === undefined) {
     return {
       status: 'failed',
       workflowId: 'unknown',
       runId,
-      error: `No parked workflow run: ${runId}`,
+      error: 'ProductionRunStore is required to resume first-party workflow runs',
     };
   }
 
-  const inputs =
-    typeof parked.workflowInputs === 'object' && parked.workflowInputs !== null
-      ? (parked.workflowInputs as Record<string, unknown>)
-      : {};
+  const record = await store.load(runId);
+  if (record === undefined) {
+    return {
+      status: 'failed',
+      workflowId: 'unknown',
+      runId,
+      error: `No production workflow run: ${runId}`,
+    };
+  }
+  if (record.state === 'canceled' || record.state === 'failed' || record.state === 'succeeded') {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: `Workflow run is already ${record.state}`,
+    };
+  }
+  if (record.state !== 'parked' || record.checkpoint === undefined) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: `Workflow run is not parked: ${record.state}`,
+    };
+  }
 
-  return runFirstPartyWorkflow(parked.workflow, inputs, {
-    runId: parked.runId,
-    resumeFrom: parked.checkpoint,
+  const workflow = resolveWorkflow(session, record.workflowId);
+  if (workflow.version !== record.workflowVersion) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Stored workflow version does not match the current workflow definition',
+    };
+  }
+
+  const pending = findPendingApproval(record.checkpoint);
+  if (pending === undefined) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Stored checkpoint has no pending approval request',
+    };
+  }
+  const approval = record.approvals.find(
+    (candidate) => candidate.nodeId === pending.nodeId && candidate.state === 'pending',
+  );
+  if (approval === undefined) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Approval request is not pending',
+    };
+  }
+
+  const authority = options.authority ?? defaultWorkflowAuthority();
+  const approved = approvalInputApproved(humanInputs[pending.nodeId]);
+  const responseResult = await recordApprovalResponse(store, record, approval, {
+    approved,
+    authority,
     humanInputs,
+    ...(options.approvalExpiresAtSeq === undefined
+      ? {}
+      : { expiresAtSeq: options.approvalExpiresAtSeq }),
   });
+  if (!responseResult.ok) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: `Approval response rejected: ${responseResult.reason}`,
+    };
+  }
+  if (!approved) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Approval response rejected the workflow request',
+    };
+  }
+
+  return executeAndPersistFirstPartyWorkflow(
+    workflow,
+    runId,
+    record.projectRevision,
+    record.workflowInputs ?? {},
+    store,
+    authority,
+    {
+      expectedRevision: record.checkpointRevision,
+      library: productionLibraryFor(options),
+      resumeFrom: record.checkpoint,
+      humanInputs,
+    },
+  );
+}
+
+type ApprovalResponseResult =
+  { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+interface ApprovalStoreWithPolicy extends ProductionRunStore {
+  respondToApproval(
+    runId: string,
+    response: {
+      readonly approvalId: string;
+      readonly approved: boolean;
+      readonly responseRef: string;
+      readonly authority: ProductionRunAuthority;
+      readonly expectedRequestedSeq?: number;
+      readonly expiresAtSeq?: number;
+    },
+  ): Promise<
+    | { readonly ok: true; readonly duplicate: boolean; readonly record: ProductionRunRecordV1 }
+    | { readonly ok: false; readonly reason: string }
+  >;
+}
+
+function hasPolicyApprovalResponse(store: ProductionRunStore): store is ApprovalStoreWithPolicy {
+  return typeof (store as { respondToApproval?: unknown }).respondToApproval === 'function';
+}
+
+async function recordApprovalResponse(
+  store: ProductionRunStore,
+  record: ProductionRunRecordV1,
+  approval: ProductionApprovalV1,
+  input: {
+    readonly approved: boolean;
+    readonly authority: ProductionRunAuthority;
+    readonly humanInputs: Readonly<Record<string, unknown>>;
+    readonly expiresAtSeq?: number;
+  },
+): Promise<ApprovalResponseResult> {
+  const response = {
+    approvalId: approval.approvalId,
+    approved: input.approved,
+    responseRef: approvalResponseRef(record, approval, input.humanInputs),
+    authority: input.authority,
+  };
+  const result = hasPolicyApprovalResponse(store)
+    ? await store.respondToApproval(record.runId, {
+        ...response,
+        expectedRequestedSeq: approval.requestedSeq,
+        ...(input.expiresAtSeq === undefined ? {} : { expiresAtSeq: input.expiresAtSeq }),
+      })
+    : await store.recordApprovalResponse(record.runId, response);
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+}
+
+function approvalResponseRef(
+  record: ProductionRunRecordV1,
+  approval: ProductionApprovalV1,
+  humanInputs: Readonly<Record<string, unknown>>,
+): string {
+  const key = computeRunKey({
+    workflowId: record.workflowId,
+    workflowVersion: record.workflowVersion,
+    nodeId: approval.nodeId,
+    nodeType: 'human.response',
+    params: { approvalId: approval.approvalId, humanInputs },
+    normalizedInputs: record.runId,
+    projectRevision: record.projectRevision,
+  });
+  return `response-${key.slice(0, 48)}`;
+}
+
+function approvalInputApproved(input: unknown): boolean {
+  if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+    const approved = (input as { readonly approved?: unknown }).approved;
+    const rejected = (input as { readonly rejected?: unknown }).rejected;
+    if (approved === false || rejected === true) return false;
+  }
+  return true;
 }
 
 export { resolveWorkflow };

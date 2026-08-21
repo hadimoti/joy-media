@@ -4,15 +4,20 @@ import { FIRST_PARTY_WORKFLOW_IDS } from '@joy-media/workflow-engine';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { EditorSession } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { detectDerivedFrom, loadFirstPartyWorkflows, getFirstPartyWorkflowVersion } from './first-party-workflows.js';
+import {
+  detectDerivedFrom,
+  loadFirstPartyWorkflows,
+  getFirstPartyWorkflowVersion,
+} from './first-party-workflows.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import {
-  getParkedWorkflowRun,
   normalizeFirstPartyInputs,
   resetFirstPartyLibraryForTests,
   resumeWorkflow,
   runWorkflow,
 } from './workflow-runner.js';
+import { BrowserProductionRunStore } from './browser-production-run-store.js';
+import { createFixtureFirstPartyLibrary } from './first-party-handlers.js';
 
 afterEach(() => {
   resetFirstPartyLibraryForTests();
@@ -46,7 +51,10 @@ describe('WP-17 first-party workflows', () => {
       preconditions: [],
       requiresConfirmation: false,
     };
-    const recorded = saveWorkflow(session, createPlan('Teach long video draft reels caption step', [step]));
+    const recorded = saveWorkflow(
+      session,
+      createPlan('Teach long video draft reels caption step', [step]),
+    );
     expect(detectDerivedFrom(recorded)).toBe('joy.first-party.long-video-draft-reels');
   });
 
@@ -70,30 +78,68 @@ describe('WP-17 first-party workflows', () => {
       buildReferenceSpikeProject(),
       INITIAL_EDITOR_PROJECT,
     );
+    const runStore = new BrowserProductionRunStore(
+      {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => storage.set(key, value),
+      },
+      {
+        projectId: session.timelineProject.id,
+        authority: { principalId: 'local-owner', role: 'owner', displayName: 'Local owner' },
+      },
+    );
+    const runnerOptions = {
+      productionRunStore: runStore,
+      firstPartyLibrary: createFixtureFirstPartyLibrary(),
+      authority: { principalId: 'local-owner', role: 'owner', displayName: 'Local owner' },
+    } as const;
 
-    const first = await runWorkflow(session, 'joy.first-party.long-video-draft-reels', {
-      assetId: 'asset-long-1',
-    });
+    const first = await runWorkflow(
+      session,
+      'joy.first-party.long-video-draft-reels',
+      {
+        assetId: 'asset-long-1',
+      },
+      runnerOptions,
+    );
     expect(first.status).toBe('waiting_for_input');
     if (first.status !== 'waiting_for_input') return;
 
     expect(first.request.kind).toBe('choose-candidates');
-    expect(getParkedWorkflowRun(first.runId)?.nodeId).toBe('approve-candidates');
     const payload = first.request.payload as { candidates: readonly { title: string }[] };
-    expect(payload.candidates.map((candidate) => candidate.title)).toEqual(['Hook A', 'Hook B', 'Hook C']);
-
-    const second = await resumeWorkflow(session, first.runId, {
-      'approve-candidates': { candidates: payload.candidates.slice(0, 2) },
+    expect(payload.candidates.map((candidate) => candidate.title)).toEqual([
+      'Hook A',
+      'Hook B',
+      'Hook C',
+    ]);
+    await expect(runStore.load(first.runId)).resolves.toMatchObject({
+      state: 'parked',
+      checkpointRevision: 1,
+      approvals: [{ nodeId: 'approve-candidates', state: 'pending' }],
     });
+
+    const second = await resumeWorkflow(
+      session,
+      first.runId,
+      {
+        'approve-candidates': { candidates: payload.candidates.slice(0, 2) },
+      },
+      runnerOptions,
+    );
     expect(second.status).toBe('waiting_for_input');
     if (second.status !== 'waiting_for_input') return;
     expect(second.request.kind).toBe('approve-render');
     expect(second.nodeId).toBe('approve-drafts');
 
     const draftPayload = second.request.payload as { items: readonly unknown[] };
-    const third = await resumeWorkflow(session, second.runId, {
-      'approve-drafts': { approved: draftPayload.items },
-    });
+    const third = await resumeWorkflow(
+      session,
+      second.runId,
+      {
+        'approve-drafts': { approved: draftPayload.items },
+      },
+      runnerOptions,
+    );
     expect(third.status).toBe('succeeded');
     if (third.status !== 'succeeded') return;
     expect(third.outputs).toMatchObject({

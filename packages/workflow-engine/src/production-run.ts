@@ -100,6 +100,8 @@ export interface ProductionRunRecordV1 {
   readonly projectRevision: string;
   readonly state: ProductionRunStateV1;
   readonly checkpointRevision: number;
+  /** Original JSON workflow inputs needed to recompute run keys on durable resume. */
+  readonly workflowInputs?: unknown;
   readonly checkpoint?: RunCheckpoint;
   readonly links: ProductionRunLinksV1;
   readonly events: readonly ProductionRunEventV1[];
@@ -370,6 +372,7 @@ export function recordProductionApprovalResponse(
       return candidate;
     }
     const { pendingApprovalId: _pendingApprovalId, ...withoutPendingApproval } = candidate;
+    void _pendingApprovalId;
     return withoutPendingApproval;
   });
   const events = [...record.events, event];
@@ -468,6 +471,15 @@ export class InMemoryProductionRunStore implements ProductionRunStore {
       },
       checkpointRevision,
     );
+    const nextApprovals = update.dashboard?.approvals.map((approval) => ({
+      approvalVersion: PRODUCTION_APPROVAL_VERSION,
+      approvalId: approval.approvalId,
+      nodeId: approval.nodeId,
+      kind: approval.kind,
+      prompt: approval.prompt,
+      state: approval.state,
+      requestedSeq: event.seq,
+    }));
     const record: ProductionRunRecordV1 = {
       ...current,
       state,
@@ -476,15 +488,9 @@ export class InMemoryProductionRunStore implements ProductionRunStore {
       events: [...current.events, event],
       nodes: update.dashboard?.nodes ?? current.nodes,
       approvals:
-        update.dashboard?.approvals.map((approval) => ({
-          approvalVersion: PRODUCTION_APPROVAL_VERSION,
-          approvalId: approval.approvalId,
-          nodeId: approval.nodeId,
-          kind: approval.kind,
-          prompt: approval.prompt,
-          state: approval.state,
-          requestedSeq: event.seq,
-        })) ?? current.approvals,
+        nextApprovals === undefined
+          ? current.approvals
+          : mergeProductionApprovals(current.approvals, nextApprovals),
       updatedSeq: event.seq,
     };
     assertMonotonicProductionRunEvents(record.events);
@@ -506,6 +512,16 @@ export class InMemoryProductionRunStore implements ProductionRunStore {
     }
     return result;
   }
+}
+
+function mergeProductionApprovals(
+  current: readonly ProductionApprovalV1[],
+  next: readonly ProductionApprovalV1[],
+): readonly ProductionApprovalV1[] {
+  const nextById = new Map(next.map((approval) => [approval.approvalId, approval]));
+  const merged = current.map((approval) => nextById.get(approval.approvalId) ?? approval);
+  const currentIds = new Set(current.map((approval) => approval.approvalId));
+  return [...merged, ...next.filter((approval) => !currentIds.has(approval.approvalId))];
 }
 
 function createProductionRunEvent(
@@ -692,11 +708,13 @@ function sanitizeCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
       attempts: node.attempts,
       deterministic: node.deterministic,
       ...(node.failureCode === undefined ? {} : { failureCode: node.failureCode }),
+      ...(node.output === undefined ? {} : { output: node.output }),
       ...(node.pendingRequest === undefined
         ? {}
         : {
             pendingRequest: sanitizeHumanInputRequest(node.pendingRequest),
           }),
+      ...(node.resolvedInput === undefined ? {} : { resolvedInput: node.resolvedInput }),
     };
   }
   return {

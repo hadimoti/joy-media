@@ -36,9 +36,12 @@ interface ApprovalState {
   readonly nodeId: string;
   readonly request: HumanInputRequest;
   readonly selected: ReadonlySet<string>;
+  readonly approvalId?: string;
+  readonly approvalRequestedSeq?: number;
+  readonly approvalExpiresAtSeq?: number;
 }
 
-function parametersFromSchema(
+export function parametersFromSchema(
   schema: Record<string, unknown>,
   selectedClip:
     | {
@@ -50,6 +53,7 @@ function parametersFromSchema(
         };
       }
     | undefined,
+  playheadUs: number,
 ): WorkflowInputParameter[] {
   const properties = (schema.properties as Record<string, unknown> | undefined) ?? {};
   const required = (schema.required as string[] | undefined) ?? [];
@@ -66,8 +70,7 @@ function parametersFromSchema(
       else if (name === 'clipDurationUs' && selectedClip !== undefined)
         defaultValue = selectedClip.clip.durationUs;
       else if (name === 'clipSourceInUs') defaultValue = 0;
-      else if ((name === 'atUs' || name === 'newStartUs') && selectedClip !== undefined)
-        defaultValue = selectedClip.clip.startUs;
+      else if (name === 'atUs' || name === 'newStartUs') defaultValue = playheadUs;
       else if (name === 'newEndUs' && selectedClip !== undefined)
         defaultValue = selectedClip.clip.startUs + selectedClip.clip.durationUs;
       else if (name === 'newClipId' && selectedClip !== undefined)
@@ -115,6 +118,11 @@ export function WorkflowsPanel({
   readonly onResume: (
     runId: string,
     humanInputs: Record<string, unknown>,
+    approval: {
+      readonly approvalId?: string;
+      readonly approvalRequestedSeq?: number;
+      readonly approvalExpiresAtSeq?: number;
+    },
   ) => Promise<WorkflowRunOutcome>;
 }) {
   const [workflows, setWorkflows] = useState(() => listWorkflows(session));
@@ -125,8 +133,6 @@ export function WorkflowsPanel({
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
   const [approval, setApproval] = useState<ApprovalState | undefined>(undefined);
   const [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
-
-  void playheadUs;
 
   const handleDelete = (workflowId: string) => {
     deleteWorkflow(session, workflowId);
@@ -159,6 +165,13 @@ export function WorkflowsPanel({
         selected: new Set(
           candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
         ),
+        ...(outcome.approvalId === undefined ? {} : { approvalId: outcome.approvalId }),
+        ...(outcome.approvalRequestedSeq === undefined
+          ? {}
+          : { approvalRequestedSeq: outcome.approvalRequestedSeq }),
+        ...(outcome.approvalExpiresAtSeq === undefined
+          ? {}
+          : { approvalExpiresAtSeq: outcome.approvalExpiresAtSeq }),
       });
       setStatusMessage(`Awaiting approval: ${outcome.request.kind}`);
       return;
@@ -181,7 +194,7 @@ export function WorkflowsPanel({
       if (systemWf === undefined) return;
       schema = systemWf.workflow.inputs as Record<string, unknown>;
     }
-    const parameters = parametersFromSchema(schema, selectedClip);
+    const parameters = parametersFromSchema(schema, selectedClip, playheadUs);
     const initial: Record<string, string> = {};
     for (const parameter of parameters) {
       initial[parameter.name] = parameter.default !== undefined ? String(parameter.default) : '';
@@ -227,7 +240,15 @@ export function WorkflowsPanel({
       humanInputs = { [approval.nodeId]: { approved: true } };
     }
 
-    const outcome = await onResume(approval.runId, humanInputs);
+    const outcome = await onResume(approval.runId, humanInputs, {
+      ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
+      ...(approval.approvalRequestedSeq === undefined
+        ? {}
+        : { approvalRequestedSeq: approval.approvalRequestedSeq }),
+      ...(approval.approvalExpiresAtSeq === undefined
+        ? {}
+        : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
+    });
     applyOutcome(outcome);
   }
 
@@ -417,9 +438,7 @@ export function WorkflowsPanel({
               })}
             </ul>
           ) : (
-            <p className="empty-hint">
-              Review the {approval.request.kind} request and continue.
-            </p>
+            <p className="empty-hint">Review the {approval.request.kind} request and continue.</p>
           )}
           <div className="workflow-run-actions">
             <button

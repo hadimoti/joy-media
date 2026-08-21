@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createStubFirstPartyLibrary } from './first-party-handlers.js';
+import { createFixtureFirstPartyLibrary } from './first-party-handlers.js';
 
 describe('transform.denoise port', () => {
   it('runs real noise-gate DSP without __stub', () => {
-    const library = createStubFirstPartyLibrary();
+    const library = createFixtureFirstPartyLibrary();
     const handler = library.handlers['transform.denoise'];
     expect(handler).toBeDefined();
     if (handler === undefined) return;
@@ -43,7 +43,7 @@ describe('transform.denoise port', () => {
   });
 
   it('defers ML denoise to a local GPU Worker capability', () => {
-    const library = createStubFirstPartyLibrary();
+    const library = createFixtureFirstPartyLibrary();
     const handler = library.handlers['transform.denoise'];
     expect(handler).toBeDefined();
     if (handler === undefined) return;
