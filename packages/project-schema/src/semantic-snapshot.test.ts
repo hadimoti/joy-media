@@ -482,6 +482,30 @@ describe('validateSemanticSnapshotV1', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((error) => error.includes('durationUs'))).toBe(true);
   });
+
+  it('should reject corrupted derived evidence state that does not match sections', () => {
+    const snapshot = createSemanticSnapshotV1(
+      [timelineSection, assetsSection],
+      {
+        projectId: 'project-001',
+        revision: 1,
+        createdBy: 'test-user',
+        schemaVersion: 1,
+        contentHash: 'abc123',
+      },
+    );
+
+    const corruptedSnapshot = {
+      ...snapshot,
+      evidenceIndex: new Map([[validClipEvidence.id, validClipEvidence]]),
+      evidenceIds: [validClipEvidence.id, 'asset-missing-from-index'],
+    };
+
+    const result = validateSemanticSnapshotV1(corruptedSnapshot);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes('evidenceIndex'))).toBe(true);
+    expect(result.errors.some((error) => error.includes('evidenceIds'))).toBe(true);
+  });
 });
 
 // ============================================================================

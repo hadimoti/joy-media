@@ -286,6 +286,16 @@ describe('validateIntelligenceRule', () => {
     const errors = validateIntelligenceRule(rule);
     expect(errors.some(e => e.includes('appliesTo'))).toBe(true);
   });
+
+  it('should reject rule with unknown evidence kinds in appliesTo', () => {
+    const rule: IntelligenceRuleV1 = {
+      ...validRule,
+      appliesTo: ['clip', 'not-a-kind' as any],
+    };
+
+    const errors = validateIntelligenceRule(rule);
+    expect(errors.some((error) => error.includes('appliesTo'))).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -394,6 +404,39 @@ describe('createSemanticIntelligenceV1', () => {
     expect(result.valid).toBe(true);
     expect(result.warnings).toEqual([]);
     expect(rebuilt.findingIds).toEqual(intelligence.findingIds);
+  });
+
+  it('should produce the same metadata id for identical inputs', () => {
+    const originalNow = Date.now;
+    try {
+      Date.now = () => 1000;
+      const first = createSemanticIntelligenceV1(
+        [validFinding],
+        [validRule],
+        {
+          projectId: 'project-001',
+          snapshotRevision: 1,
+          createdBy: 'test-user',
+          contentHash: 'abc123',
+        },
+      );
+
+      Date.now = () => 2000;
+      const second = createSemanticIntelligenceV1(
+        [validFinding],
+        [validRule],
+        {
+          projectId: 'project-001',
+          snapshotRevision: 1,
+          createdBy: 'test-user',
+          contentHash: 'abc123',
+        },
+      );
+
+      expect(second.metadata.id).toBe(first.metadata.id);
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });
 

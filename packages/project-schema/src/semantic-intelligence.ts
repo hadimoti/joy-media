@@ -53,6 +53,9 @@ const MAX_RULES_COUNT = 500;
 /** Maximum supported temporal range in microseconds (24 hours) */
 const MAX_TIME_US = 24 * 60 * 60 * 1_000_000;
 
+/** Maximum number of evidence kinds a rule can target */
+const MAX_APPLIES_TO_COUNT = EVIDENCE_KINDS_V1.length;
+
 // ============================================================================
 // Validation Helpers
 // ============================================================================
@@ -339,6 +342,17 @@ export function validateIntelligenceRule(value: unknown): string[] {
   const appliesTo = rule.appliesTo as unknown[];
   if (!Array.isArray(appliesTo)) {
     errors.push('Rule appliesTo must be an array');
+  } else {
+    if (appliesTo.length > MAX_APPLIES_TO_COUNT) {
+      errors.push(`Rule appliesTo must contain at most ${MAX_APPLIES_TO_COUNT} evidence kinds`);
+    }
+
+    for (const evidenceKind of appliesTo) {
+      if (!isNonEmptyString(evidenceKind) || !EVIDENCE_KINDS_V1.includes(evidenceKind as EvidenceKindV1)) {
+        errors.push(`Rule appliesTo entries must be one of: ${EVIDENCE_KINDS_V1.join(', ')}`);
+        break;
+      }
+    }
   }
 
   return errors;
@@ -439,7 +453,7 @@ export function createSemanticIntelligenceV1(
 ): SemanticIntelligenceV1 {
   const now = new Date().toISOString();
   const metadata: IntelligenceMetadataV1 = {
-    id: `intelligence-${options.projectId}-${options.snapshotRevision}-${Date.now()}`,
+    id: `intelligence-${options.projectId}-${options.snapshotRevision}-${options.contentHash}`,
     revision: 1,
     snapshotRevision: options.snapshotRevision,
     projectId: options.projectId,

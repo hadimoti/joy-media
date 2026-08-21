@@ -70,6 +70,26 @@ function isBoundedTimeUs(value: unknown): value is number {
   return isNonNegativeInteger(value) && value <= MAX_TIME_US;
 }
 
+function hasSameDerivedEvidence(
+  expected: SnapshotEvidenceV1,
+  actual: unknown,
+): actual is SnapshotEvidenceV1 {
+  if (!isSnapshotEvidenceV1(actual)) {
+    return false;
+  }
+
+  return (
+    actual.id === expected.id &&
+    actual.kind === expected.kind &&
+    actual.label === expected.label &&
+    actual.summary === expected.summary &&
+    actual.startUs === expected.startUs &&
+    actual.durationUs === expected.durationUs &&
+    actual.sourceEntityId === expected.sourceEntityId &&
+    actual.sourceEntityRevision === expected.sourceEntityRevision
+  );
+}
+
 // ============================================================================
 // Snapshot Metadata
 // ============================================================================
@@ -580,10 +600,39 @@ export function validateSemanticSnapshotV1(
     }
   }
 
+  const expectedEvidenceEntries = Array.isArray(sections)
+    ? sections.flatMap((section) =>
+        section !== null &&
+        typeof section === 'object' &&
+        Array.isArray((section as Record<string, unknown>).evidence)
+          ? ((section as Record<string, unknown>).evidence as SnapshotEvidenceV1[]).map((evidence) => [evidence.id, evidence] as const)
+          : [],
+      )
+    : [];
+  const expectedEvidenceIndex = new Map<EvidenceId, SnapshotEvidenceV1>(expectedEvidenceEntries);
+  const expectedEvidenceIds = expectedEvidenceEntries.map(([id]) => id);
+
   // Validate evidence index matches sections
   const evidenceIndex = s.evidenceIndex as Map<EvidenceId, SnapshotEvidenceV1>;
   if (!(evidenceIndex instanceof Map)) {
     errors.push('evidenceIndex must be a Map');
+  } else {
+    if (evidenceIndex.size !== expectedEvidenceIndex.size) {
+      errors.push('evidenceIndex must match the evidence derived from sections');
+    }
+
+    for (const [evidenceId, expectedEvidence] of expectedEvidenceIndex.entries()) {
+      const actualEvidence = evidenceIndex.get(evidenceId);
+      if (!hasSameDerivedEvidence(expectedEvidence, actualEvidence)) {
+        errors.push(`evidenceIndex entry does not match sections for evidenceId ${evidenceId}`);
+      }
+    }
+
+    for (const evidenceId of evidenceIndex.keys()) {
+      if (!expectedEvidenceIndex.has(evidenceId)) {
+        errors.push(`evidenceIndex contains unknown derived evidenceId ${evidenceId}`);
+      }
+    }
   }
 
   // Validate evidenceIds
@@ -595,6 +644,13 @@ export function validateSemanticSnapshotV1(
       if (!isNonEmptyString(id)) {
         errors.push('Each evidenceId must be a non-empty string');
       }
+    }
+
+    if (
+      evidenceIds.length !== expectedEvidenceIds.length ||
+      evidenceIds.some((id, index) => id !== expectedEvidenceIds[index])
+    ) {
+      errors.push('evidenceIds must match the evidence derived from sections');
     }
   }
 
