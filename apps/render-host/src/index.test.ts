@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it, vi } from 'vitest';
 import { CAPTION_BURN_IN_KEY, createRenderBundle } from '@joy-media/render-planner';
 import type {
   JoyProjectV1,
@@ -7,22 +11,31 @@ import type {
 } from '@joy-media/project-schema';
 import {
   collectFrameInputsForExport,
+  createPinnedOfflineRenderHostDriver,
   renderBundleFrames,
+  renderHostAudioPcmForTest,
   type RenderHostMediaResolver,
 } from './index.js';
+import * as renderPage from './render-page.js';
 
 const SECOND = 1_000_000;
+const THIS_FILE = fileURLToPath(import.meta.url);
 
 describe('render-host media execution', () => {
   it('resolves planned video, still, html, and audio inputs for every exported frame', async () => {
     const reads: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-resolve-'));
+    const videoA = join(directory, 'video-a.bin');
+    const imageA = join(directory, 'image-a.bin');
+    writeFileSync(videoA, Buffer.from('video-content-a'));
+    writeFileSync(imageA, Buffer.from('image-content-a'));
     const resolver: RenderHostMediaResolver = {
       require(opaqueRef) {
         reads.push(opaqueRef);
         if (opaqueRef.startsWith('html-scene:')) {
           return { kind: 'html-scene', packageId: opaqueRef.slice('html-scene:'.length) };
         }
-        return { kind: 'file', path: `C:\\private\\${opaqueRef.replace(/[^A-Za-z0-9._-]/g, '-')}` };
+        return { kind: 'file', path: opaqueRef === 'asset:image-a' ? imageA : videoA };
       },
       describe(opaqueRef) {
         return { opaqueRef };
@@ -52,14 +65,18 @@ describe('render-host media execution', () => {
     );
   });
 
-  it('uses resolved media inputs when producing frame pixels', async () => {
+  it('uses resolved media file contents when producing frame pixels', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-content-'));
+    const videoA = join(directory, 'video-a.bin');
+    const imageA = join(directory, 'image-a.bin');
+    writeFileSync(videoA, Buffer.from('video-content-a'));
+    writeFileSync(imageA, Buffer.from('image-content-a'));
     const resolver: RenderHostMediaResolver = {
       require(opaqueRef) {
-        if (opaqueRef === 'asset:image-a')
-          return { kind: 'file', path: 'C:\\private\\sticker-a.png' };
+        if (opaqueRef === 'asset:image-a') return { kind: 'file', path: imageA };
         if (opaqueRef.startsWith('html-scene:'))
           return { kind: 'html-scene', packageId: 'joy.firstparty.title' };
-        return { kind: 'file', path: 'C:\\private\\video-a.mp4' };
+        return { kind: 'file', path: videoA };
       },
       describe(opaqueRef) {
         return { opaqueRef };
@@ -74,15 +91,60 @@ describe('render-host media execution', () => {
     expect(first).toBeDefined();
     expect(second).toBeDefined();
     expect(first).not.toEqual(second);
+
+    writeFileSync(videoA, Buffer.from('video-content-b'));
+    writeFileSync(imageA, Buffer.from('image-content-b'));
+    const [changed] = await collectAsync(
+      renderBundleFrames(bundle, 1, undefined, { mediaResolver: resolver }),
+    );
+    expect(changed).toBeDefined();
+    expect(changed).not.toEqual(first);
+  });
+
+  it('uses resolved media file contents when producing audio PCM', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-audio-'));
+    const videoA = join(directory, 'video-a.bin');
+    writeFileSync(videoA, Buffer.from('audio-content-a'));
+    const resolver: RenderHostMediaResolver = {
+      require(opaqueRef) {
+        if (opaqueRef === 'asset:image-a') return { kind: 'file', path: videoA };
+        if (opaqueRef.startsWith('html-scene:'))
+          return { kind: 'html-scene', packageId: 'joy.firstparty.title' };
+        return { kind: 'file', path: videoA };
+      },
+      describe(opaqueRef) {
+        return { opaqueRef };
+      },
+    };
+    const bundle = renderBundle();
+    const [first] = await collectAsync(
+      renderHostAudioPcmForTest(
+        collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
+      ),
+    );
+
+    writeFileSync(videoA, Buffer.from('audio-content-b'));
+    const [changed] = await collectAsync(
+      renderHostAudioPcmForTest(
+        collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
+      ),
+    );
+
+    expect(first).toBeDefined();
+    expect(changed).toBeDefined();
+    expect(changed).not.toEqual(first);
   });
 
   it('fails when a planned capture input cannot be resolved', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-missing-'));
+    const videoA = join(directory, 'video-a.bin');
+    writeFileSync(videoA, Buffer.from('video-content-a'));
     const resolver: RenderHostMediaResolver = {
       require(opaqueRef) {
         if (opaqueRef === 'asset:image-a') throw new Error('missing sticker');
         if (opaqueRef.startsWith('html-scene:'))
           return { kind: 'html-scene', packageId: 'joy.firstparty.title' };
-        return { kind: 'file', path: 'C:\\private\\video-a.mp4' };
+        return { kind: 'file', path: videoA };
       },
       describe(opaqueRef) {
         return { opaqueRef };
@@ -96,6 +158,55 @@ describe('render-host media execution', () => {
         frameCount: 1,
       }),
     ).toThrow(/image-a/);
+  });
+
+  it('fails closed when resolved file content is missing at render time', async () => {
+    const resolver: RenderHostMediaResolver = {
+      require(opaqueRef) {
+        if (opaqueRef.startsWith('html-scene:'))
+          return { kind: 'html-scene', packageId: 'joy.firstparty.title' };
+        return { kind: 'file', path: 'C:\\private\\missing-media.bin' };
+      },
+      describe(opaqueRef) {
+        return { opaqueRef };
+      },
+    };
+
+    await expect(
+      collectAsync(renderBundleFrames(renderBundle(), 1, undefined, { mediaResolver: resolver })),
+    ).rejects.toThrow(/resolved media content is unavailable/);
+  });
+
+  it('default driver crosses the offline render-page transport boundary', async () => {
+    const calls: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-driver-'));
+    const outputPath = join(directory, 'driver-output.mp4');
+    const spy = vi.spyOn(renderPage, 'createOfflineRenderHostTransport');
+    const driver = createPinnedOfflineRenderHostDriver();
+    const request = {
+      protocolVersion: 1 as const,
+      bundle: renderBundle(),
+      outputPath,
+      mediaResolver: {
+        require(opaqueRef: string) {
+          calls.push(opaqueRef);
+          if (opaqueRef.startsWith('html-scene:'))
+            return { kind: 'html-scene' as const, packageId: 'joy.firstparty.title' };
+          return { kind: 'file' as const, path: THIS_FILE };
+        },
+        describe(opaqueRef: string) {
+          return { opaqueRef };
+        },
+      },
+      frameLimit: 1,
+    };
+
+    const result = await driver.export(request);
+
+    expect(spy).toHaveBeenCalled();
+    expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    expect(JSON.stringify(result)).not.toContain(outputPath);
+    expect(calls).toEqual(expect.arrayContaining(['asset:video-a', 'asset:image-a']));
   });
 });
 

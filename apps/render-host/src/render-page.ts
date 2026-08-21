@@ -1,5 +1,5 @@
 import type { BrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
-import { createBrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
+import type { RenderHostExportRequestV1, RenderHostExportResultV1 } from './protocol.js';
 import type { RenderFramePlan } from '@joy-media/render-planner';
 
 export interface OfflineRenderPage {
@@ -14,6 +14,7 @@ export interface OfflineRenderPage {
  * opaque render plans plus transient decoded bitmaps.
  */
 export async function createOfflineRenderPage(parent?: HTMLElement): Promise<OfflineRenderPage> {
+  const { createBrowserPixiRenderer } = await import('@joy-media/renderer-pixi/browser');
   const renderer: BrowserPixiRenderer = await createBrowserPixiRenderer({
     autoStart: false,
     backgroundAlpha: 1,
@@ -27,5 +28,17 @@ export async function createOfflineRenderPage(parent?: HTMLElement): Promise<Off
     destroy() {
       renderer.destroy();
     },
+  };
+}
+
+export interface OfflineRenderHostTransport {
+  export(request: RenderHostExportRequestV1): Promise<RenderHostExportResultV1>;
+}
+
+export async function createOfflineRenderHostTransport(options: {
+  readonly exportFile: (request: RenderHostExportRequestV1) => Promise<RenderHostExportResultV1>;
+}): Promise<OfflineRenderHostTransport> {
+  return {
+    export: options.exportFile,
   };
 }

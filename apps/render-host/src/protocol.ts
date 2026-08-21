@@ -22,6 +22,7 @@ export type RenderHostResolvedMedia =
 export interface RenderHostResolvedInput {
   readonly opaqueRef: string;
   readonly resolved: RenderHostResolvedMedia;
+  readonly contentSha256: string;
 }
 
 export interface RenderHostResolvedVideoSample extends PlannedVideoSample {

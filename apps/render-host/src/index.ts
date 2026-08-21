@@ -19,6 +19,7 @@ import {
   type RenderHostMediaResolver,
   type RenderHostResolvedInput,
 } from './protocol.js';
+import { createOfflineRenderHostTransport } from './render-page.js';
 
 export {
   RENDER_HOST_PROTOCOL_VERSION,
@@ -33,7 +34,10 @@ export {
 
 export function createPinnedOfflineRenderHostDriver(): RenderHostDriver {
   return {
-    export: renderBundleToFile,
+    async export(request) {
+      const transport = await createOfflineRenderHostTransport({ exportFile: renderBundleToFile });
+      return transport.export(request);
+    },
   };
 }
 
@@ -193,9 +197,29 @@ function resolveAssetInput(
   try {
     const resolved = resolver.require(descriptor.opaqueRef);
     resolver.describe(descriptor.opaqueRef);
-    return { opaqueRef: descriptor.opaqueRef, resolved };
+    return {
+      opaqueRef: descriptor.opaqueRef,
+      resolved,
+      contentSha256: digestResolvedMediaContent(descriptor.opaqueRef, resolved),
+    };
   } catch (error) {
     throw new Error(`missing required asset ${assetId}: ${(error as Error).message}`);
+  }
+}
+
+function digestResolvedMediaContent(
+  opaqueRef: string,
+  resolved: RenderHostResolvedInput['resolved'],
+): string {
+  if (resolved.kind === 'html-scene') {
+    return createHash('sha256').update(`html-scene:${resolved.packageId}`).digest('hex');
+  }
+  try {
+    return createHash('sha256').update(readFileSync(resolved.path)).digest('hex');
+  } catch (error) {
+    throw new Error(
+      `resolved media content is unavailable for ${opaqueRef}: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -208,21 +232,21 @@ function applyResolvedMediaCaptures(
   const result = new Uint8Array(pixels);
   const allCaptures = [
     ...input.videoSamples.map((sample) => ({
-      key: `${sample.media.opaqueRef}:${sample.clipId}:${sample.sourceTimeUs}:${sample.role}`,
+      key: `${sample.media.contentSha256}:${sample.clipId}:${sample.sourceTimeUs}:${sample.role}`,
       x: 0,
       y: 0,
       w: Math.max(1, Math.floor(width / 3)),
       h: Math.max(1, Math.floor(height / 3)),
     })),
     ...input.stillBitmaps.map((sample) => ({
-      key: `${sample.media.opaqueRef}:${sample.objectId ?? ''}:still`,
+      key: `${sample.media.contentSha256}:${sample.objectId ?? ''}:still`,
       x: Math.floor(width / 3),
       y: Math.floor(height / 3),
       w: Math.max(1, Math.floor(width / 4)),
       h: Math.max(1, Math.floor(height / 4)),
     })),
     ...input.htmlScenes.map((sample) => ({
-      key: `${sample.media.opaqueRef}:${sample.objectId ?? ''}:${sample.sourceTimeUs ?? 0}`,
+      key: `${sample.media.contentSha256}:${sample.objectId ?? ''}:${sample.sourceTimeUs ?? 0}`,
       x: Math.floor(width / 2),
       y: 0,
       w: Math.max(1, Math.floor(width / 3)),
@@ -256,7 +280,8 @@ async function* renderAudioPcm(
     const view = new DataView(chunk.buffer);
     const audioKey = input.audioSamples
       .map(
-        (sample) => `${sample.media.opaqueRef}:${sample.sourceTimeUs}:${sample.gain}:${sample.pan}`,
+        (sample) =>
+          `${sample.media.contentSha256}:${sample.sourceTimeUs}:${sample.gain}:${sample.pan}`,
       )
       .join('|');
     const frequency = 220 + (hash32(audioKey || 'silence') % 440);
@@ -271,6 +296,26 @@ async function* renderAudioPcm(
     absoluteSample += samplesThisFrame;
     yield chunk;
   }
+}
+
+export function renderHostAudioPcmForTest(
+  inputs: readonly RenderHostFrameInputV1[],
+  manifest?: RenderManifest,
+): AsyncIterable<Uint8Array> {
+  const frame = inputs[0]?.plan.frame;
+  return renderAudioPcm(
+    inputs,
+    manifest ??
+      freezeManifest({
+        projectId: 'test',
+        revision: 0,
+        width: frame?.viewport.width ?? 1,
+        height: frame?.viewport.height ?? 1,
+        frameRate: 30,
+        durationUs: 100_000,
+        preset: 'social-h264-aac',
+      }),
+  );
 }
 
 function colorFromResolvedInput(value: string): {
