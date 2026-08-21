@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ArtifactStore } from '@joy-media/commands';
 import type { ProductionRunRecordV1 } from '@joy-media/workflow-engine';
-import { ProductionBoardPanelView } from './ProductionBoardPanel.js';
+import { loadProductionBoardRecords, ProductionBoardPanelView } from './ProductionBoardPanel.js';
 import { buildProductionBoardModel } from './production-board-model.js';
 
 const emptyArtifacts: ArtifactStore = { artifacts: {}, versions: {} };
@@ -144,6 +144,45 @@ describe('ProductionBoardPanel', () => {
     expect(markup).toContain('Report report-1');
     expect(markup).toContain('Artifact Verified delivery');
     expect(markup).toContain('Generated lane');
+  });
+
+  it('loads every paged store result before applying newest-updated ordering', async () => {
+    const records = Array.from({ length: 101 }, (_, index) =>
+      run({
+        runId: `run-${String(index + 1).padStart(3, '0')}`,
+        createdSeq: index + 1,
+        updatedSeq: index + 1,
+      }),
+    );
+    const newest = run({
+      runId: 'newest-second-page',
+      createdSeq: 102,
+      updatedSeq: 10_000,
+      state: 'running',
+    });
+    const pagedRecords = [...records, newest];
+
+    const loaded = await loadProductionBoardRecords({
+      async list(options = {}) {
+        const limit = options.limit ?? 25;
+        const offset = options.cursor === undefined ? 0 : Number(options.cursor);
+        const runs = pagedRecords.slice(offset, offset + limit);
+        const nextOffset = offset + runs.length;
+        return {
+          runs,
+          ...(nextOffset < pagedRecords.length ? { nextCursor: String(nextOffset) } : {}),
+        };
+      },
+    });
+    const model = buildProductionBoardModel({
+      records: loaded,
+      currentProjectRevision: 'rev-1',
+      artifacts: emptyArtifacts,
+      dataLanes: [],
+    });
+
+    expect(loaded).toHaveLength(102);
+    expect(model.runs[0]?.runId).toBe('newest-second-page');
   });
 });
 

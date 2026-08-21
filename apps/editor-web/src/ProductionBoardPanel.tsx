@@ -21,9 +21,10 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
 export interface ProductionBoardRunStore {
-  list(options?: {
-    readonly limit?: number;
-  }): Promise<{ readonly runs: readonly ProductionRunRecordV1[] }>;
+  list(options?: { readonly limit?: number; readonly cursor?: string }): Promise<{
+    readonly runs: readonly ProductionRunRecordV1[];
+    readonly nextCursor?: string;
+  }>;
   respondToApproval?(
     runId: string,
     response: RecordProductionApprovalResponseInput & {
@@ -84,8 +85,7 @@ export function ProductionBoardPanel({
   const refresh = useCallback(async () => {
     setLoadState({ kind: 'loading' });
     try {
-      const result = await store.list({ limit: 100 });
-      setLoadState({ kind: 'loaded', records: result.runs });
+      setLoadState({ kind: 'loaded', records: await loadProductionBoardRecords(store) });
       setStatus(undefined);
     } catch (error) {
       setLoadState({ kind: 'error', message: message(error) });
@@ -162,6 +162,29 @@ export function ProductionBoardPanel({
       onOpenLink={onOpenLink}
     />
   );
+}
+
+export async function loadProductionBoardRecords(
+  store: ProductionBoardRunStore,
+): Promise<readonly ProductionRunRecordV1[]> {
+  const records: ProductionRunRecordV1[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  do {
+    if (cursor !== undefined) {
+      if (seenCursors.has(cursor)) throw new Error('Production Board pagination loop detected');
+      seenCursors.add(cursor);
+    }
+    const page = await store.list({
+      limit: 100,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    records.push(...page.runs);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+
+  return records;
 }
 
 export function ProductionBoardPanelView({
