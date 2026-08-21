@@ -462,6 +462,18 @@ describe('control-plane HTTP transport', () => {
             outputRef: 'output-render-export-1',
             sha256: 'a'.repeat(64),
             bytes: 2048,
+            qualityReport: {
+              version: 1,
+              promiseId: 'promise-1',
+              checkedAt: '2026-08-21T00:00:00.000Z',
+              artifact: {
+                outputRef: 'output-render-export-1',
+                sha256: 'a'.repeat(64),
+                bytes: 2048,
+              },
+              facts: {},
+              findings: [{ code: 'delivery', status: 'pass', message: 'delivery passed' }],
+            },
           },
         },
         workerToken,
@@ -474,6 +486,9 @@ describe('control-plane HTTP transport', () => {
             kind: 'render.export',
             reportRef: 'report-render-export-1',
             outputRef: 'output-render-export-1',
+            qualityReport: {
+              findings: [{ code: 'delivery', status: 'pass', message: 'delivery passed' }],
+            },
           },
         },
       },

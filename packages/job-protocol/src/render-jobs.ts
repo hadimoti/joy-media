@@ -8,6 +8,8 @@ export interface RenderJobPayload {
   readonly compositionId: string;
   readonly presetId: string;
   readonly reportRef: string;
+  readonly bundle?: unknown;
+  readonly frameLimit?: number;
 }
 
 export interface RenderExportJob {
@@ -44,6 +46,7 @@ export interface RenderExportReceipt {
   readonly outputRef: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly qualityReport?: unknown;
 }
 
 export interface RenderInspectReceipt {

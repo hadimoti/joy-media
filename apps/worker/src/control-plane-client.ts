@@ -39,6 +39,7 @@ export interface WorkerJobResult {
   readonly reportRef?: string;
   readonly outputRef?: string;
   readonly findings?: number;
+  readonly qualityReport?: unknown;
   readonly descriptor?: {
     readonly mimeType: string;
     readonly width?: number;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DeliveryReportPanel } from './DeliveryReportPanel.js';
 import {
   deliveryGate,
+  reconcileDeliveryInspections,
   type DeliveryQualityStatus,
   type DeliveryRenderReport,
   type ExportProcessEntry,
@@ -222,4 +223,93 @@ describe('delivery gate', () => {
     expect(markup).toContain('render-export-7');
     expect(markup).toContain('1 warning');
   });
+
+  it('reconciles completed, failed, and canceled render jobs into delivery inspection evidence', () => {
+    const entries: readonly ExportProcessEntry[] = [
+      entry({
+        id: 'delivery-pass',
+        filename: 'pass.mp4',
+        channel: 'verified-delivery',
+        exportJobId: 'render-pass',
+        reportRef: 'report-pass',
+        inspection: { state: 'queued', reportRef: 'report-pass' },
+      }),
+      entry({
+        id: 'delivery-fail',
+        filename: 'fail.mp4',
+        channel: 'verified-delivery',
+        exportJobId: 'render-fail',
+        reportRef: 'report-fail',
+        inspection: {
+          state: 'queued',
+          reportRef: 'report-fail',
+          waiver: { actor: 'producer@example.com', reason: 'Known client exception' },
+        },
+      }),
+      entry({
+        id: 'delivery-canceled',
+        filename: 'canceled.mp4',
+        channel: 'verified-delivery',
+        exportJobId: 'render-canceled',
+        reportRef: 'report-canceled',
+        inspection: { state: 'queued', reportRef: 'report-canceled' },
+      }),
+      entry({
+        id: 'quick',
+        filename: 'quick.mp4',
+        channel: 'quick-browser-export',
+        inspection: { state: 'not-requested' },
+      }),
+    ];
+
+    const reconciled = reconcileDeliveryInspections(entries, [
+      renderJob('render-pass', 'completed', report(['pass'])),
+      renderJob('render-fail', 'completed', report(['fail'])),
+      renderJob('render-canceled', 'canceled'),
+    ]);
+
+    expect(deliveryGate(reconciled[0]!)).toMatchObject({ status: 'pass', canDeliver: true });
+    expect(deliveryGate(reconciled[1]!)).toMatchObject({
+      status: 'waived',
+      canDeliver: true,
+      waiver: { actor: 'producer@example.com' },
+    });
+    expect(deliveryGate(reconciled[2]!)).toMatchObject({ status: 'canceled', canDeliver: false });
+    expect(reconciled[3]).toMatchObject({
+      channel: 'quick-browser-export',
+      inspection: { state: 'not-requested' },
+    });
+  });
 });
+
+function renderJob(
+  id: string,
+  state: 'completed' | 'canceled' | 'failed',
+  qualityReport?: DeliveryRenderReport,
+) {
+  return {
+    id,
+    projectId: 'project-1',
+    type: 'render.export',
+    state,
+    progress: state === 'completed' ? 100 : 25,
+    cancelRequested: false,
+    ...(state === 'failed' ? { error: 'worker failed' } : {}),
+    ...(qualityReport === undefined
+      ? {}
+      : {
+          derivative: {
+            jobId: id,
+            kind: 'render.export',
+            reportRef: qualityReport.artifact?.outputRef ?? `report-${id}`,
+            outputRef: 'render-output',
+            sha256: 'b'.repeat(64),
+            bytes: 2048,
+            workerRef: 'worker-1',
+            resultRef: `derivative:${id}`,
+            verifiedAt: Date.parse(startedAt),
+            qualityReport,
+          },
+        }),
+  } as const;
+}

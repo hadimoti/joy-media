@@ -68,6 +68,18 @@ export interface DeliveryGateResult {
   readonly waiver?: DeliveryWaiver;
 }
 
+export interface DeliveryJobProjection {
+  readonly id: string;
+  readonly type: string;
+  readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
+  readonly error?: string;
+  readonly derivative?: {
+    readonly kind?: string;
+    readonly reportRef?: string;
+    readonly qualityReport?: DeliveryRenderReport;
+  };
+}
+
 export const EXPORT_HISTORY_KEY = 'joy-media.export-history.v1';
 const MAX_ENTRIES = 20;
 
@@ -185,6 +197,83 @@ export function deliveryGate(entry: ExportProcessEntry): DeliveryGateResult {
     return gate('warn', true, 'Warning', 'Render inspection recorded warnings.', summary);
   }
   return gate('pass', true, 'Verified', 'Render inspection passed.', summary);
+}
+
+export function reconcileDeliveryInspections(
+  entries: readonly ExportProcessEntry[],
+  jobs: readonly DeliveryJobProjection[],
+): readonly ExportProcessEntry[] {
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  let changed = false;
+  const next = entries.map((entry) => {
+    if (entry.channel !== 'verified-delivery' || entry.exportJobId === undefined) return entry;
+    const job =
+      (entry.inspectJobId === undefined ? undefined : jobsById.get(entry.inspectJobId)) ??
+      jobsById.get(entry.exportJobId);
+    if (job === undefined) return entry;
+    const reconciled = reconcileEntry(entry, job);
+    if (reconciled !== entry) changed = true;
+    return reconciled;
+  });
+  return changed ? next : entries;
+}
+
+function reconcileEntry(entry: ExportProcessEntry, job: DeliveryJobProjection): ExportProcessEntry {
+  const previousInspection = entry.inspection;
+  const reportRef = job.derivative?.reportRef ?? previousInspection?.reportRef ?? entry.reportRef;
+  const waiver = previousInspection?.waiver;
+  if (job.state === 'queued' || job.state === 'leased') {
+    return replaceInspection(entry, {
+      state: job.state === 'queued' ? 'queued' : 'running',
+      ...(reportRef === undefined ? {} : { reportRef }),
+      ...(waiver === undefined ? {} : { waiver }),
+    });
+  }
+  if (job.state === 'canceled') {
+    return replaceInspection(entry, {
+      state: 'canceled',
+      ...(reportRef === undefined ? {} : { reportRef }),
+      ...(waiver === undefined ? {} : { waiver }),
+    });
+  }
+  if (job.state === 'failed') {
+    return replaceInspection(entry, {
+      state: 'failed',
+      ...(reportRef === undefined ? {} : { reportRef }),
+      ...(job.error === undefined ? {} : { error: job.error }),
+      ...(waiver === undefined ? {} : { waiver }),
+    });
+  }
+  const report = job.derivative?.qualityReport;
+  if (report === undefined) {
+    return replaceInspection(entry, {
+      state: 'failed',
+      ...(reportRef === undefined ? {} : { reportRef }),
+      error: 'Render job completed without an API-safe quality report.',
+      ...(waiver === undefined ? {} : { waiver }),
+    });
+  }
+  const totalBytes = entry.totalBytes ?? report.artifact?.bytes;
+  return {
+    ...entry,
+    status: 'completed',
+    finishedAt: entry.finishedAt ?? report.checkedAt ?? new Date(0).toISOString(),
+    ...(totalBytes === undefined ? {} : { totalBytes }),
+    inspection: {
+      state: 'completed',
+      report,
+      ...(reportRef === undefined ? {} : { reportRef }),
+      ...(waiver === undefined ? {} : { waiver }),
+    },
+  };
+}
+
+function replaceInspection(
+  entry: ExportProcessEntry,
+  inspection: DeliveryInspectionRecord,
+): ExportProcessEntry {
+  if (JSON.stringify(entry.inspection) === JSON.stringify(inspection)) return entry;
+  return { ...entry, inspection };
 }
 
 function summarizeReport(report: DeliveryRenderReport): DeliveryGateResult['summary'] {

@@ -169,6 +169,7 @@ export interface RenderExportReceipt {
   readonly outputRef: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly qualityReport?: unknown;
 }
 export interface RenderInspectReceipt {
   readonly kind: 'render.inspect';

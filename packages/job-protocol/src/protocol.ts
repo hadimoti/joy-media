@@ -201,7 +201,11 @@ export function validateWorkerJobV1(job: WorkerJobV1): WorkerJobV1 {
   if (!job.requirements.capabilities.includes(requiredCapabilityForJobType(job.type))) {
     throw new WorkerProtocolError('WORKER_JOB_INVALID', 'job capability requirement mismatch');
   }
-  validateJsonBudget(job.payload, 'payload');
+  validateJsonBudget(
+    job.payload,
+    'payload',
+    job.type === 'render.export' && 'bundle' in job.payload ? 1_000_000 : undefined,
+  );
   validateJsonBudget(job.requirements, 'requirements');
   assertJsonHasNoPaths(job.payload, 'payload');
   return job;
@@ -212,7 +216,11 @@ export function validateWorkerReceiptForJob(
   receipt: WorkerResultReceiptV1 | undefined,
 ): WorkerResultReceiptV1 | undefined {
   if (receipt === undefined) return undefined;
-  validateJsonBudget(receipt, 'receipt');
+  validateJsonBudget(
+    receipt,
+    'receipt',
+    jobType === 'render.export' && 'qualityReport' in receipt ? 65_536 : undefined,
+  );
   assertJsonHasNoPaths(receipt, 'receipt');
   if (receipt.kind !== jobType) {
     throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt kind does not match job type');
@@ -569,6 +577,29 @@ function validateWorkerJobPayload(job: WorkerJobV1): void {
       }
       return;
     case 'render.export':
+      assertObjectKeys(
+        job.payload,
+        ['projectRef', 'compositionId', 'presetId', 'reportRef'],
+        ['bundle', 'frameLimit'],
+        'payload',
+      );
+      assertOpaqueIds(
+        [
+          job.payload.projectRef,
+          job.payload.compositionId,
+          job.payload.presetId,
+          job.payload.reportRef,
+        ],
+        'payload references',
+      );
+      if (
+        'frameLimit' in job.payload &&
+        job.payload.frameLimit !== undefined &&
+        (!Number.isSafeInteger(job.payload.frameLimit) || job.payload.frameLimit < 1)
+      ) {
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload frameLimit is invalid');
+      }
+      return;
     case 'render.inspect':
       assertObjectKeys(
         job.payload,
@@ -664,7 +695,12 @@ function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResul
     }
     case 'render.export': {
       const value = receipt as Extract<WorkerResultReceiptV1, { readonly kind: 'render.export' }>;
-      assertObjectKeys(value, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes'], [], 'receipt');
+      assertObjectKeys(
+        value,
+        ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes'],
+        ['qualityReport'],
+        'receipt',
+      );
       assertOpaqueIds([value.reportRef, value.outputRef], 'receipt references');
       return;
     }
@@ -735,9 +771,9 @@ function assertOpaqueIds(ids: readonly string[], label: string): void {
   }
 }
 
-function validateJsonBudget(value: unknown, label: string): void {
+function validateJsonBudget(value: unknown, label: string, maxBytes = 16_384): void {
   const encoded = JSON.stringify(value);
-  if (encoded === undefined || encoded.length > 16_384) {
+  if (encoded === undefined || encoded.length > maxBytes) {
     throw new WorkerProtocolError('WORKER_PROTOCOL_OVERSIZE', `${label} is too large`);
   }
 }

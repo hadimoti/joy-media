@@ -187,6 +187,7 @@ import { logoutJoySession, probeJoySession, type JoySessionState } from './ident
 import {
   deliveryGate,
   loadExportHistory,
+  reconcileDeliveryInspections,
   saveExportHistory,
   upsertEntry,
   type ExportProcessEntry,
@@ -1653,6 +1654,30 @@ function EditorWorkspace({
     () => exportHistory.find((entry) => deliveryGate(entry).status === 'blocked'),
     [exportHistory],
   );
+  const deliveryHistoryNeedsReconcile = useMemo(
+    () => exportHistory.some((entry) => deliveryGate(entry).status === 'pending'),
+    [exportHistory],
+  );
+  const reconcileDeliveryHistory = useCallback(async () => {
+    if (!deliveryHistoryNeedsReconcile) return;
+    try {
+      const jobs = await mediaClient.jobs(projectId);
+      setExportHistory((entries) => {
+        const next = reconcileDeliveryInspections(entries, jobs);
+        if (next !== entries) saveExportHistory(window.localStorage, next);
+        return next;
+      });
+    } catch {
+      // JobsPanel already owns user-facing connection errors; delivery history
+      // remains fail-closed until a report projection is available.
+    }
+  }, [deliveryHistoryNeedsReconcile, mediaClient, projectId]);
+  useEffect(() => {
+    if (!deliveryHistoryNeedsReconcile) return;
+    void reconcileDeliveryHistory();
+    const interval = window.setInterval(() => void reconcileDeliveryHistory(), 2_000);
+    return () => window.clearInterval(interval);
+  }, [deliveryHistoryNeedsReconcile, reconcileDeliveryHistory]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const action = resolveShortcut(event);
@@ -2196,12 +2221,11 @@ function EditorWorkspace({
 
     setExporting(true);
     window.clearTimeout(exportToastTimerRef.current);
-    setExportStatus('Queueing verified delivery render and inspection…');
+    setExportStatus('Queueing verified delivery render…');
     setExportProgress(0.05);
     const createdAt = Date.now();
     const entryId = `delivery-${createdAt}`;
     const exportJobId = `${entryId}-export`;
-    const inspectJobId = `${entryId}-inspect`;
     const reportRef = `report-${entryId}`;
     const filename = `joy-media-delivery-${createdAt}.mp4`;
     const startedAt = new Date().toISOString();
@@ -2223,11 +2247,23 @@ function EditorWorkspace({
       }
     })();
     const durationUs = session.timelineProject.compositions.root?.durationUs ?? 30_000_000;
+    const bundle = createRenderBundle({
+      timelineProject: session.timelineProject,
+      visualProject: {
+        ...session.visualProject,
+        exportPreset,
+        updatedAt: new Date().toISOString(),
+      },
+      ...(compositionV1 === undefined ? {} : { compositionId: compositionV1.id }),
+      outputPreset: exportPreset,
+      seed: `delivery:${entryId}`,
+    });
     const payload = {
       projectRef: opaqueRenderRef(projectId, 'project'),
       compositionId: opaqueRenderRef(compositionV1?.id, 'root-composition'),
       presetId: opaqueRenderRef(`${exportPreset}-${width}x${height}-${durationUs}`, 'preset'),
       reportRef,
+      bundle,
     };
     const queuedEntry: ExportProcessEntry = {
       id: entryId,
@@ -2236,7 +2272,6 @@ function EditorWorkspace({
       startedAt,
       channel: 'verified-delivery',
       exportJobId,
-      inspectJobId,
       reportRef,
       inspection: { state: 'queued', reportRef },
     };
@@ -2244,9 +2279,8 @@ function EditorWorkspace({
     try {
       await mediaClient.ensureProject(projectId, projectId);
       await mediaClient.enqueueRenderExport(projectId, exportJobId, payload);
-      await mediaClient.enqueueRenderInspection(projectId, inspectJobId, payload);
       recordExportEntry(queuedEntry);
-      setExportStatus('Verified delivery queued. Watch Jobs for render export and inspection.');
+      setExportStatus('Verified delivery queued. Watch Jobs for render export evidence.');
       setExportProgress(1);
       exportToastTimerRef.current = window.setTimeout(() => {
         setExportStatus(undefined);

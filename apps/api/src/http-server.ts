@@ -953,7 +953,7 @@ function optionalWorkerResult(body: Record<string, unknown>): WorkerResultReceip
   }
   if (
     result.kind === 'render.export' &&
-    hasOnlyKeys(result, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes']) &&
+    hasOnlyKeys(result, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes', 'qualityReport']) &&
     typeof result.reportRef === 'string' &&
     typeof result.outputRef === 'string' &&
     isReceiptHashAndBytes(result)
@@ -964,6 +964,7 @@ function optionalWorkerResult(body: Record<string, unknown>): WorkerResultReceip
       outputRef: result.outputRef,
       sha256: result.sha256,
       bytes: result.bytes,
+      ...(result.qualityReport === undefined ? {} : { qualityReport: result.qualityReport }),
     };
   }
   if (

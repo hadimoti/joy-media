@@ -246,7 +246,7 @@ export class WorkerRuntime {
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
     if (this.tools.ffmpeg && this.tools.ffprobe) {
-      capabilities.push('asset.thumbnail', 'render.export', 'render.inspect');
+      capabilities.push('asset.thumbnail', 'render.export');
     }
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');

@@ -25,12 +25,28 @@ export interface BrowserJob {
     readonly reportRef?: string;
     readonly outputRef?: string;
     readonly findings?: number;
+    readonly qualityReport?: BrowserRenderReport;
     readonly sha256?: string;
     readonly bytes?: number;
     readonly workerRef: string;
     readonly resultRef: string;
     readonly verifiedAt: number;
   };
+}
+
+export interface BrowserRenderReport {
+  readonly version?: number;
+  readonly findings: readonly {
+    readonly status: 'pass' | 'warn' | 'fail';
+  }[];
+  readonly artifact?: {
+    readonly outputRef: string;
+    readonly sha256: string;
+    readonly bytes: number;
+  };
+  readonly facts?: unknown;
+  readonly checkedAt?: string;
+  readonly promiseId?: string;
 }
 
 /** Owner-safe catalog metadata. Locations are deliberately not exposed to the editor UI. */
@@ -229,7 +245,10 @@ export class BrowserControlPlaneClient {
     id: string,
     payload: RenderJobPayload,
   ): Promise<BrowserJob> {
-    return this.enqueueRenderJob(projectId, id, 'render.inspect', payload);
+    void projectId;
+    void id;
+    void payload;
+    throw new Error('render.inspect is not executable by the current Worker runtime');
   }
   /** Queues a local-GPU Comfy RemBG job when a Worker advertises `image.comfy`. */
   async enqueueComfyRemoveBg(projectId: string, id: string, assetId: string): Promise<BrowserJob> {

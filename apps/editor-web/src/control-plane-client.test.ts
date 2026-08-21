@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { validateWorkerJobV1 } from '@joy-media/job-protocol';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
@@ -139,7 +140,7 @@ describe('BrowserControlPlaneClient', () => {
     expect(JSON.stringify(requests)).not.toContain('C:\\');
   });
 
-  it('queues render export and inspection jobs with one linked report reference', async () => {
+  it('queues one executable render export job with a bundle and linked report reference', async () => {
     const requests: Array<{ readonly url: string; readonly body?: string }> = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -166,49 +167,29 @@ describe('BrowserControlPlaneClient', () => {
         compositionId: 'root-composition',
         presetId: 'reels-1080',
         reportRef: 'report-delivery-1',
+        bundle: renderBundle(),
       };
       await client.enqueueRenderExport('project-1', 'delivery-1-export', payload);
-      await client.enqueueRenderInspection('project-1', 'delivery-1-inspect', payload);
     } finally {
       globalThis.fetch = original;
     }
 
+    const body = JSON.parse(requests[0]?.body ?? '{}') as Record<string, unknown>;
+    const { id, ...workerJobFields } = body;
+    expect(() =>
+      validateWorkerJobV1({
+        ...workerJobFields,
+        jobId: id,
+      } as Parameters<typeof validateWorkerJobV1>[0]),
+    ).not.toThrow();
     expect(requests).toEqual([
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
-        body: JSON.stringify({
-          id: 'delivery-1-export',
-          type: 'render.export',
-          protocolVersion: 1,
-          payload: {
-            projectRef: 'project-1',
-            compositionId: 'root-composition',
-            presetId: 'reels-1080',
-            reportRef: 'report-delivery-1',
-          },
-          requirements: { capabilities: ['render.export'], privacy: 'local-only' },
-          idempotencyKey: 'delivery-1-export',
-          maxAttempts: 3,
-        }),
-      },
-      {
-        url: 'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
-        body: JSON.stringify({
-          id: 'delivery-1-inspect',
-          type: 'render.inspect',
-          protocolVersion: 1,
-          payload: {
-            projectRef: 'project-1',
-            compositionId: 'root-composition',
-            presetId: 'reels-1080',
-            reportRef: 'report-delivery-1',
-          },
-          requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
-          idempotencyKey: 'delivery-1-inspect',
-          maxAttempts: 3,
-        }),
+        body: expect.stringContaining('"bundle":{"version":1'),
       },
     ]);
+    expect(requests[0]?.body).toContain('"opaqueRef":"asset:clip"');
+    expect(requests[0]?.body).not.toContain('C:\\');
   });
 });
 
@@ -217,4 +198,66 @@ function json(status: number, value: unknown): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function renderBundle() {
+  return {
+    version: 1,
+    timelineProject: {
+      schemaVersion: 0,
+      id: 'timeline',
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 1080,
+          height: 1920,
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          tracks: [],
+        },
+      },
+    },
+    visualProject: {
+      schemaVersion: 1,
+      id: 'visual',
+      title: 'Visual',
+      createdAt: '2026-08-21T00:00:00.000Z',
+      updatedAt: '2026-08-21T00:00:00.000Z',
+      rootCompositionId: 'root',
+      settings: { defaultLocale: 'en' },
+      compositions: {
+        root: {
+          id: 'root',
+          name: 'Root',
+          width: 1080,
+          height: 1920,
+          pixelAspectRatio: { num: 1, den: 1 },
+          frameRate: { num: 30, den: 1 },
+          durationUs: 1_000_000,
+          background: '#000000',
+          tracks: [],
+        },
+      },
+      assets: { clip: { id: 'clip', kind: 'video', displayName: 'Clip' } },
+      variables: {},
+      markers: [],
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+    },
+    compositionId: 'root',
+    outputPreset: 'reels-1080',
+    seed: 'delivery-1',
+    assets: {
+      clip: {
+        id: 'clip',
+        kind: 'video',
+        displayName: 'Clip',
+        opaqueRef: 'asset:clip',
+        availability: 'ready',
+      },
+    },
+  };
 }
