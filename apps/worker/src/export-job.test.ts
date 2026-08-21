@@ -1,8 +1,9 @@
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as exportCore from '@joy-media/export-core';
+import * as renderPage from '@joy-media/render-host/render-page';
 import { CAPTION_BURN_IN_KEY, createRenderBundle } from '@joy-media/render-planner';
 import type {
   JoyProjectV1,
@@ -15,14 +16,30 @@ import { StaticWorkerMediaResolver } from './worker-media-resolver.js';
 const SECOND = 1_000_000;
 
 describe('leased export job', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders a real bundle through the render host without calling the fixture helper', async () => {
     const calls: string[] = [];
+    const pageEvents: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
     const video = join(directory, 'timecode-tone.mp4');
     const image = join(directory, 'sticker.png');
     writeFileSync(video, 'worker-private-video');
     writeFileSync(image, 'worker-private-sticker');
     const fixtureSpy = vi.spyOn(exportCore, 'renderFixture');
+    const pageSpy = vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
+      paint(input) {
+        pageEvents.push(`paint:${input.plan.frame.timeUs}`);
+        return new Uint8Array(
+          input.plan.frame.viewport.width * input.plan.frame.viewport.height * 4,
+        ).fill(0x20);
+      },
+      destroy() {
+        pageEvents.push('destroy');
+      },
+    });
 
     const result = await executeLeasedExport(
       { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
@@ -37,6 +54,7 @@ describe('leased export job', () => {
           'asset:image-a': image,
           'html-scene:joy.firstparty.title': 'joy.firstparty.title',
         }),
+        frameLimit: 3,
       },
     );
 
@@ -51,6 +69,8 @@ describe('leased export job', () => {
     expect(result.outputRef).toMatch(/^render-job-1-[a-f0-9]{16}$/);
     expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
     expect(fixtureSpy).not.toHaveBeenCalled();
+    expect(pageSpy).toHaveBeenCalled();
+    expect(pageEvents).toEqual(['paint:0', 'paint:33333', 'paint:66666', 'destroy']);
     expect(calls).toEqual(['worker-1:job-1']);
   });
 

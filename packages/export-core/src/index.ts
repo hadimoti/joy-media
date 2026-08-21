@@ -262,6 +262,7 @@ export async function renderRgbaFrameStream(
     if (!child.killed) child.kill();
     videoInput.destroy();
     audioInput?.destroy();
+    await audioWrite.catch(() => undefined);
     await closed.catch(() => undefined);
     if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
     throw error;

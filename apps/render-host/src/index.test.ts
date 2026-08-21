@@ -42,7 +42,7 @@ describe('render-host media execution', () => {
       },
     };
 
-    const inputs = collectFrameInputsForExport({
+    const inputs = await collectFrameInputsForExport({
       bundle: renderBundle(),
       mediaResolver: resolver,
       frameCount: 2,
@@ -119,14 +119,14 @@ describe('render-host media execution', () => {
     const bundle = renderBundle();
     const [first] = await collectAsync(
       renderHostAudioPcmForTest(
-        collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
+        await collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
       ),
     );
 
     writeFileSync(videoA, Buffer.from('audio-content-b'));
     const [changed] = await collectAsync(
       renderHostAudioPcmForTest(
-        collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
+        await collectFrameInputsForExport({ bundle, mediaResolver: resolver, frameCount: 1 }),
       ),
     );
 
@@ -135,7 +135,53 @@ describe('render-host media execution', () => {
     expect(changed).not.toEqual(first);
   });
 
-  it('fails when a planned capture input cannot be resolved', () => {
+  it('streams media content in bounded chunks and resolves frames incrementally', async () => {
+    const calls: string[] = [];
+    const chunkSizes: number[] = [];
+    const opened: Record<string, number> = {};
+    const largePayload = new Uint8Array(1024 * 1024 + 17).fill(0x5a);
+    const resolver: RenderHostMediaResolver = {
+      require(opaqueRef) {
+        calls.push(opaqueRef);
+        if (opaqueRef.startsWith('html-scene:'))
+          return { kind: 'html-scene', packageId: 'joy.firstparty.title' };
+        return {
+          kind: 'stream',
+          async *open() {
+            opened[opaqueRef] = (opened[opaqueRef] ?? 0) + 1;
+            for (let offset = 0; offset < largePayload.length; offset += 16 * 1024) {
+              const chunk = largePayload.slice(offset, offset + 16 * 1024);
+              chunkSizes.push(chunk.length);
+              yield chunk;
+            }
+          },
+        } as ReturnType<RenderHostMediaResolver['require']>;
+      },
+      describe(opaqueRef) {
+        return { opaqueRef };
+      },
+    };
+
+    const iterator = renderBundleFrames(renderBundle(), 4, undefined, {
+      mediaResolver: resolver,
+    })[Symbol.asyncIterator]();
+    const first = await iterator.next();
+
+    expect(first.done).toBe(false);
+    expect(calls.length).toBeLessThanOrEqual(4);
+    expect(Math.max(...chunkSizes)).toBeLessThanOrEqual(16 * 1024);
+
+    const remaining: Uint8Array[] = [];
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      remaining.push(next.value);
+    }
+    expect(remaining).toHaveLength(3);
+    expect(opened).toEqual({ 'asset:video-a': 1, 'asset:image-a': 1 });
+  });
+
+  it('fails when a planned capture input cannot be resolved', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-missing-'));
     const videoA = join(directory, 'video-a.bin');
     writeFileSync(videoA, Buffer.from('video-content-a'));
@@ -151,13 +197,13 @@ describe('render-host media execution', () => {
       },
     };
 
-    expect(() =>
+    await expect(
       collectFrameInputsForExport({
         bundle: renderBundle(),
         mediaResolver: resolver,
         frameCount: 1,
       }),
-    ).toThrow(/image-a/);
+    ).rejects.toThrow(/image-a/);
   });
 
   it('fails closed when resolved file content is missing at render time', async () => {
@@ -177,11 +223,23 @@ describe('render-host media execution', () => {
     ).rejects.toThrow(/resolved media content is unavailable/);
   });
 
-  it('default driver crosses the offline render-page transport boundary', async () => {
+  it('default driver creates an offline page and paints frames through it before export', async () => {
     const calls: string[] = [];
+    const pageEvents: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-driver-'));
     const outputPath = join(directory, 'driver-output.mp4');
     const spy = vi.spyOn(renderPage, 'createOfflineRenderHostTransport');
+    const pageSpy = vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
+      paint(input) {
+        pageEvents.push(`paint:${input.plan.frame.timeUs}`);
+        return new Uint8Array(
+          input.plan.frame.viewport.width * input.plan.frame.viewport.height * 4,
+        ).fill(0x40);
+      },
+      destroy() {
+        pageEvents.push('destroy');
+      },
+    });
     const driver = createPinnedOfflineRenderHostDriver();
     const request = {
       protocolVersion: 1 as const,
@@ -204,6 +262,8 @@ describe('render-host media execution', () => {
     const result = await driver.export(request);
 
     expect(spy).toHaveBeenCalled();
+    expect(pageSpy).toHaveBeenCalled();
+    expect(pageEvents).toEqual(['paint:0', 'destroy']);
     expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(JSON.stringify(result)).not.toContain(outputPath);
     expect(calls).toEqual(expect.arrayContaining(['asset:video-a', 'asset:image-a']));

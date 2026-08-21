@@ -17,7 +17,12 @@ export interface RenderHostMediaResolver {
 
 export type RenderHostResolvedMedia =
   | { readonly kind: 'file'; readonly path: string }
-  | { readonly kind: 'html-scene'; readonly packageId: string };
+  | { readonly kind: 'html-scene'; readonly packageId: string }
+  | {
+      readonly kind: 'stream';
+      readonly open: () => AsyncIterable<Uint8Array>;
+      readonly sizeBytes?: number;
+    };
 
 export interface RenderHostResolvedInput {
   readonly opaqueRef: string;

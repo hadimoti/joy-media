@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import {
   freezeManifest,
   renderRgbaFrameStream,
@@ -19,7 +20,8 @@ import {
   type RenderHostMediaResolver,
   type RenderHostResolvedInput,
 } from './protocol.js';
-import { createOfflineRenderHostTransport } from './render-page.js';
+import * as renderPage from './render-page.js';
+import type { OfflineRenderPage } from './render-page.js';
 
 export {
   RENDER_HOST_PROTOCOL_VERSION,
@@ -35,7 +37,10 @@ export {
 export function createPinnedOfflineRenderHostDriver(): RenderHostDriver {
   return {
     async export(request) {
-      const transport = await createOfflineRenderHostTransport({ exportFile: renderBundleToFile });
+      const transport = await renderPage.createOfflineRenderHostTransport({
+        createPage: renderPage.createOfflineRenderPage,
+        exportFile: renderBundleToFile,
+      });
       return transport.export(request);
     },
   };
@@ -43,23 +48,39 @@ export function createPinnedOfflineRenderHostDriver(): RenderHostDriver {
 
 export async function renderBundleToFile(
   request: RenderHostExportRequestV1,
+  runtime: { readonly page?: OfflineRenderPage } = {},
 ): Promise<RenderHostExportResultV1> {
   if (request.protocolVersion !== RENDER_HOST_PROTOCOL_VERSION) {
     throw new Error(`unsupported render-host protocol ${request.protocolVersion}`);
   }
   const manifest = manifestFromBundle(request.bundle);
   const frameCount = frameCountForManifest(manifest, request.frameLimit);
-  const frameInputs = collectFrameInputsForExport({
-    bundle: request.bundle,
-    mediaResolver: request.mediaResolver,
-    frameCount,
-    manifest,
-  });
+  const contentCache = createMediaContentCache();
   const streamed = await renderRgbaFrameStream(
     manifest,
-    renderResolvedFrameInputs(frameInputs),
+    renderResolvedFrameInputs(
+      streamFrameInputsForExport({
+        bundle: request.bundle,
+        mediaResolver: request.mediaResolver,
+        frameCount,
+        manifest,
+        contentCache,
+      }),
+      runtime.page,
+    ),
     request.outputPath,
-    { pcmS16leStereo48000: renderAudioPcm(frameInputs, manifest) },
+    {
+      pcmS16leStereo48000: renderAudioPcm(
+        streamFrameInputsForExport({
+          bundle: request.bundle,
+          mediaResolver: request.mediaResolver,
+          frameCount,
+          manifest,
+          contentCache,
+        }),
+        manifest,
+      ),
+    },
   );
   const probe = verifyExport(request.outputPath);
   const bytes = readFileSync(request.outputPath);
@@ -84,16 +105,18 @@ export async function* renderBundleFrames(
   bundle: RenderBundleV1,
   frameCount: number,
   manifest: RenderManifest = manifestFromBundle(bundle),
-  options?: { readonly mediaResolver?: RenderHostMediaResolver },
+  options?: { readonly mediaResolver?: RenderHostMediaResolver; readonly page?: OfflineRenderPage },
 ): AsyncIterable<Uint8Array> {
   if (options?.mediaResolver !== undefined) {
     yield* renderResolvedFrameInputs(
-      collectFrameInputsForExport({
+      streamFrameInputsForExport({
         bundle,
         mediaResolver: options.mediaResolver,
         frameCount,
         manifest,
+        contentCache: createMediaContentCache(),
       }),
+      options.page,
     );
     return;
   }
@@ -103,44 +126,91 @@ export async function* renderBundleFrames(
   }
 }
 
-export function collectFrameInputsForExport(input: {
+export async function collectFrameInputsForExport(input: {
   readonly bundle: RenderBundleV1;
   readonly mediaResolver: RenderHostMediaResolver;
   readonly frameCount: number;
   readonly manifest?: RenderManifest;
-}): readonly RenderHostFrameInputV1[] {
+}): Promise<readonly RenderHostFrameInputV1[]> {
+  const result: RenderHostFrameInputV1[] = [];
+  for await (const frameInput of streamFrameInputsForExport({
+    ...input,
+    manifest: input.manifest ?? manifestFromBundle(input.bundle),
+    contentCache: createMediaContentCache(),
+  })) {
+    result.push(frameInput);
+  }
+  return result;
+}
+
+async function* streamFrameInputsForExport(input: {
+  readonly bundle: RenderBundleV1;
+  readonly mediaResolver: RenderHostMediaResolver;
+  readonly frameCount: number;
+  readonly manifest: RenderManifest;
+  readonly contentCache: MediaContentCache;
+}): AsyncIterable<RenderHostFrameInputV1> {
   const manifest = input.manifest ?? manifestFromBundle(input.bundle);
-  return collectPlannedFrames(input.bundle, input.frameCount, manifest).map(({ plan }) => {
+  for (const { plan } of iteratePlannedFrames(input.bundle, input.frameCount, manifest)) {
     const blockingFinding = plan.findings.find((finding) => finding.severity === 'error');
     if (blockingFinding !== undefined) throw new Error(blockingFinding.message);
-    return {
+    yield {
       plan,
-      videoSamples: plan.videoSamples.map((sample) => ({
-        ...sample,
-        media: resolveAssetInput(input.bundle, input.mediaResolver, sample.assetId),
-      })),
-      stillBitmaps: plan.captureRequirements
-        .filter(
-          (requirement) => requirement.kind === 'still-bitmap' && requirement.assetId !== undefined,
-        )
-        .map((requirement) => ({
-          ...requirement,
-          media: resolveAssetInput(input.bundle, input.mediaResolver, requirement.assetId!),
+      videoSamples: await Promise.all(
+        plan.videoSamples.map(async (sample) => ({
+          ...sample,
+          media: await resolveAssetInput(
+            input.bundle,
+            input.mediaResolver,
+            input.contentCache,
+            sample.assetId,
+          ),
         })),
-      htmlScenes: plan.captureRequirements
-        .filter(
-          (requirement) => requirement.kind === 'html-scene' && requirement.assetId !== undefined,
-        )
-        .map((requirement) => ({
-          ...requirement,
-          media: resolveAssetInput(input.bundle, input.mediaResolver, requirement.assetId!),
+      ),
+      stillBitmaps: await Promise.all(
+        plan.captureRequirements
+          .filter(
+            (requirement) =>
+              requirement.kind === 'still-bitmap' && requirement.assetId !== undefined,
+          )
+          .map(async (requirement) => ({
+            ...requirement,
+            media: await resolveAssetInput(
+              input.bundle,
+              input.mediaResolver,
+              input.contentCache,
+              requirement.assetId!,
+            ),
+          })),
+      ),
+      htmlScenes: await Promise.all(
+        plan.captureRequirements
+          .filter(
+            (requirement) => requirement.kind === 'html-scene' && requirement.assetId !== undefined,
+          )
+          .map(async (requirement) => ({
+            ...requirement,
+            media: await resolveAssetInput(
+              input.bundle,
+              input.mediaResolver,
+              input.contentCache,
+              requirement.assetId!,
+            ),
+          })),
+      ),
+      audioSamples: await Promise.all(
+        plan.audioSamples.map(async (sample) => ({
+          ...sample,
+          media: await resolveAssetInput(
+            input.bundle,
+            input.mediaResolver,
+            input.contentCache,
+            sample.assetId,
+          ),
         })),
-      audioSamples: plan.audioSamples.map((sample) => ({
-        ...sample,
-        media: resolveAssetInput(input.bundle, input.mediaResolver, sample.assetId),
-      })),
+      ),
     };
-  });
+  }
 }
 
 function collectPlannedFrames(
@@ -148,19 +218,25 @@ function collectPlannedFrames(
   frameCount: number,
   manifest: RenderManifest,
 ): readonly Pick<RenderHostFrameInputV1, 'plan'>[] {
+  return [...iteratePlannedFrames(bundle, frameCount, manifest)];
+}
+
+function* iteratePlannedFrames(
+  bundle: RenderBundleV1,
+  frameCount: number,
+  manifest: RenderManifest,
+): Iterable<Pick<RenderHostFrameInputV1, 'plan'>> {
   const imageSizesByObjectId = imageSizesForBundle(bundle);
-  const frames: Array<Pick<RenderHostFrameInputV1, 'plan'>> = [];
   for (let index = 0; index < frameCount; index++) {
-    frames.push({
+    yield {
       plan: planRenderFrame({
         bundle,
         timeUs: timeUsForFrame(index, manifest.frameRate),
         viewport: { width: manifest.width, height: manifest.height },
         imageSizesByObjectId,
       }),
-    });
+    };
   }
-  return frames;
 }
 
 export function manifestFromBundle(bundle: RenderBundleV1): RenderManifest {
@@ -179,19 +255,29 @@ export function manifestFromBundle(bundle: RenderBundleV1): RenderManifest {
 }
 
 async function* renderResolvedFrameInputs(
-  inputs: readonly RenderHostFrameInputV1[],
+  inputs: AsyncIterable<RenderHostFrameInputV1>,
+  page?: OfflineRenderPage,
 ): AsyncIterable<Uint8Array> {
-  for (const input of inputs) {
-    const rendered = renderHeadlessFrame(input.plan.frame);
-    yield applyResolvedMediaCaptures(rendered.pixels, rendered.width, rendered.height, input);
+  for await (const input of inputs) {
+    const width = input.plan.frame.viewport.width;
+    const height = input.plan.frame.viewport.height;
+    const pixels =
+      page === undefined ? renderHeadlessFrame(input.plan.frame).pixels : await page.paint(input);
+    if (pixels.length !== width * height * 4) {
+      throw new RangeError(
+        `offline render page returned ${pixels.length} bytes for ${width}x${height}`,
+      );
+    }
+    yield applyResolvedMediaCaptures(pixels, width, height, input);
   }
 }
 
-function resolveAssetInput(
+async function resolveAssetInput(
   bundle: RenderBundleV1,
   resolver: RenderHostMediaResolver,
+  contentCache: MediaContentCache,
   assetId: string,
-): RenderHostResolvedInput {
+): Promise<RenderHostResolvedInput> {
   const descriptor = bundle.assets[assetId];
   if (descriptor === undefined) throw new Error(`missing required asset descriptor: ${assetId}`);
   try {
@@ -200,22 +286,66 @@ function resolveAssetInput(
     return {
       opaqueRef: descriptor.opaqueRef,
       resolved,
-      contentSha256: digestResolvedMediaContent(descriptor.opaqueRef, resolved),
+      contentSha256: await contentCache.digest(descriptor.opaqueRef, resolved),
     };
   } catch (error) {
     throw new Error(`missing required asset ${assetId}: ${(error as Error).message}`);
   }
 }
 
-function digestResolvedMediaContent(
+interface MediaContentCache {
+  digest(opaqueRef: string, resolved: RenderHostResolvedInput['resolved']): Promise<string>;
+}
+
+function createMediaContentCache(): MediaContentCache {
+  const digests = new Map<string, Promise<string>>();
+  return {
+    digest(opaqueRef, resolved) {
+      const key = resolvedMediaCacheKey(opaqueRef, resolved);
+      let digest = digests.get(key);
+      if (digest === undefined) {
+        digest = digestResolvedMediaContent(opaqueRef, resolved);
+        digests.set(key, digest);
+      }
+      return digest;
+    },
+  };
+}
+
+function resolvedMediaCacheKey(
   opaqueRef: string,
   resolved: RenderHostResolvedInput['resolved'],
 ): string {
+  switch (resolved.kind) {
+    case 'file':
+      return `${opaqueRef}:file:${resolved.path}`;
+    case 'html-scene':
+      return `${opaqueRef}:html-scene:${resolved.packageId}`;
+    case 'stream':
+      return `${opaqueRef}:stream`;
+  }
+}
+
+async function digestResolvedMediaContent(
+  opaqueRef: string,
+  resolved: RenderHostResolvedInput['resolved'],
+): Promise<string> {
   if (resolved.kind === 'html-scene') {
     return createHash('sha256').update(`html-scene:${resolved.packageId}`).digest('hex');
   }
+  const hash = createHash('sha256');
   try {
-    return createHash('sha256').update(readFileSync(resolved.path)).digest('hex');
+    if (resolved.kind === 'file') {
+      await stat(resolved.path);
+      for await (const chunk of createReadStream(resolved.path, { highWaterMark: 64 * 1024 })) {
+        hash.update(chunk);
+      }
+      return hash.digest('hex');
+    }
+    for await (const chunk of resolved.open()) {
+      hash.update(chunk);
+    }
+    return hash.digest('hex');
   } catch (error) {
     throw new Error(
       `resolved media content is unavailable for ${opaqueRef}: ${(error as Error).message}`,
@@ -269,12 +399,12 @@ function applyResolvedMediaCaptures(
 }
 
 async function* renderAudioPcm(
-  inputs: readonly RenderHostFrameInputV1[],
+  inputs: AsyncIterable<RenderHostFrameInputV1> | Iterable<RenderHostFrameInputV1>,
   manifest: RenderManifest,
 ): AsyncIterable<Uint8Array> {
   const sampleRate = 48_000;
   let absoluteSample = 0;
-  for (const input of inputs) {
+  for await (const input of inputs) {
     const samplesThisFrame = Math.max(1, Math.round(sampleRate / manifest.frameRate));
     const chunk = new Uint8Array(samplesThisFrame * 4);
     const view = new DataView(chunk.buffer);
@@ -299,18 +429,17 @@ async function* renderAudioPcm(
 }
 
 export function renderHostAudioPcmForTest(
-  inputs: readonly RenderHostFrameInputV1[],
+  inputs: AsyncIterable<RenderHostFrameInputV1> | Iterable<RenderHostFrameInputV1>,
   manifest?: RenderManifest,
 ): AsyncIterable<Uint8Array> {
-  const frame = inputs[0]?.plan.frame;
   return renderAudioPcm(
     inputs,
     manifest ??
       freezeManifest({
         projectId: 'test',
         revision: 0,
-        width: frame?.viewport.width ?? 1,
-        height: frame?.viewport.height ?? 1,
+        width: 1,
+        height: 1,
         frameRate: 30,
         durationUs: 100_000,
         preset: 'social-h264-aac',
