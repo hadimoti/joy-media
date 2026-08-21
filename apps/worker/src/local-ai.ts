@@ -114,6 +114,9 @@ export function descriptorForLocalAiOutput(
     if (!mimeType.startsWith('video/')) {
       aiOutputUnavailable(`expected video output, received ${mimeType}`);
     }
+    if (mimeType !== 'video/mp4') {
+      aiOutputUnavailable(`unsupported video output ${mimeType}`);
+    }
     return { mimeType };
   }
   if (!mimeType.startsWith('image/')) {

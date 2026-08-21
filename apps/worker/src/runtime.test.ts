@@ -300,4 +300,28 @@ describe('Worker runtime', () => {
       ),
     ).toThrow(/AI_OUTPUT_UNAVAILABLE/);
   });
+
+  it('fails closed on unsupported retained AI derivative mime types', () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-ai', createdAt: '2026-08-21T00:00:00.000Z' },
+      {
+        ffmpeg: true,
+        ffprobe: true,
+        comfy: false,
+        mlDenoise: false,
+        aiProviders: ['runway', 'higgsfield'],
+      },
+    );
+
+    expect(() =>
+      runtime.readDerivative({
+        kind: 'video.runway',
+        assetId: 'ai-job-video',
+        sha256: 'd'.repeat(64),
+        bytes: 1024,
+        localRef: 'ai-job-video-dddddddddddddddd',
+        descriptor: { mimeType: 'video/webm' },
+      }),
+    ).toThrow(/unsupported retained AI derivative mime type/i);
+  });
 });

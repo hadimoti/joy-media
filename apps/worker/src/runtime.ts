@@ -496,7 +496,7 @@ export class WorkerRuntime {
       throw new Error('AI text receipts do not retain derivative bytes');
     }
     if (result.kind === 'video.runway' || result.kind === 'edit.higgsfield') {
-      const ext = result.descriptor.mimeType === 'video/mp4' ? 'mp4' : 'png';
+      const ext = retainedAiDerivativeExtension(result);
       const directory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       const bytes = readFileSync(join(directory, `${result.localRef}.${ext}`));
@@ -520,6 +520,25 @@ export class WorkerRuntime {
       throw new Error('retained derivative integrity check failed');
     return bytes;
   }
+}
+
+function retainedAiDerivativeExtension(
+  result: Extract<WorkerDerivativeReceipt, { readonly kind: 'video.runway' | 'edit.higgsfield' }>,
+): 'mp4' | 'png' {
+  if (result.kind === 'video.runway') {
+    if (result.descriptor.mimeType !== 'video/mp4') {
+      throw new Error(
+        `unsupported retained AI derivative mime type for ${result.kind}: ${result.descriptor.mimeType}`,
+      );
+    }
+    return 'mp4';
+  }
+  if (result.descriptor.mimeType !== 'image/png') {
+    throw new Error(
+      `unsupported retained AI derivative mime type for ${result.kind}: ${result.descriptor.mimeType}`,
+    );
+  }
+  return 'png';
 }
 
 export type WorkerDerivativeReceipt =
