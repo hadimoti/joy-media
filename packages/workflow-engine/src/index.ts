@@ -25,8 +25,10 @@ export type { RunKeyInput } from './run-key.js';
 export {
   CHECKPOINT_VERSION,
   HUMAN_INPUT_REQUEST_KINDS,
+  WORKFLOW_RUN_STATES,
   WorkflowEngineError,
   executeWorkflow,
+  isWorkflowRunStateParked,
 } from './runtime.js';
 export type {
   ExecuteWorkflowOptions,
@@ -100,6 +102,8 @@ export type {
 export {
   RUN_ARTIFACT_KINDS,
   RunRecorder,
+  boundRunArtifacts,
+  boundRunLogEntries,
   buildRunDashboard,
   instrumentHandlers,
   isRunArtifactDeclaration,
@@ -115,6 +119,47 @@ export type {
   RunLogEntry,
   RunLogLevel,
 } from './operations.js';
+
+// Task 14 — durable production-run contracts and board projections.
+export {
+  InMemoryProductionRunStore,
+  PRODUCTION_APPROVAL_VERSION,
+  PRODUCTION_RUN_BOARD_SNAPSHOT_VERSION,
+  PRODUCTION_RUN_EVENT_VERSION,
+  PRODUCTION_RUN_RECORD_VERSION,
+  appendProductionRunEvent,
+  assertMonotonicProductionRunEvents,
+  buildProductionRunBoardSnapshot,
+  createProductionRunRecordFromDashboard,
+  createQueuedProductionRunRecord,
+  markProductionRunRunning,
+  productionRunStateFromWorkflowRunState,
+  recordProductionApprovalResponse,
+} from './production-run.js';
+export type {
+  AppendProductionRunEventInput,
+  CreateProductionRunRecordFromDashboardOptions,
+  CreateQueuedProductionRunRecordOptions,
+  ProductionApprovalStateV1,
+  ProductionApprovalV1,
+  ProductionRunAuthority,
+  ProductionRunBoardApprovalV1,
+  ProductionRunBoardRunV1,
+  ProductionRunBoardSnapshotV1,
+  ProductionRunCheckpointUpdateResultV1,
+  ProductionRunCheckpointUpdateV1,
+  ProductionRunDashboardLinksV1,
+  ProductionRunEventTypeV1,
+  ProductionRunEventV1,
+  ProductionRunLinksV1,
+  ProductionRunNodeProjectionV1,
+  ProductionRunPublicLogEntryV1,
+  ProductionRunRecordV1,
+  ProductionRunStateV1,
+  ProductionRunStore,
+  RecordProductionApprovalResponseInput,
+  RecordProductionApprovalResponseResult,
+} from './production-run.js';
 
 export { runWorkflowHeadless } from './headless.js';
 export type { HeadlessRunOptions, HeadlessRunResult } from './headless.js';

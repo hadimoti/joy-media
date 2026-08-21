@@ -13,6 +13,18 @@ export type WorkflowRunState =
 
 export const CHECKPOINT_VERSION = 1 as const;
 
+export const WORKFLOW_RUN_STATES: readonly WorkflowRunState[] = [
+  'succeeded',
+  'failed',
+  'canceled',
+  'waiting_for_manual_intervention',
+  'waiting_for_input',
+];
+
+export function isWorkflowRunStateParked(state: WorkflowRunState): boolean {
+  return state === 'waiting_for_manual_intervention' || state === 'waiting_for_input';
+}
+
 /** §23.6: the requests an approval node may make of a human reviewer. */
 export type HumanInputRequestKind =
   | 'choose-candidates'

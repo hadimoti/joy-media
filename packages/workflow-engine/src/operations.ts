@@ -38,6 +38,32 @@ export interface RunArtifact {
 /** Artifact declaration a node output may carry (without the nodeId, which is implied). */
 export type RunArtifactDeclaration = Omit<RunArtifact, 'nodeId'>;
 
+export function boundRunLogEntries(
+  entries: readonly RunLogEntry[],
+  maxEntries: number | undefined,
+): readonly RunLogEntry[] {
+  if (maxEntries === undefined) {
+    return [...entries];
+  }
+  if (!Number.isInteger(maxEntries) || maxEntries < 0) {
+    throw new RangeError('maxEntries must be a non-negative integer');
+  }
+  return entries.slice(Math.max(entries.length - maxEntries, 0));
+}
+
+export function boundRunArtifacts(
+  artifacts: readonly RunArtifact[],
+  maxArtifacts: number | undefined,
+): readonly RunArtifact[] {
+  if (maxArtifacts === undefined) {
+    return [...artifacts];
+  }
+  if (!Number.isInteger(maxArtifacts) || maxArtifacts < 0) {
+    throw new RangeError('maxArtifacts must be a non-negative integer');
+  }
+  return artifacts.slice(Math.max(artifacts.length - maxArtifacts, 0));
+}
+
 export function isRunArtifactDeclaration(value: unknown): value is RunArtifactDeclaration {
   if (value === null || typeof value !== 'object') {
     return false;
