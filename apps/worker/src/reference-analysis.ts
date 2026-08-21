@@ -15,6 +15,7 @@ const FRAME_HEIGHT = 36;
 const FRAME_BYTES = FRAME_WIDTH * FRAME_HEIGHT * 3;
 const AUDIO_SAMPLE_RATE = 8_000;
 const AUDIO_WINDOW_US = 500_000;
+const AUDIO_SILENCE_RMS_THRESHOLD = 1;
 
 export class ReferenceAnalysisError extends Error {
   readonly code: string;
@@ -613,7 +614,10 @@ function buildAudioBeatEvidence(
     }
     energies.push(count === 0 ? 0 : Math.sqrt(energy / count));
   }
+  const peakEnergy = Math.max(...energies);
+  if (peakEnergy <= AUDIO_SILENCE_RMS_THRESHOLD) return [];
   const averageEnergy = energies.reduce((total, value) => total + value, 0) / energies.length;
+  if (averageEnergy <= AUDIO_SILENCE_RMS_THRESHOLD) return [];
   const candidates = energies
     .map((energy, index) => ({ energy, index }))
     .filter(({ energy, index }) => {

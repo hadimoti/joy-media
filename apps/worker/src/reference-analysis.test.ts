@@ -154,7 +154,7 @@ describe('reference analysis', () => {
     });
   });
 
-  it('tolerates silent videos and reports zero audio beats', async () => {
+  it('tolerates videos with no audio track and reports zero audio beats', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-reference-silent-'));
     const sourcePath = join(directory, 'silent-reference.mp4');
     try {
@@ -205,6 +205,59 @@ describe('reference analysis', () => {
           expect.objectContaining({ kind: 'transcript' }),
         ]),
       );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('treats silent audio tracks as zero audio beats', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-reference-silent-track-'));
+    const sourcePath = join(directory, 'silent-audio-reference.mp4');
+    try {
+      const rendered = spawnSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'color=c=black:s=320x180:d=1',
+          '-f',
+          'lavfi',
+          '-i',
+          'anullsrc=r=8000:cl=mono',
+          '-shortest',
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          '-c:a',
+          'aac',
+          sourcePath,
+        ],
+        { shell: false, encoding: 'utf8' },
+      );
+      expect(rendered.status).toBe(0);
+      expect(existsSync(sourcePath)).toBe(true);
+
+      const receipt = await analyzeReferenceVideo({
+        jobId: 'reference-silent-track-1',
+        assetId: 'asset-silent-track',
+        sourcePath,
+        payload: {
+          assetId: 'asset-silent-track',
+          maxDurationUs: 5_000_000,
+          maxBytes: 2_000_000,
+          sampleCount: 2,
+          maxAudioBeats: 4,
+        },
+        cancelled: () => false,
+        progress: async () => undefined,
+      });
+
+      expect(receipt.summary.audioBeatCount).toBe(0);
+      expect(receipt.evidence.filter((entry) => entry.kind === 'audio-beat')).toEqual([]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
