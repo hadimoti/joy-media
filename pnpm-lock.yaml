@@ -41,6 +41,9 @@ importers:
       '@joy-media/adapter-mistral':
         specifier: workspace:*
         version: link:../../packages/adapter-mistral
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../../packages/job-protocol
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
