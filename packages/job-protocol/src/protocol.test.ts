@@ -3,6 +3,9 @@ import {
   InMemoryWorkerCoordinator,
   WorkerProtocolError,
   WORKER_PROTOCOL_VERSION,
+  validateWorkerJobV1,
+  validateWorkerReceiptForJob,
+  workerCanRunJob,
 } from './protocol.js';
 import type { ThumbnailJob, WorkerHello } from './protocol.js';
 
@@ -123,5 +126,151 @@ describe('Worker pairing and thumbnail job spike', () => {
         payload: { assetId: '/video.mp4', maxEdgePx: 720 },
       }),
     ).toThrow(WorkerProtocolError);
+  });
+
+  it('keeps Worker jobs closed, capability-matched, bounded, and path-free', () => {
+    expect(workerCanRunJob(['render.export'], 'render.export')).toBe(true);
+    expect(workerCanRunJob(['asset.thumbnail'], 'render.export')).toBe(false);
+    expect(workerCanRunJob(['render.export'], 'unknown.job')).toBe(false);
+    expect(() =>
+      validateWorkerJobV1({
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        jobId: 'render-1',
+        type: 'render.export',
+        payload: {
+          projectRef: 'project-1',
+          compositionId: 'root',
+          presetId: 'reels-1080',
+          reportRef: 'report-1',
+        },
+        requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-1',
+        maxAttempts: 1,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerJobV1({
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        jobId: 'render-1',
+        type: 'render.export',
+        payload: {
+          projectRef: 'C:\\projects\\joy.json',
+          compositionId: 'root',
+          presetId: 'reels-1080',
+          reportRef: 'report-1',
+        },
+        requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-1',
+        maxAttempts: 1,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_PROTOCOL_PATH_FORBIDDEN' }));
+    expect(() =>
+      validateWorkerJobV1({
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        jobId: 'render-1',
+        type: 'render.export',
+        payload: {
+          projectRef: 'project-1',
+          compositionId: 'root',
+          presetId: 'reels-1080',
+          reportRef: 'report-1',
+        },
+        requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-1',
+        maxAttempts: 1,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_JOB_INVALID' }));
+    expect(() =>
+      validateWorkerJobV1({
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        jobId: 'render-1',
+        type: 'render.export',
+        payload: {
+          projectRef: 'project-1',
+          compositionId: 'root',
+          presetId: 'reels-1080',
+          reportRef: 'report-1',
+          unexpected: true,
+        } as never,
+        requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-1',
+        maxAttempts: 1,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_JOB_INVALID' }));
+    expect(() =>
+      validateWorkerJobV1({
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        jobId: 'render-1',
+        type: 'render.export',
+        payload: {
+          projectRef: 'project-1',
+          compositionId: 'root',
+          presetId: 'reels-1080',
+          reportRef: 'r'.repeat(16_385),
+        },
+        requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-1',
+        maxAttempts: 1,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_PROTOCOL_OVERSIZE' }));
+  });
+
+  it('requires receipts to match the job type', () => {
+    expect(() =>
+      validateWorkerReceiptForJob('render.export', {
+        kind: 'render.export',
+        reportRef: 'report-1',
+        outputRef: 'export-1',
+        sha256: 'a'.repeat(64),
+        bytes: 1024,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('render.export', {
+        kind: 'render.inspect',
+        reportRef: 'report-1',
+        findings: 0,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_RECEIPT_INVALID' }));
+  });
+
+  it('accepts every Worker-advertised receipt variant consistently', () => {
+    expect(() =>
+      validateWorkerReceiptForJob('asset.thumbnail', {
+        kind: 'asset.thumbnail',
+        assetId: 'asset-1',
+        sha256: 'a'.repeat(64),
+        bytes: 1024,
+        localRef: 'thumb-job-1-aaaaaaaaaaaaaaaa',
+        descriptor: { mimeType: 'image/jpeg', width: 320, height: 180 },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('image.comfy', {
+        kind: 'image.comfy',
+        assetId: 'asset-2',
+        sha256: 'b'.repeat(64),
+        bytes: 2048,
+        localRef: 'gpu-job-1-bbbbbbbbbbbbbbbb',
+        descriptor: { mimeType: 'image/png', width: 512, height: 512 },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('audio.ml-denoise', {
+        kind: 'audio.ml-denoise',
+        assetId: 'asset-3',
+        sha256: 'c'.repeat(64),
+        bytes: 4096,
+        localRef: 'gpu-job-2-cccccccccccccccc',
+        descriptor: { mimeType: 'audio/wav' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('render.inspect', {
+        kind: 'render.inspect',
+        reportRef: 'report-2',
+        findings: 1,
+      }),
+    ).not.toThrow();
   });
 });

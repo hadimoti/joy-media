@@ -1,5 +1,10 @@
 import type { Pool, PoolClient } from 'pg';
 import {
+  isWorkerJobType,
+  validateWorkerReceiptForJob,
+  workerCanRunJob,
+} from '@joy-media/job-protocol';
+import {
   ControlPlaneError,
   type AssetLocationRecord,
   type AssetRegistration,
@@ -301,10 +306,10 @@ export class PostgresControlPlane implements ControlPlane {
         [assetId, projectId],
       );
       if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-      await client.query(
-        'DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
-        [projectId, assetId],
-      );
+      await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
+        projectId,
+        assetId,
+      ]);
       await client.query('DELETE FROM media_assets WHERE id = $1 AND project_id = $2', [
         assetId,
         projectId,
@@ -604,6 +609,8 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
     assetId?: string,
   ): Promise<Job> {
+    if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
+      throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',
@@ -611,6 +618,8 @@ export class PostgresControlPlane implements ControlPlane {
       );
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
+      const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
+      if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
         throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
@@ -640,6 +649,8 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<Job> {
     return this.transaction(async (client) => {
       await this.asset(actor, projectId, assetId, client);
+      const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
+      if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
       try {
         const result = await client.query<JobRow>(
           `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
@@ -684,7 +695,8 @@ export class PostgresControlPlane implements ControlPlane {
         }
         if (item.type === 'image.comfy') return caps.includes('image.comfy');
         if (item.type === 'audio.ml-denoise') return caps.includes('audio.ml-denoise');
-        return true;
+        if (isWorkerJobType(item.type)) return workerCanRunJob(caps, item.type);
+        return item.type === 'fixture.thumbnail';
       });
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
@@ -737,11 +749,24 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
     receipt?: WorkerResultReceipt,
   ): Promise<Job> {
+    const leased = await this.pool.query<JobRow>(
+      'SELECT * FROM jobs WHERE id = $1 AND state = $2 AND lease_owner = $3 AND lease_expires_at > $4',
+      [jobId, 'leased', workerId, new Date(now)],
+    );
+    const leasedJob = leased.rows[0];
+    if (leasedJob !== undefined && isWorkerJobType(leasedJob.type)) {
+      try {
+        validateWorkerReceiptForJob(leasedJob.type, receipt);
+      } catch {
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+      }
+    }
     if (receipt !== undefined && !isWorkerReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const storesAsset = isThumb || isGpu;
+    const storesHashAndBytes = receipt !== undefined && 'sha256' in receipt && 'bytes' in receipt;
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
@@ -760,8 +785,8 @@ export class PostgresControlPlane implements ControlPlane {
           workerId,
           new Date(now),
           receipt?.kind ?? null,
-          receipt?.sha256 ?? null,
-          receipt?.bytes ?? null,
+          storesHashAndBytes ? receipt.sha256 : null,
+          storesHashAndBytes ? receipt.bytes : null,
           receipt === undefined ? null : `derivative:${jobId}`,
           receipt === undefined ? null : workerId,
           receipt === undefined ? null : new Date(now),
@@ -1101,7 +1126,10 @@ function isFixtureReceipt(
 
 function isWorkerReceipt(value: WorkerResultReceipt): boolean {
   return (
-    isFixtureReceipt(value) || isAssetThumbnailReceipt(value) || isLocalGpuReceipt(value)
+    isFixtureReceipt(value) ||
+    isAssetThumbnailReceipt(value) ||
+    isLocalGpuReceipt(value) ||
+    isRenderReceipt(value)
   );
 }
 
@@ -1131,6 +1159,24 @@ function isLocalGpuReceipt(value: WorkerResultReceipt): value is LocalGpuWorkerR
     /^gpu-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
     typeof value.descriptor.mimeType === 'string' &&
     value.descriptor.mimeType.length > 0
+  );
+}
+
+function isRenderReceipt(value: WorkerResultReceipt): boolean {
+  if (value.kind === 'render.export') {
+    return (
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.outputRef) &&
+      /^[a-f0-9]{64}$/.test(value.sha256) &&
+      Number.isSafeInteger(value.bytes) &&
+      value.bytes > 0
+    );
+  }
+  return (
+    value.kind === 'render.inspect' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
+    Number.isSafeInteger(value.findings) &&
+    value.findings >= 0
   );
 }
 

@@ -14,11 +14,22 @@ export interface LeasedJob {
   readonly assetId?: string;
 }
 export interface WorkerJobResult {
-  readonly kind: 'asset.thumbnail' | 'image.comfy' | 'audio.ml-denoise' | 'text' | 'image' | 'video';
+  readonly kind:
+    | 'asset.thumbnail'
+    | 'image.comfy'
+    | 'audio.ml-denoise'
+    | 'render.export'
+    | 'render.inspect'
+    | 'text'
+    | 'image'
+    | 'video';
   readonly assetId?: string;
   readonly sha256?: string;
   readonly bytes?: number;
   readonly localRef?: string;
+  readonly reportRef?: string;
+  readonly outputRef?: string;
+  readonly findings?: number;
   readonly descriptor?: {
     readonly mimeType: string;
     readonly width?: number;

@@ -8,6 +8,9 @@ export const PACKAGE_NAME = '@joy-media/job-protocol' as const;
 
 export type {
   WorkerCapability,
+  WorkerJobType,
+  WorkerJobV1,
+  WorkerResultReceiptV1,
   LocalGpuWorkerJobType,
   SpecializedJobType,
   AiJob,
@@ -24,11 +27,29 @@ export type {
 } from './protocol.js';
 export {
   WORKER_PROTOCOL_VERSION,
+  WORKER_JOB_TYPES,
   LOCAL_GPU_WORKER_CAPABILITIES,
   SPECIALIZED_JOB_TYPES,
   WorkerProtocolError,
+  isWorkerJobType,
+  requiredCapabilityForJobType,
+  validateWorkerJobV1,
+  validateWorkerReceiptForJob,
+  workerCanRunJob,
   InMemoryWorkerCoordinator,
 } from './protocol.js';
+export type {
+  RenderCapability,
+  RenderExportJob,
+  RenderExportReceipt,
+  RenderInspectJob,
+  RenderInspectReceipt,
+  RenderJob,
+  RenderJobPayload,
+  RenderJobType,
+  RenderReceipt,
+} from './render-jobs.js';
+export type { MediaAnalysisJob } from './media-analysis-jobs.js';
 export type {
   AgentJobState,
   AgentJobRequest,

@@ -269,7 +269,8 @@ async function route(
 
   if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
     const profile = await options.mediaAuth.sessionProfile(request);
-    if (profile === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    if (profile === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
     respondJson(response, 200, { data: profile });
     return;
   }
@@ -932,6 +933,18 @@ function optionalWorkerResult(body: Record<string, unknown>):
         readonly height?: number;
       };
     }
+  | {
+      readonly kind: 'render.export';
+      readonly reportRef: string;
+      readonly outputRef: string;
+      readonly sha256: string;
+      readonly bytes: number;
+    }
+  | {
+      readonly kind: 'render.inspect';
+      readonly reportRef: string;
+      readonly findings: number;
+    }
   | undefined {
   const value = body.result;
   if (value === undefined) return undefined;
@@ -940,6 +953,28 @@ function optionalWorkerResult(body: Record<string, unknown>):
   const result = value as Record<string, unknown>;
   if (result.kind === 'fixture.thumbnail' && isReceiptHashAndBytes(result)) {
     return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
+  }
+  if (
+    result.kind === 'render.export' &&
+    typeof result.reportRef === 'string' &&
+    typeof result.outputRef === 'string' &&
+    isReceiptHashAndBytes(result)
+  ) {
+    return {
+      kind: result.kind,
+      reportRef: result.reportRef,
+      outputRef: result.outputRef,
+      sha256: result.sha256,
+      bytes: result.bytes,
+    };
+  }
+  if (
+    result.kind === 'render.inspect' &&
+    typeof result.reportRef === 'string' &&
+    typeof result.findings === 'number' &&
+    Number.isSafeInteger(result.findings)
+  ) {
+    return { kind: result.kind, reportRef: result.reportRef, findings: result.findings };
   }
   const descriptor = result.descriptor;
   if (
@@ -1170,11 +1205,7 @@ function respondError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof MediaAuthError) {
     const status =
-      error.code === 'RATE_LIMITED'
-        ? 429
-        : error.code === 'REQUEST_INVALID'
-          ? 400
-          : 401;
+      error.code === 'RATE_LIMITED' ? 429 : error.code === 'REQUEST_INVALID' ? 400 : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

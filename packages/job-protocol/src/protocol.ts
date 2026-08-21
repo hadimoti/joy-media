@@ -1,9 +1,13 @@
 /** P00.5 Worker protocol spike: outbound pairing, capability snapshots, and local-only thumbnails. */
 
+import type { RenderJob, RenderReceipt } from './render-jobs.js';
+
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 
 export type WorkerCapability =
   | 'asset.thumbnail'
+  | 'render.export'
+  | 'render.inspect'
   | 'image.comfy'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
@@ -11,7 +15,13 @@ export type WorkerCapability =
   | 'video.runway'
   | 'edit.higgsfield';
 
-export type SpecializedJobType = 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield';
+export type SpecializedJobType =
+  | 'image.comfy'
+  | 'audio.ml-denoise'
+  | 'text.lm-studio'
+  | 'text.openrouter'
+  | 'video.runway'
+  | 'edit.higgsfield';
 export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
   'audio.ml-denoise',
@@ -19,6 +29,13 @@ export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'text.openrouter',
   'video.runway',
   'edit.higgsfield',
+] as const;
+export type WorkerJobType = 'asset.thumbnail' | SpecializedJobType | RenderJob['type'];
+export const WORKER_JOB_TYPES: readonly WorkerJobType[] = [
+  'asset.thumbnail',
+  'render.export',
+  'render.inspect',
+  ...SPECIALIZED_JOB_TYPES,
 ] as const;
 
 /** @deprecated Use SpecializedJobType */
@@ -92,6 +109,8 @@ export interface AiJob {
   readonly maxAttempts: number;
 }
 
+export type WorkerJobV1 = ThumbnailJob | AiJob | RenderJob;
+
 export interface ThumbnailAssignment {
   readonly job: ThumbnailJob;
   readonly attempt: number;
@@ -139,6 +158,106 @@ export class WorkerProtocolError extends Error {
     this.code = code;
   }
 }
+
+export function isWorkerJobType(value: string): value is WorkerJobType {
+  return (WORKER_JOB_TYPES as readonly string[]).includes(value);
+}
+
+export function requiredCapabilityForJobType(type: WorkerJobType): WorkerCapability {
+  return type;
+}
+
+export function workerCanRunJob(
+  capabilities: readonly string[],
+  jobType: string,
+): jobType is WorkerJobType {
+  return isWorkerJobType(jobType) && capabilities.includes(requiredCapabilityForJobType(jobType));
+}
+
+export function validateWorkerJobV1(job: WorkerJobV1): WorkerJobV1 {
+  if (job.protocolVersion !== WORKER_PROTOCOL_VERSION || !isWorkerJobType(job.type)) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'unsupported Worker job');
+  }
+  assertObjectKeys(
+    job,
+    [
+      'protocolVersion',
+      'jobId',
+      'type',
+      'payload',
+      'requirements',
+      'idempotencyKey',
+      'maxAttempts',
+    ],
+    [],
+    'job',
+  );
+  assertOpaqueIds([job.jobId, job.idempotencyKey], 'job identifiers');
+  if (!Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1 || job.maxAttempts > 20) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'invalid retry policy');
+  }
+  validateWorkerJobPayload(job);
+  validateWorkerJobRequirements(job.type, job.requirements);
+  if (!job.requirements.capabilities.includes(requiredCapabilityForJobType(job.type))) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'job capability requirement mismatch');
+  }
+  validateJsonBudget(job.payload, 'payload');
+  validateJsonBudget(job.requirements, 'requirements');
+  assertJsonHasNoPaths(job.payload, 'payload');
+  return job;
+}
+
+export function validateWorkerReceiptForJob(
+  jobType: WorkerJobType,
+  receipt: WorkerResultReceiptV1 | undefined,
+): WorkerResultReceiptV1 | undefined {
+  if (receipt === undefined) return undefined;
+  validateJsonBudget(receipt, 'receipt');
+  assertJsonHasNoPaths(receipt, 'receipt');
+  if (receipt.kind !== jobType) {
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt kind does not match job type');
+  }
+  validateWorkerReceiptShape(jobType, receipt);
+  if ('sha256' in receipt && !/^[a-f0-9]{64}$/.test(receipt.sha256)) {
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt hash is invalid');
+  }
+  if ('bytes' in receipt && (!Number.isSafeInteger(receipt.bytes) || receipt.bytes < 1)) {
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt byte length is invalid');
+  }
+  return receipt;
+}
+
+export type WorkerResultReceiptV1 =
+  | {
+      readonly kind: 'fixture.thumbnail';
+      readonly sha256: string;
+      readonly bytes: number;
+    }
+  | {
+      readonly kind: 'asset.thumbnail';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: 'image/jpeg';
+        readonly width: number;
+        readonly height: number;
+      };
+    }
+  | {
+      readonly kind: 'image.comfy' | 'audio.ml-denoise';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+    }
+  | RenderReceipt;
 
 interface WorkerSession {
   readonly workerId: string;
@@ -420,6 +539,154 @@ function validateThumbnailJob(job: ThumbnailJob): void {
   }
 }
 
+function validateWorkerJobPayload(job: WorkerJobV1): void {
+  switch (job.type) {
+    case 'asset.thumbnail':
+      assertObjectKeys(job.payload, ['assetId', 'maxEdgePx'], [], 'payload');
+      assertOpaqueIds([job.payload.assetId], 'payload asset IDs');
+      if (!Number.isSafeInteger(job.payload.maxEdgePx) || job.payload.maxEdgePx < 1) {
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload maxEdgePx is invalid');
+      }
+      return;
+    case 'render.export':
+    case 'render.inspect':
+      assertObjectKeys(
+        job.payload,
+        ['projectRef', 'compositionId', 'presetId', 'reportRef'],
+        [],
+        'payload',
+      );
+      assertOpaqueIds(
+        [
+          job.payload.projectRef,
+          job.payload.compositionId,
+          job.payload.presetId,
+          job.payload.reportRef,
+        ],
+        'payload references',
+      );
+      return;
+    default:
+      assertObjectKeys(
+        job.payload,
+        ['prompt'],
+        ['negativePrompt', 'imageAssetId', 'model', 'params'],
+        'payload',
+      );
+      if (typeof job.payload.prompt !== 'string') {
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload prompt is invalid');
+      }
+      if (
+        ('negativePrompt' in job.payload &&
+          job.payload.negativePrompt !== undefined &&
+          typeof job.payload.negativePrompt !== 'string') ||
+        ('model' in job.payload &&
+          job.payload.model !== undefined &&
+          typeof job.payload.model !== 'string')
+      ) {
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload text fields are invalid');
+      }
+      if ('imageAssetId' in job.payload && job.payload.imageAssetId !== undefined) {
+        assertOpaqueIds([job.payload.imageAssetId], 'payload asset IDs');
+      }
+      if ('params' in job.payload && job.payload.params !== undefined) {
+        assertPlainObject(job.payload.params, 'payload params');
+      }
+  }
+}
+
+function validateWorkerJobRequirements(
+  jobType: WorkerJobType,
+  requirements: WorkerJobV1['requirements'],
+): void {
+  assertObjectKeys(requirements, ['capabilities', 'privacy'], [], 'requirements');
+  if (
+    !Array.isArray(requirements.capabilities) ||
+    requirements.capabilities.some((capability) => !isWorkerCapability(capability))
+  ) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'requirements capabilities are invalid');
+  }
+  if (requirements.privacy !== 'local-only' && requirements.privacy !== 'remote-api') {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'requirements privacy is invalid');
+  }
+  if (
+    (jobType === 'asset.thumbnail' ||
+      jobType === 'render.export' ||
+      jobType === 'render.inspect') &&
+    requirements.privacy !== 'local-only'
+  ) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'job privacy requirement mismatch');
+  }
+}
+
+function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResultReceiptV1): void {
+  switch (jobType) {
+    case 'asset.thumbnail': {
+      const value = receipt as Extract<WorkerResultReceiptV1, { readonly kind: 'asset.thumbnail' }>;
+      assertObjectKeys(
+        value,
+        ['kind', 'assetId', 'sha256', 'bytes', 'localRef', 'descriptor'],
+        [],
+        'receipt',
+      );
+      assertOpaqueIds([value.assetId, value.localRef], 'receipt references');
+      assertObjectKeys(value.descriptor, ['mimeType', 'width', 'height'], [], 'receipt descriptor');
+      if (
+        value.descriptor.mimeType !== 'image/jpeg' ||
+        !Number.isSafeInteger(value.descriptor.width) ||
+        value.descriptor.width < 1 ||
+        !Number.isSafeInteger(value.descriptor.height) ||
+        value.descriptor.height < 1
+      ) {
+        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt descriptor is invalid');
+      }
+      return;
+    }
+    case 'render.export': {
+      const value = receipt as Extract<WorkerResultReceiptV1, { readonly kind: 'render.export' }>;
+      assertObjectKeys(value, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes'], [], 'receipt');
+      assertOpaqueIds([value.reportRef, value.outputRef], 'receipt references');
+      return;
+    }
+    case 'render.inspect': {
+      const value = receipt as Extract<WorkerResultReceiptV1, { readonly kind: 'render.inspect' }>;
+      assertObjectKeys(value, ['kind', 'reportRef', 'findings'], [], 'receipt');
+      assertOpaqueIds([value.reportRef], 'receipt references');
+      if (!Number.isSafeInteger(value.findings) || value.findings < 0) {
+        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt findings are invalid');
+      }
+      return;
+    }
+    default: {
+      const value = receipt as Extract<
+        WorkerResultReceiptV1,
+        { readonly kind: 'image.comfy' | 'audio.ml-denoise' }
+      >;
+      assertObjectKeys(
+        value,
+        ['kind', 'assetId', 'sha256', 'bytes', 'localRef', 'descriptor'],
+        [],
+        'receipt',
+      );
+      assertOpaqueIds([value.assetId, value.localRef], 'receipt references');
+      assertObjectKeys(value.descriptor, ['mimeType'], ['width', 'height'], 'receipt descriptor');
+      if (typeof value.descriptor.mimeType !== 'string' || value.descriptor.mimeType.length === 0) {
+        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt descriptor is invalid');
+      }
+      if (
+        ('width' in value.descriptor &&
+          value.descriptor.width !== undefined &&
+          (!Number.isSafeInteger(value.descriptor.width) || value.descriptor.width < 1)) ||
+        ('height' in value.descriptor &&
+          value.descriptor.height !== undefined &&
+          (!Number.isSafeInteger(value.descriptor.height) || value.descriptor.height < 1))
+      ) {
+        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt descriptor is invalid');
+      }
+    }
+  }
+}
+
 function assertOpaqueIds(ids: readonly string[], label: string): void {
   for (const id of ids) {
     if (id.length === 0 || /[\\/:]/.test(id)) {
@@ -429,6 +696,81 @@ function assertOpaqueIds(ids: readonly string[], label: string): void {
       );
     }
   }
+}
+
+function validateJsonBudget(value: unknown, label: string): void {
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > 16_384) {
+    throw new WorkerProtocolError('WORKER_PROTOCOL_OVERSIZE', `${label} is too large`);
+  }
+}
+
+function assertJsonHasNoPaths(value: unknown, label: string): void {
+  if (typeof value === 'string') {
+    if (looksLikePath(value)) {
+      throw new WorkerProtocolError(
+        'WORKER_PROTOCOL_PATH_FORBIDDEN',
+        `${label} must not contain paths or URLs`,
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertJsonHasNoPaths(item, label);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', `${label} contains an unsafe key`);
+      }
+      assertJsonHasNoPaths(item, label);
+    }
+  }
+}
+
+function looksLikePath(value: string): boolean {
+  return (
+    value.startsWith('file:') ||
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    value.startsWith('\\\\')
+  );
+}
+
+function assertObjectKeys(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string,
+): asserts value is Record<string, unknown> {
+  assertPlainObject(value, label);
+  const allowed = new Set([...required, ...optional]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new WorkerProtocolError('WORKER_JOB_INVALID', `${label} contains unknown fields`);
+    }
+  }
+  for (const key of required) {
+    if (!(key in value)) {
+      throw new WorkerProtocolError('WORKER_JOB_INVALID', `${label} is missing ${key}`);
+    }
+  }
+}
+
+function assertPlainObject(
+  value: unknown,
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', `${label} must be an object`);
+  }
+}
+
+function isWorkerCapability(value: unknown): value is WorkerCapability {
+  return typeof value === 'string' && (WORKER_JOB_TYPES as readonly string[]).includes(value);
 }
 
 function snapshotOf(job: MutableJob): ThumbnailJobSnapshot {

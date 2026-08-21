@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -26,7 +26,11 @@ describe('Worker runtime', () => {
       first,
       detectMediaTools((tool) => tool === 'ffmpeg' || tool === 'ffprobe'),
     );
-    expect(runtime.hello('win32', 'x64').capabilities).toEqual(['asset.thumbnail']);
+    expect(runtime.hello('win32', 'x64').capabilities).toEqual([
+      'asset.thumbnail',
+      'render.export',
+      'render.inspect',
+    ]);
   });
   it('bounds logs and cooperatively cancels jobs', async () => {
     const log = new BoundedLog(2);
@@ -169,10 +173,17 @@ describe('Worker runtime', () => {
 
   it('runs audio.ml-denoise via ffmpeg arnndn when locally enabled', async () => {
     const previous = process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
+    const previousCommand = process.env.JOY_MEDIA_ML_DENOISE_CMD;
     const previousModel = process.env.JOY_MEDIA_RNNOISE_MODEL;
     process.env.JOY_MEDIA_LOCAL_ML_DENOISE = '1';
-    process.env.JOY_MEDIA_RNNOISE_MODEL = '/opt/joy-media/data/rnnoise/cb.rnnn';
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-ml-'));
+    const helperScript = join(derivativeDirectory, 'copy-denoised-output.cjs');
+    writeFileSync(
+      helperScript,
+      "require('node:fs').copyFileSync(process.argv[2], process.argv[3]);\n",
+    );
+    process.env.JOY_MEDIA_ML_DENOISE_CMD = `"${process.execPath}" "${helperScript}"`;
+    delete process.env.JOY_MEDIA_RNNOISE_MODEL;
     const runtime = new WorkerRuntime(
       { workerId: 'worker-ml', createdAt: '2026-07-24T00:00:00.000Z' },
       { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiProviders: [] },
@@ -192,6 +203,8 @@ describe('Worker runtime', () => {
       rmSync(derivativeDirectory, { recursive: true, force: true });
       if (previous === undefined) delete process.env.JOY_MEDIA_LOCAL_ML_DENOISE;
       else process.env.JOY_MEDIA_LOCAL_ML_DENOISE = previous;
+      if (previousCommand === undefined) delete process.env.JOY_MEDIA_ML_DENOISE_CMD;
+      else process.env.JOY_MEDIA_ML_DENOISE_CMD = previousCommand;
       if (previousModel === undefined) delete process.env.JOY_MEDIA_RNNOISE_MODEL;
       else process.env.JOY_MEDIA_RNNOISE_MODEL = previousModel;
     }
@@ -204,6 +217,8 @@ describe('Worker runtime', () => {
     );
     expect(runtime.hello('linux', 'x64').capabilities).toEqual([
       'asset.thumbnail',
+      'render.export',
+      'render.inspect',
       'image.comfy',
       'audio.ml-denoise',
     ]);

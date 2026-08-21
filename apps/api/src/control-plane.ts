@@ -1,3 +1,10 @@
+import {
+  isWorkerJobType,
+  validateWorkerReceiptForJob,
+  workerCanRunJob,
+  WorkerProtocolError,
+} from '@joy-media/job-protocol';
+
 export interface Actor {
   readonly id: string;
 }
@@ -149,10 +156,24 @@ export interface LocalGpuWorkerReceipt {
     readonly height?: number;
   };
 }
+export interface RenderExportReceipt {
+  readonly kind: 'render.export';
+  readonly reportRef: string;
+  readonly outputRef: string;
+  readonly sha256: string;
+  readonly bytes: number;
+}
+export interface RenderInspectReceipt {
+  readonly kind: 'render.inspect';
+  readonly reportRef: string;
+  readonly findings: number;
+}
 export type WorkerResultReceipt =
   | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
-  | LocalGpuWorkerReceipt;
+  | LocalGpuWorkerReceipt
+  | RenderExportReceipt
+  | RenderInspectReceipt;
 /**
  * Owner-visible derivative projection. All references are control-plane IDs;
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
@@ -238,14 +259,13 @@ export interface ControlPlane {
    * Shared cloud library: any authenticated Joy user may list assets that have a
    * private-object original (cross-account catalog, login still required).
    */
-  sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
+  sharedCloudAssets(
+    actor: Actor,
+  ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
   /**
    * Resolve a cloud-backed asset for any authenticated Joy user (private-object required).
    */
-  sharedCloudAsset(
-    actor: Actor,
-    assetId: string,
-  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -459,12 +479,9 @@ export class LocalControlPlane implements ControlPlane {
     const current = this.#assets.get(assetId);
     if (current === undefined || current.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    const tags =
-      patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
+    const tags = patch.tags === undefined ? current.tags : validateAssetTags(patch.tags);
     const sortName =
-      patch.sortName === undefined
-        ? current.sortName
-        : validateSortName(patch.sortName);
+      patch.sortName === undefined ? current.sortName : validateSortName(patch.sortName);
     const displayName =
       patch.displayName === undefined
         ? current.displayName
@@ -511,7 +528,10 @@ export class LocalControlPlane implements ControlPlane {
     return [...this.#assets.values()]
       .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'))
       .map(cloneAsset)
-      .sort((left, right) => left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id));
+      .sort(
+        (left, right) =>
+          left.sortName.localeCompare(right.sortName) || left.id.localeCompare(right.id),
+      );
   }
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord {
     this.auth(actor);
@@ -717,6 +737,10 @@ export class LocalControlPlane implements ControlPlane {
     assetId?: string,
   ): Job {
     this.project(actor, projectId);
+    if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
+      throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
+    const existing = this.#jobs.get(id);
+    if (existing !== undefined) return existing;
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',
@@ -753,6 +777,8 @@ export class LocalControlPlane implements ControlPlane {
     const asset = this.#assets.get(assetId);
     if (asset === undefined || asset.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const existing = this.#jobs.get(id);
+    if (existing !== undefined) return existing;
     const job: Job = {
       id,
       projectId,
@@ -808,6 +834,15 @@ export class LocalControlPlane implements ControlPlane {
   }
   complete(workerId: string, jobId: string, now = Date.now(), receipt?: WorkerResultReceipt): Job {
     const job = this.ownedLease(workerId, jobId, now);
+    if (isWorkerJobType(job.type)) {
+      try {
+        validateWorkerReceiptForJob(job.type, receipt);
+      } catch (error) {
+        if (error instanceof WorkerProtocolError)
+          throw new ControlPlaneError('RESULT_INVALID', error.message);
+        throw error;
+      }
+    }
     if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
@@ -954,9 +989,7 @@ function isAssetThumbnailReceipt(
   );
 }
 
-function isLocalGpuReceipt(
-  value: WorkerResultReceipt | undefined,
-): value is LocalGpuWorkerReceipt {
+function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is LocalGpuWorkerReceipt {
   return (
     (value?.kind === 'image.comfy' || value?.kind === 'audio.ml-denoise') &&
     /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
@@ -979,8 +1012,8 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   }
   if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
-  // Fixture / unknown types: any connected Worker may lease (existing behavior).
-  return true;
+  if (isWorkerJobType(job.type)) return workerCanRunJob(worker.capabilities, job.type);
+  return job.type === 'fixture.thumbnail';
 }
 
 function validatedOpaqueIds(values: readonly string[]): readonly string[] {

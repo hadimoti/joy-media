@@ -9,9 +9,16 @@ describe('local control plane', () => {
       expect.objectContaining({ code: 'REVISION_CONFLICT' }),
     );
     api.pairWorker(owner, 'w');
-    api.enqueue(owner, 'j', 'p', 'render', 100);
+    api.helloWorker('w', ['render.export'], [], 100);
+    api.enqueue(owner, 'j', 'p', 'render.export', 100);
     expect(api.lease('w', 101, 10)).toMatchObject({ id: 'j', state: 'leased' });
-    api.complete('w', 'j', 102);
+    api.complete('w', 'j', 102, {
+      kind: 'render.export',
+      reportRef: 'report-j',
+      outputRef: 'export-j',
+      sha256: 'a'.repeat(64),
+      bytes: 1024,
+    });
     expect(api.lease('w', 1_000)).toBeUndefined();
     expect(api.eventsAfter(owner, 'p', 1).map((event) => event.type)).toEqual([
       'leased',
@@ -19,6 +26,27 @@ describe('local control plane', () => {
     ]);
     api.revokeWorker(owner, 'w');
     expect(() => api.lease('w')).toThrow(expect.objectContaining({ code: 'WORKER_UNAUTHORIZED' }));
+  });
+
+  it('rejects unknown job types, capability-mismatched leases, and duplicate enqueue overwrites', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    api.createProject(owner, 'p', 'Project');
+    api.pairWorker(owner, 'w');
+    expect(() => api.enqueue(owner, 'bad', 'p', 'unknown.job', 100)).toThrow(
+      expect.objectContaining({ code: 'WORKER_JOB_INVALID' }),
+    );
+    const first = api.enqueue(owner, 'render-1', 'p', 'render.export', 100);
+    const second = api.enqueue(owner, 'render-1', 'p', 'render.inspect', 101);
+    expect(second).toEqual(first);
+    expect(api.lease('w', 102)).toBeUndefined();
+    api.helloWorker('w', ['render.inspect'], [], 103);
+    expect(api.lease('w', 104)).toBeUndefined();
+    api.helloWorker('w', ['render.export'], [], 105);
+    expect(api.lease('w', 106)).toMatchObject({ id: 'render-1', type: 'render.export' });
+    expect(() =>
+      api.complete('w', 'render-1', 107, { kind: 'render.inspect', reportRef: 'r', findings: 0 }),
+    ).toThrow(expect.objectContaining({ code: 'RESULT_INVALID' }));
   });
 
   it('records opaque asset and local-derivative metadata without accepting paths or cloud claims', () => {

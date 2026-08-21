@@ -3,6 +3,7 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist", "lib": ["ES2022", "DOM"] },
   "include": ["src"],
   "references": [
+    { "path": "../../packages/job-protocol" },
     { "path": "../../packages/provider-sdk" },
     { "path": "../../packages/adapter-mistral" }
   ]
