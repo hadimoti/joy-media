@@ -218,6 +218,16 @@ describe('Postgres production runs', () => {
       controlPlane.respondToProductionApproval(owner, 'project-approval', 'run-approval', {
         approvalId: 'approval-1',
         approved: true,
+        responseRef: 'response-1',
+        response: { approved: [{ nested: { z: 2, a: 1 }, assetId: 'asset-1' }] },
+        authority,
+        now: 502,
+      }),
+    ).rejects.toMatchObject({ code: 'APPROVAL_CONFLICT' });
+    await expect(
+      controlPlane.respondToProductionApproval(owner, 'project-approval', 'run-approval', {
+        approvalId: 'approval-1',
+        approved: true,
         responseRef: 'response-role-mismatch',
         authority: { principalId: owner.id, role: 'reviewer' },
         now: 502,
@@ -234,6 +244,52 @@ describe('Postgres production runs', () => {
         now: 503,
       }),
     ).rejects.toMatchObject({ code: 'APPROVAL_CONFLICT' });
+
+    await pool.end();
+  });
+
+  it('treats reordered response object keys as a duplicate API approval', async () => {
+    const { pool, controlPlane } = await initializedControlPlane();
+    await controlPlane.createProject(owner, 'project-approval-reordered', 'Approvals');
+    const parked = parkedRecord('run-approval-reordered', 'approval-1');
+    await controlPlane.createProductionRun(owner, 'project-approval-reordered', {
+      runKey: 'run-key-approval-reordered',
+      record: parked,
+      authority,
+      now: 100,
+    });
+
+    await expect(
+      controlPlane.respondToProductionApproval(
+        owner,
+        'project-approval-reordered',
+        'run-approval-reordered',
+        {
+          approvalId: 'approval-1',
+          approved: true,
+          responseRef: 'response-reordered',
+          response: { approved: true, nested: { a: 1, b: 2 } },
+          authority,
+          now: 500,
+        },
+      ),
+    ).resolves.toMatchObject({ duplicate: false, record: { updatedSeq: 3 } });
+
+    await expect(
+      controlPlane.respondToProductionApproval(
+        owner,
+        'project-approval-reordered',
+        'run-approval-reordered',
+        {
+          approvalId: 'approval-1',
+          approved: true,
+          responseRef: 'response-reordered',
+          response: { nested: { b: 2, a: 1 }, approved: true },
+          authority,
+          now: 501,
+        },
+      ),
+    ).resolves.toMatchObject({ duplicate: true, record: { updatedSeq: 3 } });
 
     await pool.end();
   });

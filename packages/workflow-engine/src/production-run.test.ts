@@ -269,6 +269,15 @@ describe('production run records', () => {
     });
     expect(duplicate).toMatchObject({ ok: true, duplicate: true, record: first.record });
 
+    const duplicateWithReorderedKeys = recordProductionApprovalResponse(first.record, {
+      approvalId: approvalId as string,
+      approved: true,
+      responseRef: 'approval-response-2',
+      response: { nested: { b: 2, a: 1 }, approved: true },
+      authority,
+    });
+    expect(duplicateWithReorderedKeys).toEqual({ ok: false, reason: 'approval-conflict' });
+
     const conflict = recordProductionApprovalResponse(first.record, {
       approvalId: approvalId as string,
       approved: false,
@@ -276,6 +285,34 @@ describe('production run records', () => {
       authority,
     });
     expect(conflict).toEqual({ ok: false, reason: 'approval-conflict' });
+  });
+
+  it('treats reordered response object keys as duplicate approvals', () => {
+    const parked = runProductionCase('run-approval-reordered', () => ({
+      waiting: true,
+      request: { kind: 'approve-render', prompt: 'Approve final?' },
+    }));
+    const approvalId = parked.approvals[0]?.approvalId;
+    if (approvalId === undefined) expect.unreachable('approval should exist');
+
+    const first = recordProductionApprovalResponse(parked, {
+      approvalId,
+      approved: true,
+      responseRef: 'approval-response-reordered',
+      response: { approved: true, nested: { a: 1, b: 2 } },
+      authority,
+    });
+    expect(first).toMatchObject({ ok: true, duplicate: false });
+    if (!first.ok) expect.unreachable('first approval should apply');
+
+    const duplicate = recordProductionApprovalResponse(first.record, {
+      approvalId,
+      approved: true,
+      responseRef: 'approval-response-reordered',
+      response: { nested: { b: 2, a: 1 }, approved: true },
+      authority,
+    });
+    expect(duplicate).toEqual({ ok: true, duplicate: true, record: first.record });
   });
 
   it('projects production records into a board snapshot', () => {
