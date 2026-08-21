@@ -216,6 +216,9 @@ describe('Worker pairing and thumbnail job spike', () => {
   });
 
   it('requires receipts to match the job type', () => {
+    expect(() => validateWorkerReceiptForJob('render.export', undefined)).toThrow(
+      expect.objectContaining({ code: 'WORKER_RECEIPT_INVALID' }),
+    );
     expect(() =>
       validateWorkerReceiptForJob('render.export', {
         kind: 'render.export',

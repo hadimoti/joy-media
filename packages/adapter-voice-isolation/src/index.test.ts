@@ -188,7 +188,7 @@ describe('VoiceIsolation adapter provenance', () => {
     expect(result1.outputs[0]!.assetId).not.toBe(result2.outputs[0]!.assetId);
   });
 
-  it('carries caller idempotency and decision ids through fixture provenance', async () => {
+  it('carries caller idempotency and provider decision ids through fixture provenance', async () => {
     const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
     const input = {
       assetId: 'audio-123',
@@ -205,9 +205,7 @@ describe('VoiceIsolation adapter provenance', () => {
     });
 
     expect(result.provenance.idempotencyKey).toBe('idem-voice-1');
-    expect((result.provenance as unknown as Record<string, unknown>).decisionId).toBe(
-      'decision-voice-1',
-    );
+    expect(result.provenance.providerDecisionId).toBe('decision-voice-1');
   });
 });
 
@@ -239,9 +237,7 @@ describe('VoiceIsolation adapter production mode', () => {
       ]),
     );
     expect(result.provenance.idempotencyKey).toBe('idem-voice-prod-1');
-    expect((result.provenance as unknown as Record<string, unknown>).decisionId).toBe(
-      'decision-voice-prod-1',
-    );
+    expect(result.provenance.providerDecisionId).toBe('decision-voice-prod-1');
   });
 });
 

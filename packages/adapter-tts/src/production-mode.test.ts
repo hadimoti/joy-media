@@ -24,7 +24,7 @@ describe('TTS adapter production mode', () => {
     );
   });
 
-  it('carries caller idempotency and decision ids through failed provenance', async () => {
+  it('carries caller idempotency and provider decision ids through failed provenance', async () => {
     const adapter = createTTSAdapter({ execution: 'worker-local', engine: 'kokoro' });
     const input = { text: 'Hello world', decisionId: 'decision-tts-1' };
 
@@ -37,8 +37,6 @@ describe('TTS adapter production mode', () => {
     });
 
     expect(result.provenance.idempotencyKey).toBe('idem-tts-1');
-    expect((result.provenance as unknown as Record<string, unknown>).decisionId).toBe(
-      'decision-tts-1',
-    );
+    expect(result.provenance.providerDecisionId).toBe('decision-tts-1');
   });
 });

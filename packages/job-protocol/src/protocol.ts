@@ -214,8 +214,10 @@ export function validateWorkerJobV1(job: WorkerJobV1): WorkerJobV1 {
 export function validateWorkerReceiptForJob(
   jobType: WorkerJobType,
   receipt: WorkerResultReceiptV1 | undefined,
-): WorkerResultReceiptV1 | undefined {
-  if (receipt === undefined) return undefined;
+): WorkerResultReceiptV1 {
+  if (receipt === undefined) {
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt is required');
+  }
   validateJsonBudget(
     receipt,
     'receipt',

@@ -240,7 +240,7 @@ async function route(
         decodeURIComponent(workerId),
         decodeURIComponent(workerCompleteMatch![2]!),
         undefined,
-        optionalWorkerResult(await readJson(request)),
+        requiredWorkerResult(await readJson(request)),
       ),
     });
     return;
@@ -1059,9 +1059,10 @@ function workerJobEnvelope(
   } as WorkerJobV1;
 }
 
-function optionalWorkerResult(body: Record<string, unknown>): WorkerResultReceiptV1 | undefined {
+function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceiptV1 {
   const value = body.result;
-  if (value === undefined) return undefined;
+  if (value === undefined)
+    throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is required');
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new ControlPlaneError('REQUEST_INVALID', 'result must be an object');
   const result = value as Record<string, unknown>;

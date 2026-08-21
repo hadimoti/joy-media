@@ -329,17 +329,17 @@ function buildProvenance(
   request?: CapabilityRequest,
 ): GenerationProvenance {
   const idempotencyKey = request?.idempotencyKey ?? requestId;
-  const decisionId = callerDecisionId(input);
+  const providerDecisionId = callerDecisionId(input);
   return {
     providerId: manifest.id,
     modelId,
     adapterVersion: manifest.adapterVersion,
     createdAt: new Date().toISOString(),
-    requestHash: hashRequest({ input, idempotencyKey, decisionId }),
+    requestHash: hashRequest({ input, idempotencyKey, providerDecisionId }),
     idempotencyKey,
     processingTimeMs: Date.now() - startTime,
     execution: manifest.execution,
-    ...(decisionId === undefined ? {} : { decisionId }),
+    ...(providerDecisionId === undefined ? {} : { providerDecisionId }),
   };
 }
 

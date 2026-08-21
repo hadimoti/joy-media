@@ -815,7 +815,7 @@ describe('control-plane HTTP transport', () => {
       origin,
       'POST',
       '/v1/workers/w/hello',
-      { capabilities: variants.map((variant) => variant.type) },
+      { capabilities: variants.map((variant) => variant.type), assetIds: ['asset-source-1'] },
       workerToken,
     );
 
@@ -861,6 +861,113 @@ describe('control-plane HTTP transport', () => {
             derivative: { kind: variant.type },
           },
         },
+      });
+    }
+  });
+
+  it('rejects completion without a result for every Worker job type', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'asset-source-1',
+      kind: 'image',
+      displayName: 'source.png',
+      sha256: '2'.repeat(64),
+      bytes: 2048,
+      descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+      locations: [{ kind: 'opfs-cache', ref: 'source-image-1' }],
+    });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    const variants: ReadonlyArray<{
+      readonly id: string;
+      readonly type: WorkerJobType;
+      readonly job: Record<string, unknown>;
+    }> = [
+      {
+        id: 'job-thumb',
+        type: 'asset.thumbnail',
+        job: { id: 'job-thumb', type: 'asset.thumbnail', assetId: 'asset-source-1' },
+      },
+      {
+        id: 'job-comfy',
+        type: 'image.comfy',
+        job: { id: 'job-comfy', type: 'image.comfy', assetId: 'asset-source-1' },
+      },
+      {
+        id: 'job-denoise',
+        type: 'audio.ml-denoise',
+        job: { id: 'job-denoise', type: 'audio.ml-denoise', assetId: 'asset-source-1' },
+      },
+      { id: 'job-export', type: 'render.export', job: { id: 'job-export', type: 'render.export' } },
+      {
+        id: 'job-inspect',
+        type: 'render.inspect',
+        job: { id: 'job-inspect', type: 'render.inspect' },
+      },
+      {
+        id: 'job-text-local',
+        type: 'text.lm-studio',
+        job: { id: 'job-text-local', type: 'text.lm-studio' },
+      },
+      {
+        id: 'job-text-remote',
+        type: 'text.openrouter',
+        job: { id: 'job-text-remote', type: 'text.openrouter' },
+      },
+      {
+        id: 'job-video',
+        type: 'video.runway',
+        job: { id: 'job-video', type: 'video.runway' },
+      },
+      {
+        id: 'job-edit',
+        type: 'edit.higgsfield',
+        job: { id: 'job-edit', type: 'edit.higgsfield' },
+      },
+    ];
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: variants.map((variant) => variant.type), assetIds: ['asset-source-1'] },
+      workerToken,
+    );
+
+    for (const variant of variants) {
+      expect(await request(origin, 'POST', '/v1/projects/p/jobs', variant.job)).toMatchObject({
+        status: 201,
+        body: { data: { id: variant.id, type: variant.type } },
+      });
+      expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
+        status: 200,
+        body: { data: { id: variant.id, type: variant.type } },
+      });
+      expect(
+        await request(origin, 'POST', `/v1/workers/w/jobs/${variant.id}/complete`, {}, workerToken),
+      ).toMatchObject({
+        status: 400,
+        body: { error: { code: 'REQUEST_INVALID' } },
+      });
+      expect(
+        await request(
+          origin,
+          'POST',
+          `/v1/workers/w/jobs/${variant.id}/fail`,
+          { error: 'canceled' },
+          workerToken,
+        ),
+      ).toMatchObject({
+        status: 200,
+        body: { data: { state: 'canceled' } },
       });
     }
   });
