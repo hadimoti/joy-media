@@ -32,7 +32,7 @@ describe('ProductionBoardPanel', () => {
     ).toContain('Start a Workflow');
   });
 
-  it('renders status groups, authority badge, sections, and action availability', () => {
+  it('renders status groups, authority badge, tabs, and action availability', () => {
     const model = buildProductionBoardModel({
       records: [
         run({
@@ -44,6 +44,11 @@ describe('ProductionBoardPanel', () => {
               nodeId: 'scene-candidates',
               kind: 'choose-candidates',
               prompt: 'Choose candidates',
+              requestPayload: {
+                candidates: [
+                  { id: 'candidate-1', title: 'Opening shot', thumbnailRef: 'thumb.jpg' },
+                ],
+              },
               state: 'pending',
               requestedSeq: 2,
             },
@@ -71,9 +76,9 @@ describe('ProductionBoardPanel', () => {
     expect(markup).toContain('Needs review');
     expect(markup).toContain('Producer · owner');
     expect(markup).toContain('Brief/Input');
-    expect(markup).toContain('Approve');
-    expect(markup).toContain('>Approve</button>');
-    expect(markup).toContain('>Reject</button>');
+    expect(markup).toContain('aria-label="Approvals"');
+    expect(markup).toContain('>Retry</button>');
+    expect(markup).toContain('>Cancel</button>');
     expect(markup).toContain('disabled=""><svg');
   });
 

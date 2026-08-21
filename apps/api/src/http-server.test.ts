@@ -548,6 +548,7 @@ describe('control-plane HTTP transport', () => {
         {
           approved: true,
           responseRef: 'response-api',
+          response: { approved: [{ assetId: 'asset-1' }] },
           authority,
           expectedUpdatedSeq: 2,
         },
@@ -559,7 +560,13 @@ describe('control-plane HTTP transport', () => {
           duplicate: false,
           record: {
             updatedSeq: 3,
-            approvals: [{ state: 'approved', responseRef: 'response-api' }],
+            approvals: [
+              {
+                state: 'approved',
+                responseRef: 'response-api',
+                response: { approved: [{ assetId: 'asset-1' }] },
+              },
+            ],
           },
         },
       },
@@ -572,6 +579,7 @@ describe('control-plane HTTP transport', () => {
         {
           approved: true,
           responseRef: 'response-api',
+          response: { approved: [{ assetId: 'asset-1' }] },
           authority,
           expectedUpdatedSeq: 2,
         },
@@ -595,6 +603,7 @@ describe('control-plane HTTP transport', () => {
         {
           approved: true,
           responseRef: 'response-api-role-mismatch',
+          response: { approved: true },
           authority: { principalId: 'owner', role: 'reviewer' },
         },
       ),
@@ -946,6 +955,7 @@ function parkedRecord(
         nodeId: 'review',
         kind: 'approve-render',
         prompt: 'Approve final?',
+        requestPayload: { diffRef: 'asset-diff-1' },
         state: 'pending',
         requestedSeq: 2,
       },

@@ -49,10 +49,13 @@ export interface ProductionApprovalV1 {
   readonly nodeId: string;
   readonly kind: string;
   readonly prompt: string;
+  readonly requestPayload?: unknown;
   readonly state: ProductionApprovalStateV1;
   readonly requestedSeq: number;
   readonly respondedSeq?: number;
   readonly responseRef?: string;
+  readonly response?: unknown;
+  readonly rejectionReason?: string;
   readonly authority?: ProductionRunAuthority;
 }
 
@@ -118,6 +121,8 @@ export interface RespondToProductionApprovalInput {
   readonly approvalId: string;
   readonly approved: boolean;
   readonly responseRef: string;
+  readonly response?: unknown;
+  readonly rejectionReason?: string;
   readonly authority: ProductionRunAuthority;
   readonly expectedUpdatedSeq?: number;
   readonly now?: number;
@@ -414,7 +419,12 @@ function applyApprovalResponse(
   if (approval === undefined) return { ok: false, reason: 'approval-not-found' };
   const nextState = input.approved ? 'approved' : 'rejected';
   if (approval.state !== 'pending') {
-    if (approval.state === nextState && approval.responseRef === input.responseRef) {
+    if (
+      approval.state === nextState &&
+      approval.responseRef === input.responseRef &&
+      jsonEqual(approval.response, input.response) &&
+      approval.rejectionReason === input.rejectionReason
+    ) {
       return { ok: true, duplicate: true, record };
     }
     return { ok: false, reason: 'approval-conflict' };
@@ -425,6 +435,8 @@ function applyApprovalResponse(
     state: nextState,
     respondedSeq: seq,
     responseRef: input.responseRef,
+    ...(input.response === undefined ? {} : { response: input.response }),
+    ...(input.rejectionReason === undefined ? {} : { rejectionReason: input.rejectionReason }),
     authority: input.authority,
   };
   const event: ProductionRunEventV1 = {
@@ -696,10 +708,16 @@ function validateApprovals(record: ProductionRunRecordV1): void {
       invalidRun('approval responded sequence is invalid');
     }
     if (approval.responseRef !== undefined) validateOpaque(approval.responseRef, 'response ref');
+    if (approval.rejectionReason !== undefined)
+      validateSafeString(approval.rejectionReason, 'rejection reason');
     if (approval.authority !== undefined) validateAuthorityShape(approval.authority);
     if (seen.has(approval.approvalId)) invalidRun('approval IDs must be unique');
     seen.add(approval.approvalId);
   }
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function validateNodes(record: ProductionRunRecordV1): void {

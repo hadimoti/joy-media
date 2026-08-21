@@ -202,12 +202,16 @@ export function ContactSheetApproval({
           <button
             type="button"
             className="icon-button icon-button-labeled"
-            onClick={() => setCompareKey(compareKey === activeItem.key ? undefined : activeItem.key)}
+            onClick={() =>
+              setCompareKey(compareKey === activeItem.key ? undefined : activeItem.key)
+            }
           >
             Compare
           </button>
           {comparedItem !== undefined && (
-            <pre aria-label="Render diff">{JSON.stringify(comparedItem.diff ?? comparedItem.raw, null, 2)}</pre>
+            <pre aria-label="Render diff">
+              {JSON.stringify(comparedItem.diff ?? comparedItem.raw, null, 2)}
+            </pre>
           )}
         </div>
       )}
@@ -230,11 +234,7 @@ export function ContactSheetApproval({
       )}
 
       <div className="workflow-run-actions">
-        <button
-          type="button"
-          className="icon-button icon-button-labeled"
-          onClick={submitApproved}
-        >
+        <button type="button" className="icon-button icon-button-labeled" onClick={submitApproved}>
           Approve selected
         </button>
         <button type="button" className="icon-button icon-button-labeled" onClick={submitRejected}>
@@ -374,7 +374,7 @@ export function contactSheetResponseFor(
   const selected = selectedItems.map((item) => item.raw);
   if (kind === 'choose-candidates') return { candidates: selected };
   if (kind === 'approve-render') return { approved: selected };
-  return { approved: true, items: selected };
+  return { approved: true };
 }
 
 export function contactSheetApprovalDecisionFor(
@@ -387,7 +387,8 @@ export function contactSheetApprovalDecisionFor(
   },
 ): ContactSheetApprovalDecisionResult {
   if (action === 'approve') {
-    if (input.selectedItems.length === 0) {
+    const requiresSelection = input.kind === 'choose-candidates' || input.kind === 'approve-render';
+    if (requiresSelection && input.selectedItems.length === 0) {
       return {
         ok: false,
         validation: 'Select at least one item to approve, or reject with a reason.',
@@ -470,7 +471,10 @@ function formatUs(value: number): string {
   return `${String(minutes)}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function contactSheetResponseIdFor(approvalId: string | undefined, response: unknown): string {
+export function contactSheetResponseIdFor(
+  approvalId: string | undefined,
+  response: unknown,
+): string {
   return `approval-response:${approvalId ?? 'unbound'}:${hashString(canonicalJson(response))}`;
 }
 
@@ -533,11 +537,15 @@ function firstString(...values: readonly unknown[]): string | undefined {
 }
 
 function firstNumber(...values: readonly unknown[]): number | undefined {
-  return values.find((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  return values.find(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
 }
 
 function millisToMicros(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 1_000) : undefined;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(value * 1_000)
+    : undefined;
 }
 
 function microsFromDuration(startUs: number | undefined, durationUs: unknown): number | undefined {

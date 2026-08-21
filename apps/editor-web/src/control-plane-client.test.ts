@@ -295,6 +295,8 @@ describe('BrowserControlPlaneClient', () => {
         approvalId: 'approval-1',
         approved: true,
         responseRef: 'decision:approval-1',
+        response: { approved: true },
+        rejectionReason: 'not used on approval',
         expectedUpdatedSeq: 2,
         authority: { principalId: 'owner-1', role: 'owner' },
       });
@@ -318,6 +320,8 @@ describe('BrowserControlPlaneClient', () => {
     expect(requests[0]?.body).toContain('"authority":{"principalId":"owner-1","role":"owner"}');
     expect(requests[0]?.body).toContain('"artifactIds":["asset:clip"]');
     expect(requests[4]?.body).toContain('"expectedUpdatedSeq":2');
+    expect(requests[4]?.body).toContain('"response":{"approved":true}');
+    expect(requests[4]?.body).toContain('"rejectionReason":"not used on approval"');
     expect(requests[5]?.body).toContain('"expectedUpdatedSeq":3');
     expect(JSON.stringify(requests)).not.toContain('C:\\');
     expect(JSON.stringify(requests)).not.toContain('bytesBase64');

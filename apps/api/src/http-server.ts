@@ -473,6 +473,12 @@ async function route(
           approvalId: decodeURIComponent(productionRunApprovalMatch[3]!),
           approved: requiredBoolean(body, 'approved'),
           responseRef: requiredString(body, 'responseRef'),
+          ...(!('response' in body) ? {} : { response: body.response }),
+          ...(typeof body.rejectionReason === 'string'
+            ? { rejectionReason: body.rejectionReason }
+            : body.rejectionReason === undefined
+              ? {}
+              : invalidRequest('rejectionReason must be a string')),
           authority: requiredProductionRunAuthority(body, 'authority'),
           ...(expectedUpdatedSeq === undefined ? {} : { expectedUpdatedSeq }),
         },
@@ -1424,6 +1430,10 @@ function requiredPositiveInteger(body: Record<string, unknown>, field: string): 
   const value = optionalPositiveInteger(body, field);
   if (value === undefined) throw new ControlPlaneError('REQUEST_INVALID', `${field} is required`);
   return value;
+}
+
+function invalidRequest(message: string): never {
+  throw new ControlPlaneError('REQUEST_INVALID', message);
 }
 
 function requiredObject(body: Record<string, unknown>, field: string): Record<string, unknown> {

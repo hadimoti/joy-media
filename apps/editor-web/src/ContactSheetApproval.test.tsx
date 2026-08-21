@@ -133,6 +133,23 @@ describe('ContactSheetApproval', () => {
     });
   });
 
+  it('allows non-visual approvals to approve with no selected items', () => {
+    expect(
+      contactSheetApprovalDecisionFor('approve', {
+        kind: 'confirm-cost',
+        approvalId: 'approval-2',
+        selectedItems: [],
+      }),
+    ).toEqual({
+      ok: true,
+      decision: {
+        approved: true,
+        response: { approved: true },
+        responseId: contactSheetResponseIdFor('approval-2', { approved: true }),
+      },
+    });
+  });
+
   it('binds response ids to exact approved and rejected payloads', () => {
     const selectedItems = contactSheetApprovalItemsFor(chooseCandidatesRequest()).slice(0, 2);
     const approved = contactSheetApprovalDecisionFor('approve', {

@@ -254,11 +254,12 @@ describe('production run records', () => {
       expect.unreachable('approval response should apply');
     }
     expect(first.record.approvals[0]).toMatchObject({
+      requestPayload: { private: 'diff' },
       state: 'approved',
       responseRef: 'approval-response-1',
       respondedSeq: 3,
     });
-    expect(JSON.stringify(first.record)).not.toContain('diff');
+    expect(JSON.stringify(first.record)).toContain('"requestPayload":{"private":"diff"}');
 
     const duplicate = recordProductionApprovalResponse(first.record, {
       approvalId: approvalId as string,
@@ -302,6 +303,7 @@ describe('production run records', () => {
         nodeId: 'task',
         kind: 'approve-render',
         prompt: 'Approve board?',
+        requestedSeq: 2,
         state: 'pending',
       },
     ]);
