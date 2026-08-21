@@ -64,7 +64,7 @@ export type BrowserProductionRunCancelResult =
   | {
       readonly ok: false;
       readonly reason: 'not-found' | 'revision-conflict' | 'already-terminal';
-      readonly currentRevision?: number;
+      readonly currentUpdatedSeq?: number;
     };
 
 interface BrowserProductionRunDatabase {
@@ -94,9 +94,9 @@ export class BrowserProductionRunStore implements ProductionRunStore {
     private readonly scope: BrowserProductionRunScope,
     options: BrowserProductionRunStoreOptions = {},
   ) {
-    this.#storageKey = `${STORAGE_PREFIX}:${encodeURIComponent(scope.projectId)}:${encodeURIComponent(
-      scope.authority.principalId,
-    )}`;
+    this.#storageKey =
+      `${STORAGE_PREFIX}:${encodeURIComponent(scope.projectId)}:` +
+      `${encodeURIComponent(scope.authority.principalId)}:${encodeURIComponent(scope.authority.role)}`;
     this.#maxLogMessageBytes = options.maxLogMessageBytes ?? DEFAULT_MAX_LOG_MESSAGE_BYTES;
     this.#maxLogsPerNode = options.maxLogsPerNode ?? DEFAULT_MAX_LOGS_PER_NODE;
 
@@ -264,7 +264,7 @@ export class BrowserProductionRunStore implements ProductionRunStore {
     runId: string,
     input: {
       readonly authority: ProductionRunAuthority;
-      readonly expectedRevision?: number;
+      readonly expectedUpdatedSeq?: number;
     },
   ): Promise<BrowserProductionRunCancelResult> {
     this.#assertScopeAuthority(input.authority);
@@ -273,17 +273,17 @@ export class BrowserProductionRunStore implements ProductionRunStore {
       return { ok: false, reason: 'not-found' };
     }
     if (
-      input.expectedRevision !== undefined &&
-      current.checkpointRevision !== input.expectedRevision
+      input.expectedUpdatedSeq !== undefined &&
+      current.updatedSeq !== input.expectedUpdatedSeq
     ) {
       return {
         ok: false,
         reason: 'revision-conflict',
-        currentRevision: current.checkpointRevision,
+        currentUpdatedSeq: current.updatedSeq,
       };
     }
     if (isTerminal(current.state)) {
-      return { ok: false, reason: 'already-terminal', currentRevision: current.checkpointRevision };
+      return { ok: false, reason: 'already-terminal', currentUpdatedSeq: current.updatedSeq };
     }
 
     const record = appendProductionRunEvent(current, {
@@ -328,6 +328,9 @@ export class BrowserProductionRunStore implements ProductionRunStore {
       throw new Error('local production run updates require explicit authority');
     }
     if (authority.principalId !== this.scope.authority.principalId) {
+      throw new Error('local production run authority mismatch');
+    }
+    if (authority.role !== this.scope.authority.role) {
       throw new Error('local production run authority mismatch');
     }
   }

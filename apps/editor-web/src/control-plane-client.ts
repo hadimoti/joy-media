@@ -1,6 +1,6 @@
 import { WORKER_PROTOCOL_VERSION, type RenderJobPayload } from '@joy-media/job-protocol';
 import type {
-  ProductionRunBoardSnapshotV1,
+  ProductionRunAuthority,
   ProductionRunCheckpointUpdateResultV1,
   ProductionRunCheckpointUpdateV1,
   ProductionRunRecordV1,
@@ -120,12 +120,25 @@ export interface BrowserProductionRunListOptions {
 }
 
 export interface BrowserProductionRunListResponse {
-  readonly snapshot: ProductionRunBoardSnapshotV1;
+  readonly runs: readonly ProductionRunRecordV1[];
   readonly nextCursor?: string;
 }
 
+export interface BrowserProductionRunCreateInput {
+  readonly runKey: string;
+  readonly record: ProductionRunRecordV1;
+  readonly authority: ProductionRunAuthority;
+  readonly approvalExpiresAt?: number;
+}
+
 export interface BrowserProductionRunCancelInput {
-  readonly expectedRevision?: number;
+  readonly authority: ProductionRunAuthority;
+  readonly expectedUpdatedSeq?: number;
+}
+
+export interface BrowserProductionRunApprovalResponseInput
+  extends RecordProductionApprovalResponseInput {
+  readonly expectedUpdatedSeq?: number;
 }
 
 export class BrowserControlPlaneClient {
@@ -440,9 +453,9 @@ export class BrowserControlPlaneClient {
 
   async createProductionRun(
     projectId: string,
-    record: ProductionRunRecordV1,
+    input: BrowserProductionRunCreateInput,
   ): Promise<ProductionRunRecordV1> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/production-runs`, { record });
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/production-runs`, input);
   }
 
   async productionRuns(
@@ -478,12 +491,12 @@ export class BrowserControlPlaneClient {
   async respondToProductionRunApproval(
     projectId: string,
     runId: string,
-    response: RecordProductionApprovalResponseInput,
+    response: BrowserProductionRunApprovalResponseInput,
   ): Promise<RecordProductionApprovalResponseResult> {
     return this.post(
       `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(
         runId,
-      )}/approvals/${encodeURIComponent(response.approvalId)}/response`,
+      )}/approvals/${encodeURIComponent(response.approvalId)}/respond`,
       response,
     );
   }

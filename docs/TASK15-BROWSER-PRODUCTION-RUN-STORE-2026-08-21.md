@@ -12,12 +12,15 @@ Scope:
 Behavior covered:
 
 - Browser reopen/local offline persistence.
-- Project and actor scoped local histories with paginated listing.
+- Project and actor-role scoped local histories with paginated listing.
 - Monotonic event validation and optimistic checkpoint revision conflicts.
 - Duplicate local run id and local run key rejection.
 - Approval wrong-sequence, expired, rejected, duplicate, and conflict handling.
-- Local cancellation with actor and revision checks.
+- Local cancellation with actor-role and monotonic `updatedSeq` compare-and-swap checks.
 - Rejection of local paths, raw media payloads, and oversized public logs before persistence.
+- Control-plane-client create/list/respond/cancel DTOs aligned with the authenticated API routes:
+  create sends `runKey` plus `authority`, list reads `{ runs, nextCursor }`, approval uses
+  `/respond`, and cancel sends `authority` plus `expectedUpdatedSeq`.
 
 Verification:
 

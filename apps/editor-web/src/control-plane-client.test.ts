@@ -207,6 +207,29 @@ describe('BrowserControlPlaneClient', () => {
         ...(init?.method === undefined ? {} : { method: init.method }),
         ...(typeof init?.body === 'string' ? { body: init.body } : {}),
       });
+      if (url.includes('/production-runs?')) {
+        return json(200, {
+          data: {
+            runs: [
+              {
+                recordVersion: 1,
+                runId: 'run-1',
+                workflowId: 'workflow-1',
+                workflowVersion: '1.0.0',
+                projectRevision: 'project-revision-1',
+                state: 'queued',
+                checkpointRevision: 0,
+                links: {},
+                events: [],
+                approvals: [],
+                nodes: [],
+                createdSeq: 1,
+                updatedSeq: 1,
+              },
+            ],
+          },
+        });
+      }
       return json(200, {
         data: {
           recordVersion: 1,
@@ -239,8 +262,20 @@ describe('BrowserControlPlaneClient', () => {
         links: { artifactIds: ['asset:clip'] },
         authority: { principalId: 'owner-1', role: 'owner' },
       });
-      await client.createProductionRun('project-1', record);
-      await client.productionRuns('project-1', { limit: 25, cursor: 'next', state: 'queued' });
+      await client.createProductionRun('project-1', {
+        runKey: 'run-key-1',
+        authority: { principalId: 'owner-1', role: 'owner' },
+        record,
+      });
+      await expect(
+        client.productionRuns('project-1', { limit: 25, cursor: 'next', state: 'queued' }),
+      ).resolves.toMatchObject({
+        runs: [
+          {
+            runId: 'run-1',
+          },
+        ],
+      });
       await client.productionRun('project-1', 'run-1');
       await client.updateProductionRunCheckpoint('project-1', {
         runId: 'run-1',
@@ -260,9 +295,13 @@ describe('BrowserControlPlaneClient', () => {
         approvalId: 'approval-1',
         approved: true,
         responseRef: 'decision:approval-1',
+        expectedUpdatedSeq: 2,
         authority: { principalId: 'owner-1', role: 'owner' },
       });
-      await client.cancelProductionRun('project-1', 'run-1', { expectedRevision: 0 });
+      await client.cancelProductionRun('project-1', 'run-1', {
+        authority: { principalId: 'owner-1', role: 'owner' },
+        expectedUpdatedSeq: 3,
+      });
     } finally {
       globalThis.fetch = original;
     }
@@ -272,10 +311,14 @@ describe('BrowserControlPlaneClient', () => {
       'https://media.joyteam.ir/api/v1/projects/project-1/production-runs?limit=25&cursor=next&state=queued',
       'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1',
       'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/checkpoint',
-      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/approvals/approval-1/response',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/approvals/approval-1/respond',
       'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/cancel',
     ]);
+    expect(requests[0]?.body).toContain('"runKey":"run-key-1"');
+    expect(requests[0]?.body).toContain('"authority":{"principalId":"owner-1","role":"owner"}');
     expect(requests[0]?.body).toContain('"artifactIds":["asset:clip"]');
+    expect(requests[4]?.body).toContain('"expectedUpdatedSeq":2');
+    expect(requests[5]?.body).toContain('"expectedUpdatedSeq":3');
     expect(JSON.stringify(requests)).not.toContain('C:\\');
     expect(JSON.stringify(requests)).not.toContain('bytesBase64');
   });

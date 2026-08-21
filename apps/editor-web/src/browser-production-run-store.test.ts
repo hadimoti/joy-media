@@ -74,8 +74,13 @@ describe('BrowserProductionRunStore', () => {
       projectId: 'project-a',
       authority: reviewer,
     });
+    const projectAOperator = new BrowserProductionRunStore(storage, {
+      projectId: 'project-a',
+      authority: { ...owner, role: 'operator' },
+    });
     await expect(projectBOwner.load('run-a-1')).resolves.toBeUndefined();
     await expect(projectAReviewer.load('run-a-1')).resolves.toBeUndefined();
+    await expect(projectAOperator.load('run-a-1')).resolves.toBeUndefined();
   });
 
   it('rejects non-monotonic event histories and reports checkpoint revision conflicts', async () => {
@@ -201,21 +206,59 @@ describe('BrowserProductionRunStore', () => {
     ).resolves.toEqual({ ok: false, reason: 'approval-conflict' });
   });
 
-  it('cancels local runs with actor and revision checks', async () => {
+  it('cancels local runs with actor-role and updated-sequence checks', async () => {
     const store = new BrowserProductionRunStore(memoryStorage(), {
       projectId: 'project-a',
       authority: owner,
     });
-    await store.create(queuedRecord('run-1'));
+    const record = parkedRecord('run-1');
+    const approval = record.approvals[0];
+    if (approval === undefined) expect.unreachable('fixture should include one approval');
+    await store.create(record);
 
-    await expect(store.cancel('run-1', { authority: owner, expectedRevision: 1 })).resolves.toEqual(
-      { ok: false, reason: 'revision-conflict', currentRevision: 0 },
-    );
+    await expect(
+      store.cancel('run-1', {
+        authority: { ...owner, role: 'operator' },
+        expectedUpdatedSeq: record.updatedSeq,
+      }),
+    ).rejects.toThrow('local production run authority mismatch');
 
-    const canceled = await store.cancel('run-1', { authority: owner, expectedRevision: 0 });
+    const approved = await store.respondToApproval('run-1', {
+      approvalId: approval.approvalId,
+      approved: true,
+      responseRef: 'decision:yes',
+      authority: owner,
+      expectedRequestedSeq: approval.requestedSeq,
+    });
+    expect(approved).toMatchObject({
+      ok: true,
+      record: { updatedSeq: record.updatedSeq + 1, approvals: [{ state: 'approved' }] },
+    });
+
+    await expect(
+      store.cancel('run-1', { authority: owner, expectedUpdatedSeq: record.updatedSeq }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: 'revision-conflict',
+      currentUpdatedSeq: record.updatedSeq + 1,
+    });
+
+    const canceled = await store.cancel('run-1', {
+      authority: owner,
+      expectedUpdatedSeq: record.updatedSeq + 1,
+    });
     expect(canceled).toMatchObject({
       ok: true,
-      record: { state: 'canceled', events: [{ seq: 1 }, { seq: 2, type: 'run.canceled' }] },
+      record: {
+        state: 'canceled',
+        updatedSeq: record.updatedSeq + 2,
+        events: [
+          { seq: 1 },
+          { seq: 2, type: 'approval.requested' },
+          { seq: 3, type: 'approval.responded' },
+          { seq: 4, type: 'run.canceled' },
+        ],
+      },
     });
   });
 
