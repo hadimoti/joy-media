@@ -50,6 +50,25 @@ describe('deterministic headless scene capture', () => {
     expect(first.rgba[0]).toBe(1); // cached values are defensive copies
   });
 
+  it('captures at the scene manifest viewport without substituting reel dimensions', () => {
+    let requestedSize: { readonly width: number; readonly height: number } | undefined;
+    const driver = {
+      capture: (request: { readonly width: number; readonly height: number }) => {
+        requestedSize = { width: request.width, height: request.height };
+        return { rgba: new Uint8Array(16) };
+      },
+    };
+    const surface = captureSceneSurface(
+      scene,
+      driver,
+      { timeUs: 0, frameRate: rational(30, 1), seed: 'fixed', variables: {}, locale: 'en' },
+      new SceneCaptureCache(),
+    );
+
+    expect(requestedSize).toEqual({ width: 2, height: 2 });
+    expect(surface).toMatchObject({ width: 2, height: 2 });
+  });
+
   it('caches cropped regions and rejects out-of-bounds requests', () => {
     const driver = {
       capture: () => ({ rgba: new Uint8Array(Array.from({ length: 16 }, (_, i) => i)) }),

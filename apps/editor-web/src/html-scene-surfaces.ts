@@ -13,6 +13,9 @@ import type { VisualObjectV1 } from '@joy-media/project-schema';
 
 export type HtmlSceneBitmapMap = ReadonlyMap<string, SceneSurfaceBitmap>;
 
+const MONITOR_CAPTURE_SCALE = 4;
+const DELIVERY_CAPTURE_TIMEOUT_MS = 8_000;
+
 export class HtmlSceneSurfaceCache {
   readonly #hosts = new Map<string, ScenePreviewHost>();
   readonly #bitmaps = new Map<string, SceneSurfaceBitmap>();
@@ -59,8 +62,8 @@ export class HtmlSceneSurfaceCache {
         host.update(timeUs, variables);
         const viewport = viewportForScene(packageId);
         // Monitor-scale capture (¼) keeps playhead scrub responsive.
-        const width = Math.max(1, Math.round(viewport.width / 4));
-        const height = Math.max(1, Math.round(viewport.height / 4));
+        const width = Math.max(1, Math.round(viewport.width / MONITOR_CAPTURE_SCALE));
+        const height = Math.max(1, Math.round(viewport.height / MONITOR_CAPTURE_SCALE));
         try {
           const bitmap = await host.capture(width, height);
           if (generation !== this.#generation) return;
@@ -91,7 +94,10 @@ export class HtmlSceneSurfaceCache {
           await host.ready;
           host.update(timeUs, defaultVariablesForScene(packageId));
           const viewport = viewportForScene(packageId);
-          result.set(object.id, await host.capture(viewport.width, viewport.height, 8_000));
+          result.set(
+            object.id,
+            await host.capture(viewport.width, viewport.height, DELIVERY_CAPTURE_TIMEOUT_MS),
+          );
         } finally {
           host.destroy();
         }

@@ -5,7 +5,13 @@
  * P16: CPU-side effect pass applied per-node before compositing into the frame.
  */
 
-import type { RenderFrameIR, Rgba, VisualRenderNode, EffectInstanceIR } from '@joy-media/render-ir';
+import type {
+  RenderFrameIR,
+  Rgba,
+  TransitionNode,
+  VisualRenderNode,
+  EffectInstanceIR,
+} from '@joy-media/render-ir';
 import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
 import { applyCreativeEffect } from './creative-effects.js';
 
@@ -40,7 +46,8 @@ export function renderHeadlessFrame(frame: RenderFrameIR): HeadlessFrame {
 
   for (const { node } of orderedNodes) {
     const nodePixels = new Uint8Array(width * height * 4);
-    if (node.kind === 'text') drawTextRaw(nodePixels, width, height, node);
+    if (node.kind === 'transition') drawTransitionRaw(nodePixels, width, height, node);
+    else if (node.kind === 'text') drawTextRaw(nodePixels, width, height, node);
     else drawSurfaceRaw(nodePixels, width, height, node);
     if ('effects' in node && node.effects && node.effects.length > 0) {
       applyHeadlessEffects(nodePixels, width, height, node.effects, {
@@ -89,6 +96,26 @@ function fillBackground(width: number, height: number, background: Rgba): Uint8A
   return result;
 }
 
+function drawTransitionRaw(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  node: TransitionNode,
+): void {
+  const progress = Math.min(1, Math.max(0, node.progress));
+  const left = colorFromClipId(node.leftClipId);
+  const right = colorFromClipId(node.rightClipId);
+  const color = {
+    r: mix(left.r, right.r, progress),
+    g: mix(left.g, right.g, progress),
+    b: mix(left.b, right.b, progress),
+    a: 255,
+  };
+  rasterizeRaw(pixels, width, height, node, (u, v) =>
+    u >= 0 && u < node.width && v >= 0 && v < node.height ? color : undefined,
+  );
+}
+
 function drawSurfaceRaw(
   pixels: Uint8Array,
   width: number,
@@ -113,6 +140,20 @@ function drawTextRaw(
       ? node.color
       : undefined;
   });
+}
+
+function colorFromClipId(clipId: string): Rgba {
+  const hash = hash32(`transition:${clipId}`);
+  return {
+    r: 64 + (hash & 0x7f),
+    g: 64 + ((hash >>> 8) & 0x7f),
+    b: 64 + ((hash >>> 16) & 0x7f),
+    a: 255,
+  };
+}
+
+function mix(left: number, right: number, progress: number): number {
+  return Math.round(left * (1 - progress) + right * progress);
 }
 
 function rasterizeRaw(

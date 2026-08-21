@@ -53,13 +53,15 @@ describe.runIf(findChromiumExecutable() !== undefined)(
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
       const driver = createChromiumSceneDriver();
+      const preset = { width: 32, height: 18 };
+      const sceneViewport = { width: preset.width / 2, height: preset.height / 2 };
       const title = FIRST_PARTY_SCENES[0]!;
       const lowerThird = FIRST_PARTY_SCENES[2]!;
       const instances = [title, lowerThird].map((scene) => {
         const instance = resolveFirstPartySceneInstance(scene.id)!;
         return {
           runtime: createSandboxedReactScene(
-            { ...scene.manifest, viewport: { width: 16, height: 9 } },
+            { ...scene.manifest, viewport: sceneViewport },
             scene.source,
           ),
           variables: instance.variables,
@@ -83,8 +85,8 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         {
           projectId: 'p04-scene-reel',
           revision: 1,
-          width: 32,
-          height: 18,
+          width: preset.width,
+          height: preset.height,
           frameRate: 30,
           durationUs: 100_000,
           preset: 'social-h264-aac',
@@ -94,8 +96,8 @@ describe.runIf(findChromiumExecutable() !== undefined)(
       );
       expect(existsSync(output)).toBe(true);
       expect(verifyExport(output)).toMatchObject({
-        width: 32,
-        height: 18,
+        width: preset.width,
+        height: preset.height,
         videoCodec: 'h264',
         audioCodec: 'aac',
       });
@@ -113,7 +115,7 @@ function composite(
   const output = new Uint8Array(base);
   for (const [surface, originX] of [
     [left, 0],
-    [right, 16],
+    [right, left.width],
   ] as const) {
     for (let y = 0; y < surface.height && y < height; y++) {
       for (let x = 0; x < surface.width && originX + x < width; x++) {

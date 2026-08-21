@@ -1992,8 +1992,10 @@ function EditorWorkspace({
         try {
           for (let index = 0; index < totalFrames; index++) {
             const timeUs = frameTimeUs(index);
-            await sceneCache.sync(session.visualProject.visualObjects, timeUs);
-            sceneFrames.set(index, new Map(sceneCache.bitmaps()));
+            sceneFrames.set(
+              index,
+              new Map(await sceneCache.captureFull(session.visualProject.visualObjects, timeUs)),
+            );
             if (index % frameRate === 0)
               setExportStatus(`Capturing HTML scenes… ${index + 1}/${totalFrames}`);
           }

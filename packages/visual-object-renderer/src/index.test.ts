@@ -160,6 +160,22 @@ describe('buildRenderFrameIR', () => {
     expect(a).toEqual(b);
   });
 
+  it('sizes html-scene nodes from the requested frame instead of a hard-coded reel preset', () => {
+    const obj = resolved(
+      makeObject({
+        id: 'scene',
+        kind: 'html-scene',
+        scenePackageId: 'joy.scene',
+      }),
+    );
+    const frame = buildRenderFrameIR('c', 0, 1280, 720, [obj]);
+    const node = frame.nodes[0];
+    expect(node?.kind).toBe('video-frame');
+    if (node?.kind !== 'video-frame') throw new Error('expected html scene video frame');
+    expect(node.width).toBe(1280);
+    expect(node.height).toBe(720);
+  });
+
   it('attaches per-object effects and master color grade', () => {
     const obj = resolved(makeObject({ id: 'img', kind: 'image' }));
     const frame = buildRenderFrameIR('c', 0, 100, 100, [obj], {
@@ -222,7 +238,9 @@ describe('transition timing', () => {
   });
 
   it('emits a transition node only while active', () => {
-    const objects: ResolvedObject[] = [resolved(makeObject({ id: 'a', kind: 'shape', shape: 'rectangle' }))];
+    const objects: ResolvedObject[] = [
+      resolved(makeObject({ id: 'a', kind: 'shape', shape: 'rectangle' })),
+    ];
     const inactive = buildRenderFrameIR('c', 0, 100, 100, objects, {
       transitions: [transition],
       clipTimes,

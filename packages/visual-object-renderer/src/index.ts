@@ -10,7 +10,12 @@
  * content is abstract (color-fills for now, resolved assets later).
  */
 
-import type { VisualObjectV1, VisualObjectTransformV1, ColorGradeV1, EffectInstanceV1 } from '@joy-media/project-schema';
+import type {
+  VisualObjectV1,
+  VisualObjectTransformV1,
+  ColorGradeV1,
+  EffectInstanceV1,
+} from '@joy-media/project-schema';
 import type {
   RenderNode,
   RenderFrameIR,
@@ -44,7 +49,9 @@ export interface BuildRenderFrameOptions {
   /** Per-object effect stacks from `VisualObjectV1.effects` (P16). */
   readonly effectsByObjectId?: Readonly<Record<string, readonly EffectInstanceV1[]>>;
   /** Intrinsic pixel size for image stickers when real bitmaps are available. */
-  readonly imageSizesByObjectId?: Readonly<Record<string, { readonly width: number; readonly height: number }>>;
+  readonly imageSizesByObjectId?: Readonly<
+    Record<string, { readonly width: number; readonly height: number }>
+  >;
 }
 
 /**
@@ -62,6 +69,7 @@ export function visualObjectToRenderNode(
   resolved: ResolvedObject,
   effects?: readonly EffectInstanceIR[],
   imageSize?: { readonly width: number; readonly height: number },
+  frameSize?: { readonly width: number; readonly height: number },
 ): RenderNode | undefined {
   const { object, transform } = resolved;
   if (object.kind === 'null' || object.kind === 'camera') return undefined;
@@ -85,7 +93,7 @@ export function visualObjectToRenderNode(
 
   if (object.kind === 'html-scene') {
     // RGBA pixels arrive out-of-band via Pixi videoBitmaps keyed by object id.
-    const viewport = { width: 1080, height: 1920 };
+    const viewport = imageSize ?? frameSize ?? { width: 1080, height: 1920 };
     return {
       kind: 'video-frame',
       id: object.id,
@@ -149,9 +157,11 @@ export function buildRenderFrameIR(
 
   const nodes: RenderNode[] = [];
   for (const resolved of resolvedObjects) {
-    const effects = normalizeEffects(options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects);
+    const effects = normalizeEffects(
+      options.effectsByObjectId?.[resolved.object.id] ?? resolved.object.effects,
+    );
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
-    const node = visualObjectToRenderNode(resolved, effects, imageSize);
+    const node = visualObjectToRenderNode(resolved, effects, imageSize, { width, height });
     if (node) nodes.push(node);
   }
 
@@ -194,7 +204,9 @@ function isTransitionList(
 
 /** Build a clip-id → startUs map from composition tracks. */
 export function clipTimesFromTracks(
-  tracks: readonly { readonly clips: readonly { readonly id: string; readonly startUs: TimeUs }[] }[],
+  tracks: readonly {
+    readonly clips: readonly { readonly id: string; readonly startUs: TimeUs }[];
+  }[],
 ): ClipTimingLookup {
   const map = new Map<string, { readonly startUs: TimeUs }>();
   for (const track of tracks) {
@@ -267,18 +279,21 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
   };
 }
 
-function normalizeEffects(instances: readonly EffectInstanceV1[] | undefined): readonly EffectInstanceIR[] | undefined {
+function normalizeEffects(
+  instances: readonly EffectInstanceV1[] | undefined,
+): readonly EffectInstanceIR[] | undefined {
   if (!instances?.length) return undefined;
-  return instances
-    .map((e): EffectInstanceIR => ({
-      id: e.id,
-      kind: e.effectId as EffectInstanceIR['kind'],
-      enabled: e.enabled,
-      params: mapParamsToNumbers(e.params),
-    }));
+  return instances.map((e): EffectInstanceIR => ({
+    id: e.id,
+    kind: e.effectId as EffectInstanceIR['kind'],
+    enabled: e.enabled,
+    params: mapParamsToNumbers(e.params),
+  }));
 }
 
-function mapParamsToNumbers(params: Readonly<Record<string, import('@joy-media/project-schema').EffectParamValue>>): Readonly<Record<string, number>> {
+function mapParamsToNumbers(
+  params: Readonly<Record<string, import('@joy-media/project-schema').EffectParamValue>>,
+): Readonly<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(params)) {
     if (typeof value === 'number') {
