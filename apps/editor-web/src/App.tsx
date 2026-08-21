@@ -100,6 +100,11 @@ import { EffectStudioShell } from './effect-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserAsset,
+  type BrowserDerivative,
+} from './control-plane-client.js';
 import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { ColorPanel } from './ColorPanel.js';
@@ -112,6 +117,14 @@ import {
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
+import { createMediaSessionPlayableAssetResolver } from './media-session.js';
+import {
+  MonitorMediaElementBinding,
+  monitorVideoClipSpecToken,
+  resolveMonitorMediaSource,
+  type MonitorMediaSource,
+} from './monitor-media-source.js';
 import {
   ensureClipAudio,
   loadAudioState,
@@ -242,15 +255,6 @@ function imageSizesFromCache(): Readonly<
   return sizes;
 }
 
-/**
- * WP-11.2: resolves a timeline clip's assetId to a real, browser-fetchable
- * URL for HTMLVideoElement decode. The reference intro/product/outro clips
- * each have a committed 30 s H.264/AAC fixture under `public/media/reference`.
- */
-function resolveReferenceMediaUrl(assetId: string): string {
-  return `/media/reference/${assetId}.mp4`;
-}
-
 function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
   const composition = project.compositions.root;
   return composition?.tracks
@@ -263,21 +267,11 @@ function activeVideoClipAt(project: SpikeProject, playheadUs: number) {
     );
 }
 
-/** Resolve the currently playing timeline clip from the live media URL. */
-function activeVideoClipForSource(project: SpikeProject, sourceUrl: string) {
-  const composition = project.compositions.root;
-  return composition?.tracks
-    .flatMap((track) => track.clips)
-    .find(
-      (clip) => clip.kind === 'video' && sourceUrl.endsWith(`/media/reference/${clip.assetId}.mp4`),
-    );
-}
-
 function videoClipSpec(clip: VideoClip): VideoClipSpec {
   return {
     // IR / bitmap map key — must match TransitionV1 left/right clip ids.
     id: clip.id,
-    originalToken: resolveReferenceMediaUrl(clip.assetId),
+    originalToken: monitorVideoClipSpecToken(clip),
     startUs: clip.startUs,
     durationUs: clip.durationUs,
     sourceInUs: clip.sourceInUs,
@@ -408,6 +402,7 @@ interface DecodedPreviewFrame {
 interface EditorPanelContextValue {
   readonly state: EditorRuntimeState;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
+  readonly monitorMediaStatus: MonitorMediaSource | undefined;
   /** Last decoded RGBA per timeline clip id (dual-texture transitions). */
   readonly clipFrameCache: ReadonlyMap<string, ImageDataLike>;
   readonly clipFrameTick: number;
@@ -615,6 +610,7 @@ function EditorWorkspace({
   useEffect(() => {
     return () => {
       stickerImageCache.clear();
+      partnerMediaBindingRef.current.dispose(partnerVideoRef.current);
     };
   }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
@@ -633,6 +629,9 @@ function EditorWorkspace({
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
+  const [monitorMediaStatus, setMonitorMediaStatus] = useState<MonitorMediaSource | undefined>(
+    undefined,
+  );
   const [, setRevision] = useState(0);
   const [pluginHost] = useState(() => createEditorPluginHost());
   const [, setPluginRevision] = useState(0);
@@ -649,12 +648,33 @@ function EditorWorkspace({
   const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
   const partnerDecoderRef = useRef<HtmlMediaDecoder | null>(null);
   const partnerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activeMonitorClipIdRef = useRef<string | undefined>(undefined);
+  const monitorMediaBindingRef = useRef(new MonitorMediaElementBinding());
+  const partnerMediaBindingRef = useRef(new MonitorMediaElementBinding());
   const audioContextRef = useRef<AudioContext | null>(null);
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
   const previewMixerSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const previewMixerBufferRef = useRef<Float32Array | null>(null);
+  const mediaClient = useMemo(() => new BrowserControlPlaneClient(), []);
+  const [monitorAssetCatalog, setMonitorAssetCatalog] = useState<{
+    readonly assets: Readonly<Record<string, BrowserAsset>>;
+    readonly derivativesByAssetId: Readonly<Record<string, readonly BrowserDerivative[]>>;
+  }>(() => ({ assets: {}, derivativesByAssetId: {} }));
+  const playableAssetResolver = useMemo(
+    () =>
+      Promise.all([originalAssetCachePromise, openOpfsDerivativeCache()]).then(
+        ([originalCache, derivativeCache]) =>
+          createMediaSessionPlayableAssetResolver({
+            originalCache,
+            derivativeCache,
+            fetchDerivative: ({ projectId: requestedProjectId, assetId, derivative }) =>
+              mediaClient.derivativeBytes(requestedProjectId, assetId, derivative.derivativeId),
+          }),
+      ),
+    [mediaClient],
+  );
 
   const ensurePreviewAudioGraph = useCallback(() => {
     const video = videoRef.current;
@@ -705,6 +725,39 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
   );
+  useEffect(() => {
+    let cancelled = false;
+    void mediaClient
+      .assets(controlPlaneProject.controlPlaneProjectId)
+      .then(async (assets) => {
+        const derivatives = await Promise.all(
+          assets
+            .filter((asset) => asset.kind === 'video' || asset.kind === 'audio')
+            .map(async (asset) => {
+              try {
+                return [
+                  asset.id,
+                  await mediaClient.derivatives(asset.projectId || controlPlaneProject.controlPlaneProjectId, asset.id),
+                ] as const;
+              } catch {
+                return [asset.id, []] as const;
+              }
+            }),
+        );
+        if (cancelled) return;
+        setMonitorAssetCatalog({
+          assets: Object.fromEntries(assets.map((asset) => [asset.id, asset])),
+          derivativesByAssetId: Object.fromEntries(derivatives),
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMonitorAssetCatalog({ assets: {}, derivativesByAssetId: {} });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPlaneProject.controlPlaneProjectId, mediaClient]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -737,6 +790,18 @@ function EditorWorkspace({
     }
     setClipFrameTick((tick) => tick + 1);
   }, []);
+
+  const resolveClipMonitorMediaSource = useCallback(
+    async (clip: VideoClip): Promise<MonitorMediaSource> =>
+      resolveMonitorMediaSource({
+        projectId: controlPlaneProject.controlPlaneProjectId,
+        clip,
+        asset: monitorAssetCatalog.assets[clip.assetId] ?? session.visualProject.assets[clip.assetId],
+        derivatives: monitorAssetCatalog.derivativesByAssetId[clip.assetId] ?? [],
+        resolver: await playableAssetResolver,
+      }),
+    [controlPlaneProject.controlPlaneProjectId, monitorAssetCatalog, playableAssetResolver, session],
+  );
 
   const ensurePartnerDecoder = useCallback((): {
     video: HTMLVideoElement;
@@ -772,10 +837,10 @@ function EditorWorkspace({
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
         const clip = findVideoClipById(session.timelineProject, clipId);
         if (clip === undefined) continue;
-        const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href)
-          .href;
-        if (video.src !== sourceUrl) {
-          video.src = sourceUrl;
+        const source = await resolveClipMonitorMediaSource(clip);
+        if (source.state !== 'ready') continue;
+        const changed = partnerMediaBindingRef.current.apply(video, source);
+        if (changed) {
           await new Promise<void>((resolve, reject) => {
             const cleanup = () => {
               video.removeEventListener('loadeddata', onLoaded);
@@ -800,7 +865,7 @@ function EditorWorkspace({
         if (frame.bitmap !== undefined) rememberClipFrame(clip.id, frame.bitmap);
       }
     },
-    [ensurePartnerDecoder, rememberClipFrame, session],
+    [ensurePartnerDecoder, rememberClipFrame, resolveClipMonitorMediaSource, session],
   );
 
   const syncMediaToPlayhead = useCallback(
@@ -823,9 +888,16 @@ function EditorWorkspace({
         clip.kind !== 'video'
       )
         return false;
-      const sourceUrl = new URL(resolveReferenceMediaUrl(clip.assetId), window.location.href).href;
-      if (video.src !== sourceUrl) {
-        video.src = sourceUrl;
+      const source = await resolveClipMonitorMediaSource(clip);
+      setMonitorMediaStatus(source);
+      if (source.state !== 'ready') {
+        monitorMediaBindingRef.current.dispose(video);
+        activeMonitorClipIdRef.current = undefined;
+        return false;
+      }
+      const changed = monitorMediaBindingRef.current.apply(video, source);
+      activeMonitorClipIdRef.current = clip.id;
+      if (changed) {
         await new Promise<void>((resolve, reject) => {
           const cleanup = () => {
             video.removeEventListener('loadeddata', onLoaded);
@@ -881,7 +953,7 @@ function EditorWorkspace({
       }
       return true;
     },
-    [captureTransitionPartnerFrames, rememberClipFrame, session],
+    [captureTransitionPartnerFrames, rememberClipFrame, resolveClipMonitorMediaSource, session],
   );
 
   const seek = useCallback(
@@ -905,7 +977,9 @@ function EditorWorkspace({
     const capture = (): void => {
       if (cancelled || !stateRef.current.playing) return;
       const clip =
-        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
+        (activeMonitorClipIdRef.current === undefined
+          ? undefined
+          : findVideoClipById(session.timelineProject, activeMonitorClipIdRef.current)) ??
         activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
       if (clip === undefined || clip.kind !== 'video') return;
       const rate = normalizePlaybackRate(clip.playbackRate);
@@ -974,7 +1048,9 @@ function EditorWorkspace({
     const requestFrame = (): void => {
       // Freeze holds a still frame — drive with rAF. Otherwise follow media cadence.
       const clip =
-        activeVideoClipForSource(session.timelineProject, video.currentSrc) ??
+        (activeMonitorClipIdRef.current === undefined
+          ? undefined
+          : findVideoClipById(session.timelineProject, activeMonitorClipIdRef.current)) ??
         activeVideoClipAt(session.timelineProject, stateRef.current.playheadUs);
       const freeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
       if (!freeze && typeof video.requestVideoFrameCallback === 'function')
@@ -1004,6 +1080,7 @@ function EditorWorkspace({
   useEffect(() => {
     const video = videoRef.current;
     if (video === null) return;
+    let cancelled = false;
     const captureCanvas = document.createElement('canvas');
     // A zero-sized canvas asks the decoder to size it to the decoded media on
     // first use; this avoids treating the DOM default 300×150 as a proxy size.
@@ -1012,16 +1089,26 @@ function EditorWorkspace({
     const decoder = createHtmlMediaDecoder(video, captureCanvas);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
     const firstClip = activeVideoClipAt(session.timelineProject, 0);
-    if (firstClip !== undefined && firstClip.kind === 'video')
-      video.src = resolveReferenceMediaUrl(firstClip.assetId);
+    if (firstClip !== undefined && firstClip.kind === 'video') {
+      void resolveClipMonitorMediaSource(firstClip).then((source) => {
+        if (cancelled) {
+          if (source.state === 'ready') source.release();
+          return;
+        }
+        setMonitorMediaStatus(source);
+        monitorMediaBindingRef.current.apply(video, source);
+        activeMonitorClipIdRef.current = source.state === 'ready' ? firstClip.id : undefined;
+      });
+    }
     return () => {
+      cancelled = true;
       video.pause();
       decoderRef.current = null;
       clockRef.current = null;
-      video.removeAttribute('src');
-      video.load();
+      activeMonitorClipIdRef.current = undefined;
+      monitorMediaBindingRef.current.dispose(video);
     };
-  }, [handleMediaReady, session]);
+  }, [handleMediaReady, resolveClipMonitorMediaSource, session]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
     if (current.playing) {
@@ -1879,46 +1966,56 @@ function EditorWorkspace({
       const audioDestination = audioContext.createMediaStreamDestination();
       const exportMedia = await Promise.all(
         exportClips.map(async (clip) => {
-          const video = document.createElement('video');
-          await loadDetachedVideo(video, resolveReferenceMediaUrl(clip.assetId));
-          await seekDetachedVideo(video, clip.sourceInUs);
-          const captureCanvas = document.createElement('canvas');
-          captureCanvas.width = 0;
-          captureCanvas.height = 0;
-          const audioResponse = await fetch(resolveReferenceMediaUrl(clip.assetId));
-          if (!audioResponse.ok)
-            throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
-          const audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
-          if (audioBuffer === null)
-            throw new Error(`Unable to decode export audio for ${clip.assetId}`);
-          const clipAudioConfig = audioState.clips[clip.id] ?? {
-            gain: 1,
-            pan: 0,
-            mute: false,
-            solo: false,
-          };
-          const channels = audioBuffer.numberOfChannels;
-          const length = audioBuffer.length;
-          const samples = new Float32Array(length);
-          const monoChannel = new Float32Array(length);
-          for (let channel = 0; channel < channels; channel++) {
-            audioBuffer.copyFromChannel(monoChannel, channel);
-            let index = 0;
-            for (const value of monoChannel) {
-              samples[index] = samples[index]! + value / channels;
-              index++;
+          const source = await resolveClipMonitorMediaSource(clip);
+          if (source.state !== 'ready') throw new Error(source.message);
+          try {
+            const video = document.createElement('video');
+            await loadDetachedVideo(video, source.url);
+            await seekDetachedVideo(video, clip.sourceInUs);
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = 0;
+            captureCanvas.height = 0;
+            const audioResponse = await fetch(source.url);
+            if (!audioResponse.ok)
+              throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
+            const audioBuffer = await audioContext.decodeAudioData(
+              await audioResponse.arrayBuffer(),
+            );
+            if (audioBuffer === null)
+              throw new Error(`Unable to decode export audio for ${clip.assetId}`);
+            const clipAudioConfig = audioState.clips[clip.id] ?? {
+              gain: 1,
+              pan: 0,
+              mute: false,
+              solo: false,
+            };
+            const channels = audioBuffer.numberOfChannels;
+            const length = audioBuffer.length;
+            const samples = new Float32Array(length);
+            const monoChannel = new Float32Array(length);
+            for (let channel = 0; channel < channels; channel++) {
+              audioBuffer.copyFromChannel(monoChannel, channel);
+              let index = 0;
+              for (const value of monoChannel) {
+                samples[index] = samples[index]! + value / channels;
+                index++;
+              }
             }
+            return {
+              clip,
+              source,
+              video,
+              decoder: createHtmlMediaDecoder(video, captureCanvas),
+              audio: {
+                samples,
+                sampleRate: audioBuffer.sampleRate,
+                config: clipAudioConfig,
+              },
+            };
+          } catch (error) {
+            source.release();
+            throw error;
           }
-          return {
-            clip,
-            video,
-            decoder: createHtmlMediaDecoder(video, captureCanvas),
-            audio: {
-              samples,
-              sampleRate: audioBuffer.sampleRate,
-              config: clipAudioConfig,
-            },
-          };
         }),
       );
       const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
@@ -2077,7 +2174,10 @@ function EditorWorkspace({
       } finally {
         for (const timer of startTimers) window.clearTimeout(timer);
         for (const source of audioSources) source.stop();
-        for (const media of exportMedia) media.video.pause();
+        for (const media of exportMedia) {
+          media.video.pause();
+          media.source.release();
+        }
         renderer.destroy();
         await audioContext.close();
       }
@@ -2099,7 +2199,14 @@ function EditorWorkspace({
     } finally {
       setExporting(false);
     }
-  }, [exportPreset, exporting, recordExportEntry, session, syncStickerBitmaps]);
+  }, [
+    exportPreset,
+    exporting,
+    recordExportEntry,
+    resolveClipMonitorMediaSource,
+    session,
+    syncStickerBitmaps,
+  ]);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
     setAgentPanelCommand((current) => ({
       serial: (current?.serial ?? 0) + 1,
@@ -2955,6 +3062,7 @@ function EditorWorkspace({
         value={{
           state,
           previewVideoFrame,
+          monitorMediaStatus,
           clipFrameCache: clipFrameCacheRef.current,
           clipFrameTick,
           timelineProject: session.timelineProject,
@@ -3172,6 +3280,7 @@ function MonitorPanel() {
   const {
     state,
     previewVideoFrame,
+    monitorMediaStatus,
     clipFrameCache,
     clipFrameTick,
     visualProject,
@@ -3428,6 +3537,11 @@ function MonitorPanel() {
           className="monitor-canvas"
           style={viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }}
         />
+        {monitorMediaStatus !== undefined && monitorMediaStatus.state !== 'ready' && (
+          <p className="monitor-media-state">
+            {monitorMediaStatus.message} {monitorMediaStatus.action.label}.
+          </p>
+        )}
       </div>
       <div className="monitor-transport" ref={transportRef}>
         {zoomDrawerOpen && (

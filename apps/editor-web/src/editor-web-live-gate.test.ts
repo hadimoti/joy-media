@@ -13,6 +13,7 @@ import {
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
+import { resolveMonitorMediaSource } from './monitor-media-source.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -90,5 +91,36 @@ describe('WP-15 live gate: agent edit → history → undo/redo', () => {
 
     session.redo();
     expect(clipIdsOf(session, 'track-0')).toEqual(afterClips);
+  });
+
+  it('keeps production live preview from synthesizing public reference media paths', async () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const clip = session.timelineProject.compositions.root?.tracks[0]?.clips.find(
+      (candidate) => candidate.kind === 'video',
+    );
+    expect(clip).toBeDefined();
+    if (clip?.kind !== 'video') return;
+
+    const source = await resolveMonitorMediaSource({
+      projectId: session.visualProject.id,
+      clip,
+      asset: session.visualProject.assets[clip.assetId],
+      resolver: {
+        resolve: async () => {
+          throw new Error('production must not reach resolver without integrity metadata');
+        },
+      },
+    });
+
+    expect(source).toMatchObject({
+      state: 'unavailable',
+      assetId: clip.assetId,
+      action: { kind: 'reconnect' },
+    });
+    expect(source.message).not.toContain('/media/reference/');
   });
 });

@@ -1,3 +1,8 @@
+import { AuthorizedDerivativeResolver, PlayableAssetResolver } from './asset-resolver.js';
+import type { AuthorizedDerivativeTransport } from './asset-resolver.js';
+import type { LocalDerivativeCache } from './opfs-asset-cache.js';
+import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+
 /**
  * JOY Media's own independent login session (ADR-0017). Replaces the retired
  * joyteam.ir JWT-assertion bridge: the session token below comes from this
@@ -45,6 +50,17 @@ export function clearStoredMediaToken(storage: MediaSessionStorage): void {
     /* nothing to clear */
   }
   notifyMediaSessionChanged();
+}
+
+export function createMediaSessionPlayableAssetResolver(options: {
+  readonly originalCache: OpfsOriginalAssetCache;
+  readonly derivativeCache: LocalDerivativeCache;
+  readonly fetchDerivative: AuthorizedDerivativeTransport['fetch'];
+}): PlayableAssetResolver {
+  return new PlayableAssetResolver(
+    options.originalCache,
+    new AuthorizedDerivativeResolver(options.derivativeCache, { fetch: options.fetchDerivative }),
+  );
 }
 
 export type MediaAuthMethod = 'gmail' | 'telegram';
