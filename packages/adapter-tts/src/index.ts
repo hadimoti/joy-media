@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import type {
   CapabilityDeclaration,
   CapabilityId,
+  CapabilityRequest,
   CapabilityResult,
   Diagnostic,
   GeneratedOutput,
@@ -17,13 +18,7 @@ export type { TTSRequestWithConsent } from './consent-tts.js';
 export { synthesizeWithConsent, VoiceConsentError } from './consent-tts.js';
 
 export type TTSEngine =
-  | 'fish-speech'
-  | 'f5-tts'
-  | 'kokoro'
-  | 'chatterbox'
-  | 'elevenlabs'
-  | 'edge-tts'
-  | 'piper';
+  'fish-speech' | 'f5-tts' | 'kokoro' | 'chatterbox' | 'elevenlabs' | 'edge-tts' | 'piper';
 
 export interface TTSConfig {
   readonly execution: 'worker-local' | 'remote-api';
@@ -45,6 +40,7 @@ export interface TTSInput {
   readonly voiceId?: string;
   readonly speed?: number;
   readonly pitch?: number;
+  readonly decisionId?: string;
 }
 
 interface WordTiming {
@@ -172,7 +168,10 @@ function generateWordTimings(text: string, speed: number): WordTiming[] {
 }
 
 /** Map BCP-47 / short language codes to Edge neural voices. */
-export function resolveEdgeVoice(language: string | undefined, voiceId: string | undefined): string {
+export function resolveEdgeVoice(
+  language: string | undefined,
+  voiceId: string | undefined,
+): string {
   if (voiceId !== undefined && voiceId.length > 0 && !voiceId.startsWith('stock:')) {
     return voiceId;
   }
@@ -194,16 +193,7 @@ function synthesizeWithEdgeTts(
   const dir = mkdtempSync(join(tmpdir(), 'joy-edge-tts-'));
   const mediaPath = join(dir, 'speech.mp3');
   try {
-    const args = [
-      '-t',
-      input.text,
-      '-v',
-      voice,
-      '--rate',
-      rate,
-      '--write-media',
-      mediaPath,
-    ];
+    const args = ['-t', input.text, '-v', voice, '--rate', rate, '--write-media', mediaPath];
     const result = spawnSync(command, args, {
       encoding: 'utf8',
       timeout: Number(process.env.JOY_MEDIA_TTS_TIMEOUT_MS ?? 60_000),
@@ -226,7 +216,12 @@ function resolvePiperModel(
   language: string | undefined,
   voiceId: string | undefined,
 ): string {
-  if (voiceId !== undefined && voiceId.length > 0 && voiceId.endsWith('.onnx') && existsSync(voiceId)) {
+  if (
+    voiceId !== undefined &&
+    voiceId.length > 0 &&
+    voiceId.endsWith('.onnx') &&
+    existsSync(voiceId)
+  ) {
     return voiceId;
   }
   const voicesDir =
@@ -274,9 +269,12 @@ function synthesizeWithPiper(
   }
 }
 
-function synthesizeSineFixture(
-  input: TTSInput,
-): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
+function synthesizeSineFixture(input: TTSInput): {
+  audioData: Uint8Array;
+  timings: WordTiming[];
+  mimeType: string;
+  sampleRate: number;
+} {
   const speed = input.speed ?? 1.0;
   const timings = generateWordTimings(input.text, speed);
   const totalDurationUs = timings.length > 0 ? timings[timings.length - 1]!.endUs : 1_000_000;
@@ -298,6 +296,7 @@ function synthesizeSineFixture(
 function synthesizeSpeech(
   config: TTSConfig,
   input: TTSInput,
+  allowFixtureFallback: boolean,
 ): { audioData: Uint8Array; timings: WordTiming[]; mimeType: string; sampleRate: number } {
   if (config.engine === 'edge-tts') {
     return synthesizeWithEdgeTts(config, input);
@@ -305,11 +304,54 @@ function synthesizeSpeech(
   if (config.engine === 'piper') {
     return synthesizeWithPiper(config, input);
   }
-  // Other engines remain fixture sine until a local binary is wired.
+  if (!allowFixtureFallback) {
+    throw new Error(
+      `TTS_UNAVAILABLE: engine '${config.engine}' is not wired in production; use createFixtureTTSAdapter only in explicit tests.`,
+    );
+  }
   return synthesizeSineFixture(input);
 }
 
-export function createTTSAdapter(config: TTSConfig): ProviderV2 {
+function callerDecisionId(input: unknown): string | undefined {
+  return input !== null &&
+    typeof input === 'object' &&
+    typeof (input as { decisionId?: unknown }).decisionId === 'string'
+    ? (input as { decisionId: string }).decisionId
+    : undefined;
+}
+
+function buildProvenance(
+  manifest: ProviderManifestV2,
+  modelId: string,
+  input: unknown,
+  startTime: number,
+  requestId: string,
+  request?: CapabilityRequest,
+): GenerationProvenance {
+  const idempotencyKey = request?.idempotencyKey ?? requestId;
+  const decisionId = callerDecisionId(input);
+  return {
+    providerId: manifest.id,
+    modelId,
+    adapterVersion: manifest.adapterVersion,
+    createdAt: new Date().toISOString(),
+    requestHash: hashRequest({ input, idempotencyKey, decisionId }),
+    idempotencyKey,
+    processingTimeMs: Date.now() - startTime,
+    execution: manifest.execution,
+    ...(decisionId === undefined ? {} : { decisionId }),
+  };
+}
+
+function unavailableDiagnostic(message: string): Diagnostic {
+  return {
+    severity: 'error',
+    code: 'PROVIDER_UNAVAILABLE',
+    message,
+  };
+}
+
+function createTTSAdapterInternal(config: TTSConfig, allowFixtureFallback: boolean): ProviderV2 {
   validateConfig(config);
 
   const isLocal = config.execution === 'worker-local';
@@ -403,25 +445,21 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
 
   return {
     manifest,
-    invoke: async (capabilityId: CapabilityId, input: unknown): Promise<CapabilityResult> => {
+    invoke: async (
+      capabilityId: CapabilityId,
+      input: unknown,
+      request?: CapabilityRequest,
+    ): Promise<CapabilityResult> => {
       const startTime = Date.now();
       const requestId = generateRequestId();
+      const provenance = buildProvenance(manifest, modelId, input, startTime, requestId, request);
 
       if (capabilityId !== 'speech.synthesize') {
         return {
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId,
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
+          provenance,
           diagnostics: [
             {
               severity: 'error',
@@ -438,16 +476,7 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId,
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
+          provenance,
           diagnostics: validation.diagnostics,
         };
       }
@@ -455,7 +484,11 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
       const ttsInput = input as TTSInput;
 
       try {
-        const { audioData, timings, mimeType, sampleRate } = synthesizeSpeech(config, ttsInput);
+        const { audioData, timings, mimeType, sampleRate } = synthesizeSpeech(
+          config,
+          ttsInput,
+          allowFixtureFallback,
+        );
         const assetId = generateAssetId();
 
         const output: GeneratedOutput = {
@@ -477,17 +510,6 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
           },
         };
 
-        const provenance: GenerationProvenance = {
-          providerId: manifest.id,
-          modelId,
-          adapterVersion: manifest.adapterVersion,
-          createdAt: new Date().toISOString(),
-          requestHash: hashRequest(input),
-          idempotencyKey: requestId,
-          processingTimeMs: Date.now() - startTime,
-          execution: manifest.execution,
-        };
-
         return {
           requestId,
           status: 'succeeded',
@@ -497,30 +519,29 @@ export function createTTSAdapter(config: TTSConfig): ProviderV2 {
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const code = errorMessage.startsWith('TTS_UNAVAILABLE:')
+          ? unavailableDiagnostic(errorMessage)
+          : {
+              severity: 'error' as const,
+              code: 'SYNTHESIS_FAILED',
+              message: errorMessage,
+            };
         return {
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId,
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
-          diagnostics: [
-            ...validation.diagnostics,
-            {
-              severity: 'error',
-              code: 'SYNTHESIS_FAILED',
-              message: errorMessage,
-            },
-          ],
+          provenance,
+          diagnostics: [...validation.diagnostics, code],
         };
       }
     },
   };
+}
+
+export function createTTSAdapter(config: TTSConfig): ProviderV2 {
+  return createTTSAdapterInternal(config, false);
+}
+
+export function createFixtureTTSAdapter(config: TTSConfig): ProviderV2 {
+  return createTTSAdapterInternal(config, true);
 }

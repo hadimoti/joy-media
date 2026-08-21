@@ -710,6 +710,15 @@ describe('control-plane HTTP transport', () => {
   it('accepts every AI Worker receipt variant through the completion route', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'asset-source-1',
+      kind: 'image',
+      displayName: 'source.png',
+      sha256: '2'.repeat(64),
+      bytes: 2048,
+      descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+      locations: [{ kind: 'opfs-cache', ref: 'source-image-1' }],
+    });
     await request(origin, 'POST', '/v1/worker-pair/offers', {
       workerId: 'w',
       pairingCode: 'pairing-code',
@@ -723,10 +732,40 @@ describe('control-plane HTTP transport', () => {
     const variants: readonly {
       readonly type: Extract<
         WorkerJobType,
-        'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield'
+        | 'image.comfy'
+        | 'audio.ml-denoise'
+        | 'text.lm-studio'
+        | 'text.openrouter'
+        | 'video.runway'
+        | 'edit.higgsfield'
       >;
       readonly receipt: WorkerResultReceiptV1;
+      readonly assetId?: string;
     }[] = [
+      {
+        type: 'image.comfy',
+        assetId: 'asset-source-1',
+        receipt: {
+          kind: 'image.comfy',
+          assetId: 'asset-source-1',
+          sha256: '9'.repeat(64),
+          bytes: 1024,
+          localRef: 'gpu-image-comfy-1',
+          descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+        },
+      },
+      {
+        type: 'audio.ml-denoise',
+        assetId: 'asset-source-1',
+        receipt: {
+          kind: 'audio.ml-denoise',
+          assetId: 'asset-source-1',
+          sha256: '8'.repeat(64),
+          bytes: 1536,
+          localRef: 'gpu-audio-denoise-1',
+          descriptor: { mimeType: 'audio/wav' },
+        },
+      },
       {
         type: 'text.lm-studio',
         receipt: {
@@ -784,9 +823,10 @@ describe('control-plane HTTP transport', () => {
       const job = {
         id: `ai-job-${index + 1}`,
         type: variant.type,
+        ...(variant.assetId === undefined ? {} : { assetId: variant.assetId }),
         payload: {
           prompt: `Generate variant ${index + 1}`,
-          ...(variant.type === 'edit.higgsfield' ? { imageAssetId: 'source-image-1' } : {}),
+          ...(variant.type === 'edit.higgsfield' ? { imageAssetId: 'asset-source-1' } : {}),
         },
         requirements: {
           capabilities: [variant.type],
@@ -823,6 +863,59 @@ describe('control-plane HTTP transport', () => {
         },
       });
     }
+  });
+
+  it('rejects mismatched AI media receipts over HTTP', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: ['video.runway'] },
+      workerToken,
+    );
+    await request(origin, 'POST', '/v1/projects/p/jobs', {
+      id: 'ai-mismatch-1',
+      type: 'video.runway',
+      payload: { prompt: 'Generate a video' },
+      requirements: { capabilities: ['video.runway'], privacy: 'remote-api' },
+      idempotencyKey: 'idem-ai-mismatch-1',
+      maxAttempts: 2,
+    });
+    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/ai-mismatch-1/complete',
+        {
+          result: {
+            kind: 'video.runway',
+            assetId: 'asset-video-mismatch-1',
+            sha256: '7'.repeat(64),
+            bytes: 4096,
+            localRef: 'ai-mismatch-video-1',
+            descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+          },
+        },
+        workerToken,
+      ),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
   });
 });
 

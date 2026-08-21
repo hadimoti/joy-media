@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createVoiceIsolationAdapter } from './index.js';
+import { createFixtureVoiceIsolationAdapter, createVoiceIsolationAdapter } from './index.js';
 import type { VoiceIsolationConfig } from './index.js';
 import {
   validateManifest,
@@ -62,7 +62,7 @@ describe('createVoiceIsolationAdapter', () => {
 
 describe('VoiceIsolation adapter invoke - isolate-voice', () => {
   it('handles audio.separate successfully', async () => {
-    const adapter = createVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
     const audioData = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
 
     const result = await adapter.invoke('audio.separate', {
@@ -80,7 +80,7 @@ describe('VoiceIsolation adapter invoke - isolate-voice', () => {
 
 describe('VoiceIsolation adapter invoke - remove-voice', () => {
   it('handles audio.separate successfully', async () => {
-    const adapter = createVoiceIsolationAdapter(REMOVE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(REMOVE_CONFIG);
     const audioData = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
 
     const result = await adapter.invoke('audio.separate', {
@@ -96,7 +96,7 @@ describe('VoiceIsolation adapter invoke - remove-voice', () => {
 
 describe('VoiceIsolation adapter invoke - separate-stems', () => {
   it('handles audio.separate successfully with multiple stems', async () => {
-    const adapter = createVoiceIsolationAdapter(SEPARATE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(SEPARATE_CONFIG);
     const audioData = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
 
     const result = await adapter.invoke('audio.separate', {
@@ -152,7 +152,7 @@ describe('VoiceIsolation adapter error handling', () => {
 
 describe('VoiceIsolation adapter provenance', () => {
   it('includes full provenance', async () => {
-    const adapter = createVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
     const result = await adapter.invoke('audio.separate', {
       assetId: 'audio-123',
       data: new Uint8Array([1, 2, 3]),
@@ -169,7 +169,7 @@ describe('VoiceIsolation adapter provenance', () => {
   });
 
   it('includes metadata in outputs', async () => {
-    const adapter = createVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
     const result = await adapter.invoke('audio.separate', {
       assetId: 'audio-123',
       data: new Uint8Array([1, 2, 3]),
@@ -181,11 +181,67 @@ describe('VoiceIsolation adapter provenance', () => {
   });
 
   it('generates unique asset IDs', async () => {
-    const adapter = createVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
     const result1 = await adapter.invoke('audio.separate', { assetId: 'audio-1' });
     const result2 = await adapter.invoke('audio.separate', { assetId: 'audio-2' });
 
     expect(result1.outputs[0]!.assetId).not.toBe(result2.outputs[0]!.assetId);
+  });
+
+  it('carries caller idempotency and decision ids through fixture provenance', async () => {
+    const adapter = createFixtureVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const input = {
+      assetId: 'audio-123',
+      data: new Uint8Array([1, 2, 3]),
+      decisionId: 'decision-voice-1',
+    };
+
+    const result = await adapter.invoke('audio.separate', input, {
+      requestVersion: 1,
+      capability: 'audio.separate',
+      input,
+      constraints: {},
+      idempotencyKey: 'idem-voice-1',
+    });
+
+    expect(result.provenance.idempotencyKey).toBe('idem-voice-1');
+    expect((result.provenance as unknown as Record<string, unknown>).decisionId).toBe(
+      'decision-voice-1',
+    );
+  });
+});
+
+describe('VoiceIsolation adapter production mode', () => {
+  it('fails closed without the explicit fixture constructor', async () => {
+    const adapter = createVoiceIsolationAdapter(ISOLATE_CONFIG);
+    const input = {
+      assetId: 'audio-123',
+      data: new Uint8Array([1, 2, 3]),
+      decisionId: 'decision-voice-prod-1',
+    };
+
+    const result = await adapter.invoke('audio.separate', input, {
+      requestVersion: 1,
+      capability: 'audio.separate',
+      input,
+      constraints: {},
+      idempotencyKey: 'idem-voice-prod-1',
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.outputs).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PROVIDER_UNAVAILABLE',
+          message: expect.stringContaining('VOICE_ISOLATION_UNAVAILABLE'),
+        }),
+      ]),
+    );
+    expect(result.provenance.idempotencyKey).toBe('idem-voice-prod-1');
+    expect((result.provenance as unknown as Record<string, unknown>).decisionId).toBe(
+      'decision-voice-prod-1',
+    );
   });
 });
 

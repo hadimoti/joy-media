@@ -1,6 +1,7 @@
 import type {
   CapabilityDeclaration,
   CapabilityId,
+  CapabilityRequest,
   CapabilityResult,
   Diagnostic,
   GeneratedOutput,
@@ -19,6 +20,7 @@ export interface VoiceIsolationInput {
   readonly assetId: string;
   readonly data?: Uint8Array;
   readonly sampleRate?: number;
+  readonly decisionId?: string;
 }
 
 let requestCounter = 0;
@@ -168,8 +170,52 @@ function processVoiceIsolation(
   return outputs;
 }
 
-export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): ProviderV2 {
+function callerDecisionId(input: unknown): string | undefined {
+  return input !== null &&
+    typeof input === 'object' &&
+    typeof (input as { decisionId?: unknown }).decisionId === 'string'
+    ? (input as { decisionId: string }).decisionId
+    : undefined;
+}
+
+function buildProvenance(
+  manifest: ProviderManifestV2,
+  modelId: string,
+  input: unknown,
+  startTime: number,
+  requestId: string,
+  request?: CapabilityRequest,
+): GenerationProvenance {
+  const idempotencyKey = request?.idempotencyKey ?? requestId;
+  const decisionId = callerDecisionId(input);
+  return {
+    providerId: manifest.id,
+    modelId,
+    adapterVersion: manifest.adapterVersion,
+    createdAt: new Date().toISOString(),
+    requestHash: hashRequest({ input, idempotencyKey, decisionId }),
+    idempotencyKey,
+    processingTimeMs: Date.now() - startTime,
+    execution: manifest.execution,
+    ...(decisionId === undefined ? {} : { decisionId }),
+  };
+}
+
+function unavailableDiagnostic(): Diagnostic {
+  return {
+    severity: 'error',
+    code: 'PROVIDER_UNAVAILABLE',
+    message:
+      'VOICE_ISOLATION_UNAVAILABLE: production voice isolation is not wired; use createFixtureVoiceIsolationAdapter only in explicit tests.',
+  };
+}
+
+function createVoiceIsolationAdapterInternal(
+  config: VoiceIsolationConfig,
+  fixtureMode: boolean,
+): ProviderV2 {
   const isLocal = config.execution === 'worker-local';
+  const modelId = config.modelPath ?? 'default';
 
   const capability: CapabilityDeclaration = {
     id: 'audio.separate',
@@ -198,9 +244,9 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
         },
       },
     },
-    models: config.modelPath
-      ? [{ id: config.modelPath, displayName: 'Voice Isolation Model' }]
-      : undefined,
+    ...(config.modelPath === undefined
+      ? {}
+      : { models: [{ id: config.modelPath, displayName: 'Voice Isolation Model' }] }),
     estimatedResources: {
       estimatedDurationMs: 5000,
       estimatedMemoryMb: isLocal ? 512 : 0,
@@ -230,31 +276,27 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
     secretFields: [],
     privacy: {
       dataLeavesDevice: !isLocal,
-      retentionDisclosure: isLocal ? undefined : 'Audio sent to remote API for processing',
+      ...(isLocal ? {} : { retentionDisclosure: 'Audio sent to remote API for processing' }),
     },
   };
 
   return {
     manifest,
-    invoke: async (capabilityId: CapabilityId, input: unknown): Promise<CapabilityResult> => {
+    invoke: async (
+      capabilityId: CapabilityId,
+      input: unknown,
+      request?: CapabilityRequest,
+    ): Promise<CapabilityResult> => {
       const startTime = Date.now();
       const requestId = generateRequestId();
+      const provenance = buildProvenance(manifest, modelId, input, startTime, requestId, request);
 
       if (capabilityId !== 'audio.separate') {
         return {
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId: config.modelPath ?? 'default',
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
+          provenance,
           diagnostics: [
             {
               severity: 'error',
@@ -271,35 +313,24 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId: config.modelPath ?? 'default',
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
+          provenance,
           diagnostics: validation.diagnostics,
         };
       }
 
       const voiceInput = input as VoiceIsolationInput;
+      if (!fixtureMode) {
+        return {
+          requestId,
+          status: 'failed',
+          outputs: [],
+          provenance,
+          diagnostics: [...validation.diagnostics, unavailableDiagnostic()],
+        };
+      }
 
       try {
         const outputs = processVoiceIsolation(config, voiceInput);
-
-        const provenance: GenerationProvenance = {
-          providerId: manifest.id,
-          modelId: config.modelPath ?? 'default',
-          adapterVersion: manifest.adapterVersion,
-          createdAt: new Date().toISOString(),
-          requestHash: hashRequest(input),
-          idempotencyKey: requestId,
-          processingTimeMs: Date.now() - startTime,
-          execution: manifest.execution,
-        };
 
         return {
           requestId,
@@ -314,16 +345,7 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
           requestId,
           status: 'failed',
           outputs: [],
-          provenance: {
-            providerId: manifest.id,
-            modelId: config.modelPath ?? 'default',
-            adapterVersion: manifest.adapterVersion,
-            createdAt: new Date().toISOString(),
-            requestHash: hashRequest(input),
-            idempotencyKey: requestId,
-            processingTimeMs: Date.now() - startTime,
-            execution: manifest.execution,
-          },
+          provenance,
           diagnostics: [
             ...validation.diagnostics,
             {
@@ -336,4 +358,12 @@ export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): Provi
       }
     },
   };
+}
+
+export function createVoiceIsolationAdapter(config: VoiceIsolationConfig): ProviderV2 {
+  return createVoiceIsolationAdapterInternal(config, false);
+}
+
+export function createFixtureVoiceIsolationAdapter(config: VoiceIsolationConfig): ProviderV2 {
+  return createVoiceIsolationAdapterInternal(config, true);
 }

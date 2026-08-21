@@ -362,6 +362,13 @@ export class WorkerRuntime {
           provider,
           model: job.payload?.model ?? '',
           prompt: job.payload?.prompt ?? '',
+          ...(job.payload?.negativePrompt === undefined
+            ? {}
+            : { negativePrompt: job.payload.negativePrompt }),
+          ...(job.payload?.imageAssetId === undefined
+            ? {}
+            : { imageAssetId: job.payload.imageAssetId }),
+          ...(job.payload?.params === undefined ? {} : { params: job.payload.params }),
           derivativeDirectory,
           cancelled: options.cancelled,
           progress: options.progress,
@@ -558,6 +565,9 @@ export function workerReceiptFromAiResult(
   result: LocalAiReceipt,
 ): ProtocolAiReceipt {
   if (job.type === 'text.lm-studio' || job.type === 'text.openrouter') {
+    if (result.kind !== 'text') {
+      throw new Error(`AI_OUTPUT_UNAVAILABLE: ${job.type} only supports text outputs`);
+    }
     const text = result.text ?? '';
     const bytes = Buffer.from(text, 'utf8');
     return {
@@ -569,6 +579,12 @@ export function workerReceiptFromAiResult(
     };
   }
   if (job.type === 'video.runway' || job.type === 'edit.higgsfield') {
+    if (job.type === 'video.runway' && result.kind !== 'video') {
+      throw new Error('AI_OUTPUT_UNAVAILABLE: video.runway only supports video outputs');
+    }
+    if (job.type === 'edit.higgsfield' && result.kind !== 'image') {
+      throw new Error('AI_OUTPUT_UNAVAILABLE: edit.higgsfield only supports image outputs');
+    }
     if (
       result.sha256 === undefined ||
       result.bytes === undefined ||
@@ -576,6 +592,12 @@ export function workerReceiptFromAiResult(
       result.descriptor === undefined
     ) {
       throw new Error(`AI provider result is incomplete for ${job.type}`);
+    }
+    if (job.type === 'video.runway' && !result.descriptor.mimeType.startsWith('video/')) {
+      throw new Error('AI_OUTPUT_UNAVAILABLE: video.runway returned a non-video descriptor');
+    }
+    if (job.type === 'edit.higgsfield' && !result.descriptor.mimeType.startsWith('image/')) {
+      throw new Error('AI_OUTPUT_UNAVAILABLE: edit.higgsfield returned a non-image descriptor');
     }
     return {
       kind: job.type,

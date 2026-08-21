@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createTTSAdapter } from './index.js';
+import { createFixtureTTSAdapter, createTTSAdapter } from './index.js';
 import type { TTSConfig } from './index.js';
 import {
   validateManifest,
@@ -108,7 +108,7 @@ describe('createTTSAdapter', () => {
 
 describe('TTS adapter invoke', () => {
   it('handles speech.synthesize successfully', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result = await adapter.invoke('speech.synthesize', {
       text: 'Hello world',
     });
@@ -167,7 +167,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('includes word timing metadata', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result = await adapter.invoke('speech.synthesize', {
       text: 'Hello world test',
     });
@@ -186,7 +186,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('includes full provenance', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result = await adapter.invoke('speech.synthesize', {
       text: 'Hello',
     });
@@ -202,7 +202,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('includes metadata in output', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result = await adapter.invoke('speech.synthesize', {
       text: 'Hello',
       language: 'ja',
@@ -219,7 +219,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('uses voiceId from config when not in input', async () => {
-    const adapter = createTTSAdapter({
+    const adapter = createFixtureTTSAdapter({
       ...LOCAL_CONFIG,
       voiceId: 'config-voice',
     });
@@ -231,7 +231,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('input voiceId overrides config voiceId', async () => {
-    const adapter = createTTSAdapter({
+    const adapter = createFixtureTTSAdapter({
       ...LOCAL_CONFIG,
       voiceId: 'config-voice',
     });
@@ -244,7 +244,7 @@ describe('TTS adapter invoke', () => {
   });
 
   it('generates unique asset IDs', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result1 = await adapter.invoke('speech.synthesize', { text: 'Hello' });
     const result2 = await adapter.invoke('speech.synthesize', { text: 'World' });
 
@@ -260,7 +260,7 @@ describe('TTS adapter invoke', () => {
     ];
 
     for (const engine of engines) {
-      const adapter = createTTSAdapter({ execution: 'worker-local', engine });
+      const adapter = createFixtureTTSAdapter({ execution: 'worker-local', engine });
       const result = await adapter.invoke('speech.synthesize', { text: 'Test' });
       assertResultSucceeded(result);
       expect(result.outputs[0]!.metadata!.engine).toBe(engine);
@@ -290,7 +290,7 @@ describe('TTS adapter privacy', () => {
 
 describe('TTS adapter voice cloning support', () => {
   it('accepts voiceId for future voice cloning integration', async () => {
-    const adapter = createTTSAdapter(LOCAL_CONFIG);
+    const adapter = createFixtureTTSAdapter(LOCAL_CONFIG);
     const result = await adapter.invoke('speech.synthesize', {
       text: 'Hello with cloned voice',
       voiceId: 'voice-identity-123',

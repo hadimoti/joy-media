@@ -225,6 +225,20 @@ describe('Worker runtime', () => {
     ]);
   });
 
+  it('fails image.comfy honestly until a non-fixture workflow is wired', async () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-comfy', createdAt: '2026-08-21T00:00:00.000Z' },
+      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: false, aiProviders: [] },
+    );
+
+    await expect(
+      runtime.run(
+        { id: 'job-comfy', type: 'image.comfy' },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toThrow(/COMFYUI_UNAVAILABLE/i);
+  });
+
   it('maps AI provider results to protocol-compatible receipt kinds', () => {
     expect(
       workerReceiptFromAiResult(
@@ -257,5 +271,33 @@ describe('Worker runtime', () => {
       localRef: 'ai-job-video-aaaaaaaaaaaaaaaa',
       descriptor: { mimeType: 'video/mp4' },
     });
+    expect(() =>
+      workerReceiptFromAiResult(
+        { id: 'job-video-image', type: 'video.runway' },
+        {
+          kind: 'image',
+          jobId: 'job-video-image',
+          provider: 'runway',
+          sha256: 'b'.repeat(64),
+          bytes: 512,
+          localRef: 'ai-job-video-image-bbbbbbbbbbbbbbbb',
+          descriptor: { mimeType: 'image/png', width: 512, height: 512 },
+        },
+      ),
+    ).toThrow(/AI_OUTPUT_UNAVAILABLE/);
+    expect(() =>
+      workerReceiptFromAiResult(
+        { id: 'job-edit-video', type: 'edit.higgsfield' },
+        {
+          kind: 'video',
+          jobId: 'job-edit-video',
+          provider: 'higgsfield',
+          sha256: 'c'.repeat(64),
+          bytes: 2048,
+          localRef: 'ai-job-edit-video-cccccccccccccccc',
+          descriptor: { mimeType: 'video/mp4' },
+        },
+      ),
+    ).toThrow(/AI_OUTPUT_UNAVAILABLE/);
   });
 });

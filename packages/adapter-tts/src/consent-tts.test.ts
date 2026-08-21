@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createTTSAdapter } from './index.js';
+import { createFixtureTTSAdapter } from './index.js';
 import { createVoiceConsentManager } from '@joy-media/provider-sdk';
 import { createSynthesisAuditLog } from '@joy-media/provider-sdk';
 import { synthesizeWithConsent, VoiceConsentError } from './consent-tts.js';
 
 describe('TTS with Consent', () => {
   const createTestSetup = async () => {
-    const ttsAdapter = createTTSAdapter({
+    const ttsAdapter = createFixtureTTSAdapter({
       execution: 'worker-local',
       engine: 'kokoro',
     });

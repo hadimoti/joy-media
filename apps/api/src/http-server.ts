@@ -1148,6 +1148,26 @@ function optionalWorkerResult(body: Record<string, unknown>): WorkerResultReceip
     ) {
       throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
     }
+    if (result.kind === 'image.comfy') {
+      if (!mimeType.startsWith('image/') || width === undefined || height === undefined) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+      }
+    }
+    if (result.kind === 'audio.ml-denoise') {
+      if (!mimeType.startsWith('audio/') || width !== undefined || height !== undefined) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+      }
+    }
+    if (result.kind === 'video.runway') {
+      if (!mimeType.startsWith('video/')) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+      }
+    }
+    if (result.kind === 'edit.higgsfield') {
+      if (!mimeType.startsWith('image/') || width === undefined || height === undefined) {
+        throw new ControlPlaneError('REQUEST_INVALID', 'result receipt is invalid');
+      }
+    }
     return {
       kind: result.kind,
       assetId: result.assetId,

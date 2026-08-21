@@ -72,11 +72,7 @@ async function uploadComfyImage(
 ): Promise<string> {
   const bytes = readFileSync(filePath);
   const form = new FormData();
-  form.append(
-    'image',
-    new Blob([Uint8Array.from(bytes)], { type: 'image/png' }),
-    'joy-input.png',
-  );
+  form.append('image', new Blob([Uint8Array.from(bytes)], { type: 'image/png' }), 'joy-input.png');
   form.append('overwrite', 'true');
   const response = await fetchFn(`${base}/upload/image`, { method: 'POST', body: form });
   if (!response.ok) throw new Error(`ComfyUI image upload failed (${response.status})`);
@@ -137,16 +133,7 @@ async function runComfyPrompt(
 function writeSolidPng(path: string): void {
   const result = spawnSync(
     'ffmpeg',
-    [
-      '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=c=#e9b949:s=64x64:d=0.04',
-      '-frames:v',
-      '1',
-      path,
-    ],
+    ['-y', '-f', 'lavfi', '-i', 'color=c=#e9b949:s=64x64:d=0.04', '-frames:v', '1', path],
     { encoding: 'utf8' },
   );
   if (result.status !== 0 || !existsSync(path))
@@ -179,53 +166,10 @@ function retainDerivative(
 }
 
 export async function runImageComfyJob(options: LocalGpuRunOptions): Promise<LocalGpuReceipt> {
-  const base = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim().replace(/\/$/, '');
-  if (base.length === 0) throw new Error('JOY_MEDIA_LOCAL_COMFY_URL is not set');
-  const fetchFn = options.fetch ?? fetch;
-  const tempDir = mkdtempSync(join(tmpdir(), `joy-comfy-${options.jobId}-`));
-  try {
-    await options.progress(5);
-    await ensureComfyReachable(base, fetchFn);
-    if (options.cancelled()) throw new Error('canceled');
-    await options.progress(15);
-    const inputPng = join(tempDir, 'input.png');
-    if (options.sourcePath !== undefined) convertSourceToPng(options.sourcePath, inputPng);
-    else writeSolidPng(inputPng);
-    await options.progress(30);
-    const imageName = await uploadComfyImage(base, inputPng, fetchFn);
-    await options.progress(45);
-    const { filename, subfolder } = await runComfyPrompt(
-      base,
-      identityComfyWorkflow(imageName),
-      fetchFn,
-      options.cancelled,
-    );
-    await options.progress(75);
-    const viewUrl = new URL(`${base}/view`);
-    viewUrl.searchParams.set('filename', filename);
-    if (subfolder.length > 0) viewUrl.searchParams.set('subfolder', subfolder);
-    viewUrl.searchParams.set('type', 'output');
-    const viewResponse = await fetchFn(viewUrl);
-    if (!viewResponse.ok) throw new Error(`ComfyUI view failed (${viewResponse.status})`);
-    const arrayBuffer = await viewResponse.arrayBuffer();
-    const bytes = Buffer.from(arrayBuffer);
-    if (bytes.length < 1) throw new Error('ComfyUI output is empty');
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    const assetId = options.assetId ?? `comfy-${options.jobId}`;
-    const localRef = `gpu-${options.jobId}-${sha256.slice(0, 16)}`;
-    retainDerivative(options.derivativeDirectory, localRef, 'png', bytes);
-    await options.progress(100);
-    return {
-      kind: 'image.comfy',
-      assetId,
-      sha256,
-      bytes: bytes.length,
-      localRef,
-      descriptor: { mimeType: 'image/png', width: 64, height: 64 },
-    };
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
+  void options;
+  throw new Error(
+    'COMFYUI_UNAVAILABLE: identity Comfy workflows and solid PNG fallbacks are fixture-only; production image.comfy is not wired yet.',
+  );
 }
 
 function writeNoisyFixtureWav(path: string): void {
