@@ -26,6 +26,7 @@ export default defineConfig({
       '@joy-media/audio-core/effects': pkg('audio-core/dist/effects.js'),
       '@joy-media/html-scene-runtime/browser': pkg('html-scene-runtime/src/browser-preview.ts'),
       '@joy-media/html-scene-runtime/first-party': pkg('html-scene-runtime/src/first-party.ts'),
+      '@joy-media/render-planner': pkg('render-planner/src/index.ts'),
     },
   },
   build: {

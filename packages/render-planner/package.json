@@ -1,0 +1,26 @@
+{
+  "name": "@joy-media/render-planner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/captions-core": "workspace:*",
+    "@joy-media/evaluator": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/render-ir": "workspace:*",
+    "@joy-media/timeline-engine": "workspace:*",
+    "@joy-media/visual-object-renderer": "workspace:*"
+  }
+}

@@ -24,6 +24,7 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
+import { createRenderBundle, planRenderFrame } from '@joy-media/render-planner';
 import {
   duplicateClipCommand,
   rippleDelete,
@@ -41,23 +42,14 @@ import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type {
-  EffectInstanceV1,
   JoyProjectV1,
   SpikeProject,
   TransitionV1,
   VideoClip,
-  VisualObjectV1,
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import { evaluateCameraExpressionTransform } from '@joy-media/evaluator';
-import {
-  buildRenderFrameIR,
-  clipTimesFromTracks,
-  isTransitionActive,
-  type BuildRenderFrameOptions,
-  type ResolvedObject,
-} from '@joy-media/visual-object-renderer';
+import { clipTimesFromTracks, isTransitionActive } from '@joy-media/visual-object-renderer';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 
 registerBuiltins();
@@ -96,7 +88,6 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
-import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
@@ -215,35 +206,6 @@ import { nextVideoClipAtOrAfter } from './timeline-playback.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
-
-/** IR options for preview/export: effects, grade, and clip-timed transitions. */
-function buildEffectsMap(
-  project: JoyProjectV1,
-): Readonly<Record<string, readonly EffectInstanceV1[]>> {
-  const map: Record<string, EffectInstanceV1[]> = {};
-  for (const [objectId, object] of Object.entries(project.visualObjects)) {
-    if (object.effects && object.effects.length > 0) {
-      map[objectId] = [...object.effects];
-    }
-  }
-  return map;
-}
-
-function renderFrameOptions(
-  project: JoyProjectV1,
-  imageSizesByObjectId?: Readonly<
-    Record<string, { readonly width: number; readonly height: number }>
-  >,
-): BuildRenderFrameOptions {
-  const composition = project.compositions[project.rootCompositionId];
-  return {
-    effectsByObjectId: buildEffectsMap(project),
-    ...(project.colorGrade !== undefined ? { colorGrade: project.colorGrade } : {}),
-    ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
-    ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
-    ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
-  };
-}
 
 const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
@@ -1904,36 +1866,20 @@ function EditorWorkspace({
         exportPreset,
         updatedAt: new Date().toISOString(),
       });
-      const cameraId = compositionV1?.activeCameraId;
-      const objectsById = session.visualProject.visualObjects as Readonly<
-        Record<string, VisualObjectV1>
-      >;
-      const clipTimes = compositionV1 ? clipTimesFromTracks(compositionV1.tracks) : undefined;
-      const effectsByObjectId = buildEffectsMap(session.visualProject);
       const buildFrame = (timeUs: number) => {
-        const resolved: ResolvedObject[] = Object.values(session.visualProject.visualObjects).map(
-          (object) => ({
-            object,
-            transform: evaluateCameraExpressionTransform(
-              object.id,
-              cameraId,
-              objectsById,
-              timeUs,
-              height,
-            ).transform,
+        const plan = planRenderFrame({
+          bundle: createRenderBundle({
+            timelineProject: session.timelineProject,
+            visualProject: session.visualProject,
+            ...(compositionV1 !== undefined ? { compositionId: compositionV1.id } : {}),
+            outputPreset: exportPreset,
+            seed: `export:${entryId}`,
           }),
-        );
-        return withCaptionBurnInNodes(
-          buildRenderFrameIR(
-            compositionV1?.id ?? 'root',
-            timeUs,
-            width,
-            height,
-            resolved,
-            renderFrameOptions(session.visualProject, imageSizesFromCache()),
-          ),
-          session.visualProject,
-        );
+          timeUs,
+          viewport: { width, height },
+          imageSizesByObjectId: imageSizesFromCache(),
+        });
+        return plan.frame;
       };
       const transitionTimes = Array.from(
         new Set(
@@ -3369,29 +3315,16 @@ function MonitorPanel() {
     if (renderer === null) return;
     const composition = visualProject.compositions[visualProject.rootCompositionId];
     if (composition === undefined) return;
-    const cameraId = composition.activeCameraId;
-    const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
-      object,
-      transform: evaluateCameraExpressionTransform(
-        object.id,
-        cameraId,
-        objectsById,
-        state.playheadUs,
-        composition.height,
-      ).transform,
-    }));
-    const visualFrame = withCaptionBurnInNodes(
-      buildRenderFrameIR(
-        composition.id,
-        state.playheadUs,
-        composition.width,
-        composition.height,
-        resolved,
-        renderFrameOptions(visualProject, imageSizesFromCache()),
-      ),
-      visualProject,
-    );
+    const visualFrame = planRenderFrame({
+      bundle: createRenderBundle({
+        timelineProject,
+        visualProject,
+        seed: `preview:${visualProject.id}`,
+      }),
+      timeUs: state.playheadUs,
+      viewport: { width: composition.width, height: composition.height },
+      imageSizesByObjectId: imageSizesFromCache(),
+    }).frame;
     const frame =
       previewVideoFrame === undefined
         ? visualFrame

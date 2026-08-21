@@ -51,6 +51,9 @@
       "path": "../../packages/render-ir"
     },
     {
+      "path": "../../packages/render-planner"
+    },
+    {
       "path": "../../packages/evaluator"
     },
     {

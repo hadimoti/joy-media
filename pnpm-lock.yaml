@@ -111,6 +111,9 @@ importers:
       '@joy-media/render-ir':
         specifier: workspace:*
         version: link:../../packages/render-ir
+      '@joy-media/render-planner':
+        specifier: workspace:*
+        version: link:../../packages/render-planner
       '@joy-media/renderer-headless':
         specifier: workspace:*
         version: link:../../packages/renderer-headless
@@ -380,6 +383,27 @@ importers:
         version: link:../project-schema
 
   packages/render-ir: {}
+
+  packages/render-planner:
+    dependencies:
+      '@joy-media/captions-core':
+        specifier: workspace:*
+        version: link:../captions-core
+      '@joy-media/evaluator':
+        specifier: workspace:*
+        version: link:../evaluator
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+      '@joy-media/render-ir':
+        specifier: workspace:*
+        version: link:../render-ir
+      '@joy-media/timeline-engine':
+        specifier: workspace:*
+        version: link:../timeline-engine
+      '@joy-media/visual-object-renderer':
+        specifier: workspace:*
+        version: link:../visual-object-renderer
 
   packages/renderer-headless:
     dependencies:

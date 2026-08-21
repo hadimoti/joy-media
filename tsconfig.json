@@ -22,6 +22,7 @@
     { "path": "packages/renderer-pixi" },
     { "path": "packages/renderer-headless" },
     { "path": "packages/html-scene-runtime" },
+    { "path": "packages/render-planner" },
     { "path": "packages/media-core" },
     { "path": "packages/audio-core" },
     { "path": "packages/project-persistence" },

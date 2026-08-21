@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src"],
+  "references": [
+    { "path": "../captions-core" },
+    { "path": "../evaluator" },
+    { "path": "../project-schema" },
+    { "path": "../render-ir" },
+    { "path": "../timeline-engine" },
+    { "path": "../visual-object-renderer" }
+  ]
+}
