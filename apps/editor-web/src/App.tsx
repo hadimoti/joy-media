@@ -185,11 +185,13 @@ import {
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import {
+  deliveryGate,
   loadExportHistory,
   saveExportHistory,
   upsertEntry,
   type ExportProcessEntry,
 } from './export-history.js';
+import { DeliveryReportPanel } from './DeliveryReportPanel.js';
 import { createMonoAudioBuffer } from './export-audio.js';
 import { nextVideoClipAtOrAfter } from './timeline-playback.js';
 import './app.css';
@@ -212,6 +214,11 @@ function imageSizesFromCache(): Readonly<
     sizes[id] = { width: bitmap.width, height: bitmap.height };
   }
   return sizes;
+}
+
+function opaqueRenderRef(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? '').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 128);
+  return /^[A-Za-z0-9]/.test(normalized) ? normalized : fallback;
 }
 
 async function syncStickerBitmapTargets(
@@ -1642,6 +1649,10 @@ function EditorWorkspace({
       return next;
     });
   }, []);
+  const blockedDeliveryEntry = useMemo(
+    () => exportHistory.find((entry) => deliveryGate(entry).status === 'blocked'),
+    [exportHistory],
+  );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const action = resolveShortcut(event);
@@ -1838,7 +1849,14 @@ function EditorWorkspace({
     const entryId = `export-${Date.now()}`;
     const startedAt = new Date().toISOString();
     const exportFilename = `joy-media-export-${Date.now()}.mp4`;
-    recordExportEntry({ id: entryId, filename: exportFilename, status: 'running', startedAt });
+    recordExportEntry({
+      id: entryId,
+      filename: exportFilename,
+      status: 'running',
+      startedAt,
+      channel: 'quick-browser-export',
+      inspection: { state: 'not-requested' },
+    });
     try {
       await syncStickerBitmaps();
       const compositionV1 =
@@ -2112,6 +2130,8 @@ function EditorWorkspace({
           finishedAt: new Date().toISOString(),
           totalBytes: exportResult.totalBytes,
           frameCount: exportResult.frameCount,
+          channel: 'quick-browser-export',
+          inspection: { state: 'not-requested' },
         });
         // File has already downloaded via the browser save prompt — drop the
         // toast immediately and clear the full bar after a short settle so the
@@ -2141,6 +2161,8 @@ function EditorWorkspace({
         startedAt,
         finishedAt: new Date().toISOString(),
         error: message,
+        channel: 'quick-browser-export',
+        inspection: { state: 'not-requested' },
       });
       setExportProgress(undefined);
       exportToastTimerRef.current = window.setTimeout(() => {
@@ -2156,6 +2178,105 @@ function EditorWorkspace({
     resolveClipMonitorMediaSource,
     session,
     syncStickerBitmaps,
+  ]);
+
+  const handleVerifiedDelivery = useCallback(async () => {
+    if (exporting) return;
+    if (blockedDeliveryEntry !== undefined) {
+      setExportStatus(
+        `Deliver blocked: ${blockedDeliveryEntry.filename} has failing inspection evidence without a waiver.`,
+      );
+      setExportProgress(undefined);
+      window.clearTimeout(exportToastTimerRef.current);
+      exportToastTimerRef.current = window.setTimeout(() => {
+        setExportStatus(undefined);
+      }, 8_000);
+      return;
+    }
+
+    setExporting(true);
+    window.clearTimeout(exportToastTimerRef.current);
+    setExportStatus('Queueing verified delivery render and inspection…');
+    setExportProgress(0.05);
+    const createdAt = Date.now();
+    const entryId = `delivery-${createdAt}`;
+    const exportJobId = `${entryId}-export`;
+    const inspectJobId = `${entryId}-inspect`;
+    const reportRef = `report-${entryId}`;
+    const filename = `joy-media-delivery-${createdAt}.mp4`;
+    const startedAt = new Date().toISOString();
+    const compositionV1 =
+      session.visualProject.compositions[session.visualProject.rootCompositionId];
+    const baseWidth = compositionV1?.width ?? 1080;
+    const baseHeight = compositionV1?.height ?? 1920;
+    const { width, height } = (() => {
+      switch (exportPreset) {
+        case 'reels-1080':
+        case 'shorts-1080':
+          return { width: 1080, height: 1920 };
+        case 'youtube-1080':
+          return { width: 1920, height: 1080 };
+        case 'high-bitrate':
+          return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
+        default:
+          return { width: baseWidth, height: baseHeight };
+      }
+    })();
+    const durationUs = session.timelineProject.compositions.root?.durationUs ?? 30_000_000;
+    const payload = {
+      projectRef: opaqueRenderRef(projectId, 'project'),
+      compositionId: opaqueRenderRef(compositionV1?.id, 'root-composition'),
+      presetId: opaqueRenderRef(`${exportPreset}-${width}x${height}-${durationUs}`, 'preset'),
+      reportRef,
+    };
+    const queuedEntry: ExportProcessEntry = {
+      id: entryId,
+      filename,
+      status: 'running',
+      startedAt,
+      channel: 'verified-delivery',
+      exportJobId,
+      inspectJobId,
+      reportRef,
+      inspection: { state: 'queued', reportRef },
+    };
+    recordExportEntry(queuedEntry);
+    try {
+      await mediaClient.ensureProject(projectId, projectId);
+      await mediaClient.enqueueRenderExport(projectId, exportJobId, payload);
+      await mediaClient.enqueueRenderInspection(projectId, inspectJobId, payload);
+      recordExportEntry(queuedEntry);
+      setExportStatus('Verified delivery queued. Watch Jobs for render export and inspection.');
+      setExportProgress(1);
+      exportToastTimerRef.current = window.setTimeout(() => {
+        setExportStatus(undefined);
+        setExportProgress(undefined);
+      }, 4_000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      recordExportEntry({
+        ...queuedEntry,
+        status: 'failed',
+        finishedAt: new Date().toISOString(),
+        error: message,
+        inspection: { state: 'failed', reportRef, error: message },
+      });
+      setExportStatus(`Deliver failed: ${message}`);
+      setExportProgress(undefined);
+      exportToastTimerRef.current = window.setTimeout(() => {
+        setExportStatus(undefined);
+      }, 8_000);
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    blockedDeliveryEntry,
+    exportPreset,
+    exporting,
+    mediaClient,
+    projectId,
+    recordExportEntry,
+    session,
   ]);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
     setAgentPanelCommand((current) => ({
@@ -2839,11 +2960,31 @@ function EditorWorkspace({
             className="header-export-btn"
             onClick={handleExport}
             disabled={exporting}
-            aria-label={exporting ? 'Exporting…' : 'Export MP4'}
-            data-guide={exporting ? 'Exporting…' : 'Export MP4'}
+            aria-label={exporting ? 'Exporting…' : 'Quick browser export MP4'}
+            data-guide={exporting ? 'Exporting…' : 'Quick export'}
             aria-busy={exporting}
           >
             <ExportIcon />
+          </button>
+          <button
+            type="button"
+            className="header-deliver-btn"
+            onClick={handleVerifiedDelivery}
+            disabled={exporting || blockedDeliveryEntry !== undefined}
+            aria-label={
+              blockedDeliveryEntry === undefined
+                ? 'Deliver verified render'
+                : 'Deliver blocked by failing report'
+            }
+            title={
+              blockedDeliveryEntry === undefined
+                ? 'Deliver verified render'
+                : `Blocked by ${blockedDeliveryEntry.filename}`
+            }
+            data-guide="Deliver"
+            aria-busy={exporting}
+          >
+            Deliver
           </button>
           <div className="header-menu">
             <button
@@ -2866,34 +3007,40 @@ function EditorWorkspace({
                   <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
                 ) : (
                   <ul className="process-list">
-                    {exportHistory.map((entry) => (
-                      <li key={entry.id} className={`process-row process-${entry.status}`}>
-                        <span className="process-dot" aria-hidden="true" />
-                        <span className="process-name" dir="ltr">
-                          {entry.filename}
-                        </span>
-                        <span className="process-meta">
-                          {entry.status === 'completed' && entry.totalBytes !== undefined
-                            ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
-                            : entry.status === 'failed'
-                              ? (entry.error ?? 'failed')
-                              : 'encoding…'}
-                        </span>
-                        {lastExportRef.current?.entryId === entry.id && (
-                          <a
-                            className="icon-button"
-                            href={lastExportRef.current.url}
-                            download={entry.filename}
-                            aria-label={`Download ${entry.filename} again`}
-                            title="Download again"
-                          >
-                            <DownloadIcon />
-                          </a>
-                        )}
-                      </li>
-                    ))}
+                    {exportHistory.map((entry) => {
+                      const gate = deliveryGate(entry);
+                      return (
+                        <li key={entry.id} className={`process-row process-${entry.status}`}>
+                          <span className="process-dot" aria-hidden="true" />
+                          <span className="process-name" dir="ltr">
+                            {entry.filename}
+                          </span>
+                          <span className="process-meta">
+                            {entry.status === 'completed' && entry.totalBytes !== undefined
+                              ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB · ${gate.label}`
+                              : entry.status === 'failed'
+                                ? (entry.error ?? 'failed')
+                                : entry.channel === 'verified-delivery'
+                                  ? gate.label
+                                  : 'encoding…'}
+                          </span>
+                          {lastExportRef.current?.entryId === entry.id && (
+                            <a
+                              className="icon-button"
+                              href={lastExportRef.current.url}
+                              download={entry.filename}
+                              aria-label={`Download ${entry.filename} again`}
+                              title="Download again"
+                            >
+                              <DownloadIcon />
+                            </a>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
+                <DeliveryReportPanel entries={exportHistory} />
               </section>
             )}
           </div>

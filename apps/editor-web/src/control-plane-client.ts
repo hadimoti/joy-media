@@ -1,3 +1,4 @@
+import { WORKER_PROTOCOL_VERSION, type RenderJobPayload } from '@joy-media/job-protocol';
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 
@@ -13,6 +14,7 @@ export interface BrowserJob {
   readonly id: string;
   readonly projectId: string;
   readonly type: string;
+  readonly payload?: Partial<RenderJobPayload>;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly progress: number;
   readonly cancelRequested: boolean;
@@ -20,8 +22,11 @@ export interface BrowserJob {
   readonly derivative?: {
     readonly jobId: string;
     readonly kind: string;
-    readonly sha256: string;
-    readonly bytes: number;
+    readonly reportRef?: string;
+    readonly outputRef?: string;
+    readonly findings?: number;
+    readonly sha256?: string;
+    readonly bytes?: number;
     readonly workerRef: string;
     readonly resultRef: string;
     readonly verifiedAt: number;
@@ -212,6 +217,20 @@ export class BrowserControlPlaneClient {
       assetId,
     });
   }
+  async enqueueRenderExport(
+    projectId: string,
+    id: string,
+    payload: RenderJobPayload,
+  ): Promise<BrowserJob> {
+    return this.enqueueRenderJob(projectId, id, 'render.export', payload);
+  }
+  async enqueueRenderInspection(
+    projectId: string,
+    id: string,
+    payload: RenderJobPayload,
+  ): Promise<BrowserJob> {
+    return this.enqueueRenderJob(projectId, id, 'render.inspect', payload);
+  }
   /** Queues a local-GPU Comfy RemBG job when a Worker advertises `image.comfy`. */
   async enqueueComfyRemoveBg(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
     return this.enqueueWorkerGeneration(projectId, id, 'image.comfy', assetId);
@@ -219,7 +238,13 @@ export class BrowserControlPlaneClient {
   async enqueueWorkerGeneration(
     projectId: string,
     id: string,
-    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
+    type:
+      | 'image.comfy'
+      | 'audio.ml-denoise'
+      | 'text.lm-studio'
+      | 'text.openrouter'
+      | 'video.runway'
+      | 'edit.higgsfield',
     assetId: string,
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
@@ -231,9 +256,19 @@ export class BrowserControlPlaneClient {
   async enqueueAiGeneration(
     projectId: string,
     id: string,
-    type: 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield',
+    type:
+      | 'image.comfy'
+      | 'audio.ml-denoise'
+      | 'text.lm-studio'
+      | 'text.openrouter'
+      | 'video.runway'
+      | 'edit.higgsfield',
     prompt: string,
-    options?: { readonly imageAssetId?: string; readonly model?: string; readonly params?: Record<string, unknown> },
+    options?: {
+      readonly imageAssetId?: string;
+      readonly model?: string;
+      readonly params?: Record<string, unknown>;
+    },
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,
@@ -369,6 +404,22 @@ export class BrowserControlPlaneClient {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+    });
+  }
+  private async enqueueRenderJob(
+    projectId: string,
+    id: string,
+    type: 'render.export' | 'render.inspect',
+    payload: RenderJobPayload,
+  ): Promise<BrowserJob> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+      id,
+      type,
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      payload,
+      requirements: { capabilities: [type], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
     });
   }
   private async request<T>(path: string, init: RequestInit): Promise<T> {

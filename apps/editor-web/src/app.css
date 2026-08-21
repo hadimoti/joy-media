@@ -595,6 +595,22 @@ main {
   white-space: nowrap;
   pointer-events: none;
 }
+.header-deliver-btn {
+  align-self: center;
+  min-height: 1.5rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--joy-radius-inner);
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+}
+.header-deliver-btn:hover:not(:disabled) {
+  border-color: var(--joy-border-hover);
+  background: var(--joy-bg-hover);
+}
 .header-menu {
   position: relative;
   display: inline-flex;
@@ -835,6 +851,70 @@ main {
 .process-meta {
   color: #8c8c90;
   white-space: nowrap;
+}
+.delivery-report-panel {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--joy-border-subtle);
+}
+.delivery-report-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.delivery-report-row {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid #2e2e32;
+  border-radius: 0.25rem;
+  background: #161618;
+}
+.delivery-report-pass {
+  border-color: rgba(100, 196, 140, 0.45);
+}
+.delivery-report-warn,
+.delivery-report-waived {
+  border-color: rgba(231, 176, 93, 0.5);
+}
+.delivery-report-blocked,
+.delivery-report-failed,
+.delivery-report-canceled {
+  border-color: rgba(211, 122, 122, 0.55);
+}
+.delivery-report-main,
+.delivery-report-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  align-items: center;
+  font-size: 0.76rem;
+}
+.delivery-report-channel {
+  color: var(--joy-text-muted);
+}
+.delivery-report-main strong {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.delivery-report-reason,
+.delivery-report-meta {
+  color: var(--joy-text-faint);
+}
+.delivery-report-meta span {
+  padding-inline-end: 0.5rem;
+  border-inline-end: 1px solid var(--joy-border-subtle);
+}
+.delivery-report-meta span:last-child {
+  padding-inline-end: 0;
+  border-inline-end: 0;
 }
 button,
 input,

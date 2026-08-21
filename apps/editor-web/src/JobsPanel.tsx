@@ -256,60 +256,69 @@ export function JobsPanel({
             <p className="jobs-empty">No derivative jobs yet.</p>
           ) : (
             <ul className="jobs-list">
-              {jobs.map((job) => (
-                <li key={job.id} className={`job-${job.state}`}>
-                  <div className="jobs-worker-row">
-                    <div className="jobs-worker-copy">
-                      <div className="jobs-row-main">
-                        <strong>{job.type === 'asset.thumbnail' ? 'Thumbnail' : job.type}</strong>
-                        <span className={`jobs-pill jobs-pill--${job.state}`}>
-                          {jobStateLabel(job)}
-                        </span>
-                        <span className="jobs-progress">{job.progress}%</span>
+              {jobs.map((job) => {
+                const reportRef = job.derivative?.reportRef ?? job.payload?.reportRef;
+                return (
+                  <li key={job.id} className={`job-${job.state}`}>
+                    <div className="jobs-worker-row">
+                      <div className="jobs-worker-copy">
+                        <div className="jobs-row-main">
+                          <strong>{jobLabel(job.type)}</strong>
+                          <span className={`jobs-pill jobs-pill--${job.state}`}>
+                            {jobStateLabel(job)}
+                          </span>
+                          <span className="jobs-progress">{job.progress}%</span>
+                        </div>
+                        {reportRef !== undefined && (
+                          <p className="job-derivative">Report · {reportRef}</p>
+                        )}
+                        {job.derivative !== undefined && job.derivative.sha256 !== undefined && (
+                          <p className="job-derivative">
+                            Verified · {job.derivative.bytes ?? 0} B ·{' '}
+                            {job.derivative.sha256.slice(0, 12)}…
+                          </p>
+                        )}
+                        {job.derivative?.findings !== undefined && (
+                          <p className="job-derivative">{job.derivative.findings} findings</p>
+                        )}
+                        {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
                       </div>
-                      {job.derivative !== undefined && (
-                        <p className="job-derivative">
-                          Verified · {job.derivative.bytes} B · {job.derivative.sha256.slice(0, 12)}
-                          …
-                        </p>
-                      )}
-                      {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
+                      <div className="jobs-inline-actions">
+                        {(job.state === 'queued' || job.state === 'leased') && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Cancel job ${job.id}`}
+                            title="Cancel"
+                            data-guide="Cancel"
+                            onClick={() =>
+                              void client.cancel(projectId, job.id).then(refresh).catch(report)
+                            }
+                          >
+                            <CloseIcon />
+                          </button>
+                        )}
+                        {(job.state === 'canceled' ||
+                          job.state === 'failed' ||
+                          job.state === 'completed') && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Retry job ${job.id}`}
+                            title="Retry"
+                            data-guide="Retry"
+                            onClick={() =>
+                              void client.retry(projectId, job.id).then(refresh).catch(report)
+                            }
+                          >
+                            <RefreshIcon />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="jobs-inline-actions">
-                      {(job.state === 'queued' || job.state === 'leased') && (
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Cancel job ${job.id}`}
-                          title="Cancel"
-                          data-guide="Cancel"
-                          onClick={() =>
-                            void client.cancel(projectId, job.id).then(refresh).catch(report)
-                          }
-                        >
-                          <CloseIcon />
-                        </button>
-                      )}
-                      {(job.state === 'canceled' ||
-                        job.state === 'failed' ||
-                        job.state === 'completed') && (
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Retry job ${job.id}`}
-                          title="Retry"
-                          data-guide="Retry"
-                          onClick={() =>
-                            void client.retry(projectId, job.id).then(refresh).catch(report)
-                          }
-                        >
-                          <RefreshIcon />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -369,6 +378,19 @@ export function JobsPanel({
 function shortId(id: string): string {
   if (id.length <= 22) return id;
   return `${id.slice(0, 14)}…${id.slice(-4)}`;
+}
+
+function jobLabel(type: string): string {
+  switch (type) {
+    case 'asset.thumbnail':
+      return 'Thumbnail';
+    case 'render.export':
+      return 'Render export';
+    case 'render.inspect':
+      return 'Render inspection';
+    default:
+      return type;
+  }
 }
 
 function message(error: unknown): string {
