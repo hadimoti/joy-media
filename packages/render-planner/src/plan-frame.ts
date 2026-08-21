@@ -93,6 +93,7 @@ export function planRenderFrame(input: PlanRenderFrameInput): RenderFramePlan {
   const audioSamples = plannedAudioSamples(bundle.timelineProject, bundle.visualProject, timeUs);
   const captureRequirements = plannedCaptureRequirements(
     bundle.visualProject,
+    timeUs,
     videoSamples,
     captionNodes,
   );
@@ -236,6 +237,7 @@ function plannedAudioSamples(
 
 function plannedCaptureRequirements(
   project: JoyProjectV1,
+  timeUs: TimeUs,
   videoSamples: readonly PlannedVideoSample[],
   captionNodes: readonly TextNode[],
 ): readonly PlannedCaptureRequirement[] {
@@ -261,7 +263,7 @@ function plannedCaptureRequirements(
         kind: 'html-scene',
         objectId: object.id,
         assetId: `html-scene:${object.scenePackageId}`,
-        sourceTimeUs: 0,
+        sourceTimeUs: timeUs,
       });
     }
   }

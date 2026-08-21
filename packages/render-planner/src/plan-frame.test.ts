@@ -15,6 +15,7 @@ const SECOND = 1_000_000;
 
 describe('planRenderFrame', () => {
   it('plans video, still, sticker, html scene, caption, effect, audio, and output preset without local media refs', () => {
+    const frameTimeUs = SECOND + 250_000;
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject: timelineProject(),
@@ -22,7 +23,7 @@ describe('planRenderFrame', () => {
         outputPreset: 'reels-1080',
         seed: 'seed-1',
       }),
-      timeUs: SECOND + 250_000,
+      timeUs: frameTimeUs,
       imageSizesByObjectId: { sticker: { width: 320, height: 200 } },
     });
 
@@ -43,6 +44,13 @@ describe('planRenderFrame', () => {
     expect(plan.captureRequirements.map((requirement) => requirement.kind)).toEqual(
       expect.arrayContaining(['video-frame', 'still-bitmap', 'html-scene', 'caption-burn-in']),
     );
+    expect(plan.captureRequirements).toContainEqual({
+      id: 'html-scene:scene',
+      kind: 'html-scene',
+      objectId: 'scene',
+      assetId: 'html-scene:joy.firstparty.title',
+      sourceTimeUs: frameTimeUs,
+    });
     expect(plan.requiredAssets.map((requirement) => requirement.assetId)).toEqual(
       expect.arrayContaining(['video-a', 'image-a', 'html-scene:joy.firstparty.title']),
     );
