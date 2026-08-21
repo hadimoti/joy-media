@@ -133,6 +133,47 @@ export class MonitorMediaElementBinding {
   }
 }
 
+export async function resolveReadyMonitorMediaSources<T>(
+  items: readonly T[],
+  resolve: (item: T) => Promise<MonitorMediaSource>,
+): Promise<readonly Extract<MonitorMediaSource, { readonly state: 'ready' }>[]> {
+  const settled = await Promise.allSettled(items.map((item) => resolve(item)));
+  const ready: Extract<MonitorMediaSource, { readonly state: 'ready' }>[] = [];
+  let failure: unknown;
+  for (const result of settled) {
+    if (result.status === 'rejected') {
+      failure ??= result.reason;
+      continue;
+    }
+    if (result.value.state === 'ready') ready.push(result.value);
+    else failure ??= new Error(result.value.message);
+  }
+  if (failure !== undefined) {
+    releaseMonitorMediaSources(ready);
+    throw failure;
+  }
+  return ready;
+}
+
+export function releaseMonitorMediaSources(
+  sources: readonly Extract<MonitorMediaSource, { readonly state: 'ready' }>[],
+): void {
+  for (const source of sources) source.release();
+}
+
+export function disposeInactiveMonitorPlayback(options: {
+  readonly video?: HTMLVideoElement | null;
+  readonly binding: MonitorMediaElementBinding;
+  readonly clearActiveClipId: () => void;
+  readonly clearPreviewFrame?: () => void;
+  readonly clearStatus?: () => void;
+}): void {
+  options.binding.dispose(options.video);
+  options.clearActiveClipId();
+  options.clearPreviewFrame?.();
+  options.clearStatus?.();
+}
+
 export function createReferenceFixturePlayableResolverForTests(options: {
   readonly allowFixtures?: boolean;
   readonly fixtures: Readonly<Record<string, { readonly url: string; readonly mimeType: string }>>;

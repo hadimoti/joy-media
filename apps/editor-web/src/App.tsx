@@ -121,7 +121,10 @@ import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { createMediaSessionPlayableAssetResolver } from './media-session.js';
 import {
   MonitorMediaElementBinding,
+  disposeInactiveMonitorPlayback,
   monitorVideoClipSpecToken,
+  releaseMonitorMediaSources,
+  resolveReadyMonitorMediaSources,
   resolveMonitorMediaSource,
   type MonitorMediaSource,
 } from './monitor-media-source.js';
@@ -832,7 +835,10 @@ function EditorWorkspace({
   const captureTransitionPartnerFrames = useCallback(
     async (playheadUs: number): Promise<void> => {
       const transition = activeTransitionAt(session.visualProject, playheadUs);
-      if (transition === undefined) return;
+      if (transition === undefined) {
+        partnerMediaBindingRef.current.dispose(partnerVideoRef.current);
+        return;
+      }
       const { video, decoder } = ensurePartnerDecoder();
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
         const clip = findVideoClipById(session.timelineProject, clipId);
@@ -886,8 +892,18 @@ function EditorWorkspace({
         composition === undefined ||
         clip === undefined ||
         clip.kind !== 'video'
-      )
+      ) {
+        disposeInactiveMonitorPlayback({
+          video,
+          binding: monitorMediaBindingRef.current,
+          clearActiveClipId: () => {
+            activeMonitorClipIdRef.current = undefined;
+          },
+          clearPreviewFrame: () => setPreviewVideoFrame(undefined),
+          clearStatus: () => setMonitorMediaStatus(undefined),
+        });
         return false;
+      }
       const source = await resolveClipMonitorMediaSource(clip);
       setMonitorMediaStatus(source);
       if (source.state !== 'ready') {
@@ -1964,60 +1980,70 @@ function EditorWorkspace({
       setExportProgress(0.05);
       const audioContext = new AudioContext();
       const audioDestination = audioContext.createMediaStreamDestination();
-      const exportMedia = await Promise.all(
+      const exportSources = await resolveReadyMonitorMediaSources(
+        exportClips,
+        resolveClipMonitorMediaSource,
+      );
+      const sourcesByClipId = new Map(exportSources.map((source) => [source.clipId, source]));
+      const preparedExportMedia = await Promise.allSettled(
         exportClips.map(async (clip) => {
-          const source = await resolveClipMonitorMediaSource(clip);
-          if (source.state !== 'ready') throw new Error(source.message);
-          try {
-            const video = document.createElement('video');
-            await loadDetachedVideo(video, source.url);
-            await seekDetachedVideo(video, clip.sourceInUs);
-            const captureCanvas = document.createElement('canvas');
-            captureCanvas.width = 0;
-            captureCanvas.height = 0;
-            const audioResponse = await fetch(source.url);
-            if (!audioResponse.ok)
-              throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
-            const audioBuffer = await audioContext.decodeAudioData(
-              await audioResponse.arrayBuffer(),
-            );
-            if (audioBuffer === null)
-              throw new Error(`Unable to decode export audio for ${clip.assetId}`);
-            const clipAudioConfig = audioState.clips[clip.id] ?? {
-              gain: 1,
-              pan: 0,
-              mute: false,
-              solo: false,
-            };
-            const channels = audioBuffer.numberOfChannels;
-            const length = audioBuffer.length;
-            const samples = new Float32Array(length);
-            const monoChannel = new Float32Array(length);
-            for (let channel = 0; channel < channels; channel++) {
-              audioBuffer.copyFromChannel(monoChannel, channel);
-              let index = 0;
-              for (const value of monoChannel) {
-                samples[index] = samples[index]! + value / channels;
-                index++;
-              }
+          const source = sourcesByClipId.get(clip.id);
+          if (source === undefined)
+            throw new Error(`Export source for ${clip.assetId} was not prepared`);
+          const video = document.createElement('video');
+          await loadDetachedVideo(video, source.url);
+          await seekDetachedVideo(video, clip.sourceInUs);
+          const captureCanvas = document.createElement('canvas');
+          captureCanvas.width = 0;
+          captureCanvas.height = 0;
+          const audioResponse = await fetch(source.url);
+          if (!audioResponse.ok)
+            throw new Error(`Unable to fetch export audio for ${clip.assetId}`);
+          const audioBuffer = await audioContext.decodeAudioData(await audioResponse.arrayBuffer());
+          if (audioBuffer === null)
+            throw new Error(`Unable to decode export audio for ${clip.assetId}`);
+          const clipAudioConfig = audioState.clips[clip.id] ?? {
+            gain: 1,
+            pan: 0,
+            mute: false,
+            solo: false,
+          };
+          const channels = audioBuffer.numberOfChannels;
+          const length = audioBuffer.length;
+          const samples = new Float32Array(length);
+          const monoChannel = new Float32Array(length);
+          for (let channel = 0; channel < channels; channel++) {
+            audioBuffer.copyFromChannel(monoChannel, channel);
+            let index = 0;
+            for (const value of monoChannel) {
+              samples[index] = samples[index]! + value / channels;
+              index++;
             }
-            return {
-              clip,
-              source,
-              video,
-              decoder: createHtmlMediaDecoder(video, captureCanvas),
-              audio: {
-                samples,
-                sampleRate: audioBuffer.sampleRate,
-                config: clipAudioConfig,
-              },
-            };
-          } catch (error) {
-            source.release();
-            throw error;
           }
+          return {
+            clip,
+            source,
+            video,
+            decoder: createHtmlMediaDecoder(video, captureCanvas),
+            audio: {
+              samples,
+              sampleRate: audioBuffer.sampleRate,
+              config: clipAudioConfig,
+            },
+          };
         }),
       );
+      const failedExportMedia = preparedExportMedia.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failedExportMedia !== undefined) {
+        for (const result of preparedExportMedia) {
+          if (result.status === 'fulfilled') result.value.video.pause();
+        }
+        releaseMonitorMediaSources(exportSources);
+        throw failedExportMedia.reason;
+      }
+      const exportMedia = preparedExportMedia.map((result) => result.value);
       const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
       const mixedAudio = buildMixerBuffer(
         exportMedia.map((media) => ({ clipId: media.clip.id, samples: media.audio.samples })),

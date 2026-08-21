@@ -4,6 +4,8 @@ import type { PlayableAssetRequest, PlayableAssetResolution } from './asset-reso
 import {
   MonitorMediaElementBinding,
   createReferenceFixturePlayableResolverForTests,
+  disposeInactiveMonitorPlayback,
+  resolveReadyMonitorMediaSources,
   resolveMonitorMediaSource,
   type MonitorPlayableAsset,
 } from './monitor-media-source.js';
@@ -145,6 +147,49 @@ describe('monitor media source resolution', () => {
     expect(video.loadCalls).toBe(2);
     expect(video.removedAttributes).toEqual(['src', 'src']);
   });
+
+  it('releases all ready handles when one export media source cannot be prepared', async () => {
+    const firstRelease = vi.fn();
+    const thirdRelease = vi.fn();
+
+    await expect(
+      resolveReadyMonitorMediaSources([CLIP, clip('clip-2'), clip('clip-3')], async (item) => {
+        if (item.id === 'clip-1') return readySource(item.id, 'blob:first', firstRelease);
+        if (item.id === 'clip-2') throw new Error('source preparation failed');
+        return readySource(item.id, 'blob:third', thirdRelease);
+      }),
+    ).rejects.toThrow('source preparation failed');
+
+    expect(firstRelease).toHaveBeenCalledTimes(1);
+    expect(thirdRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('detaches idle live preview media and clears stale active-frame state', () => {
+    const release = vi.fn();
+    const video = fakeVideoElement();
+    const binding = new MonitorMediaElementBinding();
+    let activeClipId: string | undefined = 'clip-1';
+    let previewCleared = false;
+    binding.apply(video, readySource('clip-1', 'blob:first', release));
+
+    disposeInactiveMonitorPlayback({
+      video,
+      binding,
+      clearActiveClipId: () => {
+        activeClipId = undefined;
+      },
+      clearPreviewFrame: () => {
+        previewCleared = true;
+      },
+    });
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(video.src).toBe('');
+    expect(video.pauseCalls).toBe(1);
+    expect(video.loadCalls).toBe(1);
+    expect(activeClipId).toBeUndefined();
+    expect(previewCleared).toBe(true);
+  });
 });
 
 function resolverReturning(
@@ -162,6 +207,10 @@ function readySource(clipId: string, url: string, release: () => void) {
     mimeType: 'video/mp4',
     release,
   };
+}
+
+function clip(id: string): VideoClip {
+  return { ...CLIP, id, assetId: `asset-${id}` };
 }
 
 function fakeVideoElement(): HTMLVideoElement & {
