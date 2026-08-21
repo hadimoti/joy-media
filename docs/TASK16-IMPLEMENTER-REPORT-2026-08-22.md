@@ -13,10 +13,10 @@ Scope:
   serialization/reopen.
 - Preserved previous approval decisions when later checkpoints park on a new approval.
 - Split first-party node libraries into explicit production and fixture constructors.
-  Production ports fail closed for unavailable provider/render/output capabilities; fixture
-  ports are opt-in for tests.
+  Production uses no fixture PCM or synthetic deferred successes; unsupported ports fail
+  closed until real media/provider adapters are injected. Fixture ports are opt-in for tests.
 - Wired the editor Workflows panel to a browser-local production run store and threaded
-  approval expiry metadata through resume.
+  approval id, requested sequence, and expiry metadata through resume.
 - Defaulted recorded workflow time inputs from the selected clip and current playhead:
   clip identity/duration come from selection; `atUs` and `newStartUs` come from the playhead.
 
@@ -25,8 +25,12 @@ Behavior covered:
 - Park, serialize, create a fresh store-backed runner, respond, and resume.
 - Completed deterministic upstream nodes do not rerun after durable resume.
 - Stale two-tab checkpoint updates fail with a production-run revision conflict.
+- Stale approval responses carrying an older approval id/requested sequence fail with an
+  approval conflict instead of answering the currently pending approval.
 - Canceled and expired approval requests do not resume.
-- Production first-party runs do not accidentally use fixture success for unsupported ports.
+- Production first-party runs do not accidentally use fixture success for unsupported ports;
+  production silence, loudness, denoise, and normalize-audio handlers return explicit
+  `workflow/port-unavailable:*` failures without fixture PCM.
 - Existing fixture-backed first-party live-gate coverage remains opt-in.
 
 Verification:
@@ -34,8 +38,8 @@ Verification:
 - `pnpm exec vitest run apps/editor-web/src/workflow-runner.test.ts apps/editor-web/src/wp17-first-party-live-gate.test.ts apps/editor-web/src/browser-production-run-store.test.ts packages/workflow-engine/src/production-run.test.ts apps/editor-web/src/wp19-normalize-port.test.ts apps/editor-web/src/wp22-denoise-port.test.ts apps/editor-web/src/wp22-loudness-port.test.ts apps/editor-web/src/wp22-silence-port.test.ts apps/editor-web/src/wp23-tts-port.test.ts`
 - `pnpm exec tsc -b packages/workflow-engine`
 - `pnpm --filter ./apps/editor-web build`
-- `pnpm exec eslint apps/editor-web/src/workflow-runner.ts apps/editor-web/src/workflow-runner.test.ts apps/editor-web/src/first-party-handlers.ts apps/editor-web/src/WorkflowsPanel.tsx apps/editor-web/src/wp17-first-party-live-gate.test.ts apps/editor-web/src/browser-production-run-store.ts apps/editor-web/src/wp19-normalize-port.test.ts apps/editor-web/src/wp22-denoise-port.test.ts apps/editor-web/src/wp22-loudness-port.test.ts apps/editor-web/src/wp22-silence-port.test.ts apps/editor-web/src/wp23-tts-port.test.ts packages/workflow-engine/src/production-run.ts`
-- `pnpm exec prettier --write ...` on Task 16 files
+- `pnpm exec eslint apps/editor-web/src/workflow-runner.ts apps/editor-web/src/workflow-runner.test.ts apps/editor-web/src/first-party-handlers.ts apps/editor-web/src/WorkflowsPanel.tsx apps/editor-web/src/wp17-first-party-live-gate.test.ts apps/editor-web/src/browser-production-run-store.ts apps/editor-web/src/browser-production-run-store.test.ts apps/editor-web/src/wp19-normalize-port.test.ts apps/editor-web/src/wp22-denoise-port.test.ts apps/editor-web/src/wp22-loudness-port.test.ts apps/editor-web/src/wp22-silence-port.test.ts apps/editor-web/src/wp23-tts-port.test.ts packages/workflow-engine/src/production-run.ts packages/workflow-engine/src/production-run.test.ts`
+- `pnpm exec prettier --check apps/editor-web/src/App.tsx apps/editor-web/src/WorkflowsPanel.tsx apps/editor-web/src/browser-production-run-store.ts apps/editor-web/src/browser-production-run-store.test.ts apps/editor-web/src/first-party-handlers.ts apps/editor-web/src/workflow-runner.ts apps/editor-web/src/workflow-runner.test.ts packages/workflow-engine/src/production-run.ts packages/workflow-engine/src/production-run.test.ts docs/TASK16-IMPLEMENTER-REPORT-2026-08-22.md`
 - `git diff --check`
 
 Known external verification note:

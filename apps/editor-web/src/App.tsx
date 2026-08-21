@@ -2823,6 +2823,10 @@ function EditorWorkspace({
                 productionRunStore,
                 authority: workflowAuthority,
                 firstPartyLibrary: firstPartyWorkflowLibrary,
+                ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
+                ...(approval.approvalRequestedSeq === undefined
+                  ? {}
+                  : { approvalRequestedSeq: approval.approvalRequestedSeq }),
                 ...(approval.approvalExpiresAtSeq === undefined
                   ? {}
                   : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),

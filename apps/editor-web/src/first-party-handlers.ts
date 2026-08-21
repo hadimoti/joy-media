@@ -3,15 +3,14 @@
 import { detectSilence, measureLoudness, measurePeak } from '@joy-media/audio-core/analysis';
 import { applyGate } from '@joy-media/audio-core/effects';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
-import { NodeLibraryError, buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
+import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
 /**
- * Browser-side ports for first-party workflows (WP-17.2 / WP-19 / WP-22 / P14.6).
+ * Browser-side libraries for first-party workflows (WP-17.2 / WP-19 / WP-22 / P14.6).
  *
- * Real DSP: normalizeAudio, detectSilence, measureLoudness, denoise (noise-gate).
- * Analysis fixtures return deterministic candidates with an honest `method` note
- * (no `__stub: true` pretending the work already landed on disk/timeline).
- * Branch / folder / metadata / caption-template ports defer to the editor UI.
+ * Production is explicit and fail-closed: it only wires real adapters when they
+ * exist. Fixture construction keeps deterministic PCM and analysis candidates
+ * isolated for tests (no `__stub: true` pretending the work landed on disk/timeline).
  */
 
 function fixtureNote(detail: string): { readonly method: 'fixture'; readonly note: string } {
@@ -60,120 +59,13 @@ function generateNoisyFixturePcm(sampleRate: number, durationSec = 1): Float32Ar
 }
 
 /**
- * Build the production browser library. Only ports backed by real local browser
- * functionality are supplied; unsupported provider/render/output ports fail
- * closed through `workflow/port-unavailable:*`.
+ * Build the production browser library. Fixture PCM and deferred synthetic
+ * successes are intentionally not wired here; unsupported ports fail closed
+ * through `workflow/port-unavailable:*` until a real media/provider adapter is
+ * injected.
  */
 export function createProductionFirstPartyLibrary(): NodeLibrary {
-  return buildNodeLibrary({
-    ports: {
-      analysis: {
-        detectSilence: (args: {
-          readonly source: unknown;
-          readonly thresholdDb?: number;
-          readonly minSilenceMs?: number;
-        }) => {
-          const sampleRate = 48_000;
-          const samples = generateFixturePcmWithSilence(sampleRate);
-          const thresholdDb = args.thresholdDb ?? -40;
-          const minSilenceMs = args.minSilenceMs ?? 100;
-          const minSamples = Math.floor((minSilenceMs / 1000) * sampleRate);
-          const detection = detectSilence(samples, thresholdDb);
-          const ranges = detection.silentRegions
-            .filter((region) => region.end - region.start >= minSamples)
-            .map((region) => ({
-              startUs: Math.round((region.start / sampleRate) * 1_000_000),
-              endUs: Math.round((region.end / sampleRate) * 1_000_000),
-            }));
-          return {
-            source: args.source,
-            ranges,
-            thresholdDb,
-            minSilenceMs,
-            silent: detection.silent,
-          };
-        },
-        measureLoudness: (args: { readonly source: unknown }) => {
-          const sampleRate = 48_000;
-          const samples = generateFixtureDialoguePcm(sampleRate);
-          const loudness = measureLoudness(samples, sampleRate);
-          return {
-            source: args.source,
-            integratedLufs: loudness.integrated,
-            shortTermLufs: loudness.shortTerm,
-            loudnessRange: loudness.range,
-          };
-        },
-      },
-      transform: {
-        denoise: (args: {
-          readonly source: unknown;
-          readonly strength?: number;
-          readonly method?: 'noise-gate' | 'spectral' | 'ml';
-        }) => {
-          const sampleRate = 48_000;
-          const samples = generateNoisyFixturePcm(sampleRate);
-          const strength = Math.min(1, Math.max(0, args.strength ?? 0.5));
-          if (args.method === 'ml') {
-            throw new NodeLibraryError(
-              'workflow/port-unavailable:transform.denoise.ml',
-              'ML denoise requires a local GPU Worker port.',
-            );
-          }
-          if (args.method === 'spectral' || strength >= 0.75) {
-            throw new NodeLibraryError(
-              'workflow/port-unavailable:transform.denoise.spectral',
-              'Spectral denoise requires an ffmpeg provider port.',
-            );
-          }
-          const thresholdDb = -55 + strength * 25;
-          const gated = applyGate(
-            samples,
-            {
-              threshold: thresholdDb,
-              attackUs: 5_000,
-              releaseUs: 80_000,
-              holdUs: 20_000,
-            },
-            sampleRate,
-          );
-          const input = measurePeak(samples);
-          const output = measurePeak(gated);
-          return {
-            source: args.source,
-            method: 'noise-gate',
-            strength,
-            thresholdDb,
-            inputPeakDb: input.peakDb,
-            outputPeakDb: output.peakDb,
-          };
-        },
-        normalizeAudio: (args: {
-          readonly source: unknown;
-          readonly targetLufs?: number;
-          readonly duckMusic?: boolean;
-        }) => {
-          const sampleRate = 48_000;
-          const samples = generateFixtureDialoguePcm(sampleRate);
-          const targetLoudness = args.targetLufs ?? -16;
-          const { result } = normalizeDialogue(samples, sampleRate, {
-            targetLoudness,
-            targetPeak: -1,
-            mode: 'normalize',
-          });
-          return {
-            source: args.source,
-            measuredLufs: result.outputLoudness,
-            targetLufs: targetLoudness,
-            inputLoudness: result.inputLoudness,
-            gainAdjustment: result.gainAdjustment,
-            duckMusic: args.duckMusic === true,
-            processing: result.processing,
-          };
-        },
-      },
-    },
-  });
+  return buildNodeLibrary();
 }
 
 /** Build a NodeLibrary whose ports are deterministic fixtures suitable for tests. */

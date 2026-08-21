@@ -77,6 +77,8 @@ export interface WorkflowRunnerOptions {
 }
 
 export interface WorkflowResumeOptions extends WorkflowRunnerOptions {
+  readonly approvalId?: string;
+  readonly approvalRequestedSeq?: number;
   readonly approvalExpiresAtSeq?: number;
 }
 
@@ -568,6 +570,25 @@ export async function resumeWorkflow(
       error: 'Approval request is not pending',
     };
   }
+  if (options.approvalId !== undefined && approval.approvalId !== options.approvalId) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Approval response rejected: approval-conflict',
+    };
+  }
+  if (
+    options.approvalRequestedSeq !== undefined &&
+    approval.requestedSeq !== options.approvalRequestedSeq
+  ) {
+    return {
+      status: 'failed',
+      workflowId: record.workflowId,
+      runId,
+      error: 'Approval response rejected: approval-conflict',
+    };
+  }
 
   const authority = options.authority ?? defaultWorkflowAuthority();
   const approved = approvalInputApproved(humanInputs[pending.nodeId]);
@@ -575,6 +596,7 @@ export async function resumeWorkflow(
     approved,
     authority,
     humanInputs,
+    ...(options.approvalId === undefined ? {} : { expectedApprovalId: options.approvalId }),
     ...(options.approvalExpiresAtSeq === undefined
       ? {}
       : { expiresAtSeq: options.approvalExpiresAtSeq }),
@@ -623,6 +645,7 @@ interface ApprovalStoreWithPolicy extends ProductionRunStore {
       readonly approved: boolean;
       readonly responseRef: string;
       readonly authority: ProductionRunAuthority;
+      readonly expectedApprovalId?: string;
       readonly expectedRequestedSeq?: number;
       readonly expiresAtSeq?: number;
     },
@@ -644,6 +667,7 @@ async function recordApprovalResponse(
     readonly approved: boolean;
     readonly authority: ProductionRunAuthority;
     readonly humanInputs: Readonly<Record<string, unknown>>;
+    readonly expectedApprovalId?: string;
     readonly expiresAtSeq?: number;
   },
 ): Promise<ApprovalResponseResult> {
@@ -656,6 +680,9 @@ async function recordApprovalResponse(
   const result = hasPolicyApprovalResponse(store)
     ? await store.respondToApproval(record.runId, {
         ...response,
+        ...(input.expectedApprovalId === undefined
+          ? {}
+          : { expectedApprovalId: input.expectedApprovalId }),
         expectedRequestedSeq: approval.requestedSeq,
         ...(input.expiresAtSeq === undefined ? {} : { expiresAtSeq: input.expiresAtSeq }),
       })

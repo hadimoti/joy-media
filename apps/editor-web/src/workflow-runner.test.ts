@@ -207,9 +207,7 @@ describe('workflow-runner', () => {
         productionRunStore: revivedStore,
         authority: owner,
         firstPartyLibrary: countedLibrary(createFixtureFirstPartyLibrary(), secondCounts),
-        ...(first.approvalExpiresAtSeq === undefined
-          ? {}
-          : { approvalExpiresAtSeq: first.approvalExpiresAtSeq }),
+        ...approvalResumeOptions(first),
       },
     );
     expect(second.status).toBe('waiting_for_input');
@@ -252,9 +250,7 @@ describe('workflow-runner', () => {
     const humanInputs = { 'approve-candidates': { candidates: payload.candidates.slice(0, 1) } };
     const current = await resumeWorkflow(session, first.runId, humanInputs, {
       ...options,
-      ...(first.approvalExpiresAtSeq === undefined
-        ? {}
-        : { approvalExpiresAtSeq: first.approvalExpiresAtSeq }),
+      ...approvalResumeOptions(first),
     });
     expect(current.status).toBe('waiting_for_input');
 
@@ -276,6 +272,55 @@ describe('workflow-runner', () => {
     expect(stale).toMatchObject({
       status: 'failed',
       error: expect.stringContaining('checkpoint revision conflict'),
+    });
+  });
+
+  it('rejects stale approval identity after another tab advances to a new approval request', async () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const store = productionRunStore(storage, session.timelineProject.id);
+    const options = {
+      productionRunStore: store,
+      authority: owner,
+      firstPartyLibrary: createFixtureFirstPartyLibrary(),
+    } as const;
+    const first = await runWorkflow(
+      session,
+      'joy.first-party.long-video-draft-reels',
+      { assetId: 'asset-long-1' },
+      options,
+    );
+    expect(first.status).toBe('waiting_for_input');
+    if (first.status !== 'waiting_for_input') return;
+
+    const payload = first.request.payload as { candidates: readonly { title: string }[] };
+    const humanInputs = { 'approve-candidates': { candidates: payload.candidates.slice(0, 1) } };
+    const current = await resumeWorkflow(session, first.runId, humanInputs, {
+      ...options,
+      ...approvalResumeOptions(first),
+    });
+    expect(current).toMatchObject({
+      status: 'waiting_for_input',
+      nodeId: 'approve-drafts',
+    });
+
+    const stale = await resumeWorkflow(session, first.runId, humanInputs, {
+      ...options,
+      ...approvalResumeOptions(first),
+    });
+    expect(stale).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('approval-conflict'),
+    });
+    await expect(store.load(first.runId)).resolves.toMatchObject({
+      approvals: [
+        { nodeId: 'approve-candidates', state: 'approved' },
+        { nodeId: 'approve-drafts', state: 'pending' },
+      ],
     });
   });
 
@@ -332,6 +377,7 @@ describe('workflow-runner', () => {
       { 'approve-candidates': { candidates: [] } },
       {
         ...options,
+        ...approvalResumeOptions(expired),
         approvalExpiresAtSeq: Math.max(0, (expired.approvalExpiresAtSeq ?? 0) - 1),
       },
     );
@@ -406,6 +452,55 @@ describe('workflow-runner', () => {
         }),
       ]),
     );
+
+    const library = createProductionFirstPartyLibrary();
+    const portUnavailableCases = [
+      {
+        type: 'analysis.silence',
+        category: 'analysis',
+        failureCode: 'workflow/port-unavailable:analysis.detectSilence',
+      },
+      {
+        type: 'analysis.loudness',
+        category: 'analysis',
+        failureCode: 'workflow/port-unavailable:analysis.measureLoudness',
+      },
+      {
+        type: 'transform.denoise',
+        category: 'transform',
+        failureCode: 'workflow/port-unavailable:transform.denoise',
+      },
+      {
+        type: 'transform.normalizeAudio',
+        category: 'transform',
+        failureCode: 'workflow/port-unavailable:transform.normalizeAudio',
+      },
+    ] as const;
+    for (const portCase of portUnavailableCases) {
+      const handler = library.handlers[portCase.type];
+      if (handler === undefined) expect.unreachable(`missing handler ${portCase.type}`);
+      expect(
+        handler({
+          node: {
+            id: `node-${portCase.type}`,
+            category: portCase.category,
+            type: portCase.type,
+            params: { source: { kind: 'literal', value: { assetId: 'asset-long-1' } } },
+            deterministic: true,
+          },
+          upstream: {},
+          workflowInputs: { assetId: 'asset-long-1' },
+          attempt: 1,
+          runKey: `run-key-${portCase.type}`,
+          runId: 'run-production-unavailable',
+          projectRevision: 'rev-production',
+        }),
+      ).toEqual({
+        ok: false,
+        failureCode: portCase.failureCode,
+        retryable: false,
+      });
+    }
   });
 });
 
@@ -433,4 +528,20 @@ function countedLibrary(library: NodeLibrary, counts: Record<string, number>): N
     };
   }
   return { registry: library.registry, handlers };
+}
+
+function approvalResumeOptions(approval: {
+  readonly approvalId?: string;
+  readonly approvalRequestedSeq?: number;
+  readonly approvalExpiresAtSeq?: number;
+}) {
+  return {
+    ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
+    ...(approval.approvalRequestedSeq === undefined
+      ? {}
+      : { approvalRequestedSeq: approval.approvalRequestedSeq }),
+    ...(approval.approvalExpiresAtSeq === undefined
+      ? {}
+      : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
+  };
 }

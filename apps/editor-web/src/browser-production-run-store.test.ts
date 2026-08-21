@@ -161,6 +161,15 @@ describe('BrowserProductionRunStore', () => {
         approved: true,
         responseRef: 'decision:yes',
         authority: owner,
+        expectedApprovalId: `${approval.approvalId}:stale`,
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'approval-conflict' });
+    await expect(
+      store.respondToApproval('run-1', {
+        approvalId: approval.approvalId,
+        approved: true,
+        responseRef: 'decision:yes',
+        authority: owner,
         expectedRequestedSeq: approval.requestedSeq + 1,
       }),
     ).resolves.toEqual({ ok: false, reason: 'approval-conflict' });

@@ -52,6 +52,7 @@ export interface BrowserProductionRunListResult {
 }
 
 export interface BrowserProductionRunApprovalResponseInput extends RecordProductionApprovalResponseInput {
+  readonly expectedApprovalId?: string;
   readonly expectedRequestedSeq?: number;
   readonly expiresAtSeq?: number;
 }
@@ -243,6 +244,12 @@ export class BrowserProductionRunStore implements ProductionRunStore {
     );
     if (approval === undefined) {
       return { ok: false, reason: 'approval-not-found' };
+    }
+    if (
+      response.expectedApprovalId !== undefined &&
+      approval.approvalId !== response.expectedApprovalId
+    ) {
+      return { ok: false, reason: 'approval-conflict' };
     }
     if (
       response.expectedRequestedSeq !== undefined &&
