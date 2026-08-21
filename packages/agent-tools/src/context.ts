@@ -1,5 +1,20 @@
 import type { Composition, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import type { SpikeCommand } from '@joy-media/commands';
+import type {
+  AnyProvider,
+  CapabilityId,
+  PricingDescriptor,
+  ResourceEstimate,
+} from '@joy-media/provider-sdk';
+import {
+  getCapabilityDeclaration,
+  getCapabilityIds,
+  getDataLeavesDevice,
+  getExecution,
+  getProviderId,
+  isLocalExecution,
+  isV2Provider,
+} from '@joy-media/provider-sdk';
 
 /**
  * The live seam between an edit tool and the real, undoable command bus the
@@ -91,12 +106,25 @@ export interface ProviderContext {
   readonly localOnly: boolean;
 }
 
+export interface ProviderCapabilitySummary {
+  readonly capability: CapabilityId;
+  readonly pricing?: PricingDescriptor;
+  readonly estimatedResources?: ResourceEstimate;
+}
+
+export interface ProviderPriceSummary {
+  readonly capability: CapabilityId;
+  readonly pricing: PricingDescriptor;
+}
+
 export interface ProviderSummary {
   readonly id: string;
   readonly displayName: string;
   readonly execution: 'worker-local' | 'remote-api' | 'server' | 'browser';
   readonly capabilities: readonly string[];
   readonly dataLeavesDevice: boolean;
+  readonly capabilityDetails?: readonly ProviderCapabilitySummary[];
+  readonly prices?: readonly ProviderPriceSummary[];
 }
 
 export interface ExportTargetContext {
@@ -116,7 +144,10 @@ export function buildEditorContext(
   projectState: unknown,
   options?: ContextOptions,
   dispatch?: CommandDispatcher,
-  extras?: { readonly liveAudio?: import('@joy-media/commands').AudioState },
+  extras?: {
+    readonly liveAudio?: import('@joy-media/commands').AudioState;
+    readonly providers?: readonly AnyProvider[];
+  },
 ): EditorContext {
   const opts = {
     maxTimelineSummaryItems: 10,
@@ -131,7 +162,11 @@ export function buildEditorContext(
   const timeline = extractTimelineContext(projectState, opts.maxTimelineSummaryItems);
   const captions = extractCaptionContext(projectState, opts.maxCaptionExcerptWords);
   const audio = extractAudioContext(projectState);
-  const providers = extractProviderContext(projectState, opts.includeProviderDetails);
+  const providers = extractProviderContext(
+    projectState,
+    opts.includeProviderDetails,
+    extras?.providers ?? [],
+  );
 
   return {
     project,
@@ -275,10 +310,50 @@ function extractAudioContext(_state: unknown): AudioContext {
   };
 }
 
-function extractProviderContext(_state: unknown, _includeDetails: boolean): ProviderContext {
+function extractProviderContext(
+  _state: unknown,
+  includeDetails: boolean,
+  providers: readonly AnyProvider[],
+): ProviderContext {
+  if (!includeDetails || providers.length === 0) {
+    return {
+      availableProviders: [],
+      localOnly: true,
+    };
+  }
+
+  const availableProviders = providers.map((provider) => summarizeProvider(provider));
   return {
-    availableProviders: [],
-    localOnly: true,
+    availableProviders,
+    localOnly: providers.every((provider) => isLocalExecution(getExecution(provider))),
+  };
+}
+
+function summarizeProvider(provider: AnyProvider): ProviderSummary {
+  const capabilities = getCapabilityIds(provider);
+  const capabilityDetails = capabilities.map((capability) => {
+    const declaration = getCapabilityDeclaration(provider, capability);
+    const pricing = declaration?.pricing;
+    const estimatedResources = declaration?.estimatedResources;
+    return {
+      capability,
+      ...(pricing === undefined ? {} : { pricing }),
+      ...(estimatedResources === undefined ? {} : { estimatedResources }),
+    };
+  });
+  const prices = capabilityDetails.flatMap((detail) =>
+    detail.pricing === undefined
+      ? []
+      : [{ capability: detail.capability, pricing: detail.pricing }],
+  );
+  return {
+    id: getProviderId(provider),
+    displayName: isV2Provider(provider) ? provider.manifest.displayName : provider.manifest.id,
+    execution: getExecution(provider),
+    capabilities,
+    dataLeavesDevice: getDataLeavesDevice(provider) !== false,
+    capabilityDetails,
+    prices,
   };
 }
 

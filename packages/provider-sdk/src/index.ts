@@ -25,6 +25,13 @@ export type {
   CapabilityRequest,
   ProviderPolicy,
   ProviderResolution,
+  ProviderScoreDimensionNameV1,
+  ProviderScoreDimensionV1,
+  ProviderScoreBreakdownV1,
+  ProviderCandidateGateV1,
+  ProviderCandidateGateResultV1,
+  ProviderCandidateDecisionV1,
+  ProviderDecisionV1,
   // Lifecycle types
   ProviderLifecycleState,
   ProviderStatus,
@@ -53,13 +60,29 @@ export type {
 export { ProviderUnavailableError } from './errors.js';
 
 // Re-export implementations
-export { resolveProvider } from './resolution.js';
+export { resolveProvider, resolveProviderDecision } from './resolution.js';
+export type { ProviderDecisionOptions } from './decision.js';
+export { decideProvider } from './decision.js';
+export type {
+  ProviderBudgetLedgerV1,
+  ProviderBudgetReservationV1,
+  ProviderBudgetReconciliationV1,
+  ReserveProviderBudgetInput,
+  ReconcileProviderBudgetInput,
+  ReserveProviderBudgetResult,
+  ReconcileProviderBudgetResult,
+} from './budget.js';
+export {
+  createProviderBudgetLedger,
+  reserveProviderBudget,
+  reconcileProviderBudget,
+} from './budget.js';
 export { ProviderLifecycle } from './lifecycle.js';
 export { computePrivacyPreflight } from './privacy.js';
 export { createMemorySecretStore } from './secrets.js';
 export type { AgentHostManifestValidation } from './agent-host.js';
 export { validateAgentHostManifest } from './agent-host.js';
-export { aggregateUsage } from './provenance.js';
+export { aggregateUsage, linkUsageToProviderDecision } from './provenance.js';
 export {
   createMockProvider,
   validateManifest,

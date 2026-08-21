@@ -1,4 +1,4 @@
-import type { Money, ProviderUsage, UsageRecord } from './types.js';
+import type { Money, ProviderDecisionV1, ProviderUsage, UsageRecord } from './types.js';
 import { addMoney } from './utils.js';
 
 const ZERO_USD: Money = { amount: '0.00', currency: 'USD' };
@@ -33,5 +33,20 @@ export function aggregateUsage(usages: readonly ProviderUsage[]): UsageRecord {
     totalCost,
     periodStart: timestamps[0]!,
     periodEnd: timestamps[timestamps.length - 1]!,
+  };
+}
+
+export function linkUsageToProviderDecision(
+  usage: ProviderUsage,
+  decision: Pick<ProviderDecisionV1, 'decisionId' | 'productionRunId'>,
+  budgetReservationId?: string,
+): ProviderUsage {
+  return {
+    ...usage,
+    providerDecisionId: decision.decisionId,
+    ...(decision.productionRunId === undefined
+      ? {}
+      : { productionRunId: decision.productionRunId }),
+    ...(budgetReservationId === undefined ? {} : { budgetReservationId }),
   };
 }

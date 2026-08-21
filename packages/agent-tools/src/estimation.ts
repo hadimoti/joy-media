@@ -1,5 +1,6 @@
 import type { ToolRegistry } from './registry.js';
-import type { EditorContext } from './context.js';
+import type { EditorContext, ProviderSummary } from './context.js';
+import type { CapabilityId } from '@joy-media/provider-sdk';
 import type {
   AgentEditPlan,
   AgentPlanStep,
@@ -88,21 +89,27 @@ export function estimatePlan(
 
 export function estimateStep(
   step: AgentPlanStep,
-  _registry: ToolRegistry,
-  _context: EditorContext,
+  registry: ToolRegistry,
+  context: EditorContext,
 ): { cost?: CostEstimate; privacy?: PrivacyImpact } {
-  const cost = step.estimatedCost;
+  const inferredCapability = inferProviderCapability(step.tool);
+  const provider = pickProvider(context, inferredCapability);
+  const providerEstimate =
+    step.estimatedCost === undefined && provider !== undefined && inferredCapability !== undefined
+      ? estimateProviderCost(provider, inferredCapability)
+      : undefined;
+  const cost = step.estimatedCost ?? providerEstimate;
 
   let privacy: PrivacyImpact | undefined;
   if (cost) {
-    const providerId = cost.localOnly ? undefined : _context.providers.availableProviders[0]?.id;
+    const providerId = cost.localOnly ? undefined : provider?.id;
     privacy = {
       dataLeavesDevice: !cost.localOnly,
       ...(providerId !== undefined && { providerId }),
       dataTypes: inferDataTypes(step.tool),
     };
   } else {
-    const tool = _registry.getTool(step.tool);
+    const tool = registry.getTool(step.tool);
     if (!tool) {
       return {};
     }
@@ -113,8 +120,6 @@ export function estimateStep(
       toolDef?.scope.capabilities.includes('provider.spend') === true;
 
     if (requiresProvider) {
-      const provider = _context.providers.availableProviders[0];
-
       if (provider) {
         privacy = {
           dataLeavesDevice: provider.dataLeavesDevice,
@@ -123,7 +128,7 @@ export function estimateStep(
         };
       } else {
         privacy = {
-          dataLeavesDevice: !_context.providers.localOnly,
+          dataLeavesDevice: !context.providers.localOnly,
           dataTypes: inferDataTypes(step.tool),
         };
       }
@@ -163,6 +168,72 @@ function sumMoney(costs: Money[], _type: 'min' | 'max'): Money {
   const currency = costs[0]?.currency ?? 'USD';
   const total = costs.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   return { amount: total.toFixed(2), currency };
+}
+
+function pickProvider(
+  context: EditorContext,
+  capability: CapabilityId | undefined,
+): ProviderSummary | undefined {
+  if (capability === undefined) {
+    return context.providers.availableProviders[0];
+  }
+  return (
+    context.providers.availableProviders.find((provider) =>
+      provider.capabilities.includes(capability),
+    ) ?? context.providers.availableProviders[0]
+  );
+}
+
+function estimateProviderCost(
+  provider: ProviderSummary,
+  capability: CapabilityId,
+): CostEstimate | undefined {
+  const detail = provider.capabilityDetails?.find(
+    (candidate) => candidate.capability === capability,
+  );
+  if (detail === undefined) return undefined;
+  const providerCost =
+    detail.pricing === undefined
+      ? undefined
+      : { amount: detail.pricing.rate, currency: detail.pricing.currency };
+  const workerTimeMs = detail.estimatedResources?.estimatedDurationMs;
+  const localOnly = provider.execution === 'worker-local' || provider.execution === 'browser';
+  if (providerCost === undefined && workerTimeMs === undefined) {
+    return { localOnly };
+  }
+  return {
+    localOnly,
+    ...(providerCost === undefined ? {} : { providerCost }),
+    ...(workerTimeMs === undefined ? {} : { workerTimeMs }),
+  };
+}
+
+function inferProviderCapability(toolName: string): CapabilityId | undefined {
+  const lower = toolName.toLowerCase();
+  if (lower.includes('transcri')) return 'speech.transcribe';
+  if (lower.includes('align')) return 'speech.align';
+  if (lower.includes('diar')) return 'speech.diarize';
+  if (lower.includes('synth') || lower.includes('tts')) return 'speech.synthesize';
+  if (lower.includes('voice') && lower.includes('clone')) return 'voice.clone';
+  if (lower.includes('denoise')) return 'audio.denoise';
+  if (lower.includes('separate') || lower.includes('stem')) return 'audio.separate';
+  if (lower.includes('music')) return 'music.generate';
+  if (lower.includes('upscale')) return 'image.upscale';
+  if (lower.includes('background') && lower.includes('remove') && lower.includes('image')) {
+    return 'image.removeBackground';
+  }
+  if (lower.includes('image') && lower.includes('edit')) return 'image.edit';
+  if (lower.includes('image')) return 'image.generate';
+  if (lower.includes('interpolate')) return 'video.interpolate';
+  if (lower.includes('animate')) return 'video.animate';
+  if (lower.includes('background') && lower.includes('remove') && lower.includes('video')) {
+    return 'video.removeBackground';
+  }
+  if (lower.includes('video')) return 'video.generate';
+  if (lower.includes('embedding')) return 'embedding.create';
+  if (lower.includes('vision')) return 'vision.analyze';
+  if (lower.includes('llm') || lower.includes('complete')) return 'llm.complete';
+  return undefined;
 }
 
 function inferDataTypes(toolName: string): readonly string[] {

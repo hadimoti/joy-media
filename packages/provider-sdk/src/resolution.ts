@@ -1,10 +1,13 @@
 import type {
   AnyProvider,
   CapabilityRequest,
+  ProviderDecisionV1,
   ProviderPolicy,
   ProviderResolution,
   Money,
 } from './types.js';
+import type { ProviderDecisionOptions } from './decision.js';
+import { decideProvider } from './decision.js';
 import {
   getProviderId,
   supportsCapability,
@@ -113,6 +116,15 @@ export function resolveProvider(
     provider: ranked[0]!,
     candidates: ranked,
   };
+}
+
+export function resolveProviderDecision(
+  request: CapabilityRequest,
+  available: readonly AnyProvider[],
+  policy: ProviderPolicy,
+  options?: ProviderDecisionOptions,
+): ProviderDecisionV1 {
+  return decideProvider(request, available, policy, options);
 }
 
 function resolveMaxCost(

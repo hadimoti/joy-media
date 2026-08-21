@@ -160,6 +160,69 @@ export interface ProviderResolution {
   readonly reason?: string;
 }
 
+// ===== Decision Ledger Types =====
+
+export type ProviderScoreDimensionNameV1 =
+  'capability' | 'privacy' | 'locality' | 'preference' | 'cost' | 'latency' | 'availability';
+
+export interface ProviderScoreDimensionV1 {
+  /** Normalized score in the inclusive range 0..1. */
+  readonly score: number;
+  readonly explanation: string;
+}
+
+export interface ProviderScoreBreakdownV1 {
+  readonly scoreVersion: 1;
+  readonly dimensions: Readonly<Record<ProviderScoreDimensionNameV1, ProviderScoreDimensionV1>>;
+  readonly total: number;
+}
+
+export type ProviderCandidateGateV1 =
+  | 'capability'
+  | 'provider-policy'
+  | 'capability-policy'
+  | 'remote-policy'
+  | 'execution-preference'
+  | 'privacy'
+  | 'model'
+  | 'cost'
+  | 'availability'
+  | 'authorization';
+
+export interface ProviderCandidateGateResultV1 {
+  readonly gate: ProviderCandidateGateV1;
+  readonly status: 'passed' | 'failed';
+  readonly reason: string;
+}
+
+export interface ProviderCandidateDecisionV1 {
+  readonly candidateVersion: 1;
+  readonly providerId: string;
+  readonly displayName: string;
+  readonly capability: CapabilityId;
+  readonly execution: 'worker-local' | 'remote-api' | 'server' | 'browser';
+  readonly status: 'eligible' | 'rejected';
+  readonly gates: readonly ProviderCandidateGateResultV1[];
+  readonly rejectedBy?: ProviderCandidateGateV1;
+  readonly scoreBreakdown?: ProviderScoreBreakdownV1;
+  readonly estimatedCost?: Money;
+  readonly modelId?: string;
+}
+
+export interface ProviderDecisionV1 {
+  readonly decisionVersion: 1;
+  readonly decisionId: string;
+  readonly idempotencyKey: string;
+  readonly capability: CapabilityId;
+  readonly status: 'selected' | 'manual-choice-required' | 'unavailable' | 'denied';
+  readonly selectedProviderId?: string;
+  readonly candidates: readonly ProviderCandidateDecisionV1[];
+  readonly reason: string;
+  readonly createdAt: string;
+  readonly productionRunId?: string;
+  readonly providerUsage?: ProviderUsage;
+}
+
 // ===== Lifecycle Types =====
 
 export type ProviderLifecycleState =
@@ -287,6 +350,9 @@ export interface GenerationProvenance {
   readonly idempotencyKey: string;
   readonly processingTimeMs: number;
   readonly execution: 'worker-local' | 'remote-api' | 'server' | 'browser';
+  readonly providerDecisionId?: string;
+  readonly productionRunId?: string;
+  readonly budgetReservationId?: string;
 }
 
 export interface ProviderUsage {
@@ -299,6 +365,9 @@ export interface ProviderUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly creditsUsed?: number;
+  readonly providerDecisionId?: string;
+  readonly productionRunId?: string;
+  readonly budgetReservationId?: string;
 }
 
 export interface UsageRecord {
