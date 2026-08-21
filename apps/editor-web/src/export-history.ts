@@ -230,28 +230,40 @@ function reconcileEntry(entry: ExportProcessEntry, job: DeliveryJobProjection): 
     });
   }
   if (job.state === 'canceled') {
-    return replaceInspection(entry, {
-      state: 'canceled',
-      ...(reportRef === undefined ? {} : { reportRef }),
-      ...(waiver === undefined ? {} : { waiver }),
-    });
+    return replaceInspection(
+      entry,
+      {
+        state: 'canceled',
+        ...(reportRef === undefined ? {} : { reportRef }),
+        ...(waiver === undefined ? {} : { waiver }),
+      },
+      'canceled',
+    );
   }
   if (job.state === 'failed') {
-    return replaceInspection(entry, {
-      state: 'failed',
-      ...(reportRef === undefined ? {} : { reportRef }),
-      ...(job.error === undefined ? {} : { error: job.error }),
-      ...(waiver === undefined ? {} : { waiver }),
-    });
+    return replaceInspection(
+      entry,
+      {
+        state: 'failed',
+        ...(reportRef === undefined ? {} : { reportRef }),
+        ...(job.error === undefined ? {} : { error: job.error }),
+        ...(waiver === undefined ? {} : { waiver }),
+      },
+      'failed',
+    );
   }
   const report = job.derivative?.qualityReport;
   if (report === undefined) {
-    return replaceInspection(entry, {
-      state: 'failed',
-      ...(reportRef === undefined ? {} : { reportRef }),
-      error: 'Render job completed without an API-safe quality report.',
-      ...(waiver === undefined ? {} : { waiver }),
-    });
+    return replaceInspection(
+      entry,
+      {
+        state: 'failed',
+        ...(reportRef === undefined ? {} : { reportRef }),
+        error: 'Render job completed without an API-safe quality report.',
+        ...(waiver === undefined ? {} : { waiver }),
+      },
+      'failed',
+    );
   }
   const totalBytes = entry.totalBytes ?? report.artifact?.bytes;
   return {
@@ -271,9 +283,22 @@ function reconcileEntry(entry: ExportProcessEntry, job: DeliveryJobProjection): 
 function replaceInspection(
   entry: ExportProcessEntry,
   inspection: DeliveryInspectionRecord,
+  terminalStatus?: Extract<ExportProcessEntry['status'], 'canceled' | 'failed'>,
 ): ExportProcessEntry {
-  if (JSON.stringify(entry.inspection) === JSON.stringify(inspection)) return entry;
-  return { ...entry, inspection };
+  const next =
+    terminalStatus === undefined
+      ? { ...entry, inspection }
+      : {
+          ...entry,
+          status: terminalStatus,
+          finishedAt: entry.finishedAt ?? new Date(0).toISOString(),
+          ...(terminalStatus === 'failed' && inspection.error !== undefined
+            ? { error: inspection.error }
+            : {}),
+          inspection,
+        };
+  if (JSON.stringify(entry) === JSON.stringify(next)) return entry;
+  return next;
 }
 
 function summarizeReport(report: DeliveryRenderReport): DeliveryGateResult['summary'] {

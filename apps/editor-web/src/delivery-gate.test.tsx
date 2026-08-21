@@ -229,6 +229,7 @@ describe('delivery gate', () => {
       entry({
         id: 'delivery-pass',
         filename: 'pass.mp4',
+        status: 'running',
         channel: 'verified-delivery',
         exportJobId: 'render-pass',
         reportRef: 'report-pass',
@@ -237,6 +238,7 @@ describe('delivery gate', () => {
       entry({
         id: 'delivery-fail',
         filename: 'fail.mp4',
+        status: 'running',
         channel: 'verified-delivery',
         exportJobId: 'render-fail',
         reportRef: 'report-fail',
@@ -249,10 +251,20 @@ describe('delivery gate', () => {
       entry({
         id: 'delivery-canceled',
         filename: 'canceled.mp4',
+        status: 'running',
         channel: 'verified-delivery',
         exportJobId: 'render-canceled',
         reportRef: 'report-canceled',
         inspection: { state: 'queued', reportRef: 'report-canceled' },
+      }),
+      entry({
+        id: 'delivery-worker-failed',
+        filename: 'worker-failed.mp4',
+        status: 'running',
+        channel: 'verified-delivery',
+        exportJobId: 'render-worker-failed',
+        reportRef: 'report-worker-failed',
+        inspection: { state: 'queued', reportRef: 'report-worker-failed' },
       }),
       entry({
         id: 'quick',
@@ -266,16 +278,28 @@ describe('delivery gate', () => {
       renderJob('render-pass', 'completed', report(['pass'])),
       renderJob('render-fail', 'completed', report(['fail'])),
       renderJob('render-canceled', 'canceled'),
+      renderJob('render-worker-failed', 'failed'),
     ]);
 
+    expect(reconciled[0]).toMatchObject({ status: 'completed' });
     expect(deliveryGate(reconciled[0]!)).toMatchObject({ status: 'pass', canDeliver: true });
+    expect(reconciled[1]).toMatchObject({ status: 'completed' });
     expect(deliveryGate(reconciled[1]!)).toMatchObject({
       status: 'waived',
       canDeliver: true,
       waiver: { actor: 'producer@example.com' },
     });
+    expect(reconciled[2]).toMatchObject({
+      status: 'canceled',
+      inspection: { state: 'canceled' },
+    });
     expect(deliveryGate(reconciled[2]!)).toMatchObject({ status: 'canceled', canDeliver: false });
     expect(reconciled[3]).toMatchObject({
+      status: 'failed',
+      inspection: { state: 'failed', error: 'worker failed' },
+    });
+    expect(deliveryGate(reconciled[3]!)).toMatchObject({ status: 'failed', canDeliver: false });
+    expect(reconciled[4]).toMatchObject({
       channel: 'quick-browser-export',
       inspection: { state: 'not-requested' },
     });
