@@ -24,7 +24,12 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
-import { rippleDelete, toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
+import {
+  duplicateClipCommand,
+  rippleDelete,
+  sourceTimeForTransitionSample,
+  toggleSelection,
+} from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
   CommandTransaction,
@@ -299,38 +304,6 @@ function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | u
     .flatMap((track) => track.clips)
     .find((item) => item.id === clipId);
   return clip?.kind === 'video' ? clip : undefined;
-}
-
-/** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
-function sourceTimeForPlayhead(clip: VideoClip, playheadUs: number): number {
-  const rate = normalizePlaybackRate(clip.playbackRate);
-  if (rate === 0) return clip.sourceInUs;
-  return clip.sourceInUs + (playheadUs - clip.startUs) * rate;
-}
-
-/**
- * Source time for a clip during an active A↔B transition. The outgoing clip
- * keeps its normal mapping; the incoming clip advances from `sourceInUs` as if
- * it began at the transition window start.
- */
-function sourceTimeForTransitionSample(
-  clip: VideoClip,
-  playheadUs: number,
-  transition: TransitionV1 | undefined,
-): number {
-  if (transition !== undefined && clip.id === transition.rightClipId && playheadUs < clip.startUs) {
-    const rate = normalizePlaybackRate(clip.playbackRate);
-    if (rate === 0) return clip.sourceInUs;
-    const windowStart = clip.startUs - transition.durationUs;
-    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate;
-  }
-  if (playheadUs < clip.startUs) return clip.sourceInUs;
-  if (playheadUs >= clip.startUs + clip.durationUs) {
-    const rate = normalizePlaybackRate(clip.playbackRate);
-    if (rate === 0) return clip.sourceInUs;
-    return clip.sourceInUs + Math.max(0, clip.durationUs * rate - 1);
-  }
-  return sourceTimeForPlayhead(clip, playheadUs);
 }
 
 /** Source media time → composition playhead (freeze holds last mapped start). */
@@ -740,7 +713,10 @@ function EditorWorkspace({
               try {
                 return [
                   asset.id,
-                  await mediaClient.derivatives(asset.projectId || controlPlaneProject.controlPlaneProjectId, asset.id),
+                  await mediaClient.derivatives(
+                    asset.projectId || controlPlaneProject.controlPlaneProjectId,
+                    asset.id,
+                  ),
                 ] as const;
               } catch {
                 return [asset.id, []] as const;
@@ -799,11 +775,17 @@ function EditorWorkspace({
       resolveMonitorMediaSource({
         projectId: controlPlaneProject.controlPlaneProjectId,
         clip,
-        asset: monitorAssetCatalog.assets[clip.assetId] ?? session.visualProject.assets[clip.assetId],
+        asset:
+          monitorAssetCatalog.assets[clip.assetId] ?? session.visualProject.assets[clip.assetId],
         derivatives: monitorAssetCatalog.derivativesByAssetId[clip.assetId] ?? [],
         resolver: await playableAssetResolver,
       }),
-    [controlPlaneProject.controlPlaneProjectId, monitorAssetCatalog, playableAssetResolver, session],
+    [
+      controlPlaneProject.controlPlaneProjectId,
+      monitorAssetCatalog,
+      playableAssetResolver,
+      session,
+    ],
   );
 
   const ensurePartnerDecoder = useCallback((): {

@@ -70,11 +70,7 @@ export function sourceTimeForTransitionSample(
 }
 
 /** CapCut-style fit: map full composition duration into the visible lane width. */
-export function fitPixelsPerSecond(
-  durationUs: number,
-  widthPx: number,
-  paddingPx = 24,
-): number {
+export function fitPixelsPerSecond(durationUs: number, widthPx: number, paddingPx = 24): number {
   const usable = Math.max(1, widthPx - paddingPx);
   const seconds = Math.max(1 / 1_000_000, durationUs / 1_000_000);
   const fitted = usable / seconds;
@@ -191,10 +187,7 @@ export interface TimedClip {
 }
 
 /** Earliest start ≥ clip end that fits `clip.durationUs` without overlapping siblings. */
-export function placeDuplicateAfter(
-  clip: TimedClip,
-  trackClips: readonly TimedClip[],
-): TimeUs {
+export function placeDuplicateAfter(clip: TimedClip, trackClips: readonly TimedClip[]): TimeUs {
   let candidate = clip.startUs + clip.durationUs;
   const others = [...trackClips]
     .filter((item) => item.id !== clip.id)

@@ -192,12 +192,15 @@ describe('evaluateFrame', () => {
     { label: 'half speed', playbackRate: 0.5, playheadUs: 2 * SECOND, expected: 10.5 * SECOND },
     { label: 'normal speed', playbackRate: 1, playheadUs: 2 * SECOND, expected: 11 * SECOND },
     { label: 'double speed', playbackRate: 2, playheadUs: 2 * SECOND, expected: 12 * SECOND },
-  ])('honors $label playback mapping from source in-point through the active range', ({ playbackRate, playheadUs, expected }) => {
-    const result = evaluateFrame(playbackFixture(playbackRate), 'root', playheadUs);
-    expect(result.frames).toEqual([
-      { clipPath: ['clip-rate'], assetId: 'asset-rate', sourceTimeUs: expected },
-    ]);
-  });
+  ])(
+    'honors $label playback mapping from source in-point through the active range',
+    ({ playbackRate, playheadUs, expected }) => {
+      const result = evaluateFrame(playbackFixture(playbackRate), 'root', playheadUs);
+      expect(result.frames).toEqual([
+        { clipPath: ['clip-rate'], assetId: 'asset-rate', sourceTimeUs: expected },
+      ]);
+    },
+  );
 
   it('keeps playback-mapped clips end-exclusive at source out', () => {
     expect(evaluateFrame(playbackFixture(2), 'root', 3 * SECOND).frames).toEqual([]);
