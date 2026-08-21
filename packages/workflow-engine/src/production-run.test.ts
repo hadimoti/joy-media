@@ -315,6 +315,34 @@ describe('production run records', () => {
     expect(duplicate).toEqual({ ok: true, duplicate: true, record: first.record });
   });
 
+  it('matches JSON serialization semantics for undefined and omitted response values', () => {
+    const parked = runProductionCase('run-approval-json-semantics', () => ({
+      waiting: true,
+      request: { kind: 'approve-render', prompt: 'Approve final?' },
+    }));
+    const approvalId = parked.approvals[0]?.approvalId;
+    if (approvalId === undefined) expect.unreachable('approval should exist');
+
+    const first = recordProductionApprovalResponse(parked, {
+      approvalId,
+      approved: true,
+      responseRef: 'approval-response-json-semantics',
+      response: { keep: 1, omit: undefined, list: [undefined, 2] },
+      authority,
+    });
+    expect(first).toMatchObject({ ok: true, duplicate: false });
+    if (!first.ok) expect.unreachable('first approval should apply');
+
+    const duplicate = recordProductionApprovalResponse(first.record, {
+      approvalId,
+      approved: true,
+      responseRef: 'approval-response-json-semantics',
+      response: { list: [null, 2], keep: 1 },
+      authority,
+    });
+    expect(duplicate).toEqual({ ok: true, duplicate: true, record: first.record });
+  });
+
   it('projects production records into a board snapshot', () => {
     const parked = runProductionCase('run-board-parked', () => ({
       waiting: true,

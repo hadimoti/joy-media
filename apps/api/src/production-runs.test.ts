@@ -294,6 +294,52 @@ describe('Postgres production runs', () => {
     await pool.end();
   });
 
+  it('matches JSON serialization semantics for undefined and omitted API response values', async () => {
+    const { pool, controlPlane } = await initializedControlPlane();
+    await controlPlane.createProject(owner, 'project-approval-json-semantics', 'Approvals');
+    const parked = parkedRecord('run-approval-json-semantics', 'approval-1');
+    await controlPlane.createProductionRun(owner, 'project-approval-json-semantics', {
+      runKey: 'run-key-approval-json-semantics',
+      record: parked,
+      authority,
+      now: 100,
+    });
+
+    await expect(
+      controlPlane.respondToProductionApproval(
+        owner,
+        'project-approval-json-semantics',
+        'run-approval-json-semantics',
+        {
+          approvalId: 'approval-1',
+          approved: true,
+          responseRef: 'response-json-semantics',
+          response: { keep: 1, omit: undefined, list: [undefined, 2] },
+          authority,
+          now: 500,
+        },
+      ),
+    ).resolves.toMatchObject({ duplicate: false, record: { updatedSeq: 3 } });
+
+    await expect(
+      controlPlane.respondToProductionApproval(
+        owner,
+        'project-approval-json-semantics',
+        'run-approval-json-semantics',
+        {
+          approvalId: 'approval-1',
+          approved: true,
+          responseRef: 'response-json-semantics',
+          response: { list: [null, 2], keep: 1 },
+          authority,
+          now: 501,
+        },
+      ),
+    ).resolves.toMatchObject({ duplicate: true, record: { updatedSeq: 3 } });
+
+    await pool.end();
+  });
+
   it('cancels with optimistic revisions and rejects private paths, raw media, and oversized logs', async () => {
     const { pool, controlPlane } = await initializedControlPlane();
     await controlPlane.createProject(owner, 'project-cancel', 'Cancellation');

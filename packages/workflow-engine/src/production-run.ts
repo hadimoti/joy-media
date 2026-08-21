@@ -559,12 +559,18 @@ function jsonEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+function canonicalJson(value: unknown): string | undefined {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) return undefined;
+  return canonicalJsonValue(JSON.parse(serialized) as unknown);
+}
+
+function canonicalJsonValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonValue).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJsonValue(child)}`)
       .join(',')}}`;
   }
   return JSON.stringify(value);
