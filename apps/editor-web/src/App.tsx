@@ -25,12 +25,7 @@ import {
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import { createRenderBundle, planRenderFrame } from '@joy-media/render-planner';
-import {
-  duplicateClipCommand,
-  rippleDelete,
-  sourceTimeForTransitionSample,
-  toggleSelection,
-} from '@joy-media/timeline-engine';
+import { duplicateClipCommand, rippleDelete, toggleSelection } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
   CommandTransaction,
@@ -41,15 +36,9 @@ import type {
 import type { EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
-import type {
-  JoyProjectV1,
-  SpikeProject,
-  TransitionV1,
-  VideoClip,
-} from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject, VideoClip } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import { clipTimesFromTracks, isTransitionActive } from '@joy-media/visual-object-renderer';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 
 registerBuiltins();
@@ -249,16 +238,6 @@ function videoClipSpec(clip: VideoClip): VideoClipSpec {
     opacity: 1,
     zIndex: 0,
   };
-}
-
-/** Active transition (if any) at composition time. */
-function activeTransitionAt(project: JoyProjectV1, playheadUs: number): TransitionV1 | undefined {
-  const composition = project.compositions[project.rootCompositionId];
-  if (composition === undefined || project.transitions === undefined) return undefined;
-  const clipTimes = clipTimesFromTracks(composition.tracks);
-  return project.transitions.find((transition) =>
-    isTransitionActive(transition, playheadUs, clipTimes),
-  );
 }
 
 function findVideoClipById(project: SpikeProject, clipId: string): VideoClip | undefined {
@@ -778,14 +757,23 @@ function EditorWorkspace({
 
   const captureTransitionPartnerFrames = useCallback(
     async (playheadUs: number): Promise<void> => {
-      const transition = activeTransitionAt(session.visualProject, playheadUs);
-      if (transition === undefined) {
+      const plan = planRenderFrame({
+        bundle: createRenderBundle({
+          timelineProject: session.timelineProject,
+          visualProject: session.visualProject,
+          seed: `preview:${session.visualProject.id}`,
+        }),
+        timeUs: playheadUs,
+        imageSizesByObjectId: imageSizesFromCache(),
+      });
+      const partnerSamples = plan.videoSamples.filter((sample) => sample.role !== 'primary');
+      if (partnerSamples.length === 0) {
         partnerMediaBindingRef.current.dispose(partnerVideoRef.current);
         return;
       }
       const { video, decoder } = ensurePartnerDecoder();
-      for (const clipId of [transition.leftClipId, transition.rightClipId]) {
-        const clip = findVideoClipById(session.timelineProject, clipId);
+      for (const sample of partnerSamples) {
+        const clip = findVideoClipById(session.timelineProject, sample.clipId);
         if (clip === undefined) continue;
         const source = await resolveClipMonitorMediaSource(clip);
         if (source.state !== 'ready') continue;
@@ -808,8 +796,7 @@ function EditorWorkspace({
             video.addEventListener('error', onError, { once: true });
           });
         }
-        const sourceUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
-        await seekDetachedVideo(video, sourceUs);
+        await seekDetachedVideo(video, sample.sourceTimeUs);
         const token = scheduler.current.requestToken();
         const frame = decoder.captureCurrentFrame(token);
         if (frame.bitmap !== undefined) rememberClipFrame(clip.id, frame.bitmap);
@@ -824,18 +811,28 @@ function EditorWorkspace({
       const clock = clockRef.current;
       const decoder = decoderRef.current;
       const composition = session.timelineProject.compositions.root;
-      const transition = activeTransitionAt(session.visualProject, playheadUs);
+      const plan = planRenderFrame({
+        bundle: createRenderBundle({
+          timelineProject: session.timelineProject,
+          visualProject: session.visualProject,
+          seed: `preview:${session.visualProject.id}`,
+        }),
+        timeUs: playheadUs,
+        imageSizesByObjectId: imageSizesFromCache(),
+      });
+      const primarySample =
+        plan.videoSamples.find((sample) => sample.role === 'primary') ?? plan.videoSamples[0];
       const clip =
-        activeVideoClipAt(session.timelineProject, playheadUs) ??
-        (transition !== undefined
-          ? findVideoClipById(session.timelineProject, transition.leftClipId)
-          : undefined);
+        primarySample === undefined
+          ? undefined
+          : findVideoClipById(session.timelineProject, primarySample.clipId);
       if (
         video === null ||
         clock === null ||
         composition === undefined ||
         clip === undefined ||
-        clip.kind !== 'video'
+        clip.kind !== 'video' ||
+        primarySample === undefined
       ) {
         disposeInactiveMonitorPlayback({
           video,
@@ -876,7 +873,7 @@ function EditorWorkspace({
         });
       }
       const rate = normalizePlaybackRate(clip.playbackRate);
-      const sourceTimeUs = sourceTimeForTransitionSample(clip, playheadUs, transition);
+      const sourceTimeUs = primarySample.sourceTimeUs;
       video.currentTime = sourceTimeUs / 1_000_000;
       video.playbackRate = rate === 0 ? 1 : rate;
       scheduler.current.seek(sourceTimeUs);
@@ -1866,8 +1863,10 @@ function EditorWorkspace({
         exportPreset,
         updatedAt: new Date().toISOString(),
       });
-      const buildFrame = (timeUs: number) => {
-        const plan = planRenderFrame({
+      const frameTimeUs = (index: number): number =>
+        Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+      const buildFramePlan = (timeUs: number) =>
+        planRenderFrame({
           bundle: createRenderBundle({
             timelineProject: session.timelineProject,
             visualProject: session.visualProject,
@@ -1879,28 +1878,14 @@ function EditorWorkspace({
           viewport: { width, height },
           imageSizesByObjectId: imageSizesFromCache(),
         });
-        return plan.frame;
-      };
-      const transitionTimes = Array.from(
-        new Set(
-          (compositionTimeline?.tracks.flatMap((track) => track.clips) ?? []).flatMap((clip) => [
-            clip.startUs,
-            clip.startUs + clip.durationUs,
-          ]),
-        ),
-      ).sort((left, right) => left - right);
-      const clipsByBoundary = transitionTimes
-        .map((timeUs) => activeVideoClipAt(session.timelineProject, timeUs))
-        .filter((clip): clip is VideoClip => clip?.kind === 'video');
-      const transitionPartnerClips = (session.visualProject.transitions ?? []).flatMap(
-        (transition) =>
-          [transition.leftClipId, transition.rightClipId]
-            .map((clipId) => findVideoClipById(session.timelineProject, clipId))
-            .filter((clip): clip is VideoClip => clip !== undefined),
-      );
-      const exportClips = [...clipsByBoundary, ...transitionPartnerClips].filter(
-        (clip, index, clips) => clips.findIndex((candidate) => candidate.id === clip.id) === index,
-      );
+      const plannedExportClipIds = new Set<string>();
+      for (let index = 0; index < totalFrames; index++) {
+        const plan = buildFramePlan(frameTimeUs(index));
+        for (const sample of plan.videoSamples) plannedExportClipIds.add(sample.clipId);
+      }
+      const exportClips = [...plannedExportClipIds]
+        .map((clipId) => findVideoClipById(session.timelineProject, clipId))
+        .filter((clip): clip is VideoClip => clip !== undefined);
       if (exportClips.length === 0)
         throw new Error('No playable video clips are available for export');
 
@@ -2006,7 +1991,7 @@ function EditorWorkspace({
         const sceneCache = new HtmlSceneSurfaceCache();
         try {
           for (let index = 0; index < totalFrames; index++) {
-            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+            const timeUs = frameTimeUs(index);
             await sceneCache.sync(session.visualProject.visualObjects, timeUs);
             sceneFrames.set(index, new Map(sceneCache.bitmaps()));
             if (index % frameRate === 0)
@@ -2050,22 +2035,23 @@ function EditorWorkspace({
             }
           },
           paintFrame: async (index) => {
-            const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
-            const transition = activeTransitionAt(session.visualProject, timeUs);
-            const clip =
-              activeVideoClipAt(session.timelineProject, timeUs) ??
-              (transition !== undefined
-                ? findVideoClipById(session.timelineProject, transition.leftClipId)
-                : undefined);
-            if (clip === undefined || clip.kind !== 'video')
+            const timeUs = frameTimeUs(index);
+            const plan = buildFramePlan(timeUs);
+            const primarySample =
+              plan.videoSamples.find((sample) => sample.role === 'primary') ?? plan.videoSamples[0];
+            if (primarySample === undefined)
               throw new Error(`No active video clip at ${timeUs}µs during export`);
             const bitmaps = new Map<string, ImageDataLike>();
-            const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
-              const media = mediaForClip.get(target.id);
+            const captureExportSample = async (
+              sample: (typeof plan.videoSamples)[number],
+            ): Promise<VideoFrameNode> => {
+              const target = findVideoClipById(session.timelineProject, sample.clipId);
+              if (target === undefined)
+                throw new Error(`Export clip ${sample.clipId} was not found`);
+              const media = mediaForClip.get(sample.clipId);
               if (media === undefined)
-                throw new Error(`Export media for ${target.id} was not prepared`);
-              const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
-              await seekDetachedVideo(media.video, sourceUs);
+                throw new Error(`Export media for ${sample.clipId} was not prepared`);
+              await seekDetachedVideo(media.video, sample.sourceTimeUs);
               const token = index + 1;
               const decoded = media.decoder.captureCurrentFrame(token);
               if (decoded.bitmap === undefined)
@@ -2078,20 +2064,17 @@ function EditorWorkspace({
                 height: media.video.videoHeight,
               });
             };
-            const node = await captureExportClip(clip);
-            if (transition !== undefined) {
-              for (const clipId of [transition.leftClipId, transition.rightClipId]) {
-                if (bitmaps.has(clipId)) continue;
-                const partner = findVideoClipById(session.timelineProject, clipId);
-                if (partner !== undefined) await captureExportClip(partner);
-              }
+            const node = await captureExportSample(primarySample);
+            for (const sample of plan.videoSamples) {
+              if (bitmaps.has(sample.clipId)) continue;
+              await captureExportSample(sample);
             }
             const scenes = sceneFrames.get(index);
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps()) bitmaps.set(id, bitmap);
-            renderer.render(withVideoFrameNode(buildFrame(timeUs), node), bitmaps);
+            renderer.render(withVideoFrameNode(plan.frame, node), bitmaps);
           },
           onProgress: (completed, total) => {
             setExportProgress(0.05 + 0.93 * (completed / total));
