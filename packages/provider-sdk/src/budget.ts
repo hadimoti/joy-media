@@ -100,12 +100,7 @@ export function reserveProviderBudget(
     (reservation) => reservation.idempotencyKey === input.idempotencyKey,
   );
   if (replay !== undefined) {
-    if (
-      replay.reservationId !== input.reservationId ||
-      replay.providerId !== input.providerId ||
-      replay.reserved.amount !== input.estimatedCost.amount ||
-      replay.reserved.currency !== input.estimatedCost.currency
-    ) {
+    if (!sameReservationReplay(replay, input)) {
       return { ok: false, ledger, reason: 'idempotency-conflict' };
     }
     return { ok: true, ledger, reservation: replay, replay: true };
@@ -158,13 +153,7 @@ export function reconcileProviderBudget(
     const reservation = ledger.reservations.find(
       (candidate) => candidate.reservationId === replay.reservationId,
     );
-    if (
-      replay.reservationId !== input.reservationId ||
-      replay.kind !== input.kind ||
-      replay.actualCost.amount !== input.actualCost.amount ||
-      replay.actualCost.currency !== input.actualCost.currency ||
-      reservation === undefined
-    ) {
+    if (reservation === undefined || !sameReconciliationReplay(replay, input)) {
       return { ok: false, ledger, reason: 'idempotency-conflict' };
     }
     return { ok: true, ledger, reservation, reconciliation: replay, replay: true };
@@ -222,6 +211,37 @@ export function reconcileProviderBudget(
 
 function zeroMoney(currency: string): Money {
   return currency === 'USD' ? ZERO_USD : { amount: '0.00', currency };
+}
+
+function sameReservationReplay(
+  reservation: ProviderBudgetReservationV1,
+  input: ReserveProviderBudgetInput,
+): boolean {
+  return (
+    reservation.reservationId === input.reservationId &&
+    reservation.providerId === input.providerId &&
+    reservation.capability === input.capability &&
+    sameMoney(reservation.reserved, input.estimatedCost) &&
+    sameMoney(reservation.cap, input.cap) &&
+    reservation.providerDecisionId === input.providerDecisionId &&
+    reservation.productionRunId === input.productionRunId
+  );
+}
+
+function sameReconciliationReplay(
+  reconciliation: ProviderBudgetReconciliationV1,
+  input: ReconcileProviderBudgetInput,
+): boolean {
+  return (
+    reconciliation.reservationId === input.reservationId &&
+    reconciliation.kind === input.kind &&
+    sameMoney(reconciliation.actualCost, input.actualCost) &&
+    reconciliation.providerUsageId === input.providerUsageId
+  );
+}
+
+function sameMoney(left: Money, right: Money): boolean {
+  return left.amount === right.amount && left.currency === right.currency;
 }
 
 function subtractMoney(left: Money, right: Money): Money {

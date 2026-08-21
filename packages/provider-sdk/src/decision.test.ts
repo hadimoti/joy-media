@@ -124,17 +124,51 @@ describe('decideProvider', () => {
     ]);
   });
 
+  it('preserves rejected hard-gate audit entries on selected decisions', () => {
+    const local = pricedProvider('local', { execution: 'worker-local', dataLeavesDevice: false });
+    const imageOnly = createMockProvider('image-only', ['image.generate']);
+    const remote = pricedProvider('remote', { execution: 'remote-api', dataLeavesDevice: true });
+
+    const decision = decideProvider(
+      request({ constraints: { requiredPrivacy: 'local-only' } }),
+      [remote, imageOnly, local],
+      policy(),
+    );
+
+    expect(decision.status).toBe('selected');
+    expect(decision.selectedProviderId).toBe('local');
+    expect(decision.candidates.map((candidate) => candidate.providerId)).toEqual([
+      'local',
+      'remote',
+      'image-only',
+    ]);
+    expect(decision.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerId: 'remote', rejectedBy: 'privacy' }),
+        expect.objectContaining({ providerId: 'image-only', rejectedBy: 'capability' }),
+      ]),
+    );
+  });
+
   it('requires manual choice for an exact top-score tie when configured', () => {
     const first = pricedProvider('first');
     const second = pricedProvider('second');
+    const imageOnly = createMockProvider('image-only', ['image.generate']);
 
-    const decision = decideProvider(request(), [first, second], policy(), {
+    const decision = decideProvider(request(), [first, imageOnly, second], policy(), {
       requireManualChoiceOnTie: true,
     });
 
     expect(decision.status).toBe('manual-choice-required');
     expect(decision.selectedProviderId).toBeUndefined();
     expect(decision.reason).toContain('tie');
+    expect(decision.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerId: 'first', status: 'eligible' }),
+        expect.objectContaining({ providerId: 'second', status: 'eligible' }),
+        expect.objectContaining({ providerId: 'image-only', rejectedBy: 'capability' }),
+      ]),
+    );
   });
 
   it('reports unavailable and denied outcomes', () => {

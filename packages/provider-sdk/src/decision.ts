@@ -88,11 +88,15 @@ export function decideProvider(
   const tied = eligible.filter(
     (candidate) => candidate.scoreBreakdown?.total === top.scoreBreakdown?.total,
   );
+  const rankedCandidates = [
+    ...eligible,
+    ...candidates.filter((candidate) => candidate.status === 'rejected'),
+  ];
 
   if (options.requireManualChoiceOnTie === true && tied.length > 1) {
     return {
       ...base,
-      candidates: eligible,
+      candidates: rankedCandidates,
       status: 'manual-choice-required',
       reason: `Top provider tie requires manual choice: ${tied
         .map((candidate) => candidate.providerId)
@@ -102,7 +106,7 @@ export function decideProvider(
 
   return {
     ...base,
-    candidates: eligible,
+    candidates: rankedCandidates,
     status: 'selected',
     selectedProviderId: top.providerId,
     reason: `Selected '${top.providerId}' for '${request.capability}'`,

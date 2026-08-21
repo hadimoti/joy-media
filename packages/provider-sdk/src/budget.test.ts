@@ -104,6 +104,8 @@ describe('provider budget ledger', () => {
       capability: 'speech.transcribe',
       estimatedCost: { amount: '1.00', currency: 'USD' },
       cap: { amount: '2.00', currency: 'USD' },
+      providerDecisionId: 'decision-1',
+      productionRunId: 'run-1',
     });
     expect(first.ok).toBe(true);
     if (!first.ok) expect.unreachable('reservation should succeed');
@@ -115,11 +117,27 @@ describe('provider budget ledger', () => {
       capability: 'speech.transcribe',
       estimatedCost: { amount: '1.00', currency: 'USD' },
       cap: { amount: '2.00', currency: 'USD' },
+      providerDecisionId: 'decision-1',
+      productionRunId: 'run-1',
     });
     expect(reservationReplay.ok).toBe(true);
     if (!reservationReplay.ok) expect.unreachable('reservation replay should succeed');
     expect(reservationReplay.replay).toBe(true);
     expect(reservationReplay.ledger).toBe(first.ledger);
+
+    const reservationConflict = reserveProviderBudget(first.ledger, {
+      reservationId: 'reservation-1',
+      idempotencyKey: 'reserve-1',
+      providerId: 'remote',
+      capability: 'image.generate',
+      estimatedCost: { amount: '1.00', currency: 'USD' },
+      cap: { amount: '1.50', currency: 'USD' },
+      providerDecisionId: 'decision-2',
+      productionRunId: 'run-2',
+    });
+    expect(reservationConflict.ok).toBe(false);
+    if (reservationConflict.ok) expect.unreachable('changed replay inputs should conflict');
+    expect(reservationConflict.reason).toBe('idempotency-conflict');
 
     const usage = reconcileProviderBudget(first.ledger, {
       reservationId: 'reservation-1',
@@ -142,5 +160,16 @@ describe('provider budget ledger', () => {
     if (!usageReplay.ok) expect.unreachable('usage replay should succeed');
     expect(usageReplay.replay).toBe(true);
     expect(usageReplay.ledger).toBe(usage.ledger);
+
+    const usageConflict = reconcileProviderBudget(usage.ledger, {
+      reservationId: 'reservation-1',
+      idempotencyKey: 'usage-1',
+      kind: 'partial',
+      actualCost: { amount: '0.20', currency: 'USD' },
+      providerUsageId: 'usage-2',
+    });
+    expect(usageConflict.ok).toBe(false);
+    if (usageConflict.ok) expect.unreachable('changed usage replay inputs should conflict');
+    expect(usageConflict.reason).toBe('idempotency-conflict');
   });
 });
