@@ -1,0 +1,31 @@
+{
+  "name": "@joy-media/render-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "default": "./src/protocol.ts"
+    },
+    "./render-page": {
+      "types": "./src/render-page.ts",
+      "default": "./src/render-page.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@joy-media/export-core": "workspace:*",
+    "@joy-media/render-planner": "workspace:*",
+    "@joy-media/renderer-headless": "workspace:*",
+    "@joy-media/renderer-pixi": "workspace:*"
+  }
+}

@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@joy-media/export-core": "workspace:*",
-    "@joy-media/job-protocol": "workspace:*"
+    "@joy-media/job-protocol": "workspace:*",
+    "@joy-media/render-host": "workspace:*",
+    "@joy-media/render-planner": "workspace:*"
   },
   "devDependencies": {
     "@joy-media/api": "workspace:*",

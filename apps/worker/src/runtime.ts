@@ -14,6 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
+import type { RenderBundleV1 } from '@joy-media/render-planner';
 import {
   readGpuDerivative,
   runAudioMlDenoiseJob,
@@ -27,6 +28,8 @@ import {
   type LocalAiReceipt,
   type AiProvider,
 } from './local-ai.js';
+import { executeLeasedExport, type RenderExportReceiptV1 } from './export-job.js';
+import { mediaResolverFromAssetSourceRegistry } from './worker-media-resolver.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -268,6 +271,8 @@ export class WorkerRuntime {
       readonly type: string;
       readonly assetId?: string;
       readonly payload?: {
+        readonly bundle?: RenderBundleV1;
+        readonly frameLimit?: number;
         readonly prompt?: string;
         readonly model?: string;
         readonly negativePrompt?: string;
@@ -369,6 +374,32 @@ export class WorkerRuntime {
         }
         throw error;
       }
+    }
+    if (job.type === 'render.export') {
+      if (!this.tools.ffmpeg || !this.tools.ffprobe)
+        throw new Error('FFmpeg and FFprobe are required');
+      if (job.payload?.bundle === undefined) throw new Error('render.export requires a bundle');
+      if (this.options.sources === undefined)
+        throw new Error('render.export requires Worker-local media sources');
+      if (options.cancelled()) return { state: 'canceled' };
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      this.log.write(`job ${job.id} started (render.export)`);
+      await options.progress(5);
+      const result = await executeLeasedExport(
+        { complete: () => undefined },
+        this.identity.workerId,
+        job.id,
+        job.payload.bundle,
+        {
+          outputDirectory: derivativeDirectory,
+          mediaResolver: mediaResolverFromAssetSourceRegistry(this.options.sources),
+          ...(job.payload.frameLimit === undefined ? {} : { frameLimit: job.payload.frameLimit }),
+        },
+      );
+      await options.progress(100);
+      this.log.write(`job ${job.id} completed`);
+      return { state: 'completed', result };
     }
     if (job.type !== 'asset.thumbnail' || job.assetId === undefined)
       throw new Error(`unsupported Worker job ${job.type}`);
@@ -482,7 +513,8 @@ export class WorkerRuntime {
   }
 }
 
-export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | ProtocolAiReceipt;
+export type WorkerDerivativeReceipt =
+  RealThumbnailReceipt | LocalGpuReceipt | ProtocolAiReceipt | RenderExportReceiptV1;
 
 export type ProtocolAiReceipt =
   | {

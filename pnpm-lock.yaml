@@ -167,6 +167,21 @@ importers:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@22.20.1)(tsx@4.23.1)
 
+  apps/render-host:
+    dependencies:
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../../packages/export-core
+      '@joy-media/render-planner':
+        specifier: workspace:*
+        version: link:../../packages/render-planner
+      '@joy-media/renderer-headless':
+        specifier: workspace:*
+        version: link:../../packages/renderer-headless
+      '@joy-media/renderer-pixi':
+        specifier: workspace:*
+        version: link:../../packages/renderer-pixi
+
   apps/worker:
     dependencies:
       '@joy-media/export-core':
@@ -175,6 +190,12 @@ importers:
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
+      '@joy-media/render-host':
+        specifier: workspace:*
+        version: link:../render-host
+      '@joy-media/render-planner':
+        specifier: workspace:*
+        version: link:../../packages/render-planner
     devDependencies:
       '@joy-media/api':
         specifier: workspace:*

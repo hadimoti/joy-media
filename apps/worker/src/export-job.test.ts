@@ -1,51 +1,285 @@
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as exportCore from '@joy-media/export-core';
+import { CAPTION_BURN_IN_KEY, createRenderBundle } from '@joy-media/render-planner';
+import type {
+  JoyProjectV1,
+  SpikeProject,
+  VisualObjectTransformV1,
+} from '@joy-media/project-schema';
 import { executeLeasedExport } from './export-job.js';
+import { StaticWorkerMediaResolver } from './worker-media-resolver.js';
+
+const SECOND = 1_000_000;
+
 describe('leased export job', () => {
-  it('verifies output before completing the lease', () => {
+  it('renders a real bundle through the render host without calling the fixture helper', async () => {
     const calls: string[] = [];
-    const output = join(mkdtempSync(join(tmpdir(), 'joy-media-leased-export-')), 'out.mp4');
-    const result = executeLeasedExport(
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
+    const video = join(directory, 'timecode-tone.mp4');
+    const image = join(directory, 'sticker.png');
+    writeFileSync(video, 'worker-private-video');
+    writeFileSync(image, 'worker-private-sticker');
+    const fixtureSpy = vi.spyOn(exportCore, 'renderFixture');
+
+    const result = await executeLeasedExport(
       { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
       'worker-1',
       'job-1',
+      renderBundle(),
       {
-        projectId: 'p',
-        revision: 1,
-        width: 64,
-        height: 36,
-        frameRate: 30,
-        durationUs: 100_000,
-        preset: 'social-h264-aac',
+        outputDirectory: directory,
+        mediaResolver: new StaticWorkerMediaResolver({
+          'asset:video-a': video,
+          'asset:video-b': video,
+          'asset:image-a': image,
+          'html-scene:joy.firstparty.title': 'joy.firstparty.title',
+        }),
       },
-      output,
     );
-    expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+
+    expect(result).toMatchObject({
+      kind: 'render.export',
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      bytes: expect.any(Number),
+      manifest: expect.objectContaining({ projectId: 'visual', preset: 'social-h264-aac' }),
+      toolVersions: expect.objectContaining({ renderHost: expect.any(String) }),
+    });
+    expect(result.outputRef).toMatch(/^render-job-1-[a-f0-9]{16}$/);
+    expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
+    expect(fixtureSpy).not.toHaveBeenCalled();
     expect(calls).toEqual(['worker-1:job-1']);
   });
-  it('does not complete a lease and removes output when rendering fails', () => {
+
+  it('refuses bundles whose required opaque assets are missing from the Worker', async () => {
     const calls: string[] = [];
-    const output = join(mkdtempSync(join(tmpdir(), 'joy-media-leased-export-')), 'out.mp4');
-    expect(() =>
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
+    const video = join(directory, 'timecode-tone.mp4');
+    writeFileSync(video, 'worker-private-video');
+
+    await expect(
       executeLeasedExport(
         { complete: (_workerId, jobId) => calls.push(jobId) },
         'worker-1',
         'job-1',
+        renderBundle(),
         {
-          projectId: 'p',
-          revision: 1,
-          width: 0,
-          height: 36,
-          frameRate: 30,
-          durationUs: 100_000,
-          preset: 'social-h264-aac',
+          outputDirectory: directory,
+          mediaResolver: new StaticWorkerMediaResolver({
+            'asset:video-a': video,
+            'asset:video-b': video,
+            'html-scene:joy.firstparty.title': 'joy.firstparty.title',
+          }),
         },
-        output,
       ),
-    ).toThrow(/manifest/);
+    ).rejects.toThrow(/image-a/);
     expect(calls).toEqual([]);
-    expect(existsSync(output)).toBe(false);
+    expect(existsSync(join(directory, 'job-1.mp4'))).toBe(false);
   });
 });
+
+function renderBundle() {
+  return createRenderBundle({
+    timelineProject: timelineProject(),
+    visualProject: visualProject({ transition: true }),
+    outputPreset: 'social-h264-aac',
+    seed: 'worker-render',
+  });
+}
+
+function timelineProject(): SpikeProject {
+  return {
+    schemaVersion: 0,
+    id: 'timeline',
+    rootCompositionId: 'root',
+    compositions: {
+      root: {
+        id: 'root',
+        name: 'Root',
+        width: 64,
+        height: 36,
+        frameRate: { num: 30, den: 1 },
+        durationUs: 2 * SECOND,
+        tracks: [
+          {
+            id: 'track-1',
+            kind: 'video',
+            order: 0,
+            enabled: true,
+            clips: [
+              {
+                kind: 'video',
+                id: 'clip-a',
+                startUs: 0,
+                durationUs: SECOND,
+                assetId: 'video-a',
+                sourceInUs: 5 * SECOND,
+              },
+              {
+                kind: 'video',
+                id: 'clip-b',
+                startUs: SECOND,
+                durationUs: SECOND,
+                assetId: 'video-b',
+                sourceInUs: 10 * SECOND,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+function visualProject(options: { readonly transition?: boolean } = {}): JoyProjectV1 {
+  return {
+    schemaVersion: 1,
+    id: 'visual',
+    title: 'Visual',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    updatedAt: '1970-01-01T00:00:00.000Z',
+    rootCompositionId: 'root',
+    settings: { defaultLocale: 'en' },
+    compositions: {
+      root: {
+        id: 'root',
+        name: 'Root',
+        width: 64,
+        height: 36,
+        pixelAspectRatio: { num: 1, den: 1 },
+        frameRate: { num: 30, den: 1 },
+        durationUs: 2 * SECOND,
+        background: '#000000',
+        tracks: [
+          {
+            id: 'caption-track',
+            kind: 'caption',
+            name: 'Captions',
+            order: 0,
+            enabled: true,
+            locked: false,
+            clips: [
+              {
+                id: 'caption-1',
+                kind: 'caption',
+                startUs: 250_000,
+                durationUs: SECOND,
+                captionDocumentId: 'doc-1',
+              },
+            ],
+          },
+          {
+            id: 'video-track',
+            kind: 'video',
+            name: 'Video',
+            order: 1,
+            enabled: true,
+            locked: false,
+            clips: [
+              {
+                id: 'clip-a',
+                kind: 'video',
+                startUs: 0,
+                durationUs: SECOND,
+                assetId: 'video-a',
+                sourceInUs: 5 * SECOND,
+              },
+              {
+                id: 'clip-b',
+                kind: 'video',
+                startUs: SECOND,
+                durationUs: SECOND,
+                assetId: 'video-b',
+                sourceInUs: 10 * SECOND,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    assets: {
+      'video-a': { id: 'video-a', kind: 'video', displayName: 'Moving timecode' },
+      'video-b': { id: 'video-b', kind: 'video', displayName: 'Transition right' },
+      'image-a': { id: 'image-a', kind: 'image', displayName: 'Sticker' },
+    },
+    variables: {},
+    markers: [],
+    visualObjects: {
+      title: {
+        id: 'title',
+        kind: 'text',
+        text: 'JOY',
+        transform: transform(4, 4),
+        effects: [
+          { id: 'effect-noise', effectId: 'noise', enabled: true, params: { amount: 0.1 } },
+        ],
+      },
+      sticker: {
+        id: 'sticker',
+        kind: 'image',
+        assetId: 'image-a',
+        transform: transform(20, 12),
+        animations: {
+          x: {
+            keyframes: [
+              { timeUs: 0, value: 20, interpolation: 'linear' },
+              { timeUs: SECOND, value: 28, interpolation: 'linear' },
+            ],
+          },
+        },
+      },
+      scene: {
+        id: 'scene',
+        kind: 'html-scene',
+        scenePackageId: 'joy.firstparty.title',
+        transform: transform(0, 0),
+      },
+    },
+    captionDocuments: {
+      'doc-1': {
+        id: 'doc-1',
+        language: 'en',
+        direction: 'ltr',
+        speakers: [],
+        words: { w1: { id: 'w1', text: 'Caption', startUs: 0, endUs: SECOND } },
+        segments: [{ id: 's1', startUs: 0, endUs: SECOND, wordIds: ['w1'] }],
+      },
+    },
+    pluginData: { [CAPTION_BURN_IN_KEY]: true },
+    audio: {
+      clips: { 'clip-a': { gain: 0.75, pan: -0.2, mute: false, solo: false } },
+      buses: [],
+      effects: [],
+    },
+    ...(options.transition
+      ? {
+          transitions: [
+            {
+              id: 'transition-1',
+              trackId: 'video-track',
+              type: 'dissolve',
+              leftClipId: 'clip-a',
+              rightClipId: 'clip-b',
+              durationUs: 500_000,
+              params: {},
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+function transform(x: number, y: number): VisualObjectTransformV1 {
+  return {
+    x,
+    y,
+    scaleX: 1,
+    scaleY: 1,
+    rotationDeg: 0,
+    opacity: 1,
+    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+  };
+}

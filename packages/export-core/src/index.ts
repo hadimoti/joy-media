@@ -1,13 +1,10 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 export type ExportPresetId =
-  | 'social-h264-aac'
-  | 'reels-1080'
-  | 'shorts-1080'
-  | 'youtube-1080'
-  | 'high-bitrate';
+  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
 export interface RenderManifest {
   readonly projectId: string;
@@ -157,6 +154,93 @@ export function renderRgbaFrames(
     throw error;
   }
 }
+
+export interface StreamedRgbaExportResult {
+  readonly frames: number;
+}
+
+/**
+ * Encodes RGBA frames by writing each frame to FFmpeg stdin as it is produced.
+ * Callers can render long projects lazily without concatenating every frame
+ * into a single in-memory payload.
+ */
+export async function renderRgbaFrameStream(
+  manifest: RenderManifest,
+  frames: AsyncIterable<Uint8Array>,
+  outputPath: string,
+): Promise<StreamedRgbaExportResult> {
+  const frozen = freezeManifest(manifest);
+  const bytesPerFrame = frozen.width * frozen.height * 4;
+  const temporaryPath = join(
+    dirname(outputPath),
+    `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
+  );
+  let frameCount = 0;
+  const child = spawn(
+    'ffmpeg',
+    [
+      '-y',
+      '-nostdin',
+      '-v',
+      'error',
+      '-f',
+      'rawvideo',
+      '-pixel_format',
+      'rgba',
+      '-video_size',
+      `${frozen.width}x${frozen.height}`,
+      '-framerate',
+      String(frozen.frameRate),
+      '-i',
+      'pipe:0',
+      '-f',
+      'lavfi',
+      '-i',
+      'anullsrc=r=48000:cl=stereo',
+      '-shortest',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+      temporaryPath,
+    ],
+    { shell: false, stdio: ['pipe', 'ignore', 'pipe'] },
+  );
+  const stderr: Buffer[] = [];
+  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+  const closed = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  try {
+    for await (const frame of frames) {
+      if (frame.length !== bytesPerFrame) {
+        throw new RangeError(`every RGBA frame must contain exactly ${bytesPerFrame} bytes`);
+      }
+      frameCount++;
+      if (!child.stdin.write(Buffer.from(frame))) await once(child.stdin, 'drain');
+    }
+    child.stdin.end();
+    const status = await closed;
+    if (frameCount === 0) throw new RangeError('at least one RGBA frame is required for export');
+    if (status !== 0) {
+      throw new Error(`ffmpeg streaming RGBA export failed: ${Buffer.concat(stderr).toString()}`);
+    }
+    renameSync(temporaryPath, outputPath);
+    return { frames: frameCount };
+  } catch (error) {
+    if (!child.killed) child.kill();
+    child.stdin.destroy();
+    await closed.catch(() => undefined);
+    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
 export interface ExportProbe {
   readonly videoCodec: string;
   readonly audioCodec: string;
