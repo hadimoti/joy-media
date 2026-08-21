@@ -330,4 +330,155 @@ describe('createCreativeBrief', () => {
 
     expect(validateCreativeBriefV1(invalidBrief, { snapshot, intelligence }).valid).toBe(false);
   });
+
+  it('rejects stale model output request identity and interpreted goal mismatches', async () => {
+    const snapshot = snapshotFixture();
+    const intelligence = intelligenceFixture(snapshot);
+    const request = requestFixture();
+    const valid = await createFakeModelAdapter({ mode: 'valid' }).createBrief({
+      snapshot,
+      intelligence,
+      request,
+    });
+
+    await expect(
+      createCreativeBrief({
+        snapshot,
+        intelligence,
+        request,
+        modelAdapter: {
+          async createBrief() {
+            return {
+              brief: {
+                ...valid.brief,
+                requestId: 'stale-request-id',
+              },
+            };
+          },
+        },
+      }),
+    ).rejects.toThrow(/requestId/i);
+
+    await expect(
+      createCreativeBrief({
+        snapshot,
+        intelligence,
+        request,
+        modelAdapter: {
+          async createBrief() {
+            return {
+              brief: {
+                ...valid.brief,
+                interpretedGoal: 'A different goal from a previous request.',
+              },
+            };
+          },
+        },
+      }),
+    ).rejects.toThrow(/interpretedGoal|goal/i);
+  });
+
+  it('rejects recommendation ranges outside cited evidence and request bounds', async () => {
+    const snapshot = snapshotFixture();
+    const intelligence = intelligenceFixture(snapshot);
+    const request = requestFixture({
+      scope: {
+        domains: ['timeline'],
+        boundedRangeUs: { startUs: 1_000_000, durationUs: 3_000_000 },
+      },
+    });
+    const valid = await createFakeModelAdapter({ mode: 'valid' }).createBrief({
+      snapshot,
+      intelligence,
+      request,
+    });
+    const recommendation = valid.brief.recommendations[0];
+    if (recommendation === undefined) {
+      throw new Error('valid fake adapter must create a recommendation');
+    }
+
+    await expect(
+      createCreativeBrief({
+        snapshot,
+        intelligence,
+        request,
+        modelAdapter: {
+          async createBrief() {
+            return {
+              brief: {
+                ...valid.brief,
+                recommendations: [
+                  {
+                    ...recommendation,
+                    boundedRangeUs: { startUs: 0, durationUs: 48 * 60 * 60 * 1_000_000 },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      }),
+    ).rejects.toThrow(/range|duration|bounds/i);
+
+    await expect(
+      createCreativeBrief({
+        snapshot,
+        intelligence,
+        request,
+        modelAdapter: {
+          async createBrief() {
+            return {
+              brief: {
+                ...valid.brief,
+                recommendations: [
+                  {
+                    ...recommendation,
+                    boundedRangeUs: { startUs: 5_000_000, durationUs: 1_000_000 },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      }),
+    ).rejects.toThrow(/request|bounds|range/i);
+  });
+
+  it('allows project-wide S2 factual findings with empty evidence references', async () => {
+    const snapshot = snapshotFixture();
+    const projectWideFinding: IntelligenceFindingV1 = {
+      id: 'finding-project-wide-001',
+      category: 'metadata',
+      severity: 'info',
+      title: 'Project-wide metadata is available',
+      description: 'This fact is derived from project-level metadata and has no S1 evidence id.',
+      evidenceIds: [],
+    };
+    const intelligence = createSemanticIntelligenceV1([projectWideFinding], [], {
+      projectId: PROJECT_ID,
+      snapshotRevision: snapshot.metadata.revision,
+      createdBy: 'test',
+      contentHash: 'project-wide-hash',
+    });
+
+    const brief = await createCreativeBrief({
+      snapshot,
+      intelligence,
+      request: requestFixture(),
+      modelAdapter: createFakeModelAdapter({ mode: 'valid' }),
+    });
+
+    expect(brief.factualFindings).toEqual([
+      {
+        source: 's2',
+        findingId: projectWideFinding.id,
+        title: projectWideFinding.title,
+        description: projectWideFinding.description,
+        evidenceReferences: [],
+        category: projectWideFinding.category,
+        severity: projectWideFinding.severity,
+      },
+    ]);
+    expect(brief.recommendations[0]?.evidenceReferences).toEqual(['clip-001']);
+  });
 });

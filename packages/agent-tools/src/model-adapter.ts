@@ -67,12 +67,26 @@ function boundedRangeForEvidence(
   evidenceId: string,
 ): CreativeTimeRangeV1 {
   const evidence = input.snapshot.evidenceIndex.get(evidenceId);
+  const evidenceStartUs = evidence?.startUs ?? 0;
+  const evidenceDurationUs = Math.max(1, evidence?.durationUs ?? 1_000_000);
+  const evidenceEndUs = evidenceStartUs + evidenceDurationUs;
+  const requestRange = input.request.scope.boundedRangeUs;
+
+  if (requestRange !== undefined) {
+    const requestEndUs = requestRange.startUs + requestRange.durationUs;
+    const startUs = Math.max(evidenceStartUs, requestRange.startUs);
+    const endUs = Math.min(evidenceEndUs, requestEndUs);
+    if (endUs > startUs) {
+      return {
+        startUs,
+        durationUs: endUs - startUs,
+      };
+    }
+  }
+
   return {
-    startUs: evidence?.startUs ?? input.request.scope.boundedRangeUs?.startUs ?? 0,
-    durationUs: Math.max(
-      1,
-      evidence?.durationUs ?? input.request.scope.boundedRangeUs?.durationUs ?? 1_000_000,
-    ),
+    startUs: evidenceStartUs,
+    durationUs: evidenceDurationUs,
   };
 }
 

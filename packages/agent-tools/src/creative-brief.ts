@@ -172,6 +172,7 @@ export interface CreativeBriefValidationResultV1 {
 export interface CreativeBriefValidationContextV1 {
   readonly snapshot: SemanticSnapshotV1;
   readonly intelligence: SemanticIntelligenceV1;
+  readonly request?: CreativeBriefRequestV1;
 }
 
 export interface CreateCreativeBriefOptionsV1 {
@@ -381,6 +382,14 @@ function addTimeRangeErrors(
   if (!durationValid) {
     errors.push(`${path}.durationUs must be a bounded positive duration`);
   }
+
+  if (
+    isNonNegativeInteger(value.startUs) &&
+    isNonNegativeInteger(value.durationUs) &&
+    value.startUs + value.durationUs > MAX_TIME_US
+  ) {
+    errors.push(`${path} end must be within 24 hours`);
+  }
 }
 
 function addSecurityErrors(errors: string[], value: unknown, path: string): void {
@@ -453,6 +462,82 @@ function addEvidenceReferenceErrors(
     if (!hasEvidence(snapshot, evidenceId)) {
       errors.push(`${path} references unknown evidence id ${evidenceId}`);
     }
+  }
+}
+
+function isValidTimeRange(value: unknown): value is CreativeTimeRangeV1 {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.startUs) &&
+    isNonNegativeInteger(value.durationUs) &&
+    value.durationUs > 0 &&
+    value.startUs + value.durationUs <= MAX_TIME_US
+  );
+}
+
+function rangeEnd(range: CreativeTimeRangeV1): number {
+  return range.startUs + range.durationUs;
+}
+
+function rangeContains(container: CreativeTimeRangeV1, child: CreativeTimeRangeV1): boolean {
+  return child.startUs >= container.startUs && rangeEnd(child) <= rangeEnd(container);
+}
+
+function addRecommendationRangeBoundErrors(
+  errors: string[],
+  recommendation: Record<string, unknown>,
+  path: string,
+  context: CreativeBriefValidationContextV1,
+): void {
+  if (!isValidTimeRange(recommendation.boundedRangeUs)) {
+    return;
+  }
+
+  const recommendationRange = recommendation.boundedRangeUs;
+
+  if (
+    context.request?.scope.boundedRangeUs !== undefined &&
+    isValidTimeRange(context.request.scope.boundedRangeUs) &&
+    !rangeContains(context.request.scope.boundedRangeUs, recommendationRange)
+  ) {
+    errors.push(`${path}.boundedRangeUs must stay within the request boundedRangeUs`);
+  }
+
+  if (!Array.isArray(recommendation.evidenceReferences)) {
+    return;
+  }
+
+  let temporalEvidenceCount = 0;
+  for (const evidenceId of recommendation.evidenceReferences) {
+    if (typeof evidenceId !== 'string') {
+      continue;
+    }
+
+    const evidence = context.snapshot.evidenceIndex.get(evidenceId);
+    if (
+      evidence === undefined ||
+      !isNonNegativeInteger(evidence.startUs) ||
+      !isNonNegativeInteger(evidence.durationUs) ||
+      evidence.durationUs <= 0
+    ) {
+      continue;
+    }
+
+    temporalEvidenceCount += 1;
+    if (
+      !rangeContains(
+        { startUs: evidence.startUs, durationUs: evidence.durationUs },
+        recommendationRange,
+      )
+    ) {
+      errors.push(`${path}.boundedRangeUs must stay within cited S1 evidence ${evidenceId}`);
+    }
+  }
+
+  if (temporalEvidenceCount === 0) {
+    errors.push(
+      `${path}.boundedRangeUs must cite at least one S1 evidence item with a bounded time range`,
+    );
   }
 }
 
@@ -678,7 +763,7 @@ function addFactErrors(
     `${path}.evidenceReferences`,
     context.snapshot,
     {
-      requireNonEmpty: true,
+      requireNonEmpty: finding === undefined || finding.evidenceIds.length > 0,
     },
   );
 }
@@ -796,6 +881,7 @@ function addRecommendationErrors(
     },
   );
   addTimeRangeErrors(errors, value.boundedRangeUs, `${path}.boundedRangeUs`, true);
+  addRecommendationRangeBoundErrors(errors, value, path, context);
 
   if (value.proposedIntent !== undefined) {
     if (!isRecord(value.proposedIntent)) {
@@ -904,6 +990,12 @@ export function validateCreativeBriefV1(
   }
   if (brief.intelligenceRevision !== context.intelligence.metadata.revision) {
     errors.push('brief intelligenceRevision must match S2 intelligence revision');
+  }
+  if (context.request !== undefined && brief.requestId !== context.request.requestId) {
+    errors.push('brief requestId must match the active creative brief request');
+  }
+  if (context.request !== undefined && brief.interpretedGoal !== context.request.goal) {
+    errors.push('brief interpretedGoal must match the active creative brief request goal');
   }
   addStringError(errors, brief.requestId, 'brief.requestId', MAX_ID_LENGTH);
   addStringError(errors, brief.interpretedGoal, 'brief.interpretedGoal', MAX_GOAL_LENGTH);
@@ -1020,6 +1112,7 @@ export async function createCreativeBrief(
   const briefResult = validateCreativeBriefV1(output.brief, {
     snapshot: inputResult.snapshot,
     intelligence: inputResult.intelligence,
+    request,
   });
 
   if (!briefResult.valid) {
