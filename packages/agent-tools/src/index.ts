@@ -74,6 +74,7 @@ export type {
   ApprovalRequest,
   ApprovalReason,
   PrivacyImpact,
+  ProviderApprovalSummary,
   PlanOptions,
 } from './plan.js';
 export { createPlan, validatePlan, addStepToPlan, updatePlanStatus } from './plan.js';

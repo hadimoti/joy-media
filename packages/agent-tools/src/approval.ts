@@ -355,6 +355,11 @@ export function approvalRequestFromProviderPreflight(
         ? {}
         : { retentionDisclosure: preflight.retentionDisclosure }),
     },
+    providerApproval: {
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+    },
     isReversible: true,
     status: 'pending',
   };

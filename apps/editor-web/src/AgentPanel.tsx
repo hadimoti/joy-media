@@ -149,6 +149,53 @@ function initialJoyCodeState(projectId: string): JoyCodeState {
   return { threads: [thread], activeThreadId: thread.id };
 }
 
+export function selectJoyCodePendingApproval(
+  decisions: readonly ApprovalDecision[],
+): ApprovalDecision | undefined {
+  return (
+    decisions.find((decision) => decision.decision === 'blocked') ??
+    decisions.find(
+      (decision) =>
+        decision.decision === 'requires-manual' && decision.request.providerApproval !== undefined,
+    ) ??
+    decisions.find((decision) => decision.decision === 'requires-manual') ??
+    decisions[0]
+  );
+}
+
+function approvalCostLabel(approval: ApprovalDecision): string | undefined {
+  const cost = approval.request.estimatedCost;
+  return cost === undefined ? undefined : `${cost.amount} ${cost.currency}`;
+}
+
+export function ProviderApprovalDetails({ approval }: { readonly approval: ApprovalDecision }) {
+  const provider = approval.request.providerApproval;
+  if (provider === undefined) return null;
+  const cost = approvalCostLabel(approval);
+  return (
+    <dl className="joy-code-provider-approval" aria-label="Provider approval details">
+      <div>
+        <dt>Provider</dt>
+        <dd>{provider.providerId}</dd>
+      </div>
+      <div>
+        <dt>Capability</dt>
+        <dd>{provider.capability}</dd>
+      </div>
+      {cost !== undefined && (
+        <div>
+          <dt>Cost cap</dt>
+          <dd>{cost}</dd>
+        </div>
+      )}
+      <div>
+        <dt>Approval</dt>
+        <dd>{provider.requestDigest}</dd>
+      </div>
+    </dl>
+  );
+}
+
 function threadTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -328,10 +375,7 @@ export function AgentPanel({
       agentContext,
       (toolName) => registry.tools.get(toolName)?.scope,
     );
-    const approval =
-      decisions.find((decision) => decision.decision === 'blocked') ??
-      decisions.find((decision) => decision.decision === 'requires-manual') ??
-      decisions[0];
+    const approval = selectJoyCodePendingApproval(decisions);
     if (approval === undefined) {
       appendMessage(threadId, 'assistant', 'برای این برنامه هیچ تصمیم تأییدی ایجاد نشد.');
       return;
@@ -736,6 +780,7 @@ export function AgentPanel({
                     </p>
                   )}
                   <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                  <ProviderApprovalDetails approval={pending.approval} />
                   <div className="joy-code-plan-actions">
                     {pending.approval.decision === 'blocked' && (
                       <button type="button" onClick={reject}>

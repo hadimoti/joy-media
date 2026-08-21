@@ -61,6 +61,13 @@ export interface ApprovalRequest {
   readonly privacyImpact: PrivacyImpact;
   readonly isReversible: boolean;
   readonly status: 'pending' | 'approved' | 'rejected';
+  readonly providerApproval?: ProviderApprovalSummary;
+}
+
+export interface ProviderApprovalSummary {
+  readonly providerId: string;
+  readonly capability: string;
+  readonly requestDigest: string;
 }
 
 export type ApprovalReason =
