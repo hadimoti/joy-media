@@ -226,7 +226,7 @@ a third needs an owner decision recorded here.
 
 ## 3. Layout & panels (seed)
 
-Persisted dock layout keys are per-mode via `dockLayoutKey(mode)`, currently `joy-media.dockview.<mode>.v9`; the legacy single-key migration target remains `joy-media.dockview.v8`. The default vertical seed keeps **Timeline** and **Flow** together across the bottom, **Monitor** full-height on the right, **Browser** tabs (`media`, `effects`, `transitions`, `captions`, `audio`, `color`, `plugins`) on the left, and **Context** tabs (`inspector`, `motion`, `history`, `jobs`, `diagnostics`, `workflows`, `camera`) in the middle. `templates` is registered as a panel but is not part of those seeded Browser/Context groups. Default composition / blank project: **1080×1920**.
+Persisted dock layout keys are per-mode via `dockLayoutKey(mode)`, currently `joy-media.dockview.<mode>.v9`; the legacy single-key migration target remains `joy-media.dockview.v8`. The default vertical seed keeps **Timeline** and **Flow** together across the bottom, **Monitor** full-height on the right, **Browser** tabs (`media`, `effects`, `transitions`, `captions`, `audio`, `color`, `plugins`) on the left, **Context** tabs (`inspector`, `motion`, `history`, `jobs`, `diagnostics`, `workflows`, `camera`) in the middle, and a seeded **Agent** column in that same upper row. `templates` is registered as a panel but is not part of those seeded Browser/Context groups. Default composition / blank project: **1080×1920**.
 
 Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transport under the canvas. Preview canvas is absolutely contained so intrinsic frame size cannot inflate the dock.
 
