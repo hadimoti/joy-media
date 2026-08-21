@@ -3,6 +3,7 @@ import type { JoyProjectV1, VisualObjectTransformV1 } from '@joy-media/project-s
 import type { PlannedCaptureRequirement } from '@joy-media/render-planner';
 import { IMAGE_MATTE_PLUGIN_KEY } from './sticker-bindings.js';
 import {
+  htmlSceneCaptureTargetsForRequirements,
   plannedHtmlSceneCaptureTargets,
   plannedStillBitmapTargets,
   requiredCaptureObjectIds,
@@ -30,6 +31,23 @@ describe('render plan capture targets', () => {
         timeUs: 345_678,
       },
     ]);
+  });
+
+  it('keeps the App html-scene capture helper name wired to the planner implementation', () => {
+    const project = visualProject();
+    const requirements: readonly PlannedCaptureRequirement[] = [
+      {
+        id: 'html-scene:scene-b',
+        kind: 'html-scene',
+        objectId: 'scene-b',
+        assetId: 'html-scene:scene.package.b',
+        sourceTimeUs: 345_678,
+      },
+    ];
+
+    expect(htmlSceneCaptureTargetsForRequirements(project, requirements)).toEqual(
+      plannedHtmlSceneCaptureTargets(project, requirements),
+    );
   });
 
   it('derives still targets only for planner-requested objects and preserves matte/crop data', () => {

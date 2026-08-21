@@ -97,7 +97,10 @@ import { TransitionsPanel } from './TransitionsPanel.js';
 import { bindClipToObject, resolveObjectIdForSelection } from './sticker-bindings.js';
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
-import { plannedStillBitmapTargets } from './render-plan-capture-targets.js';
+import {
+  htmlSceneCaptureTargetsForRequirements,
+  plannedStillBitmapTargets,
+} from './render-plan-capture-targets.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { createMediaSessionPlayableAssetResolver } from './media-session.js';

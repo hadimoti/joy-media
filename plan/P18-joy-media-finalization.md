@@ -409,6 +409,18 @@ pnpm --filter @joy-media/editor-web build
 
 **Commit:** `feat(render): share one frame plan across preview and export`
 
+**Follow-up runtime naming fix — 2026-08-21**
+
+- Restored the `App.tsx` html-scene capture binding by exporting
+  `htmlSceneCaptureTargetsForRequirements` as the exact alias of
+  `plannedHtmlSceneCaptureTargets` and importing it where preview/export capture paths call it.
+- Added a focused regression in `render-plan-capture-targets.test.ts` so the App-facing helper
+  name stays wired to the shared planner implementation.
+- Verified with:
+  `pnpm exec vitest run apps/editor-web/src/render-plan-capture-targets.test.ts`,
+  `pnpm exec vitest run packages/render-planner/src/plan-frame.test.ts apps/editor-web/src/editor-web-live-gate.test.ts`,
+  and `pnpm --filter @joy-media/editor-web build`.
+
 ### Task 9 — Make HTML scenes and transitions delivery-grade
 
 **Files**

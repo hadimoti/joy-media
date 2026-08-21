@@ -77,6 +77,8 @@ export function plannedHtmlSceneCaptureTargets(
   });
 }
 
+export const htmlSceneCaptureTargetsForRequirements = plannedHtmlSceneCaptureTargets;
+
 export function requiredCaptureObjectIds(
   requirements: readonly PlannedCaptureRequirement[],
   kind: 'still-bitmap' | 'html-scene',
