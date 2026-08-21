@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renderBundleToFile } from '@joy-media/render-host';
+import { createPinnedOfflineRenderHostDriver, type RenderHostDriver } from '@joy-media/render-host';
 import type { WorkerMediaResolver } from './worker-media-resolver.js';
 export interface ExportLeaseCoordinator {
   complete(workerId: string, jobId: string): unknown;
@@ -14,6 +14,7 @@ export interface ExecuteLeasedExportOptions {
   readonly outputDirectory?: string;
   readonly mediaResolver: WorkerMediaResolver;
   readonly frameLimit?: number;
+  readonly renderHostDriver?: RenderHostDriver;
 }
 
 export interface RenderExportReceiptV1 {
@@ -45,8 +46,9 @@ export async function executeLeasedExport(
   const outputDirectory = options.outputDirectory ?? join(tmpdir(), 'joy-media-worker-exports');
   mkdirSync(outputDirectory, { recursive: true });
   const outputPath = join(outputDirectory, `${opaqueSegment(jobId)}.mp4`);
+  const renderHostDriver = options.renderHostDriver ?? createPinnedOfflineRenderHostDriver();
   try {
-    const result = await renderBundleToFile({
+    const result = await renderHostDriver.export({
       protocolVersion: 1,
       bundle,
       outputPath,

@@ -79,6 +79,56 @@ describe('leased export job', () => {
     expect(calls).toEqual([]);
     expect(existsSync(join(directory, 'job-1.mp4'))).toBe(false);
   });
+
+  it('drives export through the render-host driver protocol', async () => {
+    const calls: string[] = [];
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
+    const driverCalls: string[] = [];
+
+    const result = await executeLeasedExport(
+      { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
+      'worker-1',
+      'job-1',
+      renderBundle(),
+      {
+        outputDirectory: directory,
+        mediaResolver: new StaticWorkerMediaResolver({}),
+        renderHostDriver: {
+          export: async (request) => {
+            driverCalls.push(`${request.protocolVersion}:${request.bundle.seed}`);
+            return {
+              manifest: {
+                projectId: 'visual',
+                revision: 0,
+                width: 64,
+                height: 36,
+                frameRate: 30,
+                durationUs: 100_000,
+                preset: 'social-h264-aac',
+              },
+              frames: 3,
+              videoCodec: 'h264',
+              audioCodec: 'aac',
+              width: 64,
+              height: 36,
+              sha256: 'a'.repeat(64),
+              bytes: 1234,
+              toolVersions: {
+                renderHost: 'test-driver',
+                ffmpeg: 'test-ffmpeg',
+                ffprobe: 'test-ffprobe',
+              },
+            };
+          },
+        },
+      },
+    );
+
+    expect(driverCalls).toEqual(['1:worker-render']);
+    expect(result).toMatchObject({ outputRef: 'render-job-1-aaaaaaaaaaaaaaaa' });
+    expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
+    expect(calls).toEqual(['worker-1:job-1']);
+  });
 });
 
 function renderBundle() {

@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@joy-media/export-core": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
     "@joy-media/render-planner": "workspace:*",
     "@joy-media/renderer-headless": "workspace:*",
     "@joy-media/renderer-pixi": "workspace:*"

@@ -3,6 +3,7 @@ import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
+import type { Writable } from 'node:stream';
 export type ExportPresetId =
   'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
@@ -159,6 +160,11 @@ export interface StreamedRgbaExportResult {
   readonly frames: number;
 }
 
+export interface RenderRgbaFrameStreamOptions {
+  /** Signed 16-bit little-endian stereo PCM at 48 kHz, streamed alongside video frames. */
+  readonly pcmS16leStereo48000?: AsyncIterable<Uint8Array>;
+}
+
 /**
  * Encodes RGBA frames by writing each frame to FFmpeg stdin as it is produced.
  * Callers can render long projects lazily without concatenating every frame
@@ -168,6 +174,7 @@ export async function renderRgbaFrameStream(
   manifest: RenderManifest,
   frames: AsyncIterable<Uint8Array>,
   outputPath: string,
+  options: RenderRgbaFrameStreamOptions = {},
 ): Promise<StreamedRgbaExportResult> {
   const frozen = freezeManifest(manifest);
   const bytesPerFrame = frozen.width * frozen.height * 4;
@@ -176,6 +183,10 @@ export async function renderRgbaFrameStream(
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
   let frameCount = 0;
+  const hasProgramAudio = options.pcmS16leStereo48000 !== undefined;
+  const audioInputArgs = hasProgramAudio
+    ? ['-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:3']
+    : ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo'];
   const child = spawn(
     'ffmpeg',
     [
@@ -193,10 +204,7 @@ export async function renderRgbaFrameStream(
       String(frozen.frameRate),
       '-i',
       'pipe:0',
-      '-f',
-      'lavfi',
-      '-i',
-      'anullsrc=r=48000:cl=stereo',
+      ...audioInputArgs,
       '-shortest',
       '-c:v',
       'libx264',
@@ -208,23 +216,41 @@ export async function renderRgbaFrameStream(
       '+faststart',
       temporaryPath,
     ],
-    { shell: false, stdio: ['pipe', 'ignore', 'pipe'] },
+    {
+      shell: false,
+      stdio: hasProgramAudio ? ['pipe', 'ignore', 'pipe', 'pipe'] : ['pipe', 'ignore', 'pipe'],
+    },
   );
+  if (child.stdin === null || child.stderr === null)
+    throw new Error('ffmpeg streaming pipes are unavailable');
+  const videoInput = child.stdin;
+  const errorOutput = child.stderr;
+  const audioInput =
+    hasProgramAudio && child.stdio[3] !== null && child.stdio[3] !== undefined
+      ? (child.stdio[3] as Writable)
+      : undefined;
+  if (hasProgramAudio && audioInput === undefined)
+    throw new Error('ffmpeg program audio pipe is unavailable');
   const stderr: Buffer[] = [];
-  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+  errorOutput.on('data', (chunk: Buffer) => stderr.push(chunk));
   const closed = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject);
     child.once('close', resolve);
   });
+  const audioWrite =
+    options.pcmS16leStereo48000 === undefined
+      ? Promise.resolve()
+      : writeChunks(options.pcmS16leStereo48000, audioInput!);
   try {
     for await (const frame of frames) {
       if (frame.length !== bytesPerFrame) {
         throw new RangeError(`every RGBA frame must contain exactly ${bytesPerFrame} bytes`);
       }
       frameCount++;
-      if (!child.stdin.write(Buffer.from(frame))) await once(child.stdin, 'drain');
+      if (!videoInput.write(Buffer.from(frame))) await once(videoInput, 'drain');
     }
-    child.stdin.end();
+    videoInput.end();
+    await audioWrite;
     const status = await closed;
     if (frameCount === 0) throw new RangeError('at least one RGBA frame is required for export');
     if (status !== 0) {
@@ -234,9 +260,22 @@ export async function renderRgbaFrameStream(
     return { frames: frameCount };
   } catch (error) {
     if (!child.killed) child.kill();
-    child.stdin.destroy();
+    videoInput.destroy();
+    audioInput?.destroy();
     await closed.catch(() => undefined);
     if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function writeChunks(chunks: AsyncIterable<Uint8Array>, stream: Writable): Promise<void> {
+  try {
+    for await (const chunk of chunks) {
+      if (!stream.write(Buffer.from(chunk))) await once(stream, 'drain');
+    }
+    stream.end();
+  } catch (error) {
+    stream.destroy();
     throw error;
   }
 }

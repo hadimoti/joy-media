@@ -172,6 +172,9 @@ importers:
       '@joy-media/export-core':
         specifier: workspace:*
         version: link:../../packages/export-core
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../../packages/project-schema
       '@joy-media/render-planner':
         specifier: workspace:*
         version: link:../../packages/render-planner
