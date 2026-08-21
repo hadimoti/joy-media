@@ -12,13 +12,14 @@ Changes:
 - Projected API-safe render export `qualityReport` data through Worker completion into the owner job projection.
 - Added bounded editor reconciliation from job projections into export history so report evidence updates `inspection` to pass/warn/block/waived/canceled/failed while preserving quick/legacy semantics.
 - Final review fix: terminal canceled/failed render-job reconciliation now also marks the export-history row `canceled`/`failed` instead of leaving it `running`; completed-without-report remains fail-closed and now terminates the row as `failed`.
+- Final P3 review test: added focused coverage for a `render.export` job that reaches `completed` without a `qualityReport`, asserting both top-level `status: "failed"` and `inspection.state: "failed"` without further production changes.
 - Updated Jobs panel and browser control-plane client to surface render export jobs and report refs.
 - Added focused tests for the delivery gate/panel, reconciliation, render job envelope linking, API quality-report projection, protocol validation, and Worker capabilities.
 
 Verification:
 
 - TDD red check for the final review fix: `pnpm exec vitest run apps/editor-web/src/delivery-gate.test.tsx apps/editor-web/src/export-history.test.ts` failed before the production fix with `expected status: "canceled", received status: "running"` for the reconciled canceled render job.
-- `pnpm exec vitest run apps/editor-web/src/delivery-gate.test.tsx apps/editor-web/src/export-history.test.ts` passed: 12 tests.
+- `pnpm exec vitest run apps/editor-web/src/delivery-gate.test.tsx apps/editor-web/src/export-history.test.ts` passed: 13 tests, including the final P3 completed-without-qualityReport fail-closed regression.
 - `pnpm exec vitest run apps/editor-web/src/control-plane-client.test.ts` passed: 6 tests.
 - `pnpm exec vitest run apps/editor-web/src/control-plane-client.test.ts packages/job-protocol/src/protocol.test.ts apps/worker/src/runtime.test.ts apps/api/src/http-server.test.ts` passed: 31 tests.
 - `pnpm --filter @joy-media/editor-web build` passed. Vite reported only the existing large chunk warning.

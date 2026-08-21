@@ -304,6 +304,32 @@ describe('delivery gate', () => {
       inspection: { state: 'not-requested' },
     });
   });
+
+  it('fails closed when a completed render job has no quality report', () => {
+    const [reconciled] = reconcileDeliveryInspections(
+      [
+        entry({
+          id: 'delivery-missing-report',
+          filename: 'missing-report.mp4',
+          status: 'running',
+          channel: 'verified-delivery',
+          exportJobId: 'render-missing-report',
+          reportRef: 'report-missing-report',
+          inspection: { state: 'queued', reportRef: 'report-missing-report' },
+        }),
+      ],
+      [renderJob('render-missing-report', 'completed')],
+    );
+
+    expect(reconciled).toMatchObject({
+      status: 'failed',
+      inspection: {
+        state: 'failed',
+        error: 'Render job completed without an API-safe quality report.',
+      },
+    });
+    expect(deliveryGate(reconciled!)).toMatchObject({ status: 'failed', canDeliver: false });
+  });
 });
 
 function renderJob(
