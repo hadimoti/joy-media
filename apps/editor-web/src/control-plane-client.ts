@@ -1,4 +1,12 @@
 import { WORKER_PROTOCOL_VERSION, type RenderJobPayload } from '@joy-media/job-protocol';
+import type {
+  ProductionRunBoardSnapshotV1,
+  ProductionRunCheckpointUpdateResultV1,
+  ProductionRunCheckpointUpdateV1,
+  ProductionRunRecordV1,
+  RecordProductionApprovalResponseInput,
+  RecordProductionApprovalResponseResult,
+} from '@joy-media/workflow-engine';
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 
@@ -103,6 +111,21 @@ export interface BrowserAssetRegistration {
   readonly bytes: number;
   readonly descriptor: BrowserMediaDescriptor;
   readonly locations: readonly { readonly kind: 'opfs-cache'; readonly ref: string }[];
+}
+
+export interface BrowserProductionRunListOptions {
+  readonly limit?: number;
+  readonly cursor?: string;
+  readonly state?: ProductionRunRecordV1['state'];
+}
+
+export interface BrowserProductionRunListResponse {
+  readonly snapshot: ProductionRunBoardSnapshotV1;
+  readonly nextCursor?: string;
+}
+
+export interface BrowserProductionRunCancelInput {
+  readonly expectedRevision?: number;
 }
 
 export class BrowserControlPlaneClient {
@@ -413,6 +436,69 @@ export class BrowserControlPlaneClient {
     readonly durationUs: number;
   }> {
     return this.post('/v1/providers/speech/synthesize', input);
+  }
+
+  async createProductionRun(
+    projectId: string,
+    record: ProductionRunRecordV1,
+  ): Promise<ProductionRunRecordV1> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/production-runs`, { record });
+  }
+
+  async productionRuns(
+    projectId: string,
+    options: BrowserProductionRunListOptions = {},
+  ): Promise<BrowserProductionRunListResponse> {
+    const search = new URLSearchParams();
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    if (options.cursor !== undefined) search.set('cursor', options.cursor);
+    if (options.state !== undefined) search.set('state', options.state);
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/production-runs${suffix}`);
+  }
+
+  async productionRun(projectId: string, runId: string): Promise<ProductionRunRecordV1> {
+    return this.get(
+      `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(runId)}`,
+    );
+  }
+
+  async updateProductionRunCheckpoint(
+    projectId: string,
+    update: ProductionRunCheckpointUpdateV1,
+  ): Promise<ProductionRunCheckpointUpdateResultV1> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(
+        update.runId,
+      )}/checkpoint`,
+      update,
+    );
+  }
+
+  async respondToProductionRunApproval(
+    projectId: string,
+    runId: string,
+    response: RecordProductionApprovalResponseInput,
+  ): Promise<RecordProductionApprovalResponseResult> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(
+        runId,
+      )}/approvals/${encodeURIComponent(response.approvalId)}/response`,
+      response,
+    );
+  }
+
+  async cancelProductionRun(
+    projectId: string,
+    runId: string,
+    input: BrowserProductionRunCancelInput = {},
+  ): Promise<ProductionRunRecordV1> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(projectId)}/production-runs/${encodeURIComponent(
+        runId,
+      )}/cancel`,
+      input,
+    );
   }
 
   private async get<T>(path: string): Promise<T> {

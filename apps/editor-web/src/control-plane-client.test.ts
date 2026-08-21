@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { validateWorkerJobV1 } from '@joy-media/job-protocol';
+import { createQueuedProductionRunRecord } from '@joy-media/workflow-engine';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
@@ -190,6 +191,93 @@ describe('BrowserControlPlaneClient', () => {
     ]);
     expect(requests[0]?.body).toContain('"opaqueRef":"asset:clip"');
     expect(requests[0]?.body).not.toContain('C:\\');
+  });
+
+  it('uses authenticated production-run routes with record refs instead of local media payloads', async () => {
+    const requests: Array<{
+      readonly url: string;
+      readonly method?: string;
+      readonly body?: string;
+    }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({
+        url,
+        ...(init?.method === undefined ? {} : { method: init.method }),
+        ...(typeof init?.body === 'string' ? { body: init.body } : {}),
+      });
+      return json(200, {
+        data: {
+          recordVersion: 1,
+          runId: 'run-1',
+          workflowId: 'workflow-1',
+          workflowVersion: '1.0.0',
+          projectRevision: 'project-revision-1',
+          state: 'queued',
+          checkpointRevision: 0,
+          links: {},
+          events: [],
+          approvals: [],
+          nodes: [],
+          createdSeq: 1,
+          updatedSeq: 1,
+          snapshot: { snapshotVersion: 1, counts: {}, runs: [] },
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const record = createQueuedProductionRunRecord({
+        runId: 'run-1',
+        workflowId: 'workflow-1',
+        workflowVersion: '1.0.0',
+        projectRevision: 'project-revision-1',
+        links: { artifactIds: ['asset:clip'] },
+        authority: { principalId: 'owner-1', role: 'owner' },
+      });
+      await client.createProductionRun('project-1', record);
+      await client.productionRuns('project-1', { limit: 25, cursor: 'next', state: 'queued' });
+      await client.productionRun('project-1', 'run-1');
+      await client.updateProductionRunCheckpoint('project-1', {
+        runId: 'run-1',
+        expectedRevision: 0,
+        checkpoint: {
+          checkpointVersion: 1,
+          runId: 'run-1',
+          workflowId: 'workflow-1',
+          workflowVersion: '1.0.0',
+          projectRevision: 'project-revision-1',
+          state: 'succeeded',
+          nodes: {},
+        },
+        authority: { principalId: 'owner-1', role: 'owner' },
+      });
+      await client.respondToProductionRunApproval('project-1', 'run-1', {
+        approvalId: 'approval-1',
+        approved: true,
+        responseRef: 'decision:approval-1',
+        authority: { principalId: 'owner-1', role: 'owner' },
+      });
+      await client.cancelProductionRun('project-1', 'run-1', { expectedRevision: 0 });
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs?limit=25&cursor=next&state=queued',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/checkpoint',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/approvals/approval-1/response',
+      'https://media.joyteam.ir/api/v1/projects/project-1/production-runs/run-1/cancel',
+    ]);
+    expect(requests[0]?.body).toContain('"artifactIds":["asset:clip"]');
+    expect(JSON.stringify(requests)).not.toContain('C:\\');
+    expect(JSON.stringify(requests)).not.toContain('bytesBase64');
   });
 });
 
