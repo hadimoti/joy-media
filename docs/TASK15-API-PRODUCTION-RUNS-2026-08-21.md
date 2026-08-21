@@ -4,7 +4,7 @@ Date: 2026-08-21
 
 Base commit:
 
-- Remaining API findings were addressed from `144ef6f`.
+- Remaining API findings were addressed from `62f226a`.
 
 Scope:
 
@@ -15,6 +15,8 @@ Scope:
   `expectedUpdatedSeq` conflicts.
 - Expanded public-log/payload rejection to block `file://`, absolute Unix/Windows paths, and raw media
   payload strings, including nested base64-like values under arbitrary keys.
+- Closed the remaining alphanumeric-only base64/base64url gap so long raw media blobs such as
+  `'A'.repeat(128)` no longer bypass `SAFE_TOKEN`.
 - Added focused regressions in `apps/api/src/production-runs.test.ts` and
   `apps/api/src/http-server.test.ts`.
 
@@ -25,7 +27,8 @@ Behavior covered:
 - Approval responses now reject same-principal callers that claim a different role than the production
   run's explicit authority.
 - Public production run strings reject `file://` URIs, slash-rooted Unix paths, Windows paths, and
-  base64-like raw media payloads even when they appear under non-forbidden nested keys.
+  base64-like raw media payloads, including long alphanumeric-only variants, even when they appear
+  under non-forbidden nested keys.
 - Exact approval retries return `{ duplicate: true }` even when the caller repeats the original
   `expectedUpdatedSeq`.
 

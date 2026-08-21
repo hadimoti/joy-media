@@ -355,6 +355,21 @@ describe('Postgres production runs', () => {
       }),
     ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
 
+    const withNestedAlnumRawMedia = queuedRecord('run-nested-alnum-raw', {
+      checkpoint: {
+        review: {
+          opaqueToken: 'A'.repeat(128),
+        },
+      },
+    });
+    await expect(
+      controlPlane.createProductionRun(owner, 'project-cancel', {
+        runKey: 'run-key-nested-alnum-raw',
+        record: withNestedAlnumRawMedia,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
+
     const withRawMediaLog = queuedRecord('run-raw-log', {
       nodes: [
         {

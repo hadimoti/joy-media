@@ -671,6 +671,19 @@ describe('control-plane HTTP transport', () => {
       }),
     ).toMatchObject({ status: 409, body: { error: { code: 'PRODUCTION_RUN_INVALID' } } });
     expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs', {
+        runKey: 'run-key-api-nested-alnum-raw',
+        authority,
+        record: queuedRecord('run-api-nested-alnum-raw', authority, {
+          checkpoint: {
+            export: {
+              opaqueToken: 'A'.repeat(128),
+            },
+          },
+        }),
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'PRODUCTION_RUN_INVALID' } } });
+    expect(
       await request(origin, 'POST', '/v1/projects/p/production-runs/run-api-cancel/cancel', {
         authority,
         expectedUpdatedSeq: 1,

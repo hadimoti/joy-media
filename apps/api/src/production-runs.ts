@@ -896,8 +896,8 @@ function looksLikeRawMediaPayload(value: string): boolean {
   const trimmed = value.trim();
   return (
     trimmed.length >= RAW_MEDIA_BASE64_MIN_LENGTH &&
-    /^[A-Za-z0-9+/_-]+={0,2}$/.test(trimmed) &&
-    !SAFE_TOKEN.test(trimmed)
+    trimmed.length % 4 !== 1 &&
+    /^[A-Za-z0-9+/_-]+={0,2}$/.test(trimmed)
   );
 }
 
