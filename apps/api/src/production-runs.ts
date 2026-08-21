@@ -174,6 +174,7 @@ const MAX_RUN_RECORD_BYTES = 1_000_000;
 const MAX_LOGS_PER_NODE = 50;
 const MAX_LOG_MESSAGE_LENGTH = 1_000;
 const MAX_PUBLIC_STRING_LENGTH = 4_096;
+const RAW_MEDIA_BASE64_MIN_LENGTH = 128;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const FORBIDDEN_KEYS = new Set([
@@ -186,7 +187,7 @@ const FORBIDDEN_KEYS = new Set([
   'rawMedia',
 ]);
 const PATH_OR_MEDIA_LEAK =
-  /[A-Za-z]:\\|\\\\|(?:^|\s)\/(?:Users|home|var|tmp|mnt|Volumes)\/|https?:\/\/|data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i;
+  /[A-Za-z]:\\|\\\\|file:\/\/|(?:^|[\s"'([])\/(?:[^/\s]+\/)+[^/\s]+|https?:\/\/|data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i;
 
 export class PostgresProductionRunStore implements ProductionRunStore {
   constructor(private readonly pool: Pool) {}
@@ -307,10 +308,12 @@ export class PostgresProductionRunStore implements ProductionRunStore {
     return this.transaction(async (client) => {
       await ownedProject(client, actor, projectId);
       const current = await loadForUpdate(client, projectId, runId);
+      const replay = applyApprovalResponse(current, input);
       if (
         input.expectedUpdatedSeq !== undefined &&
         current.updatedSeq !== input.expectedUpdatedSeq
       ) {
+        if (replay.ok && replay.duplicate) return { record: current, duplicate: true };
         throw new ControlPlaneError(
           'REVISION_CONFLICT',
           `expected ${String(input.expectedUpdatedSeq)}, found ${String(current.updatedSeq)}`,
@@ -331,7 +334,7 @@ export class PostgresProductionRunStore implements ProductionRunStore {
       ) {
         throw new ControlPlaneError('APPROVAL_EXPIRED', input.approvalId);
       }
-      const applied = applyApprovalResponse(current, input);
+      const applied = replay;
       if (!applied.ok) {
         throw new ControlPlaneError(
           applied.reason === 'approval-not-found' ? 'APPROVAL_NOT_FOUND' : 'APPROVAL_CONFLICT',
@@ -781,6 +784,22 @@ function requireCreationAuthority(
       'production run creation must include explicit matching authority',
     );
   }
+  for (const event of record.events) {
+    if (event.actor !== undefined && !sameAuthority(event.actor, authority)) {
+      throw new ControlPlaneError(
+        'AUTHORITY_REQUIRED',
+        'production run events must not mix authorities',
+      );
+    }
+  }
+  for (const approval of record.approvals) {
+    if (approval.authority !== undefined && !sameAuthority(approval.authority, authority)) {
+      throw new ControlPlaneError(
+        'AUTHORITY_REQUIRED',
+        'production run approvals must not mix authorities',
+      );
+    }
+  }
 }
 
 function validateAuthority(actor: Actor, authority: ProductionRunAuthority): void {
@@ -848,15 +867,24 @@ function validateSafeToken(value: string, label: string): void {
 function validateSafeString(value: string, label: string): void {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_PUBLIC_STRING_LENGTH)
     throw new ControlPlaneError('PRODUCTION_RUN_INVALID', `${label} is invalid`);
-  if (PATH_OR_MEDIA_LEAK.test(value))
+  if (PATH_OR_MEDIA_LEAK.test(value) || looksLikeRawMediaPayload(value))
     throw new ControlPlaneError(
       'PRODUCTION_RUN_INVALID',
-      `${label} must not contain a path or URL`,
+      `${label} must not contain a path, URL, or raw media`,
     );
 }
 
 function sameAuthority(left: ProductionRunAuthority, right: ProductionRunAuthority): boolean {
   return left.principalId === right.principalId && left.role === right.role;
+}
+
+function looksLikeRawMediaPayload(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.length >= RAW_MEDIA_BASE64_MIN_LENGTH &&
+    /^[A-Za-z0-9+/_-]+={0,2}$/.test(trimmed) &&
+    !SAFE_TOKEN.test(trimmed)
+  );
 }
 
 function cloneRecord(record: ProductionRunRecordV1): ProductionRunRecordV1 {

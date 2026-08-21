@@ -81,6 +81,48 @@ describe('Postgres production runs', () => {
       }),
     ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
 
+    const mixedEventAuthority = queuedRecord('run-mixed-event', {
+      events: [
+        queuedRecord('run-mixed-event').events[0]!,
+        {
+          eventVersion: 1,
+          seq: 2,
+          type: 'run.started',
+          state: 'running',
+          actor: { principalId: 'reviewer-2', role: 'reviewer' },
+          checkpointRevision: 0,
+          message: 'started elsewhere',
+        },
+      ],
+      updatedSeq: 2,
+    });
+    await expect(
+      restarted.createProductionRun(owner, 'project-1', {
+        runKey: 'run-key-mixed-event',
+        record: mixedEventAuthority,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'AUTHORITY_REQUIRED' });
+
+    const mixedApprovalAuthority = parkedRecord('run-mixed-approval', 'approval-mixed');
+    const approval = mixedApprovalAuthority.approvals[0];
+    if (approval === undefined) expect.unreachable('parked fixture should include an approval');
+    await expect(
+      restarted.createProductionRun(owner, 'project-1', {
+        runKey: 'run-key-mixed-approval',
+        record: {
+          ...mixedApprovalAuthority,
+          approvals: [
+            {
+              ...approval,
+              authority: { principalId: 'reviewer-2', role: 'reviewer' },
+            },
+          ],
+        },
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'AUTHORITY_REQUIRED' });
+
     await pool.end();
   });
 
@@ -152,7 +194,7 @@ describe('Postgres production runs', () => {
         expectedUpdatedSeq: 2,
         now: 501,
       }),
-    ).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
+    ).resolves.toMatchObject({ duplicate: true, record: { updatedSeq: 3 } });
     await expect(
       controlPlane.respondToProductionApproval(owner, 'project-approval', 'run-approval', {
         approvalId: 'approval-1',
@@ -229,6 +271,54 @@ describe('Postgres production runs', () => {
       }),
     ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
 
+    const withFileUrl = queuedRecord('run-file-url', {
+      nodes: [
+        {
+          ...nodeProjection('node-1'),
+          logs: [
+            {
+              seq: 1,
+              nodeId: 'node-1',
+              attempt: 1,
+              level: 'info',
+              message: 'file:///Users/private/final.mp4',
+            },
+          ],
+        },
+      ],
+    });
+    await expect(
+      controlPlane.createProductionRun(owner, 'project-cancel', {
+        runKey: 'run-key-file-url',
+        record: withFileUrl,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
+
+    const withUnixPath = queuedRecord('run-unix-path', {
+      nodes: [
+        {
+          ...nodeProjection('node-1'),
+          logs: [
+            {
+              seq: 1,
+              nodeId: 'node-1',
+              attempt: 1,
+              level: 'info',
+              message: '/private/tmp/final.mp4',
+            },
+          ],
+        },
+      ],
+    });
+    await expect(
+      controlPlane.createProductionRun(owner, 'project-cancel', {
+        runKey: 'run-key-unix-path',
+        record: withUnixPath,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
+
     const withRawMedia = {
       ...queuedRecord('run-raw'),
       checkpoint: { mediaBase64: 'AAAA' },
@@ -237,6 +327,30 @@ describe('Postgres production runs', () => {
       controlPlane.createProductionRun(owner, 'project-cancel', {
         runKey: 'run-key-raw',
         record: withRawMedia,
+        authority,
+      }),
+    ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });
+
+    const withRawMediaLog = queuedRecord('run-raw-log', {
+      nodes: [
+        {
+          ...nodeProjection('node-1'),
+          logs: [
+            {
+              seq: 1,
+              nodeId: 'node-1',
+              attempt: 1,
+              level: 'info',
+              message: 'QUJD/'.repeat(32),
+            },
+          ],
+        },
+      ],
+    });
+    await expect(
+      controlPlane.createProductionRun(owner, 'project-cancel', {
+        runKey: 'run-key-raw-log',
+        record: withRawMediaLog,
         authority,
       }),
     ).rejects.toMatchObject({ code: 'PRODUCTION_RUN_INVALID' });

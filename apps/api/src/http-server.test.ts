@@ -565,6 +565,29 @@ describe('control-plane HTTP transport', () => {
       },
     });
     expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/projects/p/production-runs/run-api/approvals/approval-api/respond',
+        {
+          approved: true,
+          responseRef: 'response-api',
+          authority,
+          expectedUpdatedSeq: 2,
+        },
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          duplicate: true,
+          record: {
+            updatedSeq: 3,
+          },
+        },
+      },
+    });
+    expect(
       await request(origin, 'POST', '/v1/projects/p/production-runs/run-api/cancel', {
         authority,
         expectedUpdatedSeq: 2,
@@ -577,6 +600,51 @@ describe('control-plane HTTP transport', () => {
       authority,
       record: cancelRecord,
     });
+    const mixedAuthorityRecord = parkedRecord('run-api-mixed', 'approval-api-mixed', authority);
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs', {
+        runKey: 'run-key-api-mixed',
+        authority,
+        record: {
+          ...mixedAuthorityRecord,
+          approvals: [
+            {
+              ...mixedAuthorityRecord.approvals[0]!,
+              authority: { principalId: 'reviewer-2', role: 'reviewer' },
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'AUTHORITY_REQUIRED' } } });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/production-runs', {
+        runKey: 'run-key-api-file',
+        authority,
+        record: queuedRecord('run-api-file', authority, {
+          nodes: [
+            {
+              nodeId: 'node-1',
+              type: 'render.review',
+              category: 'review',
+              state: 'waiting_for_input',
+              attempts: 1,
+              deterministic: false,
+              reused: false,
+              logs: [
+                {
+                  seq: 1,
+                  nodeId: 'node-1',
+                  attempt: 1,
+                  level: 'info',
+                  message: 'file:///private/final.mp4',
+                },
+              ],
+              artifactIds: [],
+            },
+          ],
+        }),
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'PRODUCTION_RUN_INVALID' } } });
     expect(
       await request(origin, 'POST', '/v1/projects/p/production-runs/run-api-cancel/cancel', {
         authority,
