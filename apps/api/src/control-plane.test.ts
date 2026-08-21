@@ -49,6 +49,71 @@ describe('local control plane', () => {
     ).toThrow(expect.objectContaining({ code: 'RESULT_INVALID' }));
   });
 
+  it('round-trips validated typed Worker jobs through enqueue, lease, and completion receipts', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    api.createProject(owner, 'p', 'Project');
+    api.pairWorker(owner, 'w');
+    api.helloWorker('w', ['render.inspect'], [], 100);
+    const first = api.enqueue(owner, 'render-inspect-1', 'p', 'render.inspect', 101, undefined, {
+      protocolVersion: 1,
+      jobId: 'render-inspect-1',
+      type: 'render.inspect',
+      payload: {
+        projectRef: 'project-ref-1',
+        compositionId: 'composition-main',
+        presetId: 'inspect',
+        reportRef: 'report-render-inspect-1',
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'idem-render-inspect-1',
+      maxAttempts: 3,
+    });
+    const duplicate = api.enqueue(owner, 'render-inspect-1', 'p', 'render.export', 102);
+    expect(duplicate).toEqual(first);
+    expect(api.lease('w', 103)).toMatchObject({
+      id: 'render-inspect-1',
+      type: 'render.inspect',
+      payload: {
+        projectRef: 'project-ref-1',
+        compositionId: 'composition-main',
+        presetId: 'inspect',
+        reportRef: 'report-render-inspect-1',
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'idem-render-inspect-1',
+      maxAttempts: 3,
+    });
+    expect(
+      api.complete('w', 'render-inspect-1', 104, {
+        kind: 'render.inspect',
+        reportRef: 'report-render-inspect-1',
+        findings: 2,
+      }).derivative,
+    ).toMatchObject({
+      kind: 'render.inspect',
+      reportRef: 'report-render-inspect-1',
+      findings: 2,
+      resultRef: 'derivative:render-inspect-1',
+    });
+    expect(() =>
+      api.enqueue(owner, 'bad-render', 'p', 'render.inspect', 105, undefined, {
+        protocolVersion: 1,
+        jobId: 'bad-render',
+        type: 'render.inspect',
+        payload: {
+          projectRef: 'C:\\private\\project.json',
+          compositionId: 'composition-main',
+          presetId: 'inspect',
+          reportRef: 'report-bad',
+        },
+        requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+        idempotencyKey: 'idem-bad-render',
+        maxAttempts: 1,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'WORKER_JOB_INVALID' }));
+  });
+
   it('records opaque asset and local-derivative metadata without accepting paths or cloud claims', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };

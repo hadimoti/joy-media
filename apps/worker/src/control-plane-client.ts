@@ -12,6 +12,13 @@ export interface LeasedJob {
   readonly projectId: string;
   readonly type: string;
   readonly assetId?: string;
+  readonly payload?: Record<string, unknown>;
+  readonly requirements?: {
+    readonly capabilities: readonly string[];
+    readonly privacy: string;
+  };
+  readonly idempotencyKey?: string;
+  readonly maxAttempts?: number;
 }
 export interface WorkerJobResult {
   readonly kind:
@@ -20,13 +27,15 @@ export interface WorkerJobResult {
     | 'audio.ml-denoise'
     | 'render.export'
     | 'render.inspect'
-    | 'text'
-    | 'image'
-    | 'video';
+    | 'text.lm-studio'
+    | 'text.openrouter'
+    | 'video.runway'
+    | 'edit.higgsfield';
   readonly assetId?: string;
   readonly sha256?: string;
   readonly bytes?: number;
   readonly localRef?: string;
+  readonly resultRef?: string;
   readonly reportRef?: string;
   readonly outputRef?: string;
   readonly findings?: number;
@@ -90,11 +99,28 @@ export class WorkerControlPlaneClient {
     if (result === null) return undefined;
     const assetId =
       isRecord(result) && typeof result.assetId === 'string' ? result.assetId : undefined;
+    const payload = isRecord(result) && isRecord(result.payload) ? result.payload : undefined;
+    const requirements =
+      isRecord(result) && isRequirements(result.requirements) ? result.requirements : undefined;
+    const idempotencyKey =
+      isRecord(result) && typeof result.idempotencyKey === 'string'
+        ? result.idempotencyKey
+        : undefined;
+    const maxAttempts =
+      isRecord(result) &&
+      typeof result.maxAttempts === 'number' &&
+      Number.isSafeInteger(result.maxAttempts)
+        ? result.maxAttempts
+        : undefined;
     return {
       id: requiredString(result, 'id'),
       projectId: requiredString(result, 'projectId'),
       type: requiredString(result, 'type'),
       ...(assetId === undefined ? {} : { assetId }),
+      ...(payload === undefined ? {} : { payload }),
+      ...(requirements === undefined ? {} : { requirements }),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      ...(maxAttempts === undefined ? {} : { maxAttempts }),
     };
   }
 
@@ -235,4 +261,13 @@ function requiredNumber(value: unknown, field: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isRequirements(value: unknown): value is LeasedJob['requirements'] {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.capabilities) &&
+    value.capabilities.every((item) => typeof item === 'string') &&
+    typeof value.privacy === 'string'
+  );
 }

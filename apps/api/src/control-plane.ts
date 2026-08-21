@@ -1,9 +1,12 @@
 import {
   isWorkerJobType,
+  validateWorkerJobV1,
   validateWorkerReceiptForJob,
   workerCanRunJob,
   WorkerProtocolError,
+  WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
+import type { WorkerJobV1 } from '@joy-media/job-protocol';
 
 export interface Actor {
   readonly id: string;
@@ -115,6 +118,10 @@ export interface Job {
   readonly projectId: string;
   readonly type: string;
   readonly assetId?: string;
+  readonly payload?: WorkerJobV1['payload'];
+  readonly requirements?: WorkerJobV1['requirements'];
+  readonly idempotencyKey?: string;
+  readonly maxAttempts?: number;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly leaseOwner?: string;
   readonly leaseExpiresAt?: number;
@@ -168,10 +175,32 @@ export interface RenderInspectReceipt {
   readonly reportRef: string;
   readonly findings: number;
 }
+export interface TextAiWorkerReceipt {
+  readonly kind: 'text.lm-studio' | 'text.openrouter';
+  readonly resultRef: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly model?: string;
+}
+export interface MediaAiWorkerReceipt {
+  readonly kind: 'video.runway' | 'edit.higgsfield';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
+  };
+  readonly model?: string;
+}
 export type WorkerResultReceipt =
   | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
   | LocalGpuWorkerReceipt
+  | TextAiWorkerReceipt
+  | MediaAiWorkerReceipt
   | RenderExportReceipt
   | RenderInspectReceipt;
 /**
@@ -326,6 +355,7 @@ export interface ControlPlane {
     type: string,
     now?: number,
     assetId?: string,
+    workerJob?: WorkerJobV1,
   ): Job | Promise<Job>;
   enqueueAssetThumbnail(
     actor: Actor,
@@ -735,12 +765,14 @@ export class LocalControlPlane implements ControlPlane {
     type: string,
     now = Date.now(),
     assetId?: string,
+    workerJob?: WorkerJobV1,
   ): Job {
     this.project(actor, projectId);
     if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
       throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
     const existing = this.#jobs.get(id);
     if (existing !== undefined) return existing;
+    const typedJob = this.workerJob(id, projectId, type, assetId, workerJob);
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',
@@ -758,6 +790,7 @@ export class LocalControlPlane implements ControlPlane {
       projectId,
       type,
       ...(assetId !== undefined ? { assetId } : {}),
+      ...typedJobFields(typedJob),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -784,6 +817,17 @@ export class LocalControlPlane implements ControlPlane {
       projectId,
       type: 'asset.thumbnail',
       assetId,
+      ...typedJobFields(
+        validateWorkerJobV1({
+          protocolVersion: WORKER_PROTOCOL_VERSION,
+          jobId: id,
+          type: 'asset.thumbnail',
+          payload: { assetId, maxEdgePx: 720 },
+          requirements: { capabilities: ['asset.thumbnail'], privacy: 'local-only' },
+          idempotencyKey: id,
+          maxAttempts: 3,
+        }),
+      ),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -959,6 +1003,28 @@ export class LocalControlPlane implements ControlPlane {
   private event(jobId: string, type: string, at: number): void {
     this.#events.push({ cursor: this.#events.length + 1, jobId, type, at });
   }
+
+  private workerJob(
+    id: string,
+    projectId: string,
+    type: string,
+    assetId?: string,
+    workerJob?: WorkerJobV1,
+  ): WorkerJobV1 | undefined {
+    if (!isWorkerJobType(type)) return undefined;
+    if (workerJob !== undefined) {
+      if (workerJob.jobId !== id || workerJob.type !== type)
+        throw new ControlPlaneError('WORKER_JOB_INVALID', 'Worker job envelope does not match');
+      try {
+        return validateWorkerJobV1(workerJob);
+      } catch (error) {
+        if (error instanceof WorkerProtocolError)
+          throw new ControlPlaneError('WORKER_JOB_INVALID', error.message);
+        throw error;
+      }
+    }
+    return legacyWorkerJob(id, projectId, type, assetId);
+  }
 }
 
 function isFixtureReceipt(
@@ -1002,6 +1068,31 @@ function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is Loc
   );
 }
 
+function isTextAiReceipt(value: WorkerResultReceipt | undefined): value is TextAiWorkerReceipt {
+  return (
+    (value?.kind === 'text.lm-studio' || value?.kind === 'text.openrouter') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.resultRef) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    (value.model === undefined || typeof value.model === 'string')
+  );
+}
+
+function isMediaAiReceipt(value: WorkerResultReceipt | undefined): value is MediaAiWorkerReceipt {
+  return (
+    (value?.kind === 'video.runway' || value?.kind === 'edit.higgsfield') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^ai-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0 &&
+    (value.model === undefined || typeof value.model === 'string')
+  );
+}
+
 function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'asset.thumbnail') {
     return (
@@ -1014,6 +1105,85 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
   if (isWorkerJobType(job.type)) return workerCanRunJob(worker.capabilities, job.type);
   return job.type === 'fixture.thumbnail';
+}
+
+function legacyWorkerJob(
+  id: string,
+  projectId: string,
+  type: string,
+  assetId?: string,
+): WorkerJobV1 | undefined {
+  if (!isWorkerJobType(type)) return undefined;
+  if (type === 'asset.thumbnail') {
+    if (assetId === undefined)
+      throw new ControlPlaneError(
+        'ASSET_JOB_INVALID',
+        'asset thumbnail requires an opaque asset ID',
+      );
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: { assetId, maxEdgePx: 720 },
+      requirements: { capabilities: ['asset.thumbnail'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'render.export' || type === 'render.inspect') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectRef: projectId,
+        compositionId: id,
+        presetId: 'default',
+        reportRef: `report-${id}`,
+      },
+      requirements: { capabilities: [type], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  return validateWorkerJobV1({
+    protocolVersion: WORKER_PROTOCOL_VERSION,
+    jobId: id,
+    type,
+    payload: {
+      prompt: '',
+      ...(assetId === undefined ? {} : { imageAssetId: assetId }),
+    },
+    requirements: {
+      capabilities: [type],
+      privacy:
+        type === 'text.openrouter' || type === 'video.runway' || type === 'edit.higgsfield'
+          ? 'remote-api'
+          : 'local-only',
+    },
+    idempotencyKey: id,
+    maxAttempts: 3,
+  });
+}
+
+function typedJobFields(
+  workerJob: WorkerJobV1 | undefined,
+): Pick<Job, 'payload' | 'requirements' | 'idempotencyKey' | 'maxAttempts'> {
+  return workerJob === undefined
+    ? {}
+    : {
+        payload: cloneJson(workerJob.payload) as WorkerJobV1['payload'],
+        requirements: {
+          capabilities: [...workerJob.requirements.capabilities],
+          privacy: workerJob.requirements.privacy,
+        },
+        idempotencyKey: workerJob.idempotencyKey,
+        maxAttempts: workerJob.maxAttempts,
+      };
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function validatedOpaqueIds(values: readonly string[]): readonly string[] {

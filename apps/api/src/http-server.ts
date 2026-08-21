@@ -19,6 +19,8 @@ import {
   type MistralProviderRegistry,
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
+import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
+import type { WorkerJobV1 } from '@joy-media/job-protocol';
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -719,29 +721,35 @@ async function route(
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
     const type = requiredString(body, 'type');
+    const id = requiredString(body, 'id');
+    const projectId = decodeURIComponent(jobMatch[1]!);
     respondJson(response, 201, {
       data:
         type === 'asset.thumbnail'
           ? await options.controlPlane.enqueueAssetThumbnail(
               actor,
-              requiredString(body, 'id'),
-              decodeURIComponent(jobMatch[1]!),
+              id,
+              projectId,
               requiredString(body, 'assetId'),
             )
           : type === 'image.comfy' || type === 'audio.ml-denoise'
             ? await options.controlPlane.enqueue(
                 actor,
-                requiredString(body, 'id'),
-                decodeURIComponent(jobMatch[1]!),
+                id,
+                projectId,
                 type,
                 Date.now(),
                 requiredString(body, 'assetId'),
+                workerJobEnvelope(projectId, body),
               )
             : await options.controlPlane.enqueue(
                 actor,
-                requiredString(body, 'id'),
-                decodeURIComponent(jobMatch[1]!),
+                id,
+                projectId,
                 type,
+                Date.now(),
+                undefined,
+                workerJobEnvelope(projectId, body),
               ),
     });
     return;
@@ -905,6 +913,29 @@ function optionalStringArray(
 ): readonly string[] | undefined {
   if (body[field] === undefined) return undefined;
   return requiredStringArray(body, field);
+}
+
+function workerJobEnvelope(
+  projectId: string,
+  body: Record<string, unknown>,
+): WorkerJobV1 | undefined {
+  if (
+    body.payload === undefined &&
+    body.requirements === undefined &&
+    body.idempotencyKey === undefined &&
+    body.maxAttempts === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    protocolVersion: WORKER_PROTOCOL_VERSION,
+    jobId: requiredString(body, 'id'),
+    type: requiredString(body, 'type') as WorkerJobV1['type'],
+    payload: requiredObject(body, 'payload') as WorkerJobV1['payload'],
+    requirements: requiredObject(body, 'requirements') as WorkerJobV1['requirements'],
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    maxAttempts: requiredPositiveInteger(body, 'maxAttempts'),
+  } as WorkerJobV1;
 }
 
 function optionalWorkerResult(body: Record<string, unknown>):

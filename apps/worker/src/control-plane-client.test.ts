@@ -114,6 +114,48 @@ describe('WorkerControlPlaneClient', () => {
     expect(session).toBeUndefined();
   });
 
+  it('preserves typed job payload metadata from leased jobs', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async () =>
+        response(200, {
+          data: {
+            id: 'render-export-1',
+            projectId: 'project-1',
+            type: 'render.export',
+            payload: {
+              projectRef: 'project-ref-1',
+              compositionId: 'composition-main',
+              presetId: 'reels-1080',
+              reportRef: 'report-render-export-1',
+            },
+            requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+            idempotencyKey: 'idem-render-export-1',
+            maxAttempts: 5,
+          },
+        }),
+    });
+
+    await expect(client.lease()).resolves.toMatchObject({
+      id: 'render-export-1',
+      payload: {
+        projectRef: 'project-ref-1',
+        compositionId: 'composition-main',
+        presetId: 'reels-1080',
+        reportRef: 'report-render-export-1',
+      },
+      requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+      idempotencyKey: 'idem-render-export-1',
+      maxAttempts: 5,
+    });
+  });
+
   it('pairs and completes a job over the real versioned HTTP transport', async () => {
     const server = createControlPlaneHttpServer({
       controlPlane: new LocalControlPlane(),

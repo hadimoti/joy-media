@@ -398,6 +398,93 @@ describe('control-plane HTTP transport', () => {
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
   });
+
+  it('accepts only typed Worker job payloads and leases them back over HTTP', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/w/pair', { pairingCode: 'pairing-code' });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'w',
+      pairingCode: 'pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/w/hello',
+      { capabilities: ['render.export'] },
+      workerToken,
+    );
+
+    const typedJob = {
+      id: 'render-export-1',
+      type: 'render.export',
+      payload: {
+        projectRef: 'project-ref-1',
+        compositionId: 'composition-main',
+        presetId: 'reels-1080',
+        reportRef: 'report-render-export-1',
+      },
+      requirements: { capabilities: ['render.export'], privacy: 'local-only' },
+      idempotencyKey: 'idem-render-export-1',
+      maxAttempts: 5,
+    };
+    expect(await request(origin, 'POST', '/v1/projects/p/jobs', typedJob)).toMatchObject({
+      status: 201,
+      body: { data: typedJob },
+    });
+    expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          id: 'render-export-1',
+          payload: typedJob.payload,
+          requirements: typedJob.requirements,
+          idempotencyKey: 'idem-render-export-1',
+          maxAttempts: 5,
+        },
+      },
+    });
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/render-export-1/complete',
+        {
+          result: {
+            kind: 'render.export',
+            reportRef: 'report-render-export-1',
+            outputRef: 'output-render-export-1',
+            sha256: 'a'.repeat(64),
+            bytes: 2048,
+          },
+        },
+        workerToken,
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          derivative: {
+            kind: 'render.export',
+            reportRef: 'report-render-export-1',
+            outputRef: 'output-render-export-1',
+          },
+        },
+      },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/jobs', {
+        ...typedJob,
+        id: 'bad-render-export',
+        payload: { ...typedJob.payload, projectRef: 'C:\\private\\project.json' },
+      }),
+    ).toMatchObject({ status: 409, body: { error: { code: 'WORKER_JOB_INVALID' } } });
+  });
 });
 
 async function start(

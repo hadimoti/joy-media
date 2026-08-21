@@ -1,9 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
 import {
   isWorkerJobType,
+  validateWorkerJobV1,
   validateWorkerReceiptForJob,
   workerCanRunJob,
+  WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
+import type { WorkerJobV1 } from '@joy-media/job-protocol';
 import {
   ControlPlaneError,
   type AssetLocationRecord,
@@ -65,6 +68,10 @@ interface JobRow {
   readonly project_id: string;
   readonly type: string;
   readonly asset_id: string | null;
+  readonly job_payload: unknown;
+  readonly job_requirements: unknown;
+  readonly idempotency_key: string | null;
+  readonly max_attempts: number | null;
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
@@ -81,6 +88,7 @@ interface JobRow {
   readonly result_mime_type: string | null;
   readonly result_width: number | null;
   readonly result_height: number | null;
+  readonly result_receipt: unknown;
   readonly error: string | null;
 }
 
@@ -608,6 +616,7 @@ export class PostgresControlPlane implements ControlPlane {
     type: string,
     now = Date.now(),
     assetId?: string,
+    workerJob?: WorkerJobV1,
   ): Promise<Job> {
     if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
       throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
@@ -620,6 +629,7 @@ export class PostgresControlPlane implements ControlPlane {
       await this.project(actor, projectId, client);
       const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
       if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
+      const typedJob = workerJobFor(id, projectId, type, assetId, workerJob);
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
         throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
@@ -627,9 +637,21 @@ export class PostgresControlPlane implements ControlPlane {
       }
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, $3, $4, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, type, assetId ?? null],
+          `INSERT INTO jobs
+             (id, project_id, type, asset_id, job_payload, job_requirements, idempotency_key,
+              max_attempts, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, 'queued', NULL, NULL)
+           RETURNING *`,
+          [
+            id,
+            projectId,
+            type,
+            assetId ?? null,
+            typedJob === undefined ? null : JSON.stringify(typedJob.payload),
+            typedJob === undefined ? null : JSON.stringify(typedJob.requirements),
+            typedJob?.idempotencyKey ?? null,
+            typedJob?.maxAttempts ?? null,
+          ],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -651,11 +673,24 @@ export class PostgresControlPlane implements ControlPlane {
       await this.asset(actor, projectId, assetId, client);
       const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
       if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
+      const typedJob = workerJobFor(id, projectId, 'asset.thumbnail', assetId);
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, 'asset.thumbnail', $3, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, assetId],
+          `INSERT INTO jobs
+             (id, project_id, type, asset_id, job_payload, job_requirements, idempotency_key,
+              max_attempts, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, 'asset.thumbnail', $3, $4::jsonb, $5::jsonb, $6, $7,
+              'queued', NULL, NULL)
+           RETURNING *`,
+          [
+            id,
+            projectId,
+            assetId,
+            JSON.stringify(typedJob!.payload),
+            JSON.stringify(typedJob!.requirements),
+            typedJob!.idempotencyKey,
+            typedJob!.maxAttempts,
+          ],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -765,20 +800,24 @@ export class PostgresControlPlane implements ControlPlane {
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
-    const storesAsset = isThumb || isGpu;
+    const isMediaAi = receipt?.kind === 'video.runway' || receipt?.kind === 'edit.higgsfield';
+    const storesAsset = isThumb || isGpu || isMediaAi;
     const storesHashAndBytes = receipt !== undefined && 'sha256' in receipt && 'bytes' in receipt;
+    const storesDescriptor = storesAsset && receipt !== undefined && 'descriptor' in receipt;
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
              result_kind = $4, result_sha256 = $5, result_bytes = $6,
              result_ref = $7, result_worker_ref = $8, result_verified_at = $9,
              result_asset_id = $10, result_local_ref = $11, result_mime_type = $12,
-             result_width = $13, result_height = $14
+             result_width = $13, result_height = $14, result_receipt = $15::jsonb
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
            AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
+           AND (type NOT IN ('render.export', 'render.inspect', 'text.lm-studio', 'text.openrouter',
+                             'video.runway', 'edit.higgsfield') OR type = $4)
          RETURNING *`,
         [
           jobId,
@@ -790,19 +829,20 @@ export class PostgresControlPlane implements ControlPlane {
           receipt === undefined ? null : `derivative:${jobId}`,
           receipt === undefined ? null : workerId,
           receipt === undefined ? null : new Date(now),
-          storesAsset && receipt !== undefined ? receipt.assetId : null,
-          storesAsset && receipt !== undefined ? receipt.localRef : null,
-          storesAsset && receipt !== undefined ? receipt.descriptor.mimeType : null,
+          storesAsset && receipt !== undefined && 'assetId' in receipt ? receipt.assetId : null,
+          storesAsset && receipt !== undefined && 'localRef' in receipt ? receipt.localRef : null,
+          storesDescriptor ? receipt.descriptor.mimeType : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.width
-            : isGpu && receipt !== undefined
+            : (isGpu || isMediaAi) && storesDescriptor
               ? (receipt.descriptor.width ?? null)
               : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.height
-            : isGpu && receipt !== undefined
+            : (isGpu || isMediaAi) && storesDescriptor
               ? (receipt.descriptor.height ?? null)
               : null,
+          receipt === undefined ? null : JSON.stringify(receipt),
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -857,7 +897,7 @@ export class PostgresControlPlane implements ControlPlane {
              result_sha256 = NULL, result_bytes = NULL, result_ref = NULL,
              result_worker_ref = NULL, result_verified_at = NULL, result_asset_id = NULL,
              result_local_ref = NULL, result_mime_type = NULL, result_width = NULL,
-             result_height = NULL, error = NULL
+             result_height = NULL, result_receipt = NULL, error = NULL
          WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
@@ -992,14 +1032,13 @@ function jobOf(row: JobRow): Job {
     projectId: row.project_id,
     type: row.type,
     ...(row.asset_id === null ? {} : { assetId: row.asset_id }),
+    ...typedJobFieldsOf(row),
     state: row.state,
     progress: row.progress,
     cancelRequested: row.cancel_requested,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
     ...(row.result_kind === null ||
-    row.result_sha256 === null ||
-    row.result_bytes === null ||
     row.result_ref === null ||
     row.result_worker_ref === null ||
     row.result_verified_at === null
@@ -1012,15 +1051,24 @@ function jobOf(row: JobRow): Job {
 }
 
 function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
-  const base = {
+  const base: {
+    readonly jobId: string;
+    readonly resultRef: string;
+    readonly workerRef: string;
+    readonly verifiedAt: number;
+  } = {
     jobId: row.id,
-    sha256: row.result_sha256!,
-    bytes: row.result_bytes!,
     resultRef: row.result_ref!,
     workerRef: row.result_worker_ref!,
     verifiedAt: row.result_verified_at!.getTime(),
   };
-  if (row.result_kind === 'fixture.thumbnail') return { ...base, kind: row.result_kind };
+  if (row.result_receipt !== null && row.result_receipt !== undefined) {
+    const receipt = workerReceiptOf(row.result_receipt);
+    return { ...base, ...receipt };
+  }
+  const hashAndBytes = resultHashAndBytesOf(row);
+  if (row.result_kind === 'fixture.thumbnail')
+    return { ...base, ...hashAndBytes, kind: row.result_kind };
   if (
     row.result_kind === 'asset.thumbnail' &&
     row.result_asset_id !== null &&
@@ -1031,6 +1079,7 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
   ) {
     return {
       ...base,
+      ...hashAndBytes,
       kind: row.result_kind,
       assetId: row.result_asset_id,
       localRef: row.result_local_ref,
@@ -1045,6 +1094,7 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
   ) {
     return {
       ...base,
+      ...hashAndBytes,
       kind: row.result_kind,
       assetId: row.result_asset_id,
       localRef: row.result_local_ref,
@@ -1056,6 +1106,42 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
     };
   }
   throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
+}
+
+function resultHashAndBytesOf(row: JobRow): { readonly sha256: string; readonly bytes: number } {
+  if (row.result_sha256 === null || row.result_bytes === null)
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
+  return { sha256: row.result_sha256, bytes: row.result_bytes };
+}
+
+function typedJobFieldsOf(
+  row: JobRow,
+): Pick<Job, 'payload' | 'requirements' | 'idempotencyKey' | 'maxAttempts'> {
+  if (
+    row.job_payload === null ||
+    row.job_payload === undefined ||
+    row.job_requirements === null ||
+    row.job_requirements === undefined ||
+    row.idempotency_key === null ||
+    row.max_attempts === null
+  ) {
+    return {};
+  }
+  return {
+    payload: jsonObject(row.job_payload) as WorkerJobV1['payload'],
+    requirements: jsonObject(row.job_requirements) as WorkerJobV1['requirements'],
+    idempotencyKey: row.idempotency_key,
+    maxAttempts: row.max_attempts,
+  };
+}
+
+function workerReceiptOf(value: unknown): WorkerResultReceipt {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
+  const receipt = value as WorkerResultReceipt;
+  if (!isWorkerReceipt(receipt))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored Worker result is invalid');
+  return receipt;
 }
 
 function mediaAssetOf(row: MediaAssetRow): MediaAssetRecord {
@@ -1129,6 +1215,8 @@ function isWorkerReceipt(value: WorkerResultReceipt): boolean {
     isFixtureReceipt(value) ||
     isAssetThumbnailReceipt(value) ||
     isLocalGpuReceipt(value) ||
+    isTextAiReceipt(value) ||
+    isMediaAiReceipt(value) ||
     isRenderReceipt(value)
   );
 }
@@ -1162,6 +1250,35 @@ function isLocalGpuReceipt(value: WorkerResultReceipt): value is LocalGpuWorkerR
   );
 }
 
+function isTextAiReceipt(
+  value: WorkerResultReceipt,
+): value is Extract<WorkerResultReceipt, { readonly kind: 'text.lm-studio' | 'text.openrouter' }> {
+  return (
+    (value.kind === 'text.lm-studio' || value.kind === 'text.openrouter') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.resultRef) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    (value.model === undefined || typeof value.model === 'string')
+  );
+}
+
+function isMediaAiReceipt(
+  value: WorkerResultReceipt,
+): value is Extract<WorkerResultReceipt, { readonly kind: 'video.runway' | 'edit.higgsfield' }> {
+  return (
+    (value.kind === 'video.runway' || value.kind === 'edit.higgsfield') &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^ai-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
+    typeof value.descriptor.mimeType === 'string' &&
+    value.descriptor.mimeType.length > 0 &&
+    (value.model === undefined || typeof value.model === 'string')
+  );
+}
+
 function isRenderReceipt(value: WorkerResultReceipt): boolean {
   if (value.kind === 'render.export') {
     return (
@@ -1188,6 +1305,85 @@ function normalizeOpaqueAssetIds(values: readonly string[]): readonly string[] {
     throw new ControlPlaneError('WORKER_ASSETS_INVALID', 'Worker asset IDs must be opaque');
   }
   return [...new Set(values)].sort();
+}
+
+function workerJobFor(
+  id: string,
+  projectId: string,
+  type: string,
+  assetId?: string,
+  workerJob?: WorkerJobV1,
+): WorkerJobV1 | undefined {
+  if (!isWorkerJobType(type)) return undefined;
+  if (workerJob !== undefined) {
+    if (workerJob.jobId !== id || workerJob.type !== type)
+      throw new ControlPlaneError('WORKER_JOB_INVALID', 'Worker job envelope does not match');
+    try {
+      return validateWorkerJobV1(workerJob);
+    } catch {
+      throw new ControlPlaneError('WORKER_JOB_INVALID', 'Worker job envelope is invalid');
+    }
+  }
+  return legacyWorkerJob(id, projectId, type, assetId);
+}
+
+function legacyWorkerJob(
+  id: string,
+  projectId: string,
+  type: string,
+  assetId?: string,
+): WorkerJobV1 | undefined {
+  if (!isWorkerJobType(type)) return undefined;
+  if (type === 'asset.thumbnail') {
+    if (assetId === undefined)
+      throw new ControlPlaneError(
+        'ASSET_JOB_INVALID',
+        'asset thumbnail requires an opaque asset ID',
+      );
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: { assetId, maxEdgePx: 720 },
+      requirements: { capabilities: ['asset.thumbnail'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'render.export' || type === 'render.inspect') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectRef: projectId,
+        compositionId: id,
+        presetId: 'default',
+        reportRef: `report-${id}`,
+      },
+      requirements: { capabilities: [type], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  return validateWorkerJobV1({
+    protocolVersion: WORKER_PROTOCOL_VERSION,
+    jobId: id,
+    type,
+    payload: {
+      prompt: '',
+      ...(assetId === undefined ? {} : { imageAssetId: assetId }),
+    },
+    requirements: {
+      capabilities: [type],
+      privacy:
+        type === 'text.openrouter' || type === 'video.runway' || type === 'edit.higgsfield'
+          ? 'remote-api'
+          : 'local-only',
+    },
+    idempotencyKey: id,
+    maxAttempts: 3,
+  });
 }
 
 function databaseError(error: unknown, duplicateCode: string, id: string): ControlPlaneError {

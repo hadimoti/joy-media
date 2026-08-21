@@ -7,6 +7,7 @@ import {
   JsonFileWorkerStore,
   StaticLocalAssetSourceRegistry,
   WorkerRuntime,
+  workerReceiptFromAiResult,
   detectMediaTools,
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
@@ -90,6 +91,8 @@ describe('Worker runtime', () => {
         },
       });
       if (result.state !== 'completed') throw new Error('real thumbnail was unexpectedly canceled');
+      if (result.result.kind !== 'asset.thumbnail')
+        throw new Error('real thumbnail returned the wrong receipt kind');
       expect(result.result.bytes).toBeGreaterThan(100);
       expect(result.result.sha256).toMatch(/^[a-f0-9]{64}$/);
       expect(result.result.localRef).toMatch(/^thumb-job-real-[a-f0-9]{16}$/);
@@ -222,5 +225,39 @@ describe('Worker runtime', () => {
       'image.comfy',
       'audio.ml-denoise',
     ]);
+  });
+
+  it('maps AI provider results to protocol-compatible receipt kinds', () => {
+    expect(
+      workerReceiptFromAiResult(
+        { id: 'job-text', type: 'text.lm-studio' },
+        { kind: 'text', jobId: 'job-text', provider: 'lm-studio', text: 'hello', model: 'local' },
+      ),
+    ).toMatchObject({
+      kind: 'text.lm-studio',
+      resultRef: 'ai-job-text',
+      model: 'local',
+      bytes: 5,
+    });
+    expect(
+      workerReceiptFromAiResult(
+        { id: 'job-video', type: 'video.runway' },
+        {
+          kind: 'video',
+          jobId: 'job-video',
+          provider: 'runway',
+          sha256: 'a'.repeat(64),
+          bytes: 2048,
+          localRef: 'ai-job-video-aaaaaaaaaaaaaaaa',
+          descriptor: { mimeType: 'video/mp4' },
+          model: 'gen4',
+        },
+      ),
+    ).toMatchObject({
+      kind: 'video.runway',
+      assetId: 'ai-job-video',
+      localRef: 'ai-job-video-aaaaaaaaaaaaaaaa',
+      descriptor: { mimeType: 'video/mp4' },
+    });
   });
 });

@@ -361,7 +361,7 @@ export class WorkerRuntime {
           progress: options.progress,
         });
         this.log.write(`job ${job.id} completed`);
-        return { state: 'completed', result };
+        return { state: 'completed', result: workerReceiptFromAiResult(job, result) };
       } catch (error) {
         if (error instanceof Error && error.message === 'canceled') {
           this.log.write(`job ${job.id} canceled`);
@@ -452,26 +452,27 @@ export class WorkerRuntime {
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       return readGpuDerivative(directory, result);
     }
-    if (result.kind === 'text' || result.kind === 'image' || result.kind === 'video') {
-      if (result.localRef === undefined) throw new Error('AI derivative has no local reference');
-      const ext = result.kind === 'video' ? 'mp4' : result.kind === 'text' ? 'txt' : 'png';
+    if (result.kind === 'text.lm-studio' || result.kind === 'text.openrouter') {
+      throw new Error('AI text receipts do not retain derivative bytes');
+    }
+    if (result.kind === 'video.runway' || result.kind === 'edit.higgsfield') {
+      const ext = result.descriptor.mimeType === 'video/mp4' ? 'mp4' : 'png';
       const directory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       const bytes = readFileSync(join(directory, `${result.localRef}.${ext}`));
-      if (result.sha256 !== undefined && result.bytes !== undefined) {
-        if (
-          bytes.length !== result.bytes ||
-          createHash('sha256').update(bytes).digest('hex') !== result.sha256
-        )
-          throw new Error('retained AI derivative integrity check failed');
-      }
+      if (
+        bytes.length !== result.bytes ||
+        createHash('sha256').update(bytes).digest('hex') !== result.sha256
+      )
+        throw new Error('retained AI derivative integrity check failed');
       return bytes;
     }
-    if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef!))
+    if (result.kind !== 'asset.thumbnail') throw new Error(`unsupported derivative ${result.kind}`);
+    if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef))
       throw new Error('derivative local reference is invalid');
     const directory =
       this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
-    const bytes = readFileSync(join(directory, `${result.localRef!}.jpg`));
+    const bytes = readFileSync(join(directory, `${result.localRef}.jpg`));
     if (
       bytes.length !== result.bytes ||
       createHash('sha256').update(bytes).digest('hex') !== result.sha256
@@ -481,7 +482,29 @@ export class WorkerRuntime {
   }
 }
 
-export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | LocalAiReceipt;
+export type WorkerDerivativeReceipt = RealThumbnailReceipt | LocalGpuReceipt | ProtocolAiReceipt;
+
+export type ProtocolAiReceipt =
+  | {
+      readonly kind: 'text.lm-studio' | 'text.openrouter';
+      readonly resultRef: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly model?: string;
+    }
+  | {
+      readonly kind: 'video.runway' | 'edit.higgsfield';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      readonly model?: string;
+    };
 
 export interface RealThumbnailReceipt {
   readonly kind: 'asset.thumbnail';
@@ -494,6 +517,43 @@ export interface RealThumbnailReceipt {
     readonly width: number;
     readonly height: number;
   };
+}
+
+export function workerReceiptFromAiResult(
+  job: { readonly id: string; readonly type: string },
+  result: LocalAiReceipt,
+): ProtocolAiReceipt {
+  if (job.type === 'text.lm-studio' || job.type === 'text.openrouter') {
+    const text = result.text ?? '';
+    const bytes = Buffer.from(text, 'utf8');
+    return {
+      kind: job.type,
+      resultRef: `ai-${job.id}`,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.length,
+      ...(result.model === undefined ? {} : { model: result.model }),
+    };
+  }
+  if (job.type === 'video.runway' || job.type === 'edit.higgsfield') {
+    if (
+      result.sha256 === undefined ||
+      result.bytes === undefined ||
+      result.localRef === undefined ||
+      result.descriptor === undefined
+    ) {
+      throw new Error(`AI provider result is incomplete for ${job.type}`);
+    }
+    return {
+      kind: job.type,
+      assetId: result.assetId ?? `ai-${job.id}`,
+      sha256: result.sha256,
+      bytes: result.bytes,
+      localRef: result.localRef,
+      descriptor: { ...result.descriptor },
+      ...(result.model === undefined ? {} : { model: result.model }),
+    };
+  }
+  throw new Error(`unsupported AI Worker job ${job.type}`);
 }
 
 async function runBounded(

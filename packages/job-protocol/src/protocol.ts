@@ -257,6 +257,26 @@ export type WorkerResultReceiptV1 =
         readonly height?: number;
       };
     }
+  | {
+      readonly kind: 'text.lm-studio' | 'text.openrouter';
+      readonly resultRef: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly model?: string;
+    }
+  | {
+      readonly kind: 'video.runway' | 'edit.higgsfield';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      readonly model?: string;
+    }
   | RenderReceipt;
 
 interface WorkerSession {
@@ -658,20 +678,37 @@ function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResul
       return;
     }
     default: {
+      if (jobType === 'text.lm-studio' || jobType === 'text.openrouter') {
+        const value = receipt as Extract<
+          WorkerResultReceiptV1,
+          { readonly kind: 'text.lm-studio' | 'text.openrouter' }
+        >;
+        assertObjectKeys(value, ['kind', 'resultRef', 'sha256', 'bytes'], ['model'], 'receipt');
+        assertOpaqueIds([value.resultRef], 'receipt references');
+        if ('model' in value && value.model !== undefined && typeof value.model !== 'string') {
+          throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt model is invalid');
+        }
+        return;
+      }
       const value = receipt as Extract<
         WorkerResultReceiptV1,
-        { readonly kind: 'image.comfy' | 'audio.ml-denoise' }
+        {
+          readonly kind: 'image.comfy' | 'audio.ml-denoise' | 'video.runway' | 'edit.higgsfield';
+        }
       >;
       assertObjectKeys(
         value,
         ['kind', 'assetId', 'sha256', 'bytes', 'localRef', 'descriptor'],
-        [],
+        ['model'],
         'receipt',
       );
       assertOpaqueIds([value.assetId, value.localRef], 'receipt references');
       assertObjectKeys(value.descriptor, ['mimeType'], ['width', 'height'], 'receipt descriptor');
       if (typeof value.descriptor.mimeType !== 'string' || value.descriptor.mimeType.length === 0) {
         throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt descriptor is invalid');
+      }
+      if ('model' in value && value.model !== undefined && typeof value.model !== 'string') {
+        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt model is invalid');
       }
       if (
         ('width' in value.descriptor &&

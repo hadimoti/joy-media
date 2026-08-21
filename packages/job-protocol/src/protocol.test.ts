@@ -272,5 +272,45 @@ describe('Worker pairing and thumbnail job spike', () => {
         findings: 1,
       }),
     ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('text.lm-studio', {
+        kind: 'text.lm-studio',
+        resultRef: 'ai-job-1',
+        sha256: 'd'.repeat(64),
+        bytes: 64,
+        model: 'local-model',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('text.openrouter', {
+        kind: 'text.openrouter',
+        resultRef: 'ai-job-2',
+        sha256: 'e'.repeat(64),
+        bytes: 128,
+        model: 'openrouter-model',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('video.runway', {
+        kind: 'video.runway',
+        assetId: 'asset-video-1',
+        sha256: 'f'.repeat(64),
+        bytes: 8192,
+        localRef: 'ai-job-3-ffffffffffffffff',
+        descriptor: { mimeType: 'video/mp4' },
+        model: 'gen4',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerReceiptForJob('edit.higgsfield', {
+        kind: 'edit.higgsfield',
+        assetId: 'asset-edit-1',
+        sha256: '1'.repeat(64),
+        bytes: 4096,
+        localRef: 'ai-job-4-1111111111111111',
+        descriptor: { mimeType: 'image/png', width: 1024, height: 1024 },
+        model: 'higgsfield-default',
+      }),
+    ).not.toThrow();
   });
 });

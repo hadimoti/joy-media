@@ -112,6 +112,84 @@ describe('PostgresControlPlane', () => {
     });
     await pool.end();
   });
+
+  it('durably round-trips typed job payloads and render inspect receipts', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'joy-user-1' };
+    await controlPlane.createProject(owner, 'project-1', 'Reference');
+    await controlPlane.pairWorker(owner, 'worker-render');
+    await controlPlane.helloWorker('worker-render', ['render.inspect'], [], 100);
+    await controlPlane.enqueue(
+      owner,
+      'render-inspect-1',
+      'project-1',
+      'render.inspect',
+      101,
+      undefined,
+      {
+        protocolVersion: 1,
+        jobId: 'render-inspect-1',
+        type: 'render.inspect',
+        payload: {
+          projectRef: 'project-ref-1',
+          compositionId: 'composition-main',
+          presetId: 'inspect',
+          reportRef: 'report-render-inspect-1',
+        },
+        requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+        idempotencyKey: 'idem-render-inspect-1',
+        maxAttempts: 4,
+      },
+    );
+
+    const restarted = new PostgresControlPlane(pool, { skipLocked: false });
+    await expect(restarted.lease('worker-render', 102, 30_000)).resolves.toMatchObject({
+      id: 'render-inspect-1',
+      payload: {
+        projectRef: 'project-ref-1',
+        compositionId: 'composition-main',
+        presetId: 'inspect',
+        reportRef: 'report-render-inspect-1',
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'idem-render-inspect-1',
+      maxAttempts: 4,
+    });
+    await expect(
+      restarted.complete('worker-render', 'render-inspect-1', 103, {
+        kind: 'render.inspect',
+        reportRef: 'report-render-inspect-1',
+        findings: 3,
+      }),
+    ).resolves.toMatchObject({
+      derivative: {
+        kind: 'render.inspect',
+        reportRef: 'report-render-inspect-1',
+        findings: 3,
+        resultRef: 'derivative:render-inspect-1',
+      },
+    });
+
+    const afterCompletionRestart = new PostgresControlPlane(pool, { skipLocked: false });
+    await expect(afterCompletionRestart.jobsForProject(owner, 'project-1')).resolves.toMatchObject([
+      {
+        id: 'render-inspect-1',
+        state: 'completed',
+        derivative: {
+          kind: 'render.inspect',
+          reportRef: 'report-render-inspect-1',
+          findings: 3,
+          resultRef: 'derivative:render-inspect-1',
+          workerRef: 'worker-render',
+        },
+      },
+    ]);
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {
