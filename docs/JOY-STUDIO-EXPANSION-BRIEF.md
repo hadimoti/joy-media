@@ -7,6 +7,8 @@
 > **Scope of this document:** accurate **Today** architecture + forward **Proposed** specs for Templates (+ PSD), Joy Code 3D tab, fullscreen 3D Studio + MCP, PNG→3D  
 > **Non-scope:** this file is a brief only — do not treat it as an implementation PR
 
+> **Historical note (2026-08-21):** this brief is a dated 2026-07-30 snapshot, not the live feature matrix. Current product truth now lives in [`docs/product/FEATURE-STATUS.md`](docs/product/FEATURE-STATUS.md). Since this snapshot was written, the repo gained a docked `TemplatesPanel`, a Joy Code `3d` viewer tab built on `three` + `GLTFLoader`, an `ag-psd` parser spike, and substantial Motion Studio direct-manipulation/keyframe work. Keep using this brief for expansion intent, but verify current implementation claims against source before treating any “absent” statement as truth.
+
 ---
 
 ## 1. Executive summary
@@ -58,15 +60,15 @@ flowchart LR
 
 ### 2.1 Positioning & surfaces
 
-| Layer | Reality |
-| ----- | ------- |
-| Brand in UI | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos) |
-| Repo / API / systemd | Still **joy-media** (`/opt/joy-media/repo`, `/etc/joy-media/api.env`) |
-| Domain | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir |
-| First paint | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace |
-| Auth | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login |
-| Composition default | `DEFAULT_COMPOSITION_SIZE = { width: 1080, height: 1920 }` in `editor-project.ts` |
-| Design system | `DESIGN.md` — neutral gray CapCut shell, Modam Pro, amber accent scarcity |
+| Layer                | Reality                                                                           |
+| -------------------- | --------------------------------------------------------------------------------- |
+| Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)           |
+| Repo / API / systemd | Still **joy-media** (`/opt/joy-media/repo`, `/etc/joy-media/api.env`)             |
+| Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir   |
+| First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace   |
+| Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login            |
+| Composition default  | `DEFAULT_COMPOSITION_SIZE = { width: 1080, height: 1920 }` in `editor-project.ts` |
+| Design system        | `DESIGN.md` — neutral gray CapCut shell, Modam Pro, amber accent scarcity         |
 
 Product docs that matter: `DESIGN.md`, `STATE.md`, `ARCHITECTURE_SUMMARY.md`, `docs/adr/*`, `AGENTIC_EDITING_NEXT_AGENT.md`, `JOY_MEDIA_UNIFIED_DATA_TIMELINE_AND_AGENT_FLOW_PLAN.md`.
 
@@ -100,28 +102,29 @@ Panel shell contract (`DESIGN.md` §3a): every dock panel is `.joy-panel-root` +
 
 Registered in `apps/editor-web/src/workspace.ts` `PANEL_IDS`:
 
-| Panel id | Surface (typical) | Primary file(s) |
-| -------- | ----------------- | --------------- |
-| `media` | Assets library | `AssetLibraryPanel.tsx` |
-| `monitor` | Program preview (Pixi) | Monitor path via `renderer-pixi` |
-| `timeline` | NLE timeline | `TimelinePanel.tsx` |
-| `flow` | Dual Lens / creative projections | Dual Lens (ADR-0022; flag may be off in prod) |
-| `captions` | Captions + style templates | `CaptionsPanel.tsx` |
-| `inspector` | Property inspector | Inspector panels |
-| `motion` | Motion catalog / entry to Motion Studio | `MotionPanel.tsx` |
-| `camera` | Camera (2.5D ADR-0015) | Camera panel |
-| `audio` | Audio | Audio panel |
-| `effects` | Effects + Effect Studio entry | `EffectsPanel.tsx` |
-| `transitions` | Transitions | Transitions panel |
-| `color` | Color | Color panel |
-| `history` | Photoshop-style history list | `HistoryPanel.tsx` |
-| `diagnostics` | Diagnostics | Diagnostics panel |
-| `jobs` | Worker / generation jobs | `JobsPanel.tsx` |
-| `agent` | **Joy Code** | `AgentPanel.tsx` |
-| `workflows` | Workflow graphs + templates-as-transactions | `WorkflowsPanel.tsx` |
-| `plugins` | Plugins | Plugins panel |
+| Panel id      | Surface (typical)                           | Primary file(s)                               |
+| ------------- | ------------------------------------------- | --------------------------------------------- |
+| `media`       | Assets library                              | `AssetLibraryPanel.tsx`                       |
+| `monitor`     | Program preview (Pixi)                      | Monitor path via `renderer-pixi`              |
+| `timeline`    | NLE timeline                                | `TimelinePanel.tsx`                           |
+| `flow`        | Dual Lens / creative projections            | Dual Lens (ADR-0022; flag may be off in prod) |
+| `captions`    | Captions + style templates                  | `CaptionsPanel.tsx`                           |
+| `inspector`   | Property inspector                          | Inspector panels                              |
+| `motion`      | Motion catalog / entry to Motion Studio     | `MotionPanel.tsx`                             |
+| `camera`      | Camera (2.5D ADR-0015)                      | Camera panel                                  |
+| `audio`       | Audio                                       | Audio panel                                   |
+| `effects`     | Effects + Effect Studio entry               | `EffectsPanel.tsx`                            |
+| `transitions` | Transitions                                 | Transitions panel                             |
+| `color`       | Color                                       | Color panel                                   |
+| `history`     | Photoshop-style history list                | `HistoryPanel.tsx`                            |
+| `diagnostics` | Diagnostics                                 | Diagnostics panel                             |
+| `jobs`        | Worker / generation jobs                    | `JobsPanel.tsx`                               |
+| `agent`       | **Joy Code**                                | `AgentPanel.tsx`                              |
+| `workflows`   | Workflow graphs + templates-as-transactions | `WorkflowsPanel.tsx`                          |
+| `plugins`     | Plugins                                     | Plugins panel                                 |
+| `templates`   | Templates library / apply flow              | `TemplatesPanel.tsx`                          |
 
-**Not a dock panel today:** Templates gallery page, 3D Studio, PSD importer.
+**Not a dock panel today:** fullscreen 3D Studio, a PSD import apply flow, and any MCP-backed 3D authoring shell.
 
 **Fullscreen overlays (siblings of Dockview, not panels):** Motion Studio, Effect Studio — mounted from `App.tsx`.
 
@@ -143,15 +146,15 @@ Registered in `apps/editor-web/src/workspace.ts` `PANEL_IDS`:
 
 **Intents wired in UI:**
 
-| Intent id | Tool(s) | Slash hints |
-| --------- | ------- | ----------- |
-| `split-at-playhead` | `splitClip` | `/split` |
-| `recipe-split-trim` | `splitClip` → `trimClip` | `/recipe` |
-| `shorten-intro` | multi-step via `analyseShortenIntro` | `/shorten` |
-| `move-to-playhead` | `moveClip` | `/move` |
-| `remove-selected` | `removeClip` | `/remove`, `/delete` |
-| `join-with-next` | `joinClips` | `/join` |
-| `insert-test-clip` | `insertClip` | `/insert` |
+| Intent id           | Tool(s)                              | Slash hints          |
+| ------------------- | ------------------------------------ | -------------------- |
+| `split-at-playhead` | `splitClip`                          | `/split`             |
+| `recipe-split-trim` | `splitClip` → `trimClip`             | `/recipe`            |
+| `shorten-intro`     | multi-step via `analyseShortenIntro` | `/shorten`           |
+| `move-to-playhead`  | `moveClip`                           | `/move`              |
+| `remove-selected`   | `removeClip`                         | `/remove`, `/delete` |
+| `join-with-next`    | `joinClips`                          | `/join`              |
+| `insert-test-clip`  | `insertClip`                         | `/insert`            |
 
 Unmatched free-form text → decline message (Persian): timeline intents only; free-form KiloCode after server adapter — **not connected**.
 
@@ -176,31 +179,31 @@ Both are **fixed fullscreen overlays** rendered as siblings of `DockviewReact` i
 
 #### Motion Studio
 
-| Item | Detail |
-| ---- | ------ |
-| Shell | `MotionStudioShell` (`motion-studio/MotionStudioShell.tsx`) |
-| Props | `{ sceneId: string; onClose: () => void }` |
-| Open state | `motionStudioSceneId: string \| undefined` |
-| Opener | `EditorPanelContext.openMotionStudio(sceneId)` |
-| Entry | `MotionPanel` — Create / open My Motions → `openMotionStudio` |
-| Overlay class | `motion-studio-overlay` — `position: fixed; inset: 0; z-index: 1000` |
-| Layout | TopBar + body: Layers ‖ Canvas (+ Timeline under) ‖ Inspector; resizable sashes |
-| Domain | `MotionSceneDocument` via `useSceneEditor` |
-| Persist | `motion-scene-catalog` / localStorage; autosave ~800 ms |
-| Canvas | **DOM stage** (`MotionStudioCanvas`) — not Pixi/WebGL; CSS rotate/scale only |
-| Close | TopBar back → save → `setMotionStudioSceneId(undefined)` (Escape clears selection only) |
+| Item          | Detail                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------- |
+| Shell         | `MotionStudioShell` (`motion-studio/MotionStudioShell.tsx`)                             |
+| Props         | `{ sceneId: string; onClose: () => void }`                                              |
+| Open state    | `motionStudioSceneId: string \| undefined`                                              |
+| Opener        | `EditorPanelContext.openMotionStudio(sceneId)`                                          |
+| Entry         | `MotionPanel` — Create / open My Motions → `openMotionStudio`                           |
+| Overlay class | `motion-studio-overlay` — `position: fixed; inset: 0; z-index: 1000`                    |
+| Layout        | TopBar + body: Layers ‖ Canvas (+ Timeline under) ‖ Inspector; resizable sashes         |
+| Domain        | `MotionSceneDocument` via `useSceneEditor`                                              |
+| Persist       | `motion-scene-catalog` / localStorage; autosave ~800 ms                                 |
+| Canvas        | **DOM stage** (`MotionStudioCanvas`) — not Pixi/WebGL; CSS rotate/scale only            |
+| Close         | TopBar back → save → `setMotionStudioSceneId(undefined)` (Escape clears selection only) |
 
 #### Effect Studio
 
-| Item | Detail |
-| ---- | ------ |
-| Shell | `EffectStudioShell` (`effect-studio/EffectStudioShell.tsx`) |
-| Open state | `effectStudioSession: { recipeId; objectId? }` |
-| Opener | `openEffectStudio(recipeId, objectId?)` from `EffectsPanel` |
-| Overlay class | `effect-studio-overlay` — **z-index 1010** (above Motion) |
-| Domain | `EffectRecipeDocument` + `reduceEffectRecipeEditor` |
-| Extra | Compare split; **Apply** writes effects onto timeline object then can close |
-| Persist | `effect-recipe-catalog`; autosave ~700 ms |
+| Item          | Detail                                                                      |
+| ------------- | --------------------------------------------------------------------------- |
+| Shell         | `EffectStudioShell` (`effect-studio/EffectStudioShell.tsx`)                 |
+| Open state    | `effectStudioSession: { recipeId; objectId? }`                              |
+| Opener        | `openEffectStudio(recipeId, objectId?)` from `EffectsPanel`                 |
+| Overlay class | `effect-studio-overlay` — **z-index 1010** (above Motion)                   |
+| Domain        | `EffectRecipeDocument` + `reduceEffectRecipeEditor`                         |
+| Extra         | Compare split; **Apply** writes effects onto timeline object then can close |
+| Persist       | `effect-recipe-catalog`; autosave ~700 ms                                   |
 
 ```mermaid
 sequenceDiagram
@@ -221,43 +224,44 @@ sequenceDiagram
   Shell->>App: onClose → clear sceneId
 ```
 
-**3D reality today:** no Three.js / R3F / Babylon / glTF in either studio. `MotionTransform` already has `z`, `rotationXDeg`, `rotationYDeg`, `perspective` (`motion-core/src/scene.ts`) but Motion Studio paint path does not drive them. ADR-0015 / `camera-core` is **depth-only 2.5D**. HTML first-party scenes can use CSS perspective/rotateX/Y outside the Motion Studio shell.
+**3D reality today:** the repo now ships `three`, `OrbitControls`, `GLTFLoader`, and a docked `JoyCode3DViewer` preview tab for manual `.glb` / `.gltf` inspection. What still does **not** exist is a fullscreen 3D Studio overlay, a durable 3D scene document, or any MCP-backed 3D authoring loop. `MotionTransform` already has `z`, `rotationXDeg`, `rotationYDeg`, `perspective` (`motion-core/src/scene.ts`) but Motion Studio remains a 2D DOM editor. ADR-0015 / `camera-core` is still **depth-only 2.5D**.
 
 ### 2.6 Media / assets / image pipeline
 
-| Concern | Today |
-| ------- | ----- |
-| Identity | `AssetId` ≠ path; opaque locations — ADR-0008 |
-| Local cache | OPFS `joy-media-assets/<id>.bin` (`opfs-original-asset-cache.ts`) |
-| Cloud | Hybrid OPFS + private object store — ADR-0017 hybrid (note: **same ADR number** as login ADR; two files) |
-| Register | `BrowserControlPlaneClient.registerAsset` / `uploadAssetOriginal` |
-| DnD | `JOY_MEDIA_ASSET_DND` onto timeline |
-| Stickers (P15) | `addStickerFromAsset` in `App.tsx` + `sticker-bindings.ts` + `StickerImageCache`; Assets UI currently renames `onAddSticker` to `_onAddSticker` and **does not call it** (pipeline alive, button dead) |
-| RemBG | Queues Worker `image.comfy` when capability advertised |
-| Joy Code attach | OPFS `joy-media-assets/joycode/` — images + markdown |
-| Generation jobs | Worker path for `image.comfy`, `audio.ml-denoise` (ADR-0018) — not image→mesh |
+| Concern         | Today                                                                                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity        | `AssetId` ≠ path; opaque locations — ADR-0008                                                                                                                                                          |
+| Local cache     | OPFS `joy-media-assets/<id>.bin` (`opfs-original-asset-cache.ts`)                                                                                                                                      |
+| Cloud           | Hybrid OPFS + private object store — ADR-0017 hybrid (note: **same ADR number** as login ADR; two files)                                                                                               |
+| Register        | `BrowserControlPlaneClient.registerAsset` / `uploadAssetOriginal`                                                                                                                                      |
+| DnD             | `JOY_MEDIA_ASSET_DND` onto timeline                                                                                                                                                                    |
+| Stickers (P15)  | `addStickerFromAsset` in `App.tsx` + `sticker-bindings.ts` + `StickerImageCache`; Assets UI currently renames `onAddSticker` to `_onAddSticker` and **does not call it** (pipeline alive, button dead) |
+| RemBG           | Queues Worker `image.comfy` when capability advertised                                                                                                                                                 |
+| Joy Code attach | OPFS `joy-media-assets/joycode/` — images + markdown                                                                                                                                                   |
+| Generation jobs | Worker path for `image.comfy`, `audio.ml-denoise` (ADR-0018) — not image→mesh                                                                                                                          |
 
-**Templates today (not a Templates page):**
+**Templates today:**
 
-- `templates/first-party/README.md` — planned placeholder
+- Docked `TemplatesPanel.tsx` registered in workspace/panel-tab icons
+- `template-catalog.ts` + `content-template-catalog.ts` for saved and first-party templates
 - First-party HTML scenes in `html-scene-runtime` (`joy.firstparty.*`, often 1080×1920)
 - Caption style templates in `CaptionsPanel`
 - Workflow templates-as-transactions (ADR-0027) in `workflow-templates.ts`
 
-**PSD:** no importer, no `.psd` parser package. Master plan treats deep PSD round-trip as deferred / optional flattening only.
+**PSD:** `ag-psd` is installed and `psd-parser-spike.ts` can parse layer metadata, but there is still no end-to-end import-to-project transaction or docked apply flow. Deep PSD round-trip remains out of scope.
 
 ### 2.7 Identity, auth, deploy
 
-| Piece | Detail |
-| ----- | ------ |
-| Login ADR | `docs/adr/0017-independent-media-login.md` — Accepted 2026-07-29 |
-| Tables | `media_allowed_users`, `media_otp_codes`, `media_sessions` |
-| API | `apps/api/src/media-auth.ts`, mailer, Telegram bot |
-| UI | `LoginGate.tsx` — editor mounted, blurred until OTP; title **Joy Studio** |
-| Admin allow-list | joy-vps admin → direct Postgres role (see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) |
-| Nginx | `deploy/joy-media.nginx.conf` → `/opt/joy-media/web`, API `:8790` |
-| Secrets | `/etc/joy-media/api.env` (not in repo) |
-| Agent host policy | ADR-0020 KiloCode sole editing host; credentials stay server-side |
+| Piece             | Detail                                                                       |
+| ----------------- | ---------------------------------------------------------------------------- |
+| Login ADR         | `docs/adr/0017-independent-media-login.md` — Accepted 2026-07-29             |
+| Tables            | `media_allowed_users`, `media_otp_codes`, `media_sessions`                   |
+| API               | `apps/api/src/media-auth.ts`, mailer, Telegram bot                           |
+| UI                | `LoginGate.tsx` — editor mounted, blurred until OTP; title **Joy Studio**    |
+| Admin allow-list  | joy-vps admin → direct Postgres role (see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) |
+| Nginx             | `deploy/joy-media.nginx.conf` → `/opt/joy-media/web`, API `:8790`            |
+| Secrets           | `/etc/joy-media/api.env` (not in repo)                                       |
+| Agent host policy | ADR-0020 KiloCode sole editing host; credentials stay server-side            |
 
 ---
 
@@ -277,7 +281,7 @@ sequenceDiagram
 ├── packages/             # Domain libraries (project-schema innermost)
 ├── docs/adr/             # Architecture Decision Records
 ├── deploy/               # Nginx / systemd snippets
-├── templates/            # first-party placeholder (no Templates UI)
+├── templates/            # legacy placeholder; live Templates UI is in editor-web
 ├── plan/                 # Phase plans (do not edit for this brief)
 ├── DESIGN.md, STATE.md, …
 └── plugins/
@@ -312,14 +316,14 @@ flowchart TB
   Prov -.-> Worker
 ```
 
-| Seam | Role for expansions |
-| ---- | ------------------- |
-| `EditorPanelContext` openers | Pattern for `open3DStudio(sceneId)` |
-| `createToolRegistry` / envelopes | Pattern for MCP-exposed tools with approval |
-| `runPlanAtomically` + ADR-0019 | Safe multi-step commits |
-| `CapabilityId` / Worker caps | Advertise `mesh.from-image` etc. |
-| OPFS + `AssetId` | Store PSD bytes, glTF, preview thumbnails |
-| `MotionSceneDocument` vs new `Scene3DDocument` | Decide extend vs new artifact type |
+| Seam                                           | Role for expansions                         |
+| ---------------------------------------------- | ------------------------------------------- |
+| `EditorPanelContext` openers                   | Pattern for `open3DStudio(sceneId)`         |
+| `createToolRegistry` / envelopes               | Pattern for MCP-exposed tools with approval |
+| `runPlanAtomically` + ADR-0019                 | Safe multi-step commits                     |
+| `CapabilityId` / Worker caps                   | Advertise `mesh.from-image` etc.            |
+| OPFS + `AssetId`                               | Store PSD bytes, glTF, preview thumbnails   |
+| `MotionSceneDocument` vs new `Scene3DDocument` | Decide extend vs new artifact type          |
 
 ### 3.3 How a fullscreen studio opens (sequence)
 
@@ -336,19 +340,19 @@ flowchart TB
 
 ### 3.4 Agent / LLM / tools / MCP reality check (what exists vs gaps)
 
-| Capability | Today | Gap for expansion |
-| ---------- | ----- | ----------------- |
-| Chat UI chrome | Yes (`AgentPanel` Composer) | Needs real LLM backend |
-| Intent → timeline tools | Yes (7 intents) | No 3D / template / PSD tools |
-| Atomic plan apply + undo | Yes | Reuse for 3D mutations if command-bus modeled |
-| Approval / execution modes | Yes | Keep for MCP-driven writes |
-| KiloCode host manifest | Declarative only | Transport + models empty |
-| `llm.complete` | Type enum only | No provider adapter |
-| MCP server/client | **Absent** | Greenfield |
-| PNG→3D | **Absent** | Need provider + job type |
-| 3D viewport | **Absent** (2.5D fields only) | Engine choice + scene schema |
-| PSD import | **Absent** | Parser + layer mapping |
-| Templates page | **Absent** | IA + catalog + apply |
+| Capability                 | Today                                              | Gap for expansion                             |
+| -------------------------- | -------------------------------------------------- | --------------------------------------------- |
+| Chat UI chrome             | Yes (`AgentPanel` Composer)                        | Needs real LLM backend                        |
+| Intent → timeline tools    | Yes (7 intents)                                    | No 3D / template / PSD tools                  |
+| Atomic plan apply + undo   | Yes                                                | Reuse for 3D mutations if command-bus modeled |
+| Approval / execution modes | Yes                                                | Keep for MCP-driven writes                    |
+| KiloCode host manifest     | Declarative only                                   | Transport + models empty                      |
+| `llm.complete`             | Type enum only                                     | No provider adapter                           |
+| MCP server/client          | **Absent**                                         | Greenfield                                    |
+| PNG→3D                     | **Absent**                                         | Need provider + job type                      |
+| 3D viewport                | **Absent** (2.5D fields only)                      | Engine choice + scene schema                  |
+| PSD import                 | Parser spike only (`ag-psd`, no apply transaction) | Wire import UI + command transaction          |
+| Templates page             | Docked panel exists                                | Close import flow + promotion criteria        |
 
 ---
 
@@ -415,13 +419,13 @@ flowchart TB
 
 **Recommended IA (Proposed):**
 
-| Surface | Placement | Notes |
-| ------- | --------- | ----- |
-| Templates | New dock panel id `templates` **or** project-library sub-route before editor | Prefer dock panel for CapCut parity; register in `PANEL_IDS` + `panel-tab-icons.ts` |
-| Import PSD | Primary CTA on Templates + secondary on Assets | Produces draft template or layered motion/HTML/visual objects |
-| Joy Code tabs | `history` \| `composer` \| **`3d`** | Keep `PanelShell` contract |
-| 3D Studio | Fullscreen overlay `ThreeDStudioShell` | Mirror `MotionStudioShell` props: `{ sceneId, onClose }` |
-| Mutual exclusion | Opening 3D Studio closes Motion/Effect or stacks with higher z-index | Prefer exclusive to reduce WebGL context cost |
+| Surface          | Placement                                                                    | Notes                                                                               |
+| ---------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Templates        | New dock panel id `templates` **or** project-library sub-route before editor | Prefer dock panel for CapCut parity; register in `PANEL_IDS` + `panel-tab-icons.ts` |
+| Import PSD       | Primary CTA on Templates + secondary on Assets                               | Produces draft template or layered motion/HTML/visual objects                       |
+| Joy Code tabs    | `history` \| `composer` \| **`3d`**                                          | Keep `PanelShell` contract                                                          |
+| 3D Studio        | Fullscreen overlay `ThreeDStudioShell`                                       | Mirror `MotionStudioShell` props: `{ sceneId, onClose }`                            |
+| Mutual exclusion | Opening 3D Studio closes Motion/Effect or stacks with higher z-index         | Prefer exclusive to reduce WebGL context cost                                       |
 
 ### 5.2 User journeys (step-by-step)
 
@@ -497,13 +501,13 @@ flowchart LR
   Tx --> OptionalTpl[Save as template]
 ```
 
-| Stage | Proposal | Notes |
-| ----- | -------- | ----- |
-| Ingest | Reuse Assets register + OPFS | Treat PSD as opaque `AssetLocation` |
-| Parse | ag-psd / PSD.js WASM in Worker **or** server job | Keep main thread free; golden fixtures required |
-| Layer DTO | `{ id, name, bounds, opacity, visible, type, imageBlobId?, text? }` | Do not claim full smart-object/vector fidelity |
-| Mapping | image → sticker/`VisualObjectV1` kind image; text → text object or caption; groups → flatten or container | Align with P15 sticker bindings |
-| Non-goals v1 | Smart objects, layer styles round-trip, editable Photoshop text engine, AEP/PRPROJ | Master plan already deferred deep PSD |
+| Stage        | Proposal                                                                                                  | Notes                                           |
+| ------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Ingest       | Reuse Assets register + OPFS                                                                              | Treat PSD as opaque `AssetLocation`             |
+| Parse        | ag-psd / PSD.js WASM in Worker **or** server job                                                          | Keep main thread free; golden fixtures required |
+| Layer DTO    | `{ id, name, bounds, opacity, visible, type, imageBlobId?, text? }`                                       | Do not claim full smart-object/vector fidelity  |
+| Mapping      | image → sticker/`VisualObjectV1` kind image; text → text object or caption; groups → flatten or container | Align with P15 sticker bindings                 |
+| Non-goals v1 | Smart objects, layer styles round-trip, editable Photoshop text engine, AEP/PRPROJ                        | Master plan already deferred deep PSD           |
 
 **MVP success:** import a simple 1080×1920 PSD with 3–8 raster layers → matching stacked images on timeline/composition, Undoable.
 
@@ -517,11 +521,11 @@ flowchart LR
 type JoyCodeTab = 'history' | 'composer' | '3d';
 ```
 
-| Mode | Behavior |
-| ---- | -------- |
-| Scoped tab | CSS/WebGL mini-canvas or static orbit poster frames; list `Project3DItem[]` |
-| Fullscreen | Button → `open3DStudio(id)` (App context) |
-| Data | Reads assets with `kind: 'model'` / `contentType: model/gltf-binary`; generation jobs in progress |
+| Mode       | Behavior                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| Scoped tab | CSS/WebGL mini-canvas or static orbit poster frames; list `Project3DItem[]`                       |
+| Fullscreen | Button → `open3DStudio(id)` (App context)                                                         |
+| Data       | Reads assets with `kind: 'model'` / `contentType: model/gltf-binary`; generation jobs in progress |
 
 Keep Composer as the NL/intent surface; 3D tab is **library + preview**, not a second competing chat (chat stays in Composer or moves into fullscreen studio side panel).
 
@@ -598,29 +602,29 @@ sequenceDiagram
 
 **Proposed MCP tool groups:**
 
-| Tool | Side effects | Approval |
-| ---- | ------------ | -------- |
-| `project.getSummary` | read | no |
-| `assets.list` / `assets.getThumb` | read | no |
-| `scene3d.getGraph` | read | no |
-| `scene3d.addModel` | write | yes |
-| `scene3d.setTransform` | write | yes |
-| `scene3d.removeNode` | write | yes |
-| `scene3d.setCamera` | write | soft |
-| `mesh.generateFromImage` | async job | yes (cost/GPU) |
-| `mesh.importGltf` | write asset | yes |
-| `timeline.placeAsClip` | write timeline | yes (phase 4+) |
-| `templates.apply` / `psd.import` | write | yes |
+| Tool                              | Side effects   | Approval       |
+| --------------------------------- | -------------- | -------------- |
+| `project.getSummary`              | read           | no             |
+| `assets.list` / `assets.getThumb` | read           | no             |
+| `scene3d.getGraph`                | read           | no             |
+| `scene3d.addModel`                | write          | yes            |
+| `scene3d.setTransform`            | write          | yes            |
+| `scene3d.removeNode`              | write          | yes            |
+| `scene3d.setCamera`               | write          | soft           |
+| `mesh.generateFromImage`          | async job      | yes (cost/GPU) |
+| `mesh.importGltf`                 | write asset    | yes            |
+| `timeline.placeAsClip`            | write timeline | yes (phase 4+) |
+| `templates.apply` / `psd.import`  | write          | yes            |
 
 Implement MCP tools as thin adapters over **the same** `agent-tools` / command-bus primitives so policy, audit, and undo stay consistent.
 
 ### 6.5 PNG→3D provider options & honest constraints
 
-| Option | Pros | Cons |
-| ------ | ---- | ---- |
-| External API (Tripo/Meshy/Luma/etc.) | Fastest product path | Cost, ToS, privacy, network dependency |
-| Local Comfy / custom Worker node | Fits ADR-0018 locality | Heavy GPU, ops burden, quality variance |
-| Hybrid: cloud default + Worker override | Flexible | Two code paths |
+| Option                                  | Pros                   | Cons                                    |
+| --------------------------------------- | ---------------------- | --------------------------------------- |
+| External API (Tripo/Meshy/Luma/etc.)    | Fastest product path   | Cost, ToS, privacy, network dependency  |
+| Local Comfy / custom Worker node        | Fits ADR-0018 locality | Heavy GPU, ops burden, quality variance |
+| Hybrid: cloud default + Worker override | Flexible               | Two code paths                          |
 
 **Recommended productization pattern (mirror RemBG):**
 
@@ -676,9 +680,15 @@ interface Scene3DNode {
   name: string;
   parentId?: string;
   transform: {
-    x: number; y: number; z: number;
-    scaleX: number; scaleY: number; scaleZ: number;
-    rotationXDeg: number; rotationYDeg: number; rotationZDeg: number;
+    x: number;
+    y: number;
+    z: number;
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
+    rotationXDeg: number;
+    rotationYDeg: number;
+    rotationZDeg: number;
   };
   visible: boolean;
   payload:
@@ -868,78 +878,78 @@ Mark which issues are blocked on ADR decisions.
 
 ### Product / docs
 
-| Path | Why |
-| ---- | --- |
-| `/opt/joy-media/repo/DESIGN.md` | CapCut shell, panel contract, tokens |
-| `/opt/joy-media/repo/STATE.md` | Live residuals, domain, deploy notes |
-| `/opt/joy-media/repo/docs/adr/0017-independent-media-login.md` | Independent OTP login |
-| `/opt/joy-media/repo/docs/adr/0017-hybrid-opfs-private-object-storage.md` | OPFS + cloud assets (**number collision**) |
-| `/opt/joy-media/repo/docs/adr/0018-local-gpu-worker.md` | Local GPU Worker |
-| `/opt/joy-media/repo/docs/adr/0019-agent-command-envelope-and-atomic-runs.md` | Atomic agent runs |
-| `/opt/joy-media/repo/docs/adr/0020-kilocode-as-sole-editing-agent-host.md` | Sole agent host |
-| `/opt/joy-media/repo/docs/adr/0021-agent-generation-jobs-and-provenance.md` | Generation provenance |
-| `/opt/joy-media/repo/docs/adr/0027-workflow-templates.md` | Templates as transactions |
-| `/opt/joy-media/repo/deploy/joy-media.nginx.conf` | joyst.ir routing |
+| Path                                                                          | Why                                        |
+| ----------------------------------------------------------------------------- | ------------------------------------------ |
+| `/opt/joy-media/repo/DESIGN.md`                                               | CapCut shell, panel contract, tokens       |
+| `/opt/joy-media/repo/STATE.md`                                                | Live residuals, domain, deploy notes       |
+| `/opt/joy-media/repo/docs/adr/0017-independent-media-login.md`                | Independent OTP login                      |
+| `/opt/joy-media/repo/docs/adr/0017-hybrid-opfs-private-object-storage.md`     | OPFS + cloud assets (**number collision**) |
+| `/opt/joy-media/repo/docs/adr/0018-local-gpu-worker.md`                       | Local GPU Worker                           |
+| `/opt/joy-media/repo/docs/adr/0019-agent-command-envelope-and-atomic-runs.md` | Atomic agent runs                          |
+| `/opt/joy-media/repo/docs/adr/0020-kilocode-as-sole-editing-agent-host.md`    | Sole agent host                            |
+| `/opt/joy-media/repo/docs/adr/0021-agent-generation-jobs-and-provenance.md`   | Generation provenance                      |
+| `/opt/joy-media/repo/docs/adr/0027-workflow-templates.md`                     | Templates as transactions                  |
+| `/opt/joy-media/repo/deploy/joy-media.nginx.conf`                             | joyst.ir routing                           |
 
 ### Editor shell / layouts
 
-| Path / symbol | Why |
-| ------------- | --- |
-| `apps/editor-web/src/App.tsx` | Panel factory; `motionStudioSceneId`; `effectStudioSession`; context openers |
-| `apps/editor-web/src/workspace.ts` → `PANEL_IDS` | Panel registry |
-| `apps/editor-web/src/dock-layout.ts` → `EditorViewMode`, `verticalDockLayout`, `widescreenDockLayout` | Layout seeds |
-| `apps/editor-web/src/editor-project.ts` → `DEFAULT_COMPOSITION_SIZE` | 1080×1920 |
-| `apps/editor-web/src/LoginGate.tsx` | Joy Studio login gate |
-| `apps/editor-web/src/ProjectLibrary.tsx` | First-paint library |
+| Path / symbol                                                                                         | Why                                                                          |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `apps/editor-web/src/App.tsx`                                                                         | Panel factory; `motionStudioSceneId`; `effectStudioSession`; context openers |
+| `apps/editor-web/src/workspace.ts` → `PANEL_IDS`                                                      | Panel registry                                                               |
+| `apps/editor-web/src/dock-layout.ts` → `EditorViewMode`, `verticalDockLayout`, `widescreenDockLayout` | Layout seeds                                                                 |
+| `apps/editor-web/src/editor-project.ts` → `DEFAULT_COMPOSITION_SIZE`                                  | 1080×1920                                                                    |
+| `apps/editor-web/src/LoginGate.tsx`                                                                   | Joy Studio login gate                                                        |
+| `apps/editor-web/src/ProjectLibrary.tsx`                                                              | First-paint library                                                          |
 
 ### Joy Code / agent
 
-| Path / symbol | Why |
-| ------------- | --- |
-| `apps/editor-web/src/AgentPanel.tsx` → `AgentPanel` | Joy Code UI |
-| `apps/editor-web/src/agent-panel-intents.ts` → `AGENT_INTENTS` | Deterministic intents |
-| `apps/editor-web/src/joy-code-history.ts` → `matchJoyCodeIntentId` | Intent routing |
-| `apps/editor-web/src/agent-command-bus.ts` → `createAgentCommandBus` | Agent → timeline |
-| `apps/editor-web/src/joycode-opfs-assets.ts` | Attachments |
-| `packages/agent-tools/src/registry.ts` → `createToolRegistry` | Tool map |
-| `packages/agent-tools/src/atomic.ts` → `runPlanAtomically` | Apply path |
-| `packages/agent-tools/src/kilocode-host.ts` → `createKiloCodeAgentHostManifest` | Host manifest |
-| `packages/provider-sdk/src/types.ts` → `CapabilityId` incl. `llm.complete` | Capability enum |
-| `apps/editor-web/src/SpecialistReviewPanel.tsx` | Specialist agents UI |
+| Path / symbol                                                                   | Why                   |
+| ------------------------------------------------------------------------------- | --------------------- |
+| `apps/editor-web/src/AgentPanel.tsx` → `AgentPanel`                             | Joy Code UI           |
+| `apps/editor-web/src/agent-panel-intents.ts` → `AGENT_INTENTS`                  | Deterministic intents |
+| `apps/editor-web/src/joy-code-history.ts` → `matchJoyCodeIntentId`              | Intent routing        |
+| `apps/editor-web/src/agent-command-bus.ts` → `createAgentCommandBus`            | Agent → timeline      |
+| `apps/editor-web/src/joycode-opfs-assets.ts`                                    | Attachments           |
+| `packages/agent-tools/src/registry.ts` → `createToolRegistry`                   | Tool map              |
+| `packages/agent-tools/src/atomic.ts` → `runPlanAtomically`                      | Apply path            |
+| `packages/agent-tools/src/kilocode-host.ts` → `createKiloCodeAgentHostManifest` | Host manifest         |
+| `packages/provider-sdk/src/types.ts` → `CapabilityId` incl. `llm.complete`      | Capability enum       |
+| `apps/editor-web/src/SpecialistReviewPanel.tsx`                                 | Specialist agents UI  |
 
 ### Motion / Effect studios
 
-| Path / symbol | Why |
-| ------------- | --- |
-| `apps/editor-web/src/motion-studio/MotionStudioShell.tsx` | Fullscreen overlay pattern |
-| `MotionStudioCanvas` / `LayersPanel` / `Timeline` / `Inspector` / `TopBar` | Regions |
-| `apps/editor-web/src/motion-studio/state/useSceneEditor.ts` | Scene editor state |
-| `apps/editor-web/src/MotionPanel.tsx` → `openMotionStudio` callers | Entry |
-| `apps/editor-web/src/effect-studio/EffectStudioShell.tsx` | Second overlay pattern |
-| `apps/editor-web/src/EffectsPanel.tsx` → `openEffectStudio` | Entry |
-| `packages/motion-core/src/scene.ts` → `MotionTransform` | Reserved 3D-ish fields |
-| `packages/camera-core` | ADR-0015 2.5D camera |
+| Path / symbol                                                              | Why                        |
+| -------------------------------------------------------------------------- | -------------------------- |
+| `apps/editor-web/src/motion-studio/MotionStudioShell.tsx`                  | Fullscreen overlay pattern |
+| `MotionStudioCanvas` / `LayersPanel` / `Timeline` / `Inspector` / `TopBar` | Regions                    |
+| `apps/editor-web/src/motion-studio/state/useSceneEditor.ts`                | Scene editor state         |
+| `apps/editor-web/src/MotionPanel.tsx` → `openMotionStudio` callers         | Entry                      |
+| `apps/editor-web/src/effect-studio/EffectStudioShell.tsx`                  | Second overlay pattern     |
+| `apps/editor-web/src/EffectsPanel.tsx` → `openEffectStudio`                | Entry                      |
+| `packages/motion-core/src/scene.ts` → `MotionTransform`                    | Reserved 3D-ish fields     |
+| `packages/camera-core`                                                     | ADR-0015 2.5D camera       |
 
 ### Assets / stickers / jobs
 
-| Path / symbol | Why |
-| ------------- | --- |
-| `apps/editor-web/src/AssetLibraryPanel.tsx` | Import UI |
-| `apps/editor-web/src/opfs-original-asset-cache.ts` | OPFS originals |
-| `apps/editor-web/src/control-plane-client.ts` | `registerAsset`, `image.comfy` |
-| `apps/editor-web/src/sticker-bindings.ts` | Sticker ↔ clip bind |
-| `apps/editor-web/src/JobsPanel.tsx` | Job UX |
-| `templates/first-party/README.md` | Templates placeholder |
-| `apps/editor-web/src/workflow-templates.ts` | Workflow template starters |
+| Path / symbol                                      | Why                            |
+| -------------------------------------------------- | ------------------------------ |
+| `apps/editor-web/src/AssetLibraryPanel.tsx`        | Import UI                      |
+| `apps/editor-web/src/opfs-original-asset-cache.ts` | OPFS originals                 |
+| `apps/editor-web/src/control-plane-client.ts`      | `registerAsset`, `image.comfy` |
+| `apps/editor-web/src/sticker-bindings.ts`          | Sticker ↔ clip bind            |
+| `apps/editor-web/src/JobsPanel.tsx`                | Job UX                         |
+| `templates/first-party/README.md`                  | Templates placeholder          |
+| `apps/editor-web/src/workflow-templates.ts`        | Workflow template starters     |
 
 ### Deploy / API
 
-| Path / symbol | Why |
-| ------------- | --- |
-| `apps/api/src/media-auth.ts` | OTP auth |
-| `apps/api/src/postgres-schema.ts` | Auth tables |
-| `deploy/README.md` | Release layout |
+| Path / symbol                     | Why            |
+| --------------------------------- | -------------- |
+| `apps/api/src/media-auth.ts`      | OTP auth       |
+| `apps/api/src/postgres-schema.ts` | Auth tables    |
+| `deploy/README.md`                | Release layout |
 
 ---
 
-*End of brief. Generated for local AI expansion; grounded in repo snapshot 2026-07-30. Prefer forward-only implementation on the live tree at `/opt/joy-media/repo` — do not restore from backups unless explicitly requested.*
+_End of brief. Generated for local AI expansion; grounded in repo snapshot 2026-07-30. Prefer forward-only implementation on the live tree at `/opt/joy-media/repo` — do not restore from backups unless explicitly requested._

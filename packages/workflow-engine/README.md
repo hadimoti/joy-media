@@ -1,6 +1,6 @@
 # workflow-engine
 
-> **Status: active — P07 (WP-07.1, WP-07.2 landed).**
+> **Status: active — runtime, authoring, operations, and first-party definitions are landed.**
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §23 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Deterministic automation graphs: typed nodes/edges, checkpoints, idempotent runs, approval nodes.
@@ -9,7 +9,9 @@
 
 **Landed (WP-07.2).** Node library v1: `NodeRegistry` with typed per-node param validation and registry-level workflow checks; 22 concrete node types spanning all nine §23.2 categories, wired to narrow dependency-inverted ports (missing ports fail with coded, non-retryable errors); typed `ValueRef`s and pure `decision.condition` evaluation; §23.6 `decision.approval` parks runs as `waiting_for_input` without holding Worker resources (independent branches keep running, recorded decisions stay authoritative across resumes); `control.map` map/batch execution runs a sub-workflow per item with per-item run keys, partial-progress persistence, and resume that re-runs only unfinished items.
 
-**Next.** WP-07.3 authoring/operations, WP-07.4 first-party workflows.
+**Landed (WP-07.3).** JSON/code authoring, structural and DAG validation, schema-checked inputs/outputs, run dashboards, recorder/instrumentation, checkpoint JSON round-trip, and a headless CLI all ship in the package.
+
+**Landed (WP-07.4).** First-party workflow definitions are versioned, pinned, and consumed by the editor-side runner/recording flow. Human-approval checkpoints remain honest: runs park as `waiting_for_input` until resumed with a decision.
 
 **Must not:** Depending on free-form agent conversation for production automation (§2.10).
 

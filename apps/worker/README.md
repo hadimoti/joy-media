@@ -1,6 +1,6 @@
 # worker
 
-> **Status: WP-12.3 local protocol complete; live deployment pending.** The local Worker persists a device identity and Worker-only session, publishes an outbound pairing offer, claims a session only after owner approval, announces capabilities, renews lease/progress, obeys cancellation, and returns a verified fixture-thumbnail receipt. This is locally tested, not deployed.
+> **Status: active — paired local/GPU Worker protocol is shipped, with execution gated by owner approval and advertised capabilities.** The daemon persists a device identity and Worker-only session, publishes pairing offers, claims only after approval, announces capabilities, renews lease/progress, obeys cancellation, and returns validated receipts without leaking local paths.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §26, §8.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Local/GPU worker daemon: probing, proxies, waveforms, FFmpeg, deterministic export, provider execution, resource governor.
@@ -15,9 +15,11 @@ claims the same approved offer rather than replacing it. The local
 state path defaults to `~/.joy-media/worker-state.json` and can be overridden
 with `JOY_MEDIA_WORKER_STATE_PATH`. It contains only the device identity and
 revocable Worker session—not a JOY browser login, media path, or project data.
-The current fixture job writes a deterministic 1×1 PPM only in its private job
+The shipped fixture job writes a deterministic 1×1 PPM only in its private job
 directory; the API receives and independently validates its fixed SHA-256
-receipt, never the local path or media bytes.
+receipt, never the local path or media bytes. Higher-value jobs such as
+`image.comfy` and `audio.ml-denoise` stay capability-gated and only surface
+when a paired Worker advertises them.
 
 **Must not:** Editing project state without a validated job/command result; building shell strings from input.
 

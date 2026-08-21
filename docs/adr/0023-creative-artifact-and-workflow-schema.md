@@ -8,7 +8,7 @@ Date: 2026-07-27
 
 ADR-0022 made Flow a projection of live session state, and its 2026-07-27
 amendment made the two lenses cross: selection, reveal, and a provenance ribbon.
-Everything that projection shows is *derived* — from timeline clips, visual
+Everything that projection shows is _derived_ — from timeline clips, visual
 objects, caption documents, and `AssetRecordV1.generationProvenance`.
 
 Derivation is enough to explain what already exists, and not enough for what
@@ -19,7 +19,7 @@ cited as the source of something else — so there is nothing for a graph edge t
 connect, and nothing for a re-run to invalidate.
 
 The workflow graph has the same gap in reverse. `workflow-engine` can execute a
-graph, but the project cannot *store* one, so a graph cannot survive a reload,
+graph, but the project cannot _store_ one, so a graph cannot survive a reload,
 be validated on import, or be edited through the command bus.
 
 ## Decision
@@ -46,7 +46,7 @@ contain the playhead" two answers.
 
 **One capability vocabulary.** `CreativeCapability` lives in `project-schema`
 because a workflow node persists the capabilities it requires, and
-`@joy-media/agent-tools` now *aliases* `ToolCapability` to it rather than
+`@joy-media/agent-tools` now _aliases_ `ToolCapability` to it rather than
 keeping the parallel copy it had. Two lists would drift, and a capability the
 policy engine does not recognise grants nothing while still looking declared —
 a failure in the direction of "the gate never fired". The dependency runs
@@ -56,8 +56,8 @@ agent-tools → project-schema, so the schema is the correct home.
 `validateWorkflowGraph` checks node id uniqueness, edge endpoints, port
 existence, capability names, and acyclicity. Cycle detection lives in the
 schema and not only in `workflow-engine` because a cyclic graph must not be
-*storable*: a hand-edited or imported project that round trips a cycle would
-fail much later, at execution, far from the edit that caused it. Port *type*
+_storable_: a hand-edited or imported project that round trips a cycle would
+fail much later, at execution, far from the edit that caused it. Port _type_
 compatibility stays in `workflow-engine`, so adding a node type does not
 require a schema migration.
 
@@ -111,16 +111,18 @@ a storage that throws fails closed.
 
 ## Gaps deliberately left open
 
-- ~~**No commands write any of this.**~~ Closed for the graph by ADR-0024:
-  `graph.node.*` and `graph.edge.*` exist with inverses, transactions, and
-  dry-run. `artifact.*` commands (plan §9.3) are still absent, so artifacts
-  remain unauthorable.
+- ~~**No commands write any of this.**~~ Closed by the shipped command layer:
+  `graph.node.*`, `graph.edge.*`, and `artifact.*` all exist with inverses,
+  transactions, and dry-run. What remains absent is a higher-level creative
+  facade that turns them into one cohesive authoring API.
 - **No Creative API facade.** `CreativeEditingFacade` (§9.1) is not built;
   queries still go through existing per-package APIs.
 - **`workflow-engine` is not joined to these contracts.** It has its own node
   definitions; reconciling them is Phase 3 work.
-- **No editor consumes v2.** `EditorSession` still holds v1. The flag exists
-  and is off; wiring it into persistence is Phase 3.
+- ~~**No editor consumes v2.**~~ Partially closed: `EditorSession` can author
+  and replay workflow-graph changes in memory, and Dual Lens reads the derived
+  slices when enabled. Persisting the full v2 document through every editor and
+  control-plane save path is still Phase 3 work.
 - **Artifact versions have no retention policy.** Nothing prunes them, and
   nothing yet stops a pinned version from keeping media alive indefinitely.
 - **No round-trip against a real persisted project.** Round-trip is tested

@@ -9,6 +9,14 @@ Baseline" section (§2) is stale — verify against the real code before trustin
 gap it describes.** Phase 0 and Phase 1 below are already done; this file is the
 handoff for Phases 2–7.
 
+Treat this file as a historical requirements handoff, not an executable
+absence checklist. As of 2026-08-21 the current source already has resize and
+rotate handles, alignment guides, marquee select, on-canvas text editing,
+group/ungroup, capability-driven inspector wiring, keyframe evaluation, basic
+keyframe property rows, and trim controls. The remaining unchecked items are
+follow-on polish, missing depth, or broader authoring scope — not proof that
+those shipped behaviors are absent.
+
 ## Read this first
 
 - `apps/editor-web/src/motion-studio/` is the whole editor: `MotionStudioShell.tsx`
