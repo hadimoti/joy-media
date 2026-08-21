@@ -219,6 +219,44 @@ export type { KiloCodeHostOptions } from './kilocode-host.js';
 export { KILOCODE_AGENT_HOST_ID, createKiloCodeAgentHostManifest } from './kilocode-host.js';
 
 export type {
+  CreativeBriefDomainV1,
+  CreativeFocusAreaV1,
+  ConfidenceLevelV1,
+  RiskClassificationV1,
+  CreativeRecommendationKindV1,
+  CreativeTimeRangeV1,
+  CreativeBriefScopeV1,
+  CreativeConstraintV1,
+  ReferenceMaterialV1,
+  CreativeBriefRequestV1,
+  CreativeFactV1,
+  CreativeInferenceV1,
+  CreativeAssumptionV1,
+  ProposedIntentV1,
+  CreativeRecommendationV1,
+  CreativeBlockerV1,
+  HumanDecisionV1,
+  ConfidenceSummaryV1,
+  CreativeBriefV1,
+  CreativeBriefValidationResultV1,
+  CreativeBriefValidationContextV1,
+  CreateCreativeBriefOptionsV1,
+} from './creative-brief.js';
+export {
+  CreativeBriefValidationError,
+  createCreativeBrief,
+  validateCreativeBriefV1,
+} from './creative-brief.js';
+export type {
+  BoundedModelInputV1,
+  StructuredModelOutputV1,
+  CreativeModelAdapter,
+  FakeModelAdapterMode,
+  FakeModelAdapterOptions,
+} from './model-adapter.js';
+export { createFakeModelAdapter } from './model-adapter.js';
+
+export type {
   BenchmarkIntent,
   ValidationCheck,
   BenchmarkProject,
