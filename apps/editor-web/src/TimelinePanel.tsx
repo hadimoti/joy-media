@@ -417,6 +417,12 @@ function importAssetKind(file: Pick<File, 'type'>): 'audio' | 'image' | 'video' 
   return 'video';
 }
 
+function preferredTimelineTrackKindForAsset(
+  assetKind: ReturnType<typeof importAssetKind>,
+): TimelineTrackKind {
+  return assetKind === 'audio' ? 'audio' : 'video';
+}
+
 function buildAssetInsertTransaction(
   composition: Composition,
   trackId: string,
@@ -463,8 +469,12 @@ function buildAssetTrackCreateTransaction(
   dropUs: number,
   stamp: number,
 ): CommandTransaction {
+  const nextKind = preferredTimelineTrackKindForAsset(importAssetKind({ type: `${asset.kind}/` }));
+  const nextKindIndex =
+    composition.tracks.filter((track) => timelineTrackKind(track) === nextKind).length + 1;
   const order = composition.tracks.length;
   const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+  const clipIdPrefix = asset.kind === 'audio' ? 'voice' : 'clip';
   return {
     label: `Add ${asset.displayName ?? asset.assetId}`,
     commands: [
@@ -473,13 +483,13 @@ function buildAssetTrackCreateTransaction(
         payload: {
           compositionId: composition.id,
           track: {
-            id: `V${order + 1}`,
+            id: timelineTrackCode(nextKind, nextKindIndex),
             kind: 'video',
             order,
             enabled: true,
             clips: [
               {
-                id: `clip-${asset.assetId}-${stamp}`,
+                id: `${clipIdPrefix}-${asset.assetId}-${stamp}`,
                 kind: 'video',
                 assetId: asset.assetId,
                 startUs,
@@ -497,7 +507,9 @@ function buildAssetTrackCreateTransaction(
 function pickTimelineImportTrackId(
   composition: Composition,
   trackFlags: readonly TimelineTrackView[],
+  assetKind: ReturnType<typeof importAssetKind>,
 ): string | undefined {
+  const wantedKind = preferredTimelineTrackKindForAsset(assetKind);
   const ordered = composition.tracks
     .map((track, index) => ({
       track,
@@ -511,7 +523,9 @@ function pickTimelineImportTrackId(
         (left.view.order ?? left.track.order ?? left.fallbackOrder) -
         (right.view.order ?? right.track.order ?? right.fallbackOrder),
     );
-  return ordered.find((entry) => !entry.view.locked)?.track.id;
+  return ordered.find(
+    (entry) => !entry.view.locked && timelineTrackKind(entry.track) === wantedKind,
+  )?.track.id;
 }
 
 export function buildTimelineFileImportTransactions({
@@ -531,10 +545,11 @@ export function buildTimelineFileImportTransactions({
 }): CommandTransaction[] {
   return files.map((file, index) => {
     const assetId = createAssetId(file, index);
-    const targetTrackId = pickTimelineImportTrackId(composition, trackFlags);
+    const assetKind = importAssetKind(file);
+    const targetTrackId = pickTimelineImportTrackId(composition, trackFlags, assetKind);
     const asset = {
       assetId,
-      kind: importAssetKind(file),
+      kind: assetKind,
       displayName: file.name,
     };
     const stamp = now() + index;

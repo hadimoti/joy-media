@@ -17,6 +17,10 @@ const TABS: readonly PanelTabSpec[] = [
   { id: 'pair', label: 'Pair' },
 ];
 
+export function jobsPanelToolbarActions(projectInitialized: boolean): readonly string[] {
+  return projectInitialized ? ['refresh'] : ['initialize', 'refresh'];
+}
+
 export function JobsPanel({
   projectId,
   projectTitle,
@@ -108,20 +112,6 @@ export function JobsPanel({
     }
   };
 
-  const submit = async () => {
-    if (!projectInitialized) {
-      setStatus('Initialize this project before queueing a derivative job.');
-      return;
-    }
-    try {
-      await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
-      setStatus('Thumbnail job queued for the paired local Worker.');
-      await refresh();
-    } catch (error) {
-      setStatus(`Failed to queue job: ${message(error)}`);
-    }
-  };
-
   return (
     <PanelShell
       title="Jobs"
@@ -145,17 +135,6 @@ export function JobsPanel({
               <PlusIcon />
             </button>
           )}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Queue thumbnail derivative"
-            title="Queue thumbnail"
-            data-guide="Queue thumbnail"
-            disabled={!projectInitialized}
-            onClick={() => void submit()}
-          >
-            <ImageIcon />
-          </button>
           <button
             type="button"
             className="icon-button"
@@ -217,9 +196,7 @@ export function JobsPanel({
             </span>
           </div>
           {visibleWorkers.length === 0 ? (
-            <p className="jobs-empty">
-              No active Worker. Pair one using the guide below.
-            </p>
+            <p className="jobs-empty">No active Worker. Pair one using the guide below.</p>
           ) : (
             <ul className="jobs-workers">
               {visibleWorkers.map((worker) => {
@@ -276,9 +253,7 @@ export function JobsPanel({
             <span className="jobs-section-meta">{jobs.length}</span>
           </div>
           {jobs.length === 0 ? (
-            <p className="jobs-empty">
-              No derivative jobs yet.
-            </p>
+            <p className="jobs-empty">No derivative jobs yet.</p>
           ) : (
             <ul className="jobs-list">
               {jobs.map((job) => (
@@ -373,10 +348,11 @@ export function JobsPanel({
                 should appear within a few seconds.
               </li>
               <li>
-                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>,
-                or <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
-                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>, <code>edit.higgsfield</code>)
-                require API keys configured in <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
+                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>, or{' '}
+                <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
+                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>,{' '}
+                <code>edit.higgsfield</code>) require API keys configured in{' '}
+                <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
               </li>
             </ol>
           )}

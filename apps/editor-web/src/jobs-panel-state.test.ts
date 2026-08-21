@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import { jobsPanelToolbarActions } from './JobsPanel.js';
 
 const NOW = 1_000_000;
 
@@ -40,6 +41,11 @@ describe('project Jobs panel state', () => {
       NOW,
     );
     expect(withGpu).toContain('GPU ready');
+  });
+
+  it('keeps initialize and refresh toolbar controls but removes the fixture thumbnail queue action', () => {
+    expect(jobsPanelToolbarActions(false)).toEqual(['initialize', 'refresh']);
+    expect(jobsPanelToolbarActions(true)).toEqual(['refresh']);
   });
 });
 
