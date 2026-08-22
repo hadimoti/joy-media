@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerControlPlaneClient } from './control-plane-client.js';
 import type { WorkerRuntime } from './runtime.js';
+import { renderExportCompletionReceipt } from './export-job.js';
 
 export class WorkerDaemon {
   constructor(
@@ -43,7 +44,11 @@ export class WorkerDaemon {
               this.runtime.readDerivative(result.result),
             );
           }
-          await this.client.complete(job.id, result.result);
+          const completionResult =
+            result.result.kind === 'render.export'
+              ? renderExportCompletionReceipt(result.result)
+              : result.result;
+          await this.client.complete(job.id, completionResult);
         } else await this.client.fail(job.id, 'canceled');
       } catch (error) {
         this.runtime.log.write(`control-plane ${error instanceof Error ? error.message : 'error'}`);

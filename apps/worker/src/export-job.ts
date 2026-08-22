@@ -9,7 +9,26 @@ import { join } from 'node:path';
 import { createPinnedOfflineRenderHostDriver, type RenderHostDriver } from '@joy-media/render-host';
 import type { WorkerMediaResolver } from './worker-media-resolver.js';
 export interface ExportLeaseCoordinator {
-  complete(workerId: string, jobId: string): unknown;
+  complete(workerId: string, jobId: string, receipt: RenderExportCompletionReceipt): unknown;
+}
+
+/** Exact control-plane shape; render-local diagnostics stay on RenderExportReceiptV1. */
+export type RenderExportCompletionReceipt = Pick<
+  RenderExportReceiptV1,
+  'kind' | 'reportRef' | 'outputRef' | 'sha256' | 'bytes'
+> & { readonly qualityReport?: RenderReportV1 };
+
+export function renderExportCompletionReceipt(
+  receipt: RenderExportReceiptV1,
+): RenderExportCompletionReceipt {
+  return {
+    kind: receipt.kind,
+    reportRef: receipt.reportRef,
+    outputRef: receipt.outputRef,
+    sha256: receipt.sha256,
+    bytes: receipt.bytes,
+    ...(receipt.qualityReport === undefined ? {} : { qualityReport: receipt.qualityReport }),
+  };
 }
 
 export interface ExecuteLeasedExportOptions {
@@ -72,8 +91,7 @@ export async function executeLeasedExport(
     );
     assertApiSafeRenderReport(qualityReport);
     rejectFailedDelivery(qualityReport);
-    coordinator.complete(workerId, jobId);
-    return {
+    const receipt: RenderExportReceiptV1 = {
       kind: 'render.export',
       outputRef,
       reportRef,
@@ -85,6 +103,8 @@ export async function executeLeasedExport(
       qualityReport,
       toolVersions: result.toolVersions,
     };
+    coordinator.complete(workerId, jobId, renderExportCompletionReceipt(receipt));
+    return receipt;
   } catch (error) {
     if (existsSync(outputPath)) rmSync(outputPath, { force: true });
     throw error;

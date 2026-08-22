@@ -88,7 +88,10 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     const resolver = referenceResolver(outputDirectory);
     expect(
       await executeLeasedExport(
-        api,
+        {
+          complete: (workerId, jobId, receipt) =>
+            api.complete(workerId, jobId, Date.now(), receipt),
+        },
         'recovery-worker',
         'landscape',
         createRenderBundle({
@@ -105,7 +108,10 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     expect(api.lease('recovery-worker', now + 11)?.id).toBe('vertical');
     expect(
       await executeLeasedExport(
-        api,
+        {
+          complete: (workerId, jobId, receipt) =>
+            api.complete(workerId, jobId, Date.now(), receipt),
+        },
         'recovery-worker',
         'vertical',
         createRenderBundle({
@@ -175,5 +181,16 @@ function referenceVisualProject(width: number, height: number): JoyProjectV1 {
     visualObjects: {},
     captionDocuments: {},
     pluginData: {},
+    audio: {
+      clips: {
+        intro: { gain: 0.75, pan: 0, mute: false, solo: false },
+        product: { gain: 0.75, pan: 0, mute: false, solo: false },
+        outro: { gain: 0.75, pan: 0, mute: false, solo: false },
+        'b-roll-a': { gain: 0.75, pan: 0, mute: false, solo: false },
+        'b-roll-b': { gain: 0.75, pan: 0, mute: false, solo: false },
+      },
+      buses: [],
+      effects: [],
+    },
   };
 }

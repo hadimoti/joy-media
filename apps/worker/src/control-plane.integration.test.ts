@@ -18,7 +18,9 @@ describe('Worker/control-plane export integration', () => {
     expect(api.lease('worker', now + 1)?.id).toBe('job');
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-integration-'));
     await executeLeasedExport(
-      api,
+      {
+        complete: (workerId, jobId, receipt) => api.complete(workerId, jobId, Date.now(), receipt),
+      },
       'worker',
       'job',
       createRenderBundle({
@@ -52,7 +54,9 @@ describe('Worker/control-plane export integration', () => {
     );
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-recovered-export-'));
     await executeLeasedExport(
-      api,
+      {
+        complete: (workerId, jobId, receipt) => api.complete(workerId, jobId, Date.now(), receipt),
+      },
       'worker-new',
       'job',
       createRenderBundle({
@@ -137,5 +141,10 @@ function visualProject() {
     visualObjects: {},
     captionDocuments: {},
     pluginData: {},
+    audio: {
+      clips: { clip: { gain: 0.75, pan: 0, mute: false, solo: false } },
+      buses: [],
+      effects: [],
+    },
   } as const;
 }
