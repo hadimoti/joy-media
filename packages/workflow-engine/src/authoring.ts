@@ -31,6 +31,7 @@ export const SUPPORTED_SCHEMA_KEYWORDS: readonly string[] = [
   'minItems',
   'description',
   'title',
+  'default',
 ];
 
 const SCHEMA_TYPES = ['string', 'number', 'integer', 'boolean', 'object', 'array', 'null'] as const;

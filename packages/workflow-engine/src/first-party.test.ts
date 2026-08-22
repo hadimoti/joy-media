@@ -7,10 +7,13 @@ import { WorkflowBuilder, parseWorkflowJson, workflowToJson } from './authoring.
 import {
   FIRST_PARTY_WORKFLOWS_VERSION,
   FIRST_PARTY_WORKFLOW_IDS,
+  buildFirstPartyPipelinePacks,
   buildFirstPartyWorkflows,
   buildLongVideoDraftReelsWorkflow,
   buildMultilingualPromoWorkflow,
   buildPodcastCleanupWorkflow,
+  buildInterviewDocumentaryAssemblyWorkflow,
+  buildReferenceSocialCutdownWorkflow,
   firstPartyDefinitionFiles,
 } from './first-party.js';
 import { runWorkflowHeadless } from './headless.js';
@@ -40,6 +43,12 @@ function stubEnvironment() {
   const library = buildNodeLibrary({
     ports: {
       analysis: {
+        researchBrief: track('researchBrief', (args: { brief: unknown; media: unknown }) => ({
+          researchRef: 'research-1',
+          brief: args.brief,
+          media: args.media,
+          providerRefs: ['provider:fixture-research'],
+        })),
         transcribe: track('transcribe', () => ({
           language: 'fa',
           segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
@@ -95,6 +104,19 @@ function stubEnvironment() {
             variables: args.variables,
           }),
         ),
+        buildContactSheet: track(
+          'contactSheet',
+          (args: { title: string; candidates: unknown }) => ({
+            title: args.title,
+            candidates:
+              args.candidates !== null &&
+              typeof args.candidates === 'object' &&
+              Array.isArray((args.candidates as { candidates?: unknown }).candidates)
+                ? (args.candidates as { candidates: readonly unknown[] }).candidates
+                : args.candidates,
+            contactSheetRef: 'contact-sheet-1',
+          }),
+        ),
       },
       generation: {
         synthesizeSpeech: track('speech', (args: { text: string; voiceId: string }) => ({
@@ -105,8 +127,24 @@ function stubEnvironment() {
           text: `[${args.targetLanguage}] ${args.text}`,
           targetLanguage: args.targetLanguage,
         })),
+        generateScript: track('script', (args: { brief: unknown }) => ({
+          scriptRef: 'script-1',
+          text: `Script: ${String(args.brief)}`,
+        })),
+        generateShotlist: track('shotlist', () => ({
+          shots: [{ id: 'shot-1', sourceRef: 'asset-long-1' }],
+        })),
       },
       editor: {
+        executeCommandTransaction: (args: {
+          readonly label: string;
+          readonly commands: readonly unknown[];
+        }) => {
+          const list = calls.get('commandTransaction') ?? [];
+          list.push(args);
+          calls.set('commandTransaction', list);
+          return { transactionId: `tx-${args.label.toLowerCase().replaceAll(' ', '-')}` };
+        },
         // Typed by hand: the port's return type is concrete ({branchId}).
         createBranch: (args: { readonly name: string; readonly source: unknown }) => {
           const list = calls.get('createBranch') ?? [];
@@ -121,6 +159,10 @@ function stubEnvironment() {
           rendered: args.mode,
           profile: args.profile ?? null,
         })),
+        inspect: track('inspect', (args: { reportRef?: string }) => ({
+          reportRef: args.reportRef ?? 'report-fixture',
+          findings: [{ code: 'fixture-pass', status: 'pass' }],
+        })),
       },
       output: {
         writeToFolder: track('writeToFolder', (args: { folderId: string }) => ({
@@ -130,6 +172,11 @@ function stubEnvironment() {
         writeMetadataFile: track('writeMetadata', (args: { fileName: string }) => ({
           written: true,
           fileName: args.fileName,
+        })),
+        writeDeliveryManifest: track('writeDeliveryManifest', (args: { fileName: string }) => ({
+          written: true,
+          fileName: args.fileName,
+          deliveryRef: `delivery:${args.fileName}`,
         })),
       },
     },
@@ -145,6 +192,7 @@ const runHeadless = (
   extras: {
     readonly resumeFromJson?: string;
     readonly humanInputs?: Readonly<Record<string, unknown>>;
+    readonly reuseNondeterministic?: boolean;
   } = {},
 ) =>
   runWorkflowHeadless({
@@ -156,6 +204,12 @@ const runHeadless = (
     projectRevision: 'rev-fp',
     ...extras,
   });
+
+const productionInputs = (overrides: Record<string, unknown> = {}) => ({
+  brief: 'Make a polished social-ready edit from the selected media.',
+  selectedMedia: { assetId: 'asset-long-1' },
+  ...overrides,
+});
 
 // ---------------------------------------------------------------------------
 // Definitions: versioned, registry-validated, pinned to committed artifacts.
@@ -175,6 +229,33 @@ describe('first-party workflow definitions (§23.4)', () => {
         expect(parsed.order).toEqual(order);
         expect(parsed.order).toHaveLength(workflow.nodes.length);
       }
+    }
+  });
+
+  it('declares production pack metadata, ports, approvals, capabilities, and report refs', () => {
+    const packs = buildFirstPartyPipelinePacks();
+    expect(packs.map((pack) => pack.workflow.id)).toEqual([...FIRST_PARTY_WORKFLOW_IDS]);
+    expect(packs).toHaveLength(5);
+    for (const pack of packs) {
+      expect(pack.provider).toBe('production');
+      expect(pack.label).toBe('Production pack');
+      expect(pack.requiredPorts.length).toBeGreaterThan(0);
+      expect(pack.capabilities.length).toBeGreaterThan(0);
+      expect(pack.approvals).toContain('confirm-cost');
+      expect(pack.reportRefs.length).toBeGreaterThan(0);
+      expect(pack.workflow.nodes.map((node) => node.id)).toEqual(
+        expect.arrayContaining([
+          'brief',
+          'selected-media',
+          'research',
+          'script',
+          'shotlist',
+          'candidates',
+          'contact-sheet',
+          'confirm-cost',
+          'manifest',
+        ]),
+      );
     }
   });
 
@@ -207,6 +288,28 @@ describe('WP-07.4 library extensions', () => {
     expect(() => registry.createNode('h', 'analysis.hooks', { maxCandidates: 0 })).toThrowError(
       /maxCandidates/,
     );
+    expect(() =>
+      registry.createNode('r', 'analysis.researchBrief', { briefFrom: { kind: 'input' } }),
+    ).toThrowError(/mediaFrom/);
+    expect(() =>
+      registry.createNode('s', 'generation.script', {
+        briefFrom: { kind: 'input', path: 'brief' },
+        mediaFrom: { kind: 'input', path: 'selectedMedia' },
+      }),
+    ).toThrowError(/researchFrom/);
+    expect(() =>
+      registry.createNode('cs', 'transform.contactSheet', {
+        title: 'x',
+        candidatesFrom: { kind: 'input', path: 'candidates' },
+        providerRefs: [1],
+      }),
+    ).toThrowError(/providerRefs/);
+    expect(() =>
+      registry.createNode('dm', 'output.deliveryManifest', {
+        folderId: 'exports',
+        source: { kind: 'input' },
+      }),
+    ).toThrowError(/fileName/);
   });
 
   it('rejects declaring generation.translate deterministic (§23.5)', () => {
@@ -271,8 +374,11 @@ describe('WP-07.4 library extensions', () => {
       name: 'Missing port test',
     })
       .node('src', 'input.value', { value: { assetId: 'a' } })
-      .node('hooks', 'analysis.hooks', { source: { kind: 'upstream', node: 'src' } })
-      .edge('src', 'hooks')
+      .node('research', 'analysis.researchBrief', {
+        briefFrom: { kind: 'literal', value: 'brief' },
+        mediaFrom: { kind: 'upstream', node: 'src' },
+      })
+      .edge('src', 'research')
       .build();
 
     const result = runWorkflowHeadless({
@@ -288,8 +394,8 @@ describe('WP-07.4 library extensions', () => {
       return;
     }
     expect(result.state).toBe('failed');
-    expect(result.checkpoint.nodes['hooks']?.failureCode).toBe(
-      'workflow/port-unavailable:analysis.detectHighlights',
+    expect(result.checkpoint.nodes['research']?.failureCode).toBe(
+      'workflow/port-unavailable:analysis.researchBrief',
     );
   });
 });
@@ -299,19 +405,39 @@ describe('WP-07.4 library extensions', () => {
 // ---------------------------------------------------------------------------
 
 describe('long video → draft reels', () => {
-  it('runs candidate approval → per-candidate editable drafts → render approval → finals', () => {
+  it('runs cost approval → contact-sheet candidate approval → editable drafts → render QA → delivery', () => {
     const { library, count, argsOf } = stubEnvironment();
     const workflowJson = workflowToJson(buildLongVideoDraftReelsWorkflow().workflow);
-    const inputs = { asset: { assetId: 'asset-long-1' } };
+    const inputs = productionInputs();
 
-    // 1. Runs to the candidate approval and parks (§23.6) — no Worker resources held.
+    // 1. Research/script/shotlist/contact sheet run, then provider cost parks.
     const first = runHeadless(library, workflowJson, inputs, 'reels-run');
     expect(first.ok).toBe(true);
     if (!first.ok) {
       return;
     }
     expect(first.state).toBe('waiting_for_input');
-    const candidateRequest = first.checkpoint.nodes['approve-candidates']?.pendingRequest;
+    const costRequest = first.checkpoint.nodes['confirm-cost']?.pendingRequest;
+    expect(costRequest?.kind).toBe('confirm-cost');
+    expect(count('researchBrief')).toBe(1);
+    expect(count('script')).toBe(1);
+    expect(count('shotlist')).toBe(1);
+    expect(count('detectHighlights')).toBe(1);
+    expect(count('contactSheet')).toBe(1);
+    expect(count('createBranch')).toBe(0);
+
+    // 2. Cost approval resumes to the contact-sheet candidate approval.
+    const second = runHeadless(library, workflowJson, inputs, 'reels-run', {
+      resumeFromJson: JSON.stringify(first.checkpoint),
+      humanInputs: { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } },
+      reuseNondeterministic: true,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) {
+      return;
+    }
+    expect(second.state).toBe('waiting_for_input');
+    const candidateRequest = second.checkpoint.nodes['approve-candidates']?.pendingRequest;
     expect(candidateRequest?.kind).toBe('choose-candidates');
     const payload = candidateRequest?.payload as { candidates: readonly { title: string }[] };
     expect(payload.candidates.map((candidate) => candidate.title)).toEqual([
@@ -319,25 +445,25 @@ describe('long video → draft reels', () => {
       'Hook B',
       'Hook C',
     ]);
-    expect(count('transcribe')).toBe(1);
+    expect(count('script')).toBe(1);
     expect(count('detectHighlights')).toBe(1);
-    expect(count('createBranch')).toBe(0);
 
-    // 2. Resume with two chosen candidates: one editable branch + review proxy each.
+    // 3. Candidate approval applies one command transaction, then builds editable drafts.
     const chosen = payload.candidates.slice(0, 2);
-    const second = runHeadless(library, workflowJson, inputs, 'reels-run', {
-      resumeFromJson: JSON.stringify(first.checkpoint),
+    const third = runHeadless(library, workflowJson, inputs, 'reels-run', {
+      resumeFromJson: JSON.stringify(second.checkpoint),
       humanInputs: { 'approve-candidates': { candidates: chosen } },
+      reuseNondeterministic: true,
     });
-    expect(second.ok).toBe(true);
-    if (!second.ok) {
+    expect(third.ok).toBe(true);
+    if (!third.ok) {
       return;
     }
-    expect(second.state).toBe('waiting_for_input');
-    const draftRequest = second.checkpoint.nodes['approve-drafts']?.pendingRequest;
+    expect(third.state).toBe('waiting_for_input');
+    const draftRequest = third.checkpoint.nodes['approve-drafts']?.pendingRequest;
     expect(draftRequest?.kind).toBe('approve-render');
     expect((draftRequest?.payload as { count: number }).count).toBe(2);
-    // One input batch generated multiple *editable* project variants (§36 Phase 7).
+    expect(count('commandTransaction')).toBe(1);
     expect(count('createBranch')).toBe(2);
     expect(count('reframe')).toBe(2);
     expect(argsOf('reframe').map((args) => (args as { aspect: string }).aspect)).toEqual([
@@ -350,32 +476,32 @@ describe('long video → draft reels', () => {
       'preview',
       'preview',
     ]);
-    // Resuming did not duplicate completed work (§36 Phase 7).
-    expect(count('transcribe')).toBe(1);
+    expect(count('script')).toBe(1);
     expect(count('detectHighlights')).toBe(1);
 
-    // 3. Resume with render approval: finals render and outputs are written once.
+    // 4. Render approval creates final renders, bounded QA reports, delivery manifests, and run report.
     const approved = (draftRequest?.payload as { items: readonly unknown[] }).items;
-    const third = runHeadless(library, workflowJson, inputs, 'reels-run', {
-      resumeFromJson: JSON.stringify(second.checkpoint),
+    const fourth = runHeadless(library, workflowJson, inputs, 'reels-run', {
+      resumeFromJson: JSON.stringify(third.checkpoint),
       humanInputs: { 'approve-drafts': { approved } },
+      reuseNondeterministic: true,
     });
-    expect(third.ok).toBe(true);
-    if (!third.ok) {
+    expect(fourth.ok).toBe(true);
+    if (!fourth.ok) {
       return;
     }
-    expect(third.state).toBe('succeeded');
-    expect(third.outputIssues).toEqual([]);
-    expect(Object.keys(third.outputs)).toEqual(['manifest']);
+    expect(fourth.state).toBe('succeeded');
+    expect(fourth.outputIssues).toEqual([]);
+    expect(Object.keys(fourth.outputs)).toEqual(['manifest']);
     const renderModes = argsOf('render').map((args) => (args as { mode: string }).mode);
     expect(renderModes).toEqual(['preview', 'preview', 'final', 'final']);
-    expect(count('writeToFolder')).toBe(2);
+    expect(count('inspect')).toBe(2);
+    expect(count('writeDeliveryManifest')).toBe(2);
     expect(count('writeMetadata')).toBe(1);
     expect((argsOf('writeMetadata')[0] as { fileName: string }).fileName).toBe(
       'long-video-draft-reels-run.json',
     );
-    // Earlier stages still ran exactly once across all three sessions.
-    expect(count('transcribe')).toBe(1);
+    expect(count('script')).toBe(1);
     expect(count('createBranch')).toBe(2);
   });
 });
@@ -404,7 +530,7 @@ describe('multilingual restaurant promo', () => {
         copy: 'Fresh koobideh kebab',
       },
     ];
-    const inputs = { rows };
+    const inputs = productionInputs({ rows });
 
     const first = runHeadless(library, workflowJson, inputs, 'promo-run');
     expect(first.ok).toBe(true);
@@ -412,22 +538,37 @@ describe('multilingual restaurant promo', () => {
       return;
     }
     expect(first.state).toBe('waiting_for_input');
-    const request = first.checkpoint.nodes['approve-copy']?.pendingRequest;
-    expect(request?.kind).toBe('approve-transcript');
-    expect(request?.payload).toEqual(rows);
+    const costRequest = first.checkpoint.nodes['confirm-cost']?.pendingRequest;
+    expect(costRequest?.kind).toBe('confirm-cost');
     expect(count('translate')).toBe(0);
 
     const second = runHeadless(library, workflowJson, inputs, 'promo-run', {
       resumeFromJson: JSON.stringify(first.checkpoint),
-      humanInputs: { 'approve-copy': { rows } },
+      humanInputs: { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } },
+      reuseNondeterministic: true,
     });
     expect(second.ok).toBe(true);
     if (!second.ok) {
       return;
     }
-    expect(second.state).toBe('succeeded');
-    expect(second.outputIssues).toEqual([]);
-    expect(Object.keys(second.outputs)).toEqual(['manifest']);
+    expect(second.state).toBe('waiting_for_input');
+    const request = second.checkpoint.nodes['approve-copy']?.pendingRequest;
+    expect(request?.kind).toBe('approve-transcript');
+    expect(request?.payload).toMatchObject({ contactSheetRef: 'contact-sheet-1' });
+    expect(count('translate')).toBe(0);
+
+    const third = runHeadless(library, workflowJson, inputs, 'promo-run', {
+      resumeFromJson: JSON.stringify(second.checkpoint),
+      humanInputs: { 'approve-copy': { rows } },
+      reuseNondeterministic: true,
+    });
+    expect(third.ok).toBe(true);
+    if (!third.ok) {
+      return;
+    }
+    expect(third.state).toBe('succeeded');
+    expect(third.outputIssues).toEqual([]);
+    expect(Object.keys(third.outputs)).toEqual(['manifest']);
 
     // Approved copy was translated per row language, then voiced from the translation.
     expect(
@@ -451,7 +592,8 @@ describe('multilingual restaurant promo', () => {
       'final',
       'final',
     ]);
-    expect(count('writeToFolder')).toBe(2);
+    expect(count('inspect')).toBe(2);
+    expect(count('writeDeliveryManifest')).toBe(2);
     expect(count('writeMetadata')).toBe(1);
   });
 });
@@ -464,7 +606,7 @@ describe('podcast cleanup', () => {
   it('parks both approvals while the independent audio branch keeps running', () => {
     const { library, count } = stubEnvironment();
     const workflowJson = workflowToJson(buildPodcastCleanupWorkflow().workflow);
-    const inputs = { source: { assetId: 'asset-episode-1' } };
+    const inputs = productionInputs({ selectedMedia: { assetId: 'asset-episode-1' } });
 
     const first = runHeadless(library, workflowJson, inputs, 'podcast-run-park');
     expect(first.ok).toBe(true);
@@ -472,6 +614,7 @@ describe('podcast cleanup', () => {
       return;
     }
     expect(first.state).toBe('waiting_for_input');
+    expect(first.checkpoint.nodes['confirm-cost']?.pendingRequest?.kind).toBe('confirm-cost');
     expect(first.checkpoint.nodes['confirm-speakers']?.pendingRequest?.kind).toBe(
       'choose-candidates',
     );
@@ -490,7 +633,7 @@ describe('podcast cleanup', () => {
   it('applies exactly the human-approved edit list, then exports the episode plus clips', () => {
     const { library, count, argsOf } = stubEnvironment();
     const workflowJson = workflowToJson(buildPodcastCleanupWorkflow().workflow);
-    const inputs = { source: { assetId: 'asset-episode-1' } };
+    const inputs = productionInputs({ selectedMedia: { assetId: 'asset-episode-1' } });
 
     const first = runHeadless(library, workflowJson, inputs, 'podcast-run');
     expect(first.ok).toBe(true);
@@ -504,9 +647,11 @@ describe('podcast cleanup', () => {
     const second = runHeadless(library, workflowJson, inputs, 'podcast-run', {
       resumeFromJson: JSON.stringify(first.checkpoint),
       humanInputs: {
+        'confirm-cost': { approved: true, approvalRef: 'cost-ok' },
         'confirm-speakers': { speakers },
         'approve-edit-list': { ranges: approvedRanges },
       },
+      reuseNondeterministic: true,
     });
     expect(second.ok).toBe(true);
     if (!second.ok) {
@@ -514,7 +659,7 @@ describe('podcast cleanup', () => {
     }
     expect(second.state).toBe('succeeded');
     expect(second.outputIssues).toEqual([]);
-    expect(Object.keys(second.outputs).sort()).toEqual(['manifest', 'save-episode']);
+    expect(Object.keys(second.outputs)).toEqual(['manifest']);
 
     expect(count('trim')).toBe(1);
     expect((argsOf('trim')[0] as { ranges: unknown }).ranges).toEqual(approvedRanges);
@@ -526,20 +671,97 @@ describe('podcast cleanup', () => {
         .map((args) => (args as { profile: string | null }).profile)
         .sort(),
     ).toEqual(['podcast-clip', 'podcast-clip', 'podcast-episode']);
-    expect(count('writeToFolder')).toBe(3);
-    // The audit manifest records the human decisions and generated structure.
-    const metadata = (
-      argsOf('writeMetadata')[0] as {
-        metadata: { speakers: unknown; editList: unknown; chapters: unknown; clips: unknown };
-      }
-    ).metadata;
-    expect(metadata.speakers).toEqual({ speakers });
-    expect(metadata.editList).toEqual({ ranges: approvedRanges });
-    expect(metadata.chapters).toBeDefined();
-    expect(metadata.clips).toBeDefined();
+    expect(count('inspect')).toBe(3);
+    expect(count('writeDeliveryManifest')).toBe(3);
+    const topLevelManifest = argsOf('writeDeliveryManifest').find(
+      (args) => (args as { fileName: string }).fileName === 'podcast-cleanup-run.json',
+    ) as { approvals: { speakers: unknown; editList: unknown; chapters: unknown; clips: unknown } };
+    expect(topLevelManifest.approvals.speakers).toEqual({ speakers });
+    expect(topLevelManifest.approvals.editList).toEqual({ ranges: approvedRanges });
+    expect(topLevelManifest.approvals.chapters).toBeDefined();
+    expect(topLevelManifest.approvals.clips).toBeDefined();
     // No duplicated completed work across the resume (§36 Phase 7).
     expect(count('detectSpeakers')).toBe(1);
     expect(count('detectSilence')).toBe(1);
     expect(count('denoise')).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New production packs.
+// ---------------------------------------------------------------------------
+
+describe('new production pipeline packs', () => {
+  it('runs the clean-room reference social cutdown through approval, render, inspect, and manifest', () => {
+    const { library, count } = stubEnvironment();
+    const workflowJson = workflowToJson(buildReferenceSocialCutdownWorkflow().workflow);
+    const inputs = productionInputs({
+      references: [{ referenceId: 'ref-structure-1', note: 'fast cold open, no copied assets' }],
+    });
+
+    const first = runHeadless(library, workflowJson, inputs, 'cutdown-run');
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.checkpoint.nodes['confirm-cost']?.pendingRequest?.kind).toBe('confirm-cost');
+
+    const second = runHeadless(library, workflowJson, inputs, 'cutdown-run', {
+      resumeFromJson: JSON.stringify(first.checkpoint),
+      humanInputs: { 'confirm-cost': { approved: true } },
+      reuseNondeterministic: true,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const request = second.checkpoint.nodes['approve-cutdown']?.pendingRequest;
+    expect(request?.kind).toBe('choose-candidates');
+    const payload = request?.payload as { candidates: readonly unknown[] };
+
+    const third = runHeadless(library, workflowJson, inputs, 'cutdown-run', {
+      resumeFromJson: JSON.stringify(second.checkpoint),
+      humanInputs: { 'approve-cutdown': { candidates: payload.candidates.slice(0, 1) } },
+      reuseNondeterministic: true,
+    });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    expect(third.state).toBe('succeeded');
+    expect(third.outputIssues).toEqual([]);
+    expect(count('commandTransaction')).toBe(1);
+    expect(count('inspect')).toBe(1);
+    expect(count('writeDeliveryManifest')).toBe(1);
+    expect(count('writeMetadata')).toBe(1);
+  });
+
+  it('runs the interview/documentary assembly pack with transcript and chapter evidence', () => {
+    const { library, count, argsOf } = stubEnvironment();
+    const workflowJson = workflowToJson(buildInterviewDocumentaryAssemblyWorkflow().workflow);
+    const inputs = productionInputs({ selectedMedia: { assetId: 'interview-roll-1' } });
+
+    const first = runHeadless(library, workflowJson, inputs, 'doc-run');
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = runHeadless(library, workflowJson, inputs, 'doc-run', {
+      resumeFromJson: JSON.stringify(first.checkpoint),
+      humanInputs: { 'confirm-cost': { approved: true } },
+      reuseNondeterministic: true,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const request = second.checkpoint.nodes['approve-assembly']?.pendingRequest;
+    expect(request?.kind).toBe('choose-candidates');
+    const payload = request?.payload as { candidates: readonly unknown[] };
+
+    const third = runHeadless(library, workflowJson, inputs, 'doc-run', {
+      resumeFromJson: JSON.stringify(second.checkpoint),
+      humanInputs: { 'approve-assembly': { candidates: payload.candidates.slice(0, 1) } },
+      reuseNondeterministic: true,
+    });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    expect(third.state).toBe('succeeded');
+    expect(third.outputIssues).toEqual([]);
+    expect(count('transcribe')).toBe(1);
+    expect(count('generateChapters')).toBe(1);
+    expect((argsOf('writeMetadata')[0] as { fileName: string }).fileName).toBe(
+      'interview-documentary-assembly-run.json',
+    );
   });
 });

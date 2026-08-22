@@ -148,6 +148,26 @@ function validateOptionalRef(
   }
 }
 
+function validateRequiredRef(
+  params: Readonly<Record<string, unknown>>,
+  key: string,
+  issues: NodeParamIssue[],
+): void {
+  if (!isValueRef(params[key])) {
+    issues.push(paramIssue(key, 'must be a value reference'));
+  }
+}
+
+function optionalStringArrayParam(
+  ctx: NodeExecutionContext,
+  key: string,
+): readonly string[] | undefined {
+  const value = ctx.node.params[key];
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? value
+    : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Typed conditions (§23.2 decision: "typed conditions").
 // ---------------------------------------------------------------------------
@@ -293,6 +313,11 @@ export function evaluateCondition(
 // ---------------------------------------------------------------------------
 
 export interface AnalysisPorts {
+  readonly researchBrief?: (args: {
+    readonly brief: unknown;
+    readonly media: unknown;
+    readonly references?: unknown;
+  }) => unknown;
   readonly transcribe?: (args: { readonly source: unknown; readonly language?: string }) => unknown;
   readonly detectSilence?: (args: {
     readonly source: unknown;
@@ -348,6 +373,12 @@ export interface TransformPorts {
     readonly templateId: string;
     readonly variables: unknown;
   }) => unknown;
+  readonly buildContactSheet?: (args: {
+    readonly title: string;
+    readonly candidates: unknown;
+    readonly shotlist?: unknown;
+    readonly providerRefs?: readonly string[];
+  }) => unknown;
 }
 
 export interface GenerationPorts {
@@ -361,6 +392,17 @@ export interface GenerationPorts {
     readonly text: string;
     readonly targetLanguage: string;
     readonly sourceLanguage?: string;
+  }) => unknown;
+  readonly generateScript?: (args: {
+    readonly brief: unknown;
+    readonly research: unknown;
+    readonly media: unknown;
+    readonly style?: string;
+  }) => unknown;
+  readonly generateShotlist?: (args: {
+    readonly script: unknown;
+    readonly media: unknown;
+    readonly format?: string;
   }) => unknown;
 }
 
@@ -381,6 +423,11 @@ export interface RenderPorts {
     readonly source: unknown;
     readonly profile?: string;
   }) => unknown;
+  readonly inspect?: (args: {
+    readonly source: unknown;
+    readonly deliveryPromise?: unknown;
+    readonly reportRef?: string;
+  }) => unknown;
 }
 
 export interface OutputPorts {
@@ -393,6 +440,14 @@ export interface OutputPorts {
     readonly folderId: string;
     readonly fileName: string;
     readonly metadata: unknown;
+  }) => unknown;
+  readonly writeDeliveryManifest?: (args: {
+    readonly folderId: string;
+    readonly fileName: string;
+    readonly artifact: unknown;
+    readonly inspection?: unknown;
+    readonly approvals?: unknown;
+    readonly providerRefs?: readonly string[];
   }) => unknown;
 }
 
@@ -598,6 +653,41 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
   );
 
   // --- analysis -----------------------------------------------------------
+  register(
+    'analysis.researchBrief',
+    'analysis',
+    'Researches a creative brief against selected media and reference material for production packs.',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateRequiredRef(params, 'briefFrom', issues);
+      validateRequiredRef(params, 'mediaFrom', issues);
+      validateOptionalRef(params, 'referencesFrom', issues);
+      return issues;
+    },
+    portBacked(ports.analysis?.researchBrief, 'analysis.researchBrief', (port, ctx) => {
+      const briefRef = ctx.node.params['briefFrom'];
+      const mediaRef = ctx.node.params['mediaFrom'];
+      const referencesRef = ctx.node.params['referencesFrom'];
+      if (!isValueRef(briefRef) || !isValueRef(mediaRef)) {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          'briefFrom and mediaFrom must be value references',
+        );
+      }
+      const references = isValueRef(referencesRef)
+        ? resolveValueRef(referencesRef, ctx)
+        : undefined;
+      return okResult(
+        port({
+          brief: resolveValueRef(briefRef, ctx),
+          media: resolveValueRef(mediaRef, ctx),
+          ...(references !== undefined ? { references } : {}),
+        }),
+      );
+    }),
+  );
+
   register(
     'analysis.transcribe',
     'analysis',
@@ -908,6 +998,47 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
   );
 
   register(
+    'transform.contactSheet',
+    'transform',
+    'Builds a reviewable contact sheet from candidates and shot-list context.',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      requireString(params, 'title', issues);
+      validateRequiredRef(params, 'candidatesFrom', issues);
+      validateOptionalRef(params, 'shotlistFrom', issues);
+      const providerRefs = params['providerRefs'];
+      if (
+        providerRefs !== undefined &&
+        (!Array.isArray(providerRefs) || providerRefs.some((entry) => typeof entry !== 'string'))
+      ) {
+        issues.push(paramIssue('providerRefs', 'must be an array of strings when present'));
+      }
+      return issues;
+    },
+    portBacked(ports.transform?.buildContactSheet, 'transform.buildContactSheet', (port, ctx) => {
+      const candidatesRef = ctx.node.params['candidatesFrom'];
+      if (!isValueRef(candidatesRef)) {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          'candidatesFrom must be a value reference',
+        );
+      }
+      const shotlistRef = ctx.node.params['shotlistFrom'];
+      const shotlist = isValueRef(shotlistRef) ? resolveValueRef(shotlistRef, ctx) : undefined;
+      const providerRefs = optionalStringArrayParam(ctx, 'providerRefs');
+      return okResult(
+        port({
+          title: stringParam(ctx, 'title'),
+          candidates: resolveValueRef(candidatesRef, ctx),
+          ...(shotlist !== undefined ? { shotlist } : {}),
+          ...(providerRefs !== undefined ? { providerRefs } : {}),
+        }),
+      );
+    }),
+  );
+
+  register(
     'transform.compose',
     'transform',
     'Builds one object from named value references — pure fan-in for multi-input downstream nodes.',
@@ -1046,6 +1177,77 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
     }),
   );
 
+  register(
+    'generation.script',
+    'generation',
+    'Generates a production script from a brief, selected media, and research notes.',
+    false,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateRequiredRef(params, 'briefFrom', issues);
+      validateRequiredRef(params, 'researchFrom', issues);
+      validateRequiredRef(params, 'mediaFrom', issues);
+      optionalString(params, 'style', issues);
+      return issues;
+    },
+    portBacked(ports.generation?.generateScript, 'generation.generateScript', (port, ctx) => {
+      const briefRef = ctx.node.params['briefFrom'];
+      const researchRef = ctx.node.params['researchFrom'];
+      const mediaRef = ctx.node.params['mediaFrom'];
+      if (!isValueRef(briefRef) || !isValueRef(researchRef) || !isValueRef(mediaRef)) {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          'briefFrom, researchFrom, and mediaFrom must be value references',
+        );
+      }
+      return okResult(
+        port({
+          brief: resolveValueRef(briefRef, ctx),
+          research: resolveValueRef(researchRef, ctx),
+          media: resolveValueRef(mediaRef, ctx),
+          ...(() => {
+            const style = optionalStringParam(ctx, 'style');
+            return style === undefined ? {} : { style };
+          })(),
+        }),
+      );
+    }),
+  );
+
+  register(
+    'generation.shotlist',
+    'generation',
+    'Generates an editable shot list from the approved/scripted treatment and media.',
+    false,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateRequiredRef(params, 'scriptFrom', issues);
+      validateRequiredRef(params, 'mediaFrom', issues);
+      optionalString(params, 'format', issues);
+      return issues;
+    },
+    portBacked(ports.generation?.generateShotlist, 'generation.generateShotlist', (port, ctx) => {
+      const scriptRef = ctx.node.params['scriptFrom'];
+      const mediaRef = ctx.node.params['mediaFrom'];
+      if (!isValueRef(scriptRef) || !isValueRef(mediaRef)) {
+        throw new NodeLibraryError(
+          'workflow/invalid-params',
+          'scriptFrom and mediaFrom must be value references',
+        );
+      }
+      return okResult(
+        port({
+          script: resolveValueRef(scriptRef, ctx),
+          media: resolveValueRef(mediaRef, ctx),
+          ...(() => {
+            const format = optionalStringParam(ctx, 'format');
+            return format === undefined ? {} : { format };
+          })(),
+        }),
+      );
+    }),
+  );
+
   // --- decision -------------------------------------------------------------
   register(
     'decision.condition',
@@ -1177,6 +1379,33 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
     renderValidate,
     renderHandler('final'),
   );
+  register(
+    'render.inspect',
+    'render',
+    'Inspects a rendered artifact against a delivery promise and returns a bounded QA report.',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      validateOptionalRef(params, 'source', issues);
+      validateOptionalRef(params, 'deliveryPromiseFrom', issues);
+      optionalString(params, 'reportRef', issues);
+      return issues;
+    },
+    portBacked(ports.render?.inspect, 'render.inspect', (port, ctx) => {
+      const deliveryPromiseRef = ctx.node.params['deliveryPromiseFrom'];
+      const deliveryPromise = isValueRef(deliveryPromiseRef)
+        ? resolveValueRef(deliveryPromiseRef, ctx)
+        : undefined;
+      const reportRef = optionalStringParam(ctx, 'reportRef');
+      return okResult(
+        port({
+          source: resolveSource(ctx, 'source'),
+          ...(deliveryPromise !== undefined ? { deliveryPromise } : {}),
+          ...(reportRef !== undefined ? { reportRef } : {}),
+        }),
+      );
+    }),
+  );
 
   // --- output ---------------------------------------------------------------
   register(
@@ -1224,6 +1453,48 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
         }),
       ),
     ),
+  );
+
+  register(
+    'output.deliveryManifest',
+    'output',
+    'Writes a delivery manifest tying the final artifact to QA, approval, and provider references.',
+    true,
+    (params) => {
+      const issues: NodeParamIssue[] = [];
+      requireString(params, 'folderId', issues);
+      requireString(params, 'fileName', issues);
+      validateOptionalRef(params, 'source', issues);
+      validateOptionalRef(params, 'inspectionFrom', issues);
+      validateOptionalRef(params, 'approvalsFrom', issues);
+      const providerRefs = params['providerRefs'];
+      if (
+        providerRefs !== undefined &&
+        (!Array.isArray(providerRefs) || providerRefs.some((entry) => typeof entry !== 'string'))
+      ) {
+        issues.push(paramIssue('providerRefs', 'must be an array of strings when present'));
+      }
+      return issues;
+    },
+    portBacked(ports.output?.writeDeliveryManifest, 'output.writeDeliveryManifest', (port, ctx) => {
+      const inspectionRef = ctx.node.params['inspectionFrom'];
+      const approvalsRef = ctx.node.params['approvalsFrom'];
+      const inspection = isValueRef(inspectionRef)
+        ? resolveValueRef(inspectionRef, ctx)
+        : undefined;
+      const approvals = isValueRef(approvalsRef) ? resolveValueRef(approvalsRef, ctx) : undefined;
+      const providerRefs = optionalStringArrayParam(ctx, 'providerRefs');
+      return okResult(
+        port({
+          folderId: stringParam(ctx, 'folderId'),
+          fileName: stringParam(ctx, 'fileName'),
+          artifact: resolveSource(ctx, 'source'),
+          ...(inspection !== undefined ? { inspection } : {}),
+          ...(approvals !== undefined ? { approvals } : {}),
+          ...(providerRefs !== undefined ? { providerRefs } : {}),
+        }),
+      );
+    }),
   );
 
   // --- control ----------------------------------------------------------------

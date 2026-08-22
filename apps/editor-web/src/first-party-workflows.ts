@@ -1,6 +1,7 @@
 // apps/editor-web/src/first-party-workflows.ts
 
 import {
+  buildFirstPartyPipelinePacks,
   buildFirstPartyWorkflows,
   firstPartyDefinitionFiles,
   FIRST_PARTY_WORKFLOWS_VERSION,
@@ -17,6 +18,13 @@ import type { RecordedWorkflow } from './workflow-recorder.js';
 export interface FirstPartyWorkflow {
   readonly workflow: JoyWorkflow;
   readonly fileName: string;
+  readonly label: string;
+  readonly summary: string;
+  readonly requiredPorts: readonly string[];
+  readonly optionalPorts: readonly string[];
+  readonly capabilities: readonly string[];
+  readonly approvals: readonly string[];
+  readonly reportRefs: readonly string[];
 }
 
 let cachedWorkflows: readonly FirstPartyWorkflow[] | undefined;
@@ -24,12 +32,20 @@ let cachedWorkflows: readonly FirstPartyWorkflow[] | undefined;
 export function loadFirstPartyWorkflows(): readonly FirstPartyWorkflow[] {
   if (cachedWorkflows !== undefined) return cachedWorkflows;
 
+  const packs = buildFirstPartyPipelinePacks();
   const builtWorkflows = buildFirstPartyWorkflows();
   const definitionFiles = firstPartyDefinitionFiles();
 
   cachedWorkflows = builtWorkflows.map((built, index) => ({
     workflow: built.workflow,
     fileName: definitionFiles[index]?.fileName ?? `${built.workflow.id}.json`,
+    label: packs[index]?.label ?? 'Production pack',
+    summary: packs[index]?.summary ?? built.workflow.name,
+    requiredPorts: packs[index]?.requiredPorts ?? [],
+    optionalPorts: packs[index]?.optionalPorts ?? [],
+    capabilities: packs[index]?.capabilities ?? built.workflow.permissions.map((p) => p.capability),
+    approvals: packs[index]?.approvals ?? [],
+    reportRefs: packs[index]?.reportRefs ?? [],
   }));
 
   return cachedWorkflows;

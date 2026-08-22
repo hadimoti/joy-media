@@ -188,18 +188,32 @@ export function normalizeFirstPartyInputs(
   workflow: JoyWorkflow,
   inputs: Readonly<Record<string, unknown>>,
 ): unknown {
+  const normalized: Record<string, unknown> = { ...inputs };
+  if (normalized.brief === undefined || normalized.brief === '') {
+    normalized.brief = 'Create a polished, on-brand edit from the selected media.';
+  }
+  if (
+    normalized.selectedMedia === undefined &&
+    typeof normalized.assetId === 'string' &&
+    normalized.assetId.trim() !== ''
+  ) {
+    normalized.selectedMedia = { assetId: normalized.assetId };
+  }
+  if (typeof normalized.selectedMedia === 'string' && normalized.selectedMedia.trim() !== '') {
+    normalized.selectedMedia = { assetId: normalized.selectedMedia };
+  }
   const required = (workflow.inputs.required as string[] | undefined) ?? [];
   if (
     required.includes('asset') &&
-    inputs.asset === undefined &&
-    typeof inputs.assetId === 'string'
+    normalized.asset === undefined &&
+    typeof normalized.assetId === 'string'
   ) {
-    return { ...inputs, asset: { assetId: inputs.assetId, fixture: true } };
+    normalized.asset = { assetId: normalized.assetId };
   }
-  if (typeof inputs.asset === 'string') {
-    return { ...inputs, asset: { assetId: inputs.asset, fixture: true } };
+  if (typeof normalized.asset === 'string') {
+    normalized.asset = { assetId: normalized.asset };
   }
-  return inputs;
+  return normalized;
 }
 
 function findPendingApproval(checkpoint: RunCheckpoint):
@@ -410,6 +424,7 @@ async function executeAndPersistFirstPartyWorkflow(
     projectRevision,
     workflowInputs,
     handlers: instrumentHandlers(options.library.handlers, recorder),
+    reuseNondeterministic: true,
     ...(options.resumeFrom !== undefined ? { resumeFrom: options.resumeFrom } : {}),
     ...(options.humanInputs !== undefined ? { humanInputs: options.humanInputs } : {}),
   });

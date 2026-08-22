@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
-  "id": "joy.first-party.long-video-draft-reels",
+  "id": "joy.first-party.reference-social-cutdown",
   "version": "2.0.0",
-  "name": "Long video draft reels",
+  "name": "Reference social cutdown",
   "inputs": {
     "type": "object",
     "required": [
@@ -92,7 +92,7 @@
       "category": "generation",
       "type": "generation.script",
       "params": {
-        "style": "short-form hook script",
+        "style": "clean-room social cutdown",
         "briefFrom": {
           "kind": "upstream",
           "node": "brief"
@@ -113,7 +113,7 @@
       "category": "generation",
       "type": "generation.shotlist",
       "params": {
-        "format": "vertical-reels",
+        "format": "reference-driven-cutdown",
         "scriptFrom": {
           "kind": "upstream",
           "node": "script"
@@ -138,7 +138,7 @@
           "kind": "upstream",
           "node": "script"
         },
-        "maxCandidates": 5
+        "maxCandidates": 6
       },
       "deterministic": true
     },
@@ -147,7 +147,7 @@
       "category": "transform",
       "type": "transform.contactSheet",
       "params": {
-        "title": "Draft reel contact sheet",
+        "title": "Clean-room reference cutdown contact sheet",
         "candidatesFrom": {
           "kind": "upstream",
           "node": "candidates"
@@ -172,7 +172,7 @@
         "fields": {
           "estimatedUsd": {
             "kind": "literal",
-            "value": 8
+            "value": 10
           },
           "providerRefs": {
             "kind": "literal",
@@ -213,12 +213,12 @@
       "deterministic": false
     },
     {
-      "id": "approve-candidates",
+      "id": "approve-cutdown",
       "category": "decision",
       "type": "decision.approval",
       "params": {
         "kind": "choose-candidates",
-        "prompt": "Choose hook candidates for editable draft reels. Respond with {candidates: [...]} where each candidate is self-contained.",
+        "prompt": "Choose clean-room social cutdown candidates. Respond with {candidates: [...]} using only reference-derived structure, not copied assets.",
         "payloadFrom": {
           "kind": "upstream",
           "node": "contact-sheet"
@@ -227,17 +227,17 @@
       "deterministic": false
     },
     {
-      "id": "apply-approved-candidates",
+      "id": "apply-cutdown",
       "category": "editor",
       "type": "editor.commandTransaction",
       "params": {
-        "label": "Create draft-reel approval artifacts",
+        "label": "Create approved reference cutdown artifacts",
         "commands": [
           {
             "tool": "artifact.create",
             "arguments": {
               "kind": "workflow-approval",
-              "label": "Approved draft reel candidates",
+              "label": "Approved clean-room social cutdown",
               "sourceRef": "approval.response"
             }
           }
@@ -246,149 +246,15 @@
       "deterministic": true
     },
     {
-      "id": "draft-reels",
+      "id": "finals",
       "category": "control",
       "type": "control.map",
       "params": {
         "workflow": {
           "formatVersion": 1,
-          "id": "joy.first-party.long-video-draft-reels.item",
+          "id": "joy.first-party.reference-social-cutdown.delivery",
           "version": "2.0.0",
-          "name": "Draft reel per approved candidate",
-          "inputs": {
-            "type": "object",
-            "description": "One approved hook candidate."
-          },
-          "outputs": {
-            "type": "object"
-          },
-          "nodes": [
-            {
-              "id": "branch",
-              "category": "editor",
-              "type": "editor.createBranch",
-              "params": {
-                "name": "draft-reel",
-                "source": {
-                  "kind": "input"
-                }
-              },
-              "deterministic": true
-            },
-            {
-              "id": "reframe",
-              "category": "transform",
-              "type": "transform.reframe",
-              "params": {
-                "aspect": "9:16",
-                "source": {
-                  "kind": "upstream",
-                  "node": "branch"
-                }
-              },
-              "deterministic": true
-            },
-            {
-              "id": "caption",
-              "category": "transform",
-              "type": "transform.caption",
-              "params": {
-                "templateId": "joy.caption.clean",
-                "source": {
-                  "kind": "upstream",
-                  "node": "reframe"
-                }
-              },
-              "deterministic": true
-            },
-            {
-              "id": "mix",
-              "category": "transform",
-              "type": "transform.normalizeAudio",
-              "params": {
-                "targetLufs": -14,
-                "duckMusic": true,
-                "source": {
-                  "kind": "upstream",
-                  "node": "caption"
-                }
-              },
-              "deterministic": true
-            },
-            {
-              "id": "preview",
-              "category": "render",
-              "type": "render.preview",
-              "params": {
-                "profile": "review-proxy",
-                "source": {
-                  "kind": "upstream",
-                  "node": "mix"
-                }
-              },
-              "deterministic": true
-            }
-          ],
-          "edges": [
-            {
-              "from": "branch",
-              "to": "reframe"
-            },
-            {
-              "from": "reframe",
-              "to": "caption"
-            },
-            {
-              "from": "caption",
-              "to": "mix"
-            },
-            {
-              "from": "mix",
-              "to": "preview"
-            }
-          ],
-          "permissions": [],
-          "policy": {
-            "concurrency": 1,
-            "failure": "stop",
-            "defaultRetry": {
-              "maxAttempts": 1,
-              "backoffMs": 0
-            }
-          }
-        },
-        "itemsFrom": {
-          "kind": "upstream",
-          "node": "approve-candidates",
-          "path": "response.candidates"
-        }
-      },
-      "deterministic": true
-    },
-    {
-      "id": "approve-drafts",
-      "category": "decision",
-      "type": "decision.approval",
-      "params": {
-        "kind": "approve-render",
-        "prompt": "Review draft proxies. Respond with {approved: [...]} listing the drafts to render as finals.",
-        "payloadFrom": {
-          "kind": "upstream",
-          "node": "draft-reels"
-        }
-      },
-      "deterministic": false
-    },
-    {
-      "id": "final-reels",
-      "category": "control",
-      "type": "control.map",
-      "params": {
-        "workflow": {
-          "formatVersion": 1,
-          "id": "joy.first-party.long-video-draft-reels.final",
-          "version": "2.0.0",
-          "name": "Final reel delivery per approved draft",
+          "name": "Reference social cutdown delivery",
           "inputs": {
             "type": "object",
             "description": "One approved render source."
@@ -402,7 +268,7 @@
               "category": "render",
               "type": "render.final",
               "params": {
-                "profile": "reel-vertical",
+                "profile": "social-cutdown-vertical",
                 "source": {
                   "kind": "input"
                 }
@@ -422,7 +288,7 @@
                   "kind": "upstream",
                   "node": "render"
                 },
-                "reportRef": "joy.first-party.long-video-draft-reels.final.qa-report"
+                "reportRef": "joy.first-party.reference-social-cutdown.delivery.qa-report"
               },
               "deterministic": true
             },
@@ -432,7 +298,7 @@
               "type": "output.deliveryManifest",
               "params": {
                 "folderId": "exports",
-                "fileName": "final.json",
+                "fileName": "delivery.json",
                 "source": {
                   "kind": "upstream",
                   "node": "render"
@@ -476,8 +342,8 @@
         },
         "itemsFrom": {
           "kind": "upstream",
-          "node": "approve-drafts",
-          "path": "response.approved"
+          "node": "approve-cutdown",
+          "path": "response.candidates"
         }
       },
       "deterministic": true
@@ -501,19 +367,14 @@
             "node": "confirm-cost",
             "path": "response"
           },
-          "candidateApproval": {
+          "creativeApproval": {
             "kind": "upstream",
-            "node": "approve-candidates",
-            "path": "response"
-          },
-          "renderApproval": {
-            "kind": "upstream",
-            "node": "approve-drafts",
+            "node": "approve-cutdown",
             "path": "response"
           },
           "deliveries": {
             "kind": "upstream",
-            "node": "final-reels"
+            "node": "finals"
           }
         }
       },
@@ -525,7 +386,7 @@
       "type": "output.metadata",
       "params": {
         "folderId": "exports",
-        "fileName": "long-video-draft-reels-run.json",
+        "fileName": "reference-social-cutdown-run.json",
         "source": {
           "kind": "upstream",
           "node": "run-report"
@@ -597,46 +458,34 @@
     },
     {
       "from": "contact-sheet",
-      "to": "approve-candidates"
+      "to": "approve-cutdown"
     },
     {
       "from": "confirm-cost",
-      "to": "approve-candidates"
+      "to": "approve-cutdown"
     },
     {
-      "from": "approve-candidates",
-      "to": "apply-approved-candidates"
+      "from": "approve-cutdown",
+      "to": "apply-cutdown"
     },
     {
-      "from": "approve-candidates",
-      "to": "draft-reels"
+      "from": "approve-cutdown",
+      "to": "finals"
     },
     {
-      "from": "apply-approved-candidates",
-      "to": "draft-reels"
-    },
-    {
-      "from": "draft-reels",
-      "to": "approve-drafts"
-    },
-    {
-      "from": "approve-drafts",
-      "to": "final-reels"
+      "from": "apply-cutdown",
+      "to": "finals"
     },
     {
       "from": "confirm-cost",
       "to": "run-report"
     },
     {
-      "from": "approve-candidates",
+      "from": "approve-cutdown",
       "to": "run-report"
     },
     {
-      "from": "approve-drafts",
-      "to": "run-report"
-    },
-    {
-      "from": "final-reels",
+      "from": "finals",
       "to": "run-report"
     },
     {
@@ -668,6 +517,9 @@
     },
     {
       "capability": "output.write"
+    },
+    {
+      "capability": "provider.reference-analysis"
     }
   ],
   "policy": {

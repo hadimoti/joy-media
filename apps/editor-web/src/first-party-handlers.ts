@@ -75,6 +75,13 @@ export function createFixtureFirstPartyLibrary(): NodeLibrary {
   return buildNodeLibrary({
     ports: {
       analysis: {
+        researchBrief: (args: { readonly brief: unknown; readonly media: unknown }) => ({
+          researchRef: 'fixture-research-brief',
+          brief: args.brief,
+          media: args.media,
+          providerRefs: ['fixture:research'],
+          ...fixtureNote('Fixture research notes for workflow tests; no provider call was made'),
+        }),
         transcribe: () => ({
           language: 'fa',
           segments: [{ text: 'Hello and welcome', startUs: 0 }],
@@ -279,6 +286,20 @@ export function createFixtureFirstPartyLibrary(): NodeLibrary {
           reason:
             'Scene templates are built via html-scene objects in the editor, not silently in this step.',
         }),
+        buildContactSheet: (args: { readonly title: string; readonly candidates: unknown }) => {
+          const candidates =
+            args.candidates !== null &&
+            typeof args.candidates === 'object' &&
+            Array.isArray((args.candidates as { readonly candidates?: unknown }).candidates)
+              ? (args.candidates as { readonly candidates: readonly unknown[] }).candidates
+              : args.candidates;
+          return {
+            title: args.title,
+            candidates,
+            contactSheetRef: 'fixture-contact-sheet',
+            ...fixtureNote('Fixture contact sheet for approval UI; not a rendered review sheet'),
+          };
+        },
       },
       generation: {
         synthesizeSpeech: (args: {
@@ -326,8 +347,27 @@ export function createFixtureFirstPartyLibrary(): NodeLibrary {
           reason:
             'Translation needs a provider gateway; the browser runner does not invent translated text.',
         }),
+        generateScript: (args: { readonly brief: unknown }) => ({
+          scriptRef: 'fixture-script',
+          text: `Fixture script from brief: ${String(args.brief)}`,
+          ...fixtureNote('Fixture script for workflow tests; no LLM provider was called'),
+        }),
+        generateShotlist: () => ({
+          shots: [{ id: 'fixture-shot-1', sourceRef: 'selected-media' }],
+          ...fixtureNote('Fixture shot list for workflow tests; no shot planner was called'),
+        }),
       },
       editor: {
+        executeCommandTransaction: (args: {
+          readonly label: string;
+          readonly commands: readonly unknown[];
+        }) => ({
+          transactionId: `fixture-${args.label.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
+          commands: args.commands,
+          applied: false,
+          deferredToEditor: true,
+          ...fixtureNote('Fixture command transaction; editor command bus is not mutated here'),
+        }),
         createBranch: (args: { readonly name: string; readonly source: unknown }) => {
           branchSeq += 1;
           return {
@@ -348,6 +388,11 @@ export function createFixtureFirstPartyLibrary(): NodeLibrary {
           profile: args.profile ?? 'social-h264-aac',
           reason: 'Use the editor Export with an output preset; Worker encoding is not wired yet.',
         }),
+        inspect: (args: { readonly reportRef?: string }) => ({
+          reportRef: args.reportRef ?? 'fixture-render-report',
+          findings: [{ code: 'fixture-inspection', status: 'pass' }],
+          ...fixtureNote('Fixture QA report; no bounded render inspection was run'),
+        }),
       },
       output: {
         writeToFolder: (args: { readonly folderId: string }) => ({
@@ -363,6 +408,15 @@ export function createFixtureFirstPartyLibrary(): NodeLibrary {
           inMemoryManifest: true,
           reason:
             'The manifest stays in the workflow output; the browser runner does not write the host filesystem.',
+        }),
+        writeDeliveryManifest: (args: { readonly fileName: string }) => ({
+          written: false,
+          deferred: true,
+          fileName: args.fileName,
+          inMemoryManifest: true,
+          deliveryRef: `fixture-delivery:${args.fileName}`,
+          reason:
+            'The delivery manifest stays in workflow output; the browser runner does not write the host filesystem.',
         }),
       },
     },

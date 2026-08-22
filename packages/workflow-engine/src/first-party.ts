@@ -1,17 +1,10 @@
 /**
- * P07 WP-07.4 — first-party workflows (§23.4): long-video→draft-reels,
- * multilingual promo, and podcast cleanup as tested, versioned definitions.
+ * Production first-party workflow packs.
  *
- * Each definition is authored in code through `WorkflowBuilder` against the v1
- * node registry, so params are validated at authoring time and `build()` re-runs
- * full definition + registry validation. The serialized JSON artifacts live in
- * `packages/workflow-engine/workflows/*.json` (diffable, CLI-runnable via
- * `joy-workflow`); a test pins them byte-for-byte to the builder output, so any
- * definition change shows up as a reviewable JSON diff.
- *
- * Regenerate the JSON artifacts after `pnpm --filter @joy-media/workflow-engine build`:
- *
- *   node -e "import('./packages/workflow-engine/dist/first-party.js').then(m => { const fs = require('node:fs'); for (const f of m.firstPartyDefinitionFiles()) fs.writeFileSync('packages/workflow-engine/workflows/' + f.fileName, f.json); })"
+ * The visible catalog is intentionally production-shaped: each pack declares the
+ * ports/capabilities it needs and every effectful step is backed by a port that
+ * fails closed when the host has not wired a real adapter. Fixture-only ports
+ * live in the editor test/demo registry, not in these definitions.
  */
 
 import { WorkflowBuilder, workflowToJson } from './authoring.js';
@@ -19,14 +12,13 @@ import type { JoyWorkflow } from './definition.js';
 import type { ValueRef } from './library.js';
 import { buildNodeLibrary } from './library.js';
 
-/** Version of every first-party definition; bump when any definition changes. */
-export const FIRST_PARTY_WORKFLOWS_VERSION = '1.0.0';
+/** Version of every production pipeline pack; bump when any definition changes. */
+export const FIRST_PARTY_WORKFLOWS_VERSION = '2.0.0';
 
-/** Caption template applied by all first-party workflows (P03 JOY templates). */
 const CAPTION_TEMPLATE_ID = 'joy.caption.clean';
-
-/** Opaque export-folder reference (§44: never a filesystem path). */
 const EXPORT_FOLDER_ID = 'exports';
+const FINAL_RENDER_RETRY = { maxAttempts: 2, backoffMs: 1000 } as const;
+const DEFAULT_PROVIDER_REFS = ['provider:analysis', 'provider:generation', 'provider:render'];
 
 const input = (path?: string): ValueRef =>
   path === undefined ? { kind: 'input' } : { kind: 'input', path };
@@ -34,7 +26,7 @@ const input = (path?: string): ValueRef =>
 const upstream = (node: string, path?: string): ValueRef =>
   path === undefined ? { kind: 'upstream', node } : { kind: 'upstream', node, path };
 
-const FINAL_RENDER_RETRY = { maxAttempts: 2, backoffMs: 1000 } as const;
+const literal = (value: unknown): ValueRef => ({ kind: 'literal', value });
 
 export interface FirstPartyWorkflow {
   readonly workflow: JoyWorkflow;
@@ -42,33 +34,204 @@ export interface FirstPartyWorkflow {
   readonly order: readonly string[];
 }
 
-// ---------------------------------------------------------------------------
-// 1. Long video → draft reels (§23.4).
-// ---------------------------------------------------------------------------
+export interface FirstPartyPipelinePack extends FirstPartyWorkflow {
+  readonly label: string;
+  readonly summary: string;
+  readonly provider: 'production';
+  readonly requiredPorts: readonly string[];
+  readonly optionalPorts: readonly string[];
+  readonly capabilities: readonly string[];
+  readonly approvals: readonly string[];
+  readonly reportRefs: readonly string[];
+}
 
-/**
- * Per-candidate sub-workflow: branch → reframe(9:16) → caption → normalize/duck
- * → review proxy. Map items are approved hook candidates and must be
- * self-contained: each carries its `source` and `subjectHints`.
- */
+interface PackDescriptor {
+  readonly id: FirstPartyWorkflowId;
+  readonly fileName: string;
+  readonly label: string;
+  readonly summary: string;
+  readonly requiredPorts: readonly string[];
+  readonly optionalPorts?: readonly string[];
+  readonly capabilities: readonly string[];
+  readonly approvals: readonly string[];
+  readonly reportRefs: readonly string[];
+  readonly build: () => FirstPartyWorkflow;
+}
+
+const CONTENT_INPUTS = {
+  type: 'object',
+  required: ['brief', 'selectedMedia'],
+  properties: {
+    brief: {
+      type: 'string',
+      minLength: 1,
+      description: 'Creative brief or client goal for this production run.',
+      default: 'Create a polished, on-brand edit from the selected media.',
+    },
+    selectedMedia: {
+      type: 'object',
+      description: 'Opaque selected media references; never paths or URLs.',
+    },
+    references: {
+      type: 'array',
+      items: { type: 'object' },
+      description: 'Optional clean-room reference notes or media fingerprints.',
+    },
+    rows: {
+      type: 'array',
+      items: { type: 'object' },
+      description: 'Optional structured rows for promo variants.',
+    },
+    delivery: {
+      type: 'object',
+      description: 'Optional delivery promise: aspect, codec, captions, approval requirements.',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+const MANIFEST_OUTPUTS = {
+  type: 'object',
+  required: ['manifest'],
+  properties: { manifest: { type: 'object' } },
+} as const;
+
+function baseContentPipeline(
+  builder: WorkflowBuilder,
+  options: {
+    readonly scriptStyle: string;
+    readonly shotlistFormat: string;
+    readonly candidateTitle: string;
+    readonly candidateCount: number;
+    readonly costUsd: number;
+  },
+): WorkflowBuilder {
+  return builder
+    .node('brief', 'input.item', { path: 'brief' })
+    .node('selected-media', 'input.item', { path: 'selectedMedia' })
+    .node('research', 'analysis.researchBrief', {
+      briefFrom: upstream('brief'),
+      mediaFrom: upstream('selected-media'),
+    })
+    .node('script', 'generation.script', {
+      style: options.scriptStyle,
+      briefFrom: upstream('brief'),
+      researchFrom: upstream('research'),
+      mediaFrom: upstream('selected-media'),
+    })
+    .node('shotlist', 'generation.shotlist', {
+      format: options.shotlistFormat,
+      scriptFrom: upstream('script'),
+      mediaFrom: upstream('selected-media'),
+    })
+    .node('candidates', 'analysis.hooks', {
+      source: upstream('selected-media'),
+      transcriptFrom: upstream('script'),
+      maxCandidates: options.candidateCount,
+    })
+    .node('contact-sheet', 'transform.contactSheet', {
+      title: options.candidateTitle,
+      candidatesFrom: upstream('candidates'),
+      shotlistFrom: upstream('shotlist'),
+      providerRefs: DEFAULT_PROVIDER_REFS,
+    })
+    .node('cost-brief', 'transform.compose', {
+      fields: {
+        estimatedUsd: literal(options.costUsd),
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        script: upstream('script'),
+        shotlist: upstream('shotlist'),
+        candidates: upstream('contact-sheet'),
+      },
+    })
+    .node('confirm-cost', 'decision.approval', {
+      kind: 'confirm-cost',
+      prompt:
+        'Confirm provider cost before candidate review. Respond with {approved: true} to continue.',
+      payloadFrom: upstream('cost-brief'),
+    })
+    .edge('brief', 'research')
+    .edge('selected-media', 'research')
+    .edge('brief', 'script')
+    .edge('research', 'script')
+    .edge('selected-media', 'script')
+    .edge('script', 'shotlist')
+    .edge('selected-media', 'shotlist')
+    .edge('selected-media', 'candidates')
+    .edge('script', 'candidates')
+    .edge('candidates', 'contact-sheet')
+    .edge('shotlist', 'contact-sheet')
+    .edge('script', 'cost-brief')
+    .edge('shotlist', 'cost-brief')
+    .edge('contact-sheet', 'cost-brief')
+    .edge('cost-brief', 'confirm-cost');
+}
+
+function addPackPermissions(builder: WorkflowBuilder): WorkflowBuilder {
+  return builder
+    .permission('provider.research')
+    .permission('provider.script')
+    .permission('provider.highlights')
+    .permission('provider.cost')
+    .permission('editor.command')
+    .permission('render.final')
+    .permission('render.inspect')
+    .permission('output.write');
+}
+
+function buildApprovalApplyCommand(label: string): readonly unknown[] {
+  return [
+    {
+      tool: 'artifact.create',
+      arguments: {
+        kind: 'workflow-approval',
+        label,
+        sourceRef: 'approval.response',
+      },
+    },
+  ];
+}
+
+function buildFinalDeliveryWorkflow(id: string, name: string, profile: string): JoyWorkflow {
+  const { registry } = buildNodeLibrary();
+  return new WorkflowBuilder(registry, {
+    id,
+    version: FIRST_PARTY_WORKFLOWS_VERSION,
+    name,
+    inputs: { type: 'object', description: 'One approved render source.' },
+    outputs: { type: 'object' },
+  })
+    .node('render', 'render.final', { profile, source: input() }, { retry: FINAL_RENDER_RETRY })
+    .node('inspect', 'render.inspect', {
+      source: upstream('render'),
+      reportRef: `${id}.qa-report`,
+    })
+    .node('manifest', 'output.deliveryManifest', {
+      folderId: EXPORT_FOLDER_ID,
+      fileName: `${id.split('.').pop() ?? 'delivery'}.json`,
+      source: upstream('render'),
+      inspectionFrom: upstream('inspect'),
+      providerRefs: DEFAULT_PROVIDER_REFS,
+    })
+    .edge('render', 'inspect')
+    .edge('render', 'manifest')
+    .edge('inspect', 'manifest')
+    .build().workflow;
+}
+
 function buildDraftReelItemWorkflow(): JoyWorkflow {
   const { registry } = buildNodeLibrary();
   return new WorkflowBuilder(registry, {
     id: 'joy.first-party.long-video-draft-reels.item',
     version: FIRST_PARTY_WORKFLOWS_VERSION,
     name: 'Draft reel per approved candidate',
-    inputs: {
-      type: 'object',
-      description:
-        'One approved hook candidate; must carry its own source reference and subjectHints.',
-    },
+    inputs: { type: 'object', description: 'One approved hook candidate.' },
     outputs: { type: 'object' },
   })
     .node('branch', 'editor.createBranch', { name: 'draft-reel', source: input() })
     .node('reframe', 'transform.reframe', {
       aspect: '9:16',
       source: upstream('branch'),
-      subjectHintsFrom: input('subjectHints'),
     })
     .node('caption', 'transform.caption', {
       templateId: CAPTION_TEMPLATE_ID,
@@ -87,64 +250,33 @@ function buildDraftReelItemWorkflow(): JoyWorkflow {
     .build().workflow;
 }
 
-/** Per-approved-draft sub-workflow: final render → export folder. */
-function buildFinalReelItemWorkflow(): JoyWorkflow {
-  const { registry } = buildNodeLibrary();
-  return new WorkflowBuilder(registry, {
-    id: 'joy.first-party.long-video-draft-reels.final',
-    version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Final reel per approved draft',
-    inputs: { type: 'object', description: 'One approved draft (self-contained render source).' },
-    outputs: { type: 'object' },
-  })
-    .node(
-      'final',
-      'render.final',
-      { profile: 'reel-vertical', source: input() },
-      { retry: FINAL_RENDER_RETRY },
-    )
-    .node('save', 'output.folder', { folderId: EXPORT_FOLDER_ID, source: upstream('final') })
-    .edge('final', 'save')
-    .build().workflow;
-}
-
-/**
- * §23.4 "Long video to draft reels": transcribe → hook candidates → human
- * candidate choice (parks, §23.6) → one editable branch + captioned 9:16 review
- * proxy per candidate (map) → human render approval (parks) → finals + manifest.
- */
 export function buildLongVideoDraftReelsWorkflow(): FirstPartyWorkflow {
   const { registry } = buildNodeLibrary();
-  return new WorkflowBuilder(registry, {
-    id: 'joy.first-party.long-video-draft-reels',
-    version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Long video → draft reels',
-    inputs: {
-      type: 'object',
-      required: ['asset'],
-      properties: {
-        asset: { type: 'object', description: 'Opaque source video asset reference.' },
-      },
-      additionalProperties: false,
+  const builder = baseContentPipeline(
+    new WorkflowBuilder(registry, {
+      id: 'joy.first-party.long-video-draft-reels',
+      version: FIRST_PARTY_WORKFLOWS_VERSION,
+      name: 'Long video draft reels',
+      inputs: CONTENT_INPUTS,
+      outputs: MANIFEST_OUTPUTS,
+    }),
+    {
+      scriptStyle: 'short-form hook script',
+      shotlistFormat: 'vertical-reels',
+      candidateTitle: 'Draft reel contact sheet',
+      candidateCount: 5,
+      costUsd: 8,
     },
-    outputs: {
-      type: 'object',
-      required: ['manifest'],
-      properties: { manifest: { type: 'object' } },
-    },
-  })
-    .node('ingest', 'input.item', { path: 'asset' })
-    .node('transcribe', 'analysis.transcribe', { source: upstream('ingest') })
-    .node('hooks', 'analysis.hooks', {
-      source: upstream('ingest'),
-      transcriptFrom: upstream('transcribe'),
-      maxCandidates: 5,
-    })
+  )
     .node('approve-candidates', 'decision.approval', {
       kind: 'choose-candidates',
       prompt:
-        'Choose which hook candidates become draft reels. Respond with {candidates: [...]}; each candidate must carry its source and subjectHints.',
-      payloadFrom: upstream('hooks'),
+        'Choose hook candidates for editable draft reels. Respond with {candidates: [...]} where each candidate is self-contained.',
+      payloadFrom: upstream('contact-sheet'),
+    })
+    .node('apply-approved-candidates', 'editor.commandTransaction', {
+      label: 'Create draft-reel approval artifacts',
+      commands: buildApprovalApplyCommand('Approved draft reel candidates'),
     })
     .node('draft-reels', 'control.map', {
       workflow: buildDraftReelItemWorkflow(),
@@ -153,53 +285,53 @@ export function buildLongVideoDraftReelsWorkflow(): FirstPartyWorkflow {
     .node('approve-drafts', 'decision.approval', {
       kind: 'approve-render',
       prompt:
-        'Review the draft previews. Respond with {approved: [...]} listing the drafts to render as finals; each entry must be a self-contained render source.',
+        'Review draft proxies. Respond with {approved: [...]} listing the drafts to render as finals.',
       payloadFrom: upstream('draft-reels'),
     })
     .node('final-reels', 'control.map', {
-      workflow: buildFinalReelItemWorkflow(),
+      workflow: buildFinalDeliveryWorkflow(
+        'joy.first-party.long-video-draft-reels.final',
+        'Final reel delivery per approved draft',
+        'reel-vertical',
+      ),
       itemsFrom: upstream('approve-drafts', 'response.approved'),
+    })
+    .node('run-report', 'transform.compose', {
+      fields: {
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        costApproval: upstream('confirm-cost', 'response'),
+        candidateApproval: upstream('approve-candidates', 'response'),
+        renderApproval: upstream('approve-drafts', 'response'),
+        deliveries: upstream('final-reels'),
+      },
     })
     .node('manifest', 'output.metadata', {
       folderId: EXPORT_FOLDER_ID,
       fileName: 'long-video-draft-reels-run.json',
-      source: upstream('final-reels'),
+      source: upstream('run-report'),
     })
-    .edge('ingest', 'transcribe')
-    .edge('ingest', 'hooks')
-    .edge('transcribe', 'hooks')
-    .edge('hooks', 'approve-candidates')
+    .edge('contact-sheet', 'approve-candidates')
+    .edge('confirm-cost', 'approve-candidates')
+    .edge('approve-candidates', 'apply-approved-candidates')
     .edge('approve-candidates', 'draft-reels')
+    .edge('apply-approved-candidates', 'draft-reels')
     .edge('draft-reels', 'approve-drafts')
     .edge('approve-drafts', 'final-reels')
-    .edge('final-reels', 'manifest')
-    .permission('provider.transcribe')
-    .permission('provider.highlights')
-    .permission('render.final')
-    .permission('output.write')
-    .build();
+    .edge('confirm-cost', 'run-report')
+    .edge('approve-candidates', 'run-report')
+    .edge('approve-drafts', 'run-report')
+    .edge('final-reels', 'run-report')
+    .edge('run-report', 'manifest');
+  return addPackPermissions(builder).build();
 }
 
-// ---------------------------------------------------------------------------
-// 2. Multilingual restaurant promo (§23.4).
-// ---------------------------------------------------------------------------
-
-/**
- * Per-row sub-workflow: translate approved copy → voice-over → aligned captions
- * → compose scene variables → Product Card scene instance → final render →
- * export. Map items are approved rows; each carries name, priceText, image,
- * language, and copy.
- */
 function buildPromoItemWorkflow(): JoyWorkflow {
   const { registry } = buildNodeLibrary();
   return new WorkflowBuilder(registry, {
     id: 'joy.first-party.multilingual-promo.item',
     version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Promo render per menu row and language',
-    inputs: {
-      type: 'object',
-      description: 'One approved menu row: name, priceText, image, language, copy.',
-    },
+    name: 'Promo render per approved row and language',
+    inputs: { type: 'object', description: 'One approved row: copy, language, image, offer.' },
     outputs: { type: 'object' },
   })
     .node('translate', 'generation.translate', {
@@ -226,13 +358,18 @@ function buildPromoItemWorkflow(): JoyWorkflow {
       templateId: 'joy.scene.product-card',
       variablesFrom: upstream('assemble'),
     })
-    .node(
-      'render',
-      'render.final',
-      { profile: 'promo-vertical', source: upstream('scene') },
-      { retry: FINAL_RENDER_RETRY },
-    )
-    .node('save', 'output.folder', { folderId: EXPORT_FOLDER_ID, source: upstream('render') })
+    .node('render', 'render.final', { profile: 'promo-vertical', source: upstream('scene') })
+    .node('inspect', 'render.inspect', {
+      source: upstream('render'),
+      reportRef: 'joy.first-party.multilingual-promo.qa-report',
+    })
+    .node('manifest', 'output.deliveryManifest', {
+      folderId: EXPORT_FOLDER_ID,
+      fileName: 'promo-delivery.json',
+      source: upstream('render'),
+      inspectionFrom: upstream('inspect'),
+      providerRefs: DEFAULT_PROVIDER_REFS,
+    })
     .edge('translate', 'voice')
     .edge('voice', 'captions')
     .edge('translate', 'assemble')
@@ -240,126 +377,106 @@ function buildPromoItemWorkflow(): JoyWorkflow {
     .edge('captions', 'assemble')
     .edge('assemble', 'scene')
     .edge('scene', 'render')
-    .edge('render', 'save')
+    .edge('render', 'inspect')
+    .edge('render', 'manifest')
+    .edge('inspect', 'manifest')
     .build().workflow;
 }
 
-/**
- * §23.4 "Multilingual restaurant promo": rows in → human copy approval (parks,
- * §23.6; the response carries the final per-row copy) → one translated, voiced,
- * captioned Product Card render per row/language (map) → manifest.
- */
 export function buildMultilingualPromoWorkflow(): FirstPartyWorkflow {
   const { registry } = buildNodeLibrary();
-  return new WorkflowBuilder(registry, {
-    id: 'joy.first-party.multilingual-promo',
-    version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Multilingual restaurant promo',
-    inputs: {
-      type: 'object',
-      required: ['rows'],
-      properties: {
-        rows: {
-          type: 'array',
-          minItems: 1,
-          items: { type: 'object' },
-          description: 'Menu rows: name, priceText, image, language, copy.',
-        },
-      },
-      additionalProperties: false,
+  const builder = baseContentPipeline(
+    new WorkflowBuilder(registry, {
+      id: 'joy.first-party.multilingual-promo',
+      version: FIRST_PARTY_WORKFLOWS_VERSION,
+      name: 'Multilingual promo',
+      inputs: CONTENT_INPUTS,
+      outputs: MANIFEST_OUTPUTS,
+    }),
+    {
+      scriptStyle: 'localized promo script',
+      shotlistFormat: 'menu-promo',
+      candidateTitle: 'Promo variant contact sheet',
+      candidateCount: 4,
+      costUsd: 12,
     },
-    outputs: {
-      type: 'object',
-      required: ['manifest'],
-      properties: { manifest: { type: 'object' } },
-    },
-  })
-    .node('rows', 'input.item', { path: 'rows' })
+  )
     .node('approve-copy', 'decision.approval', {
       kind: 'approve-transcript',
       prompt:
-        'Approve the promo copy for every row. Respond with {rows: [...]} where each row carries its final copy plus name, priceText, image, and language.',
-      payloadFrom: upstream('rows'),
+        'Approve localized promo rows. Respond with {rows: [...]} where each row has final copy and language.',
+      payloadFrom: upstream('contact-sheet'),
+    })
+    .node('apply-approved-copy', 'editor.commandTransaction', {
+      label: 'Create approved promo copy artifacts',
+      commands: buildApprovalApplyCommand('Approved multilingual promo copy'),
     })
     .node('per-language', 'control.map', {
       workflow: buildPromoItemWorkflow(),
       itemsFrom: upstream('approve-copy', 'response.rows'),
     })
+    .node('run-report', 'transform.compose', {
+      fields: {
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        costApproval: upstream('confirm-cost', 'response'),
+        copyApproval: upstream('approve-copy', 'response'),
+        deliveries: upstream('per-language'),
+      },
+    })
     .node('manifest', 'output.metadata', {
       folderId: EXPORT_FOLDER_ID,
       fileName: 'multilingual-promo-run.json',
-      source: upstream('per-language'),
+      source: upstream('run-report'),
     })
-    .edge('rows', 'approve-copy')
+    .edge('contact-sheet', 'approve-copy')
+    .edge('confirm-cost', 'approve-copy')
+    .edge('approve-copy', 'apply-approved-copy')
     .edge('approve-copy', 'per-language')
-    .edge('per-language', 'manifest')
+    .edge('apply-approved-copy', 'per-language')
+    .edge('confirm-cost', 'run-report')
+    .edge('approve-copy', 'run-report')
+    .edge('per-language', 'run-report')
+    .edge('run-report', 'manifest');
+  return addPackPermissions(builder)
     .permission('provider.translate')
     .permission('provider.tts')
-    .permission('render.final')
-    .permission('output.write')
     .build();
 }
 
-// ---------------------------------------------------------------------------
-// 3. Podcast cleanup (§23.4).
-// ---------------------------------------------------------------------------
-
-/** Per-chapter sub-workflow: final clip render → export folder. */
 function buildPodcastClipItemWorkflow(): JoyWorkflow {
-  const { registry } = buildNodeLibrary();
-  return new WorkflowBuilder(registry, {
-    id: 'joy.first-party.podcast-cleanup.clip',
-    version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Podcast clip per chapter',
-    inputs: { type: 'object', description: 'One chapter (self-contained renderable reference).' },
-    outputs: { type: 'object' },
-  })
-    .node(
-      'clip',
-      'render.final',
-      { profile: 'podcast-clip', source: input() },
-      { retry: FINAL_RENDER_RETRY },
-    )
-    .node('save', 'output.folder', { folderId: EXPORT_FOLDER_ID, source: upstream('clip') })
-    .edge('clip', 'save')
-    .build().workflow;
+  return buildFinalDeliveryWorkflow(
+    'joy.first-party.podcast-cleanup.clip',
+    'Podcast clip delivery per chapter',
+    'podcast-clip',
+  );
 }
 
-/**
- * §23.4 "Podcast cleanup": ingest → speaker detection + confirmation (parks;
- * the independent audio branch keeps running, §23.6) → denoise → normalize →
- * silence detection → human-approved edit list (parks; the approved ranges are
- * authoritative) → trim → transcript, chapters, captions → episode final render
- * + one clip per chapter (map) → audit manifest.
- */
 export function buildPodcastCleanupWorkflow(): FirstPartyWorkflow {
   const { registry } = buildNodeLibrary();
-  return new WorkflowBuilder(registry, {
-    id: 'joy.first-party.podcast-cleanup',
-    version: FIRST_PARTY_WORKFLOWS_VERSION,
-    name: 'Podcast cleanup',
-    inputs: {
-      type: 'object',
-      required: ['source'],
-      properties: {
-        source: { type: 'object', description: 'Opaque episode audio/video asset reference.' },
-      },
-      additionalProperties: false,
+  const builder = baseContentPipeline(
+    new WorkflowBuilder(registry, {
+      id: 'joy.first-party.podcast-cleanup',
+      version: FIRST_PARTY_WORKFLOWS_VERSION,
+      name: 'Podcast cleanup',
+      inputs: CONTENT_INPUTS,
+      outputs: MANIFEST_OUTPUTS,
+      policy: { failure: 'continue-independent' },
+    }),
+    {
+      scriptStyle: 'podcast cleanup plan',
+      shotlistFormat: 'chaptered-audio',
+      candidateTitle: 'Podcast chapter contact sheet',
+      candidateCount: 3,
+      costUsd: 6,
     },
-    outputs: {
-      type: 'object',
-      required: ['save-episode', 'manifest'],
-      properties: { 'save-episode': { type: 'object' }, manifest: { type: 'object' } },
-    },
-  })
-    .node('ingest', 'input.item', { path: 'source' })
-    .node('speakers', 'analysis.speakers', { source: upstream('ingest') })
+  )
+    .node('speakers', 'analysis.speakers', { source: upstream('selected-media') })
     .node('confirm-speakers', 'decision.approval', {
       kind: 'choose-candidates',
-      prompt: 'Confirm or correct the detected speakers. Respond with {speakers: [...]}.',
+      prompt: 'Confirm or correct detected speakers. Respond with {speakers: [...]}.',
       payloadFrom: upstream('speakers'),
     })
-    .node('denoise', 'transform.denoise', { source: upstream('ingest') })
+    .node('denoise', 'transform.denoise', { source: upstream('selected-media') })
     .node('normalize', 'transform.normalizeAudio', { targetLufs: -16, source: upstream('denoise') })
     .node('silence', 'analysis.silence', {
       thresholdDb: -40,
@@ -369,8 +486,12 @@ export function buildPodcastCleanupWorkflow(): FirstPartyWorkflow {
     .node('approve-edit-list', 'decision.approval', {
       kind: 'accept-edit-diff',
       prompt:
-        'Approve the silence-removal edit list. Respond with {ranges: [...]}; exactly the approved ranges are removed.',
+        'Approve the silence-removal edit list. Respond with {ranges: [...]}; exactly those ranges are removed.',
       payloadFrom: upstream('silence'),
+    })
+    .node('apply-approved-edits', 'editor.commandTransaction', {
+      label: 'Create approved podcast edit artifacts',
+      commands: buildApprovalApplyCommand('Approved podcast cleanup edits'),
     })
     .node('trim', 'transform.trim', {
       source: upstream('normalize'),
@@ -385,78 +506,352 @@ export function buildPodcastCleanupWorkflow(): FirstPartyWorkflow {
       templateId: CAPTION_TEMPLATE_ID,
       source: upstream('transcribe'),
     })
-    .node(
-      'render-episode',
-      'render.final',
-      { profile: 'podcast-episode', source: upstream('captions') },
-      { retry: FINAL_RENDER_RETRY },
-    )
-    .node('save-episode', 'output.folder', {
-      folderId: EXPORT_FOLDER_ID,
-      fileName: 'episode',
+    .node('render-episode', 'render.final', {
+      profile: 'podcast-episode',
+      source: upstream('captions'),
+    })
+    .node('inspect-episode', 'render.inspect', {
       source: upstream('render-episode'),
+      reportRef: 'joy.first-party.podcast-cleanup.qa-report',
     })
     .node('clips', 'control.map', {
       workflow: buildPodcastClipItemWorkflow(),
       itemsFrom: upstream('chapters', 'chapters'),
     })
-    .node('audit', 'transform.compose', {
+    .node('run-report', 'transform.compose', {
       fields: {
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        costApproval: upstream('confirm-cost', 'response'),
         speakers: upstream('confirm-speakers', 'response'),
         editList: upstream('approve-edit-list', 'response'),
         chapters: upstream('chapters'),
+        episodeInspection: upstream('inspect-episode'),
         clips: upstream('clips'),
       },
     })
-    .node('manifest', 'output.metadata', {
+    .node('manifest', 'output.deliveryManifest', {
       folderId: EXPORT_FOLDER_ID,
       fileName: 'podcast-cleanup-run.json',
-      source: upstream('audit'),
+      source: upstream('render-episode'),
+      inspectionFrom: upstream('inspect-episode'),
+      approvalsFrom: upstream('run-report'),
+      providerRefs: DEFAULT_PROVIDER_REFS,
     })
-    .edge('ingest', 'speakers')
+    .edge('selected-media', 'speakers')
     .edge('speakers', 'confirm-speakers')
-    .edge('ingest', 'denoise')
+    .edge('selected-media', 'denoise')
     .edge('denoise', 'normalize')
     .edge('normalize', 'silence')
     .edge('silence', 'approve-edit-list')
+    .edge('approve-edit-list', 'apply-approved-edits')
     .edge('normalize', 'trim')
     .edge('approve-edit-list', 'trim')
+    .edge('apply-approved-edits', 'trim')
     .edge('trim', 'transcribe')
     .edge('trim', 'chapters')
     .edge('transcribe', 'chapters')
     .edge('transcribe', 'captions')
     .edge('captions', 'render-episode')
-    .edge('render-episode', 'save-episode')
+    .edge('render-episode', 'inspect-episode')
     .edge('chapters', 'clips')
-    .edge('confirm-speakers', 'audit')
-    .edge('approve-edit-list', 'audit')
-    .edge('chapters', 'audit')
-    .edge('clips', 'audit')
-    .edge('audit', 'manifest')
+    .edge('confirm-cost', 'run-report')
+    .edge('confirm-speakers', 'run-report')
+    .edge('approve-edit-list', 'run-report')
+    .edge('chapters', 'run-report')
+    .edge('inspect-episode', 'run-report')
+    .edge('clips', 'run-report')
+    .edge('render-episode', 'manifest')
+    .edge('inspect-episode', 'manifest')
+    .edge('run-report', 'manifest');
+  return addPackPermissions(builder)
     .permission('provider.audio-cleanup')
     .permission('provider.transcribe')
-    .permission('render.final')
-    .permission('output.write')
     .build();
 }
 
-// ---------------------------------------------------------------------------
-// Catalog + serialized artifacts.
-// ---------------------------------------------------------------------------
+export function buildReferenceSocialCutdownWorkflow(): FirstPartyWorkflow {
+  const { registry } = buildNodeLibrary();
+  const builder = baseContentPipeline(
+    new WorkflowBuilder(registry, {
+      id: 'joy.first-party.reference-social-cutdown',
+      version: FIRST_PARTY_WORKFLOWS_VERSION,
+      name: 'Reference social cutdown',
+      inputs: CONTENT_INPUTS,
+      outputs: MANIFEST_OUTPUTS,
+    }),
+    {
+      scriptStyle: 'clean-room social cutdown',
+      shotlistFormat: 'reference-driven-cutdown',
+      candidateTitle: 'Clean-room reference cutdown contact sheet',
+      candidateCount: 6,
+      costUsd: 10,
+    },
+  )
+    .node('approve-cutdown', 'decision.approval', {
+      kind: 'choose-candidates',
+      prompt:
+        'Choose clean-room social cutdown candidates. Respond with {candidates: [...]} using only reference-derived structure, not copied assets.',
+      payloadFrom: upstream('contact-sheet'),
+    })
+    .node('apply-cutdown', 'editor.commandTransaction', {
+      label: 'Create approved reference cutdown artifacts',
+      commands: buildApprovalApplyCommand('Approved clean-room social cutdown'),
+    })
+    .node('finals', 'control.map', {
+      workflow: buildFinalDeliveryWorkflow(
+        'joy.first-party.reference-social-cutdown.delivery',
+        'Reference social cutdown delivery',
+        'social-cutdown-vertical',
+      ),
+      itemsFrom: upstream('approve-cutdown', 'response.candidates'),
+    })
+    .node('run-report', 'transform.compose', {
+      fields: {
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        costApproval: upstream('confirm-cost', 'response'),
+        creativeApproval: upstream('approve-cutdown', 'response'),
+        deliveries: upstream('finals'),
+      },
+    })
+    .node('manifest', 'output.metadata', {
+      folderId: EXPORT_FOLDER_ID,
+      fileName: 'reference-social-cutdown-run.json',
+      source: upstream('run-report'),
+    })
+    .edge('contact-sheet', 'approve-cutdown')
+    .edge('confirm-cost', 'approve-cutdown')
+    .edge('approve-cutdown', 'apply-cutdown')
+    .edge('approve-cutdown', 'finals')
+    .edge('apply-cutdown', 'finals')
+    .edge('confirm-cost', 'run-report')
+    .edge('approve-cutdown', 'run-report')
+    .edge('finals', 'run-report')
+    .edge('run-report', 'manifest');
+  return addPackPermissions(builder).permission('provider.reference-analysis').build();
+}
+
+export function buildInterviewDocumentaryAssemblyWorkflow(): FirstPartyWorkflow {
+  const { registry } = buildNodeLibrary();
+  const builder = baseContentPipeline(
+    new WorkflowBuilder(registry, {
+      id: 'joy.first-party.interview-documentary-assembly',
+      version: FIRST_PARTY_WORKFLOWS_VERSION,
+      name: 'Interview documentary assembly',
+      inputs: CONTENT_INPUTS,
+      outputs: MANIFEST_OUTPUTS,
+    }),
+    {
+      scriptStyle: 'documentary assembly treatment',
+      shotlistFormat: 'interview-documentary',
+      candidateTitle: 'Documentary assembly contact sheet',
+      candidateCount: 5,
+      costUsd: 14,
+    },
+  )
+    .node('transcribe', 'analysis.transcribe', { source: upstream('selected-media') })
+    .node('chapters', 'analysis.chapters', {
+      source: upstream('selected-media'),
+      transcriptFrom: upstream('transcribe'),
+    })
+    .node('approve-assembly', 'decision.approval', {
+      kind: 'choose-candidates',
+      prompt:
+        'Choose the interview/documentary assembly structure. Respond with {candidates: [...]} for renderable assemblies.',
+      payloadFrom: upstream('contact-sheet'),
+    })
+    .node('apply-assembly', 'editor.commandTransaction', {
+      label: 'Create approved documentary assembly artifacts',
+      commands: buildApprovalApplyCommand('Approved interview documentary assembly'),
+    })
+    .node('finals', 'control.map', {
+      workflow: buildFinalDeliveryWorkflow(
+        'joy.first-party.interview-documentary-assembly.delivery',
+        'Interview documentary delivery',
+        'documentary-assembly',
+      ),
+      itemsFrom: upstream('approve-assembly', 'response.candidates'),
+    })
+    .node('run-report', 'transform.compose', {
+      fields: {
+        providerRefs: literal(DEFAULT_PROVIDER_REFS),
+        costApproval: upstream('confirm-cost', 'response'),
+        assemblyApproval: upstream('approve-assembly', 'response'),
+        transcript: upstream('transcribe'),
+        chapters: upstream('chapters'),
+        deliveries: upstream('finals'),
+      },
+    })
+    .node('manifest', 'output.metadata', {
+      folderId: EXPORT_FOLDER_ID,
+      fileName: 'interview-documentary-assembly-run.json',
+      source: upstream('run-report'),
+    })
+    .edge('selected-media', 'transcribe')
+    .edge('transcribe', 'chapters')
+    .edge('selected-media', 'chapters')
+    .edge('contact-sheet', 'approve-assembly')
+    .edge('confirm-cost', 'approve-assembly')
+    .edge('approve-assembly', 'apply-assembly')
+    .edge('approve-assembly', 'finals')
+    .edge('apply-assembly', 'finals')
+    .edge('confirm-cost', 'run-report')
+    .edge('approve-assembly', 'run-report')
+    .edge('transcribe', 'run-report')
+    .edge('chapters', 'run-report')
+    .edge('finals', 'run-report')
+    .edge('run-report', 'manifest');
+  return addPackPermissions(builder).permission('provider.transcribe').build();
+}
 
 export const FIRST_PARTY_WORKFLOW_IDS = [
   'joy.first-party.long-video-draft-reels',
   'joy.first-party.multilingual-promo',
   'joy.first-party.podcast-cleanup',
+  'joy.first-party.reference-social-cutdown',
+  'joy.first-party.interview-documentary-assembly',
 ] as const;
+
+export type FirstPartyWorkflowId = (typeof FIRST_PARTY_WORKFLOW_IDS)[number];
+
+const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
+  {
+    id: 'joy.first-party.long-video-draft-reels',
+    fileName: 'long-video-draft-reels.json',
+    label: 'Production pack',
+    summary:
+      'Brief-to-research reel pipeline with contact sheet, approvals, final QA, and manifest.',
+    requiredPorts: [
+      'analysis.researchBrief',
+      'generation.generateScript',
+      'generation.generateShotlist',
+      'analysis.detectHighlights',
+      'transform.buildContactSheet',
+      'editor.executeCommandTransaction',
+      'render.render',
+      'render.inspect',
+      'output.writeDeliveryManifest',
+      'output.writeMetadataFile',
+    ],
+    optionalPorts: ['analysis.transcribe'],
+    capabilities: ['provider.research', 'provider.script', 'provider.highlights', 'render.final'],
+    approvals: ['confirm-cost', 'choose-candidates', 'approve-render'],
+    reportRefs: ['joy.first-party.long-video-draft-reels.final.qa-report'],
+    build: buildLongVideoDraftReelsWorkflow,
+  },
+  {
+    id: 'joy.first-party.multilingual-promo',
+    fileName: 'multilingual-promo.json',
+    label: 'Production pack',
+    summary: 'Localized promo pipeline with copy approval, TTS, final QA, and delivery manifest.',
+    requiredPorts: [
+      'analysis.researchBrief',
+      'generation.generateScript',
+      'generation.generateShotlist',
+      'generation.translate',
+      'generation.synthesizeSpeech',
+      'render.render',
+      'render.inspect',
+      'output.writeDeliveryManifest',
+      'output.writeMetadataFile',
+    ],
+    capabilities: ['provider.translate', 'provider.tts', 'render.final'],
+    approvals: ['confirm-cost', 'approve-transcript'],
+    reportRefs: ['joy.first-party.multilingual-promo.qa-report'],
+    build: buildMultilingualPromoWorkflow,
+  },
+  {
+    id: 'joy.first-party.podcast-cleanup',
+    fileName: 'podcast-cleanup.json',
+    label: 'Production pack',
+    summary:
+      'Podcast cleanup with approved speakers/edit list, episode render, clips, QA, and manifest.',
+    requiredPorts: [
+      'analysis.researchBrief',
+      'analysis.detectSpeakers',
+      'analysis.detectSilence',
+      'transform.denoise',
+      'transform.normalizeAudio',
+      'transform.trim',
+      'analysis.transcribe',
+      'analysis.generateChapters',
+      'render.render',
+      'render.inspect',
+      'output.writeDeliveryManifest',
+    ],
+    capabilities: ['provider.audio-cleanup', 'provider.transcribe', 'render.final'],
+    approvals: ['confirm-cost', 'choose-candidates', 'accept-edit-diff'],
+    reportRefs: ['joy.first-party.podcast-cleanup.qa-report'],
+    build: buildPodcastCleanupWorkflow,
+  },
+  {
+    id: 'joy.first-party.reference-social-cutdown',
+    fileName: 'reference-social-cutdown.json',
+    label: 'Production pack',
+    summary:
+      'Clean-room reference-driven social cutdown from brief/media/references to QA delivery.',
+    requiredPorts: [
+      'analysis.researchBrief',
+      'generation.generateScript',
+      'generation.generateShotlist',
+      'analysis.detectHighlights',
+      'transform.buildContactSheet',
+      'editor.executeCommandTransaction',
+      'render.render',
+      'render.inspect',
+      'output.writeDeliveryManifest',
+      'output.writeMetadataFile',
+    ],
+    capabilities: ['provider.reference-analysis', 'provider.script', 'render.final'],
+    approvals: ['confirm-cost', 'choose-candidates'],
+    reportRefs: ['joy.first-party.reference-social-cutdown.delivery.qa-report'],
+    build: buildReferenceSocialCutdownWorkflow,
+  },
+  {
+    id: 'joy.first-party.interview-documentary-assembly',
+    fileName: 'interview-documentary-assembly.json',
+    label: 'Production pack',
+    summary:
+      'Interview/documentary assembly with transcript/chapter evidence, approval, QA, and manifest.',
+    requiredPorts: [
+      'analysis.researchBrief',
+      'generation.generateScript',
+      'generation.generateShotlist',
+      'analysis.transcribe',
+      'analysis.generateChapters',
+      'transform.buildContactSheet',
+      'editor.executeCommandTransaction',
+      'render.render',
+      'render.inspect',
+      'output.writeDeliveryManifest',
+      'output.writeMetadataFile',
+    ],
+    capabilities: ['provider.transcribe', 'provider.script', 'render.final'],
+    approvals: ['confirm-cost', 'choose-candidates'],
+    reportRefs: ['joy.first-party.interview-documentary-assembly.delivery.qa-report'],
+    build: buildInterviewDocumentaryAssemblyWorkflow,
+  },
+];
+
+export function buildFirstPartyPipelinePacks(): readonly FirstPartyPipelinePack[] {
+  return PACK_DESCRIPTORS.map((descriptor) => {
+    const built = descriptor.build();
+    return {
+      ...built,
+      label: descriptor.label,
+      summary: descriptor.summary,
+      provider: 'production',
+      requiredPorts: descriptor.requiredPorts,
+      optionalPorts: descriptor.optionalPorts ?? [],
+      capabilities: descriptor.capabilities,
+      approvals: descriptor.approvals,
+      reportRefs: descriptor.reportRefs,
+    };
+  });
+}
 
 /** Builds every first-party workflow (registry-validated). */
 export function buildFirstPartyWorkflows(): readonly FirstPartyWorkflow[] {
-  return [
-    buildLongVideoDraftReelsWorkflow(),
-    buildMultilingualPromoWorkflow(),
-    buildPodcastCleanupWorkflow(),
-  ];
+  return buildFirstPartyPipelinePacks().map(({ workflow, order }) => ({ workflow, order }));
 }
 
 export interface FirstPartyDefinitionFile {
@@ -468,18 +863,8 @@ export interface FirstPartyDefinitionFile {
 
 /** The committed JSON artifacts; a test pins the files byte-for-byte to these. */
 export function firstPartyDefinitionFiles(): readonly FirstPartyDefinitionFile[] {
-  return [
-    {
-      fileName: 'long-video-draft-reels.json',
-      json: workflowToJson(buildLongVideoDraftReelsWorkflow().workflow),
-    },
-    {
-      fileName: 'multilingual-promo.json',
-      json: workflowToJson(buildMultilingualPromoWorkflow().workflow),
-    },
-    {
-      fileName: 'podcast-cleanup.json',
-      json: workflowToJson(buildPodcastCleanupWorkflow().workflow),
-    },
-  ];
+  return PACK_DESCRIPTORS.map((descriptor) => ({
+    fileName: descriptor.fileName,
+    json: workflowToJson(descriptor.build().workflow),
+  }));
 }

@@ -168,10 +168,18 @@ export type { HeadlessRunOptions, HeadlessRunResult } from './headless.js';
 export {
   FIRST_PARTY_WORKFLOWS_VERSION,
   FIRST_PARTY_WORKFLOW_IDS,
+  buildFirstPartyPipelinePacks,
   buildFirstPartyWorkflows,
+  buildInterviewDocumentaryAssemblyWorkflow,
   buildLongVideoDraftReelsWorkflow,
   buildMultilingualPromoWorkflow,
   buildPodcastCleanupWorkflow,
+  buildReferenceSocialCutdownWorkflow,
   firstPartyDefinitionFiles,
 } from './first-party.js';
-export type { FirstPartyDefinitionFile, FirstPartyWorkflow } from './first-party.js';
+export type {
+  FirstPartyDefinitionFile,
+  FirstPartyPipelinePack,
+  FirstPartyWorkflow,
+  FirstPartyWorkflowId,
+} from './first-party.js';

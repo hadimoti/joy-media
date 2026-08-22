@@ -76,6 +76,8 @@ export function parametersFromSchema(
       else if (name === 'newClipId' && selectedClip !== undefined)
         defaultValue = `${selectedClip.clip.id}-split-${selectedClip.clip.startUs}`;
       else if (name === 'asset' || name === 'assetId') defaultValue = 'asset-demo-1';
+      else if (name === 'selectedMedia') defaultValue = 'asset-demo-1';
+      else if (name === 'brief') defaultValue = 'Create a polished edit from the selected media.';
     }
     const schemaType = propertySchema.type;
     const type: 'string' | 'number' =
@@ -86,7 +88,9 @@ export function parametersFromSchema(
       description:
         name === 'asset'
           ? ((propertySchema.description as string | undefined) ?? 'Opaque source video asset id')
-          : ((propertySchema.description as string | undefined) ?? name),
+          : name === 'selectedMedia'
+            ? 'Selected media asset id'
+            : ((propertySchema.description as string | undefined) ?? name),
       default: defaultValue,
     };
   });
@@ -164,7 +168,7 @@ export function WorkflowsPanel({
     }
     setApproval(undefined);
     if (outcome.status === 'succeeded') {
-      setStatusMessage(`Workflow ${outcome.workflowId} finished.`);
+      setStatusMessage(`Workflow ${outcome.workflowId} finished; manifest output is recorded.`);
       return;
     }
     setStatusMessage(`Workflow run failed: ${outcome.error}`);
@@ -277,6 +281,10 @@ export function WorkflowsPanel({
       readonly version: string;
       readonly inputs: Record<string, unknown>;
     };
+    readonly label: string;
+    readonly summary: string;
+    readonly requiredPorts: readonly string[];
+    readonly approvals: readonly string[];
   }) {
     const properties =
       (entry.workflow.inputs.properties as Record<string, unknown> | undefined) ?? {};
@@ -285,7 +293,10 @@ export function WorkflowsPanel({
       <li key={entry.workflow.id} className="workflow-row">
         <div className="workflow-row-main">
           <strong>{entry.workflow.name}</strong>
-          <span>v{entry.workflow.version}</span>
+          <span>
+            {entry.label} · v{entry.workflow.version} · {entry.requiredPorts.length} required ports
+          </span>
+          <span title={entry.approvals.join(', ')}>{entry.summary}</span>
         </div>
         <div className="workflow-row-actions">
           <button
@@ -296,7 +307,7 @@ export function WorkflowsPanel({
                 : void onRun(entry.workflow.id, {}).then(applyOutcome)
             }
             aria-label={`Run ${entry.workflow.name}`}
-            title={`Run with inputs`}
+            title="Start production workflow run"
           >
             <PlayIcon />
           </button>
@@ -374,9 +385,9 @@ export function WorkflowsPanel({
           <ContactSheetApproval
             key={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
             request={approval.request}
-            approvalId={approval.approvalId}
             storageKey={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
-            storage={typeof window === 'undefined' ? undefined : window.localStorage}
+            {...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId })}
+            {...(typeof window === 'undefined' ? {} : { storage: window.localStorage })}
             onSubmit={(decision) => void submitApprovalDecision(decision)}
             onDismiss={() => setApproval(undefined)}
           />
@@ -390,8 +401,8 @@ export function WorkflowsPanel({
       {tab === 'system' && (
         <>
           <div className="workflow-section-header">
-            <h4>Bundled with JOY Media</h4>
-            <span className="system-version-badge" title="FIRST_PARTY_WORKFLOWS_VERSION">
+            <h4>Production pipeline packs</h4>
+            <span className="system-version-badge" title="First-party production pack version">
               v{systemWorkflowVersion}
             </span>
           </div>

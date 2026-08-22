@@ -177,7 +177,9 @@ describe('workflow-runner', () => {
     );
     expect(first.status).toBe('waiting_for_input');
     if (first.status !== 'waiting_for_input') return;
-    expect(firstCounts['analysis.transcribe']).toBe(1);
+    expect(first.nodeId).toBe('confirm-cost');
+    expect(firstCounts['analysis.researchBrief']).toBe(1);
+    expect(firstCounts['generation.script']).toBe(1);
     expect(firstCounts['analysis.hooks']).toBe(1);
 
     const serialized = JSON.stringify(await firstStore.load(first.runId));
@@ -189,20 +191,20 @@ describe('workflow-runner', () => {
       workflowInputs: { assetId: 'asset-long-1' },
       checkpoint: {
         nodes: {
-          transcribe: { state: 'succeeded', output: expect.any(Object) },
-          hooks: { state: 'succeeded', output: expect.any(Object) },
+          research: { state: 'succeeded', output: expect.any(Object) },
+          script: { state: 'succeeded', output: expect.any(Object) },
+          candidates: { state: 'succeeded', output: expect.any(Object) },
         },
       },
-      approvals: [{ nodeId: 'approve-candidates', state: 'pending' }],
+      approvals: [{ nodeId: 'confirm-cost', state: 'pending' }],
     });
     expect(serialized).toContain('"workflowInputs"');
 
-    const payload = first.request.payload as { candidates: readonly { title: string }[] };
     const secondCounts: Record<string, number> = {};
     const second = await resumeWorkflow(
       session,
       first.runId,
-      { 'approve-candidates': { candidates: payload.candidates.slice(0, 2) } },
+      { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } },
       {
         productionRunStore: revivedStore,
         authority: owner,
@@ -211,13 +213,14 @@ describe('workflow-runner', () => {
       },
     );
     expect(second.status).toBe('waiting_for_input');
-    expect(secondCounts['analysis.transcribe'] ?? 0).toBe(0);
+    expect(second).toMatchObject({ nodeId: 'approve-candidates' });
+    expect(secondCounts['generation.script'] ?? 0).toBe(0);
     expect(secondCounts['analysis.hooks'] ?? 0).toBe(0);
     await expect(revivedStore.load(first.runId)).resolves.toMatchObject({
       checkpointRevision: 2,
       approvals: [
-        { nodeId: 'approve-candidates', state: 'approved' },
-        { nodeId: 'approve-drafts', state: 'pending' },
+        { nodeId: 'confirm-cost', state: 'approved' },
+        { nodeId: 'approve-candidates', state: 'pending' },
       ],
     });
   });
@@ -246,13 +249,12 @@ describe('workflow-runner', () => {
     const staleSnapshot = await store.load(first.runId);
     if (staleSnapshot === undefined) expect.unreachable('run should be persisted');
 
-    const payload = first.request.payload as { candidates: readonly { title: string }[] };
-    const humanInputs = { 'approve-candidates': { candidates: payload.candidates.slice(0, 1) } };
+    const humanInputs = { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } };
     const current = await resumeWorkflow(session, first.runId, humanInputs, {
       ...options,
       ...approvalResumeOptions(first),
     });
-    expect(current.status).toBe('waiting_for_input');
+    expect(current).toMatchObject({ status: 'waiting_for_input', nodeId: 'approve-candidates' });
 
     const staleStore: ProductionRunStore = {
       load: async () => staleSnapshot,
@@ -297,15 +299,14 @@ describe('workflow-runner', () => {
     expect(first.status).toBe('waiting_for_input');
     if (first.status !== 'waiting_for_input') return;
 
-    const payload = first.request.payload as { candidates: readonly { title: string }[] };
-    const humanInputs = { 'approve-candidates': { candidates: payload.candidates.slice(0, 1) } };
+    const humanInputs = { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } };
     const current = await resumeWorkflow(session, first.runId, humanInputs, {
       ...options,
       ...approvalResumeOptions(first),
     });
     expect(current).toMatchObject({
       status: 'waiting_for_input',
-      nodeId: 'approve-drafts',
+      nodeId: 'approve-candidates',
     });
 
     const stale = await resumeWorkflow(session, first.runId, humanInputs, {
@@ -318,8 +319,8 @@ describe('workflow-runner', () => {
     });
     await expect(store.load(first.runId)).resolves.toMatchObject({
       approvals: [
-        { nodeId: 'approve-candidates', state: 'approved' },
-        { nodeId: 'approve-drafts', state: 'pending' },
+        { nodeId: 'confirm-cost', state: 'approved' },
+        { nodeId: 'approve-candidates', state: 'pending' },
       ],
     });
   });
@@ -355,7 +356,7 @@ describe('workflow-runner', () => {
     const afterCancel = await resumeWorkflow(
       session,
       canceled.runId,
-      { 'approve-candidates': { candidates: [] } },
+      { 'confirm-cost': { approved: true } },
       options,
     );
     expect(afterCancel).toMatchObject({
@@ -374,7 +375,7 @@ describe('workflow-runner', () => {
     const expiredResult = await resumeWorkflow(
       session,
       expired.runId,
-      { 'approve-candidates': { candidates: [] } },
+      { 'confirm-cost': { approved: true } },
       {
         ...options,
         ...approvalResumeOptions(expired),
@@ -438,17 +439,18 @@ describe('workflow-runner', () => {
     );
     expect(result).toMatchObject({
       status: 'failed',
-      error: expect.stringContaining('workflow/port-unavailable:analysis.transcribe'),
+      error: expect.stringContaining('workflow/port-unavailable:analysis.researchBrief'),
     });
     const record = await store.load(result.runId);
     expect(record?.state).toBe('failed');
     expect(record?.nodes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ nodeId: 'ingest', state: 'succeeded' }),
+        expect.objectContaining({ nodeId: 'brief', state: 'succeeded' }),
+        expect.objectContaining({ nodeId: 'selected-media', state: 'succeeded' }),
         expect.objectContaining({
-          nodeId: 'transcribe',
+          nodeId: 'research',
           state: 'failed',
-          failureCode: 'workflow/port-unavailable:analysis.transcribe',
+          failureCode: 'workflow/port-unavailable:analysis.researchBrief',
         }),
       ]),
     );

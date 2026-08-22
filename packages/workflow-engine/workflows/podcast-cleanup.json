@@ -1,17 +1,42 @@
 {
   "formatVersion": 1,
   "id": "joy.first-party.podcast-cleanup",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "name": "Podcast cleanup",
   "inputs": {
     "type": "object",
     "required": [
-      "source"
+      "brief",
+      "selectedMedia"
     ],
     "properties": {
-      "source": {
+      "brief": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Creative brief or client goal for this production run.",
+        "default": "Create a polished, on-brand edit from the selected media."
+      },
+      "selectedMedia": {
         "type": "object",
-        "description": "Opaque episode audio/video asset reference."
+        "description": "Opaque selected media references; never paths or URLs."
+      },
+      "references": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional clean-room reference notes or media fingerprints."
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional structured rows for promo variants."
+      },
+      "delivery": {
+        "type": "object",
+        "description": "Optional delivery promise: aspect, codec, captions, approval requirements."
       }
     },
     "additionalProperties": false
@@ -19,13 +44,9 @@
   "outputs": {
     "type": "object",
     "required": [
-      "save-episode",
       "manifest"
     ],
     "properties": {
-      "save-episode": {
-        "type": "object"
-      },
       "manifest": {
         "type": "object"
       }
@@ -33,13 +54,163 @@
   },
   "nodes": [
     {
-      "id": "ingest",
+      "id": "brief",
       "category": "input",
       "type": "input.item",
       "params": {
-        "path": "source"
+        "path": "brief"
       },
       "deterministic": true
+    },
+    {
+      "id": "selected-media",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "selectedMedia"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "research",
+      "category": "analysis",
+      "type": "analysis.researchBrief",
+      "params": {
+        "briefFrom": {
+          "kind": "upstream",
+          "node": "brief"
+        },
+        "mediaFrom": {
+          "kind": "upstream",
+          "node": "selected-media"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "script",
+      "category": "generation",
+      "type": "generation.script",
+      "params": {
+        "style": "podcast cleanup plan",
+        "briefFrom": {
+          "kind": "upstream",
+          "node": "brief"
+        },
+        "researchFrom": {
+          "kind": "upstream",
+          "node": "research"
+        },
+        "mediaFrom": {
+          "kind": "upstream",
+          "node": "selected-media"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "shotlist",
+      "category": "generation",
+      "type": "generation.shotlist",
+      "params": {
+        "format": "chaptered-audio",
+        "scriptFrom": {
+          "kind": "upstream",
+          "node": "script"
+        },
+        "mediaFrom": {
+          "kind": "upstream",
+          "node": "selected-media"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "candidates",
+      "category": "analysis",
+      "type": "analysis.hooks",
+      "params": {
+        "source": {
+          "kind": "upstream",
+          "node": "selected-media"
+        },
+        "transcriptFrom": {
+          "kind": "upstream",
+          "node": "script"
+        },
+        "maxCandidates": 3
+      },
+      "deterministic": true
+    },
+    {
+      "id": "contact-sheet",
+      "category": "transform",
+      "type": "transform.contactSheet",
+      "params": {
+        "title": "Podcast chapter contact sheet",
+        "candidatesFrom": {
+          "kind": "upstream",
+          "node": "candidates"
+        },
+        "shotlistFrom": {
+          "kind": "upstream",
+          "node": "shotlist"
+        },
+        "providerRefs": [
+          "provider:analysis",
+          "provider:generation",
+          "provider:render"
+        ]
+      },
+      "deterministic": true
+    },
+    {
+      "id": "cost-brief",
+      "category": "transform",
+      "type": "transform.compose",
+      "params": {
+        "fields": {
+          "estimatedUsd": {
+            "kind": "literal",
+            "value": 6
+          },
+          "providerRefs": {
+            "kind": "literal",
+            "value": [
+              "provider:analysis",
+              "provider:generation",
+              "provider:render"
+            ]
+          },
+          "script": {
+            "kind": "upstream",
+            "node": "script"
+          },
+          "shotlist": {
+            "kind": "upstream",
+            "node": "shotlist"
+          },
+          "candidates": {
+            "kind": "upstream",
+            "node": "contact-sheet"
+          }
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "confirm-cost",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "confirm-cost",
+        "prompt": "Confirm provider cost before candidate review. Respond with {approved: true} to continue.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "cost-brief"
+        }
+      },
+      "deterministic": false
     },
     {
       "id": "speakers",
@@ -48,7 +219,7 @@
       "params": {
         "source": {
           "kind": "upstream",
-          "node": "ingest"
+          "node": "selected-media"
         }
       },
       "deterministic": true
@@ -59,7 +230,7 @@
       "type": "decision.approval",
       "params": {
         "kind": "choose-candidates",
-        "prompt": "Confirm or correct the detected speakers. Respond with {speakers: [...]}.",
+        "prompt": "Confirm or correct detected speakers. Respond with {speakers: [...]}.",
         "payloadFrom": {
           "kind": "upstream",
           "node": "speakers"
@@ -74,7 +245,7 @@
       "params": {
         "source": {
           "kind": "upstream",
-          "node": "ingest"
+          "node": "selected-media"
         }
       },
       "deterministic": true
@@ -112,13 +283,32 @@
       "type": "decision.approval",
       "params": {
         "kind": "accept-edit-diff",
-        "prompt": "Approve the silence-removal edit list. Respond with {ranges: [...]}; exactly the approved ranges are removed.",
+        "prompt": "Approve the silence-removal edit list. Respond with {ranges: [...]}; exactly those ranges are removed.",
         "payloadFrom": {
           "kind": "upstream",
           "node": "silence"
         }
       },
       "deterministic": false
+    },
+    {
+      "id": "apply-approved-edits",
+      "category": "editor",
+      "type": "editor.commandTransaction",
+      "params": {
+        "label": "Create approved podcast edit artifacts",
+        "commands": [
+          {
+            "tool": "artifact.create",
+            "arguments": {
+              "kind": "workflow-approval",
+              "label": "Approved podcast cleanup edits",
+              "sourceRef": "approval.response"
+            }
+          }
+        ]
+      },
+      "deterministic": true
     },
     {
       "id": "trim",
@@ -189,23 +379,18 @@
           "node": "captions"
         }
       },
-      "deterministic": true,
-      "retry": {
-        "maxAttempts": 2,
-        "backoffMs": 1000
-      }
+      "deterministic": true
     },
     {
-      "id": "save-episode",
-      "category": "output",
-      "type": "output.folder",
+      "id": "inspect-episode",
+      "category": "render",
+      "type": "render.inspect",
       "params": {
-        "folderId": "exports",
-        "fileName": "episode",
         "source": {
           "kind": "upstream",
           "node": "render-episode"
-        }
+        },
+        "reportRef": "joy.first-party.podcast-cleanup.qa-report"
       },
       "deterministic": true
     },
@@ -217,18 +402,18 @@
         "workflow": {
           "formatVersion": 1,
           "id": "joy.first-party.podcast-cleanup.clip",
-          "version": "1.0.0",
-          "name": "Podcast clip per chapter",
+          "version": "2.0.0",
+          "name": "Podcast clip delivery per chapter",
           "inputs": {
             "type": "object",
-            "description": "One chapter (self-contained renderable reference)."
+            "description": "One approved render source."
           },
           "outputs": {
             "type": "object"
           },
           "nodes": [
             {
-              "id": "clip",
+              "id": "render",
               "category": "render",
               "type": "render.final",
               "params": {
@@ -244,23 +429,54 @@
               }
             },
             {
-              "id": "save",
-              "category": "output",
-              "type": "output.folder",
+              "id": "inspect",
+              "category": "render",
+              "type": "render.inspect",
               "params": {
-                "folderId": "exports",
                 "source": {
                   "kind": "upstream",
-                  "node": "clip"
-                }
+                  "node": "render"
+                },
+                "reportRef": "joy.first-party.podcast-cleanup.clip.qa-report"
+              },
+              "deterministic": true
+            },
+            {
+              "id": "manifest",
+              "category": "output",
+              "type": "output.deliveryManifest",
+              "params": {
+                "folderId": "exports",
+                "fileName": "clip.json",
+                "source": {
+                  "kind": "upstream",
+                  "node": "render"
+                },
+                "inspectionFrom": {
+                  "kind": "upstream",
+                  "node": "inspect"
+                },
+                "providerRefs": [
+                  "provider:analysis",
+                  "provider:generation",
+                  "provider:render"
+                ]
               },
               "deterministic": true
             }
           ],
           "edges": [
             {
-              "from": "clip",
-              "to": "save"
+              "from": "render",
+              "to": "inspect"
+            },
+            {
+              "from": "render",
+              "to": "manifest"
+            },
+            {
+              "from": "inspect",
+              "to": "manifest"
             }
           ],
           "permissions": [],
@@ -282,11 +498,24 @@
       "deterministic": true
     },
     {
-      "id": "audit",
+      "id": "run-report",
       "category": "transform",
       "type": "transform.compose",
       "params": {
         "fields": {
+          "providerRefs": {
+            "kind": "literal",
+            "value": [
+              "provider:analysis",
+              "provider:generation",
+              "provider:render"
+            ]
+          },
+          "costApproval": {
+            "kind": "upstream",
+            "node": "confirm-cost",
+            "path": "response"
+          },
           "speakers": {
             "kind": "upstream",
             "node": "confirm-speakers",
@@ -301,6 +530,10 @@
             "kind": "upstream",
             "node": "chapters"
           },
+          "episodeInspection": {
+            "kind": "upstream",
+            "node": "inspect-episode"
+          },
           "clips": {
             "kind": "upstream",
             "node": "clips"
@@ -312,21 +545,94 @@
     {
       "id": "manifest",
       "category": "output",
-      "type": "output.metadata",
+      "type": "output.deliveryManifest",
       "params": {
         "folderId": "exports",
         "fileName": "podcast-cleanup-run.json",
         "source": {
           "kind": "upstream",
-          "node": "audit"
-        }
+          "node": "render-episode"
+        },
+        "inspectionFrom": {
+          "kind": "upstream",
+          "node": "inspect-episode"
+        },
+        "approvalsFrom": {
+          "kind": "upstream",
+          "node": "run-report"
+        },
+        "providerRefs": [
+          "provider:analysis",
+          "provider:generation",
+          "provider:render"
+        ]
       },
       "deterministic": true
     }
   ],
   "edges": [
     {
-      "from": "ingest",
+      "from": "brief",
+      "to": "research"
+    },
+    {
+      "from": "selected-media",
+      "to": "research"
+    },
+    {
+      "from": "brief",
+      "to": "script"
+    },
+    {
+      "from": "research",
+      "to": "script"
+    },
+    {
+      "from": "selected-media",
+      "to": "script"
+    },
+    {
+      "from": "script",
+      "to": "shotlist"
+    },
+    {
+      "from": "selected-media",
+      "to": "shotlist"
+    },
+    {
+      "from": "selected-media",
+      "to": "candidates"
+    },
+    {
+      "from": "script",
+      "to": "candidates"
+    },
+    {
+      "from": "candidates",
+      "to": "contact-sheet"
+    },
+    {
+      "from": "shotlist",
+      "to": "contact-sheet"
+    },
+    {
+      "from": "script",
+      "to": "cost-brief"
+    },
+    {
+      "from": "shotlist",
+      "to": "cost-brief"
+    },
+    {
+      "from": "contact-sheet",
+      "to": "cost-brief"
+    },
+    {
+      "from": "cost-brief",
+      "to": "confirm-cost"
+    },
+    {
+      "from": "selected-media",
       "to": "speakers"
     },
     {
@@ -334,7 +640,7 @@
       "to": "confirm-speakers"
     },
     {
-      "from": "ingest",
+      "from": "selected-media",
       "to": "denoise"
     },
     {
@@ -350,11 +656,19 @@
       "to": "approve-edit-list"
     },
     {
+      "from": "approve-edit-list",
+      "to": "apply-approved-edits"
+    },
+    {
       "from": "normalize",
       "to": "trim"
     },
     {
       "from": "approve-edit-list",
+      "to": "trim"
+    },
+    {
+      "from": "apply-approved-edits",
       "to": "trim"
     },
     {
@@ -379,50 +693,84 @@
     },
     {
       "from": "render-episode",
-      "to": "save-episode"
+      "to": "inspect-episode"
     },
     {
       "from": "chapters",
       "to": "clips"
     },
     {
+      "from": "confirm-cost",
+      "to": "run-report"
+    },
+    {
       "from": "confirm-speakers",
-      "to": "audit"
+      "to": "run-report"
     },
     {
       "from": "approve-edit-list",
-      "to": "audit"
+      "to": "run-report"
     },
     {
       "from": "chapters",
-      "to": "audit"
+      "to": "run-report"
+    },
+    {
+      "from": "inspect-episode",
+      "to": "run-report"
     },
     {
       "from": "clips",
-      "to": "audit"
+      "to": "run-report"
     },
     {
-      "from": "audit",
+      "from": "render-episode",
+      "to": "manifest"
+    },
+    {
+      "from": "inspect-episode",
+      "to": "manifest"
+    },
+    {
+      "from": "run-report",
       "to": "manifest"
     }
   ],
   "permissions": [
     {
-      "capability": "provider.audio-cleanup"
+      "capability": "provider.research"
     },
     {
-      "capability": "provider.transcribe"
+      "capability": "provider.script"
+    },
+    {
+      "capability": "provider.highlights"
+    },
+    {
+      "capability": "provider.cost"
+    },
+    {
+      "capability": "editor.command"
     },
     {
       "capability": "render.final"
     },
     {
+      "capability": "render.inspect"
+    },
+    {
       "capability": "output.write"
+    },
+    {
+      "capability": "provider.audio-cleanup"
+    },
+    {
+      "capability": "provider.transcribe"
     }
   ],
   "policy": {
     "concurrency": 1,
-    "failure": "stop",
+    "failure": "continue-independent",
     "defaultRetry": {
       "maxAttempts": 1,
       "backoffMs": 0

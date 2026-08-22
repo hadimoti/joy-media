@@ -24,10 +24,12 @@ afterEach(() => {
 });
 
 describe('WP-17 first-party workflows', () => {
-  it('loads the three system workflows at the pinned version', () => {
+  it('loads the production pipeline packs at the pinned version', () => {
     const loaded = loadFirstPartyWorkflows();
     expect(loaded.map((entry) => entry.workflow.id)).toEqual([...FIRST_PARTY_WORKFLOW_IDS]);
-    expect(getFirstPartyWorkflowVersion()).toBe('1.0.0');
+    expect(loaded).toHaveLength(5);
+    expect(loaded.every((entry) => entry.label === 'Production pack')).toBe(true);
+    expect(getFirstPartyWorkflowVersion()).toBe('2.0.0');
   });
 
   it('detects derived-from lineage on recorded workflows only', () => {
@@ -62,13 +64,14 @@ describe('WP-17 first-party workflows', () => {
     const workflow = loadFirstPartyWorkflows()[0]?.workflow;
     expect(workflow).toBeDefined();
     if (workflow === undefined) return;
-    expect(normalizeFirstPartyInputs(workflow, { assetId: 'asset-long-1' })).toEqual({
+    expect(normalizeFirstPartyInputs(workflow, { assetId: 'asset-long-1' })).toMatchObject({
       assetId: 'asset-long-1',
-      asset: { assetId: 'asset-long-1', fixture: true },
+      brief: 'Create a polished, on-brand edit from the selected media.',
+      selectedMedia: { assetId: 'asset-long-1' },
     });
   });
 
-  it('runs long-video→draft-reels with stubs, parks, resumes, and produces a manifest', async () => {
+  it('runs long-video→draft-reels with explicit fixtures, parks, resumes, and produces a manifest', async () => {
     const storage = new Map<string, string>();
     const session = new EditorSession(
       {
@@ -105,8 +108,26 @@ describe('WP-17 first-party workflows', () => {
     expect(first.status).toBe('waiting_for_input');
     if (first.status !== 'waiting_for_input') return;
 
-    expect(first.request.kind).toBe('choose-candidates');
-    const payload = first.request.payload as { candidates: readonly { title: string }[] };
+    expect(first.request.kind).toBe('confirm-cost');
+    await expect(runStore.load(first.runId)).resolves.toMatchObject({
+      state: 'parked',
+      checkpointRevision: 1,
+      approvals: [{ nodeId: 'confirm-cost', state: 'pending' }],
+    });
+
+    const second = await resumeWorkflow(
+      session,
+      first.runId,
+      {
+        'confirm-cost': { approved: true, approvalRef: 'cost-ok' },
+      },
+      runnerOptions,
+    );
+    expect(second.status).toBe('waiting_for_input');
+    if (second.status !== 'waiting_for_input') return;
+    expect(second.nodeId).toBe('approve-candidates');
+    expect(second.request.kind).toBe('choose-candidates');
+    const payload = second.request.payload as { candidates: readonly { title: string }[] };
     expect(payload.candidates.map((candidate) => candidate.title)).toEqual([
       'Hook A',
       'Hook B',
@@ -114,35 +135,38 @@ describe('WP-17 first-party workflows', () => {
     ]);
     await expect(runStore.load(first.runId)).resolves.toMatchObject({
       state: 'parked',
-      checkpointRevision: 1,
-      approvals: [{ nodeId: 'approve-candidates', state: 'pending' }],
+      checkpointRevision: 2,
+      approvals: [
+        { nodeId: 'confirm-cost', state: 'approved' },
+        { nodeId: 'approve-candidates', state: 'pending' },
+      ],
     });
 
-    const second = await resumeWorkflow(
+    const third = await resumeWorkflow(
       session,
-      first.runId,
+      second.runId,
       {
         'approve-candidates': { candidates: payload.candidates.slice(0, 2) },
       },
       runnerOptions,
     );
-    expect(second.status).toBe('waiting_for_input');
-    if (second.status !== 'waiting_for_input') return;
-    expect(second.request.kind).toBe('approve-render');
-    expect(second.nodeId).toBe('approve-drafts');
+    expect(third.status).toBe('waiting_for_input');
+    if (third.status !== 'waiting_for_input') return;
+    expect(third.request.kind).toBe('approve-render');
+    expect(third.nodeId).toBe('approve-drafts');
 
-    const draftPayload = second.request.payload as { items: readonly unknown[] };
-    const third = await resumeWorkflow(
+    const draftPayload = third.request.payload as { items: readonly unknown[] };
+    const fourth = await resumeWorkflow(
       session,
-      second.runId,
+      third.runId,
       {
         'approve-drafts': { approved: draftPayload.items },
       },
       runnerOptions,
     );
-    expect(third.status).toBe('succeeded');
-    if (third.status !== 'succeeded') return;
-    expect(third.outputs).toMatchObject({
+    expect(fourth.status).toBe('succeeded');
+    if (fourth.status !== 'succeeded') return;
+    expect(fourth.outputs).toMatchObject({
       written: false,
       deferred: true,
       fileName: 'long-video-draft-reels-run.json',
