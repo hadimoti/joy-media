@@ -461,6 +461,7 @@ export function AgentPanel({
   session,
   attachedAssets = [],
   assets = [],
+  onOpen3DStudio,
   onDetachAsset,
   onAttachAsset,
   settings,
@@ -475,6 +476,7 @@ export function AgentPanel({
   readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
   /** Registered catalog assets available to the asset-backed 3D preview. */
   readonly assets?: readonly BrowserAsset[];
+  readonly onOpen3DStudio?: () => void;
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
   readonly settings: AgentSettings;
@@ -1396,7 +1398,7 @@ export function AgentPanel({
           </section>
         )}
 
-        {tab === '3d' && <JoyCode3DViewer assets={assets} />}
+        {tab === '3d' && <JoyCode3DViewer assets={assets} onOpenStudio={onOpen3DStudio} />}
       </div>
     </PanelShell>
   );

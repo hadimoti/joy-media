@@ -88,6 +88,7 @@ import { MotionPanel } from './MotionPanel.js';
 import { MotionStudioShell } from './motion-studio/index.js';
 import { buildMotionScenePlacementPlan } from './motion-studio/motionScenePlacement.js';
 import { EffectStudioShell } from './effect-studio/index.js';
+import { ThreeDStudioShell } from './three-d-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
@@ -560,6 +561,7 @@ function EditorWorkspace({
   const paletteRef = useRef<HTMLElement | null>(null);
   const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
+  const [threeDStudioSceneId, setThreeDStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
   >(undefined);
@@ -2843,6 +2845,7 @@ function EditorWorkspace({
             : { command: context.agentPanelCommand })}
           attachedAssets={context.kiloCodeAttachedAssets}
           assets={Object.values(monitorAssetCatalog.assets)}
+          onOpen3DStudio={() => setThreeDStudioSceneId(controlPlaneProject.controlPlaneProjectId)}
           onDetachAsset={context.detachKiloCodeAsset}
           onAttachAsset={context.attachKiloCodeAsset}
         />
@@ -3422,6 +3425,14 @@ function EditorWorkspace({
           key={motionStudioSceneId}
           sceneId={motionStudioSceneId}
           onClose={() => setMotionStudioSceneId(undefined)}
+        />
+      )}
+      {threeDStudioSceneId !== undefined && (
+        <ThreeDStudioShell
+          key={threeDStudioSceneId}
+          sceneId={threeDStudioSceneId}
+          assets={Object.values(monitorAssetCatalog.assets)}
+          onClose={() => setThreeDStudioSceneId(undefined)}
         />
       )}
       {effectStudioSession !== undefined && (

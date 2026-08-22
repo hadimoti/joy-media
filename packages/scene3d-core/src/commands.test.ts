@@ -84,4 +84,22 @@ describe('scene3d commands', () => {
     ).toThrow('missing');
     expect(base.objects).toEqual({});
   });
+
+  it('registers opaque model assets before adding a model object and undoes both', () => {
+    const asset = {
+      id: 'model-asset',
+      kind: 'model' as const,
+      mimeType: 'model/gltf-binary' as const,
+    };
+    const object: Scene3DObject = { ...model, id: 'model-2', assetId: asset.id };
+    const result = applyScene3DTransaction(base, {
+      label: 'Add registered model',
+      commands: [
+        { type: 'asset.upsert', payload: { asset } },
+        { type: 'object.add', payload: { object } },
+      ],
+    });
+    expect(result.document.assets[asset.id]).toEqual(asset);
+    expect(applyScene3DTransaction(result.document, result.record.inverses).document).toEqual(base);
+  });
 });

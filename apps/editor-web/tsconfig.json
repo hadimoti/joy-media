@@ -75,6 +75,9 @@
       "path": "../../packages/audio-core"
     },
     {
+      "path": "../../packages/scene3d-core"
+    },
+    {
       "path": "../../packages/transition-shaders"
     },
     {

@@ -24,6 +24,7 @@
     "@joy-media/property-system": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
     "@joy-media/render-planner": "workspace:*",
+    "@joy-media/scene3d-core": "workspace:*",
     "@joy-media/render-ir": "workspace:*",
     "@joy-media/renderer-headless": "workspace:*",
     "@joy-media/renderer-pixi": "workspace:*",

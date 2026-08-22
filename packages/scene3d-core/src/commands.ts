@@ -1,6 +1,7 @@
 import { assertValidScene3DDocument, validateScene3DDocument } from './validation.js';
 import type {
   Scene3DDocumentV1,
+  Scene3DAssetRef,
   Scene3DEnvironment,
   Scene3DMaterial,
   Scene3DObject,
@@ -15,10 +16,16 @@ export type Scene3DCommand =
       readonly payload: { readonly objectId: string; readonly transform: Scene3DTransform };
     }
   | {
+      readonly type: 'object.setParent';
+      readonly payload: { readonly objectId: string; readonly parentId?: string };
+    }
+  | {
       readonly type: 'object.setMaterial';
       readonly payload: { readonly objectId: string; readonly materialId?: string };
     }
   | { readonly type: 'material.upsert'; readonly payload: { readonly material: Scene3DMaterial } }
+  | { readonly type: 'asset.upsert'; readonly payload: { readonly asset: Scene3DAssetRef } }
+  | { readonly type: 'asset.remove'; readonly payload: { readonly assetId: string } }
   | { readonly type: 'material.remove'; readonly payload: { readonly materialId: string } }
   | {
       readonly type: 'scene.setEnvironment';
@@ -112,6 +119,38 @@ function applyScene3DCommandUnchecked(
       },
     };
   }
+  if (command.type === 'object.setParent') {
+    const object = document.objects[command.payload.objectId];
+    if (object === undefined)
+      throw new RangeError(`object "${command.payload.objectId}" does not exist`);
+    const parentId = command.payload.parentId;
+    if (parentId !== undefined && document.objects[parentId] === undefined)
+      throw new RangeError(`parent "${parentId}" does not exist`);
+    if (parentId === object.id) throw new RangeError('object cannot parent itself');
+    let current = parentId;
+    while (current !== undefined) {
+      if (current === object.id) throw new RangeError('object hierarchy contains a cycle');
+      current = document.objects[current]?.parentId;
+    }
+    const nextObject =
+      parentId === undefined
+        ? (() => {
+            const withoutParent = { ...object };
+            delete withoutParent.parentId;
+            return withoutParent;
+          })()
+        : { ...object, parentId };
+    return {
+      document: { ...document, objects: { ...document.objects, [object.id]: nextObject } },
+      inverse: {
+        type: 'object.setParent',
+        payload: {
+          objectId: object.id,
+          ...(object.parentId === undefined ? {} : { parentId: object.parentId }),
+        },
+      },
+    };
+  }
   if (command.type === 'object.setMaterial') {
     const object = document.objects[command.payload.objectId];
     if (object === undefined)
@@ -149,6 +188,32 @@ function applyScene3DCommandUnchecked(
         previous === undefined
           ? { type: 'material.remove', payload: { materialId: command.payload.material.id } }
           : { type: 'material.upsert', payload: { material: previous } },
+    };
+  }
+  if (command.type === 'asset.upsert') {
+    const previous = document.assets[command.payload.asset.id];
+    return {
+      document: {
+        ...document,
+        assets: { ...document.assets, [command.payload.asset.id]: command.payload.asset },
+      },
+      inverse:
+        previous === undefined
+          ? { type: 'asset.remove', payload: { assetId: command.payload.asset.id } }
+          : { type: 'asset.upsert', payload: { asset: previous } },
+    };
+  }
+  if (command.type === 'asset.remove') {
+    const asset = document.assets[command.payload.assetId];
+    if (asset === undefined)
+      throw new RangeError(`asset "${command.payload.assetId}" does not exist`);
+    if (Object.values(document.objects).some((object) => object.assetId === asset.id))
+      throw new RangeError('asset is still referenced');
+    const assets = { ...document.assets };
+    delete assets[asset.id];
+    return {
+      document: { ...document, assets },
+      inverse: { type: 'asset.upsert', payload: { asset } },
     };
   }
   if (command.type === 'material.remove') {
