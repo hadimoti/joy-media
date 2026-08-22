@@ -16,6 +16,7 @@ import {
 import {
   createRuntimeMistralProviderRegistry,
   MistralProviderError,
+  type JoyCodeReasoningEvidence,
   type MistralProviderRegistry,
 } from './mistral-provider.js';
 import {
@@ -318,6 +319,13 @@ async function route(
 
   if (request.method === 'GET' && url.pathname === '/v1/providers/reasoning') {
     respondJson(response, 200, { data: { providers: [options.mistral.summary()] } });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/providers/reasoning/joy-code') {
+    const body = await readJson(request);
+    const result = await options.mistral.joyCodeReason(actor.id, joyCodeReasoningRequest(body));
+    respondJson(response, 200, { data: result });
     return;
   }
 
@@ -1082,6 +1090,88 @@ function mistralCompletionRequest(body: Record<string, unknown>) {
   };
 }
 
+function joyCodeReasoningRequest(body: Record<string, unknown>) {
+  const privacyMode = body.privacyMode;
+  if (privacyMode !== 'local-only' && privacyMode !== 'ask-before-remote')
+    throw new ControlPlaneError('REQUEST_INVALID', 'privacyMode is invalid');
+  const evidence = requiredJoyCodeEvidence(body.evidence);
+  const allowedIntentIds = requiredStringArray(body, 'allowedIntentIds');
+  if (allowedIntentIds.length === 0 || allowedIntentIds.length > 16) {
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'allowedIntentIds must contain between 1 and 16 intent ids',
+    );
+  }
+  const snapshotDigest = requiredString(body, 'snapshotDigest');
+  if (
+    !/^fnv1a-[a-f0-9]{1,32}$/i.test(snapshotDigest) &&
+    !/^sha256:[a-f0-9]{64}$/i.test(snapshotDigest)
+  ) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'snapshotDigest is invalid');
+  }
+  const goal = requiredString(body, 'goal');
+  if (goal.length > 500 || containsUnsafeReasoningText(goal)) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'goal is invalid');
+  }
+  const projectRevision = requiredString(body, 'projectRevision');
+  const maxTokens = optionalPositiveInteger(body, 'maxTokens');
+  return {
+    model: requiredString(body, 'model'),
+    goal,
+    snapshotDigest,
+    projectRevision,
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    privacyMode: privacyMode as 'local-only' | 'ask-before-remote',
+    approvedRemoteProcessing: body.approvedRemoteProcessing === true,
+    approvedSpend: body.approvedSpend === true,
+    evidence,
+    allowedIntentIds,
+    ...(optionalProviderApprovalGrant(body) === undefined
+      ? {}
+      : { approvalGrant: optionalProviderApprovalGrant(body) }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  };
+}
+
+function requiredJoyCodeEvidence(value: unknown): readonly JoyCodeReasoningEvidence[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 12) {
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      'evidence must contain between 1 and 12 bounded evidence items',
+    );
+  }
+  return value.map((item, index) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new ControlPlaneError('REQUEST_INVALID', `evidence[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const evidenceId = requiredString(record, 'evidenceId');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(evidenceId)) {
+      throw new ControlPlaneError('REQUEST_INVALID', `evidence[${index}].evidenceId is invalid`);
+    }
+    const kind = record.kind;
+    if (
+      kind !== 'selected-clip' &&
+      kind !== 'attached-asset' &&
+      kind !== 'timeline-range' &&
+      kind !== 'project-summary'
+    ) {
+      throw new ControlPlaneError('REQUEST_INVALID', `evidence[${index}].kind is invalid`);
+    }
+    const label = requiredString(record, 'label');
+    const detail = requiredString(record, 'detail');
+    if (
+      label.length > 160 ||
+      detail.length > 320 ||
+      containsUnsafeReasoningText(label) ||
+      containsUnsafeReasoningText(detail)
+    ) {
+      throw new ControlPlaneError('REQUEST_INVALID', `evidence[${index}] is invalid`);
+    }
+    return { evidenceId, kind, label, detail };
+  });
+}
+
 function optionalPrivacyMode(
   body: Record<string, unknown>,
   field: string,
@@ -1144,6 +1234,15 @@ function optionalProviderApprovalGrant(
     ...(costCap === undefined ? {} : { costCap }),
   };
   return parsed;
+}
+
+function containsUnsafeReasoningText(value: string): boolean {
+  return (
+    /\bhttps?:\/\//i.test(value) ||
+    /\bfile:\/\//i.test(value) ||
+    /\b[A-Za-z]:\\/i.test(value) ||
+    /\b(?:api[_-]?key|secret|token|password)\b/i.test(value)
+  );
 }
 
 function optionalPositiveInteger(body: Record<string, unknown>, field: string): number | undefined {

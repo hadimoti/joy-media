@@ -7,11 +7,13 @@ import {
 } from '@joy-media/adapter-mistral';
 import {
   computeProviderApprovalPreflight,
+  resolveProviderDecision,
   ProviderLifecycle,
   resolveProvider,
   type CapabilityResult,
   type CapabilityRequest,
   type ProviderApprovalGrant,
+  type ProviderDecisionV1,
   type ProviderStatus,
 } from '@joy-media/provider-sdk';
 import {
@@ -30,6 +32,59 @@ export interface MistralCompletionRequest {
   readonly approvalGrant?: ProviderApprovalGrant | undefined;
   readonly maxTokens?: number;
   readonly temperature?: number;
+}
+
+export interface JoyCodeReasoningEvidence {
+  readonly evidenceId: string;
+  readonly kind: 'selected-clip' | 'attached-asset' | 'timeline-range' | 'project-summary';
+  readonly label: string;
+  readonly detail: string;
+}
+
+export interface JoyCodeReasoningRequest {
+  readonly model: string;
+  readonly goal: string;
+  readonly snapshotDigest: string;
+  readonly projectRevision: string;
+  readonly idempotencyKey: string;
+  readonly privacyMode: 'local-only' | 'ask-before-remote';
+  readonly approvedRemoteProcessing?: boolean;
+  readonly approvedSpend?: boolean;
+  readonly approvalGrant?: ProviderApprovalGrant | undefined;
+  readonly evidence: readonly JoyCodeReasoningEvidence[];
+  readonly allowedIntentIds: readonly string[];
+  readonly maxTokens?: number;
+}
+
+export interface JoyCodeReasoningResponse {
+  readonly responseVersion: 1;
+  readonly requestId: string;
+  readonly brief: {
+    readonly summary: string;
+    readonly rationale: string;
+    readonly evidenceReferences: readonly string[];
+    readonly caution?: string;
+  };
+  readonly proposal?: {
+    readonly intentId: string;
+    readonly summary: string;
+    readonly rationale: string;
+    readonly evidenceReferences: readonly string[];
+  };
+  readonly provider: {
+    readonly providerId: typeof MISTRAL_PROVIDER_ID;
+    readonly modelId: string;
+    readonly decisionRef: string;
+    readonly briefRef: string;
+    readonly requestDigest: string;
+    readonly dataLeavesDevice: boolean;
+    readonly retentionDisclosure?: string;
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly budgetReservationId?: string;
+    };
+  };
 }
 
 export interface MistralProviderSummary {
@@ -138,6 +193,10 @@ export class MistralProviderRegistry {
   readonly #provider;
   readonly #lifecycle = new ProviderLifecycle();
   readonly #approvals: ProviderApprovalService;
+  readonly #reasoningResults = new Map<
+    string,
+    { readonly requestDigest: string; readonly response: JoyCodeReasoningResponse }
+  >();
 
   constructor(
     apiKey: string | undefined,
@@ -296,6 +355,141 @@ export class MistralProviderRegistry {
       throw new MistralProviderError('MISTRAL_UNAVAILABLE', 'Mistral is unavailable.');
     }
   }
+
+  async joyCodeReason(
+    actorId: string,
+    input: JoyCodeReasoningRequest,
+  ): Promise<JoyCodeReasoningResponse> {
+    const request = joyCodeCapabilityRequest(input);
+    const preflight = computeProviderApprovalPreflight(actorId, request, this.#provider);
+    const approvalVerification = {
+      actorId,
+      idempotencyKey: input.idempotencyKey,
+      preflight,
+      privacyMode: input.privacyMode,
+      grant: input.approvalGrant,
+      fallbackCostCap: input.approvalGrant?.costCap ?? { amount: '0.00', currency: 'USD' },
+    } as const;
+    const resultKey = `${actorId}:${input.idempotencyKey}`;
+    const previous = this.#reasoningResults.get(resultKey);
+    if (previous !== undefined) {
+      if (previous.requestDigest !== preflight.requestDigest) {
+        await this.#approvals.recordFailed(
+          approvalVerification,
+          undefined,
+          'idempotency-request-digest-conflict',
+        );
+        throw new ProviderApprovalError(
+          'PROVIDER_APPROVAL_REPLAY_REJECTED',
+          'Idempotent retry does not match the original request digest.',
+          preflight,
+        );
+      }
+      await this.#approvals.recordSucceeded(approvalVerification, undefined);
+      return previous.response;
+    }
+
+    const status = this.#lifecycle.getStatus(MISTRAL_PROVIDER_ID);
+    if (status.state === 'unconfigured') {
+      await this.#approvals.recordUnavailable(approvalVerification, 'provider-unconfigured');
+      throw new MistralProviderError(
+        'PROVIDER_UNCONFIGURED',
+        'Mistral is not configured on this server.',
+      );
+    }
+
+    const providerDecision = resolveProviderDecision(request, [this.#provider], {
+      allowRemote: true,
+      blockedProviders: [],
+      blockedCapabilities: [],
+      requireLocalFor: [],
+    });
+    if (providerDecision.status !== 'selected') {
+      await this.#approvals.recordUnavailable(
+        approvalVerification,
+        providerDecision.reason ?? 'provider-not-eligible',
+      );
+      throw new MistralProviderError(
+        'REMOTE_PROCESSING_BLOCKED',
+        providerDecision.reason ?? 'Mistral is not eligible for this request.',
+      );
+    }
+
+    let approval: ProviderApprovalOutcome;
+    try {
+      approval = await this.#approvals.verify(approvalVerification);
+    } catch (error) {
+      if (error instanceof ProviderApprovalError) {
+        if (error.code === 'REMOTE_PROCESSING_BLOCKED') {
+          throw new MistralProviderError('REMOTE_PROCESSING_BLOCKED', error.message);
+        }
+        if (error.code === 'PROVIDER_APPROVAL_REQUIRED') {
+          throw error;
+        }
+        if (error.code === 'PROVIDER_SPEND_CAP_EXCEEDED') {
+          throw new MistralProviderError('PROVIDER_SPEND_APPROVAL_REQUIRED', error.message);
+        }
+      }
+      throw error;
+    }
+
+    this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
+    try {
+      const providerResult = await this.#provider.invoke(
+        'llm.complete',
+        {
+          model: input.model,
+          messages: joyCodeReasoningMessages(input),
+          ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
+          decisionId: providerDecision.decisionId,
+          responseFormat: joyCodeResponseFormat(),
+        },
+        request,
+      );
+      if (providerResult.status !== 'succeeded') {
+        const code = providerResult.diagnostics[0]?.code;
+        this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
+        await this.#approvals.recordFailed(
+          approvalVerification,
+          approval.reservation,
+          code ?? 'provider-request-failed',
+        );
+        throw new MistralProviderError('MISTRAL_REQUEST_FAILED', 'Mistral completion failed.');
+      }
+      const approvedResult = withApprovalProvenance(
+        providerResult,
+        preflight.requestDigest,
+        approval,
+      );
+      const response = joyCodeResponseFromProviderResult(
+        input,
+        approvedResult,
+        providerDecision,
+        preflight,
+      );
+      this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
+      this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
+      await this.#approvals.recordSucceeded(
+        approvalVerification,
+        approval.reservation,
+        approvedResult.usage?.cost,
+      );
+      this.#reasoningResults.set(resultKey, { requestDigest: preflight.requestDigest, response });
+      return response;
+    } catch (error) {
+      if (error instanceof MistralProviderError || error instanceof ProviderApprovalError) {
+        throw error;
+      }
+      this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
+      this.#lifecycle.markDegraded(MISTRAL_PROVIDER_ID, 'Mistral completion failed.', false);
+      await this.#approvals.recordFailed(
+        approvalVerification,
+        approval.reservation,
+        'provider-unavailable',
+      );
+      throw new MistralProviderError('MISTRAL_UNAVAILABLE', 'Mistral is unavailable.');
+    }
+  }
 }
 
 export function createRuntimeMistralProviderRegistry(
@@ -327,6 +521,246 @@ function mistralCapabilityRequest(input: MistralCompletionRequest): CapabilityRe
     constraints: { executionPreference: ['remote'] as const, modelAllowlist: [input.model] },
     idempotencyKey: input.idempotencyKey,
   };
+}
+
+function joyCodeCapabilityRequest(input: JoyCodeReasoningRequest): CapabilityRequest {
+  return {
+    requestVersion: 1,
+    capability: 'llm.complete',
+    input: {
+      model: input.model,
+      messages: joyCodeReasoningMessages(input),
+      ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
+    },
+    constraints: { executionPreference: ['remote'] as const, modelAllowlist: [input.model] },
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
+function joyCodeReasoningMessages(input: JoyCodeReasoningRequest): readonly MistralChatMessage[] {
+  return [
+    {
+      role: 'system',
+      content:
+        'You are JOY Code reasoning. Return JSON only. Stay bounded to the provided evidence. Do not invent tools, commands, URLs, secrets, filesystem paths, or unsupported intents.',
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        goal: input.goal,
+        snapshotDigest: input.snapshotDigest,
+        projectRevision: input.projectRevision,
+        evidence: input.evidence,
+        allowedIntentIds: input.allowedIntentIds,
+      }),
+    },
+  ];
+}
+
+function joyCodeResponseFormat(): {
+  readonly type: 'json_schema';
+  readonly name: string;
+  readonly schema: Record<string, unknown>;
+  readonly strict: true;
+} {
+  return {
+    type: 'json_schema',
+    name: 'joy_code_reasoning',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['brief'],
+      properties: {
+        brief: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['summary', 'rationale', 'evidenceReferences'],
+          properties: {
+            summary: { type: 'string' },
+            rationale: { type: 'string' },
+            evidenceReferences: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            caution: { type: 'string' },
+          },
+        },
+        proposal: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['intentId', 'summary', 'rationale', 'evidenceReferences'],
+          properties: {
+            intentId: { type: 'string' },
+            summary: { type: 'string' },
+            rationale: { type: 'string' },
+            evidenceReferences: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function joyCodeResponseFromProviderResult(
+  input: JoyCodeReasoningRequest,
+  result: CapabilityResult,
+  decision: ProviderDecisionV1,
+  preflight: ReturnType<typeof computeProviderApprovalPreflight>,
+): JoyCodeReasoningResponse {
+  const rawText = result.outputs[0]?.metadata?.text;
+  if (typeof rawText !== 'string' || rawText.length === 0) {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      'Mistral structured output was empty.',
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      'Mistral structured output was not valid JSON.',
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      'Mistral structured output was not an object.',
+    );
+  }
+  const knownEvidence = new Set(input.evidence.map((item) => item.evidenceId));
+  const brief = parseReasoningBrief(parsed.brief, knownEvidence, 'brief');
+  const proposal =
+    parsed.proposal === undefined
+      ? undefined
+      : parseReasoningProposal(parsed.proposal, knownEvidence, input.allowedIntentIds, 'proposal');
+  return {
+    responseVersion: 1,
+    requestId: result.requestId,
+    brief,
+    ...(proposal === undefined ? {} : { proposal }),
+    provider: {
+      providerId: MISTRAL_PROVIDER_ID,
+      modelId: input.model,
+      decisionRef: decision.decisionId,
+      briefRef: `reasoning-brief-${result.provenance.idempotencyKey}`,
+      requestDigest: preflight.requestDigest,
+      dataLeavesDevice: preflight.dataLeavesDevice,
+      ...(preflight.retentionDisclosure === undefined
+        ? {}
+        : { retentionDisclosure: preflight.retentionDisclosure }),
+      ...(result.usage === undefined
+        ? {}
+        : {
+            usage: {
+              ...(result.usage.inputTokens === undefined
+                ? {}
+                : { inputTokens: result.usage.inputTokens }),
+              ...(result.usage.outputTokens === undefined
+                ? {}
+                : { outputTokens: result.usage.outputTokens }),
+              ...(result.usage.budgetReservationId === undefined
+                ? {}
+                : { budgetReservationId: result.usage.budgetReservationId }),
+            },
+          }),
+    },
+  };
+}
+
+function parseReasoningBrief(
+  value: unknown,
+  knownEvidence: ReadonlySet<string>,
+  path: string,
+): JoyCodeReasoningResponse['brief'] {
+  if (!isRecord(value)) {
+    throw new MistralProviderError('MISTRAL_REQUEST_FAILED', `${path} must be an object.`);
+  }
+  const summary = boundedString(value.summary, `${path}.summary`, 400);
+  const rationale = boundedString(value.rationale, `${path}.rationale`, 800);
+  const evidenceReferences = parseEvidenceReferences(
+    value.evidenceReferences,
+    knownEvidence,
+    `${path}.evidenceReferences`,
+  );
+  const caution =
+    value.caution === undefined ? undefined : boundedString(value.caution, `${path}.caution`, 400);
+  return {
+    summary,
+    rationale,
+    evidenceReferences,
+    ...(caution === undefined ? {} : { caution }),
+  };
+}
+
+function parseReasoningProposal(
+  value: unknown,
+  knownEvidence: ReadonlySet<string>,
+  allowedIntentIds: readonly string[],
+  path: string,
+): NonNullable<JoyCodeReasoningResponse['proposal']> {
+  if (!isRecord(value)) {
+    throw new MistralProviderError('MISTRAL_REQUEST_FAILED', `${path} must be an object.`);
+  }
+  const intentId = boundedString(value.intentId, `${path}.intentId`, 128);
+  if (!allowedIntentIds.includes(intentId)) {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      `${path}.intentId must be in the bounded allowlist.`,
+    );
+  }
+  return {
+    intentId,
+    summary: boundedString(value.summary, `${path}.summary`, 400),
+    rationale: boundedString(value.rationale, `${path}.rationale`, 800),
+    evidenceReferences: parseEvidenceReferences(
+      value.evidenceReferences,
+      knownEvidence,
+      `${path}.evidenceReferences`,
+    ),
+  };
+}
+
+function parseEvidenceReferences(
+  value: unknown,
+  knownEvidence: ReadonlySet<string>,
+  path: string,
+): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      `${path} must contain between 1 and 8 evidence references.`,
+    );
+  }
+  const refs = value.map((item) => boundedString(item, path, 128));
+  for (const ref of refs) {
+    if (!knownEvidence.has(ref)) {
+      throw new MistralProviderError(
+        'MISTRAL_REQUEST_FAILED',
+        `${path} contains unknown evidence ${ref}.`,
+      );
+    }
+  }
+  return refs;
+}
+
+function boundedString(value: unknown, path: string, maxLength: number): string {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > maxLength) {
+    throw new MistralProviderError(
+      'MISTRAL_REQUEST_FAILED',
+      `${path} must be a non-empty string of at most ${String(maxLength)} characters.`,
+    );
+  }
+  return value.trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function withApprovalProvenance(

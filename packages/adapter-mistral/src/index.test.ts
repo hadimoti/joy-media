@@ -38,6 +38,58 @@ describe('Mistral adapter', () => {
     expect(JSON.stringify(adapter.manifest)).not.toContain('test-only-secret');
   });
 
+  it('passes bounded json-schema formatting through to Mistral and keeps provider decision ids in provenance', async () => {
+    let request: Request | undefined;
+    const adapter = createMistralAdapter({
+      apiKey: 'test-only-secret',
+      fetchImpl: async (input, init) => {
+        request = new Request(input, init);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"ok":true}' } }],
+            usage: { prompt_tokens: 12, completion_tokens: 9 },
+          }),
+        );
+      },
+    });
+
+    const result = await adapter.invoke(
+      'llm.complete',
+      {
+        model: MISTRAL_REASONING_MODELS[0]!.id,
+        messages: [{ role: 'user', content: 'Return structured JSON only.' }],
+        decisionId: 'provider-decision-joy-code-1',
+        responseFormat: {
+          type: 'json_schema',
+          name: 'joy_code_reasoning',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              ok: { type: 'boolean' },
+            },
+            required: ['ok'],
+          },
+          strict: true,
+        },
+      },
+      {
+        requestVersion: 1,
+        capability: 'llm.complete',
+        input: {},
+        constraints: {},
+        idempotencyKey: 'key-structured-1',
+      },
+    );
+
+    expect(result.status).toBe('succeeded');
+    expect(result.provenance.providerDecisionId).toBe('provider-decision-joy-code-1');
+    const requestBody = await request?.text();
+    expect(requestBody).toContain('"response_format"');
+    expect(requestBody).toContain('"json_schema"');
+    expect(requestBody).toContain('"joy_code_reasoning"');
+  });
+
   it('fails closed before network access for an unallowlisted model', async () => {
     const adapter = createMistralAdapter({
       apiKey: 'test-only-secret',

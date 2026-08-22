@@ -4,6 +4,7 @@ import type {
   CapabilityRequest,
   CapabilityResult,
   Diagnostic,
+  JsonSchema,
   ModelDescriptor,
   ProviderManifestV2,
   ProviderUsage,
@@ -32,6 +33,13 @@ export interface MistralCompletionInput {
   readonly messages: readonly MistralChatMessage[];
   readonly maxTokens?: number;
   readonly temperature?: number;
+  readonly decisionId?: string;
+  readonly responseFormat?: {
+    readonly type: 'json_schema';
+    readonly name: string;
+    readonly schema: JsonSchema;
+    readonly strict?: boolean;
+  };
 }
 
 export interface MistralAdapterOptions {
@@ -81,16 +89,20 @@ export function createMistralAdapter(options: MistralAdapterOptions): ProviderV2
       const requestId = `mistral-${crypto.randomUUID()}`;
       const idempotencyKey = request?.idempotencyKey ?? requestId;
       const parsed = parseInput(input);
-      const provenance = (modelId: string) => ({
-        providerId: MISTRAL_PROVIDER_ID,
-        modelId,
-        adapterVersion: MISTRAL_ADAPTER_VERSION,
-        createdAt: new Date().toISOString(),
-        requestHash: hashRequest({ input, idempotencyKey }),
-        idempotencyKey,
-        processingTimeMs: Date.now() - startedAt,
-        execution: 'remote-api' as const,
-      });
+      const provenance = (modelId: string) =>
+        withProviderDecisionId(
+          {
+            providerId: MISTRAL_PROVIDER_ID,
+            modelId,
+            adapterVersion: MISTRAL_ADAPTER_VERSION,
+            createdAt: new Date().toISOString(),
+            requestHash: hashRequest({ input, idempotencyKey }),
+            idempotencyKey,
+            processingTimeMs: Date.now() - startedAt,
+            execution: 'remote-api' as const,
+          },
+          decisionIdFromInput(input),
+        );
 
       if (capability !== 'llm.complete') {
         return failed(
@@ -121,6 +133,20 @@ export function createMistralAdapter(options: MistralAdapterOptions): ProviderV2
             ...(parsed.value.temperature === undefined
               ? {}
               : { temperature: parsed.value.temperature }),
+            ...(parsed.value.responseFormat === undefined
+              ? {}
+              : {
+                  response_format: {
+                    type: parsed.value.responseFormat.type,
+                    json_schema: {
+                      name: parsed.value.responseFormat.name,
+                      schema: parsed.value.responseFormat.schema,
+                      ...(parsed.value.responseFormat.strict === undefined
+                        ? {}
+                        : { strict: parsed.value.responseFormat.strict }),
+                    },
+                  },
+                }),
           }),
           signal: controller.signal,
         });
@@ -189,6 +215,8 @@ function completionCapability(): CapabilityDeclaration {
         messages: { type: 'array', minItems: 1 },
         maxTokens: { type: 'integer', minimum: 1, maximum: 4096 },
         temperature: { type: 'number', minimum: 0, maximum: 2 },
+        decisionId: { type: 'string' },
+        responseFormat: { type: 'object' },
       },
     },
     outputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
@@ -235,12 +263,54 @@ function parseInput(
   )
     return { error: 'temperature must be a number from 0 to 2.' };
   const temperature = rawTemperature as number | undefined;
+  const decisionId =
+    typeof input.decisionId === 'string' && input.decisionId.length > 0
+      ? input.decisionId
+      : undefined;
+  const responseFormatResult = parseResponseFormat(input.responseFormat);
+  if ('error' in responseFormatResult) return responseFormatResult;
   return {
     value: {
       model,
       messages: messages as readonly MistralChatMessage[],
       ...(maxTokens === undefined ? {} : { maxTokens }),
       ...(temperature === undefined ? {} : { temperature }),
+      ...(decisionId === undefined ? {} : { decisionId }),
+      ...(responseFormatResult.value === undefined
+        ? {}
+        : { responseFormat: responseFormatResult.value }),
+    },
+  };
+}
+
+function parseResponseFormat(value: unknown):
+  | {
+      readonly value:
+        | {
+            readonly type: 'json_schema';
+            readonly name: string;
+            readonly schema: JsonSchema;
+            readonly strict?: boolean;
+          }
+        | undefined;
+    }
+  | { readonly error: string } {
+  if (value === undefined) return { value: undefined };
+  if (!isRecord(value)) return { error: 'responseFormat must be an object.' };
+  if (value.type !== 'json_schema') return { error: 'responseFormat.type must be json_schema.' };
+  if (typeof value.name !== 'string' || value.name.length === 0 || value.name.length > 128) {
+    return { error: 'responseFormat.name must be a non-empty string.' };
+  }
+  if (!isRecord(value.schema)) return { error: 'responseFormat.schema must be an object.' };
+  if (value.strict !== undefined && typeof value.strict !== 'boolean') {
+    return { error: 'responseFormat.strict must be a boolean.' };
+  }
+  return {
+    value: {
+      type: 'json_schema',
+      name: value.name,
+      schema: value.schema,
+      ...(value.strict === undefined ? {} : { strict: value.strict }),
     },
   };
 }
@@ -300,6 +370,22 @@ function failed(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function decisionIdFromInput(value: unknown): string | undefined {
+  return value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { decisionId?: unknown }).decisionId === 'string'
+    ? (value as { decisionId: string }).decisionId
+    : undefined;
+}
+
+function withProviderDecisionId<T extends CapabilityResult['provenance']>(
+  provenance: T,
+  providerDecisionId: string | undefined,
+): T {
+  if (providerDecisionId === undefined) return provenance;
+  return { ...provenance, providerDecisionId };
 }
 
 function hashRequest(value: unknown): string {

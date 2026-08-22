@@ -22,6 +22,7 @@ import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
   buildSplitTrimRecipe,
+  findClipLocation,
   type AgentIntent,
 } from './agent-panel-intents.js';
 import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
@@ -32,6 +33,11 @@ import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserJoyCodeReasoningRequest,
+  type BrowserJoyCodeReasoningResponse,
+} from './control-plane-client.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
 import { JoyCode3DViewer } from './JoyCode3DViewer.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
@@ -64,6 +70,7 @@ interface PendingPlan {
   readonly baseProject: SpikeProject;
   readonly dryRun: DryRunResult;
   readonly approval: ApprovalDecision;
+  readonly reasoning?: BrowserJoyCodeReasoningResponse;
 }
 
 interface LastRun {
@@ -79,6 +86,8 @@ interface JoyCodeState {
   readonly threads: readonly JoyCodeThread[];
   readonly activeThreadId: string;
 }
+
+export type JoyCodeReasoningResponse = BrowserJoyCodeReasoningResponse;
 
 export interface KiloCodeAttachedAsset {
   readonly assetId: string;
@@ -196,6 +205,185 @@ export function ProviderApprovalDetails({ approval }: { readonly approval: Appro
   );
 }
 
+export function JoyCodeReasoningDetails({
+  reasoning,
+}: {
+  readonly reasoning: BrowserJoyCodeReasoningResponse;
+}) {
+  const usage = reasoning.provider.usage;
+  return (
+    <dl className="joy-code-provider-approval" aria-label="Joy Code reasoning details">
+      <div>
+        <dt>Provider</dt>
+        <dd>{reasoning.provider.providerId}</dd>
+      </div>
+      <div>
+        <dt>Model</dt>
+        <dd>{reasoning.provider.modelId}</dd>
+      </div>
+      <div>
+        <dt>Decision</dt>
+        <dd>{reasoning.provider.decisionRef}</dd>
+      </div>
+      <div>
+        <dt>Brief</dt>
+        <dd>{reasoning.provider.briefRef}</dd>
+      </div>
+      {usage !== undefined && (
+        <div>
+          <dt>Usage</dt>
+          <dd>
+            {(usage.inputTokens ?? 0).toLocaleString()} in /{' '}
+            {(usage.outputTokens ?? 0).toLocaleString()} out
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+function shortHash(value: unknown): string {
+  const text = stableJson(value);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
+}
+
+function selectedClipEvidence(
+  project: SpikeProject,
+  selectedClipIds: readonly string[],
+): ReadonlyArray<BrowserJoyCodeReasoningRequest['evidence'][number]> {
+  return selectedClipIds.flatMap((clipId) => {
+    const location = findClipLocation(project, clipId);
+    if (location === undefined) return [];
+    return [
+      {
+        evidenceId: `clip:${clipId}`,
+        kind: 'selected-clip' as const,
+        label: location.clip.id,
+        detail: `${location.compositionId}/${location.trackId} from ${location.clip.startUs}us for ${location.clip.durationUs}us`,
+      },
+    ];
+  });
+}
+
+export function buildJoyCodeReasoningRequest(args: {
+  readonly project: SpikeProject;
+  readonly selectedClipIds: readonly string[];
+  readonly playheadUs: number;
+  readonly attachedAssets: readonly KiloCodeAttachedAsset[];
+  readonly settings: Pick<AgentSettings, 'reasoningModel' | 'privacyMode'>;
+  readonly projectRevision: ProjectRevisionId;
+  readonly goal: string;
+}): BrowserJoyCodeReasoningRequest {
+  const evidence = [
+    ...selectedClipEvidence(args.project, args.selectedClipIds),
+    ...args.attachedAssets.map((asset) => ({
+      evidenceId: `asset:${asset.assetId}`,
+      kind: 'attached-asset' as const,
+      label: asset.displayName,
+      detail: `${asset.kind} asset ${asset.assetId}`,
+    })),
+    {
+      evidenceId: `playhead:${args.playheadUs}`,
+      kind: 'timeline-range' as const,
+      label: 'Playhead',
+      detail: `Current playhead at ${args.playheadUs}us`,
+    },
+  ];
+  return {
+    model: args.settings.reasoningModel || 'mistral-small-latest',
+    goal: args.goal.trim(),
+    snapshotDigest: shortHash({
+      projectId: args.project.id,
+      projectRevision: args.projectRevision,
+      selectedClipIds: args.selectedClipIds,
+      playheadUs: args.playheadUs,
+      evidence,
+    }),
+    projectRevision: args.projectRevision,
+    idempotencyKey: makeJoyCodeId('reasoning'),
+    privacyMode: args.settings.privacyMode,
+    evidence,
+    allowedIntentIds: AGENT_INTENTS.map((intent) => intent.id),
+    maxTokens: 600,
+  };
+}
+
+export function buildPendingPlanFromJoyCodeProposal(args: {
+  readonly response: BrowserJoyCodeReasoningResponse;
+  readonly project: SpikeProject;
+  readonly selectedClipIds: readonly string[];
+  readonly playheadUs: number;
+  readonly baseRevision: ProjectRevisionId;
+  readonly registry: ReturnType<typeof createToolRegistry>;
+  readonly approvalEngine: ApprovalEngine;
+  readonly agentContext: EditorContext;
+}): PendingPlan | undefined {
+  const intentId = args.response.proposal?.intentId;
+  if (intentId === undefined) return undefined;
+  const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+  if (intent === undefined) return undefined;
+  const built =
+    intent.id === 'recipe-split-trim'
+      ? buildSplitTrimRecipe(args.project, args.selectedClipIds, args.playheadUs)
+      : intent.id === 'shorten-intro'
+        ? buildShortenIntroRecipe(args.project)
+        : (() => {
+            const single = intent.buildStep(args.project, args.selectedClipIds, args.playheadUs);
+            if (!single.ok) return single;
+            return { ok: true as const, steps: [single.step], goal: intent.label };
+          })();
+  if (!built.ok) return undefined;
+  const plan = createPlan(built.goal, [...built.steps]);
+  const dryRun = dryRunPlan(plan, args.registry, buildEditorContext(args.project));
+  const approval =
+    selectJoyCodePendingApproval(
+      args.approvalEngine.evaluatePlan(
+        plan,
+        args.agentContext,
+        (toolName) => args.registry.tools.get(toolName)?.scope,
+      ),
+    ) ??
+    ({
+      decision: 'blocked',
+      reason: 'No approval decision was produced.',
+      request: {
+        id: 'approval-missing',
+        stepId: 'plan',
+        reason: 'unresolved-assumptions',
+        description: 'No approval decision was produced.',
+        privacyImpact: { dataLeavesDevice: false, dataTypes: [] },
+        isReversible: true,
+        status: 'pending',
+      },
+    } satisfies ApprovalDecision);
+  return {
+    threadId: 'reasoning-proposal',
+    intent,
+    plan,
+    baseRevision: args.baseRevision,
+    baseProject: args.project,
+    dryRun,
+    approval,
+    reasoning: args.response,
+  };
+}
+
 function threadTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -238,6 +426,7 @@ export function AgentPanel({
   readonly command?: AgentPanelCommand;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
+  const controlPlaneClient = useMemo(() => new BrowserControlPlaneClient(), []);
   const auditRef = useRef(createAuditTrail());
   const handledCommandRef = useRef<number | undefined>(undefined);
   const thinkingTimerRef = useRef<number | undefined>(undefined);
@@ -245,6 +434,9 @@ export function AgentPanel({
   const attachInputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
+  const [lastReasoning, setLastReasoning] = useState<BrowserJoyCodeReasoningResponse | undefined>(
+    undefined,
+  );
   const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState('composer');
   const [draft, setDraft] = useState('');
@@ -315,6 +507,7 @@ export function AgentPanel({
     }));
     setPending(undefined);
     setLastRun(undefined);
+    setLastReasoning(undefined);
     setThinkingThreadId(undefined);
     setDraft('');
     setTab('composer');
@@ -360,7 +553,11 @@ export function AgentPanel({
           })();
   }
 
-  function plan(intent: AgentIntent, threadId: string) {
+  function plan(
+    intent: AgentIntent,
+    threadId: string,
+    reasoning?: BrowserJoyCodeReasoningResponse,
+  ) {
     const baseRevision = session.projectRevisionId;
     const baseProject = project;
     const built = buildIntent(intent);
@@ -400,9 +597,70 @@ export function AgentPanel({
         ? `برنامه آماده شد، اما سیاست اجرایی آن را مسدود کرد: ${approval.reason}`
         : `برنامهٔ «${intent.label}» آماده شد. اجرای آزمایشی: ${dryRun.aggregateDiff.summary}. تغییر زیر را بررسی کنید.`,
     );
-    setPending({ threadId, intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
+    setPending({
+      threadId,
+      intent,
+      plan: agentPlan,
+      baseRevision,
+      baseProject,
+      dryRun,
+      approval,
+      ...(reasoning === undefined ? {} : { reasoning }),
+    });
+    if (reasoning !== undefined) setLastReasoning(reasoning);
     setLastRun(undefined);
     updateThreadStatus(threadId, 'planning');
+  }
+
+  async function requestReasoning(prompt: string, threadId: string): Promise<void> {
+    if (settings.reasoningModel === '') {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Joy Code اکنون درخواست‌های مستقیم تایم‌لاین را می‌پذیرد. برای نقد یا پیشنهاد bounded، ابتدا یک مدل reasoning را در Agent Settings انتخاب کنید.',
+      );
+      return;
+    }
+    const request = buildJoyCodeReasoningRequest({
+      project,
+      selectedClipIds,
+      playheadUs,
+      attachedAssets,
+      settings,
+      projectRevision: session.projectRevisionId,
+      goal: prompt,
+    });
+    try {
+      const reasoning = await controlPlaneClient.joyCodeReasoning(request);
+      setLastReasoning(reasoning);
+      appendMessage(threadId, 'assistant', reasoning.brief.summary);
+      if (reasoning.proposal !== undefined) {
+        const proposalPlan = buildPendingPlanFromJoyCodeProposal({
+          response: reasoning,
+          project,
+          selectedClipIds,
+          playheadUs,
+          baseRevision: session.projectRevisionId,
+          registry,
+          approvalEngine,
+          agentContext,
+        });
+        if (proposalPlan !== undefined) {
+          setPending({ ...proposalPlan, threadId });
+          setLastRun(undefined);
+          updateThreadStatus(threadId, 'planning');
+          return;
+        }
+      }
+      updateThreadStatus(threadId, 'draft');
+    } catch (error) {
+      appendMessage(
+        threadId,
+        'assistant',
+        error instanceof Error ? error.message : 'Bounded reasoning is unavailable right now.',
+      );
+      updateThreadStatus(threadId, 'failed');
+    }
   }
 
   function submitPrompt(prompt: string) {
@@ -434,9 +692,18 @@ export function AgentPanel({
     thinkingTimerRef.current = window.setTimeout(() => {
       thinkingTimerRef.current = undefined;
       try {
-        plan(intent, threadId);
+        if (intent !== undefined) {
+          plan(intent, threadId);
+          return;
+        }
+        void requestReasoning(body, threadId).finally(() => {
+          setThinkingThreadId((current) => (current === threadId ? undefined : current));
+        });
+        return;
       } finally {
-        setThinkingThreadId((current) => (current === threadId ? undefined : current));
+        if (intent !== undefined) {
+          setThinkingThreadId((current) => (current === threadId ? undefined : current));
+        }
       }
     }, THINKING_REVEAL_MS);
   }
@@ -780,6 +1047,14 @@ export function AgentPanel({
                     </p>
                   )}
                   <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                  {pending.reasoning !== undefined && (
+                    <>
+                      <p>
+                        {pending.reasoning.proposal?.summary ?? pending.reasoning.brief.summary}
+                      </p>
+                      <JoyCodeReasoningDetails reasoning={pending.reasoning} />
+                    </>
+                  )}
                   <ProviderApprovalDetails approval={pending.approval} />
                   <div className="joy-code-plan-actions">
                     {pending.approval.decision === 'blocked' && (
@@ -855,6 +1130,18 @@ export function AgentPanel({
                   )}
                 </section>
               )}
+              {lastReasoning !== undefined &&
+                lastReasoning.proposal === undefined &&
+                pending?.threadId !== activeThread?.id && (
+                  <section className="joy-code-run-card" aria-label="Last Joy Code critique">
+                    <div>
+                      <strong>Bounded critique</strong>
+                      <span>{lastReasoning.brief.summary}</span>
+                    </div>
+                    <p>{lastReasoning.brief.rationale}</p>
+                    <JoyCodeReasoningDetails reasoning={lastReasoning} />
+                  </section>
+                )}
               <div ref={messagesEndRef} />
             </div>
 

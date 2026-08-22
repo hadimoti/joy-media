@@ -127,6 +127,57 @@ export interface BrowserReasoningProvider {
   readonly adapterVersion: string;
 }
 
+export interface BrowserJoyCodeReasoningEvidence {
+  readonly evidenceId: string;
+  readonly kind: 'selected-clip' | 'attached-asset' | 'timeline-range' | 'project-summary';
+  readonly label: string;
+  readonly detail: string;
+}
+
+export interface BrowserJoyCodeReasoningRequest {
+  readonly model: string;
+  readonly goal: string;
+  readonly snapshotDigest: string;
+  readonly projectRevision: string;
+  readonly idempotencyKey: string;
+  readonly privacyMode: 'local-only' | 'ask-before-remote';
+  readonly evidence: readonly BrowserJoyCodeReasoningEvidence[];
+  readonly allowedIntentIds: readonly string[];
+  readonly providerApprovalGrant?: Record<string, unknown>;
+  readonly maxTokens?: number;
+}
+
+export interface BrowserJoyCodeReasoningResponse {
+  readonly responseVersion: 1;
+  readonly requestId: string;
+  readonly brief: {
+    readonly summary: string;
+    readonly rationale: string;
+    readonly evidenceReferences: readonly string[];
+    readonly caution?: string;
+  };
+  readonly proposal?: {
+    readonly intentId: string;
+    readonly summary: string;
+    readonly rationale: string;
+    readonly evidenceReferences: readonly string[];
+  };
+  readonly provider: {
+    readonly providerId: string;
+    readonly modelId: string;
+    readonly decisionRef: string;
+    readonly briefRef: string;
+    readonly requestDigest: string;
+    readonly dataLeavesDevice: boolean;
+    readonly retentionDisclosure?: string;
+    readonly usage?: {
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly budgetReservationId?: string;
+    };
+  };
+}
+
 export interface BrowserAssetRegistration {
   readonly id: string;
   readonly kind: BrowserAsset['kind'];
@@ -194,6 +245,11 @@ export class BrowserControlPlaneClient {
       '/v1/providers/reasoning',
     );
     return data.providers;
+  }
+  async joyCodeReasoning(
+    input: BrowserJoyCodeReasoningRequest,
+  ): Promise<BrowserJoyCodeReasoningResponse> {
+    return this.post('/v1/providers/reasoning/joy-code', input);
   }
   /** Fetch cloud-backed original bytes for any logged-in Joy user. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {

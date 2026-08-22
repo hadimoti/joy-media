@@ -173,6 +173,259 @@ describe('control-plane HTTP transport', () => {
     expect(JSON.stringify(audit.body)).not.toContain('Do not persist this prompt.');
   });
 
+  it('keeps bounded Joy Code reasoning unconfigured until Mistral is configured', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+
+    expect(
+      await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
+        model: 'mistral-small-latest',
+        goal: 'Tighten the opening pacing',
+        snapshotDigest: `fnv1a-${'a'.repeat(8)}`,
+        projectRevision: 'rev-1',
+        idempotencyKey: 'joy-code-unconfigured-1',
+        privacyMode: 'ask-before-remote',
+        evidence: [
+          {
+            evidenceId: 'clip:intro',
+            kind: 'selected-clip',
+            label: 'Intro clip',
+            detail: 'Opening narration from 0s to 10s.',
+          },
+        ],
+        allowedIntentIds: ['shorten-intro'],
+      }),
+    ).toMatchObject({ status: 503, body: { error: { code: 'PROVIDER_UNCONFIGURED' } } });
+  });
+
+  it('requires approval, validates evidence refs, and replays bounded Joy Code reasoning without persisting prompts', async () => {
+    let calls = 0;
+    const approvals = new ProviderApprovalService();
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new MemoryMistralInvocationLedger(),
+      approvals,
+      async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    brief: {
+                      summary: 'The intro can be tightened without changing the story arc.',
+                      rationale:
+                        'The opening evidence repeats setup beats before the product lands.',
+                      evidenceReferences: ['clip:intro'],
+                    },
+                    proposal: {
+                      intentId: 'shorten-intro',
+                      summary: 'Shorten the intro by 2 seconds.',
+                      rationale: 'The intro evidence supports a bounded pacing trim.',
+                      evidenceReferences: ['clip:intro'],
+                    },
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 11, completion_tokens: 13 },
+          }),
+        );
+      },
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvals,
+    );
+
+    const base = {
+      model: 'mistral-small-latest',
+      goal: 'Tighten the opening pacing without changing the message.',
+      snapshotDigest: `fnv1a-${'b'.repeat(8)}`,
+      projectRevision: 'rev-1',
+      idempotencyKey: 'joy-code-1',
+      privacyMode: 'ask-before-remote',
+      evidence: [
+        {
+          evidenceId: 'clip:intro',
+          kind: 'selected-clip',
+          label: 'Intro clip',
+          detail: 'Opening narration from 0s to 10s.',
+        },
+      ],
+      allowedIntentIds: ['shorten-intro'],
+    };
+
+    const approvalRequired = await request(
+      origin,
+      'POST',
+      '/v1/providers/reasoning/joy-code',
+      base,
+    );
+    expect(approvalRequired).toMatchObject({
+      status: 409,
+      body: {
+        error: {
+          code: 'PROVIDER_APPROVAL_REQUIRED',
+          preflight: { providerId: 'mistral', capability: 'llm.complete' },
+        },
+      },
+    });
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: {
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+    const providerApprovalGrant = approvals.createGrant({
+      actorId: 'owner',
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      costCap: { amount: '0.00', currency: 'USD' },
+      grantId: 'grant-joy-code-1',
+    });
+
+    const approved = await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
+      ...base,
+      providerApprovalGrant,
+    });
+    expect(approved).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          brief: {
+            summary: 'The intro can be tightened without changing the story arc.',
+            evidenceReferences: ['clip:intro'],
+          },
+          proposal: { intentId: 'shorten-intro', evidenceReferences: ['clip:intro'] },
+          provider: {
+            providerId: 'mistral',
+            modelId: 'mistral-small-latest',
+            decisionRef: 'provider-decision-joy-code-1',
+            briefRef: 'reasoning-brief-joy-code-1',
+            usage: { inputTokens: 11, outputTokens: 13 },
+          },
+        },
+      },
+    });
+
+    const replay = await request(origin, 'POST', '/v1/providers/reasoning/joy-code', base);
+    expect(replay).toEqual(approved);
+    expect(calls).toBe(1);
+    expect(JSON.stringify(approved.body)).not.toContain('test-only-mistral-secret');
+    expect(JSON.stringify(approved.body)).not.toContain(base.goal);
+
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(audit).toMatchObject({
+      status: 200,
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({ status: 'denied', reason: 'approval-required' }),
+          expect.objectContaining({ status: 'succeeded', approvalGrantId: 'grant-joy-code-1' }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(audit.body)).not.toContain(base.goal);
+  });
+
+  it('fails closed when Joy Code reasoning returns malformed structured output or unknown evidence refs', async () => {
+    const approvals = new ProviderApprovalService();
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new MemoryMistralInvocationLedger(),
+      approvals,
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    brief: {
+                      summary: 'Bad refs.',
+                      rationale: 'This cites an unknown item.',
+                      evidenceReferences: ['missing-evidence'],
+                    },
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 4, completion_tokens: 5 },
+          }),
+        ),
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvals,
+    );
+
+    const base = {
+      model: 'mistral-small-latest',
+      goal: 'Review the intro only.',
+      snapshotDigest: `fnv1a-${'c'.repeat(8)}`,
+      projectRevision: 'rev-2',
+      idempotencyKey: 'joy-code-malformed-1',
+      privacyMode: 'ask-before-remote',
+      evidence: [
+        {
+          evidenceId: 'clip:intro',
+          kind: 'selected-clip',
+          label: 'Intro clip',
+          detail: 'Opening narration from 0s to 10s.',
+        },
+      ],
+      allowedIntentIds: ['shorten-intro'],
+    };
+    const approvalRequired = await request(
+      origin,
+      'POST',
+      '/v1/providers/reasoning/joy-code',
+      base,
+    );
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: {
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+    const providerApprovalGrant = approvals.createGrant({
+      actorId: 'owner',
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      costCap: { amount: '0.00', currency: 'USD' },
+    });
+
+    expect(
+      await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
+        ...base,
+        providerApprovalGrant,
+      }),
+    ).toMatchObject({
+      status: 502,
+      body: { error: { code: 'MISTRAL_REQUEST_FAILED' } },
+    });
+  });
+
   it('rejects forged provider approval grants at the HTTP boundary', async () => {
     const approvals = new ProviderApprovalService();
     const registry = new MistralProviderRegistry(
