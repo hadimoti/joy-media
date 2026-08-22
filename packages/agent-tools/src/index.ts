@@ -70,6 +70,8 @@ export type {
   Scene3DPlanExecutorOptions,
 } from './scene3d-execution.js';
 export { Scene3DPlanExecutor } from './scene3d-execution.js';
+export type { Scene3DGatewayBinding } from './scene3d-mcp.js';
+export { Scene3DMcpGateway } from './scene3d-mcp.js';
 
 export type {
   AgentEditPlan,
