@@ -24,3 +24,8 @@ when a paired Worker advertises them.
 **Must not:** Editing project state without a validated job/command result; building shell strings from input.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## Release evidence
+
+Worker pairing is owner-approved and capability-backed. The release gate requires a Worker build and
+recorded pairing/capability evidence; fixture jobs do not satisfy real-media or actual-render gates.

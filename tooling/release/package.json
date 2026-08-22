@@ -1,0 +1,9 @@
+{
+  "name": "@joy-media/release",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gate": "node --experimental-strip-types src/gate.ts",
+    "test": "vitest run tooling/release/src/gate.test.ts"
+  }
+}

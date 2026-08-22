@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "tooling/release" },
     { "path": "packages/agent-tools" },
     { "path": "packages/captions-core" },
     { "path": "packages/motion-core" },

@@ -46,3 +46,11 @@ API release with `CI=true npm_config_confirm_modules_purge=false pnpm deploy
 release only after the checks pass. Rollback is a symlink change to the prior
 immutable release followed by `systemctl restart joy-media@api`; keep the
 database backup until the deployment gate is accepted.
+
+## 1.0 prerequisites and rollback
+
+Run `pnpm check`, the three application builds, `pnpm test:release`, and the non-deploying
+`pnpm release:gate` before requesting deployment. Back up the database and object-store metadata;
+retain the prior immutable API/web releases. Deployment is a separately approved action. Roll back
+by pointing `current-api` and `web` at the previous release directories, restarting the affected
+service, and re-running health plus authenticated browser smoke. Never place secrets in gate output.

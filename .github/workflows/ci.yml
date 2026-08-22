@@ -14,3 +14,19 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm release:gate:test
+      - name: Run evidence gate when CI evidence is present
+        if: hashFiles('test-output/release-evidence.json') != ''
+        run: pnpm release:gate
+        env:
+          JOY_RELEASE_EVIDENCE: test-output/release-evidence.json
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: joy-studio-release-evidence
+          path: |
+            test-output/release-gate
+            test-output/browser
+            test-output/goldens
+          if-no-files-found: ignore

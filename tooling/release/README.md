@@ -1,12 +1,14 @@
-# release
+# JOY Studio 1.0 release gate
 
-> **Status: planned — no code yet.** This README is this folder's slice of the JOY Media plan.
-> Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §32.7, §35.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
+The release gate is a non-deploying evidence check. Run `pnpm release:gate` locally or in CI; it
+writes `test-output/release-gate/{report,manifest,sbom,artifact-hashes}.json` and exits non-zero
+unless every critical check is proven. Set `JOY_RELEASE_EVIDENCE` to a checked-in or CI-generated
+JSON evidence file to evaluate a real run. Missing evidence fails closed.
 
-**Role.** Build pinning, signing, packaging, release-gate checks.
+The gate requires non-zero passing tests, clean generated artifacts, no fixture handlers in
+production registries, successful editor/API/Worker builds, a manifest and SBOM, a verified
+authenticated editor journey, and a feature-status audit no older than 45 days. Only non-critical
+status documentation may be waived, and every waiver needs an owner, reason, and future expiry.
 
-**First built in part:** P02+. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
-
-**Must not:** Shipping when §32.7 release gates fail.
-
-Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+This command never pushes, deploys, changes VPS state, or contacts GitHub. Deployment is a separate
+approved operational action documented in `deploy/README.md`.

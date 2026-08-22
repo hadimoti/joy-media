@@ -14,6 +14,8 @@
     "test:api": "vitest run apps/api/src",
     "test:worker": "vitest run apps/worker/src",
     "test:release": "pnpm test:unit && pnpm test:editor && pnpm test:api && pnpm test:worker",
+    "release:gate": "pnpm --filter @joy-media/release gate",
+    "release:gate:test": "pnpm --filter @joy-media/release test",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

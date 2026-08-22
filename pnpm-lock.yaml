@@ -561,6 +561,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/renderer-pixi
 
+  tooling/release: {}
+
 packages:
 
   '@babel/code-frame@7.29.7':

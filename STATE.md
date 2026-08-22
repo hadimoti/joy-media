@@ -1,5 +1,10 @@
 # JOY Media — Progress Ledger
 
+## 1.0 release gate status (2026-08-22)
+
+Tasks 27–29 are accepted in the finalization ledger. Task 30 adds the non-deploying release gate and
+journey evidence contract; deployment/VPS changes remain outside this task until explicitly approved.
+
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 

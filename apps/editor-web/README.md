@@ -18,3 +18,10 @@ JOY Media.
 **Must not:** Direct database writes, model-specific logic, trusted arbitrary plugin code, putting the project document into React state.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## Release evidence
+
+The authenticated 1.0 browser journey must cover project open, timeline edit, Motion Studio
+publish/place/preview, save/reopen, undo/redo, and verified export. Record it as
+`authenticated-editor-1.0` evidence for the repository release gate; never claim a browser journey
+from a build-only check.

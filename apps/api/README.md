@@ -21,3 +21,9 @@ session cookie, or identity signing key.
 **Must not:** Heavy inference, frame rendering, large-media relay; one microservice per module.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## Release evidence
+
+The API release gate requires a successful build and durable-auth evidence. PostgreSQL-backed media
+auth fails closed without `JOY_MEDIA_AUTH_HASH_KEYS`; keep keys and database credentials in the
+deployment environment, never in release reports or source control.
