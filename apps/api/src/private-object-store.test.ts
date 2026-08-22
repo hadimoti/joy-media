@@ -34,7 +34,14 @@ describe('RclonePrivateObjectStore', () => {
 
     expect(calls.map((call) => call.args)).toEqual([
       ['rcat', 'parspack:c212734/sweden-backups/joy-media/derivative-1', '--log-level', 'ERROR'],
-      ['cat', 'parspack:c212734/sweden-backups/joy-media/derivative-1', '--log-level', 'ERROR'],
+      [
+        'link',
+        'parspack:c212734/sweden-backups/joy-media/derivative-1',
+        '--expire',
+        '5m',
+        '--log-level',
+        'ERROR',
+      ],
       [
         'deletefile',
         'parspack:c212734/sweden-backups/joy-media/derivative-1',

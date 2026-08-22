@@ -18,6 +18,8 @@ export interface RclonePrivateObjectStoreOptions {
   /** Existing root-owned rclone remote, e.g. parspack:c212734/sweden-backups/joy-media. */
   readonly remotePrefix: string;
   readonly command?: string;
+  /** Bound a remote read/write so a stalled object-store connection cannot hang an API request forever. */
+  readonly timeoutMs?: number;
   readonly run?: RcloneRunner;
 }
 
@@ -37,7 +39,7 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
     if (!isRemotePrefix(options.remotePrefix))
       throw new TypeError('object-store remote prefix is invalid');
     this.command = options.command ?? 'rclone';
-    this.runner = options.run ?? new SpawnRcloneRunner(this.command);
+    this.runner = options.run ?? new SpawnRcloneRunner(this.command, options.timeoutMs);
   }
 
   async put(descriptor: PrivateObjectDescriptor, bytes: Uint8Array): Promise<void> {
@@ -48,12 +50,19 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
 
   async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
     validateDescriptor(descriptor);
-    const bytes = await this.runner.run([
-      'cat',
+    // ParsPack reliably serves a short-lived signed URL, while its direct
+    // rclone GET/HEAD path can stall on private objects. Fetch the signed URL
+    // from the API host so credentials never leave the server.
+    const link = await this.runner.run([
+      'link',
       this.pathFor(descriptor.ref),
+      '--expire',
+      '5m',
       '--log-level',
       'ERROR',
     ]);
+    const linkText = Buffer.from(link).toString('utf8').trim();
+    const bytes = /^https?:\/\//i.test(linkText) ? await fetchPrivateObject(linkText) : link;
     verify(descriptor, bytes);
     return bytes;
   }
@@ -68,6 +77,12 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
   }
 }
 
+async function fetchPrivateObject(url: string): Promise<Uint8Array> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`signed object fetch failed (${response.status})`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 export class PrivateObjectIntegrityError extends Error {
   constructor() {
     super('private object failed integrity verification');
@@ -76,7 +91,14 @@ export class PrivateObjectIntegrityError extends Error {
 }
 
 class SpawnRcloneRunner implements RcloneRunner {
-  constructor(private readonly command: string) {}
+  constructor(
+    private readonly command: string,
+    private readonly timeoutMs = 30_000,
+  ) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new TypeError('rclone timeout must be a positive integer');
+    }
+  }
 
   run(args: readonly string[], input?: Uint8Array): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
@@ -86,10 +108,25 @@ class SpawnRcloneRunner implements RcloneRunner {
       });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill('SIGTERM');
+        reject(new Error(`rclone timed out after ${this.timeoutMs}ms`));
+      }, this.timeoutMs);
       child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
       child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-      child.once('error', reject);
+      child.once('error', (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
       child.once('close', (status) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (status === 0) resolve(new Uint8Array(Buffer.concat(stdout)));
         else
           reject(
