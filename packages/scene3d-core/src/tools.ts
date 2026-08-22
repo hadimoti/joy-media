@@ -257,6 +257,10 @@ export class Scene3DApprovalLedger {
     return this.consumed.has(approvalId);
   }
 
+  release(approvalId: string): void {
+    this.consumed.delete(approvalId);
+  }
+
   apply(
     session: Scene3DToolSession,
     name: Scene3DWriteTool,

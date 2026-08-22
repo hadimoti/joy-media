@@ -65,7 +65,11 @@ describe('Scene3DPlanExecutor', () => {
     });
     const result = executor.execute({
       ...request(),
-      commit: { commit: (value) => saved.push(value) },
+      commit: {
+        commit: (value) => {
+          saved.push(value);
+        },
+      },
     });
     expect(result.status).toBe('success');
     expect(saved).toHaveLength(1);
@@ -81,14 +85,40 @@ describe('Scene3DPlanExecutor', () => {
     });
     const first = executor.execute({
       ...request(),
-      commit: { commit: (value) => saved.push(value) },
+      commit: {
+        commit: (value) => {
+          saved.push(value);
+        },
+      },
     });
     const second = executor.execute({
       ...request(),
-      commit: { commit: (value) => saved.push(value) },
+      commit: {
+        commit: (value) => {
+          saved.push(value);
+        },
+      },
     });
     expect(first.status).toBe('success');
     expect(second.status).toBe('replayed');
     expect(saved).toHaveLength(1);
+  });
+
+  it('does not consume approval when the host CAS rejects the commit', () => {
+    const executor = new Scene3DPlanExecutor({
+      registry: createToolRegistry(),
+      authorize: () => ({ allowed: true }),
+      now: () => 100,
+    });
+    const rejected = executor.execute({
+      ...request(),
+      commit: { commit: () => ({ accepted: false, error: 'stale revision' }) },
+    });
+    expect(rejected.status).toBe('failed');
+    const accepted = executor.execute({
+      ...request(),
+      commit: { commit: () => ({ accepted: true }) },
+    });
+    expect(accepted.status).toBe('success');
   });
 });

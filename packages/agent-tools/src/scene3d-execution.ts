@@ -19,8 +19,9 @@ export interface Scene3DCommit {
   readonly commit: (result: {
     readonly document: Scene3DDocumentV1;
     readonly revision: string;
+    readonly expectedRevision: string;
     readonly diff: Scene3DToolDiff;
-  }) => void;
+  }) => void | { readonly accepted: boolean; readonly error?: string };
 }
 
 export interface Scene3DExecutionRequest {
@@ -123,11 +124,19 @@ export class Scene3DPlanExecutor {
       result.diff === undefined
     )
       return this.fail(request, result.error ?? 'scene3d tool failed');
-    request.commit.commit({
+    const commitResult = request.commit.commit({
       document: result.document,
       revision: result.revision,
+      expectedRevision: request.session.revision,
       diff: result.diff,
     });
+    if (commitResult !== undefined && !commitResult.accepted) {
+      this.approvals.release(request.approval.approvalId);
+      return this.fail(
+        request,
+        commitResult.error ?? 'scene revision changed before commit; retry from a fresh session',
+      );
+    }
     const toolResult: ToolResult = {
       success: true,
       stableIds: [...result.diff.created, ...result.diff.modified],
