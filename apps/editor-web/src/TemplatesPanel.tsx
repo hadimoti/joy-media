@@ -19,6 +19,7 @@ import type {
 } from './content-template-types.js';
 import type { EditorSession } from './editor-session.js';
 import { readClipObjectMap } from './sticker-bindings.js';
+import { PsdImportDialog } from './PsdImportDialog.js';
 import { getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
 import {
   createScenePreviewHost,
@@ -63,6 +64,7 @@ export function TemplatesPanel({
   const [view, setView] = useState<TemplateView>('library');
   const [query, setQuery] = useState('');
   const [catalogTick, setCatalogTick] = useState(0);
+  const [psdOpen, setPsdOpen] = useState(false);
   const [mineCatalog, setMineCatalog] = useState<{
     readonly status: 'ready' | 'loading' | 'error';
     readonly entries: readonly TemplateCatalogEntry[];
@@ -323,9 +325,25 @@ export function TemplatesPanel({
           >
             Save selection
           </button>
+          <button
+            type="button"
+            className="templates-import-psd"
+            onClick={() => setPsdOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Import PSD
+          </button>
           {body}
         </div>
       </div>
+      {psdOpen && (
+        <PsdImportDialog
+          session={session}
+          projectId={session.timelineProject.id}
+          onClose={() => setPsdOpen(false)}
+          showToast={showToast}
+        />
+      )}
     </PanelShell>
   );
 }

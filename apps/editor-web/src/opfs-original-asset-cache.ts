@@ -107,7 +107,10 @@ function validateDescriptor(descriptor: OriginalAssetDescriptor): void {
   if (!/^[a-f0-9]{64}$/.test(descriptor.sha256) || !Number.isSafeInteger(descriptor.bytes))
     throw new Error('selected asset integrity metadata is invalid');
   if (descriptor.bytes < 0) throw new Error('selected asset integrity metadata is invalid');
-  if (!/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(descriptor.mimeType))
+  if (
+    !/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(descriptor.mimeType) &&
+    descriptor.mimeType.toLowerCase() !== 'application/vnd.adobe.photoshop'
+  )
     throw new Error('selected asset type is unsupported');
 }
 
