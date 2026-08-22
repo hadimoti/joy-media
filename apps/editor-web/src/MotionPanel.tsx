@@ -27,13 +27,18 @@ import {
   sampleCurve,
   MotionRegistry,
   registerBuiltinMotions,
+  evaluateMotionScene,
+  resolveLayerWorld,
+  resolvedLayerOpacity,
   type MotionDescriptor,
+  type MotionFill,
+  type MotionLayer,
+  type MotionSceneDocument,
 } from '@joy-media/motion-core';
 import type { SetSpatialPathCommand } from '@joy-media/motion-core';
 import {
   createScenePreviewHost,
   defaultVariablesForScene,
-  type ScenePreviewHost,
 } from '@joy-media/html-scene-runtime/browser';
 import {
   FIRST_PARTY_SCENES,
@@ -63,6 +68,7 @@ import { iconUrl } from './icon-assets.js';
 import {
   createMotionScene,
   duplicateMotionScene,
+  loadMotionSceneDocument,
   listCatalogScenes,
   removeCatalogScene,
   renameMotionScene,
@@ -190,6 +196,182 @@ function animationForMotion(motion: MotionDescriptor): CSSProperties | undefined
   if (preview === undefined) return undefined;
   const [keyframes, easing] = preview;
   return { animation: `${keyframes} ${motion.durationMs}ms ${easing} infinite alternate` };
+}
+
+function previewBackgroundFromFill(fill: MotionFill | undefined): CSSProperties['background'] {
+  if (fill === undefined || fill.kind === 'transparent') return undefined;
+  if (fill.kind === 'solid') return fill.color;
+  if (fill.kind === 'gradient') {
+    const stops = fill.gradient.stops
+      .map((stop) => `${stop.color} ${(stop.position * 100).toFixed(1)}%`)
+      .join(', ');
+    return `linear-gradient(${fill.gradient.angle ?? 90}deg, ${stops})`;
+  }
+  return undefined;
+}
+
+function previewTextColorFromFill(fill: MotionFill | undefined): string {
+  if (fill?.kind === 'solid') return fill.color;
+  if (fill?.kind === 'gradient') return fill.gradient.stops[0]?.color ?? '#fff';
+  return '#fff';
+}
+
+function previewBackgroundFromScene(scene: MotionSceneDocument): CSSProperties['background'] {
+  if (scene.background.kind === 'solid') return scene.background.color ?? 'transparent';
+  if (scene.background.kind === 'gradient' && scene.background.gradient !== undefined) {
+    const stops = scene.background.gradient.stops
+      .map((stop) => `${stop.color} ${(stop.position * 100).toFixed(1)}%`)
+      .join(', ');
+    return `linear-gradient(${scene.background.gradient.angle ?? 90}deg, ${stops})`;
+  }
+  return undefined;
+}
+
+function motionStudioPreviewAssetUrl(assetId: string | undefined): string {
+  return assetId === undefined
+    ? ''
+    : `/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`;
+}
+
+function motionSceneLayerStyle(
+  scene: MotionSceneDocument,
+  layer: MotionLayer,
+  evaluated: ReturnType<typeof evaluateMotionScene>,
+  layersById: Readonly<Record<string, MotionLayer>>,
+): CSSProperties {
+  const world = resolveLayerWorld(layer, evaluated.get(layer.id), layersById).worldTransform;
+  const width = world.width > 0 ? world.width : scene.width * 0.2;
+  const height = world.height > 0 ? world.height : scene.height * 0.2;
+  return {
+    position: 'absolute',
+    left: `${(world.x / scene.width) * 100}%`,
+    top: `${(world.y / scene.height) * 100}%`,
+    width: `${(width / scene.width) * 100}%`,
+    height: `${(height / scene.height) * 100}%`,
+    transform: `rotate(${world.rotationDeg}deg) scale(${world.scaleX}, ${world.scaleY})`,
+    transformOrigin: `${world.transformOriginX} ${world.transformOriginY}`,
+    opacity: layer.visible ? resolvedLayerOpacity(layer, evaluated.get(layer.id)) : 0,
+    overflow: layer.overflow,
+    borderRadius: `${layer.borderRadius[0] ?? 0}px ${layer.borderRadius[1] ?? 0}px ${layer.borderRadius[2] ?? 0}px ${layer.borderRadius[3] ?? 0}px`,
+    mixBlendMode: (layer.blendMode as CSSProperties['mixBlendMode']) || 'normal',
+    pointerEvents: 'none',
+  };
+}
+
+function MotionSceneThumbnailLayer({
+  scene,
+  layer,
+}: {
+  readonly scene: MotionSceneDocument;
+  readonly layer: MotionLayer;
+  readonly evaluated: ReturnType<typeof evaluateMotionScene>;
+  readonly layersById: Readonly<Record<string, MotionLayer>>;
+}) {
+  const style = motionSceneLayerStyle(scene, layer, evaluated, layersById);
+  const fill = layer.fills[0];
+  const fillBackground = previewBackgroundFromFill(fill);
+  if (layer.type === 'text') {
+    return (
+      <div style={style}>
+        <span
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            color: previewTextColorFromFill(fill),
+            fontFamily: layer.typography?.fontFamily ?? 'system-ui',
+            fontSize: `${Math.max(8, (layer.typography?.fontSize ?? 40) * (90 / scene.width))}px`,
+            fontWeight: layer.typography?.fontWeight ?? 400,
+            lineHeight: layer.typography?.lineHeight ?? 1.2,
+            textAlign: layer.typography?.textAlign ?? 'center',
+            whiteSpace: 'pre-wrap',
+            overflow: 'hidden',
+          }}
+        >
+          {layer.text ?? ''}
+        </span>
+      </div>
+    );
+  }
+  if (layer.type === 'image' && layer.assetId !== undefined) {
+    return (
+      <div style={style}>
+        <img
+          src={motionStudioPreviewAssetUrl(layer.assetId)}
+          alt=""
+          draggable={false}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      </div>
+    );
+  }
+  if (layer.type === 'svg' && layer.svgContent !== undefined) {
+    return (
+      <div style={style}>
+        <img
+          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(layer.svgContent)}`}
+          alt=""
+          draggable={false}
+          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        />
+      </div>
+    );
+  }
+  if (layer.type === 'video') {
+    return <div style={{ ...style, background: '#5f4b22' }} />;
+  }
+  if (layer.type === 'shape' || fillBackground !== undefined) {
+    return <div style={{ ...style, background: fillBackground ?? '#8c6a2a' }} />;
+  }
+  return <div style={{ ...style, background: 'rgba(244, 183, 47, 0.35)' }} />;
+}
+
+function MotionSceneThumbnail({ scene }: { readonly scene: MotionSceneDocument | undefined }) {
+  const [timeMs, setTimeMs] = useState(0);
+  useEffect(() => {
+    if (scene === undefined || scene.layers.length === 0) return;
+    let frame = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      setTimeMs((now - start) % Math.max(1, scene.durationMs));
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [scene]);
+
+  if (scene === undefined || scene.layers.length === 0) {
+    return (
+      <div className="motion-scene-card-live motion-scene-card-empty">
+        <img src="/assets/JoyCodeNew_32x32.png" alt="" draggable={false} />
+        <span>No layers yet</span>
+      </div>
+    );
+  }
+
+  const evaluated = evaluateMotionScene(scene, timeMs);
+  const layersById = Object.fromEntries(scene.layers.map((layer) => [layer.id, layer]));
+
+  return (
+    <div className="motion-scene-card-live">
+      <div
+        className="motion-scene-card-stage"
+        style={{ background: previewBackgroundFromScene(scene) }}
+      >
+        {scene.layers
+          .filter((layer) => layer.visible && layer.type !== 'background')
+          .map((layer) => (
+            <MotionSceneThumbnailLayer
+              key={layer.id}
+              scene={scene}
+              layer={layer}
+              evaluated={evaluated}
+              layersById={layersById}
+            />
+          ))}
+      </div>
+    </div>
+  );
 }
 
 function MotionCard({
@@ -399,6 +581,7 @@ function LibraryTab({
 
 function MotionSceneCard({
   entry,
+  scene,
   onOpen,
   onPlace,
   onRename,
@@ -406,6 +589,7 @@ function MotionSceneCard({
   onDelete,
 }: {
   readonly entry: MotionSceneCatalogEntry;
+  readonly scene: MotionSceneDocument | undefined;
   readonly onOpen: (id: string) => void;
   readonly onPlace: (id: string) => void;
   readonly onRename: (id: string, title: string) => void;
@@ -415,7 +599,7 @@ function MotionSceneCard({
   return (
     <div className="motion-card" role="listitem">
       <div className="motion-card-preview" aria-hidden="true">
-        <div className="motion-scene-card-swatch" />
+        <MotionSceneThumbnail scene={scene} />
         <span className="motion-card-duration">{(entry.durationMs / 1000).toFixed(1)}s</span>
       </div>
       <div className="motion-card-body">
@@ -494,6 +678,7 @@ function MotionSceneCard({
 
 function MyMotionsTab({
   entries,
+  scenes,
   onOpen,
   onPlace,
   onRename,
@@ -501,6 +686,7 @@ function MyMotionsTab({
   onDelete,
 }: {
   readonly entries: readonly MotionSceneCatalogEntry[];
+  readonly scenes: ReadonlyMap<string, MotionSceneDocument | undefined>;
   readonly onOpen: (id: string) => void;
   readonly onPlace: (id: string) => void;
   readonly onRename: (id: string, title: string) => void;
@@ -523,6 +709,7 @@ function MyMotionsTab({
               <MotionSceneCard
                 key={entry.id}
                 entry={entry}
+                scene={scenes.get(entry.id)}
                 onOpen={onOpen}
                 onPlace={onPlace}
                 onRename={onRename}
@@ -601,7 +788,6 @@ function HtmlSceneLiveThumb({
     const mount = mountRef.current;
     const root = rootRef.current;
     if (mount === null || root === null) return;
-    let host: ScenePreviewHost | undefined;
     let cancelled = false;
     const variables = defaultVariablesForScene(scene.id);
     const viewport = scene.manifest.viewport;
@@ -613,7 +799,7 @@ function HtmlSceneLiveThumb({
       scene.previewFocus,
     );
 
-    host = createScenePreviewHost({
+    const host = createScenePreviewHost({
       instanceId: `${instancePrefix}-${scene.id}`,
       scene,
       parent: mount,
@@ -1073,6 +1259,16 @@ export function MotionPanel({
 
   // myMotionsTick is the refresh signal; window.localStorage's identity never changes.
   const myMotions = useMemo(() => listCatalogScenes(window.localStorage), [myMotionsTick]);
+  const myMotionDocuments = useMemo(
+    () =>
+      new Map(
+        myMotions.map((entry) => [
+          entry.id,
+          loadMotionSceneDocument(window.localStorage, entry.id),
+        ]),
+      ),
+    [myMotions],
+  );
 
   const createMotion = useCallback(() => {
     const scene = createMotionScene(window.localStorage, `Untitled Motion ${myMotions.length + 1}`);
@@ -1272,6 +1468,7 @@ export function MotionPanel({
           {subtab === 'my-motions' && (
             <MyMotionsTab
               entries={myMotions}
+              scenes={myMotionDocuments}
               onOpen={openMySceneMotion}
               onPlace={placeMySceneMotion}
               onRename={renameMySceneMotion}
