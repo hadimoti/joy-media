@@ -28,6 +28,7 @@ describe('Worker runtime', () => {
       detectMediaTools((tool) => tool === 'ffmpeg' || tool === 'ffprobe'),
     );
     expect(runtime.hello('win32', 'x64').capabilities).toEqual([
+      'media.semantic-index',
       'asset.thumbnail',
       'render.export',
       'video.reference-analyze',
@@ -219,6 +220,7 @@ describe('Worker runtime', () => {
       { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true, aiProviders: [] },
     );
     expect(runtime.hello('linux', 'x64').capabilities).toEqual([
+      'media.semantic-index',
       'asset.thumbnail',
       'render.export',
       'video.reference-analyze',

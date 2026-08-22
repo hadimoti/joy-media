@@ -1,16 +1,17 @@
 /**
  * S2: Semantic Intelligence Types
- * 
+ *
  * Deterministic project analysis derived from S1 semantic snapshots.
  * These types provide analytic findings about project state that are
  * verifiable and reproducible from the snapshot data.
- * 
+ *
  * Dependency: S1 (semantic-snapshot.ts)
  */
 
 import type {
   EvidenceId,
   EvidenceKindV1,
+  SnapshotEvidenceV1,
   SnapshotRevision,
 } from './semantic-snapshot.js';
 import { EVIDENCE_KINDS_V1 } from './semantic-snapshot.js';
@@ -106,7 +107,7 @@ export interface IntelligenceMetadataV1 {
 // Finding Types
 // ============================================================================
 
-/** 
+/**
  * Severity level for intelligence findings.
  * Findings are **deterministic facts** derived from the snapshot.
  */
@@ -119,7 +120,7 @@ export const FINDING_SEVERITIES_V1: readonly FindingSeverityV1[] = [
   'error',
 ];
 
-/** 
+/**
  * Category of intelligence finding.
  * These categorize the domain of analysis.
  */
@@ -148,7 +149,7 @@ export const FINDING_CATEGORIES_V1: readonly FindingCategoryV1[] = [
 
 /**
  * A single deterministic finding from semantic analysis.
- * 
+ *
  * Key invariant: Findings are **FACTS** derived from the snapshot.
  * They are NOT inferences, suggestions, or opinions.
  * S3 will distinguish these from model inferences.
@@ -159,17 +160,17 @@ export interface IntelligenceFindingV1 {
   readonly severity: FindingSeverityV1;
   readonly title: string;
   readonly description: string;
-  /** 
+  /**
    * Evidence IDs from S1 that support this finding.
    * Must reference valid canonical evidence.
    */
   readonly evidenceIds: readonly EvidenceId[];
-  /** 
+  /**
    * The kind of evidence this finding relates to.
    * Optional but recommended for filtering.
    */
   readonly evidenceKind?: EvidenceKindV1;
-  /** 
+  /**
    * Computed metric or count where applicable.
    * For example: gap duration, missing asset count, etc.
    */
@@ -178,7 +179,7 @@ export interface IntelligenceFindingV1 {
     readonly value: number;
     readonly unit?: string;
   };
-  /** 
+  /**
    * Location information for findings that have a specific position.
    */
   readonly location?: {
@@ -203,11 +204,17 @@ export function validateIntelligenceFinding(value: unknown): string[] {
     errors.push(`Finding id must be a non-empty string <= ${MAX_ID_LENGTH} chars`);
   }
 
-  if (!isNonEmptyString(finding.category) || !FINDING_CATEGORIES_V1.includes(finding.category as FindingCategoryV1)) {
+  if (
+    !isNonEmptyString(finding.category) ||
+    !FINDING_CATEGORIES_V1.includes(finding.category as FindingCategoryV1)
+  ) {
     errors.push(`Finding category must be one of: ${FINDING_CATEGORIES_V1.join(', ')}`);
   }
 
-  if (!isNonEmptyString(finding.severity) || !FINDING_SEVERITIES_V1.includes(finding.severity as FindingSeverityV1)) {
+  if (
+    !isNonEmptyString(finding.severity) ||
+    !FINDING_SEVERITIES_V1.includes(finding.severity as FindingSeverityV1)
+  ) {
     errors.push(`Finding severity must be one of: ${FINDING_SEVERITIES_V1.join(', ')}`);
   }
 
@@ -233,7 +240,8 @@ export function validateIntelligenceFinding(value: unknown): string[] {
 
   if (
     finding.evidenceKind !== undefined &&
-    (!isNonEmptyString(finding.evidenceKind) || !EVIDENCE_KINDS_V1.includes(finding.evidenceKind as EvidenceKindV1))
+    (!isNonEmptyString(finding.evidenceKind) ||
+      !EVIDENCE_KINDS_V1.includes(finding.evidenceKind as EvidenceKindV1))
   ) {
     errors.push(`Finding evidenceKind must be one of: ${EVIDENCE_KINDS_V1.join(', ')}`);
   }
@@ -261,7 +269,9 @@ export function validateIntelligenceFinding(value: unknown): string[] {
       errors.push('Finding location must be an object if present');
     } else {
       if (!isNonEmptyString(location.evidenceId) || location.evidenceId.length > MAX_ID_LENGTH) {
-        errors.push(`Finding location evidenceId must be a non-empty string <= ${MAX_ID_LENGTH} chars`);
+        errors.push(
+          `Finding location evidenceId must be a non-empty string <= ${MAX_ID_LENGTH} chars`,
+        );
       }
       if (location.startUs !== undefined && !isBoundedTimeUs(location.startUs)) {
         errors.push(`Finding location startUs must be a non-negative integer <= ${MAX_TIME_US}`);
@@ -282,7 +292,7 @@ export function validateIntelligenceFinding(value: unknown): string[] {
 // Rule Types
 // ============================================================================
 
-/** 
+/**
  * A semantic rule that produces findings.
  * Rules are deterministic transformations from snapshot state to findings.
  */
@@ -293,12 +303,12 @@ export interface IntelligenceRuleV1 {
   readonly category: FindingCategoryV1;
   /** Default severity when this rule fires */
   readonly defaultSeverity: FindingSeverityV1;
-  /** 
+  /**
    * Whether this rule is enabled by default.
    * Disabled rules can be explicitly enabled.
    */
   readonly enabled: boolean;
-  /** 
+  /**
    * Evidence kinds this rule applies to.
    * Empty array means all kinds.
    */
@@ -327,11 +337,17 @@ export function validateIntelligenceRule(value: unknown): string[] {
     errors.push(`Rule description must be a non-empty string <= ${MAX_DESCRIPTION_LENGTH} chars`);
   }
 
-  if (!isNonEmptyString(rule.category) || !FINDING_CATEGORIES_V1.includes(rule.category as FindingCategoryV1)) {
+  if (
+    !isNonEmptyString(rule.category) ||
+    !FINDING_CATEGORIES_V1.includes(rule.category as FindingCategoryV1)
+  ) {
     errors.push(`Rule category must be one of: ${FINDING_CATEGORIES_V1.join(', ')}`);
   }
 
-  if (!isNonEmptyString(rule.defaultSeverity) || !FINDING_SEVERITIES_V1.includes(rule.defaultSeverity as FindingSeverityV1)) {
+  if (
+    !isNonEmptyString(rule.defaultSeverity) ||
+    !FINDING_SEVERITIES_V1.includes(rule.defaultSeverity as FindingSeverityV1)
+  ) {
     errors.push(`Rule defaultSeverity must be one of: ${FINDING_SEVERITIES_V1.join(', ')}`);
   }
 
@@ -348,9 +364,176 @@ export function validateIntelligenceRule(value: unknown): string[] {
     }
 
     for (const evidenceKind of appliesTo) {
-      if (!isNonEmptyString(evidenceKind) || !EVIDENCE_KINDS_V1.includes(evidenceKind as EvidenceKindV1)) {
+      if (
+        !isNonEmptyString(evidenceKind) ||
+        !EVIDENCE_KINDS_V1.includes(evidenceKind as EvidenceKindV1)
+      ) {
         errors.push(`Rule appliesTo entries must be one of: ${EVIDENCE_KINDS_V1.join(', ')}`);
         break;
+      }
+    }
+  }
+
+  return errors;
+}
+
+// ============================================================================
+// B-roll Semantic Search Index
+// ============================================================================
+
+export interface SemanticBrollTimeRangeV1 {
+  readonly rangeId: string;
+  readonly assetId: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+  readonly label: string;
+  readonly text: string;
+  readonly evidenceIds: readonly EvidenceId[];
+}
+
+export interface SemanticBrollAssetV1 {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly assetType: 'video' | 'audio' | 'image' | 'other';
+  readonly durationUs?: number;
+  readonly usedInTimeline: boolean;
+  readonly tags?: readonly string[];
+  readonly ranges: readonly SemanticBrollTimeRangeV1[];
+}
+
+export interface SemanticBrollSearchIndexV1 {
+  readonly schemaVersion: 1;
+  readonly projectId: string;
+  readonly createdAt: ISO8601;
+  readonly evidenceIndex: ReadonlyMap<EvidenceId, SnapshotEvidenceV1>;
+  readonly assets: readonly SemanticBrollAssetV1[];
+}
+
+export function validateSemanticBrollSearchIndexV1(index: unknown): readonly string[] {
+  const errors: string[] = [];
+
+  if (index === null || typeof index !== 'object' || Array.isArray(index)) {
+    return ['Semantic B-roll search index must be an object'];
+  }
+
+  const value = index as Record<string, unknown>;
+  if (value.schemaVersion !== 1) {
+    errors.push('Semantic B-roll search index schemaVersion must be 1');
+  }
+  if (!isNonEmptyString(value.projectId) || value.projectId.length > MAX_ID_LENGTH) {
+    errors.push(
+      `Semantic B-roll search index projectId must be a non-empty string <= ${MAX_ID_LENGTH} chars`,
+    );
+  }
+  if (!isNonEmptyString(value.createdAt)) {
+    errors.push('Semantic B-roll search index createdAt is required');
+  }
+  if (!(value.evidenceIndex instanceof Map)) {
+    errors.push('Semantic B-roll search index evidenceIndex must be a Map');
+  }
+
+  const evidenceIndex =
+    value.evidenceIndex instanceof Map
+      ? (value.evidenceIndex as ReadonlyMap<EvidenceId, SnapshotEvidenceV1>)
+      : new Map<EvidenceId, SnapshotEvidenceV1>();
+
+  if (!Array.isArray(value.assets)) {
+    errors.push('Semantic B-roll search index assets must be an array');
+    return errors;
+  }
+
+  if (value.assets.length > MAX_FINDINGS_COUNT) {
+    errors.push(
+      `Semantic B-roll search index assets count exceeds maximum of ${MAX_FINDINGS_COUNT}`,
+    );
+  }
+
+  for (const [assetIndex, asset] of value.assets.entries()) {
+    if (asset === null || typeof asset !== 'object' || Array.isArray(asset)) {
+      errors.push(`Semantic B-roll asset ${assetIndex} must be an object`);
+      continue;
+    }
+    const assetValue = asset as Record<string, unknown>;
+    if (!isNonEmptyString(assetValue.assetId) || assetValue.assetId.length > MAX_ID_LENGTH) {
+      errors.push(`Semantic B-roll asset ${assetIndex} assetId is required`);
+    }
+    if (
+      !isNonEmptyString(assetValue.displayName) ||
+      assetValue.displayName.length > MAX_LABEL_LENGTH
+    ) {
+      errors.push(`Semantic B-roll asset ${assetIndex} displayName is required`);
+    }
+    if (
+      assetValue.assetType !== 'video' &&
+      assetValue.assetType !== 'audio' &&
+      assetValue.assetType !== 'image' &&
+      assetValue.assetType !== 'other'
+    ) {
+      errors.push(`Semantic B-roll asset ${assetIndex} assetType is invalid`);
+    }
+    if (typeof assetValue.usedInTimeline !== 'boolean') {
+      errors.push(`Semantic B-roll asset ${assetIndex} usedInTimeline must be a boolean`);
+    }
+    if (assetValue.durationUs !== undefined && !isBoundedTimeUs(assetValue.durationUs)) {
+      errors.push(`Semantic B-roll asset ${assetIndex} durationUs is invalid`);
+    }
+    if (!Array.isArray(assetValue.ranges)) {
+      errors.push(`Semantic B-roll asset ${assetIndex} ranges must be an array`);
+      continue;
+    }
+    for (const [rangeIndex, range] of assetValue.ranges.entries()) {
+      if (range === null || typeof range !== 'object' || Array.isArray(range)) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} must be an object`);
+        continue;
+      }
+      const rangeValue = range as Record<string, unknown>;
+      if (!isNonEmptyString(rangeValue.rangeId) || rangeValue.rangeId.length > MAX_ID_LENGTH) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} rangeId is required`);
+      }
+      if (rangeValue.assetId !== assetValue.assetId) {
+        errors.push(
+          `Semantic B-roll range ${assetIndex}.${rangeIndex} assetId must match its asset`,
+        );
+      }
+      if (!isBoundedTimeUs(rangeValue.startUs)) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} startUs is invalid`);
+      }
+      if (!isBoundedTimeUs(rangeValue.durationUs)) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} durationUs is invalid`);
+      }
+      if (!isNonEmptyString(rangeValue.label) || rangeValue.label.length > MAX_LABEL_LENGTH) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} label is required`);
+      }
+      if (typeof rangeValue.text !== 'string' || rangeValue.text.length > MAX_FINDING_LENGTH) {
+        errors.push(
+          `Semantic B-roll range ${assetIndex}.${rangeIndex} text must be a bounded string`,
+        );
+      }
+      if (!Array.isArray(rangeValue.evidenceIds) || rangeValue.evidenceIds.length === 0) {
+        errors.push(`Semantic B-roll range ${assetIndex}.${rangeIndex} must cite evidence`);
+        continue;
+      }
+      for (const evidenceId of rangeValue.evidenceIds) {
+        if (!isNonEmptyString(evidenceId)) {
+          errors.push(
+            `Semantic B-roll range ${assetIndex}.${rangeIndex} evidenceIds must be non-empty strings`,
+          );
+          continue;
+        }
+        const evidence = evidenceIndex.get(evidenceId);
+        if (evidence === undefined) {
+          errors.push(
+            `Semantic B-roll range ${assetIndex}.${rangeIndex} cites missing evidence ${evidenceId}`,
+          );
+        } else if (
+          evidence.kind !== 'asset-shot' &&
+          evidence.kind !== 'asset-caption' &&
+          evidence.kind !== 'asset-audio'
+        ) {
+          errors.push(
+            `Semantic B-roll range ${assetIndex}.${rangeIndex} cites non-B-roll evidence ${evidenceId}`,
+          );
+        }
       }
     }
   }
@@ -382,10 +565,10 @@ export interface IntelligenceStatisticsV1 {
 
 /**
  * S2: Semantic Intelligence Version 1
- * 
+ *
  * Deterministic analysis results derived from an S1 semantic snapshot.
  * All findings are **verifiable facts** about the project state.
- * 
+ *
  * Key invariants:
  * - All arrays are readonly and bounded
  * - All strings are bounded
@@ -397,26 +580,26 @@ export interface IntelligenceStatisticsV1 {
 export interface SemanticIntelligenceV1 {
   readonly schemaVersion: 1;
   readonly metadata: IntelligenceMetadataV1;
-  
+
   /** The S1 snapshot revision this intelligence was derived from */
   readonly snapshotRevision: SnapshotRevision;
-  
+
   /** Deterministic findings from analysis */
   readonly findings: readonly IntelligenceFindingV1[];
-  
+
   /** The rules that were applied to produce these findings */
   readonly rules: readonly IntelligenceRuleV1[];
-  
+
   /** Statistical summary of findings */
   readonly statistics: IntelligenceStatisticsV1;
-  
-  /** 
+
+  /**
    * Flat index of all findings by ID for O(1) lookup.
    * Derived from findings for convenience.
    */
   readonly findingIndex: ReadonlyMap<string, IntelligenceFindingV1>;
-  
-  /** 
+
+  /**
    * Flat list of all finding IDs for iteration.
    */
   readonly findingIds: readonly string[];
@@ -482,7 +665,7 @@ export function createSemanticIntelligenceV1(
       performance: 0,
       metadata: 0,
     },
-    totalRulesApplied: rules.filter(r => r.enabled).length,
+    totalRulesApplied: rules.filter((r) => r.enabled).length,
     totalRulesMatched: 0, // Would be computed by rule matching, not set here
   };
 
@@ -494,7 +677,7 @@ export function createSemanticIntelligenceV1(
   // Build index
   const findingIndex = new Map<string, IntelligenceFindingV1>();
   const findingIds: string[] = [];
-  
+
   for (const finding of findings) {
     findingIndex.set(finding.id, finding);
     findingIds.push(finding.id);
@@ -563,18 +746,20 @@ export function validateSemanticIntelligenceV1(
     if (findings.length > MAX_FINDINGS_COUNT) {
       errors.push(`Findings count exceeds maximum of ${MAX_FINDINGS_COUNT}`);
     }
-    
+
     for (const finding of findings) {
       const findingErrors = validateIntelligenceFinding(finding);
       errors.push(...findingErrors);
-      
+
       // Validate evidence references if snapshot evidence IDs provided
       if (snapshotEvidenceIds && Array.isArray(snapshotEvidenceIds)) {
         const evidenceIds = (finding as IntelligenceFindingV1).evidenceIds;
         if (Array.isArray(evidenceIds)) {
           for (const evId of evidenceIds) {
             if (!snapshotEvidenceIds.includes(evId)) {
-              warnings.push(`Finding ${(finding as IntelligenceFindingV1).id} references unknown evidence ID: ${evId}`);
+              warnings.push(
+                `Finding ${(finding as IntelligenceFindingV1).id} references unknown evidence ID: ${evId}`,
+              );
             }
           }
         }
@@ -590,7 +775,7 @@ export function validateSemanticIntelligenceV1(
     if (rules.length > MAX_RULES_COUNT) {
       errors.push(`Rules count exceeds maximum of ${MAX_RULES_COUNT}`);
     }
-    
+
     for (const rule of rules) {
       const ruleErrors = validateIntelligenceRule(rule);
       errors.push(...ruleErrors);
@@ -625,10 +810,7 @@ export function validateSemanticIntelligenceV1(
 /**
  * Check if a finding ID exists in intelligence
  */
-export function hasFinding(
-  intelligence: SemanticIntelligenceV1,
-  findingId: string,
-): boolean {
+export function hasFinding(intelligence: SemanticIntelligenceV1, findingId: string): boolean {
   return intelligence.findingIndex.has(findingId);
 }
 
@@ -675,8 +857,8 @@ export function getFindingsByEvidence(
 ): readonly IntelligenceFindingV1[] {
   return intelligence.findingIds
     .map((id) => intelligence.findingIndex.get(id))
-    .filter((f): f is IntelligenceFindingV1 => 
-      f !== undefined && f.evidenceIds.includes(evidenceId)
+    .filter(
+      (f): f is IntelligenceFindingV1 => f !== undefined && f.evidenceIds.includes(evidenceId),
     );
 }
 
@@ -841,7 +1023,7 @@ export function getBuiltInRulesV1(): readonly IntelligenceRuleV1[] {
 
 /** Get a built-in rule by ID */
 export function getBuiltInRuleV1(id: string): IntelligenceRuleV1 | undefined {
-  return BUILT_IN_RULES_V1.find(r => r.id === id);
+  return BUILT_IN_RULES_V1.find((r) => r.id === id);
 }
 
 export { BUILT_IN_RULES_V1 };

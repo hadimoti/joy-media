@@ -51,11 +51,19 @@ export type {
 } from './render-jobs.js';
 export type {
   MediaAnalysisJob,
+  MediaSemanticIndexEvidence,
+  MediaSemanticIndexJob,
+  MediaSemanticIndexPayload,
+  MediaSemanticIndexReceipt,
   ReferenceAnalysisEvidence,
   ReferenceAnalysisFinding,
   VideoReferenceAnalyzeJob,
   VideoReferenceAnalyzePayload,
   VideoReferenceAnalyzeReceipt,
+} from './media-analysis-jobs.js';
+export {
+  assertValidMediaSemanticIndexPayload,
+  assertValidMediaSemanticIndexReceipt,
 } from './media-analysis-jobs.js';
 export type {
   AgentJobState,

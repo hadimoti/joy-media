@@ -6,7 +6,11 @@ import {
   WorkerProtocolError,
   WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
-import type { VideoReferenceAnalyzeReceipt, WorkerJobV1 } from '@joy-media/job-protocol';
+import type {
+  MediaSemanticIndexReceipt,
+  VideoReferenceAnalyzeReceipt,
+  WorkerJobV1,
+} from '@joy-media/job-protocol';
 
 export interface Actor {
   readonly id: string;
@@ -197,6 +201,7 @@ export interface MediaAiWorkerReceipt {
   readonly model?: string;
 }
 export type ReferenceAnalysisWorkerReceipt = VideoReferenceAnalyzeReceipt;
+export type SemanticIndexWorkerReceipt = MediaSemanticIndexReceipt;
 export type WorkerResultReceipt =
   | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
@@ -204,6 +209,7 @@ export type WorkerResultReceipt =
   | TextAiWorkerReceipt
   | MediaAiWorkerReceipt
   | ReferenceAnalysisWorkerReceipt
+  | SemanticIndexWorkerReceipt
   | RenderExportReceipt
   | RenderInspectReceipt;
 /**
@@ -902,6 +908,8 @@ export class LocalControlPlane implements ControlPlane {
       (!isLocalGpuReceipt(receipt) || receipt.kind !== job.type)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (job.type === 'media.semantic-index' && !isSemanticIndexReceipt(receipt))
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
     const done: Job = {
@@ -1096,6 +1104,18 @@ function isMediaAiReceipt(value: WorkerResultReceipt | undefined): value is Medi
   );
 }
 
+function isSemanticIndexReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is SemanticIndexWorkerReceipt {
+  if (value?.kind !== 'media.semantic-index') return false;
+  try {
+    validateWorkerReceiptForJob('media.semantic-index', value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'asset.thumbnail') {
     return (
@@ -1159,6 +1179,20 @@ function legacyWorkerJob(
         maxAudioBeats: 6,
       },
       requirements: { capabilities: ['video.reference-analyze'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'media.semantic-index') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectId,
+        receipts: [],
+      },
+      requirements: { capabilities: ['media.semantic-index'], privacy: 'local-only' },
       idempotencyKey: id,
       maxAttempts: 3,
     });

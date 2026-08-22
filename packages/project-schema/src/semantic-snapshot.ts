@@ -1,10 +1,10 @@
 /**
  * S1: Semantic Snapshot Types
- * 
+ *
  * Bounded, versioned project state capture for AI Creative OS foundation.
  * These types provide a stable, bounded view of project state suitable for
  * semantic analysis without exposing the full project structure.
- * 
+ *
  * Dependency: none (innermost package)
  */
 
@@ -78,7 +78,9 @@ function hasSameDerivedEvidence(
     return false;
   }
 
-  const expectedEntries = Object.entries(expected).sort(([left], [right]) => left.localeCompare(right));
+  const expectedEntries = Object.entries(expected).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
   const actualEntries = Object.entries(actual).sort(([left], [right]) => left.localeCompare(right));
 
   return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
@@ -106,13 +108,16 @@ export interface SnapshotMetadataV1 {
 // Evidence Types
 // ============================================================================
 
-/** 
+/**
  * EvidenceKind categorizes the type of evidence available in the snapshot.
  * These are the canonical evidence types that S3 recommendations can reference.
  */
 export type EvidenceKindV1 =
   | 'clip'
   | 'asset'
+  | 'asset-shot'
+  | 'asset-caption'
+  | 'asset-audio'
   | 'caption-document'
   | 'marker'
   | 'composition'
@@ -128,6 +133,9 @@ export type EvidenceKindV1 =
 export const EVIDENCE_KINDS_V1: readonly EvidenceKindV1[] = [
   'clip',
   'asset',
+  'asset-shot',
+  'asset-caption',
+  'asset-audio',
   'caption-document',
   'marker',
   'composition',
@@ -161,45 +169,51 @@ export interface SnapshotEvidenceV1 {
 /** Validation for evidence entries */
 export function validateSnapshotEvidence(value: unknown): string[] {
   const errors: string[] = [];
-  
+
   if (value === null || typeof value !== 'object') {
     return ['Evidence must be an object'];
   }
-  
+
   const evidence = value as Record<string, unknown>;
-  
+
   if (!isNonEmptyString(evidence.id) || evidence.id.length > MAX_ID_LENGTH) {
     errors.push(`Evidence id must be a non-empty string <= ${MAX_ID_LENGTH} chars`);
   }
-  
-  if (!isNonEmptyString(evidence.kind) || !EVIDENCE_KINDS_V1.includes(evidence.kind as EvidenceKindV1)) {
+
+  if (
+    !isNonEmptyString(evidence.kind) ||
+    !EVIDENCE_KINDS_V1.includes(evidence.kind as EvidenceKindV1)
+  ) {
     errors.push(`Evidence kind must be one of: ${EVIDENCE_KINDS_V1.join(', ')}`);
   }
-  
+
   if (!isNonEmptyString(evidence.label) || evidence.label.length > MAX_LABEL_LENGTH) {
     errors.push(`Evidence label must be a non-empty string <= ${MAX_LABEL_LENGTH} chars`);
   }
-  
+
   if (evidence.summary !== undefined && !isStringMaxLength(evidence.summary, MAX_SUMMARY_LENGTH)) {
     errors.push(`Evidence summary must be <= ${MAX_SUMMARY_LENGTH} chars`);
   }
-  
+
   if (evidence.startUs !== undefined && !isBoundedTimeUs(evidence.startUs)) {
     errors.push(`Evidence startUs must be a non-negative integer <= ${MAX_TIME_US}`);
   }
-  
+
   if (evidence.durationUs !== undefined && !isBoundedTimeUs(evidence.durationUs)) {
     errors.push(`Evidence durationUs must be a non-negative integer <= ${MAX_TIME_US}`);
   }
-  
-  if (!isNonEmptyString(evidence.sourceEntityId) || evidence.sourceEntityId.length > MAX_ID_LENGTH) {
+
+  if (
+    !isNonEmptyString(evidence.sourceEntityId) ||
+    evidence.sourceEntityId.length > MAX_ID_LENGTH
+  ) {
     errors.push(`Evidence sourceEntityId must be a non-empty string <= ${MAX_ID_LENGTH} chars`);
   }
-  
+
   if (!isNonNegativeInteger(evidence.sourceEntityRevision)) {
     errors.push('Evidence sourceEntityRevision must be a non-negative integer');
   }
-  
+
   return errors;
 }
 
@@ -214,6 +228,36 @@ export interface AssetEvidenceV1 extends SnapshotEvidenceV1 {
   readonly fileSizeBytes: number;
   readonly mimeType: string;
   readonly durationUs?: number;
+}
+
+/** Evidence for a semantically searchable time range inside an asset. */
+export interface AssetShotEvidenceV1 extends SnapshotEvidenceV1 {
+  readonly kind: 'asset-shot';
+  readonly assetId: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+  readonly tags?: readonly string[];
+}
+
+/** Evidence for caption/transcript text aligned to an asset time range. */
+export interface AssetCaptionEvidenceV1 extends SnapshotEvidenceV1 {
+  readonly kind: 'asset-caption';
+  readonly assetId: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+  readonly text: string;
+  readonly language?: string;
+}
+
+/** Evidence for audio events or dialog aligned to an asset time range. */
+export interface AssetAudioEvidenceV1 extends SnapshotEvidenceV1 {
+  readonly kind: 'asset-audio';
+  readonly assetId: string;
+  readonly startUs: number;
+  readonly durationUs: number;
+  readonly audioKind: 'dialogue' | 'music' | 'sfx' | 'ambient' | 'unknown';
+  readonly transcript?: string;
+  readonly loudnessLufs?: number;
 }
 
 /** Evidence for timeline clips */
@@ -309,6 +353,9 @@ export interface ExportPresetEvidenceV1 extends SnapshotEvidenceV1 {
 /** All possible evidence types as a discriminated union */
 export type SnapshotEvidenceUnionV1 =
   | AssetEvidenceV1
+  | AssetShotEvidenceV1
+  | AssetCaptionEvidenceV1
+  | AssetAudioEvidenceV1
   | ClipEvidenceV1
   | CaptionDocumentEvidenceV1
   | MarkerEvidenceV1
@@ -325,14 +372,22 @@ export type SnapshotEvidenceUnionV1 =
 // Snapshot Sections
 // ============================================================================
 
-/** 
+/**
  * A named section of evidence within the snapshot.
  * Sections help organize evidence by domain (timeline, assets, captions, etc.)
  */
 export interface SnapshotSectionV1 {
   readonly id: string;
   readonly label: string;
-  readonly domain: 'timeline' | 'assets' | 'captions' | 'audio' | 'composition' | 'workflow' | 'export' | 'metadata';
+  readonly domain:
+    | 'timeline'
+    | 'assets'
+    | 'captions'
+    | 'audio'
+    | 'composition'
+    | 'workflow'
+    | 'export'
+    | 'metadata';
   readonly evidence: readonly SnapshotEvidenceV1[];
 }
 
@@ -365,10 +420,10 @@ export interface SnapshotStatisticsV1 {
 
 /**
  * S1: Semantic Snapshot Version 1
- * 
+ *
  * A bounded, revisioned capture of project state suitable for semantic analysis.
  * This is the canonical source of evidence that S3 recommendations must reference.
- * 
+ *
  * Key invariants:
  * - All arrays are readonly and bounded
  * - All strings are bounded
@@ -380,23 +435,23 @@ export interface SnapshotStatisticsV1 {
 export interface SemanticSnapshotV1 {
   readonly schemaVersion: 1;
   readonly metadata: SnapshotMetadataV1;
-  
+
   /** Statistics for quick analysis without deep inspection */
   readonly statistics: SnapshotStatisticsV1;
-  
-  /** 
+
+  /**
    * All evidence in the snapshot, organized by section.
    * S3 recommendations must reference evidence IDs from this collection.
    */
   readonly sections: readonly SnapshotSectionV1[];
-  
-  /** 
+
+  /**
    * Flat index of all evidence by ID for O(1) lookup.
    * Derived from sections for convenience, not user-provided.
    */
   readonly evidenceIndex: ReadonlyMap<EvidenceId, SnapshotEvidenceV1>;
-  
-  /** 
+
+  /**
    * Flat list of all evidence IDs for iteration.
    */
   readonly evidenceIds: readonly EvidenceId[];
@@ -460,12 +515,12 @@ export function createSemanticSnapshotV1(
 
   const evidenceIndex = new Map<EvidenceId, SnapshotEvidenceV1>();
   const evidenceIds: EvidenceId[] = [];
-  
+
   for (const section of sections) {
     for (const evidence of section.evidence) {
       evidenceIndex.set(evidence.id, evidence);
       evidenceIds.push(evidence.id);
-      
+
       // Update statistics based on evidence kind
       switch (evidence.kind) {
         case 'clip':
@@ -518,9 +573,7 @@ export function createSemanticSnapshotV1(
 /**
  * Validate a semantic snapshot
  */
-export function validateSemanticSnapshotV1(
-  snapshot: unknown,
-): SnapshotValidationResultV1 {
+export function validateSemanticSnapshotV1(snapshot: unknown): SnapshotValidationResultV1 {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -567,7 +620,7 @@ export function validateSemanticSnapshotV1(
         errors.push('Each section must be an object');
         continue;
       }
-      
+
       const sec = section as Record<string, unknown>;
       if (!isNonEmptyString(sec.id)) {
         errors.push('Section id is required');
@@ -575,13 +628,22 @@ export function validateSemanticSnapshotV1(
       if (!isNonEmptyString(sec.label)) {
         errors.push('Section label is required');
       }
-      
+
       const domain = sec.domain as string;
-      const validDomains = ['timeline', 'assets', 'captions', 'audio', 'composition', 'workflow', 'export', 'metadata'];
+      const validDomains = [
+        'timeline',
+        'assets',
+        'captions',
+        'audio',
+        'composition',
+        'workflow',
+        'export',
+        'metadata',
+      ];
       if (!validDomains.includes(domain)) {
         errors.push(`Invalid section domain: ${domain}`);
       }
-      
+
       const evidence = sec.evidence as unknown[];
       if (!Array.isArray(evidence)) {
         errors.push(`Section ${sec.id} evidence must be an array`);
@@ -599,7 +661,9 @@ export function validateSemanticSnapshotV1(
         section !== null &&
         typeof section === 'object' &&
         Array.isArray((section as Record<string, unknown>).evidence)
-          ? ((section as Record<string, unknown>).evidence as SnapshotEvidenceV1[]).map((evidence) => [evidence.id, evidence] as const)
+          ? ((section as Record<string, unknown>).evidence as SnapshotEvidenceV1[]).map(
+              (evidence) => [evidence.id, evidence] as const,
+            )
           : [],
       )
     : [];
@@ -664,10 +728,7 @@ export function validateSemanticSnapshotV1(
 /**
  * Check if an evidence ID exists in the snapshot
  */
-export function hasEvidence(
-  snapshot: SemanticSnapshotV1,
-  evidenceId: EvidenceId,
-): boolean {
+export function hasEvidence(snapshot: SemanticSnapshotV1, evidenceId: EvidenceId): boolean {
   return snapshot.evidenceIndex.has(evidenceId);
 }
 

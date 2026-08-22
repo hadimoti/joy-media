@@ -1,14 +1,10 @@
 /**
  * S2: Semantic Intelligence Tests
- * 
+ *
  * Tests for semantic-intelligence.ts types and validation
  */
 
-import {
-  describe,
-  expect,
-  it,
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   BUILT_IN_RULES_V1,
@@ -27,8 +23,10 @@ import {
   isSemanticIntelligenceV1,
   type IntelligenceFindingV1,
   type IntelligenceRuleV1,
+  type SemanticBrollSearchIndexV1,
   validateIntelligenceFinding,
   validateIntelligenceRule,
+  validateSemanticBrollSearchIndexV1,
   validateSemanticIntelligenceV1,
 } from './semantic-intelligence.js';
 import { createSemanticIntelligenceV1 as createSemanticIntelligencePublic } from './index.js';
@@ -109,7 +107,7 @@ describe('validateIntelligenceFinding', () => {
       id: '',
     };
     const errors = validateIntelligenceFinding(finding);
-    expect(errors.some(e => e.includes('id'))).toBe(true);
+    expect(errors.some((e) => e.includes('id'))).toBe(true);
   });
 
   it('should reject finding with invalid category', () => {
@@ -118,7 +116,7 @@ describe('validateIntelligenceFinding', () => {
       category: 'invalid-category' as any,
     };
     const errors = validateIntelligenceFinding(finding);
-    expect(errors.some(e => e.includes('category'))).toBe(true);
+    expect(errors.some((e) => e.includes('category'))).toBe(true);
   });
 
   it('should reject finding with invalid severity', () => {
@@ -127,7 +125,7 @@ describe('validateIntelligenceFinding', () => {
       severity: 'invalid-severity' as any,
     };
     const errors = validateIntelligenceFinding(finding);
-    expect(errors.some(e => e.includes('severity'))).toBe(true);
+    expect(errors.some((e) => e.includes('severity'))).toBe(true);
   });
 
   it('should reject finding with empty title', () => {
@@ -136,7 +134,7 @@ describe('validateIntelligenceFinding', () => {
       title: '',
     };
     const errors = validateIntelligenceFinding(finding);
-    expect(errors.some(e => e.includes('title'))).toBe(true);
+    expect(errors.some((e) => e.includes('title'))).toBe(true);
   });
 
   it('should reject finding with empty description', () => {
@@ -145,7 +143,7 @@ describe('validateIntelligenceFinding', () => {
       description: '',
     };
     const errors = validateIntelligenceFinding(finding);
-    expect(errors.some(e => e.includes('description'))).toBe(true);
+    expect(errors.some((e) => e.includes('description'))).toBe(true);
   });
 
   it('should reject finding with empty evidenceIds array', () => {
@@ -230,7 +228,7 @@ describe('validateIntelligenceRule', () => {
       id: '',
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('id'))).toBe(true);
+    expect(errors.some((e) => e.includes('id'))).toBe(true);
   });
 
   it('should reject rule with empty name', () => {
@@ -239,7 +237,7 @@ describe('validateIntelligenceRule', () => {
       name: '',
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('name'))).toBe(true);
+    expect(errors.some((e) => e.includes('name'))).toBe(true);
   });
 
   it('should reject rule with empty description', () => {
@@ -248,7 +246,7 @@ describe('validateIntelligenceRule', () => {
       description: '',
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('description'))).toBe(true);
+    expect(errors.some((e) => e.includes('description'))).toBe(true);
   });
 
   it('should reject rule with invalid category', () => {
@@ -257,7 +255,7 @@ describe('validateIntelligenceRule', () => {
       category: 'invalid-category' as any,
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('category'))).toBe(true);
+    expect(errors.some((e) => e.includes('category'))).toBe(true);
   });
 
   it('should reject rule with invalid severity', () => {
@@ -266,7 +264,7 @@ describe('validateIntelligenceRule', () => {
       defaultSeverity: 'invalid-severity' as any,
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('defaultSeverity'))).toBe(true);
+    expect(errors.some((e) => e.includes('defaultSeverity'))).toBe(true);
   });
 
   it('should reject rule with enabled not boolean', () => {
@@ -275,7 +273,7 @@ describe('validateIntelligenceRule', () => {
       enabled: 'yes' as any,
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('enabled'))).toBe(true);
+    expect(errors.some((e) => e.includes('enabled'))).toBe(true);
   });
 
   it('should reject rule with invalid appliesTo', () => {
@@ -284,7 +282,7 @@ describe('validateIntelligenceRule', () => {
       appliesTo: 'not an array' as any,
     };
     const errors = validateIntelligenceRule(rule);
-    expect(errors.some(e => e.includes('appliesTo'))).toBe(true);
+    expect(errors.some((e) => e.includes('appliesTo'))).toBe(true);
   });
 
   it('should reject rule with unknown evidence kinds in appliesTo', () => {
@@ -351,16 +349,12 @@ describe('createSemanticIntelligenceV1', () => {
   });
 
   it('should handle empty findings', () => {
-    const intelligence = createSemanticIntelligenceV1(
-      [],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
 
     expect(intelligence.findings).toHaveLength(0);
     expect(intelligence.findingIndex.size).toBe(0);
@@ -389,7 +383,10 @@ describe('createSemanticIntelligenceV1', () => {
       },
     );
 
-    const parsed = JSON.parse(JSON.stringify(intelligence)) as Omit<typeof intelligence, 'findingIndex'> & {
+    const parsed = JSON.parse(JSON.stringify(intelligence)) as Omit<
+      typeof intelligence,
+      'findingIndex'
+    > & {
       findingIndex?: unknown;
     };
 
@@ -410,28 +407,20 @@ describe('createSemanticIntelligenceV1', () => {
     const originalNow = Date.now;
     try {
       Date.now = () => 1000;
-      const first = createSemanticIntelligenceV1(
-        [validFinding],
-        [validRule],
-        {
-          projectId: 'project-001',
-          snapshotRevision: 1,
-          createdBy: 'test-user',
-          contentHash: 'abc123',
-        },
-      );
+      const first = createSemanticIntelligenceV1([validFinding], [validRule], {
+        projectId: 'project-001',
+        snapshotRevision: 1,
+        createdBy: 'test-user',
+        contentHash: 'abc123',
+      });
 
       Date.now = () => 2000;
-      const second = createSemanticIntelligenceV1(
-        [validFinding],
-        [validRule],
-        {
-          projectId: 'project-001',
-          snapshotRevision: 1,
-          createdBy: 'test-user',
-          contentHash: 'abc123',
-        },
-      );
+      const second = createSemanticIntelligenceV1([validFinding], [validRule], {
+        projectId: 'project-001',
+        snapshotRevision: 1,
+        createdBy: 'test-user',
+        contentHash: 'abc123',
+      });
 
       expect(second.metadata.id).toBe(first.metadata.id);
     } finally {
@@ -446,16 +435,12 @@ describe('createSemanticIntelligenceV1', () => {
 
 describe('validateSemanticIntelligenceV1', () => {
   it('should validate valid intelligence', () => {
-    const intelligence = createSemanticIntelligenceV1(
-      [validFinding],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([validFinding], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
 
     const result = validateSemanticIntelligenceV1(intelligence);
     expect(result.valid).toBe(true);
@@ -469,21 +454,17 @@ describe('validateSemanticIntelligenceV1', () => {
   });
 
   it('should reject invalid schema version', () => {
-    const intelligence = createSemanticIntelligenceV1(
-      [validFinding],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([validFinding], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
     (intelligence as any).schemaVersion = 2;
 
     const result = validateSemanticIntelligenceV1(intelligence);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('schema version'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('schema version'))).toBe(true);
   });
 
   it('should reject missing metadata', () => {
@@ -500,7 +481,7 @@ describe('validateSemanticIntelligenceV1', () => {
 
     const result = validateSemanticIntelligenceV1(intelligence);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('metadata'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('metadata'))).toBe(true);
   });
 
   it('should reject invalid findings array', () => {
@@ -525,7 +506,7 @@ describe('validateSemanticIntelligenceV1', () => {
 
     const result = validateSemanticIntelligenceV1(intelligence);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('Findings'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('Findings'))).toBe(true);
   });
 
   it('should warn about unknown evidence references', () => {
@@ -534,24 +515,20 @@ describe('validateSemanticIntelligenceV1', () => {
       evidenceIds: ['unknown-evidence-001'],
     };
 
-    const intelligence = createSemanticIntelligenceV1(
-      [findingWithUnknownEvidence],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([findingWithUnknownEvidence], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
 
     const result = validateSemanticIntelligenceV1(
       intelligence,
-      ['clip-001', 'clip-002'] // known evidence IDs
+      ['clip-001', 'clip-002'], // known evidence IDs
     );
 
     expect(result.warnings.length).toBeGreaterThan(0);
-    expect(result.warnings.some(w => w.includes('unknown evidence'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('unknown evidence'))).toBe(true);
   });
 });
 
@@ -573,16 +550,12 @@ describe('type guards', () => {
   });
 
   it('isSemanticIntelligenceV1 should identify valid intelligence', () => {
-    const intelligence = createSemanticIntelligenceV1(
-      [validFinding],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([validFinding], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
 
     expect(isSemanticIntelligenceV1(intelligence)).toBe(true);
     expect(isSemanticIntelligenceV1(null)).toBe(false);
@@ -750,16 +723,12 @@ describe('Persian/RTL preservation', () => {
       evidenceIds: ['clip-001'],
     };
 
-    const intelligence = createSemanticIntelligenceV1(
-      [finding],
-      [validRule],
-      {
-        projectId: 'project-001',
-        snapshotRevision: 1,
-        createdBy: 'test-user',
-        contentHash: 'abc123',
-      },
-    );
+    const intelligence = createSemanticIntelligenceV1([finding], [validRule], {
+      projectId: 'project-001',
+      snapshotRevision: 1,
+      createdBy: 'test-user',
+      contentHash: 'abc123',
+    });
 
     const retrieved = getFinding(intelligence, 'persian-finding');
     expect(retrieved?.title).toBe(persianText);
@@ -787,5 +756,84 @@ describe('Persian/RTL preservation', () => {
 describe('public exports', () => {
   it('re-exports the semantic intelligence builder from the package entrypoint', () => {
     expect(createSemanticIntelligencePublic).toBe(createSemanticIntelligenceV1);
+  });
+});
+
+describe('SemanticBrollSearchIndexV1', () => {
+  it('validates evidence-backed search ranges', () => {
+    const index: SemanticBrollSearchIndexV1 = {
+      schemaVersion: 1,
+      projectId: 'project-broll',
+      createdAt: '2026-08-22T00:00:00.000Z',
+      evidenceIndex: new Map([
+        [
+          'asset-1.shot-1',
+          {
+            id: 'asset-1.shot-1',
+            kind: 'asset-shot',
+            label: 'Shot 1',
+            summary: 'Close product detail',
+            sourceEntityId: 'asset-1',
+            sourceEntityRevision: 1,
+            assetId: 'asset-1',
+            startUs: 1_000_000,
+            durationUs: 2_000_000,
+            tags: ['product'],
+          },
+        ],
+      ]),
+      assets: [
+        {
+          assetId: 'asset-1',
+          displayName: 'Product closeup.mp4',
+          assetType: 'video',
+          durationUs: 10_000_000,
+          usedInTimeline: false,
+          ranges: [
+            {
+              rangeId: 'asset-1.range-1',
+              assetId: 'asset-1',
+              startUs: 1_000_000,
+              durationUs: 2_000_000,
+              label: 'Close product detail',
+              text: 'Close product detail',
+              evidenceIds: ['asset-1.shot-1'],
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validateSemanticBrollSearchIndexV1(index)).toEqual([]);
+  });
+
+  it('rejects ranges without canonical evidence', () => {
+    const index: SemanticBrollSearchIndexV1 = {
+      schemaVersion: 1,
+      projectId: 'project-broll',
+      createdAt: '2026-08-22T00:00:00.000Z',
+      evidenceIndex: new Map(),
+      assets: [
+        {
+          assetId: 'asset-1',
+          displayName: 'Product closeup.mp4',
+          assetType: 'video',
+          usedInTimeline: false,
+          ranges: [
+            {
+              rangeId: 'asset-1.range-1',
+              assetId: 'asset-1',
+              startUs: 1_000_000,
+              durationUs: 2_000_000,
+              label: 'Close product detail',
+              text: 'Close product detail',
+              evidenceIds: ['missing-evidence'],
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validateSemanticBrollSearchIndexV1(index).join(' ')).toContain('missing evidence');
   });
 });

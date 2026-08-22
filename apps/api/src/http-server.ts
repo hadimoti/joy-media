@@ -1306,6 +1306,31 @@ function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceip
   ) {
     return result as WorkerResultReceiptV1;
   }
+  if (
+    result.kind === 'media.semantic-index' &&
+    hasOnlyKeys(result, [
+      'kind',
+      'projectId',
+      'sha256',
+      'bytes',
+      'summary',
+      'evidence',
+      'evidenceIds',
+      'assets',
+      'model',
+    ]) &&
+    typeof result.projectId === 'string' &&
+    isReceiptHashAndBytes(result) &&
+    result.summary !== null &&
+    typeof result.summary === 'object' &&
+    !Array.isArray(result.summary) &&
+    Array.isArray(result.evidence) &&
+    Array.isArray(result.evidenceIds) &&
+    Array.isArray(result.assets) &&
+    (result.model === undefined || typeof result.model === 'string')
+  ) {
+    return result as WorkerResultReceiptV1;
+  }
   const descriptor = result.descriptor;
   if (
     (result.kind === 'image.comfy' ||

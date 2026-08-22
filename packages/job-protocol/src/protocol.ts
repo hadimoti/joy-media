@@ -3,12 +3,15 @@
 import type { RenderJob, RenderReceipt } from './render-jobs.js';
 import type {
   MediaAnalysisJob,
+  MediaSemanticIndexReceipt,
   ReferenceAnalysisEvidence,
   ReferenceAnalysisFinding,
   VideoReferenceAnalyzeJob,
   VideoReferenceAnalyzeReceipt,
 } from './media-analysis-jobs.js';
 import {
+  assertValidMediaSemanticIndexPayload,
+  assertValidMediaSemanticIndexReceipt,
   assertValidVideoReferenceAnalyzePayload,
   assertValidVideoReferenceAnalyzeReceipt,
 } from './media-analysis-jobs.js';
@@ -20,6 +23,7 @@ export type WorkerCapability =
   | 'render.export'
   | 'render.inspect'
   | 'video.reference-analyze'
+  | 'media.semantic-index'
   | 'image.comfy'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
@@ -49,6 +53,7 @@ export const WORKER_JOB_TYPES: readonly WorkerJobType[] = [
   'render.export',
   'render.inspect',
   'video.reference-analyze',
+  'media.semantic-index',
   ...SPECIALIZED_JOB_TYPES,
 ] as const;
 
@@ -326,6 +331,7 @@ export type WorkerResultReceiptV1 =
       readonly findings?: readonly ReferenceAnalysisFinding[];
       readonly model?: string;
     }
+  | MediaSemanticIndexReceipt
   | RenderReceipt;
 
 interface WorkerSession {
@@ -668,6 +674,16 @@ function validateWorkerJobPayload(job: WorkerJobV1): void {
         );
       }
       return;
+    case 'media.semantic-index':
+      try {
+        assertValidMediaSemanticIndexPayload(job.payload, 'payload');
+      } catch (error) {
+        throw new WorkerProtocolError(
+          'WORKER_JOB_INVALID',
+          error instanceof Error ? error.message : 'payload is invalid',
+        );
+      }
+      return;
     default:
       assertObjectKeys(
         job.payload,
@@ -714,6 +730,7 @@ function validateWorkerJobRequirements(
   if (
     (jobType === 'asset.thumbnail' ||
       jobType === 'video.reference-analyze' ||
+      jobType === 'media.semantic-index' ||
       jobType === 'render.export' ||
       jobType === 'render.inspect') &&
     requirements.privacy !== 'local-only'
@@ -768,6 +785,17 @@ function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResul
     case 'video.reference-analyze': {
       try {
         assertValidVideoReferenceAnalyzeReceipt(receipt, 'receipt');
+      } catch (error) {
+        throw new WorkerProtocolError(
+          'WORKER_RECEIPT_INVALID',
+          error instanceof Error ? error.message : 'receipt is invalid',
+        );
+      }
+      return;
+    }
+    case 'media.semantic-index': {
+      try {
+        assertValidMediaSemanticIndexReceipt(receipt, 'receipt');
       } catch (error) {
         throw new WorkerProtocolError(
           'WORKER_RECEIPT_INVALID',

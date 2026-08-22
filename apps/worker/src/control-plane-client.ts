@@ -1,5 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import type { ReferenceAnalysisEvidence, ReferenceAnalysisFinding } from '@joy-media/job-protocol';
+import type {
+  MediaSemanticIndexEvidence,
+  ReferenceAnalysisEvidence,
+  ReferenceAnalysisFinding,
+} from '@joy-media/job-protocol';
 import type { DeviceIdentity } from './runtime.js';
 
 export interface WorkerSessionStore {
@@ -27,6 +31,7 @@ export interface WorkerJobResult {
     | 'image.comfy'
     | 'audio.ml-denoise'
     | 'video.reference-analyze'
+    | 'media.semantic-index'
     | 'render.export'
     | 'render.inspect'
     | 'text.lm-studio'
@@ -48,17 +53,26 @@ export interface WorkerJobResult {
     readonly height?: number;
     readonly durationUs?: number;
   };
-  readonly summary?: {
-    readonly shotCount: number;
-    readonly cutCount: number;
-    readonly averageShotDurationUs: number;
-    readonly fastestShotDurationUs: number;
-    readonly sampleCount: number;
-    readonly transcriptSegmentCount: number;
-    readonly audioBeatCount: number;
-  };
-  readonly evidence?: readonly ReferenceAnalysisEvidence[];
+  readonly summary?:
+    | {
+        readonly shotCount: number;
+        readonly cutCount: number;
+        readonly averageShotDurationUs: number;
+        readonly fastestShotDurationUs: number;
+        readonly sampleCount: number;
+        readonly transcriptSegmentCount: number;
+        readonly audioBeatCount: number;
+      }
+    | {
+        readonly assetCount: number;
+        readonly rangeCount: number;
+        readonly evidenceCount: number;
+        readonly embeddedRangeCount: number;
+        readonly reranked: boolean;
+      };
+  readonly evidence?: readonly (ReferenceAnalysisEvidence | MediaSemanticIndexEvidence)[];
   readonly evidenceIds?: readonly string[];
+  readonly assets?: readonly unknown[];
   readonly provider?: string;
   readonly text?: string;
   readonly model?: string;

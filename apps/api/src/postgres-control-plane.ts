@@ -27,6 +27,7 @@ import {
   type LocalGpuWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
+  type SemanticIndexWorkerReceipt,
   type WorkerPairingOffer,
   type WorkerRecord,
   type WorkerSession,
@@ -1277,6 +1278,7 @@ function isWorkerReceipt(value: WorkerResultReceipt): boolean {
     isTextAiReceipt(value) ||
     isMediaAiReceipt(value) ||
     isReferenceAnalysisReceipt(value) ||
+    isSemanticIndexReceipt(value) ||
     isRenderReceipt(value)
   );
 }
@@ -1361,6 +1363,16 @@ function isReferenceAnalysisReceipt(
     (value.findings === undefined || Array.isArray(value.findings)) &&
     (value.model === undefined || typeof value.model === 'string')
   );
+}
+
+function isSemanticIndexReceipt(value: WorkerResultReceipt): value is SemanticIndexWorkerReceipt {
+  if (value.kind !== 'media.semantic-index') return false;
+  try {
+    validateWorkerReceiptForJob('media.semantic-index', value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isRenderReceipt(value: WorkerResultReceipt): boolean {
@@ -1450,9 +1462,27 @@ function legacyWorkerJob(
       maxAttempts: 3,
     });
   }
+  if (type === 'media.semantic-index') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectId,
+        receipts: [],
+      },
+      requirements: { capabilities: ['media.semantic-index'], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
   const aiType = type as Exclude<
     WorkerJobType,
-    'asset.thumbnail' | 'video.reference-analyze' | 'render.export' | 'render.inspect'
+    | 'asset.thumbnail'
+    | 'video.reference-analyze'
+    | 'media.semantic-index'
+    | 'render.export'
+    | 'render.inspect'
   >;
   return validateWorkerJobV1({
     protocolVersion: WORKER_PROTOCOL_VERSION,

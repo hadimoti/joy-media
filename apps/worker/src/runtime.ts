@@ -13,6 +13,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type {
+  MediaSemanticIndexPayload,
+  MediaSemanticIndexReceipt,
   VideoReferenceAnalyzePayload,
   VideoReferenceAnalyzeReceipt,
   WorkerCapability,
@@ -36,6 +38,7 @@ import {
 import { executeLeasedExport, type RenderExportReceiptV1 } from './export-job.js';
 import { mediaResolverFromAssetSourceRegistry } from './worker-media-resolver.js';
 import { analyzeReferenceVideo, type ReferenceAnalysisError } from './reference-analysis.js';
+import { buildSemanticBrollIndex, createMediaSemanticIndexReceipt } from './semantic-index.js';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -251,6 +254,7 @@ export class WorkerRuntime {
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
+    capabilities.push('media.semantic-index');
     if (this.tools.ffmpeg && this.tools.ffprobe) {
       capabilities.push('asset.thumbnail', 'render.export', 'video.reference-analyze');
     }
@@ -291,6 +295,11 @@ export class WorkerRuntime {
         readonly sampleCount?: number;
         readonly maxAudioBeats?: number;
         readonly includeModelAnalysis?: boolean;
+        readonly receipts?: MediaSemanticIndexPayload['receipts'];
+        readonly usedAssetIds?: readonly string[];
+        readonly maxAssets?: number;
+        readonly includeEmbeddings?: boolean;
+        readonly includeRemoteRerank?: boolean;
       };
     },
     options: {
@@ -417,6 +426,27 @@ export class WorkerRuntime {
         }
         throw error;
       }
+    }
+    if (job.type === 'media.semantic-index') {
+      const payload = job.payload as Partial<MediaSemanticIndexPayload> | undefined;
+      if (payload?.projectId === undefined || payload.receipts === undefined) {
+        throw new Error('media.semantic-index requires projectId and receipts');
+      }
+      this.log.write(`job ${job.id} started (media.semantic-index)`);
+      await options.progress(10);
+      const usedAssetIds = new Set(payload.usedAssetIds ?? []);
+      const receipts =
+        typeof payload.maxAssets === 'number'
+          ? payload.receipts.slice(0, payload.maxAssets)
+          : payload.receipts;
+      const index = buildSemanticBrollIndex({
+        projectId: payload.projectId,
+        receipts,
+        usedAssetIds,
+      });
+      await options.progress(100);
+      this.log.write(`job ${job.id} completed`);
+      return { state: 'completed', result: createMediaSemanticIndexReceipt(index) };
     }
     // AI provider jobs (LM Studio, OpenRouter, Runway, Higgsfield)
     if (
@@ -618,6 +648,7 @@ export type WorkerDerivativeReceipt =
   | LocalGpuReceipt
   | ProtocolAiReceipt
   | ReferenceAnalysisReceipt
+  | MediaSemanticIndexReceipt
   | RenderExportReceiptV1;
 
 export type ProtocolAiReceipt =

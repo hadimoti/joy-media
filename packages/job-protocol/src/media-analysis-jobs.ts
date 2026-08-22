@@ -1,3 +1,10 @@
+import type {
+  AssetAudioEvidenceV1,
+  AssetCaptionEvidenceV1,
+  AssetShotEvidenceV1,
+  SemanticBrollAssetV1,
+} from '@joy-media/project-schema';
+
 export type ReferenceAnalysisEvidenceKind =
   | 'shot'
   | 'cut-rhythm'
@@ -142,7 +149,50 @@ export interface VideoReferenceAnalyzeReceipt {
   readonly model?: string;
 }
 
-export type MediaAnalysisJob = VideoReferenceAnalyzeJob;
+export type MediaSemanticIndexEvidence =
+  AssetShotEvidenceV1 | AssetCaptionEvidenceV1 | AssetAudioEvidenceV1;
+
+export interface MediaSemanticIndexPayload {
+  readonly projectId: string;
+  readonly receipts: readonly VideoReferenceAnalyzeReceipt[];
+  readonly usedAssetIds?: readonly string[];
+  readonly maxAssets?: number;
+  readonly includeEmbeddings?: boolean;
+  readonly includeRemoteRerank?: boolean;
+}
+
+export interface MediaSemanticIndexJob {
+  readonly protocolVersion: 1;
+  readonly jobId: string;
+  readonly type: 'media.semantic-index';
+  readonly payload: MediaSemanticIndexPayload;
+  readonly requirements: {
+    readonly capabilities: readonly string[];
+    readonly privacy: 'local-only' | 'remote-api';
+  };
+  readonly idempotencyKey: string;
+  readonly maxAttempts: number;
+}
+
+export interface MediaSemanticIndexReceipt {
+  readonly kind: 'media.semantic-index';
+  readonly projectId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly summary: {
+    readonly assetCount: number;
+    readonly rangeCount: number;
+    readonly evidenceCount: number;
+    readonly embeddedRangeCount: number;
+    readonly reranked: boolean;
+  };
+  readonly evidence: readonly MediaSemanticIndexEvidence[];
+  readonly evidenceIds: readonly string[];
+  readonly assets: readonly SemanticBrollAssetV1[];
+  readonly model?: string;
+}
+
+export type MediaAnalysisJob = VideoReferenceAnalyzeJob | MediaSemanticIndexJob;
 
 export function assertValidVideoReferenceAnalyzePayload(
   payload: unknown,
@@ -222,6 +272,140 @@ export function assertValidVideoReferenceAnalyzeReceipt(
   }
 }
 
+export function assertValidMediaSemanticIndexPayload(
+  payload: unknown,
+  label = 'payload',
+): asserts payload is MediaSemanticIndexPayload {
+  const value = requireRecord(payload, label);
+  requireOpaqueId(value.projectId, `${label}.projectId`);
+  const receipts = requireArray(value.receipts, `${label}.receipts`);
+  if (receipts.length > 1_000)
+    throw new Error(`${label}.receipts must contain at most 1000 entries`);
+  receipts.forEach((receipt, index) =>
+    assertValidVideoReferenceAnalyzeReceipt(receipt, `${label}.receipts[${index}]`),
+  );
+  if (value.usedAssetIds !== undefined) {
+    requireArray(value.usedAssetIds, `${label}.usedAssetIds`).forEach((assetId, index) =>
+      requireOpaqueId(assetId, `${label}.usedAssetIds[${index}]`),
+    );
+  }
+  if (value.maxAssets !== undefined) {
+    requireIntegerInRange(value.maxAssets, 1, 1_000, `${label}.maxAssets`);
+  }
+  if (value.includeEmbeddings !== undefined && typeof value.includeEmbeddings !== 'boolean') {
+    throw new Error(`${label}.includeEmbeddings must be a boolean`);
+  }
+  if (value.includeRemoteRerank !== undefined && typeof value.includeRemoteRerank !== 'boolean') {
+    throw new Error(`${label}.includeRemoteRerank must be a boolean`);
+  }
+}
+
+export function assertValidMediaSemanticIndexReceipt(
+  receipt: unknown,
+  label = 'receipt',
+): asserts receipt is MediaSemanticIndexReceipt {
+  const value = requireRecord(receipt, label);
+  if (value.kind !== 'media.semantic-index') throw new Error(`${label}.kind is invalid`);
+  requireOpaqueId(value.projectId, `${label}.projectId`);
+  requireHash(value.sha256, `${label}.sha256`);
+  requirePositiveInteger(value.bytes, `${label}.bytes`);
+  const summary = requireRecord(value.summary, `${label}.summary`);
+  requireNonNegativeInteger(summary.assetCount, `${label}.summary.assetCount`);
+  requireNonNegativeInteger(summary.rangeCount, `${label}.summary.rangeCount`);
+  requireNonNegativeInteger(summary.evidenceCount, `${label}.summary.evidenceCount`);
+  requireNonNegativeInteger(summary.embeddedRangeCount, `${label}.summary.embeddedRangeCount`);
+  if (typeof summary.reranked !== 'boolean') {
+    throw new Error(`${label}.summary.reranked must be a boolean`);
+  }
+  const evidence = requireArray(value.evidence, `${label}.evidence`);
+  if (evidence.length > 5_000)
+    throw new Error(`${label}.evidence must contain at most 5000 entries`);
+  evidence.forEach((entry, index) =>
+    assertValidSemanticIndexEvidence(entry, `${label}.evidence[${index}]`),
+  );
+  const evidenceIds = requireArray(value.evidenceIds, `${label}.evidenceIds`);
+  const derivedEvidenceIds = evidence.map((entry) => (entry as MediaSemanticIndexEvidence).id);
+  if (
+    evidenceIds.length !== derivedEvidenceIds.length ||
+    evidenceIds.some((entry, index) => entry !== derivedEvidenceIds[index])
+  ) {
+    throw new Error(`${label}.evidenceIds must match evidence order exactly`);
+  }
+  const knownEvidence = new Set(derivedEvidenceIds);
+  requireArray(value.assets, `${label}.assets`).forEach((asset, assetIndex) => {
+    const assetValue = requireRecord(asset, `${label}.assets[${assetIndex}]`);
+    requireOpaqueId(assetValue.assetId, `${label}.assets[${assetIndex}].assetId`);
+    if (typeof assetValue.displayName !== 'string' || assetValue.displayName.length === 0) {
+      throw new Error(`${label}.assets[${assetIndex}].displayName must be a non-empty string`);
+    }
+    if (
+      assetValue.assetType !== 'video' &&
+      assetValue.assetType !== 'audio' &&
+      assetValue.assetType !== 'image' &&
+      assetValue.assetType !== 'other'
+    ) {
+      throw new Error(`${label}.assets[${assetIndex}].assetType is invalid`);
+    }
+    if (typeof assetValue.usedInTimeline !== 'boolean') {
+      throw new Error(`${label}.assets[${assetIndex}].usedInTimeline must be a boolean`);
+    }
+    requireArray(assetValue.ranges, `${label}.assets[${assetIndex}].ranges`).forEach(
+      (range, rangeIndex) => {
+        const rangeValue = requireRecord(
+          range,
+          `${label}.assets[${assetIndex}].ranges[${rangeIndex}]`,
+        );
+        requireOpaqueId(
+          rangeValue.rangeId,
+          `${label}.assets[${assetIndex}].ranges[${rangeIndex}].rangeId`,
+        );
+        if (rangeValue.assetId !== assetValue.assetId) {
+          throw new Error(
+            `${label}.assets[${assetIndex}].ranges[${rangeIndex}].assetId must match assetId`,
+          );
+        }
+        requirePositiveInteger(
+          rangeValue.startUs,
+          `${label}.assets[${assetIndex}].ranges[${rangeIndex}].startUs`,
+          true,
+        );
+        requirePositiveInteger(
+          rangeValue.durationUs,
+          `${label}.assets[${assetIndex}].ranges[${rangeIndex}].durationUs`,
+        );
+        if (typeof rangeValue.label !== 'string' || rangeValue.label.length === 0) {
+          throw new Error(
+            `${label}.assets[${assetIndex}].ranges[${rangeIndex}].label must be non-empty`,
+          );
+        }
+        if (typeof rangeValue.text !== 'string') {
+          throw new Error(
+            `${label}.assets[${assetIndex}].ranges[${rangeIndex}].text must be a string`,
+          );
+        }
+        const ids = requireArray(
+          rangeValue.evidenceIds,
+          `${label}.assets[${assetIndex}].ranges[${rangeIndex}].evidenceIds`,
+        );
+        if (ids.length === 0)
+          throw new Error(
+            `${label}.assets[${assetIndex}].ranges[${rangeIndex}].evidenceIds must not be empty`,
+          );
+        ids.forEach((entry, index) => {
+          if (typeof entry !== 'string' || !knownEvidence.has(entry)) {
+            throw new Error(
+              `${label}.assets[${assetIndex}].ranges[${rangeIndex}].evidenceIds[${index}] references unknown evidence`,
+            );
+          }
+        });
+      },
+    );
+  });
+  if (value.model !== undefined && typeof value.model !== 'string') {
+    throw new Error(`${label}.model must be a string`);
+  }
+}
+
 function assertValidReferenceAnalysisEvidence(
   evidence: unknown,
   label: string,
@@ -288,6 +472,56 @@ function assertValidReferenceAnalysisEvidence(
         value.strength < 0
       ) {
         throw new Error(`${label}.strength must be a non-negative finite number`);
+      }
+      return;
+    default:
+      throw new Error(`${label}.kind is invalid`);
+  }
+}
+
+function assertValidSemanticIndexEvidence(
+  evidence: unknown,
+  label: string,
+): asserts evidence is MediaSemanticIndexEvidence {
+  const value = requireRecord(evidence, label);
+  requireOpaqueId(value.id, `${label}.id`);
+  requireOpaqueId(value.assetId, `${label}.assetId`);
+  if (typeof value.label !== 'string' || value.label.length === 0) {
+    throw new Error(`${label}.label must be a non-empty string`);
+  }
+  if (value.summary !== undefined && typeof value.summary !== 'string') {
+    throw new Error(`${label}.summary must be a string`);
+  }
+  requireOpaqueId(value.sourceEntityId, `${label}.sourceEntityId`);
+  requireNonNegativeInteger(value.sourceEntityRevision, `${label}.sourceEntityRevision`);
+  switch (value.kind) {
+    case 'asset-shot':
+      requirePositiveInteger(value.startUs, `${label}.startUs`, true);
+      requirePositiveInteger(value.durationUs, `${label}.durationUs`);
+      if (value.tags !== undefined) requireArray(value.tags, `${label}.tags`);
+      return;
+    case 'asset-caption':
+      requirePositiveInteger(value.startUs, `${label}.startUs`, true);
+      requirePositiveInteger(value.durationUs, `${label}.durationUs`);
+      if (typeof value.text !== 'string') throw new Error(`${label}.text must be a string`);
+      if (value.language !== undefined && typeof value.language !== 'string') {
+        throw new Error(`${label}.language must be a string`);
+      }
+      return;
+    case 'asset-audio':
+      requirePositiveInteger(value.startUs, `${label}.startUs`, true);
+      requirePositiveInteger(value.durationUs, `${label}.durationUs`);
+      if (
+        value.audioKind !== 'dialogue' &&
+        value.audioKind !== 'music' &&
+        value.audioKind !== 'sfx' &&
+        value.audioKind !== 'ambient' &&
+        value.audioKind !== 'unknown'
+      ) {
+        throw new Error(`${label}.audioKind is invalid`);
+      }
+      if (value.transcript !== undefined && typeof value.transcript !== 'string') {
+        throw new Error(`${label}.transcript must be a string`);
       }
       return;
     default:

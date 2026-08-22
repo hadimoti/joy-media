@@ -1,5 +1,15 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
+import type {
+  MediaSemanticIndexEvidence,
+  VideoReferenceAnalyzeReceipt,
+} from '@joy-media/job-protocol';
+import type {
+  SemanticBrollAssetV1,
+  SemanticBrollSearchIndexV1,
+  SemanticBrollTimeRangeV1,
+} from '@joy-media/project-schema';
+import { searchBroll, type BrollSearchResult } from '@joy-media/agent-tools';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
@@ -126,7 +136,9 @@ export function AssetLibraryPanel({
   const [category, setCategory] = useState<AssetCategory>('image');
   const [collection, setCollection] = useState<AssetCollectionId>('browse');
   const [query, setQuery] = useState('');
+  const [brollQuery, setBrollQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
+  const deferredBrollQuery = useDeferredValue(brollQuery);
   const [availability, setAvailability] = useState<AssetAvailability>('all');
   const [sort, setSort] = useState<AssetSort>('name');
   const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
@@ -361,6 +373,21 @@ export function AssetLibraryPanel({
     );
     return asset === undefined || analysis === undefined ? undefined : { asset, analysis };
   }, [artifacts, items, openReferenceAnalysisAssetId]);
+  const brollSearchView = useMemo(() => {
+    if (artifacts === undefined) return undefined;
+    const index = buildPanelSemanticBrollIndex(projectId, items, artifacts);
+    const normalizedQuery = deferredBrollQuery.trim();
+    const rangeCount = index.assets.reduce((count, asset) => count + asset.ranges.length, 0);
+    if (normalizedQuery.length === 0) return { rangeCount, results: [] as BrollSearchResult[] };
+    try {
+      return {
+        rangeCount,
+        results: [...searchBroll(index, { query: normalizedQuery, maxResults: 6 }).results],
+      };
+    } catch {
+      return { rangeCount, results: [] as BrollSearchResult[] };
+    }
+  }, [artifacts, deferredBrollQuery, items, projectId]);
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [items, category, collection, deferredQuery, availability, sort]);
@@ -1092,6 +1119,34 @@ export function AssetLibraryPanel({
               </div>
             </section>
           )}
+          {brollSearchView !== undefined && brollSearchView.rangeCount > 0 && (
+            <section className="asset-preview" aria-label="Semantic B-roll search">
+              <div>
+                <strong>Semantic B-roll</strong>
+                <span>{brollSearchView.rangeCount} evidence-linked range(s)</span>
+              </div>
+              <label className="asset-search-field">
+                <span className="sr-only">Search semantic B-roll</span>
+                <input
+                  type="search"
+                  value={brollQuery}
+                  onChange={(event) => setBrollQuery(event.target.value)}
+                  placeholder="Search B-roll evidence"
+                />
+              </label>
+              {brollSearchView.results.length > 0 && (
+                <ul className="asset-reference-analysis">
+                  {brollSearchView.results.map((result) => (
+                    <li key={result.resultId}>
+                      <strong>{result.displayName}</strong> {formatSeconds(result.range.startUs)}-
+                      {formatSeconds(result.range.startUs + result.range.durationUs)} ·{' '}
+                      {result.evidenceIds.length} evidence id(s)
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {selectedCount > 0 && (
             <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
               <span className="asset-bulk-count">{selectedCount}</span>
@@ -1562,6 +1617,164 @@ function AssetCardMedia({
       )}
     </button>
   );
+}
+
+function buildPanelSemanticBrollIndex(
+  projectId: string,
+  items: readonly AssetLibraryItem[],
+  artifacts: ArtifactStore,
+): SemanticBrollSearchIndexV1 {
+  const evidenceIndex = new Map<string, MediaSemanticIndexEvidence>();
+  const assets: SemanticBrollAssetV1[] = [];
+
+  for (const { asset } of items) {
+    if (asset.kind !== 'video') continue;
+    const analysis = parseReferenceAnalysisArtifact(
+      artifacts.artifacts[referenceAnalysisArtifactId(asset.id)],
+    );
+    if (analysis === undefined) continue;
+    const converted = panelSemanticAssetFromReceipt(asset, analysis.receipt);
+    for (const evidence of converted.evidence) evidenceIndex.set(evidence.id, evidence);
+    assets.push(converted.asset);
+  }
+
+  return {
+    schemaVersion: 1,
+    projectId,
+    createdAt: new Date(0).toISOString(),
+    evidenceIndex,
+    assets,
+  };
+}
+
+function panelSemanticAssetFromReceipt(
+  asset: BrowserAsset,
+  receipt: VideoReferenceAnalyzeReceipt,
+): {
+  readonly asset: SemanticBrollAssetV1;
+  readonly evidence: readonly MediaSemanticIndexEvidence[];
+} {
+  const evidence: MediaSemanticIndexEvidence[] = [];
+
+  for (const entry of receipt.evidence) {
+    if (entry.kind === 'shot') {
+      evidence.push({
+        id: panelSemanticEvidenceId(asset.id, entry.id),
+        kind: 'asset-shot',
+        label: entry.label,
+        summary: entry.summary,
+        sourceEntityId: asset.id,
+        sourceEntityRevision: 1,
+        assetId: asset.id,
+        startUs: entry.startUs,
+        durationUs: entry.durationUs,
+        tags: tagsFromPanelText(`${entry.label} ${entry.summary}`),
+      });
+      continue;
+    }
+    if (entry.kind === 'transcript') {
+      for (const segment of entry.segments) {
+        evidence.push({
+          id: panelSemanticEvidenceId(
+            asset.id,
+            `caption-${String(segment.startUs).padStart(8, '0')}`,
+          ),
+          kind: 'asset-caption',
+          label: `${entry.label} ${formatSeconds(segment.startUs)}`,
+          summary: segment.text,
+          sourceEntityId: asset.id,
+          sourceEntityRevision: 1,
+          assetId: asset.id,
+          startUs: segment.startUs,
+          durationUs: Math.max(1, segment.endUs - segment.startUs),
+          text: segment.text,
+          language: 'und',
+        });
+      }
+      continue;
+    }
+    if (entry.kind === 'audio-beat') {
+      evidence.push({
+        id: panelSemanticEvidenceId(asset.id, entry.id),
+        kind: 'asset-audio',
+        label: entry.label,
+        summary: entry.summary,
+        sourceEntityId: asset.id,
+        sourceEntityRevision: 1,
+        assetId: asset.id,
+        startUs: entry.startUs,
+        durationUs: entry.durationUs,
+        audioKind: 'music',
+      });
+    }
+  }
+
+  const ranges = panelSemanticRanges(asset.id, evidence);
+  return {
+    evidence,
+    asset: {
+      assetId: asset.id,
+      displayName: asset.displayName,
+      assetType: 'video',
+      ...(receipt.descriptor.durationUs === undefined
+        ? {}
+        : { durationUs: receipt.descriptor.durationUs }),
+      usedInTimeline: false,
+      tags: tagsFromPanelText(`${asset.displayName} ${(asset.tags ?? []).join(' ')}`),
+      ranges,
+    },
+  };
+}
+
+function panelSemanticRanges(
+  assetId: string,
+  evidence: readonly MediaSemanticIndexEvidence[],
+): readonly SemanticBrollTimeRangeV1[] {
+  const shots = evidence.filter((entry) => entry.kind === 'asset-shot');
+  const sourceRanges = shots.length > 0 ? shots : evidence;
+  return sourceRanges.map((source, index) => {
+    const overlapping = evidence.filter((entry) =>
+      panelRangesOverlap(source.startUs, source.durationUs, entry.startUs, entry.durationUs),
+    );
+    return {
+      rangeId: `${assetId}.range-${String(index + 1).padStart(4, '0')}`,
+      assetId,
+      startUs: source.startUs,
+      durationUs: source.durationUs,
+      label: source.label,
+      text: overlapping
+        .map((entry) =>
+          entry.kind === 'asset-caption' ? entry.text : (entry.summary ?? entry.label),
+        )
+        .join(' '),
+      evidenceIds: overlapping.map((entry) => entry.id),
+    };
+  });
+}
+
+function panelSemanticEvidenceId(assetId: string, evidenceId: string): string {
+  return `${assetId}.${evidenceId}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 128);
+}
+
+function panelRangesOverlap(
+  leftStartUs: number,
+  leftDurationUs: number,
+  rightStartUs: number,
+  rightDurationUs: number,
+): boolean {
+  const leftEndUs = leftStartUs + leftDurationUs;
+  const rightEndUs = rightStartUs + rightDurationUs;
+  return leftStartUs < rightEndUs && rightStartUs < leftEndUs;
+}
+
+function tagsFromPanelText(text: string): readonly string[] {
+  return [...new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? [])]
+    .filter((token) => token.length > 2)
+    .slice(0, 12);
+}
+
+function formatSeconds(valueUs: number): string {
+  return `${(valueUs / 1_000_000).toFixed(1)}s`;
 }
 
 function formatBytes(bytes: number): string {

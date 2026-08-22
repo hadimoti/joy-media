@@ -219,6 +219,17 @@ export type { KiloCodeHostOptions } from './kilocode-host.js';
 export { KILOCODE_AGENT_HOST_ID, createKiloCodeAgentHostManifest } from './kilocode-host.js';
 
 export type {
+  BrollInsertionProposalOptions,
+  BrollRerankCandidate,
+  BrollRerankResult,
+  BrollSearchRequest,
+  BrollSearchResponse,
+  BrollSearchResult,
+  BrollSearchServices,
+} from './broll-search.js';
+export { BrollSearchError, createBrollInsertionProposal, searchBroll } from './broll-search.js';
+
+export type {
   CreativeBriefDomainV1,
   CreativeFocusAreaV1,
   ConfidenceLevelV1,
