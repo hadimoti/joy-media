@@ -969,7 +969,7 @@ export function AssetLibraryPanel({
                   ref={fileInputRef}
                   className="sr-only"
                   type="file"
-                  accept="video/*,audio/*,image/*"
+                  accept="video/*,audio/*,image/*,.glb,.gltf,model/gltf-binary,model/gltf+json"
                   disabled={importProgress !== undefined}
                   onChange={(event) => setSelectedFile(event.currentTarget.files?.[0])}
                   aria-label="Media file"
