@@ -39,6 +39,7 @@ export interface ReleaseGateInput {
   }[];
   readonly featureStatus: { readonly auditedOn: string; readonly statuses: readonly string[] };
   readonly waivers?: readonly ReleaseWaiver[];
+  readonly commandResults?: readonly ReleaseCommandResult[];
 }
 
 export interface ReleaseGateResult {
@@ -48,7 +49,31 @@ export interface ReleaseGateResult {
 }
 
 export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): ReleaseGateResult {
+  const requiredCommands = [
+    'typecheck',
+    'lint',
+    'format',
+    'tests',
+    'editor-build',
+    'api-build',
+    'worker-build',
+    'goldens',
+  ];
+  const commandHealth =
+    input.commandResults === undefined ||
+    requiredCommands.every((id) =>
+      input.commandResults?.some((result) => result.id === id && result.exitCode === 0),
+    );
   const checks: ReleaseCheck[] = [
+    check(
+      'command-health',
+      commandHealth,
+      input.commandResults === undefined
+        ? 'command evidence not supplied to pure evaluator'
+        : commandHealth
+          ? 'typecheck, lint, format, tests, builds, and goldens passed'
+          : 'one or more required release commands failed',
+    ),
     check(
       'tests',
       input.testSummary.collected > 0 && input.testSummary.failed === 0,
@@ -150,7 +175,6 @@ export interface ReleaseEvidence extends ReleaseGateInput {
   readonly artifactHashes: Readonly<Record<string, string>>;
   readonly manifest: Readonly<Record<string, unknown>>;
   readonly sbom: Readonly<Record<string, unknown>>;
-  readonly commandResults?: readonly ReleaseCommandResult[];
 }
 
 export interface ReleaseCommandResult {

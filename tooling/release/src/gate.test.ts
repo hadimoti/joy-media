@@ -35,6 +35,30 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'tests')?.status).toBe('failed');
   });
 
+  it('rejects a failed typecheck, lint, format, build, or golden command', () => {
+    const commandIds = [
+      'typecheck',
+      'lint',
+      'format',
+      'tests',
+      'editor-build',
+      'api-build',
+      'worker-build',
+      'goldens',
+    ];
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      commandResults: commandIds.map((id) => ({
+        id,
+        command: id,
+        exitCode: id === 'lint' ? 1 : 0,
+        durationMs: 1,
+      })),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'command-health')?.status).toBe('failed');
+  });
+
   it('rejects dirty generated artifacts', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
