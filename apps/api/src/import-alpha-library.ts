@@ -28,13 +28,15 @@ interface AlphaLibraryAsset {
   readonly ref: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly kind: 'image' | 'audio';
   readonly displayName: string;
   readonly sortName: string;
   readonly tags: readonly string[];
   readonly descriptor: {
     readonly mimeType: string;
-    readonly width: number;
-    readonly height: number;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationUs?: number;
   };
 }
 
@@ -64,7 +66,7 @@ export async function importAlphaLibrary(
   for (const asset of manifest.assets) {
     const registration = {
       id: asset.id,
-      kind: 'image' as const,
+      kind: asset.kind,
       displayName: asset.displayName,
       sha256: asset.sha256,
       bytes: asset.bytes,
@@ -127,17 +129,28 @@ function validateManifest(manifest: AlphaLibraryManifest): void {
   }
   const ids = new Set<string>();
   for (const asset of manifest.assets) {
+    const { mimeType, width, height, durationUs } = asset.descriptor;
+    const validMediaDescriptor =
+      asset.kind === 'image'
+        ? mimeType === 'image/png' &&
+          Number.isSafeInteger(width) &&
+          (width ?? 0) >= 1 &&
+          Number.isSafeInteger(height) &&
+          (height ?? 0) >= 1 &&
+          durationUs === undefined
+        : asset.kind === 'audio'
+          ? (mimeType === 'audio/wav' || mimeType === 'audio/mpeg') &&
+            width === undefined &&
+            height === undefined &&
+            (durationUs === undefined || (Number.isSafeInteger(durationUs) && durationUs >= 1))
+          : false;
     if (
       asset.id !== asset.ref ||
       !/^joylib-[a-f0-9]{64}$/.test(asset.id) ||
       asset.sha256 !== asset.id.slice('joylib-'.length) ||
       !Number.isSafeInteger(asset.bytes) ||
       asset.bytes < 1 ||
-      asset.descriptor.mimeType !== 'image/png' ||
-      !Number.isSafeInteger(asset.descriptor.width) ||
-      !Number.isSafeInteger(asset.descriptor.height) ||
-      asset.descriptor.width < 1 ||
-      asset.descriptor.height < 1 ||
+      !validMediaDescriptor ||
       typeof asset.displayName !== 'string' ||
       asset.displayName.length === 0 ||
       asset.displayName.length > 255 ||
