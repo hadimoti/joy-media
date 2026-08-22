@@ -70,6 +70,14 @@ function isBoundedTimeUs(value: unknown): value is number {
   return isNonNegativeInteger(value) && value <= MAX_TIME_US;
 }
 
+function isPositiveBoundedTimeUs(value: unknown): value is number {
+  return isNonNegativeInteger(value) && value > 0 && value <= MAX_TIME_US;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function hasSameDerivedEvidence(
   expected: SnapshotEvidenceV1,
   actual: unknown,
@@ -214,7 +222,84 @@ export function validateSnapshotEvidence(value: unknown): string[] {
     errors.push('Evidence sourceEntityRevision must be a non-negative integer');
   }
 
+  errors.push(...validateSemanticAssetEvidenceSubtype(evidence));
+
   return errors;
+}
+
+function validateSemanticAssetEvidenceSubtype(evidence: Record<string, unknown>): string[] {
+  switch (evidence.kind) {
+    case 'asset-shot':
+      return validateAssetShotEvidence(evidence);
+    case 'asset-caption':
+      return validateAssetCaptionEvidence(evidence);
+    case 'asset-audio':
+      return validateAssetAudioEvidence(evidence);
+    default:
+      return [];
+  }
+}
+
+function validateAssetShotEvidence(evidence: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  validateSemanticAssetRangeFields(evidence, 'Asset shot evidence', errors);
+  if (
+    evidence.tags !== undefined &&
+    (!Array.isArray(evidence.tags) ||
+      !evidence.tags.every((tag) => isStringMaxLength(tag, MAX_LABEL_LENGTH)))
+  ) {
+    errors.push('Asset shot evidence tags must be an array of bounded strings');
+  }
+  return errors;
+}
+
+function validateAssetCaptionEvidence(evidence: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  validateSemanticAssetRangeFields(evidence, 'Asset caption evidence', errors);
+  if (!isNonEmptyString(evidence.text) || evidence.text.length > MAX_SUMMARY_LENGTH) {
+    errors.push('Asset caption evidence text must be a non-empty string');
+  }
+  if (evidence.language !== undefined && !isStringMaxLength(evidence.language, MAX_LABEL_LENGTH)) {
+    errors.push('Asset caption evidence language must be a bounded string');
+  }
+  return errors;
+}
+
+function validateAssetAudioEvidence(evidence: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const audioKinds = ['dialogue', 'music', 'sfx', 'ambient', 'unknown'] as const;
+  validateSemanticAssetRangeFields(evidence, 'Asset audio evidence', errors);
+  if (!audioKinds.includes(evidence.audioKind as (typeof audioKinds)[number])) {
+    errors.push(
+      'Asset audio evidence audioKind must be one of: dialogue, music, sfx, ambient, unknown',
+    );
+  }
+  if (
+    evidence.transcript !== undefined &&
+    !isStringMaxLength(evidence.transcript, MAX_SUMMARY_LENGTH)
+  ) {
+    errors.push('Asset audio evidence transcript must be a bounded string');
+  }
+  if (evidence.loudnessLufs !== undefined && !isFiniteNumber(evidence.loudnessLufs)) {
+    errors.push('Asset audio evidence loudnessLufs must be a finite number');
+  }
+  return errors;
+}
+
+function validateSemanticAssetRangeFields(
+  evidence: Record<string, unknown>,
+  label: string,
+  errors: string[],
+): void {
+  if (!isNonEmptyString(evidence.assetId) || evidence.assetId.length > MAX_ID_LENGTH) {
+    errors.push(`${label} assetId must be a non-empty string`);
+  }
+  if (!isBoundedTimeUs(evidence.startUs)) {
+    errors.push(`${label} startUs must be a non-negative integer`);
+  }
+  if (!isPositiveBoundedTimeUs(evidence.durationUs)) {
+    errors.push(`${label} durationUs must be a positive integer`);
+  }
 }
 
 // ============================================================================
@@ -773,13 +858,5 @@ export function isSemanticSnapshotV1(value: unknown): value is SemanticSnapshotV
 
 export function isSnapshotEvidenceV1(value: unknown): value is SnapshotEvidenceV1 {
   if (value === null || typeof value !== 'object') return false;
-  const ev = value as SnapshotEvidenceV1;
-  return (
-    isNonEmptyString(ev.id) &&
-    isNonEmptyString(ev.kind) &&
-    EVIDENCE_KINDS_V1.includes(ev.kind as EvidenceKindV1) &&
-    isNonEmptyString(ev.label) &&
-    isNonEmptyString(ev.sourceEntityId) &&
-    isNonNegativeInteger(ev.sourceEntityRevision)
-  );
+  return validateSnapshotEvidence(value).length === 0;
 }

@@ -1,14 +1,10 @@
 /**
  * S1: Semantic Snapshot Tests
- * 
+ *
  * Tests for semantic-snapshot.ts types and validation
  */
 
-import {
-  describe,
-  expect,
-  it,
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   createSemanticSnapshotV1,
@@ -191,7 +187,7 @@ describe('validateSnapshotEvidence', () => {
       id: '',
     };
     const errors = validateSnapshotEvidence(evidence);
-    expect(errors.some(e => e.includes('id'))).toBe(true);
+    expect(errors.some((e) => e.includes('id'))).toBe(true);
   });
 
   it('should reject evidence with invalid kind', () => {
@@ -200,7 +196,7 @@ describe('validateSnapshotEvidence', () => {
       kind: 'invalid-kind' as any,
     };
     const errors = validateSnapshotEvidence(evidence);
-    expect(errors.some(e => e.includes('kind'))).toBe(true);
+    expect(errors.some((e) => e.includes('kind'))).toBe(true);
   });
 
   it('should reject evidence with empty label', () => {
@@ -209,7 +205,7 @@ describe('validateSnapshotEvidence', () => {
       label: '',
     };
     const errors = validateSnapshotEvidence(evidence);
-    expect(errors.some(e => e.includes('label'))).toBe(true);
+    expect(errors.some((e) => e.includes('label'))).toBe(true);
   });
 
   it('should reject evidence with empty sourceEntityId', () => {
@@ -218,7 +214,7 @@ describe('validateSnapshotEvidence', () => {
       sourceEntityId: '',
     };
     const errors = validateSnapshotEvidence(evidence);
-    expect(errors.some(e => e.includes('sourceEntityId'))).toBe(true);
+    expect(errors.some((e) => e.includes('sourceEntityId'))).toBe(true);
   });
 
   it('should reject evidence with negative sourceEntityRevision', () => {
@@ -227,23 +223,107 @@ describe('validateSnapshotEvidence', () => {
       sourceEntityRevision: -1,
     };
     const errors = validateSnapshotEvidence(evidence);
-    expect(errors.some(e => e.includes('sourceEntityRevision'))).toBe(true);
+    expect(errors.some((e) => e.includes('sourceEntityRevision'))).toBe(true);
   });
 
   it('should accept all valid evidence kinds', () => {
     for (const kind of EVIDENCE_KINDS_V1) {
-      const evidence: SnapshotEvidenceV1 = {
-        id: `test-${kind}`,
-        kind,
-        label: `Test ${kind}`,
-        sourceEntityId: 'entity-1',
-        sourceEntityRevision: 1,
-      };
+      const evidence = validEvidenceForKind(kind);
       const errors = validateSnapshotEvidence(evidence);
       expect(errors).toEqual([]);
     }
   });
+
+  it('should reject incomplete semantic asset shot evidence', () => {
+    const evidence: SnapshotEvidenceV1 = {
+      id: 'asset-shot-incomplete',
+      kind: 'asset-shot',
+      label: 'Incomplete shot',
+      sourceEntityId: 'asset-1',
+      sourceEntityRevision: 1,
+    };
+
+    const errors = validateSnapshotEvidence(evidence);
+
+    expect(errors).toContain('Asset shot evidence assetId must be a non-empty string');
+    expect(errors).toContain('Asset shot evidence startUs must be a non-negative integer');
+    expect(errors).toContain('Asset shot evidence durationUs must be a positive integer');
+  });
+
+  it('should reject incomplete semantic asset caption evidence', () => {
+    const evidence: SnapshotEvidenceV1 = {
+      id: 'asset-caption-incomplete',
+      kind: 'asset-caption',
+      label: 'Incomplete caption',
+      sourceEntityId: 'asset-1',
+      sourceEntityRevision: 1,
+    };
+
+    const errors = validateSnapshotEvidence(evidence);
+
+    expect(errors).toContain('Asset caption evidence assetId must be a non-empty string');
+    expect(errors).toContain('Asset caption evidence text must be a non-empty string');
+    expect(errors).toContain('Asset caption evidence startUs must be a non-negative integer');
+    expect(errors).toContain('Asset caption evidence durationUs must be a positive integer');
+  });
+
+  it('should reject incomplete semantic asset audio evidence', () => {
+    const evidence: SnapshotEvidenceV1 = {
+      id: 'asset-audio-incomplete',
+      kind: 'asset-audio',
+      label: 'Incomplete audio',
+      sourceEntityId: 'asset-1',
+      sourceEntityRevision: 1,
+    };
+
+    const errors = validateSnapshotEvidence(evidence);
+
+    expect(errors).toContain('Asset audio evidence assetId must be a non-empty string');
+    expect(errors).toContain(
+      'Asset audio evidence audioKind must be one of: dialogue, music, sfx, ambient, unknown',
+    );
+    expect(errors).toContain('Asset audio evidence startUs must be a non-negative integer');
+    expect(errors).toContain('Asset audio evidence durationUs must be a positive integer');
+  });
 });
+
+function validEvidenceForKind(kind: (typeof EVIDENCE_KINDS_V1)[number]): SnapshotEvidenceV1 {
+  const base: SnapshotEvidenceV1 = {
+    id: `test-${kind}`,
+    kind,
+    label: `Test ${kind}`,
+    sourceEntityId: 'entity-1',
+    sourceEntityRevision: 1,
+  };
+
+  switch (kind) {
+    case 'asset-shot':
+      return {
+        ...base,
+        assetId: 'asset-1',
+        startUs: 0,
+        durationUs: 1_000_000,
+      } as SnapshotEvidenceV1;
+    case 'asset-caption':
+      return {
+        ...base,
+        assetId: 'asset-1',
+        startUs: 0,
+        durationUs: 1_000_000,
+        text: 'Product detail caption',
+      } as SnapshotEvidenceV1;
+    case 'asset-audio':
+      return {
+        ...base,
+        assetId: 'asset-1',
+        startUs: 0,
+        durationUs: 1_000_000,
+        audioKind: 'music',
+      } as SnapshotEvidenceV1;
+    default:
+      return base;
+  }
+}
 
 // ============================================================================
 // Snapshot Creation Tests
@@ -251,16 +331,13 @@ describe('validateSnapshotEvidence', () => {
 
 describe('createSemanticSnapshotV1', () => {
   it('should create a valid snapshot with sections', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection, assetsSection, captionsSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection, assetsSection, captionsSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     expect(snapshot.schemaVersion).toBe(1);
     expect(snapshot.metadata.projectId).toBe('project-001');
@@ -272,16 +349,13 @@ describe('createSemanticSnapshotV1', () => {
   });
 
   it('should build correct evidence index', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     expect(hasEvidence(snapshot, 'clip-001')).toBe(true);
     expect(hasEvidence(snapshot, 'asset-001')).toBe(false);
@@ -290,16 +364,13 @@ describe('createSemanticSnapshotV1', () => {
   });
 
   it('should build correct statistics', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection, assetsSection, captionsSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection, assetsSection, captionsSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     expect(snapshot.statistics.totalClips).toBe(1);
     expect(snapshot.statistics.totalAssets).toBe(1);
@@ -315,16 +386,13 @@ describe('createSemanticSnapshotV1', () => {
       evidence: [],
     };
 
-    const snapshot = createSemanticSnapshotV1(
-      [emptySection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([emptySection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     expect(snapshot.sections).toHaveLength(1);
     expect(snapshot.evidenceIndex.size).toBe(0);
@@ -354,7 +422,10 @@ describe('createSemanticSnapshotV1', () => {
 
   it('should round-trip through JSON and remain valid after rebuilding derived indexes', () => {
     const snapshot = createProjectDerivedSnapshot();
-    const parsed = JSON.parse(JSON.stringify(snapshot)) as Omit<SemanticSnapshotV1, 'evidenceIndex'> & {
+    const parsed = JSON.parse(JSON.stringify(snapshot)) as Omit<
+      SemanticSnapshotV1,
+      'evidenceIndex'
+    > & {
       evidenceIndex?: unknown;
     };
 
@@ -377,16 +448,13 @@ describe('createSemanticSnapshotV1', () => {
 
 describe('validateSemanticSnapshotV1', () => {
   it('should validate a valid snapshot', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     const result = validateSemanticSnapshotV1(snapshot);
     expect(result.valid).toBe(true);
@@ -400,21 +468,18 @@ describe('validateSemanticSnapshotV1', () => {
   });
 
   it('should reject invalid schema version', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
     (snapshot as any).schemaVersion = 2;
 
     const result = validateSemanticSnapshotV1(snapshot);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('schema version'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('schema version'))).toBe(true);
   });
 
   it('should reject missing metadata', () => {
@@ -428,7 +493,7 @@ describe('validateSemanticSnapshotV1', () => {
 
     const result = validateSemanticSnapshotV1(snapshot);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('metadata'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('metadata'))).toBe(true);
   });
 
   it('should reject invalid sections', () => {
@@ -450,7 +515,7 @@ describe('validateSemanticSnapshotV1', () => {
 
     const result = validateSemanticSnapshotV1(snapshot);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('Sections'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('Sections'))).toBe(true);
   });
 
   it('should reject evidence with out-of-bounds temporal ranges', () => {
@@ -484,16 +549,13 @@ describe('validateSemanticSnapshotV1', () => {
   });
 
   it('should reject corrupted derived evidence state that does not match sections', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection, assetsSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection, assetsSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     const corruptedSnapshot = {
       ...snapshot,
@@ -536,20 +598,34 @@ describe('type guards', () => {
     expect(isSnapshotEvidenceV1(validClipEvidence)).toBe(true);
     expect(isSnapshotEvidenceV1(null)).toBe(false);
     expect(isSnapshotEvidenceV1({})).toBe(false);
-    expect(isSnapshotEvidenceV1({ id: '', kind: 'clip', label: '', sourceEntityId: '', sourceEntityRevision: 0 })).toBe(false);
+    expect(
+      isSnapshotEvidenceV1({
+        id: '',
+        kind: 'clip',
+        label: '',
+        sourceEntityId: '',
+        sourceEntityRevision: 0,
+      }),
+    ).toBe(false);
+    expect(
+      isSnapshotEvidenceV1({
+        id: 'asset-caption-incomplete',
+        kind: 'asset-caption',
+        label: 'Incomplete caption',
+        sourceEntityId: 'asset-1',
+        sourceEntityRevision: 1,
+      }),
+    ).toBe(false);
   });
 
   it('isSemanticSnapshotV1 should identify valid snapshots', () => {
-    const snapshot = createSemanticSnapshotV1(
-      [timelineSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([timelineSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     expect(isSemanticSnapshotV1(snapshot)).toBe(true);
     expect(isSemanticSnapshotV1(null)).toBe(false);
@@ -562,16 +638,13 @@ describe('type guards', () => {
 // ============================================================================
 
 describe('evidence queries', () => {
-  const snapshot = createSemanticSnapshotV1(
-    [timelineSection, assetsSection, captionsSection],
-    {
-      projectId: 'project-001',
-      revision: 1,
-      createdBy: 'test-user',
-      schemaVersion: 1,
-      contentHash: 'abc123',
-    },
-  );
+  const snapshot = createSemanticSnapshotV1([timelineSection, assetsSection, captionsSection], {
+    projectId: 'project-001',
+    revision: 1,
+    createdBy: 'test-user',
+    schemaVersion: 1,
+    contentHash: 'abc123',
+  });
 
   it('getEvidenceByKind should return evidence of specific kind', () => {
     const clips = getEvidenceByKind(snapshot, 'clip');
@@ -652,16 +725,13 @@ describe('Persian/RTL preservation', () => {
       ],
     };
 
-    const snapshot = createSemanticSnapshotV1(
-      [persianSection],
-      {
-        projectId: 'project-001',
-        revision: 1,
-        createdBy: 'test-user',
-        schemaVersion: 1,
-        contentHash: 'abc123',
-      },
-    );
+    const snapshot = createSemanticSnapshotV1([persianSection], {
+      projectId: 'project-001',
+      revision: 1,
+      createdBy: 'test-user',
+      schemaVersion: 1,
+      contentHash: 'abc123',
+    });
 
     const evidence = getEvidence(snapshot, 'persian-clip');
     expect(evidence?.label).toBe(persianText);
