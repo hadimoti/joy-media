@@ -1598,9 +1598,10 @@ function AssetCardMedia({
         resolver,
         originalCache,
         fetchCloudOriginal,
-        // Cloud originals are fetched only for an explicit Preview action;
-        // otherwise 1,800+ cards would queue long-running object-store reads.
-        allowCloudFallback: false,
+        // Image cards may hydrate their visible thumbnails through the shared
+        // queue; audio keeps the lightweight equalizer fallback until the user
+        // explicitly opens Preview, so the 1,805-track library stays cheap.
+        allowCloudFallback: asset.kind === 'image',
       });
       if (cancelled) {
         result.revoke();
