@@ -6,6 +6,9 @@ import {
   emptyScene3D,
   IDENTITY_3D_TRANSFORM,
   inspectScene3DTool,
+  Scene3DApprovalLedger,
+  scene3DToolDiffDigest,
+  scene3DToolInputDigest,
 } from './index.js';
 
 const session = () => ({
@@ -35,45 +38,40 @@ describe('scene3d structured tools', () => {
     expect(dry.diff?.changedAssets).toEqual([]);
   });
   it('requires a matching, unexpired approval and applies atomically with an undo transaction', () => {
-    const result = applyApprovedScene3DTool(
-      session(),
-      'scene3d.add',
-      {
-        object: {
-          id: 'box',
-          name: 'Box',
-          kind: 'primitive',
-          primitive: 'box',
-          transform: IDENTITY_3D_TRANSFORM,
-        },
+    const input = {
+      object: {
+        id: 'box',
+        name: 'Box',
+        kind: 'primitive',
+        primitive: 'box',
+        transform: IDENTITY_3D_TRANSFORM,
       },
-      {
-        approvalId: 'a1',
-        actorId: 'actor',
-        projectId: 'project',
-        sceneId: 'scene',
-        baseRevision: 'r1',
-        expiresAt: 1000,
-      },
-      100,
-    );
+    };
+    const preview = dryRunScene3DTool(session(), 'scene3d.add', input);
+    const approval = {
+      approvalId: 'a1',
+      toolName: 'scene3d.add' as const,
+      inputDigest: preview.inputDigest!,
+      diffDigest: preview.diffDigest!,
+      actorId: 'actor',
+      projectId: 'project',
+      sceneId: 'scene',
+      baseRevision: 'r1',
+      expiresAt: 1000,
+    };
+    const result = applyApprovedScene3DTool(session(), 'scene3d.add', input, approval, 100);
     expect(result.document?.objects.box).toBeDefined();
     expect(result.inverse?.commands).toHaveLength(1);
     expect(
       applyApprovedScene3DTool(
         session(),
         'scene3d.add',
-        {
-          object: {
-            id: 'box',
-            name: 'Box',
-            kind: 'primitive',
-            primitive: 'box',
-            transform: IDENTITY_3D_TRANSFORM,
-          },
-        },
+        input,
         {
           approvalId: 'a1',
+          toolName: 'scene3d.add',
+          inputDigest: preview.inputDigest!,
+          diffDigest: preview.diffDigest!,
           actorId: 'wrong',
           projectId: 'project',
           sceneId: 'scene',
@@ -115,5 +113,37 @@ describe('scene3d structured tools', () => {
     expect(materialDiff.diff?.changedMaterials).toEqual(['mat']);
     const cameraDiff = dryRunScene3DTool(session(), 'scene3d.camera', { cameraId: 'camera' });
     expect(cameraDiff.error).toContain('active camera');
+  });
+
+  it('binds approvals to the exact request and consumes them once', () => {
+    const input = {
+      object: {
+        id: 'box',
+        name: 'Box',
+        kind: 'primitive',
+        primitive: 'box',
+        transform: IDENTITY_3D_TRANSFORM,
+      },
+    };
+    const preview = dryRunScene3DTool(session(), 'scene3d.add', input);
+    const approval = {
+      approvalId: 'once',
+      toolName: 'scene3d.add' as const,
+      inputDigest: scene3DToolInputDigest('scene3d.add', input),
+      diffDigest: scene3DToolDiffDigest(preview.diff!),
+      actorId: 'actor',
+      projectId: 'project',
+      sceneId: 'scene',
+      baseRevision: 'r1',
+      expiresAt: 1000,
+    };
+    const ledger = new Scene3DApprovalLedger();
+    expect(ledger.apply(session(), 'scene3d.add', input, approval, 100).document).toBeDefined();
+    expect(ledger.apply(session(), 'scene3d.add', input, approval, 100).error).toContain(
+      'consumed',
+    );
+    expect(ledger.apply(session(), 'scene3d.remove', input, approval, 100).error).toContain(
+      'consumed',
+    );
   });
 });

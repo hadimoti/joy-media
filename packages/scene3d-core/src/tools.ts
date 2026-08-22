@@ -21,6 +21,9 @@ export interface Scene3DToolDefinition {
 
 export interface Scene3DApprovalBinding {
   readonly approvalId: string;
+  readonly toolName: Scene3DWriteTool;
+  readonly inputDigest: string;
+  readonly diffDigest: string;
   readonly actorId: string;
   readonly projectId: string;
   readonly sceneId: string;
@@ -46,6 +49,14 @@ export interface Scene3DToolDiff {
   readonly environmentChanged: boolean;
   readonly activeCameraChanged: boolean;
   readonly summary: string;
+}
+
+export interface Scene3DToolApplyResult {
+  readonly document?: Scene3DDocumentV1;
+  readonly revision?: string;
+  readonly inverse?: Scene3DTransaction;
+  readonly diff?: Scene3DToolDiff;
+  readonly error?: string;
 }
 
 export const SCENE3D_TOOL_DEFINITIONS: readonly Scene3DToolDefinition[] = [
@@ -181,6 +192,8 @@ export function dryRunScene3DTool(
 ): {
   readonly diff?: Scene3DToolDiff;
   readonly inverse?: Scene3DTransaction;
+  readonly inputDigest?: string;
+  readonly diffDigest?: string;
   readonly error?: string;
 } {
   try {
@@ -192,6 +205,8 @@ export function dryRunScene3DTool(
     return {
       diff: diffForScene(session.document, result.document),
       inverse: result.record.inverses,
+      inputDigest: scene3DToolInputDigest(name, input),
+      diffDigest: scene3DToolDiffDigest(diffForScene(session.document, result.document)),
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -204,13 +219,7 @@ export function applyApprovedScene3DTool(
   input: Readonly<Record<string, unknown>>,
   approval: Scene3DApprovalBinding,
   now = Date.now(),
-): {
-  readonly document?: Scene3DDocumentV1;
-  readonly revision?: string;
-  readonly inverse?: Scene3DTransaction;
-  readonly diff?: Scene3DToolDiff;
-  readonly error?: string;
-} {
+): Scene3DToolApplyResult {
   if (
     approval.actorId !== session.actorId ||
     approval.projectId !== session.projectId ||
@@ -219,9 +228,14 @@ export function applyApprovedScene3DTool(
     return { error: 'approval binding does not match this scene session' };
   if (approval.baseRevision !== session.revision) return { error: 'scene revision is stale' };
   if (approval.expiresAt <= now) return { error: 'scene approval has expired' };
+  if (approval.toolName !== name) return { error: 'approval tool does not match requested tool' };
   const preview = dryRunScene3DTool(session, name, input);
   if (preview.error !== undefined || preview.inverse === undefined || preview.diff === undefined)
     return { error: preview.error ?? 'scene change was rejected' };
+  if (approval.inputDigest !== preview.inputDigest)
+    return { error: 'approval input digest does not match request' };
+  if (approval.diffDigest !== preview.diffDigest)
+    return { error: 'approval diff digest does not match dry run' };
   const command = commandForScene3DTool(name, input);
   const result = applyScene3DTransaction(session.document, {
     label: `Approved ${name}`,
@@ -233,6 +247,40 @@ export function applyApprovedScene3DTool(
     inverse: result.record.inverses,
     diff: preview.diff,
   };
+}
+
+/** Stateful guard for hosts that must reject a retried approval. */
+export class Scene3DApprovalLedger {
+  private readonly consumed = new Set<string>();
+
+  hasConsumed(approvalId: string): boolean {
+    return this.consumed.has(approvalId);
+  }
+
+  apply(
+    session: Scene3DToolSession,
+    name: Scene3DWriteTool,
+    input: Readonly<Record<string, unknown>>,
+    approval: Scene3DApprovalBinding,
+    now = Date.now(),
+  ): Scene3DToolApplyResult {
+    if (this.consumed.has(approval.approvalId))
+      return { error: 'scene approval has already been consumed' };
+    const result = applyApprovedScene3DTool(session, name, input, approval, now);
+    if (result.document !== undefined) this.consumed.add(approval.approvalId);
+    return result;
+  }
+}
+
+export function scene3DToolInputDigest(
+  name: Scene3DWriteTool,
+  input: Readonly<Record<string, unknown>>,
+): string {
+  return fingerprint(`${name}:${JSON.stringify(input)}`);
+}
+
+export function scene3DToolDiffDigest(diff: Scene3DToolDiff): string {
+  return fingerprint(JSON.stringify(diff));
 }
 
 function diffForScene(before: Scene3DDocumentV1, after: Scene3DDocumentV1): Scene3DToolDiff {
@@ -267,6 +315,15 @@ function changedRecordIds(
 ): readonly string[] {
   const ids = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...ids].filter((id) => JSON.stringify(before[id]) !== JSON.stringify(after[id]));
+}
+
+function fingerprint(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {
