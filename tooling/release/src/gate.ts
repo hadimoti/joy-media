@@ -35,6 +35,7 @@ export interface ReleaseGateInput {
     readonly id: string;
     readonly status: 'verified' | 'failed' | 'unverified';
     readonly verifiedAt?: string;
+    readonly evidencePath?: string;
   }[];
   readonly featureStatus: { readonly auditedOn: string; readonly statuses: readonly string[] };
   readonly waivers?: readonly ReleaseWaiver[];
@@ -319,10 +320,30 @@ function readBrowserJourneys(root: string): ReleaseGateInput['browserJourneys'] 
   const path = join(root, 'test-output/browser/journeys.json');
   if (!existsSync(path)) return [];
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as ReleaseGateInput['browserJourneys'];
+    return verifiedBrowserJourneys(
+      root,
+      JSON.parse(readFileSync(path, 'utf8')) as ReleaseGateInput['browserJourneys'],
+    );
   } catch {
     return [];
   }
+}
+
+function verifiedBrowserJourneys(
+  root: string,
+  journeys: ReleaseGateInput['browserJourneys'],
+): ReleaseGateInput['browserJourneys'] {
+  return journeys.filter((journey) => {
+    if (journey.status !== 'verified') return true;
+    if (journey.evidencePath === undefined) return false;
+    const evidencePath = resolve(root, journey.evidencePath);
+    const repositoryRoot = resolve(root);
+    const insideRepository =
+      evidencePath === repositoryRoot ||
+      evidencePath.startsWith(`${repositoryRoot}/`) ||
+      evidencePath.startsWith(`${repositoryRoot}\\`);
+    return insideRepository && existsSync(evidencePath);
+  });
 }
 
 function verifyArtifactHashes(
@@ -374,10 +395,20 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
   const output = resolve(root, process.env.JOY_RELEASE_OUTPUT ?? 'test-output/release-gate');
   const evidencePath = process.env.JOY_RELEASE_EVIDENCE?.trim();
-  const evidence =
+  const workspaceEvidence = buildEvidenceFromWorkspace(root);
+  const supplied =
     evidencePath !== undefined && evidencePath.length > 0
-      ? (JSON.parse(readFileSync(resolve(root, evidencePath), 'utf8')) as ReleaseEvidence)
-      : buildEvidenceFromWorkspace(root);
+      ? (JSON.parse(readFileSync(resolve(root, evidencePath), 'utf8')) as Partial<ReleaseEvidence>)
+      : undefined;
+  const evidence: ReleaseEvidence = {
+    ...workspaceEvidence,
+    ...(supplied === undefined
+      ? {}
+      : {
+          browserJourneys: verifiedBrowserJourneys(root, supplied.browserJourneys ?? []),
+          ...(supplied.waivers !== undefined ? { waivers: supplied.waivers } : {}),
+        }),
+  };
   const result = writeReleaseEvidence(root, output, evidence);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.passed) process.exitCode = 1;
