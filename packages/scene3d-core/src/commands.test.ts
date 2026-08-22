@@ -102,4 +102,45 @@ describe('scene3d commands', () => {
     expect(result.document.assets[asset.id]).toEqual(asset);
     expect(applyScene3DTransaction(result.document, result.record.inverses).document).toEqual(base);
   });
+
+  it('updates camera and light payloads through typed reversible commands', () => {
+    const camera: Scene3DObject = {
+      id: 'camera',
+      name: 'Camera',
+      kind: 'camera',
+      transform: IDENTITY_3D_TRANSFORM,
+      camera: { fieldOfViewDeg: 50, near: 0.1, far: 100 },
+    };
+    const light: Scene3DObject = {
+      id: 'light',
+      name: 'Light',
+      kind: 'light',
+      transform: IDENTITY_3D_TRANSFORM,
+      light: { kind: 'point', intensity: 1, color: '#ffffff' },
+    };
+    const scene = { ...base, objects: { camera, light } };
+    const result = applyScene3DTransaction(scene, {
+      label: 'configure scene',
+      commands: [
+        {
+          type: 'object.setCamera',
+          payload: { objectId: 'camera', camera: { fieldOfViewDeg: 65, near: 0.2, far: 250 } },
+        },
+        {
+          type: 'object.setLight',
+          payload: {
+            objectId: 'light',
+            light: { kind: 'directional', intensity: 2, color: '#aabbcc' },
+          },
+        },
+        { type: 'scene.setActiveCamera', payload: { cameraId: 'camera' } },
+      ],
+    });
+    expect(result.document.objects.camera?.camera?.fieldOfViewDeg).toBe(65);
+    expect(result.document.objects.light?.light?.kind).toBe('directional');
+    expect(result.document.activeCameraId).toBe('camera');
+    expect(applyScene3DTransaction(result.document, result.record.inverses).document).toEqual(
+      scene,
+    );
+  });
 });

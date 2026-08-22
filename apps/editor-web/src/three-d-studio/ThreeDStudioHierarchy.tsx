@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
 import type { BrowserAsset } from '../control-plane-client.js';
 import type { Scene3DDocumentV1 } from '@joy-media/scene3d-core';
+import { registered3DAssets } from '../JoyCode3DViewer.js';
 
 export function ThreeDStudioHierarchy({
   document,
@@ -19,7 +21,35 @@ export function ThreeDStudioHierarchy({
   }) => void;
   readonly onRemove: () => void;
 }) {
-  const models = assets.filter((asset) => asset.kind === 'model');
+  const models = registered3DAssets(assets);
+  const childrenByParent = new Map<string | undefined, (typeof document.objects)[string][]>();
+  for (const object of Object.values(document.objects)) {
+    const list = childrenByParent.get(object.parentId) ?? [];
+    list.push(object);
+    childrenByParent.set(object.parentId, list);
+  }
+  const renderObjects = (parentId: string | undefined, depth = 0): ReactNode[] =>
+    (childrenByParent.get(parentId) ?? []).flatMap((object) => [
+      <li key={object.id} style={{ paddingLeft: depth * 14 }}>
+        <button
+          type="button"
+          className={object.id === selectedObjectId ? 'is-selected' : ''}
+          onClick={() => onSelect(object.id)}
+        >
+          <span aria-hidden>
+            {object.kind === 'model'
+              ? '◇'
+              : object.kind === 'camera'
+                ? '◉'
+                : object.kind === 'light'
+                  ? '☼'
+                  : '□'}
+          </span>
+          {object.name}
+        </button>
+      </li>,
+      ...renderObjects(object.id, depth + 1),
+    ]);
   return (
     <aside className="three-d-studio-hierarchy" aria-label="3D scene hierarchy">
       <div className="three-d-studio-section-title">Hierarchy</div>
@@ -54,28 +84,7 @@ export function ThreeDStudioHierarchy({
           </select>
         )}
       </div>
-      <ul className="three-d-studio-object-list">
-        {Object.values(document.objects).map((object) => (
-          <li key={object.id}>
-            <button
-              type="button"
-              className={object.id === selectedObjectId ? 'is-selected' : ''}
-              onClick={() => onSelect(object.id)}
-            >
-              <span aria-hidden>
-                {object.kind === 'model'
-                  ? '◇'
-                  : object.kind === 'camera'
-                    ? '◉'
-                    : object.kind === 'light'
-                      ? '☼'
-                      : '□'}
-              </span>
-              {object.name}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <ul className="three-d-studio-object-list">{renderObjects(undefined)}</ul>
       <button
         type="button"
         className="three-d-studio-danger"

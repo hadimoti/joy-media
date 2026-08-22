@@ -1,43 +1,73 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { Scene3DDocumentV1 } from '@joy-media/scene3d-core';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { Scene3DDocumentV1, Scene3DObject } from '@joy-media/scene3d-core';
+import type { BrowserAsset } from '../control-plane-client.js';
+import { BrowserControlPlaneClient } from '../control-plane-client.js';
+import { openOpfsOriginalAssetCache } from '../opfs-original-asset-cache.js';
+import { isSupported3DAsset, resolveRegistered3DAsset } from '../JoyCode3DViewer.js';
 
 export function ThreeDStudioCanvas({
   document,
+  assets = [],
   selectedObjectId,
   onSelect,
+  resolveAsset,
 }: {
   readonly document: Scene3DDocumentV1;
+  readonly assets?: readonly BrowserAsset[];
   readonly selectedObjectId?: string;
   readonly onSelect: (objectId: string | undefined) => void;
+  readonly resolveAsset?: (asset: BrowserAsset) => Promise<Blob>;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const selectedRef = useRef(selectedObjectId);
   selectedRef.current = selectedObjectId;
-  const objectsRef = useRef(new Map<string, THREE.Object3D>());
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  const objectsRef = useRef(new Map<string, THREE.Group>());
+  const modelUrlsRef = useRef(new Set<string>());
+  const loadSeqRef = useRef(0);
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const clientRef = useRef<BrowserControlPlaneClient | null>(null);
+  const [contextStatus, setContextStatus] = useState('');
+
+  const fallbackResolver = useCallback(async (asset: BrowserAsset): Promise<Blob> => {
+    const cache = await openOpfsOriginalAssetCache();
+    const local = await cache.resolve({
+      assetId: asset.id,
+      sha256: asset.sha256,
+      bytes: asset.bytes,
+      mimeType: asset.descriptor.mimeType,
+    });
+    if (local.state === 'available-local') {
+      try {
+        return await (await fetch(local.url)).blob();
+      } finally {
+        local.revoke();
+      }
+    }
+    if (clientRef.current === null) clientRef.current = new BrowserControlPlaneClient();
+    return clientRef.current.sharedCloudOriginalBytes(asset.id);
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b1020);
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(5, 4, 7);
+    sceneRef.current = scene;
+    cameraRef.current = camera;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 2));
     renderer.setSize(Math.max(1, host.clientWidth), Math.max(1, host.clientHeight));
     host.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-    sceneRef.current = scene;
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
-    key.position.set(4, 6, 4);
-    scene.add(key, new THREE.GridHelper(12, 24, 0x334155, 0x1e293b));
+    scene.add(new THREE.GridHelper(12, 24, 0x334155, 0x1e293b));
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const onPointerDown = (event: PointerEvent) => {
@@ -46,10 +76,19 @@ export function ThreeDStudioCanvas({
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects([...objectsRef.current.values()], true)[0];
-      const id = hit?.object.userData.sceneObjectId;
-      onSelect(typeof id === 'string' ? id : undefined);
+      let current: THREE.Object3D | null = hit?.object ?? null;
+      while (current !== null && typeof current.userData.sceneObjectId !== 'string')
+        current = current.parent;
+      onSelect(current === null ? undefined : (current.userData.sceneObjectId as string));
     };
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      setContextStatus('WebGL context lost — waiting for recovery…');
+    };
+    const onContextRestored = () => setContextStatus('WebGL context restored');
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
     let frame = 0;
     const animate = () => {
       frame = requestAnimationFrame(animate);
@@ -69,73 +108,134 @@ export function ThreeDStudioCanvas({
           });
     resize?.observe(host);
     return () => {
+      ++loadSeqRef.current;
       cancelAnimationFrame(frame);
       resize?.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       controls.dispose();
       for (const object of objectsRef.current.values()) disposeObject(object);
       objectsRef.current.clear();
+      for (const url of modelUrlsRef.current) URL.revokeObjectURL(url);
+      modelUrlsRef.current.clear();
       renderer.dispose();
       renderer.forceContextLoss();
       renderer.domElement.remove();
-      rendererRef.current = null;
       sceneRef.current = null;
+      cameraRef.current = null;
     };
   }, [onSelect]);
 
   useEffect(() => {
     const scene = sceneRef.current;
-    if (scene === null) return;
+    const camera = cameraRef.current;
+    if (scene === null || camera === null) return;
+    const requestId = ++loadSeqRef.current;
     for (const object of objectsRef.current.values()) {
       scene.remove(object);
       disposeObject(object);
     }
     objectsRef.current.clear();
+    for (const url of modelUrlsRef.current) URL.revokeObjectURL(url);
+    modelUrlsRef.current.clear();
+    scene.background = new THREE.Color(document.environment.backgroundColor);
+    const activeCamera =
+      document.activeCameraId === undefined ? undefined : document.objects[document.activeCameraId];
+    if (activeCamera?.camera !== undefined) {
+      camera.fov = activeCamera.camera.fieldOfViewDeg;
+      camera.near = activeCamera.camera.near;
+      camera.far = activeCamera.camera.far;
+      camera.position.set(
+        activeCamera.transform.position.x,
+        activeCamera.transform.position.y,
+        activeCamera.transform.position.z,
+      );
+      camera.rotation.set(
+        activeCamera.transform.rotation.x,
+        activeCamera.transform.rotation.y,
+        activeCamera.transform.rotation.z,
+      );
+      camera.updateProjectionMatrix();
+    }
+    const groups = new Map<string, THREE.Group>();
     for (const object of Object.values(document.objects)) {
-      const mesh =
-        object.kind === 'light'
-          ? new THREE.Mesh(
-              new THREE.SphereGeometry(0.16),
-              new THREE.MeshBasicMaterial({ color: 0xffd166 }),
-            )
-          : object.kind === 'camera'
-            ? new THREE.Mesh(
-                new THREE.ConeGeometry(0.25, 0.6, 4),
-                new THREE.MeshBasicMaterial({ color: 0x8ecae6 }),
-              )
-            : new THREE.Mesh(
-                object.primitive === 'sphere'
-                  ? new THREE.SphereGeometry(0.7)
-                  : object.primitive === 'plane'
-                    ? new THREE.PlaneGeometry(1.4, 1.4)
-                    : new THREE.BoxGeometry(1.2, 1.2, 1.2),
-                new THREE.MeshStandardMaterial({
-                  color:
-                    object.id === selectedRef.current
-                      ? 0xfbbf24
-                      : object.kind === 'model'
-                        ? 0x7c3aed
-                        : 0x38bdf8,
-                  roughness: 0.55,
-                  metalness: 0.1,
-                }),
-              );
-      mesh.userData.sceneObjectId = object.id;
-      mesh.position.set(
+      const group = new THREE.Group();
+      group.userData.sceneObjectId = object.id;
+      group.position.set(
         object.transform.position.x,
         object.transform.position.y,
         object.transform.position.z,
       );
-      mesh.rotation.set(
+      group.rotation.set(
         object.transform.rotation.x,
         object.transform.rotation.y,
         object.transform.rotation.z,
       );
-      mesh.scale.set(object.transform.scale.x, object.transform.scale.y, object.transform.scale.z);
-      scene.add(mesh);
-      objectsRef.current.set(object.id, mesh);
+      group.scale.set(object.transform.scale.x, object.transform.scale.y, object.transform.scale.z);
+      groups.set(object.id, group);
+      objectsRef.current.set(object.id, group);
     }
-  }, [document, selectedObjectId]);
+    for (const object of Object.values(document.objects)) {
+      const group = groups.get(object.id)!;
+      const parent = object.parentId === undefined ? scene : (groups.get(object.parentId) ?? scene);
+      parent.add(group);
+      addObjectVisual(
+        group,
+        object,
+        selectedRef.current === object.id,
+        document.environment.ambientIntensity,
+      );
+      if (object.kind === 'light' && object.light !== undefined) addSceneLight(group, object);
+      if (object.kind === 'model' && object.assetId !== undefined) {
+        const asset = assetsRef.current.find(
+          (candidate) => candidate.id === object.assetId && isSupported3DAsset(candidate),
+        );
+        if (asset !== undefined) {
+          void resolveRegistered3DAsset(asset, resolveAsset ?? fallbackResolver)
+            .then((blob) => {
+              if (requestId !== loadSeqRef.current) return;
+              const url = URL.createObjectURL(blob);
+              modelUrlsRef.current.add(url);
+              new GLTFLoader().load(
+                url,
+                (gltf) => {
+                  URL.revokeObjectURL(url);
+                  modelUrlsRef.current.delete(url);
+                  if (requestId !== loadSeqRef.current) {
+                    disposeObject(gltf.scene);
+                    return;
+                  }
+                  while (group.children.length > 0) {
+                    const child = group.children[0]!;
+                    group.remove(child);
+                    disposeObject(child);
+                  }
+                  group.add(gltf.scene);
+                },
+                undefined,
+                () => {
+                  URL.revokeObjectURL(url);
+                  modelUrlsRef.current.delete(url);
+                },
+              );
+            })
+            .catch(() => undefined);
+        }
+      }
+    }
+    const previousAmbient = scene.getObjectByName('__scene_environment_ambient');
+    if (previousAmbient !== undefined) {
+      scene.remove(previousAmbient);
+      disposeObject(previousAmbient);
+    }
+    const ambient = new THREE.AmbientLight(0xffffff, document.environment.ambientIntensity);
+    ambient.name = '__scene_environment_ambient';
+    scene.add(ambient);
+    return () => {
+      ++loadSeqRef.current;
+    };
+  }, [document, fallbackResolver, resolveAsset]);
 
   return (
     <div
@@ -143,8 +243,65 @@ export function ThreeDStudioCanvas({
       className="three-d-studio-canvas"
       aria-label="3D viewport"
       data-selected-object={selectedObjectId ?? ''}
-    />
+    >
+      {contextStatus && (
+        <span className="three-d-studio-context-status" role="status">
+          {contextStatus}
+        </span>
+      )}
+    </div>
   );
+}
+
+function addObjectVisual(
+  group: THREE.Group,
+  object: Scene3DObject,
+  selected: boolean,
+  _ambient: number,
+): void {
+  if (object.kind === 'camera')
+    group.add(
+      new THREE.Mesh(
+        new THREE.ConeGeometry(0.25, 0.6, 4),
+        new THREE.MeshBasicMaterial({ color: selected ? 0xfbbf24 : 0x8ecae6 }),
+      ),
+    );
+  else if (object.kind === 'light')
+    group.add(
+      new THREE.Mesh(
+        new THREE.SphereGeometry(0.16),
+        new THREE.MeshBasicMaterial({ color: selected ? 0xfbbf24 : 0xffd166 }),
+      ),
+    );
+  else if (object.kind !== 'model')
+    group.add(
+      new THREE.Mesh(
+        object.primitive === 'sphere'
+          ? new THREE.SphereGeometry(0.7)
+          : object.primitive === 'plane'
+            ? new THREE.PlaneGeometry(1.4, 1.4)
+            : new THREE.BoxGeometry(1.2, 1.2, 1.2),
+        new THREE.MeshStandardMaterial({
+          color: selected ? 0xfbbf24 : 0x38bdf8,
+          roughness: 0.55,
+          metalness: 0.1,
+        }),
+      ),
+    );
+}
+
+function addSceneLight(group: THREE.Group, object: Scene3DObject): void {
+  const light = object.light!;
+  const color = new THREE.Color(light.color);
+  const node =
+    light.kind === 'ambient'
+      ? new THREE.AmbientLight(color, light.intensity)
+      : light.kind === 'directional'
+        ? new THREE.DirectionalLight(color, light.intensity)
+        : light.kind === 'spot'
+          ? new THREE.SpotLight(color, light.intensity)
+          : new THREE.PointLight(color, light.intensity);
+  group.add(node);
 }
 
 function disposeObject(object: THREE.Object3D): void {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserAsset } from '../control-plane-client.js';
 import {
   emptyScene3D,
@@ -12,6 +12,7 @@ import { ThreeDStudioCanvas } from './ThreeDStudioCanvas.js';
 import { ThreeDStudioHierarchy } from './ThreeDStudioHierarchy.js';
 import { ThreeDStudioInspector } from './ThreeDStudioInspector.js';
 import { ThreeDStudioChat } from './ThreeDStudioChat.js';
+import { isSupported3DAsset } from '../JoyCode3DViewer.js';
 
 export interface ThreeDStudioShellProps {
   readonly sceneId: string;
@@ -51,6 +52,24 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
       setSaveState('error');
     }
   }, [editor.document, storage]);
+  const saveNowRef = useRef<() => void>(() => undefined);
+  saveNowRef.current = saveNow;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveNowRef.current();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        event.shiftKey ? editor.redo() : editor.undo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editor.redo, editor.undo, onClose]);
   const dispatch = useCallback(
     (label: string, command: Scene3DCommand) => {
       editor.dispatch({ label, commands: [command] });
@@ -78,14 +97,14 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
       };
       if (input.kind === 'model' && input.assetId !== undefined) {
         const asset = assets.find((candidate) => candidate.id === input.assetId);
-        if (asset !== undefined) {
+        if (asset !== undefined && isSupported3DAsset(asset)) {
           const modelAsset = {
             id: asset.id,
             kind: 'model' as const,
             mimeType: asset.descriptor.mimeType as 'model/gltf-binary' | 'model/gltf+json',
             sha256: asset.sha256,
           };
-          editor.dispatch({
+          const applied = editor.dispatch({
             label: 'Add model',
             commands: [
               { type: 'asset.upsert', payload: { asset: modelAsset } },
@@ -98,23 +117,27 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
               { type: 'object.add', payload: { object } },
             ],
           });
+          if (applied) editor.selectObject(id);
         }
-      } else
+      } else if (
         editor.dispatch({
           label: `Add ${input.kind}`,
           commands: [{ type: 'object.add', payload: { object } }],
-        });
-      editor.selectObject(id);
+        })
+      )
+        editor.selectObject(id);
     },
     [assets, editor],
   );
   const removeSelected = useCallback(() => {
     if (editor.selectedObjectId === undefined) return;
-    editor.dispatch({
-      label: 'Delete object',
-      commands: [{ type: 'object.remove', payload: { objectId: editor.selectedObjectId } }],
-    });
-    editor.selectObject(undefined);
+    if (
+      editor.dispatch({
+        label: 'Delete object',
+        commands: [{ type: 'object.remove', payload: { objectId: editor.selectedObjectId } }],
+      })
+    )
+      editor.selectObject(undefined);
   }, [editor]);
   const close = useCallback(() => {
     saveNow();
@@ -125,7 +148,12 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
     [dispatch],
   );
   return (
-    <div className="three-d-studio-overlay">
+    <div
+      className="three-d-studio-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="JOY 3D Studio"
+    >
       <header className="three-d-studio-topbar">
         <button type="button" onClick={close}>
           Back to Editor
@@ -154,6 +182,7 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
         <main className="three-d-studio-center">
           <ThreeDStudioCanvas
             document={editor.document}
+            assets={assets}
             selectedObjectId={editor.selectedObjectId}
             onSelect={editor.selectObject}
           />

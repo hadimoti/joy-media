@@ -20,6 +20,20 @@ export type Scene3DCommand =
       readonly payload: { readonly objectId: string; readonly parentId?: string };
     }
   | {
+      readonly type: 'object.setLight';
+      readonly payload: {
+        readonly objectId: string;
+        readonly light: NonNullable<Scene3DObject['light']>;
+      };
+    }
+  | {
+      readonly type: 'object.setCamera';
+      readonly payload: {
+        readonly objectId: string;
+        readonly camera: NonNullable<Scene3DObject['camera']>;
+      };
+    }
+  | {
       readonly type: 'object.setMaterial';
       readonly payload: { readonly objectId: string; readonly materialId?: string };
     }
@@ -148,6 +162,36 @@ function applyScene3DCommandUnchecked(
           objectId: object.id,
           ...(object.parentId === undefined ? {} : { parentId: object.parentId }),
         },
+      },
+    };
+  }
+  if (command.type === 'object.setLight') {
+    const object = document.objects[command.payload.objectId];
+    if (object === undefined || object.kind !== 'light')
+      throw new RangeError('light object does not exist');
+    return {
+      document: {
+        ...document,
+        objects: { ...document.objects, [object.id]: { ...object, light: command.payload.light } },
+      },
+      inverse: { type: 'object.setLight', payload: { objectId: object.id, light: object.light! } },
+    };
+  }
+  if (command.type === 'object.setCamera') {
+    const object = document.objects[command.payload.objectId];
+    if (object === undefined || object.kind !== 'camera')
+      throw new RangeError('camera object does not exist');
+    return {
+      document: {
+        ...document,
+        objects: {
+          ...document.objects,
+          [object.id]: { ...object, camera: command.payload.camera },
+        },
+      },
+      inverse: {
+        type: 'object.setCamera',
+        payload: { objectId: object.id, camera: object.camera! },
       },
     };
   }

@@ -40,6 +40,27 @@ export function ThreeDStudioInspector({
     });
   };
   const materials = Object.values(document.materials);
+  const setCamera = (key: 'fieldOfViewDeg' | 'near' | 'far', value: string) => {
+    if (object.camera === undefined) return;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return;
+    onCommand({
+      type: 'object.setCamera',
+      payload: { objectId: object.id, camera: { ...object.camera, [key]: number } },
+    });
+  };
+  const setLight = (key: 'kind' | 'intensity' | 'color', value: string) => {
+    if (object.light === undefined) return;
+    const next = key === 'intensity' ? Number(value) : value;
+    if (key === 'intensity' && !Number.isFinite(next)) return;
+    onCommand({
+      type: 'object.setLight',
+      payload: {
+        objectId: object.id,
+        light: { ...object.light, [key]: next } as NonNullable<typeof object.light>,
+      },
+    });
+  };
   return (
     <aside className="three-d-studio-inspector" aria-label="3D inspector">
       <div className="three-d-studio-section-title">Inspector</div>
@@ -98,6 +119,66 @@ export function ThreeDStudioInspector({
           ))}
         </select>
       </label>
+      {object.kind === 'camera' && object.camera !== undefined && (
+        <fieldset>
+          <legend>Camera</legend>
+          {(['fieldOfViewDeg', 'near', 'far'] as const).map((key) => (
+            <label key={key}>
+              {key}
+              <input
+                type="number"
+                step="0.1"
+                value={object.camera![key]}
+                onChange={(event) => setCamera(key, event.target.value)}
+              />
+            </label>
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              onCommand({ type: 'scene.setActiveCamera', payload: { cameraId: object.id } })
+            }
+          >
+            Use as active camera
+          </button>
+        </fieldset>
+      )}
+      {object.kind === 'light' && object.light !== undefined && (
+        <fieldset>
+          <legend>Light</legend>
+          <label>
+            Kind
+            <select
+              value={object.light.kind}
+              onChange={(event) => setLight('kind', event.target.value)}
+            >
+              {(['ambient', 'directional', 'point', 'spot'] as const).map((kind) => (
+                <option key={kind} value={kind}>
+                  {kind}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Intensity
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={object.light.intensity}
+              onChange={(event) => setLight('intensity', event.target.value)}
+            />
+          </label>
+          <label>
+            Color
+            <input
+              type="text"
+              value={object.light.color}
+              onChange={(event) => setLight('color', event.target.value)}
+            />
+          </label>
+        </fieldset>
+      )}
     </aside>
   );
 }
