@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
-import { describe, expect, it, vi } from 'vitest';
-import { MediaAuthError, MediaAuthService, type MediaAuthHashKey } from './media-auth.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  MediaAuthError,
+  MediaAuthService,
+  mediaAuthHashKeysForDatabase,
+  requireMediaAuthHashKeysFromEnv,
+  type MediaAuthHashKey,
+} from './media-auth.js';
 
 function pool(): Pool {
   const database = newDb();
@@ -39,7 +45,8 @@ async function installSchema(db: Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
     CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, secret_id text, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
     CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, secret_id text, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
-    CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null);
+    CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null, window_start timestamptz, request_count integer not null default 0, updated_at timestamptz);
+    CREATE UNIQUE INDEX IF NOT EXISTS media_otp_rate_limits_key_window_idx ON media_otp_rate_limits (key_hash, window_start);
   `);
 }
 
@@ -50,6 +57,41 @@ function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
 }
 
 describe('MediaAuthService', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('fails closed when durable media auth starts without configured hash keys', () => {
+    const db = pool();
+    expect(() => new MediaAuthService({ pool: db })).toThrow(
+      expect.objectContaining({ code: 'AUTH_HASH_KEYS_REQUIRED' }),
+    );
+    expect(() => requireMediaAuthHashKeysFromEnv(undefined)).toThrow(
+      expect.objectContaining({ code: 'AUTH_HASH_KEYS_REQUIRED' }),
+    );
+    expect(requireMediaAuthHashKeysFromEnv('next:configured-auth-hash-secret')).toEqual([
+      { id: 'next', secret: 'configured-auth-hash-secret' },
+    ]);
+  });
+
+  it('requires configured hash keys when startup has a database URL', () => {
+    expect(mediaAuthHashKeysForDatabase(undefined, undefined)).toBeUndefined();
+    expect(() => mediaAuthHashKeysForDatabase('postgres://joy-media', undefined)).toThrow(
+      expect.objectContaining({ code: 'AUTH_HASH_KEYS_REQUIRED' }),
+    );
+
+    vi.stubEnv('JOY_MEDIA_DATABASE_URL', 'postgres://joy-media');
+    vi.stubEnv('JOY_MEDIA_AUTH_HASH_KEYS', '');
+    expect(() => mediaAuthHashKeysForDatabase()).toThrow(
+      expect.objectContaining({ code: 'AUTH_HASH_KEYS_REQUIRED' }),
+    );
+
+    vi.stubEnv('JOY_MEDIA_AUTH_HASH_KEYS', 'current:configured-auth-hash-secret');
+    expect(mediaAuthHashKeysForDatabase()).toEqual([
+      { id: 'current', secret: 'configured-auth-hash-secret' },
+    ]);
+  });
+
   it('sends and verifies an OTP for an allow-listed gmail, then authenticates the session', async () => {
     const { auth, mailer } = await service();
     await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
@@ -131,12 +173,65 @@ describe('MediaAuthService', () => {
       restarted.service.requestOtp('user@example.com', 'gmail', request),
     ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
 
-    const rateRows = await db.query<{ key_hash: string; secret_id: string }>(
-      'SELECT key_hash, secret_id FROM media_otp_rate_limits',
-    );
-    expect(rateRows.rows).toHaveLength(3);
+    const rateRows = await db.query<{
+      key_hash: string;
+      secret_id: string;
+      request_count: number;
+    }>('SELECT key_hash, secret_id, request_count FROM media_otp_rate_limits');
+    expect(rateRows.rows).toHaveLength(1);
+    expect(rateRows.rows[0]?.request_count).toBe(4);
     expect(rateRows.rows.every((row) => row.secret_id === 'k2')).toBe(true);
     expect(JSON.stringify(rateRows.rows)).not.toContain('5.6.7.8');
+  });
+
+  it('atomically caps concurrent OTP requests to one IP window', async () => {
+    const { auth, db, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = { socket: { remoteAddress: '9.9.9.9' } } as never;
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 12 }, () => auth.requestOtp('user@example.com', 'gmail', request)),
+    );
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(3);
+    expect(
+      results.filter(
+        (result) => result.status === 'rejected' && result.reason instanceof MediaAuthError,
+      ),
+    ).toHaveLength(9);
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+    await expect(
+      db.query<{ request_count: number }>('SELECT request_count FROM media_otp_rate_limits'),
+    ).resolves.toMatchObject({ rows: [{ request_count: 4 }] });
+  });
+
+  it('carries active legacy throttle rows into the atomic OTP window', async () => {
+    const { auth, db, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = { socket: { remoteAddress: '2.2.2.2' } } as never;
+
+    await auth.requestOtp('user@example.com', 'gmail', request);
+    const bucket = await db.query<{ key_hash: string }>(
+      'SELECT key_hash FROM media_otp_rate_limits WHERE window_start IS NOT NULL',
+    );
+    const keyHash = bucket.rows[0]?.key_hash;
+    if (keyHash === undefined) throw new Error('missing rate-limit bucket');
+    await db.query('DELETE FROM media_otp_rate_limits');
+    await db.query(
+      `INSERT INTO media_otp_rate_limits (key_hash, secret_id, created_at)
+       VALUES ($1, $2, $3), ($1, $2, $4), ($1, $2, $5)`,
+      [keyHash, 'k2', new Date(), new Date(), new Date()],
+    );
+
+    await expect(auth.requestOtp('user@example.com', 'gmail', request)).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+    });
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(1);
+    await expect(
+      db.query<{ request_count: number }>(
+        'SELECT request_count FROM media_otp_rate_limits WHERE window_start IS NOT NULL',
+      ),
+    ).resolves.toMatchObject({ rows: [{ request_count: 4 }] });
   });
 
   it('stores keyed OTP/session digests with key ids instead of raw codes or tokens', async () => {

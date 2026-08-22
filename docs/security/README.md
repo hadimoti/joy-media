@@ -13,8 +13,10 @@ worker pairing codes, session tokens, filesystem paths, or object-store credenti
   not confirm allow-list membership.
 - OTP and session digests are HMAC-SHA-256 values with explicit key ids. New rows use the active key;
   previous-key and legacy rows are accepted only so they can expire or migrate after successful use.
+- Durable media auth requires `JOY_MEDIA_AUTH_HASH_KEYS`; the PostgreSQL-backed API fails closed at
+  startup when signing keys are not configured.
 - OTP request throttles are stored in PostgreSQL/shared durable storage and keyed by a hashed client
-  address, not by raw IP text.
+  address plus a fixed time window, not by raw IP text.
 - Browser requests authenticate with bearer sessions. Project, asset, worker-owner, provider, and
   production-run APIs use the authenticated actor from the server-side auth boundary rather than a
   browser-supplied authority claim.
@@ -46,7 +48,8 @@ worker pairing codes, session tokens, filesystem paths, or object-store credenti
 
 ## Operational Notes
 
-- Rotate media auth HMAC keys by deploying the new key first and retaining the previous key until old
+- Configure `JOY_MEDIA_AUTH_HASH_KEYS` as `currentKeyId:secret,previousKeyId:secret` when durable
+  auth is enabled. Rotate by deploying the new key first and retaining the previous key until old
   OTPs expire and active sessions have either migrated, expired, or been revoked.
 - Treat the database, object store, provider ledgers, and Worker PCs as privileged infrastructure.
 - Keep CSRF exposure low by avoiding cookie authentication for the API; bearer sessions are supplied

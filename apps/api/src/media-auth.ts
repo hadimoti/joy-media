@@ -80,6 +80,26 @@ export function mediaAuthHashKeysFromEnv(
   });
 }
 
+export function requireMediaAuthHashKeysFromEnv(
+  value = process.env.JOY_MEDIA_AUTH_HASH_KEYS,
+): readonly MediaAuthHashKey[] {
+  const keys = mediaAuthHashKeysFromEnv(value);
+  if (keys === undefined) {
+    throw new MediaAuthError(
+      'AUTH_HASH_KEYS_REQUIRED',
+      'JOY_MEDIA_AUTH_HASH_KEYS is required when durable media auth is enabled',
+    );
+  }
+  return keys;
+}
+
+export function mediaAuthHashKeysForDatabase(
+  databaseUrl = process.env.JOY_MEDIA_DATABASE_URL,
+  value = process.env.JOY_MEDIA_AUTH_HASH_KEYS,
+): readonly MediaAuthHashKey[] | undefined {
+  return databaseUrl === undefined ? undefined : requireMediaAuthHashKeysFromEnv(value);
+}
+
 export interface MediaSessionProfile {
   readonly contact: string;
   readonly method: MediaAuthMethod;
@@ -355,21 +375,37 @@ export class MediaAuthService implements MediaAuthApi {
   private async checkOtpRateLimit(key: string): Promise<void> {
     const now = new Date();
     const keyHash = this.rateLimitHash(key);
-    await this.pool.query('DELETE FROM media_otp_rate_limits WHERE created_at <= $1', [
-      new Date(now.getTime() - OTP_RATE_LIMIT_WINDOW_MS),
-    ]);
-    const active = await this.pool.query<{ count: string }>(
+    const windowStart = rateLimitWindowStart(now);
+    await this.pool.query(
+      `DELETE FROM media_otp_rate_limits
+       WHERE window_start < $1
+          OR (window_start IS NULL AND created_at <= $2)`,
+      [windowStart, new Date(now.getTime() - OTP_RATE_LIMIT_WINDOW_MS)],
+    );
+    const legacyActive = await this.pool.query<{ count: string }>(
       `SELECT count(*)::text AS count FROM media_otp_rate_limits
-       WHERE key_hash = $1 AND created_at > $2`,
+       WHERE key_hash = $1 AND window_start IS NULL AND created_at > $2`,
       [keyHash, new Date(now.getTime() - OTP_RATE_LIMIT_WINDOW_MS)],
     );
-    if (Number(active.rows[0]?.count ?? '0') >= OTP_RATE_LIMIT_MAX) {
+    const initialRequestCount = Math.min(
+      Number(legacyActive.rows[0]?.count ?? '0') + 1,
+      OTP_RATE_LIMIT_MAX + 1,
+    );
+    const updated = await this.pool.query<{ request_count: number }>(
+      `INSERT INTO media_otp_rate_limits
+         (key_hash, window_start, request_count, secret_id, created_at, updated_at)
+       VALUES ($1, $2, $5, $3, $4, $4)
+       ON CONFLICT (key_hash, window_start)
+       DO UPDATE SET
+         request_count = LEAST(media_otp_rate_limits.request_count + 1, $6 + 1),
+         secret_id = EXCLUDED.secret_id,
+         updated_at = EXCLUDED.updated_at
+       RETURNING request_count`,
+      [keyHash, windowStart, this.currentKey().id, now, initialRequestCount, OTP_RATE_LIMIT_MAX],
+    );
+    if ((updated.rows[0]?.request_count ?? 0) > OTP_RATE_LIMIT_MAX) {
       throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
     }
-    await this.pool.query(
-      'INSERT INTO media_otp_rate_limits (key_hash, secret_id, created_at) VALUES ($1, $2, $3)',
-      [keyHash, this.currentKey().id, now],
-    );
   }
 
   private async matchActiveOtp(
@@ -558,6 +594,10 @@ function hmacDigest(secret: string, value: string): string {
   return createHmac('sha256', secret).update(value).digest('base64url');
 }
 
+function rateLimitWindowStart(now: Date): Date {
+  return new Date(Math.floor(now.getTime() / OTP_RATE_LIMIT_WINDOW_MS) * OTP_RATE_LIMIT_WINDOW_MS);
+}
+
 function safeEqual(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left);
   const rightBytes = Buffer.from(right);
@@ -567,12 +607,11 @@ function safeEqual(left: string, right: string): boolean {
 function normalizeHashKeys(
   keys: readonly MediaAuthHashKey[] | undefined,
 ): readonly MediaAuthHashKey[] {
-  const resolved =
-    keys === undefined || keys.length === 0
-      ? [{ id: 'local-dev', secret: 'joy-media-local-development-auth-hash-key' }]
-      : keys;
+  if (keys === undefined || keys.length === 0) {
+    throw new MediaAuthError('AUTH_HASH_KEYS_REQUIRED', 'media auth hash keys are required');
+  }
   const seen = new Set<string>();
-  return resolved.map((key) => {
+  return keys.map((key) => {
     const id = key.id.trim();
     const secret = key.secret.trim();
     if (!HASH_KEY_ID.test(id) || secret.length < 16 || seen.has(id)) {

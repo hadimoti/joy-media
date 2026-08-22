@@ -62,6 +62,10 @@ CREATE INDEX IF NOT EXISTS media_otp_codes_contact_idx ON media_otp_codes (conta
 CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, secret_id text, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
 ALTER TABLE media_sessions ADD COLUMN IF NOT EXISTS secret_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS media_sessions_token_idx ON media_sessions (token_hash);
-CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null);
-CREATE INDEX IF NOT EXISTS media_otp_rate_limits_key_created_idx ON media_otp_rate_limits (key_hash, created_at);
+CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null, window_start timestamptz, request_count integer NOT NULL DEFAULT 0, updated_at timestamptz);
+ALTER TABLE media_otp_rate_limits ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ALTER TABLE media_otp_rate_limits ADD COLUMN IF NOT EXISTS window_start timestamptz;
+ALTER TABLE media_otp_rate_limits ADD COLUMN IF NOT EXISTS request_count integer NOT NULL DEFAULT 0;
+ALTER TABLE media_otp_rate_limits ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+CREATE UNIQUE INDEX IF NOT EXISTS media_otp_rate_limits_key_window_idx ON media_otp_rate_limits (key_hash, window_start);
 `;

@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
-import { DisabledMediaAuth, MediaAuthService, mediaAuthHashKeysFromEnv } from './media-auth.js';
+import { DisabledMediaAuth, MediaAuthService, mediaAuthHashKeysForDatabase } from './media-auth.js';
 import { MediaMailer } from './media-mailer.js';
 import { MediaTelegramSender } from './media-telegram.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
@@ -26,7 +26,7 @@ async function start(): Promise<void> {
   const providerApprovals = new ProviderApprovalService();
   const mailer = createMailer();
   const telegram = createTelegramSender();
-  const mediaAuthHashKeys = mediaAuthHashKeysFromEnv();
+  const mediaAuthHashKeys = mediaAuthHashKeysForDatabase(databaseUrl);
   const mediaAuth =
     pool === undefined
       ? new DisabledMediaAuth()
