@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { emptyScene3D, IDENTITY_3D_TRANSFORM, migrateScene3DDocument, parseScene3DDocument } from './scene.js';
+import {
+  emptyScene3D,
+  IDENTITY_3D_TRANSFORM,
+  migrateScene3DDocument,
+  parseScene3DDocument,
+} from './scene.js';
 
 describe('scene3d document', () => {
   it('creates a stable JSON-round-trippable empty document', () => {

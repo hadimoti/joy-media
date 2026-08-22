@@ -119,7 +119,8 @@ function applyScene3DCommandUnchecked(
     const nextObject =
       command.payload.materialId === undefined
         ? (() => {
-            const { materialId: _previousMaterialId, ...objectWithoutMaterial } = object;
+            const objectWithoutMaterial = { ...object };
+            delete objectWithoutMaterial.materialId;
             return objectWithoutMaterial;
           })()
         : { ...object, materialId: command.payload.materialId };
@@ -174,7 +175,8 @@ function applyScene3DCommandUnchecked(
   const nextDocument =
     cameraId === undefined
       ? (() => {
-          const { activeCameraId: _previousCameraId, ...documentWithoutCamera } = document;
+          const documentWithoutCamera = { ...document };
+          delete documentWithoutCamera.activeCameraId;
           return documentWithoutCamera;
         })()
       : { ...document, activeCameraId: cameraId };

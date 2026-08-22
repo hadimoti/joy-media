@@ -1,3 +1,5 @@
+import { validateScene3DDocument } from './validation.js';
+
 export const SCENE3D_SCHEMA_VERSION = 1 as const;
 
 export type Scene3DObjectKind = 'empty' | 'model' | 'primitive' | 'light' | 'camera';
@@ -85,11 +87,23 @@ export function emptyScene3D(id: string, name = 'Untitled 3D scene'): Scene3DDoc
 /** Upgrade the short-lived v0 JSON shape used by the initial 3D spike. */
 export function migrateScene3DDocument(input: unknown): Scene3DDocumentV1 {
   if (!isRecord(input)) throw new TypeError('scene JSON must be an object');
-  if (input.schemaVersion === SCENE3D_SCHEMA_VERSION) return input as unknown as Scene3DDocumentV1;
+  if (input.schemaVersion === SCENE3D_SCHEMA_VERSION) {
+    const errors = validateScene3DDocument(input);
+    if (errors.length > 0) throw new RangeError(`scene JSON is invalid: ${errors[0]!.message}`);
+    return input as unknown as Scene3DDocumentV1;
+  }
   if (input.schemaVersion !== 0) throw new TypeError('unsupported scene schema version');
   const scene = emptyScene3D(
-    typeof input.sceneId === 'string' ? input.sceneId : typeof input.id === 'string' ? input.id : 'scene-migrated',
-    typeof input.title === 'string' ? input.title : typeof input.name === 'string' ? input.name : undefined,
+    typeof input.sceneId === 'string'
+      ? input.sceneId
+      : typeof input.id === 'string'
+        ? input.id
+        : 'scene-migrated',
+    typeof input.title === 'string'
+      ? input.title
+      : typeof input.name === 'string'
+        ? input.name
+        : undefined,
   );
   const legacyObjects = isRecord(input.objects) ? input.objects : {};
   const objects: Record<string, Scene3DObject> = {};
@@ -99,23 +113,56 @@ export function migrateScene3DDocument(input: unknown): Scene3DDocumentV1 {
     objects[id] = {
       id,
       name: typeof value.name === 'string' ? value.name : id,
-      kind: value.kind === 'model' || value.kind === 'primitive' || value.kind === 'light' || value.kind === 'camera' ? value.kind : 'empty',
+      kind:
+        value.kind === 'model' ||
+        value.kind === 'primitive' ||
+        value.kind === 'light' ||
+        value.kind === 'camera'
+          ? value.kind
+          : 'empty',
       transform: normalizeTransform(transform),
       ...(typeof value.parentId === 'string' ? { parentId: value.parentId } : {}),
       ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
+      ...(typeof value.materialId === 'string' ? { materialId: value.materialId } : {}),
+      ...(value.primitive !== undefined ? { primitive: value.primitive as Scene3DPrimitive } : {}),
+      ...(isRecord(value.light)
+        ? { light: value.light as NonNullable<Scene3DObject['light']> }
+        : {}),
+      ...(isRecord(value.camera)
+        ? { camera: value.camera as NonNullable<Scene3DObject['camera']> }
+        : {}),
     };
   }
-  const durationUs = typeof input.durationUs === 'number' && Number.isSafeInteger(input.durationUs) && input.durationUs >= 0
-    ? input.durationUs
-    : scene.durationUs;
-  return { ...scene, durationUs, objects };
+  const durationUs =
+    typeof input.durationUs === 'number' &&
+    Number.isSafeInteger(input.durationUs) &&
+    input.durationUs >= 0
+      ? input.durationUs
+      : scene.durationUs;
+  const migrated: Scene3DDocumentV1 = {
+    ...scene,
+    durationUs,
+    objects,
+    ...(isRecord(input.assets) ? { assets: input.assets as Scene3DDocumentV1['assets'] } : {}),
+    ...(isRecord(input.materials)
+      ? { materials: input.materials as Scene3DDocumentV1['materials'] }
+      : {}),
+    ...(isRecord(input.environment)
+      ? { environment: input.environment as unknown as Scene3DDocumentV1['environment'] }
+      : {}),
+    ...(typeof input.activeCameraId === 'string' ? { activeCameraId: input.activeCameraId } : {}),
+  };
+  const errors = validateScene3DDocument(migrated);
+  if (errors.length > 0)
+    throw new RangeError(`migrated scene JSON is invalid: ${errors[0]!.message}`);
+  return migrated;
 }
 
 export function parseScene3DDocument(json: string): Scene3DDocumentV1 {
   return migrateScene3DDocument(JSON.parse(json) as unknown);
 }
 
-function normalizeTransform(value: Record<string, any>): Scene3DTransform {
+function normalizeTransform(value: unknown): Scene3DTransform {
   const vector = (candidate: unknown, fallback: Scene3DVec3): Scene3DVec3 => {
     if (!isRecord(candidate)) return fallback;
     return {
@@ -124,13 +171,14 @@ function normalizeTransform(value: Record<string, any>): Scene3DTransform {
       z: typeof candidate.z === 'number' && Number.isFinite(candidate.z) ? candidate.z : fallback.z,
     };
   };
+  const record = isRecord(value) ? value : {};
   return {
-    position: vector(value.position, IDENTITY_3D_TRANSFORM.position),
-    rotation: vector(value.rotation, IDENTITY_3D_TRANSFORM.rotation),
-    scale: vector(value.scale, IDENTITY_3D_TRANSFORM.scale),
+    position: vector(record.position, IDENTITY_3D_TRANSFORM.position),
+    rotation: vector(record.rotation, IDENTITY_3D_TRANSFORM.rotation),
+    scale: vector(record.scale, IDENTITY_3D_TRANSFORM.scale),
   };
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
