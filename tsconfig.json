@@ -5,6 +5,7 @@
     { "path": "packages/agent-tools" },
     { "path": "packages/captions-core" },
     { "path": "packages/motion-core" },
+    { "path": "packages/scene3d-core" },
     { "path": "packages/camera-core" },
     { "path": "packages/expression-core" },
     { "path": "packages/provider-sdk" },

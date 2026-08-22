@@ -466,6 +466,8 @@ importers:
         specifier: ^8.6.0
         version: 8.19.0
 
+  packages/scene3d-core: {}
+
   packages/test-fixtures:
     dependencies:
       '@joy-media/project-schema':
