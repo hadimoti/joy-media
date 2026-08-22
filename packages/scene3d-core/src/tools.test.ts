@@ -7,6 +7,7 @@ import {
   IDENTITY_3D_TRANSFORM,
   inspectScene3DTool,
   Scene3DApprovalLedger,
+  scene3DApprovalSignature,
   scene3DToolDiffDigest,
   scene3DToolInputDigest,
 } from './index.js';
@@ -64,13 +65,18 @@ describe('scene3d structured tools', () => {
       toolName: 'scene3d.add' as const,
       inputDigest: preview.inputDigest!,
       diffDigest: preview.diffDigest!,
+      signature: '',
       actorId: 'actor',
       projectId: 'project',
       sceneId: 'scene',
       baseRevision: 'r1',
       expiresAt: 1000,
     };
-    const result = applyApprovedScene3DTool(session(), 'scene3d.add', input, approval, 100);
+    const signedApproval = {
+      ...approval,
+      signature: scene3DApprovalSignature(approval, 'secret'),
+    };
+    const result = applyApprovedScene3DTool(session(), 'scene3d.add', input, signedApproval, 100);
     expect(result.document?.objects.box).toBeDefined();
     expect(result.inverse?.commands).toHaveLength(1);
     expect(
@@ -83,6 +89,7 @@ describe('scene3d structured tools', () => {
           toolName: 'scene3d.add',
           inputDigest: preview.inputDigest!,
           diffDigest: preview.diffDigest!,
+          signature: signedApproval.signature,
           actorId: 'wrong',
           projectId: 'project',
           sceneId: 'scene',
@@ -142,18 +149,23 @@ describe('scene3d structured tools', () => {
       toolName: 'scene3d.add' as const,
       inputDigest: scene3DToolInputDigest('scene3d.add', input),
       diffDigest: scene3DToolDiffDigest(preview.diff!),
+      signature: '',
       actorId: 'actor',
       projectId: 'project',
       sceneId: 'scene',
       baseRevision: 'r1',
       expiresAt: 1000,
     };
+    const signedApproval = {
+      ...approval,
+      signature: scene3DApprovalSignature(approval, 'secret'),
+    };
     const ledger = new Scene3DApprovalLedger();
-    expect(ledger.apply(session(), 'scene3d.add', input, approval, 100).document).toBeDefined();
-    expect(ledger.apply(session(), 'scene3d.add', input, approval, 100).error).toContain(
+    expect(ledger.apply(session(), 'scene3d.add', input, signedApproval, 100).document).toBeDefined();
+    expect(ledger.apply(session(), 'scene3d.add', input, signedApproval, 100).error).toContain(
       'consumed',
     );
-    expect(ledger.apply(session(), 'scene3d.remove', input, approval, 100).error).toContain(
+    expect(ledger.apply(session(), 'scene3d.remove', input, signedApproval, 100).error).toContain(
       'consumed',
     );
   });

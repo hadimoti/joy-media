@@ -24,6 +24,8 @@ export interface Scene3DApprovalBinding {
   readonly toolName: Scene3DWriteTool;
   readonly inputDigest: string;
   readonly diffDigest: string;
+  /** Secret-bound receipt signature issued by the host approval service. */
+  readonly signature: string;
   readonly actorId: string;
   readonly projectId: string;
   readonly sceneId: string;
@@ -57,6 +59,19 @@ export interface Scene3DToolApplyResult {
   readonly inverse?: Scene3DTransaction;
   readonly diff?: Scene3DToolDiff;
   readonly error?: string;
+}
+
+/** Durable approval state seam required by the host execution boundary. */
+export interface Scene3DApprovalStore {
+  hasConsumed(approvalId: string): boolean;
+  release(approvalId: string): void;
+  apply(
+    session: Scene3DToolSession,
+    name: Scene3DWriteTool,
+    input: Readonly<Record<string, unknown>>,
+    approval: Scene3DApprovalBinding,
+    now?: number,
+  ): Scene3DToolApplyResult;
 }
 
 export const SCENE3D_TOOL_DEFINITIONS: readonly Scene3DToolDefinition[] = [
@@ -262,7 +277,7 @@ export function applyApprovedScene3DTool(
 }
 
 /** Stateful guard for hosts that must reject a retried approval. */
-export class Scene3DApprovalLedger {
+export class Scene3DApprovalLedger implements Scene3DApprovalStore {
   private readonly consumed = new Set<string>();
 
   hasConsumed(approvalId: string): boolean {
@@ -297,6 +312,33 @@ export function scene3DToolInputDigest(
 
 export function scene3DToolDiffDigest(diff: Scene3DToolDiff): string {
   return fingerprint(JSON.stringify(diff));
+}
+
+/** Creates the host-bound receipt signature for an approval binding. */
+export function scene3DApprovalSignature(
+  approval: Omit<Scene3DApprovalBinding, 'signature'>,
+  secret: string,
+): string {
+  if (secret.length === 0) throw new Error('scene3d approval secret must not be empty');
+  const canonical = JSON.stringify({
+    approvalId: approval.approvalId,
+    toolName: approval.toolName,
+    inputDigest: approval.inputDigest,
+    diffDigest: approval.diffDigest,
+    actorId: approval.actorId,
+    projectId: approval.projectId,
+    sceneId: approval.sceneId,
+    baseRevision: approval.baseRevision,
+    expiresAt: approval.expiresAt,
+  });
+  return fingerprint(`${secret}:${canonical}`);
+}
+
+export function verifyScene3DApprovalSignature(
+  approval: Scene3DApprovalBinding,
+  secret: string,
+): boolean {
+  return approval.signature === scene3DApprovalSignature(approval, secret);
 }
 
 function diffForScene(before: Scene3DDocumentV1, after: Scene3DDocumentV1): Scene3DToolDiff {

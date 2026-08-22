@@ -6,11 +6,13 @@ import {
   createAuditTrail,
 } from './index.js';
 import {
+  Scene3DApprovalLedger,
   dryRunScene3DTool,
   emptyScene3D,
   IDENTITY_3D_TRANSFORM,
   scene3DToolDiffDigest,
   scene3DToolInputDigest,
+  scene3DApprovalSignature,
 } from '@joy-media/scene3d-core';
 
 function request() {
@@ -31,6 +33,17 @@ function request() {
     },
   };
   const preview = dryRunScene3DTool(session, 'scene3d.add', input);
+  const approval = {
+    approvalId: 'approval-1',
+    toolName: 'scene3d.add' as const,
+    inputDigest: scene3DToolInputDigest('scene3d.add', input),
+    diffDigest: scene3DToolDiffDigest(preview.diff!),
+    actorId: 'actor',
+    projectId: 'project',
+    sceneId: 'scene',
+    baseRevision: 'r1',
+    expiresAt: 1000,
+  };
   return {
     planId: 'plan-1',
     stepId: 'step-1',
@@ -38,17 +51,7 @@ function request() {
     session,
     name: 'scene3d.add' as const,
     input,
-    approval: {
-      approvalId: 'approval-1',
-      toolName: 'scene3d.add' as const,
-      inputDigest: scene3DToolInputDigest('scene3d.add', input),
-      diffDigest: scene3DToolDiffDigest(preview.diff!),
-      actorId: 'actor',
-      projectId: 'project',
-      sceneId: 'scene',
-      baseRevision: 'r1',
-      expiresAt: 1000,
-    },
+    approval: { ...approval, signature: scene3DApprovalSignature(approval, 'secret') },
   };
 }
 
@@ -59,6 +62,8 @@ describe('Scene3DPlanExecutor', () => {
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
+      approvalSecret: 'secret',
+      approvalStore: new Scene3DApprovalLedger(),
       idempotency: createIdempotencyStore(),
       audit,
       now: () => 100,
@@ -68,6 +73,7 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           saved.push(value);
+          return { accepted: true };
         },
       },
     });
@@ -81,6 +87,9 @@ describe('Scene3DPlanExecutor', () => {
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
+      approvalSecret: 'secret',
+      approvalStore: new Scene3DApprovalLedger(),
+      idempotency: createIdempotencyStore(),
       now: () => 100,
     });
     const first = executor.execute({
@@ -88,6 +97,7 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           saved.push(value);
+          return { accepted: true };
         },
       },
     });
@@ -96,6 +106,7 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           saved.push(value);
+          return { accepted: true };
         },
       },
     });
@@ -108,6 +119,9 @@ describe('Scene3DPlanExecutor', () => {
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
+      approvalSecret: 'secret',
+      approvalStore: new Scene3DApprovalLedger(),
+      idempotency: createIdempotencyStore(),
       now: () => 100,
     });
     const rejected = executor.execute({
@@ -120,5 +134,54 @@ describe('Scene3DPlanExecutor', () => {
       commit: { commit: () => ({ accepted: true }) },
     });
     expect(accepted.status).toBe('success');
+  });
+
+  it('records thrown commit failures and allows a retry', () => {
+    const executor = new Scene3DPlanExecutor({
+      registry: createToolRegistry(),
+      authorize: () => ({ allowed: true }),
+      approvalSecret: 'secret',
+      approvalStore: new Scene3DApprovalLedger(),
+      idempotency: createIdempotencyStore(),
+      now: () => 100,
+    });
+    expect(
+      executor.execute({
+        ...request(),
+        commit: {
+          commit: () => {
+            throw new Error('storage unavailable');
+          },
+        },
+      }).status,
+    ).toBe('failed');
+    expect(
+      executor.execute({ ...request(), commit: { commit: () => ({ accepted: true }) } }).status,
+    ).toBe('success');
+  });
+
+  it('rejects a caller-forged approval receipt before committing', () => {
+    const saved: unknown[] = [];
+    const executor = new Scene3DPlanExecutor({
+      registry: createToolRegistry(),
+      authorize: () => ({ allowed: true }),
+      approvalSecret: 'secret',
+      approvalStore: new Scene3DApprovalLedger(),
+      idempotency: createIdempotencyStore(),
+      now: () => 100,
+    });
+    const result = executor.execute({
+      ...request(),
+      approval: { ...request().approval, signature: 'forged' },
+      commit: {
+        commit: () => {
+          saved.push(true);
+          return { accepted: true };
+        },
+      },
+    });
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('signature');
+    expect(saved).toHaveLength(0);
   });
 });

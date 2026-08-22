@@ -115,6 +115,13 @@ export class Scene3DMcpServer {
         id: request.id,
         error: { code: -32602, message: 'tool name is required' },
       };
+    const definition = this.gateway.listTools().find((tool) => tool.name === name);
+    if (definition === undefined)
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32602, message: 'tool is outside the scene3d allow-list' },
+      };
     const input = params.arguments;
     if (input === null || typeof input !== 'object' || Array.isArray(input))
       return {
@@ -122,21 +129,23 @@ export class Scene3DMcpServer {
         id: request.id,
         error: { code: -32602, message: 'tool arguments must be an object' },
       };
-    if (
-      name.startsWith('scene3d.') &&
-      ['scene3d.summary', 'scene3d.assets', 'scene3d.scene', 'scene3d.selection'].includes(name)
-    )
+    const schemaError = validateMcpInput(definition.inputSchema, input as Readonly<Record<string, unknown>>);
+    if (schemaError !== undefined)
+      return { jsonrpc: '2.0', id: request.id, error: { code: -32602, message: schemaError } };
+    if (definition.category === 'query')
       return {
         jsonrpc: '2.0',
         id: request.id,
         result: { content: [{ type: 'json', json: this.gateway.read(name as Scene3DReadTool) }] },
       };
-    if (!name.startsWith('scene3d.'))
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: { code: -32602, message: 'tool is outside the scene3d allow-list' },
-      };
+    for (const field of ['planId', 'stepId', 'idempotencyKey']) {
+      if (typeof params[field] !== 'string' || params[field].length === 0)
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32602, message: `${field} is required for scene3d writes` },
+        };
+    }
     const approval = params.approval;
     if (approval === null || typeof approval !== 'object' || Array.isArray(approval))
       return {
@@ -158,4 +167,41 @@ export class Scene3DMcpServer {
       result: { content: [{ type: 'json', json: result }] },
     };
   }
+}
+
+function validateMcpInput(
+  schema: Readonly<Record<string, unknown>>,
+  input: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const required = schema.required;
+  if (Array.isArray(required)) {
+    for (const field of required) {
+      if (typeof field === 'string' && !(field in input)) return `missing required input: ${field}`;
+    }
+  }
+  if (schema.additionalProperties === false) {
+    const properties = schema.properties;
+    const allowed =
+      properties !== null && typeof properties === 'object' && !Array.isArray(properties)
+        ? new Set(Object.keys(properties as Record<string, unknown>))
+        : new Set<string>();
+    const unknown = Object.keys(input).find((key) => !allowed.has(key));
+    if (unknown !== undefined) return `unknown input property: ${unknown}`;
+  }
+  const properties = schema.properties;
+  if (properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
+    for (const [key, value] of Object.entries(input)) {
+      const propertySchema = (properties as Record<string, unknown>)[key];
+      if (propertySchema === null || typeof propertySchema !== 'object' || Array.isArray(propertySchema))
+        continue;
+      const expectedType = (propertySchema as Record<string, unknown>).type;
+      if (expectedType === 'string' && typeof value !== 'string') return `${key} must be a string`;
+      if (expectedType === 'object' && (value === null || typeof value !== 'object' || Array.isArray(value)))
+        return `${key} must be an object`;
+      const minLength = (propertySchema as Record<string, unknown>).minLength;
+      if (typeof minLength === 'number' && typeof value === 'string' && value.length < minLength)
+        return `${key} must be a non-empty string`;
+    }
+  }
+  return undefined;
 }

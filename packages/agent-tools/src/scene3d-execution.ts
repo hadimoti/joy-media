@@ -1,5 +1,6 @@
 import {
-  Scene3DApprovalLedger,
+  verifyScene3DApprovalSignature,
+  type Scene3DApprovalStore,
   type Scene3DApprovalBinding,
   type Scene3DDocumentV1,
   type Scene3DToolDiff,
@@ -11,7 +12,7 @@ import type { AgentPlanStep } from './plan.js';
 import type { ApprovalEngine } from './approval.js';
 import type { EditorContext } from './context.js';
 import { createAuditTrail, type AuditTrail } from './audit.js';
-import { createIdempotencyStore, type IdempotencyStore } from './idempotency.js';
+import type { IdempotencyTracker } from './idempotency.js';
 import type { ToolRegistry } from './registry.js';
 import type { ToolResult } from './types.js';
 
@@ -21,7 +22,7 @@ export interface Scene3DCommit {
     readonly revision: string;
     readonly expectedRevision: string;
     readonly diff: Scene3DToolDiff;
-  }) => void | { readonly accepted: boolean; readonly error?: string };
+  }) => { readonly accepted: boolean; readonly error?: string };
 }
 
 export interface Scene3DExecutionRequest {
@@ -54,8 +55,13 @@ export interface Scene3DPlanExecutorOptions {
     readonly allowed: boolean;
     readonly reason?: string;
   };
+  /** Secret used to verify host-issued approval receipts. */
+  readonly approvalSecret: string;
+  /** Host-owned durable approval store; in-memory implementations are suitable only for tests. */
+  readonly approvalStore: Scene3DApprovalStore;
   readonly approvalEngine?: ApprovalEngine;
-  readonly idempotency?: IdempotencyStore;
+  /** Host-owned durable idempotency store. */
+  readonly idempotency: IdempotencyTracker;
   readonly audit?: AuditTrail;
   readonly now?: () => number;
 }
@@ -65,16 +71,21 @@ export class Scene3DPlanExecutor {
   private readonly registry: ToolRegistry;
   private readonly authorize: Scene3DPlanExecutorOptions['authorize'];
   private readonly approvalEngine: ApprovalEngine | undefined;
-  private readonly idempotency: IdempotencyStore;
+  private readonly idempotency: IdempotencyTracker;
   private readonly audit: AuditTrail;
-  private readonly approvals = new Scene3DApprovalLedger();
+  private readonly approvals: Scene3DApprovalStore;
+  private readonly approvalSecret: string;
   private readonly now: () => number;
 
   constructor(options: Scene3DPlanExecutorOptions) {
     this.registry = options.registry;
     this.authorize = options.authorize;
+    if (options.approvalSecret.length === 0)
+      throw new Error('scene3d approval secret must not be empty');
+    this.approvalSecret = options.approvalSecret;
+    this.approvals = options.approvalStore;
     this.approvalEngine = options.approvalEngine;
-    this.idempotency = options.idempotency ?? createIdempotencyStore();
+    this.idempotency = options.idempotency;
     this.audit = options.audit ?? createAuditTrail();
     this.now = options.now ?? Date.now;
   }
@@ -103,6 +114,8 @@ export class Scene3DPlanExecutor {
       );
       if (decision.decision === 'blocked') return this.fail(request, decision.reason, 'blocked');
     }
+    if (!verifyScene3DApprovalSignature(request.approval, this.approvalSecret))
+      return this.fail(request, 'scene approval signature is invalid');
     this.audit.record({
       planId: request.planId,
       stepId: request.stepId,
@@ -124,13 +137,19 @@ export class Scene3DPlanExecutor {
       result.diff === undefined
     )
       return this.fail(request, result.error ?? 'scene3d tool failed');
-    const commitResult = request.commit.commit({
-      document: result.document,
-      revision: result.revision,
-      expectedRevision: request.session.revision,
-      diff: result.diff,
-    });
-    if (commitResult !== undefined && !commitResult.accepted) {
+    let commitResult: { readonly accepted: boolean; readonly error?: string };
+    try {
+      commitResult = request.commit.commit({
+        document: result.document,
+        revision: result.revision,
+        expectedRevision: request.session.revision,
+        diff: result.diff,
+      });
+    } catch (cause) {
+      this.approvals.release(request.approval.approvalId);
+      return this.fail(request, cause instanceof Error ? cause.message : String(cause));
+    }
+    if (!commitResult.accepted) {
       this.approvals.release(request.approval.approvalId);
       return this.fail(
         request,

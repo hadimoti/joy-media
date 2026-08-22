@@ -4,6 +4,7 @@ import {
   Scene3DMcpServer,
   Scene3DPlanExecutor,
   createToolRegistry,
+  createIdempotencyStore,
 } from './index.js';
 import {
   dryRunScene3DTool,
@@ -11,6 +12,8 @@ import {
   IDENTITY_3D_TRANSFORM,
   scene3DToolDiffDigest,
   scene3DToolInputDigest,
+  scene3DApprovalSignature,
+  Scene3DApprovalLedger,
 } from '@joy-media/scene3d-core';
 
 describe('Scene3DMcpGateway', () => {
@@ -38,6 +41,9 @@ describe('Scene3DMcpGateway', () => {
       executor: new Scene3DPlanExecutor({
         registry: createToolRegistry(),
         authorize: () => ({ allowed: true }),
+        approvalSecret: 'secret',
+        approvalStore: new Scene3DApprovalLedger(),
+        idempotency: createIdempotencyStore(),
         now: () => 100,
       }),
       binding: {
@@ -45,29 +51,31 @@ describe('Scene3DMcpGateway', () => {
         commit: {
           commit: (result) => {
             document = result.document;
+            return { accepted: true };
           },
         },
       },
     });
     expect(gateway.listTools().some((tool) => tool.name === 'scene3d.add')).toBe(true);
     expect(gateway.read('scene3d.summary')).toMatchObject({ sceneId: 'scene' });
+    const approval = {
+      approvalId: 'a',
+      toolName: 'scene3d.add' as const,
+      inputDigest: scene3DToolInputDigest('scene3d.add', input),
+      diffDigest: scene3DToolDiffDigest(preview.diff!),
+      actorId: 'actor',
+      projectId: 'project',
+      sceneId: 'scene',
+      baseRevision: 'r1',
+      expiresAt: 1000,
+    };
     const result = gateway.callApproved({
       planId: 'p',
       stepId: 's',
       idempotencyKey: 'p:s:0',
       name: 'scene3d.add',
       input,
-      approval: {
-        approvalId: 'a',
-        toolName: 'scene3d.add',
-        inputDigest: scene3DToolInputDigest('scene3d.add', input),
-        diffDigest: scene3DToolDiffDigest(preview.diff!),
-        actorId: 'actor',
-        projectId: 'project',
-        sceneId: 'scene',
-        baseRevision: 'r1',
-        expiresAt: 1000,
-      },
+      approval: { ...approval, signature: scene3DApprovalSignature(approval, 'secret') },
     });
     expect(result.status).toBe('success');
     expect(document.objects.box).toBeDefined();
@@ -79,6 +87,9 @@ describe('Scene3DMcpGateway', () => {
       executor: new Scene3DPlanExecutor({
         registry: createToolRegistry(),
         authorize: () => ({ allowed: true }),
+        approvalSecret: 'secret',
+        approvalStore: new Scene3DApprovalLedger(),
+        idempotency: createIdempotencyStore(),
       }),
       binding: {
         getSession: () => ({
@@ -88,7 +99,7 @@ describe('Scene3DMcpGateway', () => {
           revision: 'r1',
           document: emptyScene3D('scene'),
         }),
-        commit: { commit: () => undefined },
+        commit: { commit: () => ({ accepted: true }) },
       },
     });
     const server = new Scene3DMcpServer(gateway);
@@ -106,6 +117,14 @@ describe('Scene3DMcpGateway', () => {
         params: { name: 'scene3d.summary', arguments: {} },
       }).result,
     ).toBeDefined();
+    expect(
+      server.handle({
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: { name: 'scene3d.remove', arguments: {}, approval: {} },
+      }).error?.message,
+    ).toContain('objectId');
     expect(
       server.handle({
         jsonrpc: '2.0',
