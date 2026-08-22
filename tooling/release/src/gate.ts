@@ -170,7 +170,8 @@ export function writeReleaseEvidence(
   now = new Date(),
 ): ReleaseGateResult {
   mkdirSync(outputDirectory, { recursive: true });
-  verifyArtifactHashes(root, evidence.artifactHashes);
+  verifyArtifactHashes(root, evidence.artifactHashes, evidence.manifest);
+  verifyReleaseDocuments(evidence.manifest, evidence.sbom);
   const result = evaluateReleaseGate(evidence, now);
   const manifestText = JSON.stringify(evidence.manifest, null, 2);
   writeFileSync(
@@ -207,11 +208,6 @@ function collectFiles(root: string, directory: string): readonly string[] {
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const commandResults = runReleaseCommands(root);
   const artifacts = ['apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'];
-  const artifactHashes: Record<string, string> = {};
-  for (const directory of artifacts) {
-    for (const path of collectFiles(root, directory))
-      artifactHashes[relative(root, path)] = sha256File(path);
-  }
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
       const commandId = `${id}-build`;
@@ -222,6 +218,11 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
       ];
     }),
   );
+  const artifactHashes: Record<string, string> = {};
+  for (const directory of artifacts) {
+    for (const path of collectFiles(root, directory))
+      artifactHashes[relative(root, path)] = sha256File(path);
+  }
   const tests = commandResults.find((result) => result.id === 'tests');
   const featureStatusText = existsSync(join(root, 'docs/product/FEATURE-STATUS.md'))
     ? readFileSync(join(root, 'docs/product/FEATURE-STATUS.md'), 'utf8')
@@ -249,8 +250,8 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     dirtyGeneratedArtifacts: dirtyGeneratedArtifacts(root),
     fixtureHandlers: fixtureHandlers(root),
     builds: buildSuccess,
-    manifestGenerated: false,
-    sbomGenerated: false,
+    manifestGenerated: true,
+    sbomGenerated: true,
     browserJourneys,
     featureStatus: { auditedOn, statuses },
     artifactHashes,
@@ -324,8 +325,27 @@ function readBrowserJourneys(root: string): ReleaseGateInput['browserJourneys'] 
   }
 }
 
-function verifyArtifactHashes(root: string, hashes: Readonly<Record<string, string>>): void {
+function verifyArtifactHashes(
+  root: string,
+  hashes: Readonly<Record<string, string>>,
+  manifest: Readonly<Record<string, unknown>>,
+): void {
+  const manifestArtifacts = manifest.artifacts;
+  if (
+    typeof manifestArtifacts !== 'object' ||
+    manifestArtifacts === null ||
+    Array.isArray(manifestArtifacts)
+  ) {
+    throw new Error('release manifest must contain an artifact hash map');
+  }
+  const manifestHashMap = manifestArtifacts as Record<string, unknown>;
+  if (Object.keys(manifestHashMap).length !== Object.keys(hashes).length) {
+    throw new Error('release manifest artifact hashes do not match the evidence hash map');
+  }
   for (const [relativePath, expected] of Object.entries(hashes)) {
+    if (manifestHashMap[relativePath] !== expected) {
+      throw new Error(`release manifest hash mismatch: ${relativePath}`);
+    }
     const path = resolve(root, relativePath);
     const repositoryRoot = resolve(root);
     if (
@@ -337,6 +357,16 @@ function verifyArtifactHashes(root: string, hashes: Readonly<Record<string, stri
     if (!existsSync(path)) throw new Error(`artifact is missing: ${relativePath}`);
     const actual = sha256File(path);
     if (actual !== expected) throw new Error(`artifact hash mismatch: ${relativePath}`);
+  }
+}
+
+function verifyReleaseDocuments(
+  manifest: Readonly<Record<string, unknown>>,
+  sbom: Readonly<Record<string, unknown>>,
+): void {
+  if (manifest.schemaVersion !== 1) throw new Error('release manifest schemaVersion must be 1');
+  if (sbom.bomFormat !== 'cyclonedx' || !Array.isArray(sbom.components)) {
+    throw new Error('release SBOM must be CycloneDX with components');
   }
 }
 

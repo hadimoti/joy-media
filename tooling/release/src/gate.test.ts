@@ -116,7 +116,12 @@ describe('JOY Studio 1.0 release gate', () => {
       artifactHashes: {
         'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
       },
-      manifest: { schemaVersion: 1, artifacts: ['apps/api/dist/server.js'] },
+      manifest: {
+        schemaVersion: 1,
+        artifacts: {
+          'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
+        },
+      },
       sbom: { bomFormat: 'cyclonedx', components: [] },
     };
     const result = writeReleaseEvidence(
