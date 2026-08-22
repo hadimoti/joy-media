@@ -205,13 +205,13 @@ function collectFiles(root: string, directory: string): readonly string[] {
 }
 
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
+  const commandResults = runReleaseCommands(root);
   const artifacts = ['apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'];
   const artifactHashes: Record<string, string> = {};
   for (const directory of artifacts) {
     for (const path of collectFiles(root, directory))
       artifactHashes[relative(root, path)] = sha256File(path);
   }
-  const commandResults = runReleaseCommands(root);
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
       const commandId = `${id}-build`;
