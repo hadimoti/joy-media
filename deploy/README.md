@@ -47,6 +47,13 @@ release only after the checks pass. Rollback is a symlink change to the prior
 immutable release followed by `systemctl restart joy-media@api`; keep the
 database backup until the deployment gate is accepted.
 
+Static web release permissions are part of the deployment gate: nginx must be
+able to traverse every release directory and read every bundle. After copying
+the editor build, set release directories to `0755` and files to `0644` before
+switching the `web` symlink; otherwise `try_files` can fall back to
+`index.html`, making JavaScript/CSS asset requests return HTML and blanking the
+editor in strict browsers.
+
 ## 1.0 prerequisites and rollback
 
 Run `pnpm check`, the three application builds, `pnpm test:release`, and the non-deploying
