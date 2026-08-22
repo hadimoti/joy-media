@@ -35,6 +35,17 @@ const DERIVATIVE: BrowserDerivative = {
   verifiedAt: 1_700_000_000_000,
 };
 
+const AUDIO: BrowserAsset = {
+  id: 'audio-1',
+  projectId: 'prj-1',
+  kind: 'audio',
+  displayName: 'Servo movement',
+  sha256: 'c'.repeat(64),
+  bytes: 2000,
+  descriptor: { mimeType: 'audio/wav', durationUs: 1_250_000 },
+  createdAt: 1_700_000_000_000,
+};
+
 function fakeResolver(outcome: unknown): AuthorizedDerivativeResolver {
   return { resolve: vi.fn().mockResolvedValue(outcome) } as unknown as AuthorizedDerivativeResolver;
 }
@@ -87,6 +98,34 @@ describe('resolveAssetThumb fallback chain', () => {
       fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'image/png' })),
     });
     expect(result.source).toBe('cloud');
+  });
+
+  it('falls back to the shared cloud original for audio previews', async () => {
+    const result = await resolveAssetThumb({
+      asset: AUDIO,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'audio/wav' })),
+    });
+    expect(result.source).toBe('cloud');
+    expect(result.mimeType).toBe('audio/wav');
+  });
+
+  it('does not enqueue cloud reads for grid cards', async () => {
+    const fetchCloudOriginal = vi.fn().mockResolvedValue(new Blob([], { type: 'image/png' }));
+    const result = await resolveAssetThumb({
+      asset: IMAGE,
+      derivatives: [],
+      projectId: 'prj-1',
+      resolver: fakeResolver({ state: 'unavailable' }),
+      originalCache: fakeOriginal(undefined),
+      fetchCloudOriginal,
+      allowCloudFallback: false,
+    });
+    expect(result.source).toBe('none');
+    expect(fetchCloudOriginal).not.toHaveBeenCalled();
   });
 
   it('returns none (no throw) when no source is available', async () => {

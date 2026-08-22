@@ -43,8 +43,12 @@ export function playableAssetDescriptorFromBrowserAsset(
 }
 
 /**
- * Resolve a card preview URL:
- * preferredDerivative → OPFS original → shared cloud original (images) → none.
+ * Resolve a preview URL:
+ * preferredDerivative → OPFS original → shared cloud original (image/audio) → none.
+ *
+ * Grid cards deliberately disable the cloud fallback so opening the library does
+ * not enqueue one rclone-backed request per visible asset. Explicit Preview
+ * actions keep the fallback enabled and fetch only the selected asset.
  */
 export async function resolveAssetThumb(options: {
   readonly asset: BrowserAsset;
@@ -53,8 +57,17 @@ export async function resolveAssetThumb(options: {
   readonly resolver: AuthorizedDerivativeResolver;
   readonly originalCache: OpfsOriginalAssetCache;
   readonly fetchCloudOriginal: (assetId: string) => Promise<Blob>;
+  readonly allowCloudFallback?: boolean;
 }): Promise<AssetThumbResult> {
-  const { asset, derivatives, projectId, resolver, originalCache, fetchCloudOriginal } = options;
+  const {
+    asset,
+    derivatives,
+    projectId,
+    resolver,
+    originalCache,
+    fetchCloudOriginal,
+    allowCloudFallback = true,
+  } = options;
   let hasOpfsOriginal = false;
 
   const derivative = preferredDerivative(derivatives);
@@ -101,7 +114,7 @@ export async function resolveAssetThumb(options: {
     /* fall through */
   }
 
-  if (asset.kind === 'image') {
+  if (allowCloudFallback && (asset.kind === 'image' || asset.kind === 'audio')) {
     try {
       const cloud = await fetchCloudOriginal(asset.id);
       const url = URL.createObjectURL(cloud);

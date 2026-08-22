@@ -1598,6 +1598,9 @@ function AssetCardMedia({
         resolver,
         originalCache,
         fetchCloudOriginal,
+        // Cloud originals are fetched only for an explicit Preview action;
+        // otherwise 1,800+ cards would queue long-running object-store reads.
+        allowCloudFallback: false,
       });
       if (cancelled) {
         result.revoke();
@@ -1648,9 +1651,15 @@ function AssetCardMedia({
         <video src={url} muted playsInline preload="metadata" />
       ) : url !== undefined ? (
         <img src={url} alt="" loading="lazy" decoding="async" />
+      ) : asset.kind === 'audio' ? (
+        <span className="asset-card-audio-equalizer" aria-hidden="true">
+          {[34, 58, 82, 46, 70, 94, 54, 76, 42, 64, 88, 50, 72, 38, 60, 84].map((height, index) => (
+            <span key={index} style={{ height: `${height}%` }} />
+          ))}
+        </span>
       ) : (
         <span className="asset-card-placeholder" aria-hidden>
-          {asset.kind === 'video' ? '▶' : asset.kind === 'audio' ? '♪' : '▣'}
+          {asset.kind === 'video' ? '▶' : '▣'}
         </span>
       )}
     </button>

@@ -5215,6 +5215,46 @@ label {
   opacity: 0.55;
   user-select: none;
 }
+.asset-card-audio-equalizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16rem;
+  width: 72%;
+  height: 58%;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgb(241 183 72 / 28%);
+  border-radius: 0.45rem;
+  background: linear-gradient(145deg, rgb(241 183 72 / 13%), rgb(61 46 24 / 38%));
+  color: #f1b748;
+  box-sizing: border-box;
+}
+.asset-card-audio-equalizer > span {
+  display: block;
+  width: 0.22rem;
+  min-height: 0.32rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.82;
+  transform-origin: center;
+  animation: asset-audio-equalizer-pulse 1.35s ease-in-out infinite alternate;
+}
+.asset-card-audio-equalizer > span:nth-child(2n) {
+  animation-delay: -0.45s;
+}
+.asset-card-audio-equalizer > span:nth-child(3n) {
+  animation-delay: -0.9s;
+}
+@keyframes asset-audio-equalizer-pulse {
+  from {
+    transform: scaleY(0.72);
+    opacity: 0.55;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 0.95;
+  }
+}
 .asset-card-media--video .asset-card-placeholder {
   font-size: 1.1rem;
 }
