@@ -91,7 +91,7 @@ export interface BrowserRenderReport {
 export interface BrowserAsset {
   readonly id: string;
   readonly projectId: string;
-  readonly kind: 'video' | 'audio' | 'image';
+  readonly kind: 'video' | 'audio' | 'image' | 'model';
   readonly displayName: string;
   readonly sha256: string;
   readonly bytes: number;

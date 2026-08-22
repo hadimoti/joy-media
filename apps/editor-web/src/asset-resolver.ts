@@ -26,7 +26,7 @@ export interface AuthorizedOriginalTransport {
 
 export interface PlayableAssetDescriptor {
   readonly assetId: string;
-  readonly kind: 'video' | 'audio' | 'image';
+  readonly kind: 'video' | 'audio' | 'image' | 'model';
   readonly sha256: string;
   readonly byteLength: number;
   readonly mimeType: string;

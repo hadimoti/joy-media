@@ -23,7 +23,7 @@ export interface ProjectMetadata {
   /** Explicit opt-in prerequisite for private object-storage synchronization. */
   readonly assetSyncEnabled: boolean;
 }
-export type MediaAssetKind = 'video' | 'audio' | 'image';
+export type MediaAssetKind = 'video' | 'audio' | 'image' | 'model';
 export type DerivativeKind = 'thumbnail' | 'proxy';
 export type DerivativeAvailability =
   'pending' | 'available-local' | 'available-cloud' | 'evicted' | 'invalid';
@@ -1281,7 +1281,7 @@ function derivativeOf(
 export function validateAssetRegistration(value: AssetRegistration): void {
   validateOpaqueId(value.id, 'asset id');
   validateDisplayName(value.displayName);
-  if (!['video', 'audio', 'image'].includes(value.kind))
+  if (!['video', 'audio', 'image', 'model'].includes(value.kind))
     throw new ControlPlaneError('ASSET_INVALID', 'asset kind is invalid');
   validateHashAndBytes(value.sha256, value.bytes, 'asset');
   validateDescriptor(value.descriptor);
@@ -1360,7 +1360,10 @@ function validateHashAndBytes(hash: string, bytes: number, label: string): void 
 }
 
 function validateDescriptor(value: MediaDescriptor): void {
-  if (!/^(video|audio|image)\/[a-z0-9.+-]+$/.test(value.mimeType))
+  if (
+    !/^(video|audio|image)\/[a-z0-9.+-]+$/.test(value.mimeType) &&
+    !['model/gltf-binary', 'model/gltf+json'].includes(value.mimeType)
+  )
     throw new ControlPlaneError('ASSET_INVALID', 'media MIME type is invalid');
   for (const dimension of [value.durationUs, value.width, value.height]) {
     if (dimension !== undefined && (!Number.isSafeInteger(dimension) || dimension < 1))

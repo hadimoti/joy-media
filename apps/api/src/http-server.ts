@@ -1811,7 +1811,7 @@ function requiredAssetKind(
   field: string,
 ): AssetRegistration['kind'] {
   const value = body[field];
-  if (value !== 'video' && value !== 'audio' && value !== 'image')
+  if (value !== 'video' && value !== 'audio' && value !== 'image' && value !== 'model')
     throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
   return value;
 }

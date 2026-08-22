@@ -75,6 +75,7 @@ const categories: readonly {
   { id: 'image', label: 'Images' },
   { id: 'video', label: 'Video' },
   { id: 'audio', label: 'Audio' },
+  { id: 'model', label: '3D Models' },
 ];
 
 interface Preview {
@@ -472,7 +473,7 @@ export function AssetLibraryPanel({
           /* heuristic retag is best-effort for video/audio */
         }
         setStatus(
-          `${selectedFile.name} به‌صورت محلی ثبت شد. پشتیبان‌گیری Cloud برای Video و Audio در v1 اولویت پایین‌تری دارد.`,
+          `${selectedFile.name} به‌صورت محلی ثبت شد. پشتیبان‌گیری Cloud برای ${kind === 'model' ? '3D model' : 'Video و Audio'} در v1 اولویت پایین‌تری دارد.`,
         );
       }
       setImportProgress(1);
@@ -506,7 +507,13 @@ export function AssetLibraryPanel({
       const requestId = ++previewSeqRef.current;
       clearPreview();
       const sourceKind =
-        asset.kind === 'video' ? 'video' : asset.kind === 'audio' ? 'audio' : 'image';
+        asset.kind === 'video'
+          ? 'video'
+          : asset.kind === 'audio'
+            ? 'audio'
+            : asset.kind === 'model'
+              ? '3D model'
+              : 'image';
       setStatus(`در حال باز کردن Preview ${sourceKind} تأییدشده…`);
       try {
         const [resolverInstance, originalCache] = await Promise.all([resolver, originalAssetCache]);
@@ -1818,12 +1825,22 @@ function message(error: unknown): string {
 }
 
 function assetKind(file: File): BrowserAsset['kind'] {
+  if (
+    file.type === 'model/gltf-binary' ||
+    file.type === 'model/gltf+json' ||
+    /\.(glb|gltf)$/i.test(file.name)
+  )
+    return 'model';
   if (file.type.startsWith('video/')) return 'video';
   if (file.type.startsWith('audio/')) return 'audio';
   if (file.type.startsWith('image/')) return 'image';
-  throw new Error('selected file must be video, audio, or an image');
+  throw new Error('selected file must be video, audio, image, or GLB/GLTF');
 }
 function normalizedMimeType(file: File, kind: BrowserAsset['kind']): string {
+  if (kind === 'model' && (file.type === 'model/gltf-binary' || file.type === 'model/gltf+json'))
+    return file.type;
+  if (kind === 'model' && /\.glb$/i.test(file.name)) return 'model/gltf-binary';
+  if (kind === 'model' && /\.gltf$/i.test(file.name)) return 'model/gltf+json';
   if (/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(file.type)) return file.type;
   throw new Error(`${kind} file has no supported MIME type`);
 }

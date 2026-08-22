@@ -36,6 +36,7 @@ import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import {
   BrowserControlPlaneError,
   BrowserControlPlaneClient,
+  type BrowserAsset,
   type BrowserProviderApprovalPreflight,
   type BrowserJoyCodeReasoningRequest,
   type BrowserJoyCodeReasoningResponse,
@@ -459,6 +460,7 @@ export function AgentPanel({
   onUndo,
   session,
   attachedAssets = [],
+  assets = [],
   onDetachAsset,
   onAttachAsset,
   settings,
@@ -471,6 +473,8 @@ export function AgentPanel({
   readonly onUndo: () => void;
   readonly session: EditorSession;
   readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
+  /** Registered catalog assets available to the asset-backed 3D preview. */
+  readonly assets?: readonly BrowserAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
   readonly settings: AgentSettings;
@@ -1392,7 +1396,7 @@ export function AgentPanel({
           </section>
         )}
 
-        {tab === '3d' && <JoyCode3DViewer />}
+        {tab === '3d' && <JoyCode3DViewer assets={assets} />}
       </div>
     </PanelShell>
   );

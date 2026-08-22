@@ -18,7 +18,7 @@ export function playableAssetDescriptorFromBrowserAsset(
   asset:
     | {
         readonly id: string;
-        readonly kind: 'video' | 'audio' | 'image' | 'other';
+        readonly kind: 'video' | 'audio' | 'image' | 'model' | 'other';
         readonly sha256?: unknown;
         readonly bytes?: unknown;
         readonly descriptor?: { readonly mimeType?: unknown };

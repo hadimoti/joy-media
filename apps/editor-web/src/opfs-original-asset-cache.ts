@@ -120,7 +120,9 @@ function validateDescriptor(descriptor: OriginalAssetDescriptor): void {
   if (descriptor.bytes < 0) throw new Error('selected asset integrity metadata is invalid');
   if (
     !/^(video|audio|image)\/[a-z0-9.+-]+$/i.test(descriptor.mimeType) &&
-    descriptor.mimeType.toLowerCase() !== 'application/vnd.adobe.photoshop'
+    descriptor.mimeType.toLowerCase() !== 'application/vnd.adobe.photoshop' &&
+    descriptor.mimeType.toLowerCase() !== 'model/gltf-binary' &&
+    descriptor.mimeType.toLowerCase() !== 'model/gltf+json'
   )
     throw new Error('selected asset type is unsupported');
 }

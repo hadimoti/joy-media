@@ -10,6 +10,7 @@ export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, string>> = {
   image: iconUrl('asset/24_Images.png'),
   video: iconUrl('asset/24_video.png'),
   audio: iconUrl('asset/24_Audio.png'),
+  model: '/assets/24_3d.png',
 };
 
 const COLLECTION_ICONS: Readonly<Record<string, string>> = {

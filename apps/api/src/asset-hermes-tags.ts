@@ -3,7 +3,7 @@
  * Always applies deterministic tags; optionally enriches via vision API when configured.
  */
 export interface HermesTagInput {
-  readonly kind: 'video' | 'audio' | 'image';
+  readonly kind: 'video' | 'audio' | 'image' | 'model';
   readonly displayName: string;
   readonly mimeType: string;
   readonly bytes: number;
@@ -59,7 +59,11 @@ export function heuristicTags(input: HermesTagInput): readonly string[] {
 
   if (input.width !== undefined && input.height !== undefined) {
     const orient =
-      input.width === input.height ? 'square' : input.width > input.height ? 'landscape' : 'portrait';
+      input.width === input.height
+        ? 'square'
+        : input.width > input.height
+          ? 'landscape'
+          : 'portrait';
     tags.push(orient);
     if (input.width >= 1920 || input.height >= 1920) tags.push('hires');
   }

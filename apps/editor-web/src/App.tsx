@@ -2842,6 +2842,7 @@ function EditorWorkspace({
             ? {}
             : { command: context.agentPanelCommand })}
           attachedAssets={context.kiloCodeAttachedAssets}
+          assets={Object.values(monitorAssetCatalog.assets)}
           onDetachAsset={context.detachKiloCodeAsset}
           onAttachAsset={context.attachKiloCodeAsset}
         />
