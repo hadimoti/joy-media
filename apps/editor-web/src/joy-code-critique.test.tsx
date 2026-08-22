@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import {
   ApprovalEngine,
@@ -10,11 +10,17 @@ import {
   runPlanAtomically,
 } from '@joy-media/agent-tools';
 import {
+  routeJoyCodePrompt,
   JoyCodeReasoningDetails,
   buildJoyCodeReasoningRequest,
   buildPendingPlanFromJoyCodeProposal,
   type JoyCodeReasoningResponse,
 } from './AgentPanel.js';
+import {
+  BrowserControlPlaneClient,
+  BrowserControlPlaneError,
+  type BrowserProviderApprovalGrant,
+} from './control-plane-client.js';
 
 describe('Joy Code critique helpers', () => {
   it('keeps read-only critique responses bounded to evidence and leaves the revision unchanged', () => {
@@ -158,5 +164,136 @@ describe('Joy Code critique helpers', () => {
     expect(atomic.committed).toBe(true);
     expect(commits).toHaveLength(1);
     expect(commits[0]?.commands.length).toBeGreaterThan(1);
+  });
+
+  it('routes unmatched Joy Code prompts to bounded reasoning instead of rejecting them', () => {
+    expect(routeJoyCodePrompt('shorten the intro')).toMatchObject({ kind: 'intent' });
+    expect(routeJoyCodePrompt('make the opening feel more cinematic')).toEqual({
+      kind: 'reasoning',
+    });
+  });
+
+  it('preserves provider approval preflight in the client and resubmits reasoning with the signed grant', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ readonly url: string; readonly body?: string }> = [];
+    const signedGrant: BrowserProviderApprovalGrant = {
+      grantVersion: 1,
+      grantId: 'grant-joy-code-browser-1',
+      grantSignature: 'signed-grant',
+      actorId: 'owner',
+      providerId: 'mistral',
+      capability: 'llm.complete',
+      requestDigest: 'sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      expiresAt: '2026-08-22T00:05:00.000Z',
+      status: 'approved',
+      costCap: { amount: '0.00', currency: 'USD' },
+    };
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = typeof init?.body === 'string' ? init.body : undefined;
+      requests.push({ url, ...(body === undefined ? {} : { body }) });
+      if (url.endsWith('/v1/providers/reasoning/joy-code') && requests.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'PROVIDER_APPROVAL_REQUIRED',
+              message: 'Provider processing requires an approval grant bound to this request.',
+              preflight: {
+                providerId: 'mistral',
+                capability: 'llm.complete',
+                requestDigest: signedGrant.requestDigest,
+                dataLeavesDevice: true,
+                dataBeingSent: ['text prompt'],
+                purpose: 'Complete text generation',
+                estimatedSizeBytes: 5000,
+                transformations: ['remote API call'],
+                requiresUserApproval: true,
+                estimatedCost: { amount: '0.00', currency: 'USD' },
+              },
+            },
+          }),
+          { status: 409, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.endsWith('/v1/providers/approvals/grants')) {
+        return new Response(JSON.stringify({ data: signedGrant }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            responseVersion: 1,
+            requestId: 'joy-code-approved-1',
+            brief: {
+              summary: 'Approved bounded critique.',
+              rationale: 'Approved for remote reasoning.',
+              evidenceReferences: ['clip:intro'],
+            },
+            provider: {
+              providerId: 'mistral',
+              modelId: 'mistral-small-latest',
+              decisionRef: 'provider-decision-approved-1',
+              briefRef: 'reasoning-brief-approved-1',
+              requestDigest: signedGrant.requestDigest,
+              dataLeavesDevice: true,
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    try {
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => 'session');
+      const request = {
+        model: 'mistral-small-latest',
+        goal: 'Critique the opening pacing only.',
+        snapshotDigest: 'fnv1a-abc123',
+        projectRevision: 'rev-1',
+        idempotencyKey: 'joy-code-browser-1',
+        privacyMode: 'ask-before-remote' as const,
+        evidence: [
+          {
+            evidenceId: 'clip:intro',
+            kind: 'selected-clip' as const,
+            label: 'Intro',
+            detail: '0s to 10s',
+          },
+        ],
+        allowedIntentIds: ['shorten-intro'],
+      };
+
+      const error = await client.joyCodeReasoning(request).catch((reason) => reason);
+      expect(error).toBeInstanceOf(BrowserControlPlaneError);
+      expect(error).toMatchObject({
+        code: 'PROVIDER_APPROVAL_REQUIRED',
+        preflight: {
+          providerId: 'mistral',
+          capability: 'llm.complete',
+          requestDigest: signedGrant.requestDigest,
+        },
+      });
+
+      const grant = await client.issueProviderApprovalGrant({
+        providerId: error.preflight.providerId,
+        capability: error.preflight.capability,
+        requestDigest: error.preflight.requestDigest,
+        costCap: error.preflight.estimatedCost,
+      });
+      const approved = await client.joyCodeReasoning({ ...request, providerApprovalGrant: grant });
+
+      expect(approved.brief.summary).toBe('Approved bounded critique.');
+      expect(requests.map((entry) => entry.url)).toEqual([
+        'https://media.joyteam.ir/api/v1/providers/reasoning/joy-code',
+        'https://media.joyteam.ir/api/v1/providers/approvals/grants',
+        'https://media.joyteam.ir/api/v1/providers/reasoning/joy-code',
+      ]);
+      expect(requests[1]?.body).toContain(`"requestDigest":"${signedGrant.requestDigest}"`);
+      expect(requests[2]?.body).toContain('"providerApprovalGrant"');
+      expect(requests[2]?.body).toContain('"grantSignature":"signed-grant"');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

@@ -285,19 +285,19 @@ describe('control-plane HTTP transport', () => {
         };
       }
     ).error.preflight;
-    const providerApprovalGrant = approvals.createGrant({
-      actorId: 'owner',
-      providerId: preflight.providerId,
-      capability: preflight.capability,
-      requestDigest: preflight.requestDigest,
-      expiresAt: '2026-12-31T00:00:00.000Z',
-      costCap: { amount: '0.00', currency: 'USD' },
-      grantId: 'grant-joy-code-1',
-    });
+    const providerApprovalGrant = (
+      await request(origin, 'POST', '/v1/providers/approvals/grants', {
+        providerId: preflight.providerId,
+        capability: preflight.capability,
+        requestDigest: preflight.requestDigest,
+        expiresAt: '2026-12-31T00:00:00.000Z',
+        costCap: { amount: '0.00', currency: 'USD' },
+      })
+    ).body as { data: { grantId: string } };
 
     const approved = await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
       ...base,
-      providerApprovalGrant,
+      providerApprovalGrant: providerApprovalGrant.data,
     });
     expect(approved).toMatchObject({
       status: 200,
@@ -331,11 +331,120 @@ describe('control-plane HTTP transport', () => {
       body: {
         data: expect.arrayContaining([
           expect.objectContaining({ status: 'denied', reason: 'approval-required' }),
-          expect.objectContaining({ status: 'succeeded', approvalGrantId: 'grant-joy-code-1' }),
+          expect.objectContaining({
+            status: 'succeeded',
+            approvalGrantId: providerApprovalGrant.data.grantId,
+          }),
         ]),
       },
     });
     expect(JSON.stringify(audit.body)).not.toContain(base.goal);
+  });
+
+  it('replays bounded Joy Code reasoning from the shared invocation ledger across registry restarts', async () => {
+    const ledger = new MemoryMistralInvocationLedger();
+    const firstApprovals = new ProviderApprovalService();
+    let calls = 0;
+    const firstRegistry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      ledger,
+      firstApprovals,
+      async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    brief: {
+                      summary: 'Shared ledger replay works.',
+                      rationale: 'The stored completion can be replayed after restart.',
+                      evidenceReferences: ['clip:intro'],
+                    },
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 7, completion_tokens: 6 },
+          }),
+        );
+      },
+    );
+    const firstOrigin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      firstRegistry,
+      undefined,
+      firstApprovals,
+    );
+    const base = {
+      model: 'mistral-small-latest',
+      goal: 'Review the intro for pacing.',
+      snapshotDigest: `fnv1a-${'d'.repeat(8)}`,
+      projectRevision: 'rev-replay',
+      idempotencyKey: 'joy-code-replay-shared-1',
+      privacyMode: 'ask-before-remote',
+      evidence: [
+        {
+          evidenceId: 'clip:intro',
+          kind: 'selected-clip',
+          label: 'Intro clip',
+          detail: 'Opening narration from 0s to 10s.',
+        },
+      ],
+      allowedIntentIds: ['shorten-intro'],
+    };
+    const firstApproval = await request(
+      firstOrigin,
+      'POST',
+      '/v1/providers/reasoning/joy-code',
+      base,
+    );
+    const firstPreflight = (
+      firstApproval.body as {
+        error: {
+          preflight: {
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+    const firstGrant = await request(firstOrigin, 'POST', '/v1/providers/approvals/grants', {
+      providerId: firstPreflight.providerId,
+      capability: firstPreflight.capability,
+      requestDigest: firstPreflight.requestDigest,
+      costCap: { amount: '0.00', currency: 'USD' },
+    });
+    const firstResult = await request(firstOrigin, 'POST', '/v1/providers/reasoning/joy-code', {
+      ...base,
+      providerApprovalGrant: (firstGrant.body as { data: unknown }).data,
+    });
+
+    const secondApprovals = new ProviderApprovalService();
+    const secondRegistry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      ledger,
+      secondApprovals,
+      async () => {
+        calls++;
+        throw new Error('network must not be reached after replay');
+      },
+    );
+    const secondOrigin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      secondRegistry,
+      undefined,
+      secondApprovals,
+    );
+
+    expect(await request(secondOrigin, 'POST', '/v1/providers/reasoning/joy-code', base)).toEqual(
+      firstResult,
+    );
+    expect(calls).toBe(1);
   });
 
   it('fails closed when Joy Code reasoning returns malformed structured output or unknown evidence refs', async () => {
@@ -406,8 +515,7 @@ describe('control-plane HTTP transport', () => {
         };
       }
     ).error.preflight;
-    const providerApprovalGrant = approvals.createGrant({
-      actorId: 'owner',
+    const providerApprovalGrant = await request(origin, 'POST', '/v1/providers/approvals/grants', {
       providerId: preflight.providerId,
       capability: preflight.capability,
       requestDigest: preflight.requestDigest,
@@ -418,11 +526,30 @@ describe('control-plane HTTP transport', () => {
     expect(
       await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
         ...base,
-        providerApprovalGrant,
+        providerApprovalGrant: (providerApprovalGrant.body as { data: unknown }).data,
       }),
     ).toMatchObject({
       status: 502,
       body: { error: { code: 'MISTRAL_REQUEST_FAILED' } },
+    });
+
+    expect(await request(origin, 'GET', '/v1/providers/reasoning')).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          providers: [expect.objectContaining({ providerId: 'mistral', state: 'degraded' })],
+        },
+      },
+    });
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(audit).toMatchObject({
+      status: 200,
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({ status: 'denied', reason: 'approval-required' }),
+          expect.objectContaining({ status: 'failed', reason: 'invalid-structured-output' }),
+        ]),
+      },
     });
   });
 

@@ -11,6 +11,12 @@ import type {
   RecordProductionApprovalResponseInput,
   RecordProductionApprovalResponseResult,
 } from '@joy-media/workflow-engine';
+import type {
+  CapabilityId,
+  Money,
+  ProviderApprovalGrant,
+  ProviderApprovalPreflight,
+} from '@joy-media/provider-sdk';
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 
@@ -127,6 +133,21 @@ export interface BrowserReasoningProvider {
   readonly adapterVersion: string;
 }
 
+export type BrowserProviderApprovalPreflight = ProviderApprovalPreflight;
+export type BrowserProviderApprovalGrant = ProviderApprovalGrant;
+
+export class BrowserControlPlaneError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly preflight?: BrowserProviderApprovalPreflight,
+  ) {
+    super(message);
+    this.name = 'BrowserControlPlaneError';
+  }
+}
+
 export interface BrowserJoyCodeReasoningEvidence {
   readonly evidenceId: string;
   readonly kind: 'selected-clip' | 'attached-asset' | 'timeline-range' | 'project-summary';
@@ -143,7 +164,7 @@ export interface BrowserJoyCodeReasoningRequest {
   readonly privacyMode: 'local-only' | 'ask-before-remote';
   readonly evidence: readonly BrowserJoyCodeReasoningEvidence[];
   readonly allowedIntentIds: readonly string[];
-  readonly providerApprovalGrant?: Record<string, unknown>;
+  readonly providerApprovalGrant?: BrowserProviderApprovalGrant;
   readonly maxTokens?: number;
 }
 
@@ -250,6 +271,15 @@ export class BrowserControlPlaneClient {
     input: BrowserJoyCodeReasoningRequest,
   ): Promise<BrowserJoyCodeReasoningResponse> {
     return this.post('/v1/providers/reasoning/joy-code', input);
+  }
+  async issueProviderApprovalGrant(input: {
+    readonly providerId: string;
+    readonly capability: CapabilityId;
+    readonly requestDigest: string;
+    readonly costCap?: Money;
+    readonly expiresAt?: string;
+  }): Promise<BrowserProviderApprovalGrant> {
+    return this.post('/v1/providers/approvals/grants', input);
   }
   /** Fetch cloud-backed original bytes for any logged-in Joy user. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
@@ -642,7 +672,7 @@ export class BrowserControlPlaneClient {
       headers: { ...init.headers, authorization: `Bearer ${token}` },
     });
     const body = await responseBody(response);
-    if (!response.ok) throw new Error(errorMessage(body, response.status));
+    if (!response.ok) throw controlPlaneError(body, response.status);
     if (!isRecord(body) || !('data' in body))
       throw new Error('JOY Media API returned an invalid response');
     return body.data as T;
@@ -661,6 +691,17 @@ function errorMessage(body: unknown, status: number): string {
   }
   if (isRecord(body) && typeof body.error === 'string') return body.error;
   return `JOY Media request failed (${status})`;
+}
+
+function controlPlaneError(body: unknown, status: number): Error {
+  if (isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string') {
+    const code = typeof body.error.code === 'string' ? body.error.code : 'REQUEST_FAILED';
+    const preflight = isRecord(body.error.preflight)
+      ? (body.error.preflight as unknown as BrowserProviderApprovalPreflight)
+      : undefined;
+    return new BrowserControlPlaneError(code, body.error.message, status, preflight);
+  }
+  return new Error(errorMessage(body, status));
 }
 async function responseBody(response: Response): Promise<unknown> {
   const text = await response.text();

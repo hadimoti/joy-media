@@ -13,7 +13,6 @@ import {
   type CapabilityResult,
   type CapabilityRequest,
   type ProviderApprovalGrant,
-  type ProviderDecisionV1,
   type ProviderStatus,
 } from '@joy-media/provider-sdk';
 import {
@@ -193,10 +192,6 @@ export class MistralProviderRegistry {
   readonly #provider;
   readonly #lifecycle = new ProviderLifecycle();
   readonly #approvals: ProviderApprovalService;
-  readonly #reasoningResults = new Map<
-    string,
-    { readonly requestDigest: string; readonly response: JoyCodeReasoningResponse }
-  >();
 
   constructor(
     apiKey: string | undefined,
@@ -370,10 +365,9 @@ export class MistralProviderRegistry {
       grant: input.approvalGrant,
       fallbackCostCap: input.approvalGrant?.costCap ?? { amount: '0.00', currency: 'USD' },
     } as const;
-    const resultKey = `${actorId}:${input.idempotencyKey}`;
-    const previous = this.#reasoningResults.get(resultKey);
+    const previous = await this.ledger.find(actorId, input.idempotencyKey);
     if (previous !== undefined) {
-      if (previous.requestDigest !== preflight.requestDigest) {
+      if (previous.provenance.requestHash !== preflight.requestDigest) {
         await this.#approvals.recordFailed(
           approvalVerification,
           undefined,
@@ -386,7 +380,12 @@ export class MistralProviderRegistry {
         );
       }
       await this.#approvals.recordSucceeded(approvalVerification, undefined);
-      return previous.response;
+      return joyCodeResponseFromProviderResult(
+        input,
+        previous,
+        previous.provenance.providerDecisionId ?? 'provider-decision-replay',
+        preflight,
+      );
     }
 
     const status = this.#lifecycle.getStatus(MISTRAL_PROVIDER_ID);
@@ -461,12 +460,29 @@ export class MistralProviderRegistry {
         preflight.requestDigest,
         approval,
       );
-      const response = joyCodeResponseFromProviderResult(
-        input,
-        approvedResult,
-        providerDecision,
-        preflight,
-      );
+      let response: JoyCodeReasoningResponse;
+      try {
+        response = joyCodeResponseFromProviderResult(
+          input,
+          approvedResult,
+          providerDecision.decisionId,
+          preflight,
+        );
+      } catch (error) {
+        this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
+        this.#lifecycle.markDegraded(
+          MISTRAL_PROVIDER_ID,
+          'Mistral bounded reasoning response was invalid.',
+          false,
+        );
+        await this.#approvals.recordFailed(
+          approvalVerification,
+          approval.reservation,
+          'invalid-structured-output',
+        );
+        throw error;
+      }
+      await this.ledger.record(actorId, approvedResult);
       this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
       this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
       await this.#approvals.recordSucceeded(
@@ -474,7 +490,6 @@ export class MistralProviderRegistry {
         approval.reservation,
         approvedResult.usage?.cost,
       );
-      this.#reasoningResults.set(resultKey, { requestDigest: preflight.requestDigest, response });
       return response;
     } catch (error) {
       if (error instanceof MistralProviderError || error instanceof ProviderApprovalError) {
@@ -608,7 +623,7 @@ function joyCodeResponseFormat(): {
 function joyCodeResponseFromProviderResult(
   input: JoyCodeReasoningRequest,
   result: CapabilityResult,
-  decision: ProviderDecisionV1,
+  decisionRef: string,
   preflight: ReturnType<typeof computeProviderApprovalPreflight>,
 ): JoyCodeReasoningResponse {
   const rawText = result.outputs[0]?.metadata?.text;
@@ -647,7 +662,7 @@ function joyCodeResponseFromProviderResult(
     provider: {
       providerId: MISTRAL_PROVIDER_ID,
       modelId: input.model,
-      decisionRef: decision.decisionId,
+      decisionRef,
       briefRef: `reasoning-brief-${result.provenance.idempotencyKey}`,
       requestDigest: preflight.requestDigest,
       dataLeavesDevice: preflight.dataLeavesDevice,

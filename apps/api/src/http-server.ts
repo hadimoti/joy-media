@@ -334,6 +334,22 @@ async function route(
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/providers/approvals/grants') {
+    const body = await readJson(request);
+    const grantRequest = providerApprovalGrantRequest(body);
+    respondJson(response, 201, {
+      data: options.providerApprovals.createGrant({
+        actorId: actor.id,
+        providerId: grantRequest.providerId,
+        capability: grantRequest.capability,
+        requestDigest: grantRequest.requestDigest,
+        expiresAt: grantRequest.expiresAt,
+        ...(grantRequest.costCap === undefined ? {} : { costCap: grantRequest.costCap }),
+      }),
+    });
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/providers/mistral/complete') {
     const body = await readJson(request);
     const result = await options.mistral.complete(actor.id, mistralCompletionRequest(body));
@@ -1133,6 +1149,34 @@ function joyCodeReasoningRequest(body: Record<string, unknown>) {
   };
 }
 
+function providerApprovalGrantRequest(body: Record<string, unknown>): {
+  readonly providerId: string;
+  readonly capability: ProviderApprovalGrant['capability'];
+  readonly requestDigest: string;
+  readonly expiresAt: string;
+  readonly costCap?: NonNullable<ProviderApprovalGrant['costCap']>;
+} {
+  const providerId = requiredString(body, 'providerId');
+  const capability = requiredString(body, 'capability') as ProviderApprovalGrant['capability'];
+  const requestDigest = requiredString(body, 'requestDigest');
+  if (!/^sha256:[a-f0-9]{64}$/i.test(requestDigest)) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'requestDigest is invalid');
+  }
+  const expiresAtValue = body.expiresAt;
+  const expiresAt =
+    typeof expiresAtValue === 'string' && !Number.isNaN(Date.parse(expiresAtValue))
+      ? expiresAtValue
+      : new Date(Date.now() + 5 * 60_000).toISOString();
+  const costCap = optionalMoney(body, 'costCap');
+  return {
+    providerId,
+    capability,
+    requestDigest,
+    expiresAt,
+    ...(costCap === undefined ? {} : { costCap }),
+  };
+}
+
 function requiredJoyCodeEvidence(value: unknown): readonly JoyCodeReasoningEvidence[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 12) {
     throw new ControlPlaneError(
@@ -1234,6 +1278,22 @@ function optionalProviderApprovalGrant(
     ...(costCap === undefined ? {} : { costCap }),
   };
   return parsed;
+}
+
+function optionalMoney(
+  body: Record<string, unknown>,
+  field: string,
+): NonNullable<ProviderApprovalGrant['costCap']> | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
+  }
+  const money = value as Record<string, unknown>;
+  if (typeof money.amount !== 'string' || typeof money.currency !== 'string') {
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} is invalid`);
+  }
+  return { amount: money.amount, currency: money.currency };
 }
 
 function containsUnsafeReasoningText(value: string): boolean {

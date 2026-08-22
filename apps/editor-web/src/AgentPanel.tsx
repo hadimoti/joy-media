@@ -34,7 +34,9 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import type { AgentSettings } from './agent-settings.js';
 import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import {
+  BrowserControlPlaneError,
   BrowserControlPlaneClient,
+  type BrowserProviderApprovalPreflight,
   type BrowserJoyCodeReasoningRequest,
   type BrowserJoyCodeReasoningResponse,
 } from './control-plane-client.js';
@@ -82,6 +84,12 @@ interface LastRun {
   readonly savedWorkflowId?: string;
 }
 
+interface PendingReasoningApproval {
+  readonly threadId: string;
+  readonly request: BrowserJoyCodeReasoningRequest;
+  readonly preflight: BrowserProviderApprovalPreflight;
+}
+
 interface JoyCodeState {
   readonly threads: readonly JoyCodeThread[];
   readonly activeThreadId: string;
@@ -102,6 +110,9 @@ export interface AgentPanelCommand {
   readonly serial: number;
   readonly type: AgentPanelCommandType;
 }
+
+export type JoyCodePromptRoute =
+  { readonly kind: 'intent'; readonly intent: AgentIntent } | { readonly kind: 'reasoning' };
 
 /**
  * Maps the atomic runner into the result shape used by the run summary UI.
@@ -240,6 +251,46 @@ export function JoyCodeReasoningDetails({
       )}
     </dl>
   );
+}
+
+export function JoyCodeReasoningApprovalDetails({
+  preflight,
+}: {
+  readonly preflight: BrowserProviderApprovalPreflight;
+}) {
+  return (
+    <dl className="joy-code-provider-approval" aria-label="Joy Code reasoning approval details">
+      <div>
+        <dt>Provider</dt>
+        <dd>{preflight.providerId}</dd>
+      </div>
+      <div>
+        <dt>Capability</dt>
+        <dd>{preflight.capability}</dd>
+      </div>
+      <div>
+        <dt>Approval</dt>
+        <dd>{preflight.requestDigest}</dd>
+      </div>
+      {preflight.estimatedCost !== undefined && (
+        <div>
+          <dt>Cost cap</dt>
+          <dd>
+            {preflight.estimatedCost.amount} {preflight.estimatedCost.currency}
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+export function routeJoyCodePrompt(prompt: string): JoyCodePromptRoute {
+  const intentId = matchJoyCodeIntentId(prompt.trim());
+  const intent =
+    intentId === undefined
+      ? undefined
+      : AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+  return intent === undefined ? { kind: 'reasoning' } : { kind: 'intent', intent };
 }
 
 function shortHash(value: unknown): string {
@@ -433,6 +484,9 @@ export function AgentPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
+  const [pendingReasoningApproval, setPendingReasoningApproval] = useState<
+    PendingReasoningApproval | undefined
+  >(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [lastReasoning, setLastReasoning] = useState<BrowserJoyCodeReasoningResponse | undefined>(
     undefined,
@@ -462,7 +516,14 @@ export function AgentPanel({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [activeThread?.messages.length, pending, lastRun, tab, thinkingThreadId]);
+  }, [
+    activeThread?.messages.length,
+    pending,
+    pendingReasoningApproval,
+    lastRun,
+    tab,
+    thinkingThreadId,
+  ]);
 
   useEffect(
     () => () => {
@@ -490,9 +551,18 @@ export function AgentPanel({
       appendMessage(pending.threadId, 'assistant', 'متوقف شد. ویرایش پیشنهادی اعمال نشد.');
       updateThreadStatus(pending.threadId, 'draft');
     }
+    if (command.type === 'stop' && pendingReasoningApproval !== undefined) {
+      appendMessage(
+        pendingReasoningApproval.threadId,
+        'assistant',
+        'تأیید پردازش راه‌دور لغو شد. هیچ داده‌ای ارسال نشد.',
+      );
+      updateThreadStatus(pendingReasoningApproval.threadId, 'draft');
+    }
     setPending(undefined);
+    setPendingReasoningApproval(undefined);
     if (command.type === 'new-task') startNewTask();
-  }, [command, pending]);
+  }, [command, pending, pendingReasoningApproval]);
 
   function startNewTask() {
     if (thinkingTimerRef.current !== undefined) {
@@ -506,6 +576,7 @@ export function AgentPanel({
       activeThreadId: thread.id,
     }));
     setPending(undefined);
+    setPendingReasoningApproval(undefined);
     setLastRun(undefined);
     setLastReasoning(undefined);
     setThinkingThreadId(undefined);
@@ -612,26 +683,13 @@ export function AgentPanel({
     updateThreadStatus(threadId, 'planning');
   }
 
-  async function requestReasoning(prompt: string, threadId: string): Promise<void> {
-    if (settings.reasoningModel === '') {
-      appendMessage(
-        threadId,
-        'assistant',
-        'Joy Code اکنون درخواست‌های مستقیم تایم‌لاین را می‌پذیرد. برای نقد یا پیشنهاد bounded، ابتدا یک مدل reasoning را در Agent Settings انتخاب کنید.',
-      );
-      return;
-    }
-    const request = buildJoyCodeReasoningRequest({
-      project,
-      selectedClipIds,
-      playheadUs,
-      attachedAssets,
-      settings,
-      projectRevision: session.projectRevisionId,
-      goal: prompt,
-    });
+  async function runReasoningRequest(
+    request: BrowserJoyCodeReasoningRequest,
+    threadId: string,
+  ): Promise<void> {
     try {
       const reasoning = await controlPlaneClient.joyCodeReasoning(request);
+      setPendingReasoningApproval(undefined);
       setLastReasoning(reasoning);
       appendMessage(threadId, 'assistant', reasoning.brief.summary);
       if (reasoning.proposal !== undefined) {
@@ -654,12 +712,67 @@ export function AgentPanel({
       }
       updateThreadStatus(threadId, 'draft');
     } catch (error) {
+      if (
+        error instanceof BrowserControlPlaneError &&
+        error.code === 'PROVIDER_APPROVAL_REQUIRED' &&
+        error.preflight !== undefined &&
+        request.privacyMode === 'ask-before-remote'
+      ) {
+        setPendingReasoningApproval({ threadId, request, preflight: error.preflight });
+        appendMessage(
+          threadId,
+          'assistant',
+          'Remote reasoning needs your approval before this bounded request leaves the device.',
+        );
+        updateThreadStatus(threadId, 'planning');
+        return;
+      }
       appendMessage(
         threadId,
         'assistant',
         error instanceof Error ? error.message : 'Bounded reasoning is unavailable right now.',
       );
       updateThreadStatus(threadId, 'failed');
+    }
+  }
+
+  async function requestReasoning(prompt: string, threadId: string): Promise<void> {
+    if (settings.reasoningModel === '') {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Joy Code اکنون درخواست‌های مستقیم تایم‌لاین را می‌پذیرد. برای نقد یا پیشنهاد bounded، ابتدا یک مدل reasoning را در Agent Settings انتخاب کنید.',
+      );
+      return;
+    }
+    await runReasoningRequest(
+      buildJoyCodeReasoningRequest({
+        project,
+        selectedClipIds,
+        playheadUs,
+        attachedAssets,
+        settings,
+        projectRevision: session.projectRevisionId,
+        goal: prompt,
+      }),
+      threadId,
+    );
+  }
+
+  async function approveReasoning(): Promise<void> {
+    if (pendingReasoningApproval === undefined) return;
+    const { threadId, request, preflight } = pendingReasoningApproval;
+    setThinkingThreadId(threadId);
+    try {
+      const grant = await controlPlaneClient.issueProviderApprovalGrant({
+        providerId: preflight.providerId,
+        capability: preflight.capability,
+        requestDigest: preflight.requestDigest,
+        ...(preflight.estimatedCost === undefined ? {} : { costCap: preflight.estimatedCost }),
+      });
+      await runReasoningRequest({ ...request, providerApprovalGrant: grant }, threadId);
+    } finally {
+      setThinkingThreadId((current) => (current === threadId ? undefined : current));
     }
   }
 
@@ -678,46 +791,49 @@ export function AgentPanel({
       );
       return;
     }
-    const intentId = matchJoyCodeIntentId(body);
-    const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
-    if (intent === undefined) {
+    if (pendingReasoningApproval !== undefined) {
       appendMessage(
         threadId,
         'assistant',
-        'Joy Code اکنون درخواست‌های مستقیم تایم‌لاین مانند کوتاه‌کردن مقدمه، برش، جابه‌جایی، اتصال، افزودن یا حذف کلیپ را می‌پذیرد. پس از اتصال آداپتور نشست سرور، پاسخ آزاد KiloCode نیز اینجا نمایش داده می‌شود.',
+        'پیش از شروع درخواست تازه، تأیید پردازش راه‌دور فعلی را تأیید یا رد کنید.',
       );
       return;
     }
+    const route = routeJoyCodePrompt(body);
     setThinkingThreadId(threadId);
     thinkingTimerRef.current = window.setTimeout(() => {
       thinkingTimerRef.current = undefined;
-      try {
-        if (intent !== undefined) {
-          plan(intent, threadId);
-          return;
-        }
-        void requestReasoning(body, threadId).finally(() => {
-          setThinkingThreadId((current) => (current === threadId ? undefined : current));
-        });
-        return;
-      } finally {
-        if (intent !== undefined) {
-          setThinkingThreadId((current) => (current === threadId ? undefined : current));
-        }
-      }
+      const action =
+        route.kind === 'intent'
+          ? Promise.resolve().then(() => plan(route.intent, threadId))
+          : requestReasoning(body, threadId);
+      void action.finally(() => {
+        setThinkingThreadId((current) => (current === threadId ? undefined : current));
+      });
     }, THINKING_REVEAL_MS);
   }
 
   function reject() {
-    if (pending === undefined) return;
-    auditRef.current.record({
-      planId: pending.plan.planId,
-      action: 'plan-rejected',
-      userId: 'local-owner',
-    });
-    appendMessage(pending.threadId, 'assistant', 'رد شد. هیچ تغییری روی تایم‌لاین اعمال نشد.');
-    updateThreadStatus(pending.threadId, 'draft');
-    setPending(undefined);
+    if (pending !== undefined) {
+      auditRef.current.record({
+        planId: pending.plan.planId,
+        action: 'plan-rejected',
+        userId: 'local-owner',
+      });
+      appendMessage(pending.threadId, 'assistant', 'رد شد. هیچ تغییری روی تایم‌لاین اعمال نشد.');
+      updateThreadStatus(pending.threadId, 'draft');
+      setPending(undefined);
+      return;
+    }
+    if (pendingReasoningApproval !== undefined) {
+      appendMessage(
+        pendingReasoningApproval.threadId,
+        'assistant',
+        'پردازش راه‌دور رد شد. هیچ داده‌ای برای reasoning ارسال نشد.',
+      );
+      updateThreadStatus(pendingReasoningApproval.threadId, 'draft');
+      setPendingReasoningApproval(undefined);
+    }
   }
 
   async function executePending(manualApprovalGranted: boolean) {
@@ -850,6 +966,7 @@ export function AgentPanel({
     if (pending === undefined) return [];
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
+  const hasBlockingPending = pending !== undefined || pendingReasoningApproval !== undefined;
   const isThinking = thinkingThreadId === activeThread?.id;
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
@@ -1091,6 +1208,47 @@ export function AgentPanel({
                   </div>
                 </section>
               )}
+              {pendingReasoningApproval !== undefined &&
+                pendingReasoningApproval.threadId === activeThread?.id && (
+                  <section
+                    className="joy-code-plan-card"
+                    aria-label="Joy Code remote reasoning approval"
+                  >
+                    <div className="joy-code-plan-head">
+                      <div>
+                        <span>Remote reasoning approval</span>
+                        <strong>{pendingReasoningApproval.request.model}</strong>
+                      </div>
+                      <span className="agent-decision agent-decision-requires-manual">
+                        requires manual
+                      </span>
+                    </div>
+                    <p>
+                      Approve this bounded request before Joy Code sends it to the remote model.
+                    </p>
+                    <span className="joy-code-plan-reason">
+                      {pendingReasoningApproval.preflight.retentionDisclosure ??
+                        'The bounded prompt will be sent to the configured remote reasoning provider.'}
+                    </span>
+                    <JoyCodeReasoningApprovalDetails
+                      preflight={pendingReasoningApproval.preflight}
+                    />
+                    <div className="joy-code-plan-actions">
+                      <button
+                        type="button"
+                        className="is-primary"
+                        onClick={() => void approveReasoning()}
+                      >
+                        <CheckIcon />
+                        Allow remote reasoning
+                      </button>
+                      <button type="button" onClick={reject}>
+                        <CloseIcon />
+                        Reject
+                      </button>
+                    </div>
+                  </section>
+                )}
 
               {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
                 <section
@@ -1212,18 +1370,18 @@ export function AgentPanel({
                   aria-label={
                     isThinking
                       ? 'Joy Code is thinking'
-                      : pending === undefined
+                      : !hasBlockingPending
                         ? 'Send message'
-                        : 'Stop current plan'
+                        : 'Stop current request'
                   }
-                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
-                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
+                  title={isThinking ? 'Thinking…' : !hasBlockingPending ? 'Send' : 'Stop'}
+                  disabled={isThinking || (!hasBlockingPending && draft.trim().length === 0)}
                   onClick={() => {
-                    if (pending !== undefined) reject();
+                    if (hasBlockingPending) reject();
                     else submitPrompt(draft);
                   }}
                 >
-                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                  {!hasBlockingPending ? <PlayIcon /> : <CloseIcon />}
                 </button>
               </div>
             </div>
