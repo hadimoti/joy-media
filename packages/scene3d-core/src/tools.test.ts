@@ -62,6 +62,8 @@ describe('scene3d structured tools', () => {
     const preview = dryRunScene3DTool(session(), 'scene3d.add', input);
     const approval = {
       approvalId: 'a1',
+      planId: 'plan-1',
+      stepId: 'step-1',
       toolName: 'scene3d.add' as const,
       inputDigest: preview.inputDigest!,
       diffDigest: preview.diffDigest!,
@@ -86,6 +88,8 @@ describe('scene3d structured tools', () => {
         input,
         {
           approvalId: 'a1',
+          planId: 'plan-1',
+          stepId: 'step-1',
           toolName: 'scene3d.add',
           inputDigest: preview.inputDigest!,
           diffDigest: preview.diffDigest!,
@@ -146,6 +150,8 @@ describe('scene3d structured tools', () => {
     const preview = dryRunScene3DTool(session(), 'scene3d.add', input);
     const approval = {
       approvalId: 'once',
+      planId: 'plan-1',
+      stepId: 'step-1',
       toolName: 'scene3d.add' as const,
       inputDigest: scene3DToolInputDigest('scene3d.add', input),
       diffDigest: scene3DToolDiffDigest(preview.diff!),

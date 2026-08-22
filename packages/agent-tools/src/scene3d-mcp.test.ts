@@ -19,6 +19,8 @@ import {
 describe('Scene3DMcpGateway', () => {
   it('binds reads, previews, and approved calls to a live session/commit seam', () => {
     let document = emptyScene3D('scene');
+    const approvalStore = new Scene3DApprovalLedger();
+    const idempotency = createIdempotencyStore();
     const session = () => ({
       actorId: 'actor',
       projectId: 'project',
@@ -42,8 +44,8 @@ describe('Scene3DMcpGateway', () => {
         registry: createToolRegistry(),
         authorize: () => ({ allowed: true }),
         approvalSecret: 'secret',
-        approvalStore: new Scene3DApprovalLedger(),
-        idempotency: createIdempotencyStore(),
+        approvalStore,
+        idempotency,
         now: () => 100,
       }),
       binding: {
@@ -51,6 +53,13 @@ describe('Scene3DMcpGateway', () => {
         commit: {
           commit: (result) => {
             document = result.document;
+            approvalStore.markConsumed(result.approval.approvalId);
+            idempotency.recordExecution(
+              result.idempotencyKey,
+              result.planId,
+              result.stepId,
+              result.result,
+            );
             return { accepted: true };
           },
         },
@@ -60,6 +69,8 @@ describe('Scene3DMcpGateway', () => {
     expect(gateway.read('scene3d.summary')).toMatchObject({ sceneId: 'scene' });
     const approval = {
       approvalId: 'a',
+      planId: 'p',
+      stepId: 's',
       toolName: 'scene3d.add' as const,
       inputDigest: scene3DToolInputDigest('scene3d.add', input),
       diffDigest: scene3DToolDiffDigest(preview.diff!),

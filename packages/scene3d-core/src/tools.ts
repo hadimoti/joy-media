@@ -21,6 +21,8 @@ export interface Scene3DToolDefinition {
 
 export interface Scene3DApprovalBinding {
   readonly approvalId: string;
+  readonly planId: string;
+  readonly stepId: string;
   readonly toolName: Scene3DWriteTool;
   readonly inputDigest: string;
   readonly diffDigest: string;
@@ -64,14 +66,8 @@ export interface Scene3DToolApplyResult {
 /** Durable approval state seam required by the host execution boundary. */
 export interface Scene3DApprovalStore {
   hasConsumed(approvalId: string): boolean;
+  markConsumed(approvalId: string): void;
   release(approvalId: string): void;
-  apply(
-    session: Scene3DToolSession,
-    name: Scene3DWriteTool,
-    input: Readonly<Record<string, unknown>>,
-    approval: Scene3DApprovalBinding,
-    now?: number,
-  ): Scene3DToolApplyResult;
 }
 
 export const SCENE3D_TOOL_DEFINITIONS: readonly Scene3DToolDefinition[] = [
@@ -288,6 +284,10 @@ export class Scene3DApprovalLedger implements Scene3DApprovalStore {
     this.consumed.delete(approvalId);
   }
 
+  markConsumed(approvalId: string): void {
+    this.consumed.add(approvalId);
+  }
+
   apply(
     session: Scene3DToolSession,
     name: Scene3DWriteTool,
@@ -298,7 +298,7 @@ export class Scene3DApprovalLedger implements Scene3DApprovalStore {
     if (this.consumed.has(approval.approvalId))
       return { error: 'scene approval has already been consumed' };
     const result = applyApprovedScene3DTool(session, name, input, approval, now);
-    if (result.document !== undefined) this.consumed.add(approval.approvalId);
+    if (result.document !== undefined) this.markConsumed(approval.approvalId);
     return result;
   }
 }
@@ -322,6 +322,8 @@ export function scene3DApprovalSignature(
   if (secret.length === 0) throw new Error('scene3d approval secret must not be empty');
   const canonical = JSON.stringify({
     approvalId: approval.approvalId,
+    planId: approval.planId,
+    stepId: approval.stepId,
     toolName: approval.toolName,
     inputDigest: approval.inputDigest,
     diffDigest: approval.diffDigest,

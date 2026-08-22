@@ -35,6 +35,8 @@ function request() {
   const preview = dryRunScene3DTool(session, 'scene3d.add', input);
   const approval = {
     approvalId: 'approval-1',
+    planId: 'plan-1',
+    stepId: 'step-1',
     toolName: 'scene3d.add' as const,
     inputDigest: scene3DToolInputDigest('scene3d.add', input),
     diffDigest: scene3DToolDiffDigest(preview.diff!),
@@ -59,12 +61,14 @@ describe('Scene3DPlanExecutor', () => {
   it('commits approved changes and records audit/idempotency state', () => {
     const saved: unknown[] = [];
     const audit = createAuditTrail();
+    const approvalStore = new Scene3DApprovalLedger();
+    const idempotency = createIdempotencyStore();
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
       approvalSecret: 'secret',
-      approvalStore: new Scene3DApprovalLedger(),
-      idempotency: createIdempotencyStore(),
+      approvalStore,
+      idempotency,
       audit,
       now: () => 100,
     });
@@ -73,6 +77,8 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           saved.push(value);
+          approvalStore.markConsumed(value.approval.approvalId);
+          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
           return { accepted: true };
         },
       },
@@ -84,12 +90,14 @@ describe('Scene3DPlanExecutor', () => {
 
   it('returns replay without committing twice', () => {
     const saved: unknown[] = [];
+    const approvalStore = new Scene3DApprovalLedger();
+    const idempotency = createIdempotencyStore();
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
       approvalSecret: 'secret',
-      approvalStore: new Scene3DApprovalLedger(),
-      idempotency: createIdempotencyStore(),
+      approvalStore,
+      idempotency,
       now: () => 100,
     });
     const first = executor.execute({
@@ -97,6 +105,8 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           saved.push(value);
+          approvalStore.markConsumed(value.approval.approvalId);
+          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
           return { accepted: true };
         },
       },
@@ -116,12 +126,14 @@ describe('Scene3DPlanExecutor', () => {
   });
 
   it('does not consume approval when the host CAS rejects the commit', () => {
+    const approvalStore = new Scene3DApprovalLedger();
+    const idempotency = createIdempotencyStore();
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
       approvalSecret: 'secret',
-      approvalStore: new Scene3DApprovalLedger(),
-      idempotency: createIdempotencyStore(),
+      approvalStore,
+      idempotency,
       now: () => 100,
     });
     const rejected = executor.execute({
@@ -131,18 +143,26 @@ describe('Scene3DPlanExecutor', () => {
     expect(rejected.status).toBe('failed');
     const accepted = executor.execute({
       ...request(),
-      commit: { commit: () => ({ accepted: true }) },
+      commit: {
+        commit: (value) => {
+          approvalStore.markConsumed(value.approval.approvalId);
+          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
+          return { accepted: true };
+        },
+      },
     });
     expect(accepted.status).toBe('success');
   });
 
-  it('records thrown commit failures and allows a retry', () => {
+  it('quarantines an approval when the commit outcome is ambiguous', () => {
+    const approvalStore = new Scene3DApprovalLedger();
+    const idempotency = createIdempotencyStore();
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
       authorize: () => ({ allowed: true }),
       approvalSecret: 'secret',
-      approvalStore: new Scene3DApprovalLedger(),
-      idempotency: createIdempotencyStore(),
+      approvalStore,
+      idempotency,
       now: () => 100,
     });
     expect(
@@ -157,7 +177,7 @@ describe('Scene3DPlanExecutor', () => {
     ).toBe('failed');
     expect(
       executor.execute({ ...request(), commit: { commit: () => ({ accepted: true }) } }).status,
-    ).toBe('success');
+    ).toBe('failed');
   });
 
   it('rejects a caller-forged approval receipt before committing', () => {

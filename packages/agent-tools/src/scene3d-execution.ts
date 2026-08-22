@@ -1,4 +1,5 @@
 import {
+  applyApprovedScene3DTool,
   verifyScene3DApprovalSignature,
   type Scene3DApprovalStore,
   type Scene3DApprovalBinding,
@@ -17,12 +18,22 @@ import type { ToolRegistry } from './registry.js';
 import type { ToolResult } from './types.js';
 
 export interface Scene3DCommit {
+  /**
+   * Atomically compare-and-swap the scene, consume the approval receipt, and
+   * persist the idempotency result. accepted:false must prove no mutation;
+   * a thrown error is ambiguous and must be resolved by the host before retry.
+   */
   readonly commit: (result: {
     readonly document: Scene3DDocumentV1;
     readonly revision: string;
     readonly expectedRevision: string;
     readonly diff: Scene3DToolDiff;
-  }) => { readonly accepted: boolean; readonly error?: string };
+    readonly approval: Scene3DApprovalBinding;
+    readonly planId: string;
+    readonly stepId: string;
+    readonly idempotencyKey: string;
+    readonly result: ToolResult;
+  }) => { readonly accepted: boolean; readonly replayed?: boolean; readonly error?: string };
 }
 
 export interface Scene3DExecutionRequest {
@@ -116,6 +127,13 @@ export class Scene3DPlanExecutor {
     }
     if (!verifyScene3DApprovalSignature(request.approval, this.approvalSecret))
       return this.fail(request, 'scene approval signature is invalid');
+    if (
+      request.approval.planId !== request.planId ||
+      request.approval.stepId !== request.stepId
+    )
+      return this.fail(request, 'scene approval receipt is bound to a different plan step');
+    if (this.approvals.hasConsumed(request.approval.approvalId))
+      return this.fail(request, 'scene approval has already been consumed');
     this.audit.record({
       planId: request.planId,
       stepId: request.stepId,
@@ -123,7 +141,7 @@ export class Scene3DPlanExecutor {
       tool: request.name,
       userId: request.session.actorId,
     });
-    const result = this.approvals.apply(
+    const result = applyApprovedScene3DTool(
       request.session,
       request.name,
       request.input,
@@ -137,25 +155,6 @@ export class Scene3DPlanExecutor {
       result.diff === undefined
     )
       return this.fail(request, result.error ?? 'scene3d tool failed');
-    let commitResult: { readonly accepted: boolean; readonly error?: string };
-    try {
-      commitResult = request.commit.commit({
-        document: result.document,
-        revision: result.revision,
-        expectedRevision: request.session.revision,
-        diff: result.diff,
-      });
-    } catch (cause) {
-      this.approvals.release(request.approval.approvalId);
-      return this.fail(request, cause instanceof Error ? cause.message : String(cause));
-    }
-    if (!commitResult.accepted) {
-      this.approvals.release(request.approval.approvalId);
-      return this.fail(
-        request,
-        commitResult.error ?? 'scene revision changed before commit; retry from a fresh session',
-      );
-    }
     const toolResult: ToolResult = {
       success: true,
       stableIds: [...result.diff.created, ...result.diff.modified],
@@ -166,12 +165,39 @@ export class Scene3DPlanExecutor {
         summary: result.diff.summary,
       },
     };
-    this.idempotency.recordExecution(
-      request.idempotencyKey,
-      request.planId,
-      request.stepId,
-      toolResult,
-    );
+    let commitResult: {
+      readonly accepted: boolean;
+      readonly replayed?: boolean;
+      readonly error?: string;
+    };
+    try {
+      commitResult = request.commit.commit({
+        document: result.document,
+        revision: result.revision,
+        expectedRevision: request.session.revision,
+        diff: result.diff,
+        approval: request.approval,
+        planId: request.planId,
+        stepId: request.stepId,
+        idempotencyKey: request.idempotencyKey,
+        result: toolResult,
+      });
+    } catch (cause) {
+      this.approvals.markConsumed(request.approval.approvalId);
+      return this.ambiguousFailure(
+        request,
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    }
+    if (!commitResult.accepted) {
+      this.approvals.release(request.approval.approvalId);
+      return this.fail(
+        request,
+        commitResult.error ?? 'scene revision changed before commit; retry from a fresh session',
+      );
+    }
+    if (commitResult.replayed)
+      return { status: 'replayed', idempotencyKey: request.idempotencyKey };
     this.audit.record({
       planId: request.planId,
       stepId: request.stepId,
@@ -209,5 +235,21 @@ export class Scene3DPlanExecutor {
       error,
     });
     return { status, error, idempotencyKey: request.idempotencyKey };
+  }
+
+  private ambiguousFailure(
+    request: Scene3DExecutionRequest,
+    error: string,
+  ): Scene3DExecutionResult {
+    const message = `ambiguous scene3d commit; resolve durable status before retry: ${error}`;
+    this.audit.record({
+      planId: request.planId,
+      stepId: request.stepId,
+      action: 'step-failed',
+      tool: request.name,
+      userId: request.session.actorId,
+      error: message,
+    });
+    return { status: 'failed', error: message, idempotencyKey: request.idempotencyKey };
   }
 }
