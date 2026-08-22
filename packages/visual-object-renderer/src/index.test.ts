@@ -176,6 +176,23 @@ describe('buildRenderFrameIR', () => {
     expect(node.height).toBe(720);
   });
 
+  it('sizes Motion Studio scene nodes as captured video frames for preview and export', () => {
+    const obj = resolved(
+      makeObject({
+        id: 'motion-scene',
+        kind: 'motion-scene',
+        motionSceneId: 'motion-doc-1',
+      }),
+    );
+    const frame = buildRenderFrameIR('c', 250_000, 1080, 1920, [obj]);
+    const node = frame.nodes[0];
+    expect(node?.kind).toBe('video-frame');
+    if (node?.kind !== 'video-frame') throw new Error('expected motion scene video frame');
+    expect(node.width).toBe(1080);
+    expect(node.height).toBe(1920);
+    expect(node.id).toBe('motion-scene');
+  });
+
   it('attaches per-object effects and master color grade', () => {
     const obj = resolved(makeObject({ id: 'img', kind: 'image' }));
     const frame = buildRenderFrameIR('c', 0, 100, 100, [obj], {

@@ -127,4 +127,37 @@ describe('visual property schemas', () => {
     expect(updated.visualObjects.title!.transform.x).toBe(12);
     expect(project.visualObjects.title!.transform.x).toBe(0);
   });
+
+  it('creates and removes durable Motion Studio scene objects with undo inverses', () => {
+    const migrated = migrateV0ToV1(emptySpikeProject());
+    const object = {
+      id: 'motion-scene-object',
+      kind: 'motion-scene',
+      motionSceneId: 'motion-doc-1',
+      transform: {
+        x: 0,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        rotationDeg: 0,
+        opacity: 1,
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      },
+    } as const;
+    const project = { ...migrated.project, visualObjects: {} };
+    const created = applyVisualObjectProjectTransaction(project, {
+      label: 'Create motion scene',
+      commands: [{ type: 'motionScene.create', payload: { object } }],
+    });
+
+    expect(created.visualObjects['motion-scene-object']).toMatchObject({
+      kind: 'motion-scene',
+      motionSceneId: 'motion-doc-1',
+    });
+    const removed = applyVisualObjectProjectTransaction(created, {
+      label: 'Remove motion scene',
+      commands: [{ type: 'motionScene.remove', payload: { objectId: object.id } }],
+    });
+    expect(removed.visualObjects['motion-scene-object']).toBeUndefined();
+  });
 });

@@ -420,6 +420,58 @@ describe('v1 project schema and migration harness', () => {
     );
   });
 
+  it('accepts a published Motion Studio scene object with a durable scene id', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    expect(
+      validateJoyProjectV1({
+        ...base,
+        visualObjects: {
+          'motion-scene-1': {
+            id: 'motion-scene-1',
+            kind: 'motion-scene',
+            motionSceneId: 'motion-doc-1',
+            transform,
+          },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('reports Motion Studio scene object shape violations', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    const diagnostics = validateJoyProjectV1({
+      ...base,
+      visualObjects: {
+        'motion-scene-1': { id: 'motion-scene-1', kind: 'motion-scene', transform },
+        text: { id: 'text', kind: 'text', motionSceneId: 'leaked', transform },
+      },
+    });
+    expect(diagnostics.map((diagnostic) => diagnostic.message)).toEqual(
+      expect.arrayContaining([
+        'motion-scene objects require a non-empty motionSceneId',
+        'only motion-scene objects may carry motionSceneId',
+      ]),
+    );
+  });
+
   it('accepts a visual object with a valid expressions map (ADR-0015)', () => {
     const base = migrateV0ToV1(v0Fixture()).project;
     const project = {

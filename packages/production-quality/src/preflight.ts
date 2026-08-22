@@ -8,7 +8,8 @@ import {
 
 const CAPTION_BURN_IN_KEY = 'joy.captions.burnIn';
 
-export type PlannedAssetKind = 'video' | 'audio' | 'image' | 'other' | 'html-scene';
+export type PlannedAssetKind =
+  'video' | 'audio' | 'image' | 'other' | 'html-scene' | 'motion-scene';
 
 export interface QualityOpaqueAssetDescriptor {
   readonly id: string;
@@ -187,6 +188,16 @@ function validateBindings(bundle: QualityRenderBundleV1): readonly QualityFindin
       if (bundle.assets[id] === undefined) {
         findings.push(
           finding('asset-binding', 'fail', `HTML scene ${id} is unresolved`, { refId: object.id }),
+        );
+      }
+    }
+    if (object.kind === 'motion-scene') {
+      const id = `motion-scene:${object.motionSceneId ?? ''}`;
+      if (bundle.assets[id] === undefined) {
+        findings.push(
+          finding('asset-binding', 'fail', `Motion scene ${id} is unresolved`, {
+            refId: object.id,
+          }),
         );
       }
     }

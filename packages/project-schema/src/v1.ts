@@ -18,9 +18,7 @@ export interface EffectInstanceV1 {
   readonly effectId: string;
   readonly enabled: boolean;
   readonly params: Readonly<Record<string, EffectParamValue>>;
-  readonly animations?: Readonly<
-    Partial<Record<string, AnimationCurveV1>>
-  >;
+  readonly animations?: Readonly<Partial<Record<string, AnimationCurveV1>>>;
   readonly label?: string;
 }
 
@@ -161,12 +159,14 @@ export interface CameraParamsV1 {
  * it renders nothing but its resolved transform + `camera` params drive
  * perspective projection for a composition's `activeCameraId`. `kind: 'html-scene'`
  * references a first-party or packaged HTML scene (`scenePackageId`) for
- * Monitor/export (P04). `parentId` links an object to its parent for transform
+ * Monitor/export (P04). `kind: 'motion-scene'` references a published Motion
+ * Studio scene (`motionSceneId`) that is captured as timeline media.
+ * `parentId` links an object to its parent for transform
  * inheritance; the graph must stay acyclic.
  */
 export interface VisualObjectV1 {
   readonly id: string;
-  readonly kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene';
+  readonly kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene' | 'motion-scene';
   readonly transform: VisualObjectTransformV1;
   /** Optional per-channel keyframe curves; a present channel overrides the static value (§20.3). */
   readonly animations?: Readonly<Partial<Record<AnimatablePropertyV1, AnimationCurveV1>>>;
@@ -193,6 +193,8 @@ export interface VisualObjectV1 {
   readonly camera?: CameraParamsV1;
   /** Present iff `kind === 'html-scene'` — first-party or package scene id (P04). */
   readonly scenePackageId?: string;
+  /** Present iff `kind === 'motion-scene'` — published Motion Studio scene id (P18). */
+  readonly motionSceneId?: string;
   /** Applied visual effects (P16). Stable per-instance IDs; order = application order. */
   readonly effects?: readonly EffectInstanceV1[];
 }
@@ -394,11 +396,7 @@ export interface TransitionV1 {
 }
 
 export type ExportPresetId =
-  | 'social-h264-aac'
-  | 'reels-1080'
-  | 'shorts-1080'
-  | 'youtube-1080'
-  | 'high-bitrate';
+  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
 
 export type JsonValue =
   null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
@@ -754,7 +752,8 @@ function validateVisualObject(
     value.kind !== 'shape' &&
     value.kind !== 'null' &&
     value.kind !== 'camera' &&
-    value.kind !== 'html-scene'
+    value.kind !== 'html-scene' &&
+    value.kind !== 'motion-scene'
   )
     diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_VISUAL_OBJECT', 'object kind is invalid', path));
   if (value.kind === 'camera') {
@@ -791,6 +790,24 @@ function validateVisualObject(
       diagnostic(
         'PROJECT_SCHEMA_V1_HTML_SCENE',
         'only html-scene objects may carry scenePackageId',
+        path,
+      ),
+    );
+  }
+  if (value.kind === 'motion-scene') {
+    if (!isNonEmptyString(value.motionSceneId))
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_MOTION_SCENE',
+          'motion-scene objects require a non-empty motionSceneId',
+          path,
+        ),
+      );
+  } else if (value.motionSceneId !== undefined) {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_MOTION_SCENE',
+        'only motion-scene objects may carry motionSceneId',
         path,
       ),
     );

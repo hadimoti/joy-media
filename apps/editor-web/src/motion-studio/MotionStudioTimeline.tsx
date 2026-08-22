@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MotionLayer, MotionSceneDocument, MotionLayerId, MotionAnimation, MotionKeyframe } from '@joy-media/motion-core';
+import type {
+  MotionLayer,
+  MotionSceneDocument,
+  MotionLayerId,
+  MotionAnimation,
+  MotionKeyframe,
+} from '@joy-media/motion-core';
 import {
   clampPixelsPerSecond,
   fitPixelsPerSecond,
@@ -36,6 +42,113 @@ export interface MotionStudioTimelineProps {
   readonly onToggleVisibility: (layerId: MotionLayerId) => void;
   readonly onToggleLocked: (layerId: MotionLayerId) => void;
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
+}
+
+export interface MotionTimelineKeyframeSelection {
+  readonly property: string;
+  readonly keyframeId: string;
+}
+
+export interface CopiedMotionKeyframes {
+  readonly anchorTimeMs: number;
+  readonly entries: readonly {
+    readonly property: string;
+    readonly keyframe: MotionKeyframe;
+    readonly offsetMs: number;
+  }[];
+}
+
+function selectionKey(selection: MotionTimelineKeyframeSelection): string {
+  return `${selection.property}\0${selection.keyframeId}`;
+}
+
+function snapTimeMs(timeMs: number, snapIntervalMs: number): number {
+  if (!Number.isFinite(snapIntervalMs) || snapIntervalMs <= 0) return Math.max(0, timeMs);
+  return Math.max(0, Math.round(timeMs / snapIntervalMs) * snapIntervalMs);
+}
+
+export function moveMotionKeyframes(
+  animations: readonly MotionAnimation[],
+  selections: readonly MotionTimelineKeyframeSelection[],
+  deltaMs: number,
+  options: { readonly durationMs: number; readonly snapIntervalMs?: number },
+): readonly MotionAnimation[] {
+  const selected = new Set(selections.map(selectionKey));
+  const snap = options.snapIntervalMs ?? 0;
+  return animations.map((animation) => ({
+    ...animation,
+    curve: {
+      ...animation.curve,
+      keyframes: animation.curve.keyframes
+        .map((keyframe) => {
+          if (
+            !selected.has(selectionKey({ property: animation.property, keyframeId: keyframe.id }))
+          ) {
+            return keyframe;
+          }
+          const snapped = snapTimeMs(keyframe.timeMs + deltaMs, snap);
+          return { ...keyframe, timeMs: Math.min(options.durationMs, snapped) };
+        })
+        .sort((a, b) => a.timeMs - b.timeMs),
+    },
+  }));
+}
+
+export function copyMotionKeyframes(
+  animations: readonly MotionAnimation[],
+  selections: readonly MotionTimelineKeyframeSelection[],
+): CopiedMotionKeyframes | undefined {
+  const selected = new Set(selections.map(selectionKey));
+  const entries = animations.flatMap((animation) =>
+    animation.curve.keyframes
+      .filter((keyframe) =>
+        selected.has(selectionKey({ property: animation.property, keyframeId: keyframe.id })),
+      )
+      .map((keyframe) => ({ property: animation.property, keyframe })),
+  );
+  if (entries.length === 0) return undefined;
+  const anchorTimeMs = Math.min(...entries.map((entry) => entry.keyframe.timeMs));
+  return {
+    anchorTimeMs,
+    entries: entries.map((entry) => ({
+      ...entry,
+      offsetMs: entry.keyframe.timeMs - anchorTimeMs,
+    })),
+  };
+}
+
+export function pasteMotionKeyframes(
+  animations: readonly MotionAnimation[],
+  clipboard: CopiedMotionKeyframes,
+  atTimeMs: number,
+  options: { readonly durationMs: number; readonly snapIntervalMs?: number },
+): readonly MotionAnimation[] {
+  const byProperty = new Map<string, MotionAnimation>();
+  for (const animation of animations) byProperty.set(animation.property, animation);
+  const snap = options.snapIntervalMs ?? 0;
+  for (const entry of clipboard.entries) {
+    const existing = byProperty.get(entry.property);
+    const keyframe = {
+      ...entry.keyframe,
+      id: crypto.randomUUID(),
+      timeMs: Math.min(options.durationMs, snapTimeMs(atTimeMs + entry.offsetMs, snap)),
+    };
+    byProperty.set(
+      entry.property,
+      existing === undefined
+        ? { property: entry.property, curve: { keyframes: [keyframe] } }
+        : {
+            ...existing,
+            curve: {
+              ...existing.curve,
+              keyframes: [...existing.curve.keyframes, keyframe].sort(
+                (a, b) => a.timeMs - b.timeMs,
+              ),
+            },
+          },
+    );
+  }
+  return [...byProperty.values()];
 }
 
 /** Visible lane width = scrollport minus fixed 9.5rem track gutter. */
@@ -132,7 +245,10 @@ export function MotionStudioTimeline({
 
   // ── Keyframe rows per selected layer ──
   const selectedLayer = useMemo(
-    () => (selectedLayerIds.length === 1 ? document.layers.find((l) => l.id === selectedLayerIds[0]) : null),
+    () =>
+      selectedLayerIds.length === 1
+        ? document.layers.find((l) => l.id === selectedLayerIds[0])
+        : null,
     [document.layers, selectedLayerIds],
   );
 

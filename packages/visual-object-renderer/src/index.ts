@@ -60,6 +60,7 @@ export interface BuildRenderFrameOptions {
  * - `image` → `video-frame` when size known (real RGBA arrives via bitmap map), else placeholder sprite
  * - `text`  → `text` node
  * - `shape` → `sprite` node tinted per shape
+ * - `html-scene` / `motion-scene` → `video-frame` backed by captured RGBA
  * - `null` / `camera` → **undefined** (controllers render nothing)
  *
  * The transform is already resolved through parenting and camera projection by
@@ -91,7 +92,7 @@ export function visualObjectToRenderNode(
     };
   }
 
-  if (object.kind === 'html-scene') {
+  if (object.kind === 'html-scene' || object.kind === 'motion-scene') {
     // RGBA pixels arrive out-of-band via Pixi videoBitmaps keyed by object id.
     const viewport = imageSize ?? frameSize ?? { width: 1080, height: 1920 };
     return {
@@ -323,7 +324,7 @@ const DARK_BG: Rgba = Object.freeze({ r: 12, g: 16, b: 28, a: 255 });
 const EMPTY_CLIP_TIMES: ClipTimingLookup = new Map();
 
 function shapeColor(
-  kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene',
+  kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene' | 'motion-scene',
   shape?: 'rectangle' | 'ellipse',
 ): Rgba {
   switch (kind) {

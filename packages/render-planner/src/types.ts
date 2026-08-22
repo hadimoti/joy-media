@@ -7,7 +7,7 @@ import type {
   TimeUs,
 } from '@joy-media/project-schema';
 
-export type PlannedAssetKind = AssetRecordV1['kind'] | 'html-scene';
+export type PlannedAssetKind = AssetRecordV1['kind'] | 'html-scene' | 'motion-scene';
 
 export interface OpaqueAssetDescriptor {
   readonly id: string;
@@ -44,7 +44,7 @@ export interface PlanRenderFrameInput {
 export interface PlannedAssetRequirement {
   readonly assetId: string;
   readonly kind: PlannedAssetKind;
-  readonly reason: 'video-sample' | 'still-bitmap' | 'html-scene' | 'audio-sample';
+  readonly reason: 'video-sample' | 'still-bitmap' | 'html-scene' | 'motion-scene' | 'audio-sample';
   readonly descriptor?: OpaqueAssetDescriptor;
 }
 
@@ -65,7 +65,7 @@ export interface PlannedAudioSample {
 
 export interface PlannedCaptureRequirement {
   readonly id: string;
-  readonly kind: 'video-frame' | 'still-bitmap' | 'html-scene' | 'caption-burn-in';
+  readonly kind: 'video-frame' | 'still-bitmap' | 'html-scene' | 'motion-scene' | 'caption-burn-in';
   readonly assetId?: string;
   readonly clipId?: string;
   readonly objectId?: string;

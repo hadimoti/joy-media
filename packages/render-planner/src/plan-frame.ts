@@ -266,6 +266,15 @@ function plannedCaptureRequirements(
         sourceTimeUs: timeUs,
       });
     }
+    if (object.kind === 'motion-scene' && object.motionSceneId !== undefined) {
+      requirements.push({
+        id: `motion-scene:${object.id}`,
+        kind: 'motion-scene',
+        objectId: object.id,
+        assetId: `motion-scene:${object.motionSceneId}`,
+        sourceTimeUs: timeUs,
+      });
+    }
   }
   if (captionNodes.length > 0) {
     requirements.push({ id: 'caption-burn-in', kind: 'caption-burn-in' });
@@ -299,7 +308,18 @@ function plannedAssetRequirements(
       ...(descriptor !== undefined ? { descriptor } : {}),
     });
   };
-  for (const sample of videoSamples) push(sample.assetId, 'video', 'video-sample');
+  for (const sample of videoSamples) {
+    const kind = assets[sample.assetId]?.kind ?? 'video';
+    push(
+      sample.assetId,
+      kind,
+      kind === 'motion-scene'
+        ? 'motion-scene'
+        : kind === 'html-scene'
+          ? 'html-scene'
+          : 'video-sample',
+    );
+  }
   for (const sample of audioSamples) push(sample.assetId, 'audio', 'audio-sample');
   for (const object of Object.values(project.visualObjects)) {
     if (object.kind === 'image' && object.assetId !== undefined) {
@@ -307,6 +327,9 @@ function plannedAssetRequirements(
     }
     if (object.kind === 'html-scene' && object.scenePackageId !== undefined) {
       push(`html-scene:${object.scenePackageId}`, 'html-scene', 'html-scene');
+    }
+    if (object.kind === 'motion-scene' && object.motionSceneId !== undefined) {
+      push(`motion-scene:${object.motionSceneId}`, 'motion-scene', 'motion-scene');
     }
   }
   return requirements;

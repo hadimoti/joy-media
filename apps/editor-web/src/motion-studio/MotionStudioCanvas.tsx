@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MotionFill, MotionLayer, MotionLayerId, MotionSceneDocument } from '@joy-media/motion-core';
-import { evaluateMotionScene, resolveLayerWorld, resolvedLayerOpacity, resolvedLayerTransform, type LayerWorldEvaluation } from '@joy-media/motion-core';
+import type {
+  MotionFill,
+  MotionLayer,
+  MotionLayerId,
+  MotionSceneDocument,
+} from '@joy-media/motion-core';
+import {
+  evaluateMotionScene,
+  resolveLayerWorld,
+  resolvedLayerOpacity,
+  resolvedLayerTransform,
+  type LayerWorldEvaluation,
+} from '@joy-media/motion-core';
 import { JOY_COLORS } from '../theme.js';
 import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
@@ -18,9 +29,14 @@ interface LayerElementProps {
   readonly onTextEditEnd: (layerId: MotionLayerId) => void;
 }
 
-function assetUrl(assetId: string | undefined): string {
+export function motionStudioAssetUrl(assetId: string | undefined): string {
   if (!assetId) return '';
   return `/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`;
+}
+
+export function svgContentToDataUrl(svgContent: string | undefined): string {
+  if (svgContent === undefined || svgContent.trim().length === 0) return '';
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 }
 
 function bgToCSS(background: MotionSceneDocument['background']): string {
@@ -30,13 +46,11 @@ function bgToCSS(background: MotionSceneDocument['background']): string {
     case 'gradient': {
       const g = background.gradient;
       if (!g) return 'transparent';
-      const stops = g.stops
-        .map((s) => `${s.color} ${(s.position * 100).toFixed(1)}%`)
-        .join(', ');
+      const stops = g.stops.map((s) => `${s.color} ${(s.position * 100).toFixed(1)}%`).join(', ');
       return `linear-gradient(${g.angle ?? 90}deg, ${stops})`;
     }
     case 'image':
-      return assetUrl(background.assetId);
+      return motionStudioAssetUrl(background.assetId);
     default:
       return 'transparent';
   }
@@ -46,9 +60,7 @@ function fillToCSS(fill: MotionFill): string {
   if (fill.kind === 'solid') return fill.color;
   if (fill.kind === 'gradient') {
     const g = fill.gradient;
-    const stops = g.stops
-      .map((s) => `${s.color} ${(s.position * 100).toFixed(1)}%`)
-      .join(', ');
+    const stops = g.stops.map((s) => `${s.color} ${(s.position * 100).toFixed(1)}%`).join(', ');
     return `linear-gradient(${g.angle ?? 90}deg, ${stops})`;
   }
   return 'transparent';
@@ -159,7 +171,8 @@ function LayerElement({
             lineHeight: layer.typography?.lineHeight ?? 1.2,
             letterSpacing: layer.typography?.letterSpacing ?? 0,
             textAlign: (layer.typography?.textAlign as React.CSSProperties['textAlign']) ?? 'left',
-            textTransform: (layer.typography?.textTransform as React.CSSProperties['textTransform']) ?? 'none',
+            textTransform:
+              (layer.typography?.textTransform as React.CSSProperties['textTransform']) ?? 'none',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             pointerEvents: 'none',
@@ -182,7 +195,7 @@ function LayerElement({
             height: '100%',
             background: fill ? fillToCSS(fill) : 'transparent',
             border: stroke ? `${stroke.width}px solid ${stroke.color}` : 'none',
-            borderRadius: `${(layer.borderRadius[0] ?? 0)}px ${(layer.borderRadius[1] ?? 0)}px ${(layer.borderRadius[2] ?? 0)}px ${(layer.borderRadius[3] ?? 0)}px`,
+            borderRadius: `${layer.borderRadius[0] ?? 0}px ${layer.borderRadius[1] ?? 0}px ${layer.borderRadius[2] ?? 0}px ${layer.borderRadius[3] ?? 0}px`,
             pointerEvents: 'none',
           }}
         />
@@ -195,13 +208,34 @@ function LayerElement({
       <div {...commonProps}>
         {layer.assetId ? (
           <img
-            src={assetUrl(layer.assetId)}
+            src={motionStudioAssetUrl(layer.assetId)}
             alt={layer.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
             draggable={false}
           />
         ) : (
-          <div style={{ width: '100%', height: '100%', background: '#333', pointerEvents: 'none' }} />
+          <div
+            style={{ width: '100%', height: '100%', background: '#333', pointerEvents: 'none' }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (layer.type === 'svg') {
+    return (
+      <div {...commonProps}>
+        {layer.svgContent ? (
+          <img
+            src={svgContentToDataUrl(layer.svgContent)}
+            alt={layer.name}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+            draggable={false}
+          />
+        ) : (
+          <div
+            style={{ width: '100%', height: '100%', background: '#333', pointerEvents: 'none' }}
+          />
         )}
       </div>
     );
@@ -209,7 +243,14 @@ function LayerElement({
 
   return (
     <div {...commonProps}>
-      <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.08)', pointerEvents: 'none' }} />
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          background: 'rgba(255,255,255,0.08)',
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   );
 }
@@ -221,7 +262,10 @@ export interface MotionStudioCanvasProps {
   readonly onSelectLayers: (layerIds: readonly MotionLayerId[]) => void;
   readonly onToggleLayerSelection: (layerId: MotionLayerId) => void;
   readonly onClearSelection: () => void;
-  readonly onSetLayerTransform: (layerId: MotionLayerId, transform: Partial<MotionLayer['transform']>) => void;
+  readonly onSetLayerTransform: (
+    layerId: MotionLayerId,
+    transform: Partial<MotionLayer['transform']>,
+  ) => void;
   readonly onDispatch: (label: string, ...commands: SceneCommand[]) => void;
   readonly onBeginTransaction: () => void;
   readonly onUpdateTransaction: (...commands: SceneCommand[]) => void;
@@ -264,7 +308,10 @@ const SNAP_THRESHOLD = 8;
 
 function rotatedAxes(deg: number): { axisX: Point; axisY: Point } {
   const rad = (deg * Math.PI) / 180;
-  return { axisX: { x: Math.cos(rad), y: Math.sin(rad) }, axisY: { x: -Math.sin(rad), y: Math.cos(rad) } };
+  return {
+    axisX: { x: Math.cos(rad), y: Math.sin(rad) },
+    axisY: { x: -Math.sin(rad), y: Math.cos(rad) },
+  };
 }
 
 function worldToLocal(point: Point, center: Point, deg: number): Point {
@@ -311,7 +358,10 @@ export function MotionStudioCanvas({
 }: MotionStudioCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [editingTextLayerId, setEditingTextLayerId] = useState<MotionLayerId | null>(null);
-  const evaluated = useMemo(() => evaluateMotionScene(document, playheadMs), [document, playheadMs]);
+  const evaluated = useMemo(
+    () => evaluateMotionScene(document, playheadMs),
+    [document, playheadMs],
+  );
   const layersById = useMemo(() => {
     const map: Record<string, MotionLayer> = {};
     for (const layer of document.layers) map[layer.id] = layer;
@@ -397,7 +447,10 @@ export function MotionStudioCanvas({
   );
 
   const commitLayerTransforms = useCallback(
-    (layerIds: readonly MotionLayerId[], transformMap: Map<MotionLayerId, MotionLayer['transform']>) => {
+    (
+      layerIds: readonly MotionLayerId[],
+      transformMap: Map<MotionLayerId, MotionLayer['transform']>,
+    ) => {
       const commands: SceneCommand[] = [];
       for (const id of layerIds) {
         const layer = document.layers.find((l) => l.id === id);
@@ -405,7 +458,10 @@ export function MotionStudioCanvas({
         if (!layer || !base) continue;
         const next = layer.transform;
         if (next !== base) {
-          commands.push({ type: 'scene.setLayerTransform', payload: { layerId: id, transform: next } });
+          commands.push({
+            type: 'scene.setLayerTransform',
+            payload: { layerId: id, transform: next },
+          });
         }
       }
       if (commands.length > 0) {
@@ -430,11 +486,7 @@ export function MotionStudioCanvas({
       const addVertical = (x: number) => candidates.push(x);
       const addHorizontal = (y: number) => candidates.push(y);
 
-      const sceneTargets = [
-        document.width / 2,
-        0,
-        document.width,
-      ];
+      const sceneTargets = [document.width / 2, 0, document.width];
 
       for (const layer of movingLayers) {
         const base = transformMap.get(layer.id);
@@ -499,11 +551,15 @@ export function MotionStudioCanvas({
       }
 
       if (snapX !== 0) {
-        const guideX = movingLayers[0] ? movingLayers[0].transform.x + movingLayers[0].transform.width / 2 + snapX : document.width / 2;
+        const guideX = movingLayers[0]
+          ? movingLayers[0].transform.x + movingLayers[0].transform.width / 2 + snapX
+          : document.width / 2;
         foundGuides.push({ orientation: 'vertical', position: guideX });
       }
       if (snapY !== 0) {
-        const guideY = movingLayers[0] ? movingLayers[0].transform.y + movingLayers[0].transform.height / 2 + snapY : document.height / 2;
+        const guideY = movingLayers[0]
+          ? movingLayers[0].transform.y + movingLayers[0].transform.height / 2 + snapY
+          : document.height / 2;
         foundGuides.push({ orientation: 'horizontal', position: guideY });
       }
 
@@ -538,11 +594,12 @@ export function MotionStudioCanvas({
           }
         }
 
-        const selection = addToSelection && selectedLayerIds.includes(layerId)
-          ? [...selectedLayerIds]
-          : selectedLayerIds.includes(layerId) && selectedLayerIds.length > 1
+        const selection =
+          addToSelection && selectedLayerIds.includes(layerId)
             ? [...selectedLayerIds]
-            : [layerId];
+            : selectedLayerIds.includes(layerId) && selectedLayerIds.length > 1
+              ? [...selectedLayerIds]
+              : [layerId];
 
         const transforms = new Map<MotionLayerId, MotionLayer['transform']>();
         for (const id of selection) {
@@ -588,7 +645,17 @@ export function MotionStudioCanvas({
 
       stage.setPointerCapture(e.pointerId);
     },
-    [document.layers, editingTextLayerId, onBeginTransaction, onClearSelection, onSelectLayer, onToggleLayerSelection, screenToScene, selectedLayerIds, canvasScale],
+    [
+      document.layers,
+      editingTextLayerId,
+      onBeginTransaction,
+      onClearSelection,
+      onSelectLayer,
+      onToggleLayerSelection,
+      screenToScene,
+      selectedLayerIds,
+      canvasScale,
+    ],
   );
 
   const handleHandlePointerDown = useCallback(
@@ -651,7 +718,8 @@ export function MotionStudioCanvas({
 
   const handleResizeMove = useCallback(
     (pointer: Point) => {
-      const { layerId, handle, initialTransforms, initialCenter, shiftKey, altKey } = dragRef.current;
+      const { layerId, handle, initialTransforms, initialCenter, shiftKey, altKey } =
+        dragRef.current;
       const layer = document.layers.find((l) => l.id === layerId);
       if (!layer || !layerId || !handle) return;
       const base = initialTransforms.get(layerId);
@@ -738,7 +806,9 @@ export function MotionStudioCanvas({
       const dy = pointer.y - initialPointer.y;
 
       const movingLayers = selectedLayers.filter((l) => !l.locked);
-      const { snap, guides } = shiftKey ? computeSnap(movingLayers, initialTransforms, { x: dx, y: dy }) : { snap: { x: 0, y: 0 }, guides: [] };
+      const { snap, guides } = shiftKey
+        ? computeSnap(movingLayers, initialTransforms, { x: dx, y: dy })
+        : { snap: { x: 0, y: 0 }, guides: [] };
       setGuides(guides);
 
       const finalDx = dx + snap.x;
@@ -804,7 +874,9 @@ export function MotionStudioCanvas({
       if (mode === 'marquee') {
         handleMarqueeEnd();
       } else if (mode === 'move' || mode === 'resize' || mode === 'rotate') {
-        onCommitTransaction(mode === 'move' ? 'Move layers' : mode === 'resize' ? 'Resize layer' : 'Rotate layer');
+        onCommitTransaction(
+          mode === 'move' ? 'Move layers' : mode === 'resize' ? 'Resize layer' : 'Rotate layer',
+        );
       }
       dragRef.current = {
         ...dragRef.current,
@@ -855,13 +927,10 @@ export function MotionStudioCanvas({
     [onSelectLayer, selectedLayerIds],
   );
 
-  const handleStageContextMenu = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setContextMenu({ x: e.clientX, y: e.clientY, layerId: null });
-    },
-    [],
-  );
+  const handleStageContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, layerId: null });
+  }, []);
 
   const handleTextChange = useCallback(
     (layerId: MotionLayerId, text: string) => {
@@ -923,7 +992,21 @@ export function MotionStudioCanvas({
           break;
       }
     },
-    [document.layers, onAddEllipseLayer, onAddRectangleLayer, onAddTextLayer, onBringToFront, onDeleteSelected, onDuplicateSelected, onGroupSelected, onSelectLayers, onSendToBack, onUngroupSelected, onAddImageLayer, onAddVideoLayer],
+    [
+      document.layers,
+      onAddEllipseLayer,
+      onAddRectangleLayer,
+      onAddTextLayer,
+      onBringToFront,
+      onDeleteSelected,
+      onDuplicateSelected,
+      onGroupSelected,
+      onSelectLayers,
+      onSendToBack,
+      onUngroupSelected,
+      onAddImageLayer,
+      onAddVideoLayer,
+    ],
   );
 
   useEffect(() => {
@@ -1129,7 +1212,12 @@ function SelectionOverlay({ layer, onHandlePointerDown }: SelectionOverlayProps)
             background: JOY_COLORS.accent,
             border: '1px solid #fff',
             pointerEvents: 'auto',
-            cursor: name.length === 2 ? `${name}-resize` : name === 'n' || name === 's' ? `${name}s-resize` : `${name}w-resize`,
+            cursor:
+              name.length === 2
+                ? `${name}-resize`
+                : name === 'n' || name === 's'
+                  ? `${name}s-resize`
+                  : `${name}w-resize`,
             ...pos,
           }}
           onPointerDown={(e) => onHandlePointerDown(e, name)}
@@ -1220,45 +1308,80 @@ function ContextMenu({
       {layerId ? (
         <>
           <button className="ms-context-item" role="menuitem" onClick={() => onDuplicateSelected()}>
-            <span className="ms-context-icon"><DuplicateIcon /></span> Duplicate
+            <span className="ms-context-icon">
+              <DuplicateIcon />
+            </span>{' '}
+            Duplicate
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onDeleteSelected()}>
-            <span className="ms-context-icon"><TrashIcon /></span> Delete
+            <span className="ms-context-icon">
+              <TrashIcon />
+            </span>{' '}
+            Delete
           </button>
           <div className="ms-context-separator" />
           <button className="ms-context-item" role="menuitem" onClick={() => onBringToFront()}>
-            <span className="ms-context-icon"><LayersIcon /></span> Bring to front
+            <span className="ms-context-icon">
+              <LayersIcon />
+            </span>{' '}
+            Bring to front
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onSendToBack()}>
-            <span className="ms-context-icon"><LayersIcon /></span> Send to back
+            <span className="ms-context-icon">
+              <LayersIcon />
+            </span>{' '}
+            Send to back
           </button>
           <div className="ms-context-separator" />
           <button className="ms-context-item" role="menuitem" onClick={() => onGroupSelected()}>
-            <span className="ms-context-icon"><LockIcon /></span> Group
+            <span className="ms-context-icon">
+              <LockIcon />
+            </span>{' '}
+            Group
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onUngroupSelected()}>
-            <span className="ms-context-icon"><UnlockIcon /></span> Ungroup
+            <span className="ms-context-icon">
+              <UnlockIcon />
+            </span>{' '}
+            Ungroup
           </button>
         </>
       ) : (
         <>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-text')}>
-            <span className="ms-add-text-glyph" aria-hidden="true">T</span> Add text
+            <span className="ms-add-text-glyph" aria-hidden="true">
+              T
+            </span>{' '}
+            Add text
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-rect')}>
             <span className="ms-shape-icon-rect" /> Add rectangle
           </button>
-          <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-ellipse')}>
+          <button
+            className="ms-context-item"
+            role="menuitem"
+            onClick={() => onAction('add-ellipse')}
+          >
             <span className="ms-shape-icon-ellipse" /> Add ellipse
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-image')}>
-            <span className="ms-image-icon" aria-hidden="true">🖼</span> Add image
+            <span className="ms-image-icon" aria-hidden="true">
+              🖼
+            </span>{' '}
+            Add image
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-video')}>
-            <span className="ms-video-icon" aria-hidden="true">🎬</span> Add video
+            <span className="ms-video-icon" aria-hidden="true">
+              🎬
+            </span>{' '}
+            Add video
           </button>
           <div className="ms-context-separator" />
-          <button className="ms-context-item" role="menuitem" onClick={() => onAction('select-all')}>
+          <button
+            className="ms-context-item"
+            role="menuitem"
+            onClick={() => onAction('select-all')}
+          >
             Select all
           </button>
         </>

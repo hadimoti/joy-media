@@ -7,13 +7,22 @@ function nextId(): string {
 
 function base(type: MotionLayerType, name: string): MotionLayer {
   return {
-    id: nextId(), type, name, visible: true, locked: false,
+    id: nextId(),
+    type,
+    name,
+    visible: true,
+    locked: false,
     transform: { ...DEFAULT_TRANSFORM },
-    fills: [], strokes: [], shadows: [], filters: [],
-    blendMode: 'normal', borderRadius: [0, 0, 0, 0] as const,
+    fills: [],
+    strokes: [],
+    shadows: [],
+    filters: [],
+    blendMode: 'normal',
+    borderRadius: [0, 0, 0, 0] as const,
     overflow: 'visible' as const,
     layout: { mode: 'free' as const },
-    children: [], animations: [],
+    children: [],
+    animations: [],
   };
 }
 
@@ -45,7 +54,14 @@ export function createEllipseLayer(x = 100, y = 100, w = 200, h = 200): MotionLa
   };
 }
 
-export function createImageLayer(assetId: string, name = 'Image', x = 100, y = 100, w = 300, h = 300): MotionLayer {
+export function createImageLayer(
+  assetId: string,
+  name = 'Image',
+  x = 100,
+  y = 100,
+  w = 300,
+  h = 300,
+): MotionLayer {
   return {
     ...base('image', name),
     assetId,
@@ -53,7 +69,14 @@ export function createImageLayer(assetId: string, name = 'Image', x = 100, y = 1
   };
 }
 
-export function createVideoLayer(assetId: string, name = 'Video', x = 100, y = 100, w = 480, h = 270): MotionLayer {
+export function createVideoLayer(
+  assetId: string,
+  name = 'Video',
+  x = 100,
+  y = 100,
+  w = 480,
+  h = 270,
+): MotionLayer {
   return {
     ...base('video', name),
     assetId,
@@ -61,7 +84,28 @@ export function createVideoLayer(assetId: string, name = 'Video', x = 100, y = 1
   };
 }
 
-export function createContainerLayer(name = 'Container', x = 50, y = 50, w = 400, h = 300): MotionLayer {
+export function createSvgLayer(
+  svgContent: string,
+  name = 'SVG',
+  x = 100,
+  y = 100,
+  w = 300,
+  h = 300,
+): MotionLayer {
+  return {
+    ...base('svg', name),
+    svgContent,
+    transform: { ...DEFAULT_TRANSFORM, x, y, width: w, height: h },
+  };
+}
+
+export function createContainerLayer(
+  name = 'Container',
+  x = 50,
+  y = 50,
+  w = 400,
+  h = 300,
+): MotionLayer {
   return {
     ...base('container', name),
     transform: { ...DEFAULT_TRANSFORM, x, y, width: w, height: h },

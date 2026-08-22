@@ -38,15 +38,26 @@ export function assetDescriptorsFromProject(
     };
   }
   for (const object of Object.values(project.visualObjects)) {
-    if (object.kind !== 'html-scene' || object.scenePackageId === undefined) continue;
-    const id = `html-scene:${object.scenePackageId}`;
-    descriptors[id] = {
-      id,
-      kind: 'html-scene',
-      displayName: object.scenePackageId,
-      opaqueRef: `html-scene:${object.scenePackageId}`,
-      availability: 'ready',
-    };
+    if (object.kind === 'html-scene' && object.scenePackageId !== undefined) {
+      const id = `html-scene:${object.scenePackageId}`;
+      descriptors[id] = {
+        id,
+        kind: 'html-scene',
+        displayName: object.scenePackageId,
+        opaqueRef: `html-scene:${object.scenePackageId}`,
+        availability: 'ready',
+      };
+    }
+    if (object.kind === 'motion-scene' && object.motionSceneId !== undefined) {
+      const id = `motion-scene:${object.motionSceneId}`;
+      descriptors[id] = {
+        id,
+        kind: 'motion-scene',
+        displayName: object.motionSceneId,
+        opaqueRef: `motion-scene:${object.motionSceneId}`,
+        availability: 'ready',
+      };
+    }
   }
   return descriptors;
 }

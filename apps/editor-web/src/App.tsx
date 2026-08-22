@@ -82,6 +82,7 @@ import { CaptionsPanel } from './CaptionsPanel.js';
 import { InspectorPanel } from './InspectorPanel.js';
 import { MotionPanel } from './MotionPanel.js';
 import { MotionStudioShell } from './motion-studio/index.js';
+import { buildMotionScenePlacementPlan } from './motion-studio/motionScenePlacement.js';
 import { EffectStudioShell } from './effect-studio/index.js';
 import { CameraPanel } from './CameraPanel.js';
 import { JobsPanel } from './JobsPanel.js';
@@ -396,6 +397,7 @@ interface EditorPanelContextValue {
     readonly blob?: Blob;
   }) => Promise<void>;
   readonly addHtmlSceneToSelectedClip: (scenePackageId: string) => void;
+  readonly addMotionSceneToSelectedClip: (motionSceneId: string) => void;
   readonly stickerTick: number;
   readonly audioState: AudioState;
   readonly setAudioState: (next: AudioState, label?: string) => void;
@@ -1390,6 +1392,29 @@ function EditorWorkspace({
       });
       session.replaceVisualProject(bindClipToObject(session.visualProject, clipId, objectId));
       setState((current) => ({ ...current, selectedIds: [clipId] }));
+      setRevision((revision) => revision + 1);
+    },
+    [session, state.selectedIds],
+  );
+
+  const addMotionSceneToSelectedClip = useCallback(
+    (motionSceneId: string) => {
+      const composition = session.timelineProject.compositions.root;
+      if (composition === undefined) return;
+      const plan = buildMotionScenePlacementPlan({
+        composition,
+        visualProject: session.visualProject,
+        selectedClipId: state.selectedIds[0],
+        motionSceneId,
+        nowMs: Date.now(),
+      });
+      if (plan === undefined) return;
+      session.dispatchVisualObjects(plan.visualTransaction);
+      session.dispatchTimeline(plan.timelineTransaction);
+      session.replaceVisualProject(
+        bindClipToObject(session.visualProject, plan.clipId, plan.objectId),
+      );
+      setState((current) => ({ ...current, selectedIds: [plan.clipId] }));
       setRevision((revision) => revision + 1);
     },
     [session, state.selectedIds],
@@ -2474,6 +2499,7 @@ function EditorWorkspace({
           onDispatch={context.dispatchProject}
           {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
           onAddHtmlSceneToSelection={context.addHtmlSceneToSelectedClip}
+          onAddMotionSceneToSelection={context.addMotionSceneToSelectedClip}
         />
       );
     }
@@ -3300,6 +3326,7 @@ function EditorWorkspace({
           replaceVisualProject,
           addStickerFromAsset,
           addHtmlSceneToSelectedClip,
+          addMotionSceneToSelectedClip,
           stickerTick,
           audioState,
           setAudioState,

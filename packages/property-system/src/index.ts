@@ -124,6 +124,15 @@ export type VisualObjectCommand =
       readonly payload: { readonly objectId: string };
     }
   | {
+      /** Adds a `kind: 'motion-scene'` object referencing a published Motion Studio scene (P18). */
+      readonly type: 'motionScene.create';
+      readonly payload: { readonly object: VisualObjectV1 };
+    }
+  | {
+      readonly type: 'motionScene.remove';
+      readonly payload: { readonly objectId: string };
+    }
+  | {
       /** Adds a `kind: 'image'` sticker / overlay object (P15). */
       readonly type: 'image.create';
       readonly payload: { readonly object: VisualObjectV1 };
@@ -343,7 +352,8 @@ export function applyVisualObjectProjectCommand(
     const { objectId } = command.payload;
     const scene = project.visualObjects[objectId];
     if (scene === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
-    if (scene.kind !== 'html-scene') throw new RangeError(`object "${objectId}" is not an html-scene`);
+    if (scene.kind !== 'html-scene')
+      throw new RangeError(`object "${objectId}" is not an html-scene`);
     const parentOf = Object.values(project.visualObjects).find(
       (candidate) => candidate.parentId === objectId,
     );
@@ -356,10 +366,43 @@ export function applyVisualObjectProjectCommand(
       inverse: { type: 'htmlScene.create', payload: { object: scene } },
     };
   }
+  if (command.type === 'motionScene.create') {
+    const { object } = command.payload;
+    if (object.kind !== 'motion-scene')
+      throw new RangeError('motionScene.create requires a motion-scene-kind object');
+    if (typeof object.motionSceneId !== 'string' || object.motionSceneId.length === 0)
+      throw new RangeError('motionScene.create requires motionSceneId');
+    if (project.visualObjects[object.id] !== undefined)
+      throw new RangeError(`visual object "${object.id}" already exists`);
+    return {
+      project: {
+        ...project,
+        visualObjects: { ...project.visualObjects, [object.id]: object },
+      },
+      inverse: { type: 'motionScene.remove', payload: { objectId: object.id } },
+    };
+  }
+  if (command.type === 'motionScene.remove') {
+    const { objectId } = command.payload;
+    const scene = project.visualObjects[objectId];
+    if (scene === undefined) throw new RangeError(`unknown visual object "${objectId}"`);
+    if (scene.kind !== 'motion-scene')
+      throw new RangeError(`object "${objectId}" is not a motion-scene`);
+    const parentOf = Object.values(project.visualObjects).find(
+      (candidate) => candidate.parentId === objectId,
+    );
+    if (parentOf !== undefined)
+      throw new RangeError(`motion-scene "${objectId}" is still the parent of "${parentOf.id}"`);
+    const remaining = { ...project.visualObjects };
+    delete remaining[objectId];
+    return {
+      project: { ...project, visualObjects: remaining },
+      inverse: { type: 'motionScene.create', payload: { object: scene } },
+    };
+  }
   if (command.type === 'image.create') {
     const { object } = command.payload;
-    if (object.kind !== 'image')
-      throw new RangeError('image.create requires an image-kind object');
+    if (object.kind !== 'image') throw new RangeError('image.create requires an image-kind object');
     if (typeof object.assetId !== 'string' || object.assetId.length === 0)
       throw new RangeError('image.create requires assetId');
     if (project.visualObjects[object.id] !== undefined)
