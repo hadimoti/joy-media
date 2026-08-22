@@ -86,7 +86,12 @@ export function PsdImportDialog({
         assets,
         parsed.sha256.slice(0, 12),
       );
-      session.dispatchCompound(`Import PSD ${file.name}`, { document: nextDocument });
+      try {
+        session.dispatchCompound(`Import PSD ${file.name}`, { document: nextDocument });
+      } catch (error) {
+        await assets.cleanup?.();
+        throw error;
+      }
       showToast('PSD imported into the document', 'success');
       onClose();
     } catch (error) {
@@ -113,6 +118,10 @@ export function PsdImportDialog({
             Close
           </button>
         </div>
+        <p className="psd-import-subhint">
+          Smart-object editing, complete layer-style/text fidelity, and PSD round-trip export are
+          not supported. Import is bounded to safe image, text, and flattened-group payloads.
+        </p>
         {status !== undefined && (
           <p role={parsed === undefined && file !== undefined && !busy ? 'alert' : 'status'}>
             {status}

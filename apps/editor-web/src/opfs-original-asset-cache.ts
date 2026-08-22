@@ -61,6 +61,17 @@ export class OpfsOriginalAssetCache {
     }
   }
 
+  /** Removes a locally cached original after a failed multi-step import. */
+  async remove(assetId: string): Promise<void> {
+    if (this.root === undefined || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId)) return;
+    try {
+      const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: false });
+      await directory.removeEntry(`${assetId}.bin`);
+    } catch {
+      // Cleanup is best effort; the authoritative catalog delete below still runs.
+    }
+  }
+
   async resolve(descriptor: OriginalAssetDescriptor): Promise<OriginalAssetCacheResult> {
     validateDescriptor(descriptor);
     if (this.root === undefined) return { state: 'unsupported' };

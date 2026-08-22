@@ -8,6 +8,8 @@ import {
 } from './psd-import.js';
 import type { BrowserAssetRegistration } from './control-plane-client.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
+import { EditorSession } from './editor-session.js';
+import { emptySpikeProject } from '@joy-media/test-fixtures';
 
 const parsed: PsdParseResult = {
   width: 1200,
@@ -101,5 +103,30 @@ describe('bounded PSD import', () => {
     await expect(parsePsdFile(new Blob(['not-a-psd']))).rejects.toMatchObject({
       code: 'invalid-psd',
     } satisfies Partial<PsdImportError>);
+  });
+
+  it('applies through the compound document boundary and survives undo/redo/reopen', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const session = new EditorSession(storage, emptySpikeProject(), INITIAL_EDITOR_PROJECT);
+    const next = buildPsdDocumentSnapshot(
+      session.visualProject,
+      parsed,
+      { hero: 'image-object', headline: 'text-object' },
+      { sourceAssetId: 'psd-source', layerAssetIds: { hero: 'psd-hero' } },
+      'journey',
+    );
+    session.dispatchCompound('Import PSD sample', { document: next });
+    expect(session.historyEntries.at(-1)?.source).toBe('visual-object');
+    expect(session.visualProject.visualObjects['psd-journey-hero']).toBeDefined();
+    session.undo();
+    expect(session.visualProject.visualObjects['psd-journey-hero']).toBeUndefined();
+    session.redo();
+    expect(session.visualProject.visualObjects['psd-journey-hero']).toBeDefined();
+    const reopened = new EditorSession(storage, emptySpikeProject(), INITIAL_EDITOR_PROJECT);
+    expect(reopened.visualProject.visualObjects['psd-journey-hero']).toBeDefined();
   });
 });

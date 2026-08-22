@@ -28,7 +28,11 @@ export interface PsdLayerDto {
 }
 
 export interface PsdWarning {
-  readonly code: 'adjustment-unsupported' | 'smart-object-unsupported' | 'unknown-layer';
+  readonly code:
+    | 'adjustment-unsupported'
+    | 'smart-object-unsupported'
+    | 'unknown-layer'
+    | 'group-flatten-unavailable';
   readonly layerId: string;
   readonly message: string;
 }
@@ -92,8 +96,17 @@ export async function parsePsdFile(
     readonly memoryBudgetBytes?: number;
   } = {},
 ): Promise<PsdParseResult> {
-  const bytes = await file.arrayBuffer();
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  if (file.size > maxBytes) {
+    throw new PsdImportError(
+      'too-large',
+      `PSD file is ${(file.size / (1024 * 1024)).toFixed(1)} MB; the limit is ${(
+        maxBytes /
+        (1024 * 1024)
+      ).toFixed(0)} MB.`,
+    );
+  }
+  const bytes = await file.arrayBuffer();
   if (bytes.byteLength > maxBytes) {
     throw new PsdImportError(
       'too-large',
@@ -143,6 +156,7 @@ export async function parsePsdFile(
       skipCompositeImageData: true,
       skipThumbnail: true,
       useImageData: true,
+      totalMemoryLimit: memoryBudgetBytes,
       logMissingFeatures: false,
     }) as unknown as AgPsdDocument;
   } catch (error) {
@@ -150,6 +164,8 @@ export async function parsePsdFile(
   }
   const layers: PsdLayerDto[] = [];
   const warnings: PsdWarning[] = [];
+  let decodedLayerPixels = 0;
+  const maxLayerPixels = Math.floor(memoryBudgetBytes / 4);
   const flatten = async (children: readonly AgPsdLayer[] | undefined): Promise<void> => {
     if (children === undefined) return;
     for (const layer of children) {
@@ -174,7 +190,14 @@ export async function parsePsdFile(
         type,
         ...(type === 'text' && layer.text?.text !== undefined ? { text: layer.text.text } : {}),
       };
-      if (type === 'raster') {
+      decodedLayerPixels += Math.ceil(dto.bounds.width) * Math.ceil(dto.bounds.height);
+      if (decodedLayerPixels > maxLayerPixels) {
+        throw new PsdImportError(
+          'memory-budget',
+          'PSD layer rasters exceed the bounded decoded-pixel budget.',
+        );
+      }
+      if (type === 'raster' || type === 'group') {
         const rasterBlob = rasterBlobFromLayer(layer);
         if (rasterBlob !== undefined) {
           const blob = await rasterBlob;
@@ -201,6 +224,13 @@ export async function parsePsdFile(
           message: `Layer “${dto.name}” has no supported payload and will default to ignore.`,
         });
       }
+      if (type === 'group' && layer.canvas === undefined && layer.imageData === undefined) {
+        warnings.push({
+          code: 'group-flatten-unavailable',
+          layerId: id,
+          message: `Group “${dto.name}” has no composite raster; choose ignore unless a flatten asset is available.`,
+        });
+      }
       await flatten(layer.children);
     }
   };
@@ -215,7 +245,7 @@ export async function parsePsdFile(
     sha256,
     parseTimeMs: performance.now() - started,
     ...(sourceName !== undefined ? { sourceName } : {}),
-    sourceMimeType: file.type || 'image/vnd.adobe.photoshop',
+    sourceMimeType: 'image/vnd.adobe.photoshop',
   };
 }
 
@@ -224,12 +254,15 @@ export type PsdLayerMapping = 'image-object' | 'text-object' | 'flatten-group' |
 export interface PsdAssetRefs {
   readonly sourceAssetId: string;
   readonly layerAssetIds: Readonly<Record<string, string>>;
+  readonly cleanup?: () => Promise<void>;
 }
 
 export interface PsdAssetRegistrationOptions {
-  readonly client: Pick<BrowserControlPlaneClient, 'registerAsset'>;
+  readonly client: Pick<BrowserControlPlaneClient, 'registerAsset'> &
+    Partial<Pick<BrowserControlPlaneClient, 'deleteAsset'>>;
   readonly projectId: string;
-  readonly cache: Pick<OpfsOriginalAssetCache, 'put'>;
+  readonly cache: Pick<OpfsOriginalAssetCache, 'put'> &
+    Partial<Pick<OpfsOriginalAssetCache, 'remove'>>;
   readonly file: File | Blob;
   readonly parsed: PsdParseResult;
   readonly selectedLayerIds: readonly string[];
@@ -239,24 +272,54 @@ export async function registerPsdAssets(
   options: PsdAssetRegistrationOptions,
 ): Promise<PsdAssetRefs> {
   const sourceAssetId = opaqueId(`psd-${options.parsed.sha256.slice(0, 24)}`);
-  await registerBlob(
-    options,
-    sourceAssetId,
-    options.file,
-    options.parsed.sourceMimeType,
-    'PSD source',
-  );
+  const registeredIds: string[] = [];
+  const register = async (
+    assetId: string,
+    blob: Blob,
+    mimeType: string,
+    displayName: string,
+  ): Promise<void> => {
+    await registerBlob(options, assetId, blob, mimeType, displayName);
+    registeredIds.push(assetId);
+  };
+  const cleanup = async (): Promise<void> => {
+    for (const assetId of [...registeredIds].reverse()) {
+      await options.cache.remove?.(assetId);
+      const deletion = options.client.deleteAsset?.(options.projectId, assetId);
+      await deletion?.catch(() => undefined);
+    }
+  };
+  try {
+    await register(sourceAssetId, options.file, 'image/vnd.adobe.photoshop', 'PSD source');
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
   const layerAssetIds: Record<string, string> = {};
   const selected = new Set(options.selectedLayerIds);
-  for (const layer of options.parsed.layers) {
-    if (!selected.has(layer.id) || layer.rasterBlob === undefined) continue;
-    const blob = layer.rasterBlob;
-    const hash = await sha256Hex(await blob.arrayBuffer());
-    const assetId = opaqueId(`psd-${options.parsed.sha256.slice(0, 12)}-${hash.slice(0, 12)}`);
-    await registerBlob(options, assetId, blob, 'image/png', `PSD layer ${layer.name}`);
-    layerAssetIds[layer.id] = assetId;
+  try {
+    for (const layer of options.parsed.layers) {
+      if (!selected.has(layer.id) || layer.rasterBlob === undefined) continue;
+      const blob = layer.rasterBlob;
+      const hash = await sha256Hex(await blob.arrayBuffer());
+      const assetId = opaqueId(`psd-${options.parsed.sha256.slice(0, 12)}-${hash.slice(0, 12)}`);
+      const registeredAssetId = registerAssetId(assetId, registeredIds);
+      await register(registeredAssetId, blob, 'image/png', `PSD layer ${layer.name}`);
+      layerAssetIds[layer.id] = registeredAssetId;
+    }
+  } catch (error) {
+    await cleanup();
+    throw error;
   }
-  return { sourceAssetId, layerAssetIds };
+  return { sourceAssetId, layerAssetIds, cleanup };
+}
+
+function registerAssetId(assetId: string, registeredIds: readonly string[]): string {
+  if (!registeredIds.includes(assetId)) return assetId;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${assetId}-${suffix}`;
+    if (!registeredIds.includes(candidate)) return candidate;
+  }
 }
 
 export function buildPsdDocumentSnapshot(
@@ -282,9 +345,7 @@ export function buildPsdDocumentSnapshot(
   for (const layer of parsed.layers) {
     const mapping = mappings[layer.id] ?? 'ignore';
     if (mapping === 'ignore' || !layer.visible) continue;
-    const assetId =
-      assets.layerAssetIds[layer.id] ??
-      (mapping === 'flatten-group' ? assets.sourceAssetId : undefined);
+    const assetId = assets.layerAssetIds[layer.id];
     if (mapping === 'image-object' && assetId === undefined) continue;
     if (mapping === 'flatten-group' && assetId === undefined) continue;
     if (mapping === 'text-object' && (layer.text ?? '').length === 0) continue;
