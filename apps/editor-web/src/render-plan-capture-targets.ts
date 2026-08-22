@@ -19,6 +19,14 @@ export interface PlannedHtmlSceneCaptureTarget {
   readonly timeUs: number;
 }
 
+export interface PlannedMotionSceneCaptureTarget {
+  readonly requirementId: string;
+  readonly objectId: string;
+  readonly assetId: string;
+  readonly motionSceneId: string;
+  readonly timeUs: number;
+}
+
 export function plannedStillBitmapTargets(
   project: JoyProjectV1,
   requirements: readonly PlannedCaptureRequirement[],
@@ -79,6 +87,35 @@ export function plannedHtmlSceneCaptureTargets(
 
 export const htmlSceneCaptureTargetsForRequirements = plannedHtmlSceneCaptureTargets;
 
+export function plannedMotionSceneCaptureTargets(
+  project: JoyProjectV1,
+  requirements: readonly PlannedCaptureRequirement[],
+): readonly PlannedMotionSceneCaptureTarget[] {
+  return requirements.flatMap((requirement): readonly PlannedMotionSceneCaptureTarget[] => {
+    if (
+      requirement.kind !== 'motion-scene' ||
+      requirement.objectId === undefined ||
+      requirement.assetId === undefined ||
+      requirement.sourceTimeUs === undefined
+    ) {
+      return [];
+    }
+    const object = project.visualObjects[requirement.objectId];
+    if (object?.kind !== 'motion-scene' || object.motionSceneId === undefined) return [];
+    const motionSceneId = parseMotionSceneId(requirement.assetId);
+    if (motionSceneId === undefined || motionSceneId !== object.motionSceneId) return [];
+    return [
+      {
+        requirementId: requirement.id,
+        objectId: requirement.objectId,
+        assetId: requirement.assetId,
+        motionSceneId,
+        timeUs: requirement.sourceTimeUs,
+      },
+    ];
+  });
+}
+
 export function requiredCaptureObjectIds(
   requirements: readonly PlannedCaptureRequirement[],
   kind: 'still-bitmap' | 'html-scene',
@@ -93,5 +130,10 @@ export function requiredCaptureObjectIds(
 
 function parseHtmlScenePackageId(assetId: string): string | undefined {
   const prefix = 'html-scene:';
+  return assetId.startsWith(prefix) ? assetId.slice(prefix.length) : undefined;
+}
+
+function parseMotionSceneId(assetId: string): string | undefined {
+  const prefix = 'motion-scene:';
   return assetId.startsWith(prefix) ? assetId.slice(prefix.length) : undefined;
 }

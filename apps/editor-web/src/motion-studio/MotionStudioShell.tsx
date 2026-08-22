@@ -487,6 +487,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
               onAddVideoLayer={handleAddVideoLayer}
               canvasScale={canvasScale}
               playheadMs={playheadMs}
+              playing={playing}
             />
           ) : (
             <div className="ms-code" aria-label="Code editor">

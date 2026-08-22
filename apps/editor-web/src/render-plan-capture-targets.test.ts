@@ -4,6 +4,7 @@ import type { PlannedCaptureRequirement } from '@joy-media/render-planner';
 import { IMAGE_MATTE_PLUGIN_KEY } from './sticker-bindings.js';
 import {
   htmlSceneCaptureTargetsForRequirements,
+  plannedMotionSceneCaptureTargets,
   plannedHtmlSceneCaptureTargets,
   plannedStillBitmapTargets,
   requiredCaptureObjectIds,
@@ -48,6 +49,40 @@ describe('render plan capture targets', () => {
     expect(htmlSceneCaptureTargetsForRequirements(project, requirements)).toEqual(
       plannedHtmlSceneCaptureTargets(project, requirements),
     );
+  });
+
+  it('derives published Motion Studio capture targets only from matching object ids', () => {
+    const project = {
+      ...visualProject(),
+      visualObjects: {
+        ...visualProject().visualObjects,
+        'motion-a': {
+          id: 'motion-a',
+          kind: 'motion-scene' as const,
+          motionSceneId: 'motion-doc-a',
+          transform: transform(),
+        },
+      },
+    };
+    expect(
+      plannedMotionSceneCaptureTargets(project, [
+        {
+          id: 'motion-scene:motion-a',
+          kind: 'motion-scene',
+          objectId: 'motion-a',
+          assetId: 'motion-scene:motion-doc-a',
+          sourceTimeUs: 456_789,
+        },
+      ]),
+    ).toEqual([
+      {
+        requirementId: 'motion-scene:motion-a',
+        objectId: 'motion-a',
+        assetId: 'motion-scene:motion-doc-a',
+        motionSceneId: 'motion-doc-a',
+        timeUs: 456_789,
+      },
+    ]);
   });
 
   it('derives still targets only for planner-requested objects and preserves matte/crop data', () => {
@@ -144,6 +179,7 @@ function visualProject(): JoyProjectV1 {
         transform: transform(),
       },
     },
+    captionDocuments: {},
     pluginData: { [IMAGE_MATTE_PLUGIN_KEY]: { 'still-a': 'matte-a' } },
   };
 }

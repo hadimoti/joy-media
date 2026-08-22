@@ -38,7 +38,10 @@ import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type { JoyProjectV1, SpikeProject, VideoClip } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
-import type { VisualObjectTransaction } from '@joy-media/property-system';
+import {
+  applyVisualObjectProjectTransaction,
+  type VisualObjectTransaction,
+} from '@joy-media/property-system';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
 import type { ProductionRunAuthority } from '@joy-media/workflow-engine';
 
@@ -102,8 +105,10 @@ import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
 import {
   htmlSceneCaptureTargetsForRequirements,
+  plannedMotionSceneCaptureTargets,
   plannedStillBitmapTargets,
 } from './render-plan-capture-targets.js';
+import { MotionSceneSurfaceCache } from './motion-scene-surfaces.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { createMediaSessionPlayableAssetResolver } from './media-session.js';
@@ -773,15 +778,26 @@ function EditorWorkspace({
   }, []);
 
   const resolveClipMonitorMediaSource = useCallback(
-    async (clip: VideoClip): Promise<MonitorMediaSource> =>
-      resolveMonitorMediaSource({
+    async (clip: VideoClip): Promise<MonitorMediaSource> => {
+      if (clip.assetId.startsWith('motion-scene:')) {
+        return {
+          state: 'unavailable',
+          clipId: clip.id,
+          assetId: clip.assetId,
+          message:
+            'Motion Studio scene media is not a browser video source; the published scene is hydrated as an RGBA surface and must be rendered by the Worker for delivery.',
+          action: { kind: 'wait', label: 'Render scene media' },
+        };
+      }
+      return resolveMonitorMediaSource({
         projectId: controlPlaneProject.controlPlaneProjectId,
         clip,
         asset:
           monitorAssetCatalog.assets[clip.assetId] ?? session.visualProject.assets[clip.assetId],
         derivatives: monitorAssetCatalog.derivativesByAssetId[clip.assetId] ?? [],
         resolver: await playableAssetResolver,
-      }),
+      });
+    },
     [
       controlPlaneProject.controlPlaneProjectId,
       monitorAssetCatalog,
@@ -1418,11 +1434,19 @@ function EditorWorkspace({
         nowMs: Date.now(),
       });
       if (plan === undefined) return;
-      session.dispatchVisualObjects(plan.visualTransaction);
-      session.dispatchTimeline(plan.timelineTransaction);
-      session.replaceVisualProject(
-        bindClipToObject(session.visualProject, plan.clipId, plan.objectId),
+      // A placed scene changes both lenses. Apply the object command first as
+      // a pure calculation, bind the new object to its clip, then commit both
+      // slices through the session's compound snapshot. This keeps Place
+      // Motion Scene to one durable undo step (and avoids a dangling binding
+      // if a later timeline command rejects).
+      const created = applyVisualObjectProjectTransaction(
+        session.visualProject,
+        plan.visualTransaction,
       );
+      session.dispatchCompound(`Place Motion scene ${motionSceneId}`, {
+        document: bindClipToObject(created, plan.clipId, plan.objectId),
+        timeline: plan.timelineTransaction,
+      });
       setState((current) => ({ ...current, selectedIds: [plan.clipId] }));
       setRevision((revision) => revision + 1);
     },
@@ -2105,6 +2129,7 @@ function EditorWorkspace({
         throw new Error('Export audio mix did not produce a track');
       const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
       const sceneFrameSource = createDeliverySceneFrameSource(new HtmlSceneSurfaceCache());
+      const motionSceneFrameSource = new MotionSceneSurfaceCache(window.localStorage);
       const startTimers: number[] = [];
       const audioSources: AudioBufferSourceNode[] = [];
       try {
@@ -2180,6 +2205,14 @@ function EditorWorkspace({
                 plan.captureRequirements,
               ),
             );
+            const motionSceneTargets = plannedMotionSceneCaptureTargets(
+              session.visualProject,
+              plan.captureRequirements,
+            );
+            const motionSceneBitmaps = await motionSceneFrameSource.captureFull(motionSceneTargets);
+            const motionSceneDiagnostic = motionSceneFrameSource.diagnostics()[0];
+            if (motionSceneDiagnostic !== undefined) throw new Error(motionSceneDiagnostic.message);
+            for (const [objectId, bitmap] of motionSceneBitmaps) bitmaps.set(objectId, bitmap);
             for (const target of plannedStillBitmapTargets(
               session.visualProject,
               plan.captureRequirements,
@@ -2231,6 +2264,7 @@ function EditorWorkspace({
           media.source.release();
         }
         sceneFrameSource.destroy();
+        motionSceneFrameSource.destroy();
         renderer.destroy();
         await audioContext.close();
       }
@@ -3542,6 +3576,7 @@ function MonitorPanel() {
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
   const paintRef = useRef<() => void>(() => {});
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
+  const motionSceneCacheRef = useRef(new MotionSceneSurfaceCache(window.localStorage));
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
   const [viewerZoom, setViewerZoom] = useState<'fit' | '50' | '100' | '200'>('fit');
@@ -3630,6 +3665,13 @@ function MonitorPanel() {
       const bitmap = sceneCacheRef.current.bitmaps().get(target.objectId);
       if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
     }
+    for (const target of plannedMotionSceneCaptureTargets(
+      visualProject,
+      plan.captureRequirements,
+    )) {
+      const bitmap = motionSceneCacheRef.current.bitmaps().get(target.objectId);
+      if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
+    }
     for (const target of plannedStillBitmapTargets(visualProject, plan.captureRequirements)) {
       const bitmap = stickerImageCache.get(target.objectId);
       if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
@@ -3684,7 +3726,41 @@ function MonitorPanel() {
     };
   }, [state.playheadUs, timelineProject, visualProject]);
 
-  useEffect(() => () => sceneCacheRef.current.destroy(), []);
+  useEffect(() => {
+    let cancelled = false;
+    const plan = planRenderFrame({
+      bundle: createRenderBundle({
+        timelineProject,
+        visualProject,
+        seed: `preview:${visualProject.id}`,
+      }),
+      timeUs: state.playheadUs,
+      imageSizesByObjectId: imageSizesFromCache(),
+    });
+    void motionSceneCacheRef.current
+      .sync(plannedMotionSceneCaptureTargets(visualProject, plan.captureRequirements))
+      .then(() => {
+        if (cancelled) return;
+        const diagnostic = motionSceneCacheRef.current.diagnostics()[0];
+        setError(diagnostic?.message);
+        setSceneTick((value) => value + 1);
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.playheadUs, timelineProject, visualProject]);
+
+  useEffect(
+    () => () => {
+      sceneCacheRef.current.destroy();
+      motionSceneCacheRef.current.destroy();
+    },
+    [],
+  );
 
   useEffect(() => {
     paintRef.current();

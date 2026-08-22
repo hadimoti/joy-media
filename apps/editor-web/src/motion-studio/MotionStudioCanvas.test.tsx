@@ -54,6 +54,9 @@ describe('MotionStudioCanvas media surface', () => {
 
     expect(markup).toContain('/v1/library/cloud-assets/asset-image-1/content');
     expect(markup).toContain('/v1/library/cloud-assets/asset-video-1/content');
+    expect(markup).toContain('<video');
+    expect(markup).toContain('playsInline');
+    expect(markup).not.toContain('src="/v1/library/cloud-assets/asset-video-1/content" alt=');
     expect(markup).toContain(svgContentToDataUrl(svg.svgContent));
   });
 });

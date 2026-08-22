@@ -41,6 +41,19 @@ export function mediaResolverFromAssetSourceRegistry(source: {
       if (opaqueRef.startsWith('html-scene:')) {
         return { kind: 'html-scene', packageId: opaqueRef.slice('html-scene:'.length) };
       }
+      if (opaqueRef.startsWith('motion-scene:')) {
+        // Motion Studio scenes are published as renderable media before a
+        // Worker can consume them. The source registry owns the private path;
+        // do not silently turn an unresolved scene into a placeholder frame.
+        const sceneId = opaqueRef.slice('motion-scene:'.length);
+        const path = source.resolve(opaqueRef) ?? source.resolve(sceneId);
+        if (path === undefined || !existsSync(path)) {
+          throw new Error(
+            `required Worker motion scene media is unavailable: ${opaqueRef}; publish or render the scene first`,
+          );
+        }
+        return { kind: 'file', path };
+      }
       if (!opaqueRef.startsWith('asset:')) {
         throw new Error(`required Worker media is unavailable: ${opaqueRef}`);
       }

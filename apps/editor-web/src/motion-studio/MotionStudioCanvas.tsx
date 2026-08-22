@@ -27,6 +27,8 @@ interface LayerElementProps {
   readonly onContextMenu: (e: React.MouseEvent, layerId: MotionLayerId) => void;
   readonly onTextChange: (layerId: MotionLayerId, text: string) => void;
   readonly onTextEditEnd: (layerId: MotionLayerId) => void;
+  readonly playheadMs: number;
+  readonly playing: boolean;
 }
 
 export function motionStudioAssetUrl(assetId: string | undefined): string {
@@ -77,7 +79,10 @@ function LayerElement({
   onContextMenu,
   onTextChange,
   onTextEditEnd,
+  playheadMs,
+  playing,
 }: LayerElementProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const local = resolvedLayerTransform(layer, evaluation);
   const opacity = resolvedLayerOpacity(layer, evaluation);
   const t = world?.worldTransform ?? local;
@@ -120,6 +125,17 @@ function LayerElement({
   const handleBlur = useCallback(() => {
     onTextEditEnd(layer.id);
   }, [layer.id, onTextEditEnd]);
+
+  useEffect(() => {
+    if (layer.type !== 'video' || videoRef.current === null) return;
+    const video = videoRef.current;
+    // Motion Studio's playhead is the source of truth. Seeking here keeps a
+    // paused scrub deterministic while play() lets the browser present real
+    // decoded frames during preview playback.
+    if (Number.isFinite(playheadMs)) video.currentTime = Math.max(0, playheadMs / 1000);
+    if (playing) void video.play().catch(() => undefined);
+    else video.pause();
+  }, [layer.type, playheadMs, playing]);
 
   const commonProps = {
     'data-layer-id': layer.id,
@@ -203,7 +219,7 @@ function LayerElement({
     );
   }
 
-  if (layer.type === 'image' || layer.type === 'video') {
+  if (layer.type === 'image') {
     return (
       <div {...commonProps}>
         {layer.assetId ? (
@@ -212,6 +228,31 @@ function LayerElement({
             alt={layer.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
             draggable={false}
+          />
+        ) : (
+          <div
+            style={{ width: '100%', height: '100%', background: '#333', pointerEvents: 'none' }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (layer.type === 'video') {
+    return (
+      <div {...commonProps}>
+        {layer.assetId ? (
+          <video
+            ref={videoRef}
+            src={motionStudioAssetUrl(layer.assetId)}
+            aria-label={layer.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+            autoPlay={playing}
+            controls={false}
+            loop
+            muted
+            playsInline
+            preload="auto"
           />
         ) : (
           <div
@@ -284,6 +325,7 @@ export interface MotionStudioCanvasProps {
   readonly onAddVideoLayer: () => void;
   readonly canvasScale?: number;
   readonly playheadMs?: number;
+  readonly playing?: boolean;
 }
 
 interface GuideLine {
@@ -355,6 +397,7 @@ export function MotionStudioCanvas({
   onAddVideoLayer,
   canvasScale = 1,
   playheadMs = 0,
+  playing = false,
 }: MotionStudioCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [editingTextLayerId, setEditingTextLayerId] = useState<MotionLayerId | null>(null);
@@ -1070,6 +1113,8 @@ export function MotionStudioCanvas({
               onContextMenu={handleLayerContextMenu}
               onTextChange={handleTextChange}
               onTextEditEnd={handleTextEditEnd}
+              playheadMs={playheadMs}
+              playing={playing}
             />
           ))}
 

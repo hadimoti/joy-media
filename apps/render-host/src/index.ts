@@ -198,6 +198,22 @@ async function* streamFrameInputsForExport(input: {
             ),
           })),
       ),
+      motionScenes: await Promise.all(
+        plan.captureRequirements
+          .filter(
+            (requirement) =>
+              requirement.kind === 'motion-scene' && requirement.assetId !== undefined,
+          )
+          .map(async (requirement) => ({
+            ...requirement,
+            media: await resolveAssetInput(
+              input.bundle,
+              input.mediaResolver,
+              input.contentCache,
+              requirement.assetId!,
+            ),
+          })),
+      ),
       audioSamples: await Promise.all(
         plan.audioSamples.map(async (sample) => ({
           ...sample,
@@ -381,6 +397,13 @@ function applyResolvedMediaCaptures(
       y: 0,
       w: Math.max(1, Math.floor(width / 3)),
       h: Math.max(1, Math.floor(height / 4)),
+    })),
+    ...(input.motionScenes ?? []).map((sample) => ({
+      key: `${sample.media.contentSha256}:${sample.objectId ?? ''}:${sample.sourceTimeUs ?? 0}:motion`,
+      x: Math.floor(width / 2),
+      y: Math.floor(height / 4),
+      w: Math.max(1, Math.floor(width / 3)),
+      h: Math.max(1, Math.floor(height / 3)),
     })),
   ];
   for (const capture of allCaptures) {

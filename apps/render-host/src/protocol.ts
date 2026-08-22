@@ -47,6 +47,10 @@ export interface RenderHostFrameInputV1 {
   readonly videoSamples: readonly RenderHostResolvedVideoSample[];
   readonly stillBitmaps: readonly RenderHostResolvedCapture[];
   readonly htmlScenes: readonly RenderHostResolvedCapture[];
+  /** Published Motion Studio captures. Optional for protocol-v1 consumers that
+   * only render legacy bundles; when planned, the host resolves every item or
+   * fails closed before painting the frame. */
+  readonly motionScenes?: readonly RenderHostResolvedCapture[];
   readonly audioSamples: readonly RenderHostResolvedAudioSample[];
 }
 
