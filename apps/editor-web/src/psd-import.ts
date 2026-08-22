@@ -160,7 +160,11 @@ export async function parsePsdFile(
       logMissingFeatures: false,
     }) as unknown as AgPsdDocument;
   } catch (error) {
-    throw new PsdImportError('invalid-psd', `Unable to decode PSD layers: ${message(error)}`);
+    const detail = message(error);
+    throw new PsdImportError(
+      /memory|limit|allocation/i.test(detail) ? 'memory-budget' : 'invalid-psd',
+      `Unable to decode PSD layers: ${detail}`,
+    );
   }
   const layers: PsdLayerDto[] = [];
   const warnings: PsdWarning[] = [];
@@ -279,8 +283,12 @@ export async function registerPsdAssets(
     mimeType: string,
     displayName: string,
   ): Promise<void> => {
-    await registerBlob(options, assetId, blob, mimeType, displayName);
     registeredIds.push(assetId);
+    try {
+      await registerBlob(options, assetId, blob, mimeType, displayName);
+    } catch (error) {
+      throw error;
+    }
   };
   const cleanup = async (): Promise<void> => {
     for (const assetId of [...registeredIds].reverse()) {

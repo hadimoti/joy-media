@@ -79,14 +79,14 @@ export function PsdImportDialog({
         parsed,
         selectedLayerIds,
       });
-      const nextDocument = buildPsdDocumentSnapshot(
-        session.visualProject,
-        parsed,
-        mappings,
-        assets,
-        parsed.sha256.slice(0, 12),
-      );
       try {
+        const nextDocument = buildPsdDocumentSnapshot(
+          session.visualProject,
+          parsed,
+          mappings,
+          assets,
+          parsed.sha256.slice(0, 12),
+        );
         session.dispatchCompound(`Import PSD ${file.name}`, { document: nextDocument });
       } catch (error) {
         await assets.cleanup?.();

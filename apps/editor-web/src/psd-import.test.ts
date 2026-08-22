@@ -92,8 +92,33 @@ describe('bounded PSD import', () => {
     expect(result.sourceAssetId).toMatch(/^psd-/);
     expect(result.layerAssetIds.hero).toMatch(/^psd-/);
     expect(registrations).toHaveLength(2);
+    expect(registrations[0]?.descriptor.mimeType).toBe('image/vnd.adobe.photoshop');
     expect(registrations.every((entry) => /^[a-f0-9]{64}$/.test(entry.sha256))).toBe(true);
     expect(cached.every((entry) => entry.split(':')[1]?.length === 64)).toBe(true);
+  });
+
+  it('cleans the in-flight OPFS original when catalog registration fails', async () => {
+    const removed: string[] = [];
+    await expect(
+      registerPsdAssets({
+        client: {
+          registerAsset: async () => {
+            throw new Error('catalog unavailable');
+          },
+        },
+        projectId: 'project-1',
+        cache: {
+          put: async () => undefined,
+          remove: async (assetId) => {
+            removed.push(assetId);
+          },
+        },
+        file: new Blob(['source'], { type: 'application/octet-stream' }),
+        parsed,
+        selectedLayerIds: [],
+      }),
+    ).rejects.toThrow('catalog unavailable');
+    expect(removed).toHaveLength(1);
   });
 
   it('rejects malformed and oversized PSD inputs with typed user-safe errors', async () => {
