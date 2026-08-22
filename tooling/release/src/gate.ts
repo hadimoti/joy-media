@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -148,6 +149,14 @@ export interface ReleaseEvidence extends ReleaseGateInput {
   readonly artifactHashes: Readonly<Record<string, string>>;
   readonly manifest: Readonly<Record<string, unknown>>;
   readonly sbom: Readonly<Record<string, unknown>>;
+  readonly commandResults?: readonly ReleaseCommandResult[];
+}
+
+export interface ReleaseCommandResult {
+  readonly id: string;
+  readonly command: string;
+  readonly exitCode: number;
+  readonly durationMs: number;
 }
 
 export function sha256File(path: string): string {
@@ -161,12 +170,14 @@ export function writeReleaseEvidence(
   now = new Date(),
 ): ReleaseGateResult {
   mkdirSync(outputDirectory, { recursive: true });
+  verifyArtifactHashes(root, evidence.artifactHashes);
   const result = evaluateReleaseGate(evidence, now);
+  const manifestText = JSON.stringify(evidence.manifest, null, 2);
   writeFileSync(
     join(outputDirectory, 'report.json'),
     JSON.stringify({ result, evidence }, null, 2),
   );
-  writeFileSync(join(outputDirectory, 'manifest.json'), JSON.stringify(evidence.manifest, null, 2));
+  writeFileSync(join(outputDirectory, 'manifest.json'), manifestText);
   writeFileSync(join(outputDirectory, 'sbom.json'), JSON.stringify(evidence.sbom, null, 2));
   writeFileSync(
     join(outputDirectory, 'artifact-hashes.json'),
@@ -174,7 +185,7 @@ export function writeReleaseEvidence(
   );
   writeFileSync(
     join(outputDirectory, 'release-manifest.sha256'),
-    `${sha256Text(JSON.stringify(evidence.manifest))}  manifest.json\n`,
+    `${sha256Text(manifestText)}  manifest.json\n`,
   );
   void root;
   return result;
@@ -200,16 +211,33 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     for (const path of collectFiles(root, directory))
       artifactHashes[relative(root, path)] = sha256File(path);
   }
+  const commandResults = runReleaseCommands(root);
   const buildSuccess = Object.fromEntries(
-    REQUIRED_BUILD_IDS.map((id) => [
-      id,
-      collectFiles(root, `apps/${id === 'editor' ? 'editor-web' : id}/dist`).length > 0,
-    ]),
+    REQUIRED_BUILD_IDS.map((id) => {
+      const commandId = `${id}-build`;
+      return [
+        id,
+        commandResults.some((result) => result.id === commandId && result.exitCode === 0) &&
+          collectFiles(root, `apps/${id === 'editor' ? 'editor-web' : id}/dist`).length > 0,
+      ];
+    }),
   );
+  const tests = commandResults.find((result) => result.id === 'tests');
+  const featureStatusText = existsSync(join(root, 'docs/product/FEATURE-STATUS.md'))
+    ? readFileSync(join(root, 'docs/product/FEATURE-STATUS.md'), 'utf8')
+    : '';
+  const auditedOn =
+    featureStatusText.match(/Audited against current source on (\d{4}-\d{2}-\d{2})/u)?.[1] ??
+    '1970-01-01';
+  const statuses = [
+    ...featureStatusText.matchAll(/\|\s+(production|demo-only|experimental|hidden)\s+\|/gu),
+  ].map((match) => match[1]!);
+  const browserJourneys = readBrowserJourneys(root);
   const manifest = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     artifacts: artifactHashes,
+    commands: commandResults,
   };
   const sbom = {
     bomFormat: 'cyclonedx',
@@ -217,26 +245,107 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     components: [{ type: 'application', name: 'joy-media', version: '1.0.0' }],
   };
   return {
-    testSummary: { collected: 0, failed: 1 },
-    dirtyGeneratedArtifacts: [],
-    fixtureHandlers: [],
+    testSummary: { collected: tests === undefined ? 0 : 1, failed: tests?.exitCode === 0 ? 0 : 1 },
+    dirtyGeneratedArtifacts: dirtyGeneratedArtifacts(root),
+    fixtureHandlers: fixtureHandlers(root),
     builds: buildSuccess,
     manifestGenerated: false,
     sbomGenerated: false,
-    browserJourneys: [],
-    featureStatus: { auditedOn: '1970-01-01', statuses: [] },
+    browserJourneys,
+    featureStatus: { auditedOn, statuses },
     artifactHashes,
     manifest,
     sbom,
+    commandResults,
   };
 }
 
+function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
+  const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+  const commands: readonly [string, readonly string[]][] = [
+    ['typecheck', ['typecheck']],
+    ['lint', ['lint']],
+    ['format', ['format:check']],
+    ['tests', ['test:release']],
+    ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
+    ['api-build', ['--filter', '@joy-media/api', 'build']],
+    ['worker-build', ['--filter', '@joy-media/worker', 'build']],
+    ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
+  ];
+  return commands.map(([id, args]) => {
+    const started = Date.now();
+    const result = spawnSync(pnpm, args, { cwd: root, stdio: 'ignore', shell: false });
+    return {
+      id,
+      command: [pnpm, ...args].join(' '),
+      exitCode: result.status ?? 1,
+      durationMs: Date.now() - started,
+    };
+  });
+}
+
+function dirtyGeneratedArtifacts(root: string): readonly string[] {
+  const pnpm = process.platform === 'win32' ? 'git.exe' : 'git';
+  const result = spawnSync(
+    pnpm,
+    ['status', '--porcelain', '--', 'apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      shell: false,
+    },
+  );
+  return (result.stdout ?? '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function fixtureHandlers(root: string): readonly string[] {
+  return collectFiles(root, 'apps')
+    .filter((path) => /\.(?:ts|tsx)$/u.test(path) && !/\.test\.[^.]+$/u.test(path))
+    .flatMap((path) => {
+      const lines = readFileSync(path, 'utf8').split(/\r?\n/u);
+      return lines.flatMap((line, index) =>
+        /fixture(?:handler|registry|port)/iu.test(line)
+          ? [`${relative(root, path)}:${index + 1}`]
+          : [],
+      );
+    });
+}
+
+function readBrowserJourneys(root: string): ReleaseGateInput['browserJourneys'] {
+  const path = join(root, 'test-output/browser/journeys.json');
+  if (!existsSync(path)) return [];
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as ReleaseGateInput['browserJourneys'];
+  } catch {
+    return [];
+  }
+}
+
+function verifyArtifactHashes(root: string, hashes: Readonly<Record<string, string>>): void {
+  for (const [relativePath, expected] of Object.entries(hashes)) {
+    const path = resolve(root, relativePath);
+    const repositoryRoot = resolve(root);
+    if (
+      path !== repositoryRoot &&
+      !path.startsWith(`${repositoryRoot}/`) &&
+      !path.startsWith(`${repositoryRoot}\\`)
+    )
+      throw new Error(`artifact path escapes repository: ${relativePath}`);
+    if (!existsSync(path)) throw new Error(`artifact is missing: ${relativePath}`);
+    const actual = sha256File(path);
+    if (actual !== expected) throw new Error(`artifact hash mismatch: ${relativePath}`);
+  }
+}
+
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const root = resolve(fileURLToPath(new URL('../../', import.meta.url)));
+  const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
   const output = resolve(root, process.env.JOY_RELEASE_OUTPUT ?? 'test-output/release-gate');
-  const evidencePath = process.env.JOY_RELEASE_EVIDENCE;
+  const evidencePath = process.env.JOY_RELEASE_EVIDENCE?.trim();
   const evidence =
-    evidencePath !== undefined
+    evidencePath !== undefined && evidencePath.length > 0
       ? (JSON.parse(readFileSync(resolve(root, evidencePath), 'utf8')) as ReleaseEvidence)
       : buildEvidenceFromWorkspace(root);
   const result = writeReleaseEvidence(root, output, evidence);

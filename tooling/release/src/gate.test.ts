@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import {
   evaluateReleaseGate,
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
+  sha256File,
   writeReleaseEvidence,
   type ReleaseGateInput,
 } from './gate.js';
@@ -106,15 +107,20 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('writes machine-readable report, manifest, SBOM, and artifact hashes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-root-'));
     const output = mkdtempSync(join(tmpdir(), 'joy-release-gate-'));
+    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
     const evidence = {
       ...passingInput(),
-      artifactHashes: { 'apps/api/dist/server.js': 'abc123' },
+      artifactHashes: {
+        'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
+      },
       manifest: { schemaVersion: 1, artifacts: ['apps/api/dist/server.js'] },
       sbom: { bomFormat: 'cyclonedx', components: [] },
     };
     const result = writeReleaseEvidence(
-      process.cwd(),
+      root,
       output,
       evidence,
       new Date('2026-08-22T00:00:00.000Z'),
