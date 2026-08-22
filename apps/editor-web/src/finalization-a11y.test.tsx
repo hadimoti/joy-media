@@ -188,6 +188,7 @@ describe('Task 28 finalization accessibility and localization', () => {
 
     expect(assetSource).toContain('useAccessibleDialog');
     expect(assetSource).toContain('aria-modal="true"');
+    expect(assetSource).toContain('button[aria-label="Choose media file"]:not([disabled])');
     expect(appSource).toContain('useAccessibleDialog');
     expect(appSource).toContain('aria-modal="true"');
     expect(workflowSource).toContain('useAccessibleDialog');

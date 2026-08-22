@@ -167,7 +167,8 @@ export function AssetLibraryPanel({
     open: importOpen,
     containerRef: importDialogRef,
     onClose: () => setImportOpen(false),
-    initialFocusSelector: 'button[aria-label="Choose media file"], input:not([disabled])',
+    initialFocusSelector:
+      'button[aria-label="Choose media file"]:not([disabled]), button[aria-label="Close import"]',
   });
   useAccessibleDialog({
     open: filterOpen,

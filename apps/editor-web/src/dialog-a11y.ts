@@ -51,6 +51,8 @@ export function useAccessibleDialog(args: {
 }): void {
   const openerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
+  const onCloseRef = useRef(args.onClose);
+  onCloseRef.current = args.onClose;
 
   useEffect(() => {
     if (args.open && !wasOpenRef.current) {
@@ -64,17 +66,18 @@ export function useAccessibleDialog(args: {
     wasOpenRef.current = args.open;
   }, [args.open]);
 
+  // The dialog can rerender while it is open (for example while a user types in
+  // a form field). Keep the focus/trap lifecycle tied to the open transition;
+  // re-running it for every inline callback identity would steal focus back to
+  // the first control on every render.
   useEffect(() => {
     if (!args.open) return;
     const container = args.containerRef.current;
     if (container === null) return;
-    const focusables = dialogFocusableElements(container);
-    const initialTarget =
-      (args.initialFocusSelector === undefined
-        ? undefined
-        : (container.querySelector(args.initialFocusSelector) as HTMLElement | null)) ??
-      focusables[0] ??
-      container;
+    const initialTarget = resolveDialogInitialFocusTarget(
+      container,
+      args.initialFocusSelector,
+    );
     const frame = window.requestAnimationFrame(() => initialTarget.focus());
     const onKeyDown = (event: KeyboardEvent) => {
       const nodes = dialogFocusableElements(container);
@@ -87,7 +90,7 @@ export function useAccessibleDialog(args: {
       });
       if (action.type === 'close') {
         event.preventDefault();
-        args.onClose();
+        onCloseRef.current();
         return;
       }
       if (action.type !== 'focus') return;
@@ -99,7 +102,25 @@ export function useAccessibleDialog(args: {
       window.cancelAnimationFrame(frame);
       container.removeEventListener('keydown', onKeyDown);
     };
-  }, [args.containerRef, args.initialFocusSelector, args.onClose, args.open]);
+  }, [args.open]);
+}
+
+function resolveDialogInitialFocusTarget(
+  container: HTMLElement,
+  selector: string | undefined,
+): HTMLElement {
+  if (selector !== undefined) {
+    // querySelector treats a comma-separated selector as one set and returns
+    // the first match in document order. Try each alternative in author order
+    // so a preferred visible control wins over an earlier hidden fallback.
+    for (const candidate of selector.split(',')) {
+      const match = container.querySelector<HTMLElement>(candidate.trim());
+      if (match !== null && match.tabIndex >= 0 && !match.hasAttribute('disabled')) {
+        return match;
+      }
+    }
+  }
+  return dialogFocusableElements(container)[0] ?? container;
 }
 
 function dialogFocusableElements(container: HTMLElement): HTMLElement[] {

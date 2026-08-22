@@ -8,15 +8,17 @@ describe('project Jobs panel state', () => {
   it('labels a missing control-plane record as ready to initialize, never offline', () => {
     const status = projectJobStatus(true, [], NOW);
 
-    expect(status).toContain('Ready to initialize');
-    expect(status).not.toContain('Not connected');
+    expect(status).toContain('آمادهٔ راه‌اندازی');
+    expect(status).toContain('هیچ Workerی متصل نیست');
   });
 
   it('distinguishes connected, disconnected, and revoked Workers', () => {
     expect(workerPresence(worker({ lastSeenAt: NOW - 1 }), NOW)).toBe('connected');
     expect(workerPresence(worker({ lastSeenAt: NOW - 35_000 }), NOW)).toBe('disconnected');
     expect(workerPresence(worker({ revoked: true, lastSeenAt: NOW - 1 }), NOW)).toBe('revoked');
-    expect(projectJobStatus(false, [worker({ lastSeenAt: NOW - 1 })], NOW)).toContain('connected');
+    expect(projectJobStatus(false, [worker({ lastSeenAt: NOW - 1 })], NOW)).toContain(
+      'Worker متصل است',
+    );
   });
 
   it('gives queued, running, canceled, failed, and completed jobs distinct labels', () => {
@@ -33,14 +35,14 @@ describe('project Jobs panel state', () => {
       [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail'] })],
       NOW,
     );
-    expect(noGpu).toBe('Initialized · Worker connected');
-    expect(noGpu).not.toContain('GPU ready');
+    expect(noGpu).toBe('راه‌اندازی شد · Worker متصل است');
+    expect(noGpu).not.toContain('GPU آماده است');
     const withGpu = projectJobStatus(
       false,
       [worker({ lastSeenAt: NOW - 1, capabilities: ['asset.thumbnail', 'image.comfy'] })],
       NOW,
     );
-    expect(withGpu).toContain('GPU ready');
+    expect(withGpu).toContain('GPU آماده است');
   });
 
   it('keeps initialize and refresh toolbar controls but removes the fixture thumbnail queue action', () => {
