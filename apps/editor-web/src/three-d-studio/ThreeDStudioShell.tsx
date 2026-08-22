@@ -64,7 +64,8 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
         saveNowRef.current();
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        event.shiftKey ? editor.redo() : editor.undo();
+        if (event.shiftKey) editor.redo();
+        else editor.undo();
       }
     };
     window.addEventListener('keydown', onKeyDown);
