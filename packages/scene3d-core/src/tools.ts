@@ -41,6 +41,10 @@ export interface Scene3DToolDiff {
   readonly created: readonly string[];
   readonly modified: readonly string[];
   readonly deleted: readonly string[];
+  readonly changedAssets: readonly string[];
+  readonly changedMaterials: readonly string[];
+  readonly environmentChanged: boolean;
+  readonly activeCameraChanged: boolean;
   readonly summary: string;
 }
 
@@ -240,12 +244,29 @@ function diffForScene(before: Scene3DDocumentV1, after: Scene3DDocumentV1): Scen
     (id) =>
       beforeIds.has(id) && JSON.stringify(before.objects[id]) !== JSON.stringify(after.objects[id]),
   );
+  const changedAssets = changedRecordIds(before.assets, after.assets);
+  const changedMaterials = changedRecordIds(before.materials, after.materials);
+  const environmentChanged =
+    JSON.stringify(before.environment) !== JSON.stringify(after.environment);
+  const activeCameraChanged = before.activeCameraId !== after.activeCameraId;
   return {
     created,
     modified,
     deleted,
-    summary: `${created.length} created, ${modified.length} modified, ${deleted.length} deleted`,
+    changedAssets,
+    changedMaterials,
+    environmentChanged,
+    activeCameraChanged,
+    summary: `${created.length} created, ${modified.length} modified, ${deleted.length} deleted; ${changedAssets.length} assets, ${changedMaterials.length} materials${environmentChanged ? ', environment changed' : ''}${activeCameraChanged ? ', active camera changed' : ''}`,
   };
+}
+
+function changedRecordIds(
+  before: Readonly<Record<string, unknown>>,
+  after: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  const ids = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...ids].filter((id) => JSON.stringify(before[id]) !== JSON.stringify(after[id]));
 }
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {

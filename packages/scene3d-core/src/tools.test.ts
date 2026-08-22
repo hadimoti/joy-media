@@ -32,6 +32,7 @@ describe('scene3d structured tools', () => {
       },
     });
     expect(dry.diff).toMatchObject({ created: ['box'] });
+    expect(dry.diff?.changedAssets).toEqual([]);
   });
   it('requires a matching, unexpired approval and applies atomically with an undo transaction', () => {
     const result = applyApprovedScene3DTool(
@@ -101,5 +102,18 @@ describe('scene3d structured tools', () => {
     expect(() => commandForScene3DTool('scene3d.transform', { objectId: 'box' })).toThrow(
       'transform must be an object',
     );
+  });
+
+  it('reports non-object changes in material and camera diffs', () => {
+    const material = {
+      id: 'mat',
+      color: '#ffffff',
+      roughness: 0.5,
+      metalness: 0.1,
+    };
+    const materialDiff = dryRunScene3DTool(session(), 'scene3d.material', { material });
+    expect(materialDiff.diff?.changedMaterials).toEqual(['mat']);
+    const cameraDiff = dryRunScene3DTool(session(), 'scene3d.camera', { cameraId: 'camera' });
+    expect(cameraDiff.error).toContain('active camera');
   });
 });
