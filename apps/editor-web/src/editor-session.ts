@@ -53,12 +53,7 @@ export interface HistoryEntry {
  * command form and therefore no inverse the object history can compute. The
  * session keeps the before/after pair itself so it can still be undone.
  */
-type EditorOperation =
-  | 'timeline'
-  | 'visual-object'
-  | 'document-snapshot'
-  | 'graph'
-  | 'artifact';
+type EditorOperation = 'timeline' | 'visual-object' | 'document-snapshot' | 'graph' | 'artifact';
 
 /**
  * The graph needs an id to share the persistence adapter shape, and the adapter
@@ -181,10 +176,7 @@ export class EditorSession {
     );
     const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
     // Stored projects may still carry the pre-v7 1920×1080 default; normalize on open.
-    const visualObjects = recoverOrInitialize(
-      this.#visualObjectPersistence,
-      initialVisualProject,
-    );
+    const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
     this.#timelineRevision = timeline.revision;
     this.#visualObjectRevision = visualObjects.revision;
     this.#timeline = new EditorCommandController(timeline.project);
@@ -289,9 +281,7 @@ export class EditorSession {
       const isTip = index === this.#undo.length - 1;
       return this.#toEntry(e, isTip ? 'current' : 'undo');
     });
-    const futureRows = [...this.#redo]
-      .reverse()
-      .map((e) => this.#toEntry(e, 'redo'));
+    const futureRows = [...this.#redo].reverse().map((e) => this.#toEntry(e, 'redo'));
     if (cursorSequence === 0) {
       return [document, ...futureRows];
     }
@@ -325,10 +315,7 @@ export class EditorSession {
     }
   }
 
-  #toEntry(
-    entry: HistoryStackEntry,
-    direction: 'undo' | 'redo' | 'current',
-  ): HistoryEntry {
+  #toEntry(entry: HistoryStackEntry, direction: 'undo' | 'redo' | 'current'): HistoryEntry {
     return {
       id: `history-${entry.sequence}`,
       source:
@@ -429,40 +416,97 @@ export class EditorSession {
     if (parts.artifacts !== undefined && !this.graphEnabled) {
       throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
     }
+    const beforeDocument = this.#visualObjects.present;
+    const beforeTimeline = this.#timeline.project;
+    const beforeArtifacts = this.#artifactDocument;
+    if (parts.document !== undefined) {
+      const documentErrors = validateJoyProjectV1(parts.document);
+      if (documentErrors.length > 0) {
+        throw new RangeError(
+          `compound document is invalid: ${documentErrors.map((error) => error.message).join('; ')}`,
+        );
+      }
+    }
     const artifactResult =
       parts.artifacts === undefined
         ? undefined
         : applyArtifactTransaction(this.#artifactDocument.store, parts.artifacts);
-    if (parts.timeline !== undefined) {
-      // Pure: throws on an invalid command without touching the live project.
-      applyTransaction(this.#timeline.project, parts.timeline);
+    const timelineResult =
+      parts.timeline === undefined
+        ? undefined
+        : applyTransaction(this.#timeline.project, parts.timeline);
+
+    // Persist each prepared result before mutating any live history object. If a
+    // later bus rejects its write, the already-written buses are restored from
+    // their pre-state snapshots and the caller sees no compound history entry.
+    let documentPersisted = false;
+    let timelinePersisted = false;
+    let artifactPersisted = false;
+    try {
+      if (parts.document !== undefined) {
+        this.#visualObjectPersistence.saveSnapshot(parts.document, false);
+        documentPersisted = true;
+      }
+      if (parts.timeline !== undefined) {
+        this.#timelinePersistence.saveTransaction(beforeTimeline, parts.timeline, false);
+        timelinePersisted = true;
+      }
+      if (parts.artifacts !== undefined && artifactResult !== undefined) {
+        this.#artifactPersistence?.saveTransaction(beforeArtifacts, parts.artifacts, false);
+        artifactPersisted = true;
+      }
+    } catch (error) {
+      const rollbackErrors: unknown[] = [];
+      if (artifactPersisted) {
+        try {
+          this.#artifactPersistence?.saveSnapshot(beforeArtifacts, false);
+          this.#artifactRevision += 1;
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (timelinePersisted) {
+        try {
+          this.#timelinePersistence.saveSnapshot(beforeTimeline, false);
+          this.#timelineRevision += 1;
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (documentPersisted) {
+        try {
+          this.#visualObjectPersistence.saveSnapshot(beforeDocument, false);
+          this.#visualObjectRevision += 1;
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          'compound transaction failed and durable rollback was incomplete',
+        );
+      }
+      throw error;
     }
 
-    if (parts.timeline !== undefined) {
-      const before = this.#timeline.project;
+    if (timelineResult !== undefined && parts.timeline !== undefined) {
       this.#timeline.dispatch(parts.timeline);
-      this.#timelinePersistence.saveTransaction(before, parts.timeline, false);
       this.#timelineRevision += 1;
       operations.push('timeline');
       commandCount += parts.timeline.commands.length;
     }
 
     if (parts.document !== undefined) {
-      const before = this.#visualObjects.present;
       this.#visualObjects.replacePresent(parts.document);
-      // A replacement has no command form, so it persists as a snapshot; an
-      // empty transaction would replay to the old document on reload.
-      this.#visualObjectPersistence.saveSnapshot(parts.document, false);
       this.#visualObjectRevision += 1;
-      this.#snapshotUndo.push({ before, after: parts.document });
+      this.#snapshotUndo.push({ before: beforeDocument, after: parts.document });
       this.#snapshotRedo.length = 0;
       operations.push('document-snapshot');
     }
 
     if (parts.artifacts !== undefined && artifactResult !== undefined) {
-      const before = this.#artifactDocument;
-      this.#artifactDocument = { ...before, store: artifactResult.store };
-      this.#artifactPersistence?.saveTransaction(before, parts.artifacts, false);
+      this.#artifactDocument = { ...beforeArtifacts, store: artifactResult.store };
       this.#artifactRevision += 1;
       this.#artifactUndo.push(artifactResult.record);
       this.#artifactRedo.length = 0;

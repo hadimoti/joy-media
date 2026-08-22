@@ -45,13 +45,14 @@ export function buildContentTemplateTransaction(
   const bindings: Array<[string, string]> = [];
 
   const { actions } = seeded.template;
+  const resolvedSeed = nextAvailableSeed(seeded, deps.session.visualProject, composition);
   const usedTrackIds = new Set<string>();
 
   actions.forEach((action, index) => {
     if (action.kind !== 'html-scene') return;
 
     const sceneId = action.sceneId;
-    const objectId = `${seeded.template.id}-${index}-${seeded.seed}`;
+    const objectId = `${seeded.template.id}-${index}-${resolvedSeed}`;
     const clipId = `clip-${objectId}`;
     const startUs = deps.playheadUs;
     const durationUs = 5_000_000;
@@ -169,4 +170,27 @@ export function buildContentTemplateTransaction(
   deps.session.dispatchVisualObjects(visualTransaction);
   deps.session.dispatchTimeline(timelineTransaction);
   deps.session.replaceVisualProject(project);
+}
+
+function nextAvailableSeed(
+  seeded: SeededContentTemplate,
+  project: EditorSession['visualProject'],
+  composition: NonNullable<EditorSession['timelineProject']['compositions']['root']>,
+): string {
+  const objectIds = new Set(Object.keys(project.visualObjects));
+  const clipIds = new Set(
+    composition.tracks.flatMap((track) => track.clips.map((clip) => clip.id)),
+  );
+  for (let attempt = 0; ; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `-${attempt + 1}`;
+    const candidate = `${seeded.seed}${suffix}`;
+    const collides = seeded.template.actions.some((action, index) => {
+      if (action.kind !== 'html-scene') return false;
+      return (
+        objectIds.has(`${seeded.template.id}-${index}-${candidate}`) ||
+        clipIds.has(`clip-${seeded.template.id}-${index}-${candidate}`)
+      );
+    });
+    if (!collides) return candidate;
+  }
 }

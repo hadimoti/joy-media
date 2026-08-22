@@ -5,9 +5,19 @@ import { EditorSession } from './editor-session.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
+  let failKey: string | undefined;
   return {
     getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
+    setItem: (key: string, value: string) => {
+      if (key === failKey) {
+        failKey = undefined;
+        throw new Error(`injected write failure for ${key}`);
+      }
+      values.set(key, value);
+    },
+    failNextWrite: (key: string) => {
+      failKey = key;
+    },
   };
 }
 
@@ -236,5 +246,54 @@ describe('EditorSession', () => {
     ).toThrow();
     expect(session.visualProject).toBe(beforeDocument);
     expect(session.historyEntries).toHaveLength(beforeEntries);
+  });
+
+  it('leaves both durable buses unchanged when a compound snapshot write fails', () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const beforeDocument = session.visualProject;
+    const beforeTimeline = session.timelineProject;
+    const beforeEntries = session.historyEntries.length;
+    const nextDocument = {
+      ...beforeDocument,
+      title: 'must roll back',
+    };
+    storage.failNextWrite('joy-media.visual-object-project-log.v1');
+
+    expect(() =>
+      session.dispatchCompound('Injected failure', {
+        document: nextDocument,
+        timeline: {
+          label: 'Injected failure',
+          commands: [
+            {
+              type: 'timeline.trimClipEnd',
+              payload: {
+                compositionId: 'root',
+                trackId: 'track-0',
+                clipId: 'intro',
+                newEndUs: 9_000_000,
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow('injected write failure');
+
+    expect(session.visualProject).toBe(beforeDocument);
+    expect(session.timelineProject).toBe(beforeTimeline);
+    expect(session.historyEntries).toHaveLength(beforeEntries);
+
+    const reopened = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(reopened.visualProject).toEqual(beforeDocument);
+    expect(reopened.timelineProject).toEqual(beforeTimeline);
   });
 });

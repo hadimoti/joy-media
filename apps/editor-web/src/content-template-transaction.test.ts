@@ -6,6 +6,16 @@ import type { VisualObjectTransaction } from '@joy-media/property-system';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import type { SeededContentTemplate } from './content-template-types.js';
+import { EditorSession } from './editor-session.js';
+import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+}
 
 function emptyTimelineProject(): SpikeProject {
   return emptySpikeProject();
@@ -301,6 +311,41 @@ describe('buildContentTemplateTransaction', () => {
 
     expect(dispatchVisualObjects).toHaveBeenCalledTimes(2);
     expect(dispatchTimeline).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves a repeated caller seed against durable objects after apply and reopen', () => {
+    const storage = memoryStorage();
+    const seeded: SeededContentTemplate = {
+      template: {
+        id: 'joy.title',
+        label: 'JOY Title',
+        description: 'Main title',
+        category: 'Titles',
+        actions: [{ kind: 'html-scene', sceneId: 'joy.firstparty.title' }],
+      },
+      seed: 'durable-seed',
+    };
+    const session = new EditorSession(storage, emptyTimelineProject(), INITIAL_EDITOR_PROJECT);
+
+    buildContentTemplateTransaction(seeded, { session, selectedClipIds: [], playheadUs: 0 });
+    buildContentTemplateTransaction(seeded, { session, selectedClipIds: [], playheadUs: 0 });
+    const firstIds = Object.keys(session.visualProject.visualObjects).filter((id) =>
+      id.startsWith('joy.title-0-durable-seed'),
+    );
+    expect(firstIds).toHaveLength(2);
+    expect(new Set(firstIds).size).toBe(2);
+
+    const reopened = new EditorSession(storage, emptyTimelineProject(), INITIAL_EDITOR_PROJECT);
+    buildContentTemplateTransaction(seeded, {
+      session: reopened,
+      selectedClipIds: [],
+      playheadUs: 0,
+    });
+    const reopenedIds = Object.keys(reopened.visualProject.visualObjects).filter((id) =>
+      id.startsWith('joy.title-0-durable-seed'),
+    );
+    expect(reopenedIds).toHaveLength(3);
+    expect(new Set(reopenedIds).size).toBe(3);
   });
 
   it('places two clips with correct duration (5 seconds each)', () => {
