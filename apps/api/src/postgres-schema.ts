@@ -56,8 +56,12 @@ CREATE INDEX IF NOT EXISTS workers_session_idx ON workers (session_token_hash) W
 CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
 CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_gmail_idx ON media_allowed_users (gmail) WHERE gmail IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_telegram_idx ON media_allowed_users (telegram_id) WHERE telegram_id IS NOT NULL;
-CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, secret_id text, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+ALTER TABLE media_otp_codes ADD COLUMN IF NOT EXISTS secret_id text;
 CREATE INDEX IF NOT EXISTS media_otp_codes_contact_idx ON media_otp_codes (contact, method, used, expires_at);
-CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, secret_id text, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+ALTER TABLE media_sessions ADD COLUMN IF NOT EXISTS secret_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS media_sessions_token_idx ON media_sessions (token_hash);
+CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null);
+CREATE INDEX IF NOT EXISTS media_otp_rate_limits_key_created_idx ON media_otp_rate_limits (key_hash, created_at);
 `;

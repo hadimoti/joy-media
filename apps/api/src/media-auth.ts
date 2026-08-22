@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Pool } from 'pg';
 import type { Actor } from './control-plane.js';
@@ -12,19 +12,8 @@ const OTP_MAX_ACTIVE = 3;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
-
-const otpRateLimitWindow = new Map<string, number[]>();
-
-function checkOtpRateLimit(key: string): void {
-  const now = Date.now();
-  const timestamps = otpRateLimitWindow.get(key) ?? [];
-  const recent = timestamps.filter((ts) => now - ts < OTP_RATE_LIMIT_WINDOW_MS);
-  if (recent.length >= OTP_RATE_LIMIT_MAX) {
-    throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
-  }
-  recent.push(now);
-  otpRateLimitWindow.set(key, recent);
-}
+const CONTACT_MAX_LENGTH = 320;
+const HASH_KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** Generic response text for both known and unknown contacts (no enumeration). */
 const OTP_REQUESTED_MESSAGE = 'If that account is registered, a login code was sent.';
@@ -63,6 +52,32 @@ export interface MediaAuthServiceOptions {
   readonly pool: Pool;
   readonly mailer?: MediaMailerLike;
   readonly telegram?: MediaTelegramSenderLike;
+  /**
+   * Rotation-aware HMAC keys. The first key signs new OTP/session rows; later
+   * keys are accepted for migration until their rows expire or are revoked.
+   */
+  readonly hashKeys?: readonly MediaAuthHashKey[];
+}
+
+export interface MediaAuthHashKey {
+  readonly id: string;
+  readonly secret: string;
+}
+
+export function mediaAuthHashKeysFromEnv(
+  value = process.env.JOY_MEDIA_AUTH_HASH_KEYS,
+): readonly MediaAuthHashKey[] | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
+  return value.split(',').map((entry) => {
+    const separator = entry.indexOf(':');
+    if (separator <= 0 || separator === entry.length - 1) {
+      throw new MediaAuthError('REQUEST_INVALID', 'JOY_MEDIA_AUTH_HASH_KEYS is invalid');
+    }
+    return {
+      id: entry.slice(0, separator),
+      secret: entry.slice(separator + 1),
+    };
+  });
 }
 
 export interface MediaSessionProfile {
@@ -98,11 +113,13 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly pool: Pool;
   private readonly mailer: MediaMailerLike | undefined;
   private readonly telegram: MediaTelegramSenderLike | undefined;
+  private readonly hashKeys: readonly MediaAuthHashKey[];
 
   constructor(options: MediaAuthServiceOptions) {
     this.pool = options.pool;
     this.mailer = options.mailer;
     this.telegram = options.telegram;
+    this.hashKeys = normalizeHashKeys(options.hashKeys);
   }
 
   async listAllowed(): Promise<readonly MediaAllowedUser[]> {
@@ -157,7 +174,7 @@ export class MediaAuthService implements MediaAuthApi {
     request?: IncomingMessage,
   ): Promise<{ message: string }> {
     if (request !== undefined) {
-      checkOtpRateLimit(requestIp(request));
+      await this.checkOtpRateLimit(requestIp(request));
     }
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
@@ -172,9 +189,16 @@ export class MediaAuthService implements MediaAuthApi {
         const code = randomInt(100_000, 1_000_000).toString();
         const now = new Date();
         await this.pool.query(
-          `INSERT INTO media_otp_codes (contact, method, code_hash, created_at, expires_at, used)
-           VALUES ($1, $2, $3, $4, $5, false)`,
-          [otpContact, method, codeHash(otpContact, method, code), now, new Date(now.getTime() + OTP_TTL_MS)],
+          `INSERT INTO media_otp_codes (contact, method, code_hash, secret_id, created_at, expires_at, used)
+           VALUES ($1, $2, $3, $4, $5, $6, false)`,
+          [
+            otpContact,
+            method,
+            this.codeHash(otpContact, method, code, this.currentKey()),
+            this.currentKey().id,
+            now,
+            new Date(now.getTime() + OTP_TTL_MS),
+          ],
         );
         await this.deliver(allowed, method, code);
       }
@@ -189,33 +213,49 @@ export class MediaAuthService implements MediaAuthApi {
       throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
     }
     const otpContact = canonicalOtpContact(contact, method, allowed);
-    const hash = codeHash(otpContact, method, code);
+    if (!/^\d{6}$/.test(code))
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    const codeRow = await this.matchActiveOtp(otpContact, method, code);
+    if (codeRow === undefined)
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
     const result = await this.pool.query<{ id: string }>(
-      `UPDATE media_otp_codes SET used = true
-       WHERE id = (
-         SELECT id FROM media_otp_codes
-         WHERE contact = $1 AND method = $2 AND code_hash = $3 AND used = false AND expires_at > $4
-         ORDER BY created_at DESC LIMIT 1
-       )
+      `UPDATE media_otp_codes SET used = true, code_hash = $3, secret_id = $4
+       WHERE id = $1 AND used = false AND expires_at > $2
        RETURNING id`,
-      [otpContact, method, hash, new Date()],
+      [
+        codeRow.id,
+        new Date(),
+        this.codeHash(otpContact, method, code, this.currentKey()),
+        this.currentKey().id,
+      ],
     );
-    if (result.rows.length === 0) throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    if (result.rows.length === 0)
+      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
     await this.pool.query(
-      `INSERT INTO media_sessions (token_hash, contact, method, created_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [sessionHash(token), otpContact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
+      `INSERT INTO media_sessions (token_hash, secret_id, contact, method, created_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        this.sessionHash(token, this.currentKey()),
+        this.currentKey().id,
+        otpContact,
+        method,
+        now,
+        new Date(now.getTime() + SESSION_TTL_MS),
+      ],
     );
     return token;
   }
 
   async logout(token: string): Promise<void> {
-    await this.pool.query('UPDATE media_sessions SET revoked_at = $2 WHERE token_hash = $1', [
-      sessionHash(token),
-      new Date(),
-    ]);
+    const now = new Date();
+    for (const hash of this.sessionHashCandidates(token)) {
+      await this.pool.query('UPDATE media_sessions SET revoked_at = $2 WHERE token_hash = $1', [
+        hash,
+        now,
+      ]);
+    }
   }
 
   /** Satisfies the existing `ApiAuthentication` interface (see http-server.ts). */
@@ -256,12 +296,7 @@ export class MediaAuthService implements MediaAuthApi {
   ): Promise<{ readonly contact: string; readonly method: MediaAuthMethod } | undefined> {
     const token = bearerToken(request);
     if (token === undefined) return undefined;
-    const result = await this.pool.query<{ contact: string; method: string }>(
-      `SELECT contact, method FROM media_sessions
-       WHERE token_hash = $1 AND expires_at > $2 AND revoked_at IS NULL`,
-      [sessionHash(token), new Date()],
-    );
-    const row = result.rows[0];
+    const row = await this.matchSession(token);
     if (row === undefined) return undefined;
     if (row.method !== 'gmail' && row.method !== 'telegram') return undefined;
     return { contact: row.contact, method: row.method };
@@ -301,12 +336,130 @@ export class MediaAuthService implements MediaAuthApi {
     return row === undefined ? undefined : allowedUserOf(row);
   }
 
-  private async deliver(allowed: MediaAllowedUser, method: MediaAuthMethod, code: string): Promise<void> {
+  private async deliver(
+    allowed: MediaAllowedUser,
+    method: MediaAuthMethod,
+    code: string,
+  ): Promise<void> {
     if (method === 'gmail' && allowed.gmail !== null && this.mailer !== undefined) {
       await this.mailer.sendOtp(allowed.gmail, code);
-    } else if (method === 'telegram' && allowed.telegramId !== null && this.telegram !== undefined) {
+    } else if (
+      method === 'telegram' &&
+      allowed.telegramId !== null &&
+      this.telegram !== undefined
+    ) {
       await this.telegram.sendOtp(allowed.telegramId, code);
     }
+  }
+
+  private async checkOtpRateLimit(key: string): Promise<void> {
+    const now = new Date();
+    const keyHash = this.rateLimitHash(key);
+    await this.pool.query('DELETE FROM media_otp_rate_limits WHERE created_at <= $1', [
+      new Date(now.getTime() - OTP_RATE_LIMIT_WINDOW_MS),
+    ]);
+    const active = await this.pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM media_otp_rate_limits
+       WHERE key_hash = $1 AND created_at > $2`,
+      [keyHash, new Date(now.getTime() - OTP_RATE_LIMIT_WINDOW_MS)],
+    );
+    if (Number(active.rows[0]?.count ?? '0') >= OTP_RATE_LIMIT_MAX) {
+      throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
+    }
+    await this.pool.query(
+      'INSERT INTO media_otp_rate_limits (key_hash, secret_id, created_at) VALUES ($1, $2, $3)',
+      [keyHash, this.currentKey().id, now],
+    );
+  }
+
+  private async matchActiveOtp(
+    contact: string,
+    method: MediaAuthMethod,
+    code: string,
+  ): Promise<{ readonly id: string } | undefined> {
+    const result = await this.pool.query<{
+      readonly id: string;
+      readonly code_hash: string;
+      readonly secret_id: string | null;
+    }>(
+      `SELECT id, code_hash, secret_id FROM media_otp_codes
+       WHERE contact = $1 AND method = $2 AND used = false AND expires_at > $3
+       ORDER BY created_at DESC`,
+      [contact, method, new Date()],
+    );
+    return result.rows.find((row) => {
+      const key =
+        row.secret_id === null
+          ? undefined
+          : this.hashKeys.find((candidate) => candidate.id === row.secret_id);
+      const expected =
+        key === undefined
+          ? legacyCodeHash(contact, method, code)
+          : this.codeHash(contact, method, code, key);
+      return safeEqual(row.code_hash, expected);
+    });
+  }
+
+  private async matchSession(token: string): Promise<
+    | {
+        readonly id: string;
+        readonly token_hash: string;
+        readonly secret_id: string | null;
+        readonly contact: string;
+        readonly method: string;
+      }
+    | undefined
+  > {
+    for (const hash of this.sessionHashCandidates(token)) {
+      const result = await this.pool.query<{
+        readonly id: string;
+        readonly token_hash: string;
+        readonly secret_id: string | null;
+        readonly contact: string;
+        readonly method: string;
+      }>(
+        `SELECT id, token_hash, secret_id, contact, method FROM media_sessions
+         WHERE token_hash = $1 AND expires_at > $2 AND revoked_at IS NULL
+         LIMIT 1`,
+        [hash, new Date()],
+      );
+      const row = result.rows[0];
+      if (row === undefined) continue;
+      const currentHash = this.sessionHash(token, this.currentKey());
+      if (row.secret_id !== this.currentKey().id || row.token_hash !== currentHash) {
+        await this.pool.query(
+          'UPDATE media_sessions SET token_hash = $2, secret_id = $3 WHERE id = $1',
+          [row.id, currentHash, this.currentKey().id],
+        );
+      }
+      return row;
+    }
+    return undefined;
+  }
+
+  private codeHash(
+    contact: string,
+    method: MediaAuthMethod,
+    code: string,
+    key: MediaAuthHashKey,
+  ): string {
+    return hmacDigest(key.secret, `otp:${method}:${contact}:${code}`);
+  }
+
+  private sessionHash(token: string, key: MediaAuthHashKey): string {
+    return hmacDigest(key.secret, `session:${token}`);
+  }
+
+  private rateLimitHash(key: string): string {
+    return hmacDigest(this.currentKey().secret, `otp-rate:${key}`);
+  }
+
+  private sessionHashCandidates(token: string): readonly string[] {
+    return [...this.hashKeys.map((key) => this.sessionHash(token, key)), legacySessionHash(token)];
+  }
+
+  private currentKey(): MediaAuthHashKey {
+    return this.hashKeys[0]!;
   }
 }
 
@@ -373,6 +526,8 @@ function isTelegramNumericId(value: string): boolean {
 function normalizeContact(value: string, method: MediaAuthMethod): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
+  if (trimmed.length > CONTACT_MAX_LENGTH)
+    throw new MediaAuthError('REQUEST_INVALID', 'contact is too long');
   if (method === 'gmail') return trimmed.toLowerCase();
   const withoutAt = trimmed.replace(/^@+/, '');
   if (withoutAt.length === 0) throw new MediaAuthError('REQUEST_INVALID', 'contact is required');
@@ -391,12 +546,41 @@ function canonicalOtpContact(
   return contact;
 }
 
-function codeHash(contact: string, method: MediaAuthMethod, code: string): string {
+function legacyCodeHash(contact: string, method: MediaAuthMethod, code: string): string {
   return createHash('sha256').update(`${method}:${contact}:${code}`).digest('base64url');
 }
 
-function sessionHash(token: string): string {
+function legacySessionHash(token: string): string {
   return createHash('sha256').update(token).digest('base64url');
+}
+
+function hmacDigest(secret: string, value: string): string {
+  return createHmac('sha256', secret).update(value).digest('base64url');
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.byteLength === rightBytes.byteLength && timingSafeEqual(leftBytes, rightBytes);
+}
+
+function normalizeHashKeys(
+  keys: readonly MediaAuthHashKey[] | undefined,
+): readonly MediaAuthHashKey[] {
+  const resolved =
+    keys === undefined || keys.length === 0
+      ? [{ id: 'local-dev', secret: 'joy-media-local-development-auth-hash-key' }]
+      : keys;
+  const seen = new Set<string>();
+  return resolved.map((key) => {
+    const id = key.id.trim();
+    const secret = key.secret.trim();
+    if (!HASH_KEY_ID.test(id) || secret.length < 16 || seen.has(id)) {
+      throw new MediaAuthError('REQUEST_INVALID', 'auth hash keys are invalid');
+    }
+    seen.add(id);
+    return { id, secret };
+  });
 }
 
 function bearerToken(request: IncomingMessage): string | undefined {

@@ -1,4 +1,4 @@
-import { PANEL_IDS, type PanelId } from './workspace.js';
+import { GA_PANEL_IDS, PANEL_IDS, type PanelId } from './workspace.js';
 import { PANEL_LABELS } from './panel-tab-icons.js';
 
 export type AppMenuActionId =
@@ -46,7 +46,7 @@ const WINDOW_PANELS = [
 ] as const satisfies readonly PanelId[];
 
 function panelViewItems(): readonly AppMenuItem[] {
-  return PANEL_IDS.map((panelId) => ({
+  return GA_PANEL_IDS.map((panelId) => ({
     id: `view.panel.${panelId}` as const,
     label: PANEL_LABELS[panelId],
   }));

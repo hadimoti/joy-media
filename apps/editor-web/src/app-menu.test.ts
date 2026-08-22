@@ -37,4 +37,17 @@ describe('app-menu catalog', () => {
     expect(panelIdFromMenuAction('window.panel.media')).toBe('media');
     expect(panelIdFromMenuAction('edit.undo')).toBeUndefined();
   });
+
+  it('does not advertise experimental platform panels in the default View menu', () => {
+    const view = APP_MENU_GROUPS.find((group) => group.id === 'view');
+    expect(view?.items.map((item) => item.id)).not.toEqual(
+      expect.arrayContaining([
+        'view.panel.jobs',
+        'view.panel.workflows',
+        'view.panel.production',
+        'view.panel.plugins',
+        'view.panel.templates',
+      ]),
+    );
+  });
 });

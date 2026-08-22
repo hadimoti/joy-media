@@ -50,19 +50,32 @@ export interface EditorPluginHost {
   setProjectData(pluginId: string, value: unknown): void;
 }
 
+export interface EditorPluginHostOptions {
+  readonly enableExperimentalDemoPanel?: boolean;
+}
+
 export function createEditorPluginHost(
   storage:
     | { getItem(key: string): string | null; setItem(key: string, value: string): void }
     | undefined = typeof window !== 'undefined' ? window.localStorage : undefined,
+  options: EditorPluginHostOptions = {},
 ): EditorPluginHost {
   const persisted = (() => {
     if (storage === undefined) {
-      return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+      return {
+        safeMode: true,
+        enabledIds: [] as string[],
+        projectData: {} as Record<string, unknown>,
+      };
     }
     try {
       const raw = storage.getItem(STORAGE_KEY);
       if (raw === null) {
-        return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+        return {
+          safeMode: true,
+          enabledIds: [] as string[],
+          projectData: {} as Record<string, unknown>,
+        };
       }
       const parsed = JSON.parse(raw) as PersistedHostState;
       return {
@@ -76,12 +89,18 @@ export function createEditorPluginHost(
             : {},
       };
     } catch {
-      return { safeMode: true, enabledIds: [] as string[], projectData: {} as Record<string, unknown> };
+      return {
+        safeMode: true,
+        enabledIds: [] as string[],
+        projectData: {} as Record<string, unknown>,
+      };
     }
   })();
 
   const host = new FirstPartyPluginHost(defaultPolicy(persisted.safeMode));
-  host.register(DEMO_PANEL_MANIFEST);
+  if (options.enableExperimentalDemoPanel === true) {
+    host.register(DEMO_PANEL_MANIFEST);
+  }
   for (const id of persisted.enabledIds) {
     host.enable(id, 'ui');
   }

@@ -146,4 +146,23 @@ describe('view modes', () => {
     expect(seedDockLayout('widescreen')).toEqual(wide);
     expect(seedDockLayout('vertical')).toEqual(vertical);
   });
+
+  it('does not open experimental platform panels in seeded GA layouts', () => {
+    const experimental = new Set(['jobs', 'workflows', 'production', 'plugins', 'templates']);
+    const views = (layout: unknown): string[] => {
+      const out: string[] = [];
+      const walk = (node: unknown): void => {
+        if (!isRecord(node)) return;
+        if (isRecord(node.data) && Array.isArray(node.data.views)) {
+          out.push(...node.data.views.filter((view): view is string => typeof view === 'string'));
+        }
+        if (Array.isArray(node.data)) for (const child of node.data) walk(child);
+      };
+      walk((layout as LayoutWithPanels).grid?.root);
+      return out;
+    };
+
+    expect(views(verticalDockLayout()).some((view) => experimental.has(view))).toBe(false);
+    expect(views(widescreenDockLayout()).some((view) => experimental.has(view))).toBe(false);
+  });
 });

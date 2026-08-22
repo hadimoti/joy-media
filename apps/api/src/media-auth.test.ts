@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { describe, expect, it, vi } from 'vitest';
-import { MediaAuthError, MediaAuthService } from './media-auth.js';
+import { MediaAuthError, MediaAuthService, type MediaAuthHashKey } from './media-auth.js';
 
 function pool(): Pool {
   const database = newDb();
@@ -9,18 +10,37 @@ function pool(): Pool {
   return new adapter.Pool() as Pool;
 }
 
-async function service(overrides: Partial<{ mailerCode: string }> = {}) {
-  const db = pool();
+const HASH_KEYS: readonly MediaAuthHashKey[] = [
+  { id: 'k2', secret: 'test-current-auth-hash-secret' },
+  { id: 'k1', secret: 'test-previous-auth-hash-secret' },
+];
+
+async function service(
+  overrides: Partial<{ pool: Pool; hashKeys: readonly MediaAuthHashKey[] }> = {},
+) {
+  const db = overrides.pool ?? pool();
+  await installSchema(db);
+  const auth = createAuth(db, overrides.hashKeys);
+  const mailer = auth.mailer;
+  const telegram = auth.telegram;
+  void overrides;
+  return { auth: auth.service, db, mailer, telegram };
+}
+
+function createAuth(db: Pool, hashKeys: readonly MediaAuthHashKey[] = HASH_KEYS) {
   const mailer = { sendOtp: vi.fn(async () => undefined) };
   const telegram = { sendOtp: vi.fn(async () => undefined) };
-  const auth = new MediaAuthService({ pool: db, mailer, telegram });
+  const service = new MediaAuthService({ pool: db, mailer, telegram, hashKeys });
+  return { service, mailer, telegram };
+}
+
+async function installSchema(db: Pool): Promise<void> {
   await db.query(`
     CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
-    CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
-    CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+    CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, secret_id text, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+    CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, secret_id text, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+    CREATE TABLE IF NOT EXISTS media_otp_rate_limits (id bigserial primary key, key_hash text not null, secret_id text, created_at timestamptz not null);
   `);
-  void overrides;
-  return { auth, db, mailer, telegram };
 }
 
 function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
@@ -90,10 +110,117 @@ describe('MediaAuthService', () => {
     await auth.requestOtp('user@example.com', 'gmail', request);
     await auth.requestOtp('user@example.com', 'gmail', request);
     await auth.requestOtp('user@example.com', 'gmail', request);
-    await expect(
-      auth.requestOtp('user@example.com', 'gmail', request),
-    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await expect(auth.requestOtp('user@example.com', 'gmail', request)).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+    });
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
+  it('persists OTP throttles across auth service reconstruction', async () => {
+    const db = pool();
+    await installSchema(db);
+    const first = createAuth(db);
+    await first.service.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = { socket: { remoteAddress: '5.6.7.8' } } as never;
+    await first.service.requestOtp('user@example.com', 'gmail', request);
+    await first.service.requestOtp('user@example.com', 'gmail', request);
+
+    const restarted = createAuth(db);
+    await restarted.service.requestOtp('user@example.com', 'gmail', request);
+    await expect(
+      restarted.service.requestOtp('user@example.com', 'gmail', request),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+
+    const rateRows = await db.query<{ key_hash: string; secret_id: string }>(
+      'SELECT key_hash, secret_id FROM media_otp_rate_limits',
+    );
+    expect(rateRows.rows).toHaveLength(3);
+    expect(rateRows.rows.every((row) => row.secret_id === 'k2')).toBe(true);
+    expect(JSON.stringify(rateRows.rows)).not.toContain('5.6.7.8');
+  });
+
+  it('stores keyed OTP/session digests with key ids instead of raw codes or tokens', async () => {
+    const { auth, db, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    await auth.requestOtp('user@example.com', 'gmail');
+    const code = sentCode(mailer);
+    const otpRows = await db.query<{ code_hash: string; secret_id: string }>(
+      'SELECT code_hash, secret_id FROM media_otp_codes',
+    );
+    expect(otpRows.rows).toHaveLength(1);
+    expect(otpRows.rows[0]).toMatchObject({ secret_id: 'k2' });
+    expect(otpRows.rows[0]?.code_hash).not.toBe(code);
+    expect(otpRows.rows[0]?.code_hash).not.toBe(legacyCodeHash('user@example.com', 'gmail', code));
+
+    const token = await auth.verifyOtp('user@example.com', 'gmail', code);
+    const sessionRows = await db.query<{ token_hash: string; secret_id: string }>(
+      'SELECT token_hash, secret_id FROM media_sessions',
+    );
+    expect(sessionRows.rows).toHaveLength(1);
+    expect(sessionRows.rows[0]).toMatchObject({ secret_id: 'k2' });
+    expect(sessionRows.rows[0]?.token_hash).not.toBe(token);
+    expect(sessionRows.rows[0]?.token_hash).not.toBe(legacySessionHash(token));
+  });
+
+  it('accepts previous-key OTP/session rows during rotation and migrates sessions to the current key', async () => {
+    const db = pool();
+    await installSchema(db);
+    const previousOnly = createAuth(db, [HASH_KEYS[1]!]);
+    await previousOnly.service.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    await previousOnly.service.requestOtp('user@example.com', 'gmail');
+    const code = sentCode(previousOnly.mailer);
+
+    const rotated = createAuth(db, HASH_KEYS);
+    const token = await rotated.service.verifyOtp('user@example.com', 'gmail', code);
+    await expect(
+      rotated.service.authenticate({ headers: { authorization: `Bearer ${token}` } } as never),
+    ).resolves.toEqual({ id: 'user@example.com' });
+
+    const rows = await db.query<{ secret_id: string }>('SELECT secret_id FROM media_sessions');
+    expect(rows.rows[0]?.secret_id).toBe('k2');
+  });
+
+  it('migrates legacy unkeyed sessions on successful authentication', async () => {
+    const { auth, db } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const token = 'legacy-token-with-enough-entropy-for-test';
+    await db.query(
+      `INSERT INTO media_sessions (token_hash, contact, method, created_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        legacySessionHash(token),
+        'user@example.com',
+        'gmail',
+        new Date(),
+        new Date(Date.now() + 60_000),
+      ],
+    );
+
+    await expect(
+      auth.authenticate({ headers: { authorization: `Bearer ${token}` } } as never),
+    ).resolves.toEqual({ id: 'user@example.com' });
+    const rows = await db.query<{ token_hash: string; secret_id: string }>(
+      'SELECT token_hash, secret_id FROM media_sessions',
+    );
+    expect(rows.rows[0]?.secret_id).toBe('k2');
+    expect(rows.rows[0]?.token_hash).not.toBe(legacySessionHash(token));
+  });
+
+  it('does not authenticate expired or revoked sessions', async () => {
+    const { auth, db, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    await auth.requestOtp('user@example.com', 'gmail');
+    const token = await auth.verifyOtp('user@example.com', 'gmail', sentCode(mailer));
+    const request = { headers: { authorization: `Bearer ${token}` } } as never;
+    await expect(auth.authenticate(request)).resolves.toEqual({ id: 'user@example.com' });
+
+    await auth.logout(token);
+    await expect(auth.authenticate(request)).resolves.toBeUndefined();
+
+    await db.query('UPDATE media_sessions SET revoked_at = NULL, expires_at = $1', [
+      new Date(Date.now() - 1_000),
+    ]);
+    await expect(auth.authenticate(request)).resolves.toBeUndefined();
   });
 
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {
@@ -128,7 +255,9 @@ describe('MediaAuthService', () => {
     telegram.sendOtp.mockClear();
     await auth.requestOtp('@joyuser', 'telegram');
     const code2 = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
-    await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(expect.any(String));
+    await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(
+      expect.any(String),
+    );
   });
 
   it('does not deliver for an unknown Telegram username', async () => {
@@ -149,3 +278,11 @@ describe('MediaAuthService', () => {
     });
   });
 });
+
+function legacyCodeHash(contact: string, method: string, code: string): string {
+  return createHash('sha256').update(`${method}:${contact}:${code}`).digest('base64url');
+}
+
+function legacySessionHash(token: string): string {
+  return createHash('sha256').update(token).digest('base64url');
+}

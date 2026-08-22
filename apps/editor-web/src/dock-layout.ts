@@ -58,26 +58,9 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
 export const DOCK_PANEL_MINIMUM_WIDTH = 64;
 export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
-const BROWSER_GROUP = [
-  'media',
-  'effects',
-  'transitions',
-  'captions',
-  'audio',
-  'color',
-  'plugins',
-] as const;
+const BROWSER_GROUP = ['media', 'effects', 'transitions', 'captions', 'audio', 'color'] as const;
 
-const CONTEXT_GROUP = [
-  'inspector',
-  'motion',
-  'history',
-  'jobs',
-  'diagnostics',
-  'workflows',
-  'production',
-  'camera',
-] as const;
+const CONTEXT_GROUP = ['inspector', 'motion', 'history', 'diagnostics', 'camera'] as const;
 
 export interface ViewModeStorage {
   getItem(key: string): string | null;
