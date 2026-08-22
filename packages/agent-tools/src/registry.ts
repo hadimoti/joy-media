@@ -26,6 +26,7 @@ import {
   createSearchTranscriptTool,
 } from './queries.js';
 import type { ToolDefinition } from './types.js';
+import { createScene3DToolDefinitions } from './scene3d-tools.js';
 
 export interface ToolRegistry {
   readonly tools: ReadonlyMap<string, ToolDefinition>;
@@ -33,6 +34,7 @@ export interface ToolRegistry {
   getToolsByCategory(category: ToolDefinition['category']): readonly (QueryTool | EditTool)[];
   getToolNames(): readonly string[];
   hasTool(name: string): boolean;
+  readonly scene3dDefinitions: readonly ToolDefinition[];
 }
 
 export function createToolRegistry(): ToolRegistry {
@@ -64,6 +66,7 @@ export function createToolRegistry(): ToolRegistry {
   ];
 
   const allTools: readonly (QueryTool | EditTool)[] = [...queryTools, ...editTools];
+  const scene3dDefinitions = createScene3DToolDefinitions();
   const toolMap = new Map<string, ToolDefinition>();
   const toolImplMap = new Map<string, QueryTool | EditTool>();
 
@@ -72,9 +75,11 @@ export function createToolRegistry(): ToolRegistry {
     toolMap.set(tool.name, definition);
     toolImplMap.set(tool.name, tool);
   }
+  for (const definition of scene3dDefinitions) toolMap.set(definition.name, definition);
 
   return {
     tools: toolMap,
+    scene3dDefinitions,
     getTool: (name) => toolImplMap.get(name),
     getToolsByCategory: (category) => {
       return allTools.filter((tool) => {

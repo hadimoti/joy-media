@@ -422,4 +422,22 @@ describe('Tool Registry', () => {
     expect(registry.hasTool('setGain')).toBe(true);
     expect(registry.hasTool('findClip')).toBe(true);
   });
+
+  it('registers 3D tools as explicit approval-bound definitions', () => {
+    const registry = createToolRegistry();
+    expect(registry.hasTool('scene3d.summary')).toBe(true);
+    expect(registry.hasTool('scene3d.add')).toBe(true);
+    expect(registry.scene3dDefinitions).toHaveLength(9);
+    expect(registry.tools.get('scene3d.summary')).toMatchObject({
+      category: 'query',
+      requiresConfirmation: false,
+      supportsDryRun: false,
+    });
+    expect(registry.tools.get('scene3d.add')).toMatchObject({
+      category: 'edit',
+      requiresConfirmation: true,
+      supportsDryRun: true,
+      scope: { isReversible: true },
+    });
+  });
 });

@@ -21,6 +21,7 @@
     "@joy-media/commands": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
+    "@joy-media/scene3d-core": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*"
   },
   "devDependencies": {

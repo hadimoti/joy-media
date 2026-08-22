@@ -275,6 +275,9 @@ importers:
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../provider-sdk
+      '@joy-media/scene3d-core':
+        specifier: workspace:*
+        version: link:../scene3d-core
     devDependencies:
       '@joy-media/test-fixtures':
         specifier: workspace:*

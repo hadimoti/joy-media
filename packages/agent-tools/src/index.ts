@@ -62,6 +62,7 @@ export {
 
 export type { ToolRegistry } from './registry.js';
 export { createToolRegistry } from './registry.js';
+export { createScene3DToolDefinitions } from './scene3d-tools.js';
 
 export type {
   AgentEditPlan,
