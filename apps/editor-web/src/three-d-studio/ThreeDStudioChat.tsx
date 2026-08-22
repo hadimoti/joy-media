@@ -1,6 +1,12 @@
 import { useState } from 'react';
 
-export function ThreeDStudioChat() {
+export function ThreeDStudioChat({
+  sceneId,
+  onDraftProposal,
+}: {
+  readonly sceneId?: string;
+  readonly onDraftProposal?: (proposal: string) => void;
+}) {
   const [draft, setDraft] = useState('');
   const [proposal, setProposal] = useState<string | undefined>(undefined);
   return (
@@ -9,6 +15,7 @@ export function ThreeDStudioChat() {
       <p className="three-d-studio-chat-note">
         Chat drafts proposals only. Apply changes from the inspector or an approved tool plan.
       </p>
+      {sceneId !== undefined && <small>Bound scene: {sceneId}</small>}
       <textarea
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
@@ -17,7 +24,11 @@ export function ThreeDStudioChat() {
       <button
         type="button"
         onClick={() => {
-          if (draft.trim()) setProposal(`Proposal: ${draft.trim()}`);
+          if (draft.trim()) {
+            const nextProposal = `Proposal: ${draft.trim()}`;
+            setProposal(nextProposal);
+            onDraftProposal?.(nextProposal);
+          }
         }}
       >
         Draft proposal

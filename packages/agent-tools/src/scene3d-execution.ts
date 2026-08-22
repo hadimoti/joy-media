@@ -48,6 +48,11 @@ export interface Scene3DExecutionResult {
 
 export interface Scene3DPlanExecutorOptions {
   readonly registry: ToolRegistry;
+  /** Host policy decision; the gateway cannot self-authorize a write. */
+  readonly authorize: (request: Scene3DExecutionRequest) => {
+    readonly allowed: boolean;
+    readonly reason?: string;
+  };
   readonly approvalEngine?: ApprovalEngine;
   readonly idempotency?: IdempotencyStore;
   readonly audit?: AuditTrail;
@@ -57,6 +62,7 @@ export interface Scene3DPlanExecutorOptions {
 /** Executes the bounded Scene3D adapter through the same plan/policy/audit seams as other tools. */
 export class Scene3DPlanExecutor {
   private readonly registry: ToolRegistry;
+  private readonly authorize: Scene3DPlanExecutorOptions['authorize'];
   private readonly approvalEngine: ApprovalEngine | undefined;
   private readonly idempotency: IdempotencyStore;
   private readonly audit: AuditTrail;
@@ -65,6 +71,7 @@ export class Scene3DPlanExecutor {
 
   constructor(options: Scene3DPlanExecutorOptions) {
     this.registry = options.registry;
+    this.authorize = options.authorize;
     this.approvalEngine = options.approvalEngine;
     this.idempotency = options.idempotency ?? createIdempotencyStore();
     this.audit = options.audit ?? createAuditTrail();
@@ -76,6 +83,13 @@ export class Scene3DPlanExecutor {
     if (definition === undefined) return this.fail(request, 'scene3d tool is not registered');
     if (this.idempotency.hasExecuted(request.idempotencyKey))
       return { status: 'replayed', idempotencyKey: request.idempotencyKey };
+    const authorization = this.authorize(request);
+    if (!authorization.allowed)
+      return this.fail(
+        request,
+        authorization.reason ?? 'scene3d write blocked by policy',
+        'blocked',
+      );
     if (
       this.approvalEngine !== undefined &&
       request.planStep !== undefined &&

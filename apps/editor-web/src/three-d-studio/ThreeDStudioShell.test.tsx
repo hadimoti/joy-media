@@ -22,6 +22,10 @@ describe('3D studio surfaces', () => {
     expect(markup).toContain('drafts proposals only');
     expect(markup).toContain('Draft proposal');
   });
+  it('binds chat copy to the durable scene session when provided', () => {
+    const markup = renderToStaticMarkup(<ThreeDStudioChat sceneId="scene-1" />);
+    expect(markup).toContain('Bound scene: scene-1');
+  });
   it('exposes hierarchy actions without mutating the document directly', () => {
     const markup = renderToStaticMarkup(
       <ThreeDStudioHierarchy

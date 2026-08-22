@@ -30,7 +30,11 @@ describe('Scene3DMcpGateway', () => {
     const preview = dryRunScene3DTool(session(), 'scene3d.add', input);
     const gateway = new Scene3DMcpGateway({
       registry: createToolRegistry(),
-      executor: new Scene3DPlanExecutor({ registry: createToolRegistry(), now: () => 100 }),
+      executor: new Scene3DPlanExecutor({
+        registry: createToolRegistry(),
+        authorize: () => ({ allowed: true }),
+        now: () => 100,
+      }),
       binding: {
         getSession: session,
         commit: {

@@ -20,6 +20,12 @@ const session = () => ({
 });
 
 describe('scene3d structured tools', () => {
+  it('uses a cryptographic SHA-256 request digest', () => {
+    expect(scene3DToolInputDigest('scene3d.add', {})).toBe(
+      'b98e6c32179b53a2d5a84d63e1bec7af0a712eb5d3438bf651f329a128c8c4f7',
+    );
+  });
+
   it('keeps reads bounded to the bound scene and returns dry-run diffs', () => {
     expect(inspectScene3DTool(session(), 'scene3d.summary')).toMatchObject({
       sceneId: 'scene',

@@ -193,7 +193,7 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
           selectedObjectId={editor.selectedObjectId}
           onCommand={command}
         />
-        <ThreeDStudioChat />
+        <ThreeDStudioChat sceneId={sceneId} />
       </div>
     </div>
   );

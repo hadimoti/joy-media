@@ -58,6 +58,7 @@ describe('Scene3DPlanExecutor', () => {
     const audit = createAuditTrail();
     const executor = new Scene3DPlanExecutor({
       registry: createToolRegistry(),
+      authorize: () => ({ allowed: true }),
       idempotency: createIdempotencyStore(),
       audit,
       now: () => 100,
@@ -73,7 +74,11 @@ describe('Scene3DPlanExecutor', () => {
 
   it('returns replay without committing twice', () => {
     const saved: unknown[] = [];
-    const executor = new Scene3DPlanExecutor({ registry: createToolRegistry(), now: () => 100 });
+    const executor = new Scene3DPlanExecutor({
+      registry: createToolRegistry(),
+      authorize: () => ({ allowed: true }),
+      now: () => 100,
+    });
     const first = executor.execute({
       ...request(),
       commit: { commit: (value) => saved.push(value) },
