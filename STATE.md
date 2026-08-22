@@ -8,6 +8,15 @@ journey evidence contract; deployment/VPS changes remain outside this task until
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
+### Curated audio library integration (2026-08-22)
+
+- Importer generalization committed as `81ae210` (`apps/api/src/import-alpha-library.ts`), with media-kind-aware image/audio validation and focused tests.
+- Live import completed from the VPS manifest: `created=1805`, `updated=0`, `total=1805`.
+- PostgreSQL reconciliation: 1,805 distinct `audio` rows in `joy-media-alpha-library`, 10,180,145,576 bytes, valid `audio/wav`/`audio/mpeg` descriptors, and cloud locations on every row. Manifest↔DB comparison is exact (zero mismatches; zero DB-only rows).
+- ParsPack Plan 1 reconciliation remains `UPLOAD_COMPLETE_VERIFIED`: 1,805 objects / 10,180,145,576 bytes, 1,805 hash samples, zero hash failures.
+- API service and nginx are active; local API health returns `200` and the unauthenticated shared-cloud route correctly returns `401 AUTH_REQUIRED`. The existing browser session was invalidated by the auth-key deployment; after refresh the UI requests login and reports the catalog request as failed, so signed-in Audio-tab/browser playback verification remains the final UI gate. VPS staging is intentionally retained until that gate passes.
+- Rollback: the importer is idempotent; if required, remove the imported audio rows in a reviewed transaction while leaving immutable content-addressed bucket objects intact.
+
 ## VPS access
 
 JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.
