@@ -111,8 +111,8 @@ export function SpecialistReviewPanel({
         currentRevision: revisionId,
         approval: { approvedRoleIds: approved, approvedAt: now },
         // Each specialist's result becomes an inspectable change-set artifact,
-        // bound to nothing until someone places it. Applying a change set to
-        // the timeline is a separate step this phase does not take.
+        // and the approved plan is committed to the document/timeline in the
+        // same undoable step so the record matches what actually changed.
         build: (combined): ArtifactTransaction => {
           // Only specialists that both contributed an edit and were approved
           // become change sets; a review that found nothing records nothing.
@@ -120,31 +120,31 @@ export function SpecialistReviewPanel({
             (proposal) => proposal.edits.length > 0 && approved.includes(proposal.roleId),
           );
           return {
-          label: `Apply ${contributing.length} specialist change set(s)`,
-          commands: contributing.map((proposal) => ({
-            type: 'artifact.create' as const,
-            payload: {
-              artifact: {
-                id: `changeset-${proposal.roleId}-${Date.now()}`,
-                kind: 'changeSet' as const,
-                schemaVersion: 1,
-                revision: 0,
-                label: proposal.title,
-                contentRef: {
-                  type: 'inline' as const,
-                  value: JSON.stringify({ findings: proposal.findings, edits: proposal.edits }),
+            label: `Apply ${contributing.length} specialist change set(s)`,
+            commands: contributing.map((proposal) => ({
+              type: 'artifact.create' as const,
+              payload: {
+                artifact: {
+                  id: `changeset-${proposal.roleId}-${Date.now()}`,
+                  kind: 'changeSet' as const,
+                  schemaVersion: 1,
+                  revision: 0,
+                  label: proposal.title,
+                  contentRef: {
+                    type: 'inline' as const,
+                    value: JSON.stringify({ findings: proposal.findings, edits: proposal.edits }),
+                  },
+                  binding: { type: 'none' as const },
+                  provenance: {
+                    sourceArtifactIds: [],
+                    inputHashes: [],
+                    createdBy: { type: 'agent' as const, id: proposal.roleId },
+                  },
+                  createdAt: now,
+                  updatedAt: now,
                 },
-                binding: { type: 'none' as const },
-                provenance: {
-                  sourceArtifactIds: [],
-                  inputHashes: [],
-                  createdBy: { type: 'agent' as const, id: proposal.roleId },
-                },
-                createdAt: now,
-                updatedAt: now,
               },
-            },
-          })),
+            })),
           };
         },
         commit: (transaction) => {
@@ -164,14 +164,14 @@ export function SpecialistReviewPanel({
       });
       setStatus(
         result.committed
-          ? `Applied ${approved.length} change set(s) as one transaction.`
+          ? `${approved.length} Change set در یک تراکنش واحد اعمال شد.`
           : result.errors[0],
       );
       if (result.committed) setState(undefined);
     } catch (error) {
       setStatus(
         error instanceof RevisionConflictError
-          ? 'The project changed since this review ran. Run it again.'
+          ? 'از زمان اجرای این Review، پروژه تغییر کرده است. دوباره آن را اجرا کنید.'
           : error instanceof Error
             ? error.message
             : String(error),
@@ -213,17 +213,17 @@ export function SpecialistReviewPanel({
       ))}
 
       {state === undefined ? (
-        <p className="specialist-empty">
-          Caption, audio, colour, and pacing specialists analyse in parallel and propose changes.
-          Nothing is applied until you approve it.
+        <p className="specialist-empty" lang="fa">
+          متخصص‌های Caption، Audio، Color، و Pacing به‌صورت موازی بررسی می‌کنند و پیشنهاد می‌دهند.
+          تا زمانی که شما تأیید نکنید چیزی اعمال نمی‌شود.
         </p>
       ) : (
         <>
           {state.combined.conflicts.length > 0 && (
-            <p className="specialist-conflict" role="alert">
-              {state.combined.conflicts.length} conflict(s): specialists disagree about{' '}
-              {state.combined.conflicts.map((conflict) => conflict.targetId).join(', ')}. Resolve
-              before applying.
+            <p className="specialist-conflict" role="alert" lang="fa">
+              {state.combined.conflicts.length} تعارض وجود دارد: متخصص‌ها دربارهٔ{' '}
+              {state.combined.conflicts.map((conflict) => conflict.targetId).join('، ')} اختلاف
+              دارند. پیش از اعمال، آن را حل کنید.
             </p>
           )}
 
@@ -263,13 +263,13 @@ export function SpecialistReviewPanel({
           </ul>
 
           {state.denied.map((entry) => (
-            <p key={entry.roleId} className="specialist-denied">
-              {entry.roleId} skipped — {entry.reason}
+            <p key={entry.roleId} className="specialist-denied" lang="fa">
+              {entry.roleId} نادیده گرفته شد — {entry.reason}
             </p>
           ))}
           {state.failed.map((entry) => (
-            <p key={entry.roleId} className="specialist-denied">
-              {entry.roleId} failed — {entry.error}
+            <p key={entry.roleId} className="specialist-denied" lang="fa">
+              {entry.roleId} ناموفق بود — {entry.error}
             </p>
           ))}
 

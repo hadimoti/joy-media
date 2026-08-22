@@ -7,6 +7,10 @@ import {
 } from './project-catalog.js';
 import { CheckIcon, CloseIcon, PlusIcon, TrashIcon } from './icons.js';
 
+export function projectLibraryRemovalCopy(title: string): string {
+  return `«${title}» فقط از فهرست پروژه‌ها حذف می‌شود. فایل‌های ذخیره‌شدهٔ پروژه پاک نمی‌شوند.`;
+}
+
 export function ProjectLibrary({
   storage,
   onOpen,
@@ -56,9 +60,7 @@ export function ProjectLibrary({
       <main className="project-library-main">
         <div className="project-library-intro">
           <h1>Projects</h1>
-          <p>
-            Open a recent project or create a new one to enter the editor.
-          </p>
+          <p lang="fa">یک پروژهٔ اخیر را باز کنید یا پروژهٔ تازه‌ای بسازید تا وارد Editor شوید.</p>
         </div>
 
         {creating && (
@@ -74,7 +76,8 @@ export function ProjectLibrary({
               <input
                 autoFocus
                 value={draftTitle}
-                placeholder="Project name"
+                placeholder="نام پروژه"
+                lang="fa"
                 onChange={(event) => setDraftTitle(event.currentTarget.value)}
               />
             </label>
@@ -116,10 +119,10 @@ export function ProjectLibrary({
               <button
                 type="button"
                 className="icon-button project-library-delete"
-                aria-label={`Delete ${entry.title}`}
+                aria-label={`Remove ${entry.title} from library`}
                 title="Remove from library"
                 onClick={() => {
-                  if (!window.confirm(`Remove “${entry.title}” from the library?`)) return;
+                  if (!window.confirm(projectLibraryRemovalCopy(entry.title))) return;
                   removeCatalogProject(storage, entry.id);
                   setTick((value) => value + 1);
                 }}

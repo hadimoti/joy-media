@@ -69,6 +69,7 @@ import {
 import { buildDataLanes, type DataLane } from './data-lanes.js';
 import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
+import { useAccessibleDialog } from './dialog-a11y.js';
 import {
   clearActiveProjectId,
   getCatalogProject,
@@ -547,6 +548,7 @@ function EditorWorkspace({
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<EditorViewMode>(() => loadViewMode(window.localStorage));
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
@@ -611,6 +613,13 @@ function EditorWorkspace({
     readonly assets: Readonly<Record<string, BrowserAsset>>;
     readonly derivativesByAssetId: Readonly<Record<string, readonly BrowserDerivative[]>>;
   }>(() => ({ assets: {}, derivativesByAssetId: {} }));
+
+  useAccessibleDialog({
+    open: keyboardShortcutsOpen,
+    containerRef: shortcutsDialogRef,
+    onClose: () => setKeyboardShortcutsOpen(false),
+    initialFocusSelector: 'button[aria-label="Close shortcuts"]',
+  });
   const playableAssetResolver = useMemo(
     () =>
       Promise.all([originalAssetCachePromise, openOpfsDerivativeCache()]).then(
@@ -3452,7 +3461,14 @@ function EditorWorkspace({
         </div>
       )}
       {keyboardShortcutsOpen && (
-        <div className="shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
+        <div
+          ref={shortcutsDialogRef}
+          className="shortcuts-overlay"
+          role="dialog"
+          aria-label="Keyboard shortcuts"
+          aria-modal="true"
+          tabIndex={-1}
+        >
           <div className="shortcuts-panel">
             <header className="shortcuts-header">
               <h2>Keyboard Shortcuts</h2>
@@ -3533,6 +3549,15 @@ function MonitorPanel() {
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
+  const zoomDrawerRef = useRef<HTMLDivElement | null>(null);
+
+  useAccessibleDialog({
+    open: zoomDrawerOpen,
+    containerRef: zoomDrawerRef,
+    onClose: () => setZoomDrawerOpen(false),
+    initialFocusSelector:
+      'button[aria-pressed="true"], button[aria-label="Close scale options"], button:not([disabled])',
+  });
 
   useEffect(() => {
     if (!zoomDrawerOpen) return;
@@ -3541,14 +3566,9 @@ function MonitorPanel() {
       if (root === null || root.contains(event.target as Node)) return;
       setZoomDrawerOpen(false);
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setZoomDrawerOpen(false);
-    };
     window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
     };
   }, [zoomDrawerOpen]);
 
@@ -3773,10 +3793,13 @@ function MonitorPanel() {
       <div className="monitor-transport" ref={transportRef}>
         {zoomDrawerOpen && (
           <div
+            ref={zoomDrawerRef}
             className="monitor-zoom-drawer"
             id="monitor-zoom-drawer"
             role="dialog"
             aria-label="Preview scale"
+            aria-modal="true"
+            tabIndex={-1}
           >
             <div className="monitor-zoom-drawer-head">
               <strong>Preview scale</strong>

@@ -6397,7 +6397,7 @@ label {
   padding: 0.45rem 0.5rem;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid #2e2e32;
+  border-bottom: 1px solid var(--joy-border);
   border-radius: 0;
   margin-block: 0.15rem 0.35rem;
 }
@@ -6405,23 +6405,23 @@ label {
   margin: 0;
   font-size: 0.72rem;
   font-weight: 600;
-  color: #9d9da1;
+  color: var(--joy-text-faint);
 }
 .workflow-run-modal label {
   display: grid;
   gap: 0.15rem;
   font-size: 0.68rem;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
 }
 .workflow-run-modal input {
   width: 100%;
   box-sizing: border-box;
   height: 1.7rem;
   padding: 0 0.4rem;
-  background: #0e0e10;
-  border: 1px solid #2e2e32;
+  background: var(--joy-bg-input);
+  border: 1px solid var(--joy-border);
   border-radius: 0.2rem;
-  color: #e4e4e6;
+  color: var(--joy-text);
   font-size: 0.75rem;
   unicode-bidi: plaintext;
 }
@@ -6641,7 +6641,7 @@ label {
   gap: 0.35rem;
   margin: 0.4rem 0 0.15rem;
   padding-bottom: 0.2rem;
-  border-bottom: 1px solid #2e2e32;
+  border-bottom: 1px solid var(--joy-border);
 }
 .workflow-section-header h4 {
   margin: 0;
@@ -6649,17 +6649,17 @@ label {
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
 }
 .workflow-version-badge,
 .system-version-badge,
 .plugin-state-badge {
   font-size: 0.6rem;
   padding: 0.05rem 0.28rem;
-  border: 1px solid #2e2e32;
+  border: 1px solid var(--joy-border);
   border-radius: 0.15rem;
   background: transparent;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
   font-weight: 500;
 }
 .workflow-row,
@@ -6669,7 +6669,7 @@ label {
   gap: 0.35rem;
   padding: 0.28rem 0.1rem;
   border: 0;
-  border-bottom: 1px solid #242428;
+  border-bottom: 1px solid var(--joy-border-subtle);
   border-radius: 0;
   background: transparent;
 }
@@ -6693,12 +6693,12 @@ label {
   white-space: nowrap;
   font-size: 0.75rem;
   font-weight: 550;
-  color: #e4e4e6;
+  color: var(--joy-text);
 }
 .workflow-row-main > span,
 .plugin-row-main > span:not(.plugin-state-badge):not(.derived-badge) {
   flex: none;
-  color: #6e6e74;
+  color: var(--joy-text-faint);
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
 }
@@ -6717,12 +6717,12 @@ label {
   border: 0;
   border-radius: 0.15rem;
   background: transparent;
-  color: #c8b06a;
+  color: var(--joy-accent);
 }
 .workflow-status-hint {
   margin: 0.2rem 0;
   font-size: 0.68rem;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
 }
 .workflow-candidate-list {
   display: grid;
@@ -6781,8 +6781,8 @@ label {
 /* —— Project library gate —— */
 .project-library {
   min-height: 100vh;
-  background: #0e0e10;
-  color: #e4e4e6;
+  background: var(--joy-bg-app);
+  color: var(--joy-text);
 }
 .project-library-header {
   display: flex;
@@ -6790,8 +6790,8 @@ label {
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid #2e2e32;
-  background: #1c1c1e;
+  border-bottom: 1px solid var(--joy-border);
+  background: var(--joy-bg-inset);
 }
 .project-library-brand {
   display: inline-flex;
@@ -6811,7 +6811,7 @@ label {
 }
 .project-library-intro p {
   margin: 0 0 1.5rem;
-  color: #9d9da1;
+  color: var(--joy-text-faint);
   font-size: 0.92rem;
 }
 .project-library-create {
@@ -6824,10 +6824,10 @@ label {
 .project-library-create input {
   min-width: min(100%, 18rem);
   padding: 0.45rem 0.65rem;
-  border: 1px solid #3a3a3e;
+  border: 1px solid var(--joy-border);
   border-radius: 0.3rem;
-  background: #1f1f21;
-  color: #e4e4e6;
+  background: var(--joy-bg-control);
+  color: var(--joy-text);
   font: inherit;
 }
 .project-library-grid {
@@ -6846,9 +6846,9 @@ label {
   width: 100%;
   margin: 0;
   padding: 0;
-  border: 1px solid #2e2e32;
+  border: 1px solid var(--joy-border);
   border-radius: 0.4rem;
-  background: #1f1f21;
+  background: var(--joy-bg-control);
   color: inherit;
   text-align: start;
   cursor: pointer;
@@ -6860,8 +6860,8 @@ label {
 .project-library-card-thumb {
   display: block;
   height: 7.5rem;
-  background: #252528;
-  border-bottom: 1px solid #2e2e32;
+  background: var(--joy-bg-raised);
+  border-bottom: 1px solid var(--joy-border);
 }
 .project-library-card-body {
   display: grid;
@@ -6875,7 +6875,7 @@ label {
   white-space: nowrap;
 }
 .project-library-card-body span {
-  color: #9d9da1;
+  color: var(--joy-text-faint);
   font-size: 0.75rem;
 }
 .project-library-delete {
@@ -9720,9 +9720,9 @@ label {
   padding: 0.55rem 0.9rem;
   height: 3.1rem;
   box-sizing: border-box;
-  border: 1px dashed var(--color-border-2);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-surface-1) 70%, transparent);
+  border: 1px dashed var(--joy-border);
+  border-radius: var(--joy-radius-inner);
+  background: color-mix(in srgb, var(--joy-bg-panel) 72%, transparent);
   pointer-events: auto;
   cursor: pointer;
   transition:
@@ -9731,8 +9731,8 @@ label {
 }
 
 .timeline-empty-state.drag-active {
-  border-color: var(--color-joy);
-  background: color-mix(in srgb, var(--color-joy) 12%, transparent);
+  border-color: var(--joy-accent);
+  background: color-mix(in srgb, var(--joy-accent) 12%, transparent);
   border-style: solid;
 }
 
@@ -9744,17 +9744,17 @@ label {
   width: 2rem;
   height: 2rem;
   border-radius: 6px;
-  color: var(--color-text-muted);
-  background: var(--color-surface-2);
+  color: var(--joy-text-muted);
+  background: var(--joy-bg-control);
 }
 
 .timeline-empty-state.drag-active .timeline-empty-strip-icon {
-  color: var(--color-joy);
+  color: var(--joy-accent);
 }
 
 .timeline-empty-text {
   margin: 0;
-  color: var(--color-text-secondary);
+  color: var(--joy-text-secondary);
   font-size: 13px;
   font-weight: 500;
 }
@@ -10752,7 +10752,7 @@ label {
   overflow: hidden;
   border: 1px solid var(--joy-border);
   border-radius: 7px;
-  background: rgba(16, 18, 24, 0.78);
+  background: color-mix(in srgb, var(--joy-bg-inset) 82%, transparent);
 }
 
 .specialist-empty,
@@ -10771,10 +10771,10 @@ label {
 .specialist-conflict {
   margin: 8px 10px 0;
   padding: 6px 9px;
-  border: 1px solid rgba(220, 96, 96, 0.5);
+  border: 1px solid color-mix(in srgb, var(--joy-danger) 55%, transparent);
   border-radius: 5px;
-  color: #ffb4b4;
-  background: rgba(220, 96, 96, 0.12);
+  color: color-mix(in srgb, var(--joy-danger) 55%, white);
+  background: color-mix(in srgb, var(--joy-danger) 12%, transparent);
   font-size: 10px;
 }
 
@@ -10791,7 +10791,7 @@ label {
   padding: 7px 9px;
   border: 1px solid var(--joy-border);
   border-radius: 5px;
-  background: #1c2029;
+  background: var(--joy-bg-control);
 }
 
 .specialist-card-head {
@@ -10820,17 +10820,17 @@ label {
 }
 
 .specialist-findings .is-warning {
-  color: #f6d38a;
+  color: color-mix(in srgb, var(--joy-accent) 82%, white);
 }
 
 .specialist-edits {
-  color: #cfd6e4;
+  color: var(--joy-text-secondary);
 }
 
 .specialist-edits code {
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(110, 87, 255, 0.22);
+  background: color-mix(in srgb, var(--joy-accent) 22%, transparent);
   font-size: 9px;
 }
 
@@ -10839,10 +10839,10 @@ label {
   width: calc(100% - 20px);
   margin: 0 10px 10px;
   padding: 7px;
-  border: 1px solid var(--color-joy);
+  border: 1px solid var(--joy-accent);
   border-radius: 5px;
-  color: #fff;
-  background: rgba(110, 87, 255, 0.3);
+  color: var(--joy-text);
+  background: color-mix(in srgb, var(--joy-accent) 24%, transparent);
   font-size: 10px;
   cursor: pointer;
 }

@@ -75,7 +75,7 @@ export function TimelineEmptyState({
         event.dataTransfer.types.includes('application/x-joy-effect') ||
         event.dataTransfer.types.includes('application/x-joy-transition')
       ) {
-        onToast?.('Add media to the timeline first, then drag the effect onto a clip.');
+        onToast?.('ابتدا مدیا را به تایم‌لاین اضافه کنید، سپس افکت را روی یک کلیپ بکشید.');
         return;
       }
       const droppedFiles = extractTimelineDroppedFiles(event.dataTransfer);
@@ -134,8 +134,8 @@ export function TimelineEmptyState({
       <div className="timeline-empty-strip-icon" aria-hidden="true">
         <UploadIcon />
       </div>
-      <p className="timeline-empty-text">
-        {dragActive ? 'Release to import media' : 'Drag media here and start creating'}
+      <p className="timeline-empty-text" lang="fa">
+        {dragActive ? 'برای وارد کردن مدیا رها کنید' : 'مدیا را اینجا بکشید و ساختن را شروع کنید'}
       </p>
     </div>
   );

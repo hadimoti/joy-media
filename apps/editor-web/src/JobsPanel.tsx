@@ -5,7 +5,7 @@ import {
   type BrowserWorker,
 } from './control-plane-client.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
-import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
+import { CloseIcon, PlusIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
@@ -34,7 +34,7 @@ export function JobsPanel({
   const [workerId, setWorkerId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [projectInitialized, setProjectInitialized] = useState(false);
-  const [status, setStatus] = useState('Checking JOY Media connection…');
+  const [status, setStatus] = useState('در حال بررسی اتصال JOY Media…');
   const [guideOpen, setGuideOpen] = useState(false);
   const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
@@ -59,7 +59,7 @@ export function JobsPanel({
       setStatus(projectJobStatus(projectMissing, nextWorkers));
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
-      setStatus(`Not connected or not signed in: ${message(error)}`);
+      setStatus(`اتصال برقرار نیست یا ورود انجام نشده است: ${message(error)}`);
     }
   }, [client, projectId]);
 
@@ -90,10 +90,10 @@ export function JobsPanel({
     try {
       await client.pairWorker(workerId.trim(), pairingCode.trim());
       setPairingCode('');
-      setStatus('Pairing approved; restart the Worker to receive its session.');
+      setStatus('Pairing تأیید شد؛ Worker را دوباره اجرا کنید تا نشست خود را بگیرد.');
       await refresh();
     } catch (error) {
-      setStatus(`Pairing failed: ${message(error)}`);
+      setStatus(`Pairing ناموفق بود: ${message(error)}`);
     }
   };
 
@@ -105,10 +105,10 @@ export function JobsPanel({
         if (!message(error).includes('PROJECT_EXISTS')) throw error;
       }
       setProjectInitialized(true);
-      setStatus('Project is ready. Pair a Worker, then queue a job.');
+      setStatus('Project آماده است. یک Worker را Pair کنید و سپس Job را در صف بگذارید.');
       await refresh();
     } catch (error) {
-      setStatus(`Failed to initialize project: ${message(error)}`);
+      setStatus(`راه‌اندازی Project ناموفق بود: ${message(error)}`);
     }
   };
 
@@ -196,7 +196,9 @@ export function JobsPanel({
             </span>
           </div>
           {visibleWorkers.length === 0 ? (
-            <p className="jobs-empty">No active Worker. Pair one using the guide below.</p>
+            <p className="jobs-empty" lang="fa">
+              هنوز Worker فعالی وجود ندارد. با راهنمای پایین یکی را Pair کنید.
+            </p>
           ) : (
             <ul className="jobs-workers">
               {visibleWorkers.map((worker) => {
@@ -253,7 +255,9 @@ export function JobsPanel({
             <span className="jobs-section-meta">{jobs.length}</span>
           </div>
           {jobs.length === 0 ? (
-            <p className="jobs-empty">No derivative jobs yet.</p>
+            <p className="jobs-empty" lang="fa">
+              هنوز هیچ Job مشتقی ثبت نشده است.
+            </p>
           ) : (
             <ul className="jobs-list">
               {jobs.map((job) => {
@@ -336,32 +340,32 @@ export function JobsPanel({
             <span aria-hidden>{guideOpen ? '−' : '+'}</span>
           </button>
           {guideOpen && (
-            <ol className="jobs-guide-steps">
+            <ol className="jobs-guide-steps" lang="fa">
               <li>
-                Run a local Worker on your computer with <code>JOY_MEDIA_API_URL</code> pointing at
-                this Media API. The Worker runs on your machine, not the VPS.
+                یک Worker محلی را روی رایانهٔ خود اجرا کنید و <code>JOY_MEDIA_API_URL</code> را به
+                همین Media API اشاره دهید. Worker روی دستگاه شما اجرا می‌شود، نه روی VPS.
               </li>
               <li>
-                <strong>Pairing code</strong> — the Worker terminal shows{' '}
-                <code>Approve this Worker in JOY Media with pairing code: …</code>. Codes are valid
-                for about five minutes; restart the Worker for a fresh offer.
+                <strong>Pairing code</strong> — ترمینال Worker این پیام را نشان می‌دهد:{' '}
+                <code>Approve this Worker in JOY Media with pairing code: …</code>. کدها حدود پنج
+                دقیقه معتبرند؛ برای گرفتن یک کد تازه Worker را دوباره اجرا کنید.
               </li>
               <li>
-                <strong>Worker ID</strong> — copy <code>workerId</code> from the Worker startup JSON
-                or from <code>~/.joy-media/worker-state.json</code> (or{' '}
-                <code>JOY_MEDIA_WORKER_STATE_PATH</code>).
+                <strong>Worker ID</strong> — مقدار <code>workerId</code> را از JSON آغاز Worker یا
+                از <code>~/.joy-media/worker-state.json</code> (یا{' '}
+                <code>JOY_MEDIA_WORKER_STATE_PATH</code>) بردارید.
               </li>
               <li>
-                Enter both values above, click <strong>Approve</strong>, then{' '}
-                <strong>restart the Worker</strong> so it receives the session. The connection
-                should appear within a few seconds.
+                هر دو مقدار را بالا وارد کنید، روی <strong>Approve</strong> بزنید، سپس{' '}
+                <strong>Worker را دوباره اجرا کنید</strong> تا نشست را بگیرد. اتصال باید ظرف چند
+                ثانیه ظاهر شود.
               </li>
               <li>
-                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>, or{' '}
-                <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
-                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>,{' '}
-                <code>edit.higgsfield</code>) require API keys configured in{' '}
-                <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
+                Jobهای GPU به <code>image.comfy</code>، <code>audio.ml-denoise</code>، یا{' '}
+                <code>text.lm-studio</code> روی همان دستگاه محلی نیاز دارند و هرگز روی Media VPS
+                اجرا نمی‌شوند. Jobهای AI راه‌دور (<code>text.openrouter</code>،{' '}
+                <code>video.runway</code>، <code>edit.higgsfield</code>) به کلیدهای API تنظیم‌شده در{' '}
+                <code>~/.joy-media/ai-providers.json</code> روی رایانهٔ Worker نیاز دارند.
               </li>
             </ol>
           )}
@@ -371,7 +375,7 @@ export function JobsPanel({
   );
 
   function report(error: unknown): void {
-    setStatus(`Job action failed: ${message(error)}`);
+    setStatus(`اقدام روی Job ناموفق بود: ${message(error)}`);
   }
 }
 

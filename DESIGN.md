@@ -6,7 +6,7 @@ Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-
 
 Neutral grays only. **No blue anywhere.** One amber accent. Semantic green/red are reserved for status. The shell follows a **CapCut-like tile layout** (§3b): pure-black canvas (`#000`) with medium-gray panel surfaces (`#252525`) separated by 2px black gaps and 16px outer corner radius on dock tiles.
 
-**The `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Every other rule references `var(--joy-*)`. A literal hex outside `:root` is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows.
+**For the standard editor shell, panels, dialogs, and project library, the `:root` block of [app.css](apps/editor-web/src/app.css) is the only place a hex may be declared.** Those surfaces reference `var(--joy-*)` only. A literal hex there is a defect, not a style choice — that is how the ramp drifted to 103 distinct values and three competing yellows. Purpose-built immersive sub-surfaces (for example Dual Lens / Effect Studio) may define scoped local custom properties at their own root when they intentionally use a different visual language, but they still should not scatter one-off literals through descendant rules.
 
 | Token                  | Hex                      | Use                                                                      |
 | ---------------------- | ------------------------ | ------------------------------------------------------------------------ |
@@ -204,7 +204,7 @@ a third needs an owner decision recorded here.
 
 - **First paint is the projects library**, not the Dockview editor. [`ProjectLibrary.tsx`](apps/editor-web/src/ProjectLibrary.tsx) lists catalog entries; **Open** / **New project** set the active id and mount [`EditorWorkspace`](apps/editor-web/src/App.tsx). **File → Projects Library…** on the Adobe-style menubar under the header clears the active id and returns to the library.
 - Catalog keys: `joy-media.project-catalog.v1` (titles + paired timeline/visual ids), `joy-media.active-project.v1`. Creative docs remain in timeline/visual persistence logs; blank projects use one shared id for both slices ([`project-factory.ts`](apps/editor-web/src/project-factory.ts)).
-- Library chrome uses the same neutral-gray tokens as the editor (no purple themes, no emoji decoration). Cards are interactive surfaces (open on click); delete is an icon-only hover control.
+- Library chrome uses the same neutral-gray tokens as the editor (no purple themes, no emoji decoration). Cards are interactive surfaces (open on click); the hover trash action is **Remove from library** unless a separately confirmed durable-project delete is implemented.
 
 ## 4b. Timeline NLE strip
 

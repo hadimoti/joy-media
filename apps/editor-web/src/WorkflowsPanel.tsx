@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { HumanInputRequest } from '@joy-media/workflow-engine';
 import type { EditorSession } from './editor-session.js';
 import {
@@ -14,10 +14,11 @@ import {
   detectDerivedFrom,
 } from './first-party-workflows.js';
 import type { WorkflowRunOutcome } from './workflow-runner.js';
-import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
+import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon, CloseIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ContactSheetApproval, type ContactSheetApprovalDecision } from './ContactSheetApproval.js';
+import { useAccessibleDialog } from './dialog-a11y.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'saved', label: 'Saved' },
@@ -128,6 +129,21 @@ export function WorkflowsPanel({
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
   const [approval, setApproval] = useState<ApprovalState | undefined>(undefined);
   const [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
+  const runDialogRef = useRef<HTMLDivElement | null>(null);
+  const approvalDialogRef = useRef<HTMLDivElement | null>(null);
+
+  useAccessibleDialog({
+    open: runModal !== undefined,
+    containerRef: runDialogRef,
+    onClose: () => setRunModal(undefined),
+    initialFocusSelector: 'input, button:not([disabled])',
+  });
+  useAccessibleDialog({
+    open: approval !== undefined,
+    containerRef: approvalDialogRef,
+    onClose: () => setApproval(undefined),
+    initialFocusSelector: '[role="option"], textarea, button:not([disabled])',
+  });
 
   const handleDelete = (workflowId: string) => {
     deleteWorkflow(session, workflowId);
@@ -163,15 +179,15 @@ export function WorkflowsPanel({
           ? {}
           : { approvalExpiresAtSeq: outcome.approvalExpiresAtSeq }),
       });
-      setStatusMessage(`Awaiting approval: ${outcome.request.kind}`);
+      setStatusMessage(`تأیید کاربر برای ${outcome.request.kind} منتظر مانده است.`);
       return;
     }
     setApproval(undefined);
     if (outcome.status === 'succeeded') {
-      setStatusMessage(`Workflow ${outcome.workflowId} finished; manifest output is recorded.`);
+      setStatusMessage(`گردش‌کار ${outcome.workflowId} تمام شد و خروجی Manifest ثبت شد.`);
       return;
     }
-    setStatusMessage(`Workflow run failed: ${outcome.error}`);
+    setStatusMessage(`اجرای گردش‌کار ناموفق بود: ${outcome.error}`);
   }
 
   function openRunModal(workflowId: string) {
@@ -329,7 +345,7 @@ export function WorkflowsPanel({
       {...(statusMessage !== undefined
         ? { note: statusMessage }
         : isEmpty
-          ? { note: 'Run and save an Agent action to create your first workflow.' }
+          ? { note: 'برای ساختن نخستین Workflow، یک ویرایش Agent را اجرا و ذخیره کنید.' }
           : {})}
       actions={
         <button
@@ -344,7 +360,14 @@ export function WorkflowsPanel({
       }
     >
       {runModal !== undefined && (
-        <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
+        <div
+          ref={runDialogRef}
+          className="workflow-run-modal"
+          role="dialog"
+          aria-label="Run workflow inputs"
+          aria-modal="true"
+          tabIndex={-1}
+        >
           <h4>Run: {runModal.workflowId}</h4>
           {runModal.parameters.map((parameter) => (
             <label key={parameter.name}>
@@ -355,7 +378,6 @@ export function WorkflowsPanel({
                 onChange={(event) =>
                   setRunInputs((current) => ({ ...current, [parameter.name]: event.target.value }))
                 }
-                dir="ltr"
               />
             </label>
           ))}
@@ -374,14 +396,21 @@ export function WorkflowsPanel({
               title="Cancel"
               aria-label="Cancel"
             >
-              <TrashIcon />
+              <CloseIcon />
             </button>
           </div>
         </div>
       )}
 
       {approval !== undefined && (
-        <div className="workflow-run-modal" role="dialog" aria-label="Workflow approval">
+        <div
+          ref={approvalDialogRef}
+          className="workflow-run-modal"
+          role="dialog"
+          aria-label="Workflow approval"
+          aria-modal="true"
+          tabIndex={-1}
+        >
           <ContactSheetApproval
             key={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
             request={approval.request}

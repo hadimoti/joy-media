@@ -1087,7 +1087,7 @@ export function AgentPanel({
               {activeThread?.messages.length === 0 && (
                 <div className="joy-code-welcome">
                   <JoyCodeLogo variant="horizontal" label="Joy Code" />
-                  <h3>What should we edit?</h3>
+                  <h3 lang="fa">چه چیزی را ویرایش کنیم؟</h3>
                   <p lang="fa">
                     <strong>جوی کد</strong> برنامه‌های کنترل‌شدهٔ تایم‌لاین را آماده می‌کند. تا
                     زمانی که برنامه از سیاست‌ها عبور نکند و حالت اجرا اجازه ندهد، چیزی تغییر
@@ -1224,11 +1224,14 @@ export function AgentPanel({
                       </span>
                     </div>
                     <p>
-                      Approve this bounded request before Joy Code sends it to the remote model.
+                      <span lang="fa">
+                        پیش از آن‌که Joy Code این درخواست محدود را به مدل راه‌دور بفرستد، آن را
+                        تأیید کنید.
+                      </span>
                     </p>
                     <span className="joy-code-plan-reason">
                       {pendingReasoningApproval.preflight.retentionDisclosure ??
-                        'The bounded prompt will be sent to the configured remote reasoning provider.'}
+                        'درخواست محدود به ارائه‌دهندهٔ reasoning راه‌دورِ پیکربندی‌شده فرستاده می‌شود.'}
                     </span>
                     <JoyCodeReasoningApprovalDetails
                       preflight={pendingReasoningApproval.preflight}
@@ -1355,7 +1358,8 @@ export function AgentPanel({
                   rows={3}
                   value={draft}
                   aria-label="Message Joy Code"
-                  placeholder="Describe the timeline edit you want…"
+                  placeholder="ویرایش موردنظر روی تایم‌لاین را توضیح دهید…"
+                  lang="fa"
                   onChange={(event) => setDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
