@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { Scene3DMcpGateway, Scene3DPlanExecutor, createToolRegistry } from './index.js';
+import {
+  Scene3DMcpGateway,
+  Scene3DMcpServer,
+  Scene3DPlanExecutor,
+  createToolRegistry,
+} from './index.js';
 import {
   dryRunScene3DTool,
   emptyScene3D,
@@ -66,5 +71,48 @@ describe('Scene3DMcpGateway', () => {
     });
     expect(result.status).toBe('success');
     expect(document.objects.box).toBeDefined();
+  });
+
+  it('handles MCP JSON-RPC and enforces the scene3d allow-list', () => {
+    const gateway = new Scene3DMcpGateway({
+      registry: createToolRegistry(),
+      executor: new Scene3DPlanExecutor({
+        registry: createToolRegistry(),
+        authorize: () => ({ allowed: true }),
+      }),
+      binding: {
+        getSession: () => ({
+          actorId: 'actor',
+          projectId: 'project',
+          sceneId: 'scene',
+          revision: 'r1',
+          document: emptyScene3D('scene'),
+        }),
+        commit: { commit: () => undefined },
+      },
+    });
+    const server = new Scene3DMcpServer(gateway);
+    expect(server.handle({ jsonrpc: '2.0', id: 1, method: 'initialize' }).result).toMatchObject({
+      protocolVersion: '2025-06-18',
+    });
+    expect(server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }).result).toMatchObject({
+      tools: expect.any(Array),
+    });
+    expect(
+      server.handle({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'scene3d.summary', arguments: {} },
+      }).result,
+    ).toBeDefined();
+    expect(
+      server.handle({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'shell.exec', arguments: {} },
+      }).error?.message,
+    ).toContain('allow-list');
   });
 });
