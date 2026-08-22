@@ -7,7 +7,8 @@
     "type": "object",
     "required": [
       "brief",
-      "selectedMedia"
+      "selectedMedia",
+      "references"
     ],
     "properties": {
       "brief": {
@@ -72,6 +73,15 @@
       "deterministic": true
     },
     {
+      "id": "references",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "references"
+      },
+      "deterministic": true
+    },
+    {
       "id": "research",
       "category": "analysis",
       "type": "analysis.researchBrief",
@@ -83,6 +93,10 @@
         "mediaFrom": {
           "kind": "upstream",
           "node": "selected-media"
+        },
+        "referencesFrom": {
+          "kind": "upstream",
+          "node": "references"
         }
       },
       "deterministic": true
@@ -402,6 +416,10 @@
     },
     {
       "from": "selected-media",
+      "to": "research"
+    },
+    {
+      "from": "references",
       "to": "research"
     },
     {

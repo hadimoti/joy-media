@@ -90,11 +90,86 @@ const CONTENT_INPUTS = {
   additionalProperties: false,
 } as const;
 
+const REFERENCE_CONTENT_INPUTS = {
+  ...CONTENT_INPUTS,
+  required: ['brief', 'selectedMedia', 'references'],
+} as const;
+
 const MANIFEST_OUTPUTS = {
   type: 'object',
   required: ['manifest'],
   properties: { manifest: { type: 'object' } },
 } as const;
+
+const unique = (...groups: readonly (readonly string[])[]): readonly string[] => [
+  ...new Set(groups.flat()),
+];
+
+const BASE_PIPELINE_REQUIRED_PORTS = [
+  'analysis.researchBrief',
+  'generation.generateScript',
+  'generation.generateShotlist',
+  'analysis.detectHighlights',
+  'transform.buildContactSheet',
+] as const;
+
+const APPROVAL_APPLY_REQUIRED_PORTS = ['editor.executeCommandTransaction'] as const;
+
+const FINAL_DELIVERY_REQUIRED_PORTS = [
+  'render.render',
+  'render.inspect',
+  'output.writeDeliveryManifest',
+] as const;
+
+const RUN_METADATA_REQUIRED_PORTS = ['output.writeMetadataFile'] as const;
+
+const DRAFT_REEL_ITEM_REQUIRED_PORTS = [
+  'editor.createBranch',
+  'transform.reframe',
+  'transform.applyCaptionTemplate',
+  'transform.normalizeAudio',
+  'render.render',
+] as const;
+
+const PROMO_ITEM_REQUIRED_PORTS = [
+  'generation.translate',
+  'generation.synthesizeSpeech',
+  'transform.applyCaptionTemplate',
+  'transform.instantiateSceneTemplate',
+  'render.render',
+  'render.inspect',
+  'output.writeDeliveryManifest',
+] as const;
+
+const PODCAST_REQUIRED_PORTS = [
+  'analysis.detectSpeakers',
+  'analysis.detectSilence',
+  'transform.denoise',
+  'transform.normalizeAudio',
+  'transform.trim',
+  'analysis.transcribe',
+  'analysis.generateChapters',
+  'transform.applyCaptionTemplate',
+  'render.render',
+  'render.inspect',
+  'output.writeDeliveryManifest',
+] as const;
+
+const INTERVIEW_EVIDENCE_REQUIRED_PORTS = [
+  'analysis.transcribe',
+  'analysis.generateChapters',
+] as const;
+
+const BASE_PIPELINE_CAPABILITIES = [
+  'provider.research',
+  'provider.script',
+  'provider.highlights',
+  'provider.cost',
+  'editor.command',
+  'render.final',
+  'render.inspect',
+  'output.write',
+] as const;
 
 function baseContentPipeline(
   builder: WorkflowBuilder,
@@ -104,14 +179,21 @@ function baseContentPipeline(
     readonly candidateTitle: string;
     readonly candidateCount: number;
     readonly costUsd: number;
+    readonly includeReferences?: boolean;
   },
 ): WorkflowBuilder {
-  return builder
+  let current = builder
     .node('brief', 'input.item', { path: 'brief' })
-    .node('selected-media', 'input.item', { path: 'selectedMedia' })
+    .node('selected-media', 'input.item', { path: 'selectedMedia' });
+  if (options.includeReferences === true) {
+    current = current.node('references', 'input.item', { path: 'references' });
+  }
+
+  current = current
     .node('research', 'analysis.researchBrief', {
       briefFrom: upstream('brief'),
       mediaFrom: upstream('selected-media'),
+      ...(options.includeReferences === true ? { referencesFrom: upstream('references') } : {}),
     })
     .node('script', 'generation.script', {
       style: options.scriptStyle,
@@ -151,7 +233,12 @@ function baseContentPipeline(
       payloadFrom: upstream('cost-brief'),
     })
     .edge('brief', 'research')
-    .edge('selected-media', 'research')
+    .edge('selected-media', 'research');
+  if (options.includeReferences === true) {
+    current = current.edge('references', 'research');
+  }
+
+  return current
     .edge('brief', 'script')
     .edge('research', 'script')
     .edge('selected-media', 'script')
@@ -576,7 +663,7 @@ export function buildReferenceSocialCutdownWorkflow(): FirstPartyWorkflow {
       id: 'joy.first-party.reference-social-cutdown',
       version: FIRST_PARTY_WORKFLOWS_VERSION,
       name: 'Reference social cutdown',
-      inputs: CONTENT_INPUTS,
+      inputs: REFERENCE_CONTENT_INPUTS,
       outputs: MANIFEST_OUTPUTS,
     }),
     {
@@ -585,6 +672,7 @@ export function buildReferenceSocialCutdownWorkflow(): FirstPartyWorkflow {
       candidateTitle: 'Clean-room reference cutdown contact sheet',
       candidateCount: 6,
       costUsd: 10,
+      includeReferences: true,
     },
   )
     .node('approve-cutdown', 'decision.approval', {
@@ -720,20 +808,14 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     label: 'Production pack',
     summary:
       'Brief-to-research reel pipeline with contact sheet, approvals, final QA, and manifest.',
-    requiredPorts: [
-      'analysis.researchBrief',
-      'generation.generateScript',
-      'generation.generateShotlist',
-      'analysis.detectHighlights',
-      'transform.buildContactSheet',
-      'editor.executeCommandTransaction',
-      'render.render',
-      'render.inspect',
-      'output.writeDeliveryManifest',
-      'output.writeMetadataFile',
-    ],
-    optionalPorts: ['analysis.transcribe'],
-    capabilities: ['provider.research', 'provider.script', 'provider.highlights', 'render.final'],
+    requiredPorts: unique(
+      BASE_PIPELINE_REQUIRED_PORTS,
+      APPROVAL_APPLY_REQUIRED_PORTS,
+      DRAFT_REEL_ITEM_REQUIRED_PORTS,
+      FINAL_DELIVERY_REQUIRED_PORTS,
+      RUN_METADATA_REQUIRED_PORTS,
+    ),
+    capabilities: BASE_PIPELINE_CAPABILITIES,
     approvals: ['confirm-cost', 'choose-candidates', 'approve-render'],
     reportRefs: ['joy.first-party.long-video-draft-reels.final.qa-report'],
     build: buildLongVideoDraftReelsWorkflow,
@@ -743,18 +825,13 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     fileName: 'multilingual-promo.json',
     label: 'Production pack',
     summary: 'Localized promo pipeline with copy approval, TTS, final QA, and delivery manifest.',
-    requiredPorts: [
-      'analysis.researchBrief',
-      'generation.generateScript',
-      'generation.generateShotlist',
-      'generation.translate',
-      'generation.synthesizeSpeech',
-      'render.render',
-      'render.inspect',
-      'output.writeDeliveryManifest',
-      'output.writeMetadataFile',
-    ],
-    capabilities: ['provider.translate', 'provider.tts', 'render.final'],
+    requiredPorts: unique(
+      BASE_PIPELINE_REQUIRED_PORTS,
+      APPROVAL_APPLY_REQUIRED_PORTS,
+      PROMO_ITEM_REQUIRED_PORTS,
+      RUN_METADATA_REQUIRED_PORTS,
+    ),
+    capabilities: unique(BASE_PIPELINE_CAPABILITIES, ['provider.translate', 'provider.tts']),
     approvals: ['confirm-cost', 'approve-transcript'],
     reportRefs: ['joy.first-party.multilingual-promo.qa-report'],
     build: buildMultilingualPromoWorkflow,
@@ -765,20 +842,15 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     label: 'Production pack',
     summary:
       'Podcast cleanup with approved speakers/edit list, episode render, clips, QA, and manifest.',
-    requiredPorts: [
-      'analysis.researchBrief',
-      'analysis.detectSpeakers',
-      'analysis.detectSilence',
-      'transform.denoise',
-      'transform.normalizeAudio',
-      'transform.trim',
-      'analysis.transcribe',
-      'analysis.generateChapters',
-      'render.render',
-      'render.inspect',
-      'output.writeDeliveryManifest',
-    ],
-    capabilities: ['provider.audio-cleanup', 'provider.transcribe', 'render.final'],
+    requiredPorts: unique(
+      BASE_PIPELINE_REQUIRED_PORTS,
+      APPROVAL_APPLY_REQUIRED_PORTS,
+      PODCAST_REQUIRED_PORTS,
+    ),
+    capabilities: unique(BASE_PIPELINE_CAPABILITIES, [
+      'provider.audio-cleanup',
+      'provider.transcribe',
+    ]),
     approvals: ['confirm-cost', 'choose-candidates', 'accept-edit-diff'],
     reportRefs: ['joy.first-party.podcast-cleanup.qa-report'],
     build: buildPodcastCleanupWorkflow,
@@ -789,19 +861,13 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     label: 'Production pack',
     summary:
       'Clean-room reference-driven social cutdown from brief/media/references to QA delivery.',
-    requiredPorts: [
-      'analysis.researchBrief',
-      'generation.generateScript',
-      'generation.generateShotlist',
-      'analysis.detectHighlights',
-      'transform.buildContactSheet',
-      'editor.executeCommandTransaction',
-      'render.render',
-      'render.inspect',
-      'output.writeDeliveryManifest',
-      'output.writeMetadataFile',
-    ],
-    capabilities: ['provider.reference-analysis', 'provider.script', 'render.final'],
+    requiredPorts: unique(
+      BASE_PIPELINE_REQUIRED_PORTS,
+      APPROVAL_APPLY_REQUIRED_PORTS,
+      FINAL_DELIVERY_REQUIRED_PORTS,
+      RUN_METADATA_REQUIRED_PORTS,
+    ),
+    capabilities: unique(BASE_PIPELINE_CAPABILITIES, ['provider.reference-analysis']),
     approvals: ['confirm-cost', 'choose-candidates'],
     reportRefs: ['joy.first-party.reference-social-cutdown.delivery.qa-report'],
     build: buildReferenceSocialCutdownWorkflow,
@@ -812,20 +878,14 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     label: 'Production pack',
     summary:
       'Interview/documentary assembly with transcript/chapter evidence, approval, QA, and manifest.',
-    requiredPorts: [
-      'analysis.researchBrief',
-      'generation.generateScript',
-      'generation.generateShotlist',
-      'analysis.transcribe',
-      'analysis.generateChapters',
-      'transform.buildContactSheet',
-      'editor.executeCommandTransaction',
-      'render.render',
-      'render.inspect',
-      'output.writeDeliveryManifest',
-      'output.writeMetadataFile',
-    ],
-    capabilities: ['provider.transcribe', 'provider.script', 'render.final'],
+    requiredPorts: unique(
+      BASE_PIPELINE_REQUIRED_PORTS,
+      INTERVIEW_EVIDENCE_REQUIRED_PORTS,
+      APPROVAL_APPLY_REQUIRED_PORTS,
+      FINAL_DELIVERY_REQUIRED_PORTS,
+      RUN_METADATA_REQUIRED_PORTS,
+    ),
+    capabilities: unique(BASE_PIPELINE_CAPABILITIES, ['provider.transcribe']),
     approvals: ['confirm-cost', 'choose-candidates'],
     reportRefs: ['joy.first-party.interview-documentary-assembly.delivery.qa-report'],
     build: buildInterviewDocumentaryAssemblyWorkflow,

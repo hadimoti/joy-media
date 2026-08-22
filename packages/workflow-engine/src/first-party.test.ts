@@ -16,6 +16,7 @@ import {
   buildReferenceSocialCutdownWorkflow,
   firstPartyDefinitionFiles,
 } from './first-party.js';
+import type { JoyWorkflow } from './definition.js';
 import { runWorkflowHeadless } from './headless.js';
 import type { NodeLibrary } from './library.js';
 import { buildNodeLibrary } from './library.js';
@@ -43,12 +44,16 @@ function stubEnvironment() {
   const library = buildNodeLibrary({
     ports: {
       analysis: {
-        researchBrief: track('researchBrief', (args: { brief: unknown; media: unknown }) => ({
-          researchRef: 'research-1',
-          brief: args.brief,
-          media: args.media,
-          providerRefs: ['provider:fixture-research'],
-        })),
+        researchBrief: track(
+          'researchBrief',
+          (args: { brief: unknown; media: unknown; references?: unknown }) => ({
+            researchRef: 'research-1',
+            brief: args.brief,
+            media: args.media,
+            ...(args.references !== undefined ? { references: args.references } : {}),
+            providerRefs: ['provider:fixture-research'],
+          }),
+        ),
         transcribe: track('transcribe', () => ({
           language: 'fa',
           segments: [{ text: 'سلام و خوش آمدید', startUs: 0 }],
@@ -211,6 +216,62 @@ const productionInputs = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const PORT_BACKED_NODE_PORTS = new Map<string, string>([
+  ['analysis.researchBrief', 'analysis.researchBrief'],
+  ['analysis.transcribe', 'analysis.transcribe'],
+  ['analysis.silence', 'analysis.detectSilence'],
+  ['analysis.loudness', 'analysis.measureLoudness'],
+  ['analysis.hooks', 'analysis.detectHighlights'],
+  ['analysis.speakers', 'analysis.detectSpeakers'],
+  ['analysis.chapters', 'analysis.generateChapters'],
+  ['transform.trim', 'transform.trim'],
+  ['transform.caption', 'transform.applyCaptionTemplate'],
+  ['transform.reframe', 'transform.reframe'],
+  ['transform.denoise', 'transform.denoise'],
+  ['transform.normalizeAudio', 'transform.normalizeAudio'],
+  ['transform.sceneTemplate', 'transform.instantiateSceneTemplate'],
+  ['transform.contactSheet', 'transform.buildContactSheet'],
+  ['generation.speech', 'generation.synthesizeSpeech'],
+  ['generation.image', 'generation.generateImage'],
+  ['generation.translate', 'generation.translate'],
+  ['generation.script', 'generation.generateScript'],
+  ['generation.shotlist', 'generation.generateShotlist'],
+  ['editor.commandTransaction', 'editor.executeCommandTransaction'],
+  ['editor.createBranch', 'editor.createBranch'],
+  ['render.preview', 'render.render'],
+  ['render.final', 'render.render'],
+  ['render.inspect', 'render.inspect'],
+  ['output.folder', 'output.writeToFolder'],
+  ['output.metadata', 'output.writeMetadataFile'],
+  ['output.deliveryManifest', 'output.writeDeliveryManifest'],
+]);
+
+function isWorkflowLike(value: unknown): value is JoyWorkflow {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    Array.isArray((value as { readonly nodes?: unknown }).nodes)
+  );
+}
+
+function collectRequiredPortsFromWorkflow(workflow: JoyWorkflow): readonly string[] {
+  const ports = new Set<string>();
+  const visit = (current: JoyWorkflow) => {
+    for (const node of current.nodes) {
+      const port = PORT_BACKED_NODE_PORTS.get(node.type);
+      if (port !== undefined) {
+        ports.add(port);
+      }
+      const nestedWorkflow = node.params['workflow'];
+      if (isWorkflowLike(nestedWorkflow)) {
+        visit(nestedWorkflow);
+      }
+    }
+  };
+  visit(workflow);
+  return [...ports].sort();
+}
+
 // ---------------------------------------------------------------------------
 // Definitions: versioned, registry-validated, pinned to committed artifacts.
 // ---------------------------------------------------------------------------
@@ -243,6 +304,16 @@ describe('first-party workflow definitions (§23.4)', () => {
       expect(pack.capabilities.length).toBeGreaterThan(0);
       expect(pack.approvals).toContain('confirm-cost');
       expect(pack.reportRefs.length).toBeGreaterThan(0);
+      const declaredPorts = new Set([...pack.requiredPorts, ...pack.optionalPorts]);
+      const missingPorts = collectRequiredPortsFromWorkflow(pack.workflow).filter(
+        (port) => !declaredPorts.has(port),
+      );
+      expect(missingPorts).toEqual([]);
+      const declaredCapabilities = new Set(pack.capabilities);
+      const missingCapabilities = pack.workflow.permissions
+        .map((permission) => permission.capability)
+        .filter((capability) => !declaredCapabilities.has(capability));
+      expect(missingCapabilities).toEqual([]);
       expect(pack.workflow.nodes.map((node) => node.id)).toEqual(
         expect.arrayContaining([
           'brief',
@@ -693,16 +764,18 @@ describe('podcast cleanup', () => {
 
 describe('new production pipeline packs', () => {
   it('runs the clean-room reference social cutdown through approval, render, inspect, and manifest', () => {
-    const { library, count } = stubEnvironment();
+    const { library, count, argsOf } = stubEnvironment();
     const workflowJson = workflowToJson(buildReferenceSocialCutdownWorkflow().workflow);
-    const inputs = productionInputs({
-      references: [{ referenceId: 'ref-structure-1', note: 'fast cold open, no copied assets' }],
-    });
+    const references = [
+      { referenceId: 'ref-structure-1', note: 'fast cold open, no copied assets' },
+    ];
+    const inputs = productionInputs({ references });
 
     const first = runHeadless(library, workflowJson, inputs, 'cutdown-run');
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     expect(first.checkpoint.nodes['confirm-cost']?.pendingRequest?.kind).toBe('confirm-cost');
+    expect((argsOf('researchBrief')[0] as { references?: unknown }).references).toEqual(references);
 
     const second = runHeadless(library, workflowJson, inputs, 'cutdown-run', {
       resumeFromJson: JSON.stringify(first.checkpoint),
