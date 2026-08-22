@@ -27,6 +27,12 @@ import {
 } from './queries.js';
 import type { ToolDefinition } from './types.js';
 import { createScene3DToolDefinitions } from './scene3d-tools.js';
+import type {
+  Scene3DExecutionRequest,
+  Scene3DExecutionResult,
+  Scene3DPlanExecutor,
+} from './scene3d-execution.js';
+import type { Scene3DWriteTool } from '@joy-media/scene3d-core';
 
 export interface ToolRegistry {
   readonly tools: ReadonlyMap<string, ToolDefinition>;
@@ -35,6 +41,11 @@ export interface ToolRegistry {
   getToolNames(): readonly string[];
   hasTool(name: string): boolean;
   readonly scene3dDefinitions: readonly ToolDefinition[];
+  executeScene3DTool(
+    name: Scene3DWriteTool,
+    executor: Scene3DPlanExecutor,
+    request: Scene3DExecutionRequest,
+  ): Scene3DExecutionResult;
 }
 
 export function createToolRegistry(): ToolRegistry {
@@ -80,6 +91,15 @@ export function createToolRegistry(): ToolRegistry {
   return {
     tools: toolMap,
     scene3dDefinitions,
+    executeScene3DTool: (name, executor, request) => {
+      if (!scene3dDefinitions.some((definition) => definition.name === name))
+        return {
+          status: 'failed',
+          error: `scene3d tool '${name}' is not registered`,
+          idempotencyKey: request.idempotencyKey,
+        };
+      return executor.execute(request);
+    },
     getTool: (name) => toolImplMap.get(name),
     getToolsByCategory: (category) => {
       return allTools.filter((tool) => {

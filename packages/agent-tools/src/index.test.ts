@@ -439,5 +439,6 @@ describe('Tool Registry', () => {
       supportsDryRun: true,
       scope: { isReversible: true },
     });
+    expect(typeof registry.executeScene3DTool).toBe('function');
   });
 });

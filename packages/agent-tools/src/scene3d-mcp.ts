@@ -56,7 +56,7 @@ export class Scene3DMcpGateway {
     readonly approval: Scene3DApprovalBinding;
   }): Scene3DExecutionResult {
     const session = this.binding.getSession();
-    return this.executor.execute({
+    return this.registry.executeScene3DTool(options.name, this.executor, {
       ...options,
       session,
       commit: this.binding.commit,
