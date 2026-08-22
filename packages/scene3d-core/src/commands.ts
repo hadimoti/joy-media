@@ -1,4 +1,4 @@
-import { validateScene3DDocument } from './validation.js';
+import { assertValidScene3DDocument, validateScene3DDocument } from './validation.js';
 import type {
   Scene3DDocumentV1,
   Scene3DEnvironment,
@@ -55,6 +55,16 @@ export function applyScene3DTransaction(
 }
 
 export function applyScene3DCommand(
+  document: Scene3DDocumentV1,
+  command: Scene3DCommand,
+): { readonly document: Scene3DDocumentV1; readonly inverse: Scene3DCommand } {
+  assertValidScene3DDocument(document);
+  const result = applyScene3DCommandUnchecked(document, command);
+  assertValidScene3DDocument(result.document);
+  return result;
+}
+
+function applyScene3DCommandUnchecked(
   document: Scene3DDocumentV1,
   command: Scene3DCommand,
 ): { readonly document: Scene3DDocumentV1; readonly inverse: Scene3DCommand } {

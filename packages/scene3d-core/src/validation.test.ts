@@ -37,4 +37,35 @@ describe('scene3d validation', () => {
     const codes = validateScene3DDocument(scene).map((error) => error.code);
     expect(codes).toEqual(expect.arrayContaining(['cycle', 'active-camera', 'missing-material']));
   });
+
+  it('rejects malformed payloads without throwing', () => {
+    const errors = validateScene3DDocument({
+      schemaVersion: 1,
+      id: 's',
+      name: 'Malformed',
+      durationUs: 1,
+      objects: {
+        camera: {
+          id: 'camera',
+          name: 'Camera',
+          kind: 'camera',
+          transform: IDENTITY_3D_TRANSFORM,
+          camera: { fieldOfViewDeg: 50, near: Number.NaN, far: Number.POSITIVE_INFINITY },
+        },
+        light: {
+          id: 'light',
+          name: 'Light',
+          kind: 'light',
+          transform: IDENTITY_3D_TRANSFORM,
+          light: { kind: 'unknown', intensity: Number.NaN, color: 'bad' },
+        },
+      },
+      assets: { bad: { id: 'bad', kind: 'model', mimeType: 'text/plain' } },
+      materials: {},
+      environment: { backgroundColor: '#000000', ambientIntensity: 0.5 },
+    });
+    expect(errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(['camera', 'light', 'asset-ref']),
+    );
+  });
 });

@@ -81,3 +81,56 @@ export function emptyScene3D(id: string, name = 'Untitled 3D scene'): Scene3DDoc
     environment: { backgroundColor: '#10131a', ambientIntensity: 0.5 },
   };
 }
+
+/** Upgrade the short-lived v0 JSON shape used by the initial 3D spike. */
+export function migrateScene3DDocument(input: unknown): Scene3DDocumentV1 {
+  if (!isRecord(input)) throw new TypeError('scene JSON must be an object');
+  if (input.schemaVersion === SCENE3D_SCHEMA_VERSION) return input as unknown as Scene3DDocumentV1;
+  if (input.schemaVersion !== 0) throw new TypeError('unsupported scene schema version');
+  const scene = emptyScene3D(
+    typeof input.sceneId === 'string' ? input.sceneId : typeof input.id === 'string' ? input.id : 'scene-migrated',
+    typeof input.title === 'string' ? input.title : typeof input.name === 'string' ? input.name : undefined,
+  );
+  const legacyObjects = isRecord(input.objects) ? input.objects : {};
+  const objects: Record<string, Scene3DObject> = {};
+  for (const [id, value] of Object.entries(legacyObjects)) {
+    if (!isRecord(value)) continue;
+    const transform = isRecord(value.transform) ? value.transform : IDENTITY_3D_TRANSFORM;
+    objects[id] = {
+      id,
+      name: typeof value.name === 'string' ? value.name : id,
+      kind: value.kind === 'model' || value.kind === 'primitive' || value.kind === 'light' || value.kind === 'camera' ? value.kind : 'empty',
+      transform: normalizeTransform(transform),
+      ...(typeof value.parentId === 'string' ? { parentId: value.parentId } : {}),
+      ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
+    };
+  }
+  const durationUs = typeof input.durationUs === 'number' && Number.isSafeInteger(input.durationUs) && input.durationUs >= 0
+    ? input.durationUs
+    : scene.durationUs;
+  return { ...scene, durationUs, objects };
+}
+
+export function parseScene3DDocument(json: string): Scene3DDocumentV1 {
+  return migrateScene3DDocument(JSON.parse(json) as unknown);
+}
+
+function normalizeTransform(value: Record<string, any>): Scene3DTransform {
+  const vector = (candidate: unknown, fallback: Scene3DVec3): Scene3DVec3 => {
+    if (!isRecord(candidate)) return fallback;
+    return {
+      x: typeof candidate.x === 'number' && Number.isFinite(candidate.x) ? candidate.x : fallback.x,
+      y: typeof candidate.y === 'number' && Number.isFinite(candidate.y) ? candidate.y : fallback.y,
+      z: typeof candidate.z === 'number' && Number.isFinite(candidate.z) ? candidate.z : fallback.z,
+    };
+  };
+  return {
+    position: vector(value.position, IDENTITY_3D_TRANSFORM.position),
+    rotation: vector(value.rotation, IDENTITY_3D_TRANSFORM.rotation),
+    scale: vector(value.scale, IDENTITY_3D_TRANSFORM.scale),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
