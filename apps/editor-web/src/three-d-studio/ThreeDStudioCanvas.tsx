@@ -6,7 +6,11 @@ import type { Scene3DDocumentV1, Scene3DObject } from '@joy-media/scene3d-core';
 import type { BrowserAsset } from '../control-plane-client.js';
 import { BrowserControlPlaneClient } from '../control-plane-client.js';
 import { openOpfsOriginalAssetCache } from '../opfs-original-asset-cache.js';
-import { isSupported3DAsset, resolveRegistered3DAsset } from '../JoyCode3DViewer.js';
+import {
+  disposeThreeObject,
+  isSupported3DAsset,
+  resolveRegistered3DAsset,
+} from '../JoyCode3DViewer.js';
 
 export function ThreeDStudioCanvas({
   document,
@@ -26,6 +30,11 @@ export function ThreeDStudioCanvas({
   selectedRef.current = selectedObjectId;
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
+  const assetKey = assets
+    .filter(isSupported3DAsset)
+    .map((asset) => `${asset.id}:${asset.sha256}:${asset.bytes}:${asset.descriptor.mimeType}`)
+    .sort()
+    .join('|');
   const objectsRef = useRef(new Map<string, THREE.Group>());
   const modelUrlsRef = useRef(new Set<string>());
   const loadSeqRef = useRef(0);
@@ -115,7 +124,7 @@ export function ThreeDStudioCanvas({
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       controls.dispose();
-      for (const object of objectsRef.current.values()) disposeObject(object);
+      for (const object of objectsRef.current.values()) disposeThreeObject(object);
       objectsRef.current.clear();
       for (const url of modelUrlsRef.current) URL.revokeObjectURL(url);
       modelUrlsRef.current.clear();
@@ -134,7 +143,7 @@ export function ThreeDStudioCanvas({
     const requestId = ++loadSeqRef.current;
     for (const object of objectsRef.current.values()) {
       scene.remove(object);
-      disposeObject(object);
+      disposeThreeObject(object);
     }
     objectsRef.current.clear();
     for (const url of modelUrlsRef.current) URL.revokeObjectURL(url);
@@ -180,12 +189,7 @@ export function ThreeDStudioCanvas({
       const group = groups.get(object.id)!;
       const parent = object.parentId === undefined ? scene : (groups.get(object.parentId) ?? scene);
       parent.add(group);
-      addObjectVisual(
-        group,
-        object,
-        selectedRef.current === object.id,
-        document.environment.ambientIntensity,
-      );
+      addObjectVisual(group, object, selectedRef.current === object.id, document.materials);
       if (object.kind === 'light' && object.light !== undefined) addSceneLight(group, object);
       if (object.kind === 'model' && object.assetId !== undefined) {
         const asset = assetsRef.current.find(
@@ -203,31 +207,47 @@ export function ThreeDStudioCanvas({
                   URL.revokeObjectURL(url);
                   modelUrlsRef.current.delete(url);
                   if (requestId !== loadSeqRef.current) {
-                    disposeObject(gltf.scene);
+                    disposeThreeObject(gltf.scene);
                     return;
                   }
                   while (group.children.length > 0) {
                     const child = group.children[0]!;
                     group.remove(child);
-                    disposeObject(child);
+                    disposeThreeObject(child);
                   }
+                  fitModelToViewport(gltf.scene);
+                  applySceneMaterial(
+                    gltf.scene,
+                    object.materialId === undefined
+                      ? undefined
+                      : document.materials[object.materialId],
+                  );
                   group.add(gltf.scene);
                 },
                 undefined,
-                () => {
+                (error: unknown) => {
                   URL.revokeObjectURL(url);
                   modelUrlsRef.current.delete(url);
+                  if (requestId === loadSeqRef.current)
+                    setContextStatus(
+                      `Unable to load ${object.name}: ${error instanceof Error ? error.message : 'invalid GLB/GLTF'}`,
+                    );
                 },
               );
             })
-            .catch(() => undefined);
+            .catch((error: unknown) => {
+              if (requestId === loadSeqRef.current)
+                setContextStatus(
+                  `Unable to load ${object.name}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            });
         }
       }
     }
     const previousAmbient = scene.getObjectByName('__scene_environment_ambient');
     if (previousAmbient !== undefined) {
       scene.remove(previousAmbient);
-      disposeObject(previousAmbient);
+      disposeThreeObject(previousAmbient);
     }
     const ambient = new THREE.AmbientLight(0xffffff, document.environment.ambientIntensity);
     ambient.name = '__scene_environment_ambient';
@@ -235,7 +255,29 @@ export function ThreeDStudioCanvas({
     return () => {
       ++loadSeqRef.current;
     };
-  }, [document, fallbackResolver, resolveAsset]);
+  }, [assetKey, document, fallbackResolver, resolveAsset]);
+
+  useEffect(() => {
+    for (const [objectId, group] of objectsRef.current) {
+      const selected = objectId === selectedObjectId;
+      group.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!(
+            material instanceof THREE.MeshStandardMaterial ||
+            material instanceof THREE.MeshBasicMaterial
+          ))
+            continue;
+          const baseColor =
+            typeof material.userData.joyBaseColor === 'string'
+              ? material.userData.joyBaseColor
+              : '#38bdf8';
+          material.color.set(selected ? 0xfbbf24 : baseColor);
+        }
+      });
+    }
+  }, [selectedObjectId]);
 
   return (
     <div
@@ -257,7 +299,7 @@ function addObjectVisual(
   group: THREE.Group,
   object: Scene3DObject,
   selected: boolean,
-  _ambient: number,
+  materials: Scene3DDocumentV1['materials'],
 ): void {
   if (object.kind === 'camera')
     group.add(
@@ -281,11 +323,7 @@ function addObjectVisual(
           : object.primitive === 'plane'
             ? new THREE.PlaneGeometry(1.4, 1.4)
             : new THREE.BoxGeometry(1.2, 1.2, 1.2),
-        new THREE.MeshStandardMaterial({
-          color: selected ? 0xfbbf24 : 0x38bdf8,
-          roughness: 0.55,
-          metalness: 0.1,
-        }),
+        toThreeMaterial(materials[object.materialId ?? ''], selected),
       ),
     );
 }
@@ -304,11 +342,49 @@ function addSceneLight(group: THREE.Group, object: Scene3DObject): void {
   group.add(node);
 }
 
-function disposeObject(object: THREE.Object3D): void {
+function toThreeMaterial(
+  material: Scene3DDocumentV1['materials'][string] | undefined,
+  selected: boolean,
+): THREE.MeshStandardMaterial {
+  const meshMaterial = new THREE.MeshStandardMaterial({
+    color: selected ? 0xfbbf24 : (material?.color ?? '#38bdf8'),
+    roughness: material?.roughness ?? 0.55,
+    metalness: material?.metalness ?? 0.1,
+    ...(material?.opacity === undefined
+      ? {}
+      : { opacity: material.opacity, transparent: material.opacity < 1 }),
+  });
+  meshMaterial.userData.joyBaseColor = material?.color ?? '#38bdf8';
+  return meshMaterial;
+}
+
+function fitModelToViewport(model: THREE.Object3D): void {
+  const bounds = new THREE.Box3().setFromObject(model);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const maxDimension = Math.max(size.x, size.y, size.z, 1);
+  const scale = 3 / maxDimension;
+  model.scale.setScalar(scale);
+  model.position.sub(center.multiplyScalar(scale));
+  model.position.y += size.y * scale * 0.5;
+}
+
+function applySceneMaterial(
+  object: THREE.Object3D,
+  material: Scene3DDocumentV1['materials'][string] | undefined,
+): void {
+  if (material === undefined) return;
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    child.geometry.dispose();
-    for (const material of Array.isArray(child.material) ? child.material : [child.material])
-      material.dispose();
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const current of materials) {
+      if ('color' in current && current.color instanceof THREE.Color)
+        current.color.set(material.color);
+      if ('roughness' in current && typeof current.roughness === 'number')
+        current.roughness = material.roughness;
+      if ('metalness' in current && typeof current.metalness === 'number')
+        current.metalness = material.metalness;
+      current.userData.joyBaseColor = material.color;
+    }
   });
 }
