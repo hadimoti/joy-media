@@ -142,4 +142,99 @@ describe('EditorSession', () => {
     session.jumpToHistory(entries[2]!.sequence);
     expect(session.visualProject.visualObjects['intro-title']?.transform.x).toBe(90);
   });
+
+  it('records a compound template apply as one undo step and restores both buses', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const beforeEntries = session.historyEntries.length;
+    const nextDocument = {
+      ...session.visualProject,
+      visualObjects: {
+        ...session.visualProject.visualObjects,
+        'intro-title': {
+          ...session.visualProject.visualObjects['intro-title']!,
+          transform: {
+            ...session.visualProject.visualObjects['intro-title']!.transform,
+            x: 321,
+          },
+        },
+      },
+    };
+
+    session.dispatchCompound('Apply saved title', {
+      document: nextDocument,
+      timeline: {
+        label: 'Apply saved title',
+        commands: [
+          {
+            type: 'timeline.trimClipEnd',
+            payload: {
+              compositionId: 'root',
+              trackId: 'track-0',
+              clipId: 'intro',
+              newEndUs: 9_000_000,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(session.historyEntries).toHaveLength(beforeEntries + 1);
+    expect(session.historyEntries.at(-1)?.source).toBe('compound');
+    expect(session.visualProject.visualObjects['intro-title']?.transform.x).toBe(321);
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]?.durationUs).toBe(
+      9_000_000,
+    );
+
+    session.undo();
+    expect(session.visualProject.visualObjects['intro-title']?.transform.x).toBe(0);
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]?.durationUs).toBe(
+      10_000_000,
+    );
+
+    session.redo();
+    expect(session.visualProject.visualObjects['intro-title']?.transform.x).toBe(321);
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]?.durationUs).toBe(
+      9_000_000,
+    );
+  });
+
+  it('validates every part before writing a compound transaction', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const beforeDocument = session.visualProject;
+    const beforeEntries = session.historyEntries.length;
+    const nextDocument = {
+      ...beforeDocument,
+      title: 'must not commit',
+    };
+
+    expect(() =>
+      session.dispatchCompound('Invalid template apply', {
+        document: nextDocument,
+        timeline: {
+          label: 'Invalid template apply',
+          commands: [
+            {
+              type: 'timeline.trimClipEnd',
+              payload: {
+                compositionId: 'root',
+                trackId: 'track-0',
+                clipId: 'missing-clip',
+                newEndUs: 1,
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow();
+    expect(session.visualProject).toBe(beforeDocument);
+    expect(session.historyEntries).toHaveLength(beforeEntries);
+  });
 });

@@ -9,6 +9,7 @@ import { bindClipToObject } from './sticker-bindings.js';
 import type { EditorSession } from './editor-session.js';
 import type { SeededContentTemplate } from './content-template-types.js';
 import type { SpikeCommand } from '@joy-media/commands';
+import { applyVisualObjectProjectTransaction } from '@joy-media/property-system';
 
 export function buildContentTemplateTransaction(
   seeded: SeededContentTemplate,
@@ -29,9 +30,12 @@ export function buildContentTemplateTransaction(
         kind: 'html-scene';
         scenePackageId: string;
         transform: {
-          x: number; y: number;
-          scaleX: number; scaleY: number;
-          rotationDeg: number; opacity: number;
+          x: number;
+          y: number;
+          scaleX: number;
+          scaleY: number;
+          rotationDeg: number;
+          opacity: number;
           crop: { left: number; top: number; right: number; bottom: number };
         };
       };
@@ -134,17 +138,35 @@ export function buildContentTemplateTransaction(
 
   if (voCommands.length === 0) return;
 
-  deps.session.dispatchVisualObjects({
+  const visualTransaction = {
     label: `Apply template ${seeded.template.label}`,
     commands: voCommands,
-  });
-  deps.session.dispatchTimeline({
+  } as const;
+  const timelineTransaction = {
     label: `Apply template ${seeded.template.label}`,
     commands: tlCommands,
-  });
-  let project = deps.session.visualProject;
+  } as const;
+  let project = applyVisualObjectProjectTransaction(deps.session.visualProject, visualTransaction);
   for (const [clipId, objectId] of bindings) {
     project = bindClipToObject(project, clipId, objectId);
   }
+  const dispatchCompound = (
+    deps.session as unknown as {
+      dispatchCompound?: (
+        label: string,
+        parts: { readonly document: typeof project; readonly timeline: typeof timelineTransaction },
+      ) => void;
+    }
+  ).dispatchCompound;
+  if (dispatchCompound !== undefined) {
+    dispatchCompound.call(deps.session, `Apply template ${seeded.template.label}`, {
+      document: project,
+      timeline: timelineTransaction,
+    });
+    return;
+  }
+  // Compatibility fallback for lightweight callers that predate compound dispatch.
+  deps.session.dispatchVisualObjects(visualTransaction);
+  deps.session.dispatchTimeline(timelineTransaction);
   deps.session.replaceVisualProject(project);
 }

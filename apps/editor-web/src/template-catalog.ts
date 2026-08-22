@@ -15,6 +15,21 @@ import type { ContentTemplateV1 } from './content-template-types.js';
 
 export const TEMPLATE_CATALOG_KEY = 'joy-media.template-catalog.v1';
 
+export function filterTemplateEntries<
+  T extends {
+    readonly label: string;
+    readonly description?: string;
+    readonly category: string;
+  },
+>(entries: readonly T[], query: string, category?: string): readonly T[] {
+  const needle = query.trim().toLocaleLowerCase();
+  return entries.filter((entry) => {
+    if (category !== undefined && entry.category !== category) return false;
+    if (needle.length === 0) return true;
+    return `${entry.label} ${entry.description ?? ''}`.toLocaleLowerCase().includes(needle);
+  });
+}
+
 export interface TemplateCatalogEntry {
   readonly id: string;
   readonly label: string;
@@ -36,13 +51,9 @@ interface CatalogDatabase {
   readonly templates: Readonly<Record<string, TemplateCatalogEntry>>;
 }
 
-export function listTemplates(
-  storage: BrowserKeyValueStore,
-): readonly TemplateCatalogEntry[] {
+export function listTemplates(storage: BrowserKeyValueStore): readonly TemplateCatalogEntry[] {
   const db = readCatalog(storage);
-  return Object.values(db.templates).sort(
-    (a, b) => b.updatedAt.localeCompare(a.updatedAt),
-  );
+  return Object.values(db.templates).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export function getTemplate(
@@ -52,10 +63,7 @@ export function getTemplate(
   return readCatalog(storage).templates[id];
 }
 
-export function saveTemplate(
-  storage: BrowserKeyValueStore,
-  entry: TemplateCatalogEntry,
-): void {
+export function saveTemplate(storage: BrowserKeyValueStore, entry: TemplateCatalogEntry): void {
   if (!isTemplateCatalogEntry(entry)) {
     throw new TypeError('Invalid template catalog entry');
   }
@@ -66,10 +74,7 @@ export function saveTemplate(
   });
 }
 
-export function removeTemplate(
-  storage: BrowserKeyValueStore,
-  id: string,
-): void {
+export function removeTemplate(storage: BrowserKeyValueStore, id: string): void {
   const db = readCatalog(storage);
   if (db.templates[id] === undefined) return;
   const templates = { ...db.templates };
