@@ -17,9 +17,6 @@ function createStorage(): BrowserKeyValueStore {
     setItem: (key, value) => {
       values.set(key, value);
     },
-    removeItem: (key) => {
-      values.delete(key);
-    },
   };
 }
 
@@ -84,7 +81,13 @@ function contrastRatio(leftHex: string, rightHex: string): number {
 function rootCssVariables(css: string): Record<string, string> {
   const rootBlock = css.match(/:root\s*\{([\s\S]*?)\n\}/u)?.[1] ?? '';
   const matches = [...rootBlock.matchAll(/(--joy-[\w-]+):\s*([^;]+);/gu)];
-  return Object.fromEntries(matches.map((match) => [match[1], match[2].trim()]));
+  return Object.fromEntries(
+    matches.flatMap((match) =>
+      match[1] === undefined || match[2] === undefined
+        ? []
+        : [[match[1], match[2].trim()] as const],
+    ),
+  );
 }
 
 describe('Task 28 finalization accessibility and localization', () => {
