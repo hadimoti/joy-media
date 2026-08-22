@@ -26,6 +26,11 @@ describe('scene3d structured tools', () => {
     );
   });
 
+  it('rejects unknown runtime tool names instead of falling through', () => {
+    expect(() => inspectScene3DTool(session(), 'shell.exec' as never)).toThrow('unsupported');
+    expect(() => commandForScene3DTool('shell.exec' as never, {})).toThrow('unsupported');
+  });
+
   it('keeps reads bounded to the bound scene and returns dry-run diffs', () => {
     expect(inspectScene3DTool(session(), 'scene3d.summary')).toMatchObject({
       sceneId: 'scene',

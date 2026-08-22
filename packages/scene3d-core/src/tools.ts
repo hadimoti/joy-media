@@ -107,6 +107,8 @@ export const SCENE3D_TOOL_DEFINITIONS: readonly Scene3DToolDefinition[] = [
 ];
 
 export function inspectScene3DTool(session: Scene3DToolSession, tool: Scene3DReadTool): unknown {
+  if (!['scene3d.summary', 'scene3d.assets', 'scene3d.scene', 'scene3d.selection'].includes(tool))
+    throw new RangeError(`unsupported scene3d read tool: ${String(tool)}`);
   if (tool === 'scene3d.summary')
     return {
       sceneId: session.sceneId,
@@ -128,6 +130,16 @@ export function commandForScene3DTool(
   name: Scene3DWriteTool,
   input: Readonly<Record<string, unknown>>,
 ): Scene3DCommand {
+  if (
+    ![
+      'scene3d.add',
+      'scene3d.transform',
+      'scene3d.material',
+      'scene3d.remove',
+      'scene3d.camera',
+    ].includes(name)
+  )
+    throw new RangeError(`unsupported scene3d write tool: ${String(name)}`);
   if (name === 'scene3d.add')
     return {
       type: 'object.add',

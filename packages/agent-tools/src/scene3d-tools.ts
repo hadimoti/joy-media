@@ -9,7 +9,11 @@ export function createScene3DToolDefinitions(): readonly ToolDefinition[] {
     category: tool.readOnly ? 'query' : 'edit',
     inputSchema: inputSchemaFor(tool.name),
     outputSchema: tool.readOnly
-      ? { type: 'object', additionalProperties: true }
+      ? tool.name === 'scene3d.assets'
+        ? { type: 'array', items: { type: 'object' } }
+        : tool.name === 'scene3d.selection'
+          ? { anyOf: [{ type: 'object' }, { type: 'null' }] }
+          : { type: 'object', additionalProperties: true }
       : {
           type: 'object',
           additionalProperties: false,
