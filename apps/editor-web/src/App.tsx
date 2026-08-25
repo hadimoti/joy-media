@@ -2175,8 +2175,6 @@ function EditorWorkspace({
             const plan = buildFramePlan(timeUs);
             const primarySample =
               plan.videoSamples.find((sample) => sample.role === 'primary') ?? plan.videoSamples[0];
-            if (primarySample === undefined)
-              throw new Error(`No active video clip at ${timeUs}µs during export`);
             const bitmaps = new Map<string, ImageDataLike>();
             const captureExportSample = async (
               sample: (typeof plan.videoSamples)[number],
@@ -2200,10 +2198,13 @@ function EditorWorkspace({
                 height: media.video.videoHeight,
               });
             };
-            const node = await captureExportSample(primarySample);
-            for (const sample of plan.videoSamples) {
-              if (bitmaps.has(sample.clipId)) continue;
-              await captureExportSample(sample);
+            let node: VideoFrameNode | undefined;
+            if (primarySample !== undefined) {
+              node = await captureExportSample(primarySample);
+              for (const sample of plan.videoSamples) {
+                if (bitmaps.has(sample.clipId)) continue;
+                await captureExportSample(sample);
+              }
             }
             await sceneFrameSource.captureInto(
               bitmaps,
@@ -2227,7 +2228,10 @@ function EditorWorkspace({
               const bitmap = stickerImageCache.get(target.objectId);
               if (bitmap !== undefined) bitmaps.set(target.objectId, bitmap);
             }
-            renderer.render(withVideoFrameNode(plan.frame, node), bitmaps);
+            renderer.render(
+              node === undefined ? plan.frame : withVideoFrameNode(plan.frame, node),
+              bitmaps,
+            );
           },
           onProgress: (completed, total) => {
             setExportProgress(0.05 + 0.93 * (completed / total));
