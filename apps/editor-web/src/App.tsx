@@ -61,7 +61,11 @@ import {
 import { createDeliverySceneFrameSource, HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
-import { TimelinePanel } from './TimelinePanel.js';
+import {
+  buildTimelineFileImportTransactions,
+  importAssetKind,
+  TimelinePanel,
+} from './TimelinePanel.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
 import {
@@ -95,6 +99,7 @@ import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import {
   BrowserControlPlaneClient,
   type BrowserAsset,
+  type BrowserAssetRegistration,
   type BrowserDerivative,
 } from './control-plane-client.js';
 import { AudioPanel } from './AudioPanel.js';
@@ -2513,6 +2518,79 @@ function EditorWorkspace({
     const context = useContext(EditorPanelContext);
     if (context === undefined) throw new Error('editor panel context is unavailable');
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const importTimelineFiles = async (files: readonly File[]): Promise<void> => {
+      const composition = context.timelineProject.compositions.root;
+      if (composition === undefined) {
+        context.showToast('The main timeline composition is unavailable.', 'error');
+        return;
+      }
+      try {
+        const cache = await originalAssetCachePromise;
+        const registered: Array<{ readonly asset: BrowserAsset; readonly file: File }> = [];
+        for (const [index, file] of files.entries()) {
+          const assetId = timelineImportAssetId(file, index);
+          const mimeType = file.type;
+          if (mimeType.length === 0)
+            throw new Error(`Unable to determine a media type for ${file.name}`);
+          const bytes = await file.arrayBuffer();
+          const sha256 = bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+          const registration: BrowserAssetRegistration = {
+            id: assetId,
+            kind: importAssetKind(file),
+            displayName: file.name,
+            sha256,
+            bytes: file.size,
+            descriptor: { mimeType },
+            locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
+          };
+          await cache.put(
+            {
+              assetId,
+              sha256,
+              bytes: file.size,
+              mimeType,
+            },
+            file,
+          );
+          try {
+            const asset = await mediaClient.registerAsset(
+              controlPlaneProject.controlPlaneProjectId,
+              registration,
+            );
+            registered.push({ asset, file });
+          } catch (error) {
+            await cache.remove(assetId);
+            throw error;
+          }
+        }
+
+        const transactions = buildTimelineFileImportTransactions({
+          composition,
+          trackFlags: context.timelineTrackFlags,
+          playheadUs: state.playheadUs,
+          files,
+          createAssetId: (_, index) =>
+            registered[index]?.asset.id ?? timelineImportAssetId(files[index]!, index),
+        });
+        for (const transaction of transactions) context.dispatchTimeline(transaction);
+        setMonitorAssetCatalog((previous) => ({
+          assets: {
+            ...previous.assets,
+            ...Object.fromEntries(registered.map(({ asset }) => [asset.id, asset])),
+          },
+          derivativesByAssetId: previous.derivativesByAssetId,
+        }));
+        context.showToast(
+          `${registered.length} media file${registered.length === 1 ? '' : 's'} registered and added to the timeline.`,
+          'success',
+        );
+      } catch (error) {
+        context.showToast(
+          `Media import failed: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        );
+      }
+    };
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
@@ -2697,6 +2775,7 @@ function EditorWorkspace({
             })
           }
           onOpenAssetLibrary={() => context.activatePanel('media')}
+          onImportFiles={importTimelineFiles}
           onEffectDrop={(effectId, clipId, trackId) => {
             context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
@@ -3564,6 +3643,20 @@ function formatTimecode(timeUs: number, fps = 30): string {
   const hours = Math.floor(totalMinutes / 60);
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
+}
+
+function timelineImportAssetId(file: Pick<File, 'name'>, index: number): string {
+  const stem = file.name
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .slice(0, 72);
+  const prefix = stem.length > 0 ? stem : 'media';
+  return `${prefix}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`.slice(0, 128);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function MonitorPanel() {

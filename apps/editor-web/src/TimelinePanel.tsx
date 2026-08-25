@@ -411,7 +411,7 @@ function defaultTrackView(trackId: string, order: number, enabled = true): Timel
   };
 }
 
-function importAssetKind(file: Pick<File, 'type'>): 'audio' | 'image' | 'video' {
+export function importAssetKind(file: Pick<File, 'type'>): 'audio' | 'image' | 'video' {
   if (file.type.startsWith('audio/')) return 'audio';
   if (file.type.startsWith('image/')) return 'image';
   return 'video';
@@ -604,6 +604,7 @@ export function TimelinePanel({
   trackFlags: trackFlagsProp,
   onTrackFlagsChange,
   onOpenAssetLibrary,
+  onImportFiles,
 }: {
   readonly project: SpikeProject;
   readonly playheadUs: number;
@@ -652,6 +653,8 @@ export function TimelinePanel({
   readonly trackFlags?: readonly TimelineTrackView[];
   readonly onTrackFlagsChange?: (next: readonly TimelineTrackView[]) => void;
   readonly onOpenAssetLibrary?: () => void;
+  /** Register/cache files before inserting them into the timeline. */
+  readonly onImportFiles?: (files: readonly File[]) => void | Promise<void>;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const trackFlags = trackFlagsProp ?? localTrackFlags;
@@ -1023,6 +1026,10 @@ export function TimelinePanel({
   const handleImportClick = useCallback(
     (providedFiles?: readonly File[]) => {
       if (providedFiles !== undefined) {
+        if (onImportFiles !== undefined) {
+          void onImportFiles(providedFiles);
+          return;
+        }
         const transactions = buildTimelineFileImportTransactions({
           composition,
           trackFlags: tracks,
@@ -1043,7 +1050,7 @@ export function TimelinePanel({
       };
       input.click();
     },
-    [composition, onDispatch, playheadUs, tracks],
+    [composition, onDispatch, onImportFiles, playheadUs, tracks],
   );
 
   const handleAddFromLibrary = useCallback(() => {
