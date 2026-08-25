@@ -7,18 +7,13 @@
  */
 
 import { useState } from 'react';
-import type {
-  AnimatablePropertyV1,
-  EffectInstanceV1,
-  VisualObjectV1,
-} from '@joy-media/project-schema';
+import type { AnimatablePropertyV1, VisualObjectV1 } from '@joy-media/project-schema';
 import type { AudioCommand, AudioState } from '@joy-media/commands';
 import { applyAudioCommand } from '@joy-media/commands';
 import type { NumericTransformProperty, VisualObjectTransaction } from '@joy-media/property-system';
 import { VISUAL_INSPECTOR } from '@joy-media/property-system';
 import {
   hasKeyframeAtCurve,
-  hasKeyframeAtMotion,
   removeKeyframe,
   resolveObjectTransformWithExpressions,
   sampleCurve,
@@ -449,9 +444,7 @@ export function InspectorPanel({
             dispatch={dispatchAudio}
           />
         ) : (
-          <p className="empty-hint">
-            Select a clip to mix its audio.
-          </p>
+          <p className="empty-hint">Select a clip to mix its audio.</p>
         ))}
     </PanelShell>
   );

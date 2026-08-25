@@ -123,7 +123,12 @@ describe('artifact commands', () => {
     it('does not version a rename, so history is not filled with identical content', () => {
       const applied = applyArtifactCommand(storeWith(artifact('a')), {
         type: 'artifact.update',
-        payload: { artifactId: 'a', label: 'Renamed', updatedAt: '2026-07-27T01:00:00.000Z', versionId: 'v1' },
+        payload: {
+          artifactId: 'a',
+          label: 'Renamed',
+          updatedAt: '2026-07-27T01:00:00.000Z',
+          versionId: 'v1',
+        },
       }).store;
 
       expect(applied.artifacts['a']?.label).toBe('Renamed');
@@ -267,7 +272,10 @@ describe('artifact commands', () => {
         label: 'Add script and prompt',
         commands: [
           { type: 'artifact.create', payload: { artifact: artifact('script-1') } },
-          { type: 'artifact.create', payload: { artifact: artifact('prompt-1', { kind: 'prompt' }) } },
+          {
+            type: 'artifact.create',
+            payload: { artifact: artifact('prompt-1', { kind: 'prompt' }) },
+          },
           {
             type: 'artifact.bindTime',
             payload: {

@@ -931,7 +931,8 @@ describe('control-plane HTTP transport', () => {
   });
 
   it('accepts only typed Worker job payloads and leases them back over HTTP', async () => {
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
     await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
     await request(origin, 'POST', '/v1/worker-pair/offers', {
       workerId: 'w',
@@ -980,6 +981,20 @@ describe('control-plane HTTP transport', () => {
         },
       },
     });
+    const artifactBytes = new Uint8Array(2048);
+    const artifactSha256 = createHash('sha256').update(artifactBytes).digest('hex');
+    const artifactUpload = await fetch(`${origin}/v1/workers/w/jobs/render-export-1/artifact`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${workerToken}`,
+        'content-type': 'video/mp4',
+        'x-joy-output-ref': 'output-render-export-1',
+        'x-joy-sha256': artifactSha256,
+        'x-joy-bytes': '2048',
+      },
+      body: artifactBytes,
+    });
+    expect(artifactUpload.status).toBe(201);
     expect(
       await request(
         origin,
@@ -990,7 +1005,7 @@ describe('control-plane HTTP transport', () => {
             kind: 'render.export',
             reportRef: 'report-render-export-1',
             outputRef: 'output-render-export-1',
-            sha256: 'a'.repeat(64),
+            sha256: artifactSha256,
             bytes: 2048,
             qualityReport: {
               version: 1,
@@ -998,7 +1013,7 @@ describe('control-plane HTTP transport', () => {
               checkedAt: '2026-08-21T00:00:00.000Z',
               artifact: {
                 outputRef: 'output-render-export-1',
-                sha256: 'a'.repeat(64),
+                sha256: artifactSha256,
                 bytes: 2048,
               },
               facts: {},
@@ -1549,6 +1564,135 @@ describe('control-plane HTTP transport', () => {
       status: 400,
       body: { error: { code: 'REQUEST_INVALID' } },
     });
+  });
+  it('stores render artifacts only for the leased render job and serves them to the owner', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const controlPlane = new LocalControlPlane();
+    const ownerOrigin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      store,
+      undefined,
+      controlPlane,
+    );
+    await request(ownerOrigin, 'POST', '/v1/projects', {
+      id: 'artifact-project',
+      title: 'Artifacts',
+    });
+    await request(ownerOrigin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'artifact-worker',
+      pairingCode: 'artifact-pairing',
+    });
+    await request(ownerOrigin, 'POST', '/v1/workers/artifact-worker/pair', {
+      pairingCode: 'artifact-pairing',
+    });
+    const claim = await request(ownerOrigin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'artifact-worker',
+      pairingCode: 'artifact-pairing',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      ownerOrigin,
+      'POST',
+      '/v1/workers/artifact-worker/hello',
+      { capabilities: ['render.export'] },
+      workerToken,
+    );
+    await request(ownerOrigin, 'POST', '/v1/projects/artifact-project/jobs', {
+      id: 'artifact-job',
+      type: 'render.export',
+    });
+    await request(ownerOrigin, 'POST', '/v1/workers/artifact-worker/leases', {}, workerToken);
+    const bytes = new Uint8Array([0, 1, 2, 3, 4, 5]);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const artifactPath = `${ownerOrigin}/v1/workers/artifact-worker/jobs/artifact-job/artifact`;
+    const upload = (headers: Record<string, string>, body: Uint8Array = bytes) =>
+      fetch(artifactPath, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${workerToken}`, ...headers },
+        body: Buffer.from(body),
+      });
+    expect(
+      (
+        await upload({
+          'content-type': 'video/webm',
+          'x-joy-output-ref': 'render-output',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.length),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await upload({
+          'content-type': 'video/mp4',
+          'x-joy-output-ref': 'render-output',
+          'x-joy-sha256': 'f'.repeat(64),
+          'x-joy-bytes': String(bytes.length),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await upload({
+          'content-type': 'video/mp4',
+          'x-joy-output-ref': 'render-output',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.length + 1),
+        })
+      ).status,
+    ).toBe(400);
+    const accepted = await upload({
+      'content-type': 'video/mp4',
+      'x-joy-output-ref': 'render-output',
+      'x-joy-sha256': sha256,
+      'x-joy-bytes': String(bytes.length),
+    });
+    expect(accepted.status).toBe(201);
+    const artifact = ((await accepted.json()) as { data: { id: string } }).data;
+    expect(
+      await request(
+        ownerOrigin,
+        'POST',
+        '/v1/workers/artifact-worker/jobs/artifact-job/complete',
+        {
+          result: {
+            kind: 'render.export',
+            reportRef: 'report-artifact-job',
+            outputRef: 'render-output',
+            sha256,
+            bytes: bytes.length,
+          },
+        },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 200 });
+    const content = await fetch(
+      `${ownerOrigin}/v1/projects/artifact-project/render-artifacts/${artifact.id}/content`,
+      { headers: { authorization: 'Bearer owner-session' } },
+    );
+    expect(content.status).toBe(200);
+    expect(content.headers.get('content-type')).toBe('video/mp4');
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(bytes);
+    const otherOwnerOrigin = await start(
+      { authenticate: () => ({ id: 'other-owner' }) },
+      store,
+      undefined,
+      controlPlane,
+    );
+    const isolated = await fetch(
+      `${otherOwnerOrigin}/v1/projects/artifact-project/render-artifacts/${artifact.id}/content`,
+    );
+    expect([404, 409]).toContain(isolated.status);
+    const unauthenticatedOrigin = await start(
+      { authenticate: () => undefined },
+      store,
+      undefined,
+      controlPlane,
+    );
+    const denied = await fetch(
+      `${unauthenticatedOrigin}/v1/projects/artifact-project/render-artifacts/${artifact.id}/content`,
+    );
+    expect(denied.status).toBe(401);
   });
 });
 

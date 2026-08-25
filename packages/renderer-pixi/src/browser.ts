@@ -30,7 +30,6 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js
 import type {
   Rgba,
   RenderFrameIR,
-  SpriteNode,
   TextNode,
   TransitionNode,
   VideoFrameNode,
@@ -43,10 +42,7 @@ import {
   colorGradeSignature,
   effectsSignature,
 } from './effects-pixi.js';
-import {
-  createGlTransitionFilter,
-  type GlTransitionFilterHandle,
-} from './gl-transition-filter.js';
+import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
 import { dualTextureBitmapsReady } from './transition-bitmaps.js';
 
 export { dualTextureBitmapsReady } from './transition-bitmaps.js';
@@ -374,8 +370,7 @@ export async function createBrowserPixiRenderer(
     for (const { node } of transitionNodes) {
       seenTransitionIds.add(node.id);
       const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
-        | TransitionLayerContainer
-        | undefined;
+        TransitionLayerContainer | undefined;
       if (existing === undefined) {
         const container = createTransitionLayer(node, videoBitmaps);
         transitionLayer.addChild(container);
@@ -479,7 +474,8 @@ function ensureBitmapTexture(
     nextCanvas.height = bitmap.height;
   }
   const context = nextCanvas.getContext('2d');
-  if (context === null) throw new Error(`${BROWSER_PACKAGE_ENTRY}: transition canvas 2d unavailable`);
+  if (context === null)
+    throw new Error(`${BROWSER_PACKAGE_ENTRY}: transition canvas 2d unavailable`);
   const image = context.createImageData(bitmap.width, bitmap.height);
   image.data.set(bitmap.data);
   context.putImageData(image, 0, 0);
@@ -542,7 +538,8 @@ function updateTransitionLayer(
     container.glHandle?.destroy();
     container.glHandle = createGlTransitionFilter(node.shaderId, node.params);
     container.shaderId = node.shaderId;
-    container.sprite.filters = container.glHandle === undefined ? null : [container.glHandle.filter];
+    container.sprite.filters =
+      container.glHandle === undefined ? null : [container.glHandle.filter];
   }
 
   if (container.glHandle !== undefined) {

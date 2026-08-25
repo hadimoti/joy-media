@@ -5,10 +5,7 @@
  * frame so burned-in captions match the Captions panel preview.
  */
 
-import {
-  captionCuesAt,
-  layoutTemplatedCaptionNodes,
-} from '@joy-media/captions-core';
+import { captionCuesAt, layoutTemplatedCaptionNodes } from '@joy-media/captions-core';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { RenderFrameIR, RenderNode, TextNode } from '@joy-media/render-ir';
 

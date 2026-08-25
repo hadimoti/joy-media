@@ -28,17 +28,27 @@ export interface MoveLayerCommand {
 
 export interface SetLayerTransformCommand {
   readonly type: 'scene.setLayerTransform';
-  readonly payload: { readonly layerId: MotionLayerId; readonly transform: Partial<MotionTransform> };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly transform: Partial<MotionTransform>;
+  };
 }
 
 export interface SetLayerPropertyCommand {
   readonly type: 'scene.setLayerProperty';
-  readonly payload: { readonly layerId: MotionLayerId; readonly property: string; readonly value: unknown };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly property: string;
+    readonly value: unknown;
+  };
 }
 
 export interface SetLayerTypographyCommand {
   readonly type: 'scene.setLayerTypography';
-  readonly payload: { readonly layerId: MotionLayerId; readonly typography: Partial<MotionTypography> };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly typography: Partial<MotionTypography>;
+  };
 }
 
 export interface SetLayerTextCommand {
@@ -63,7 +73,10 @@ export interface SetLayerShadowsCommand {
 
 export interface SetLayerBorderRadiusCommand {
   readonly type: 'scene.setLayerBorderRadius';
-  readonly payload: { readonly layerId: MotionLayerId; readonly borderRadius: readonly [number, number, number, number] };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly borderRadius: readonly [number, number, number, number];
+  };
 }
 
 export interface SetLayerVisibilityCommand {
@@ -93,23 +106,38 @@ export interface SetDocumentDurationCommand {
 
 export interface SetLayerAnimationsCommand {
   readonly type: 'scene.setLayerAnimations';
-  readonly payload: { readonly layerId: MotionLayerId; readonly animations: readonly MotionAnimation[] };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly animations: readonly MotionAnimation[];
+  };
 }
 
 export interface SetLayerAnimationsCommand {
   readonly type: 'scene.setLayerAnimations';
-  readonly payload: { readonly layerId: MotionLayerId; readonly animations: readonly MotionAnimation[] };
+  readonly payload: {
+    readonly layerId: MotionLayerId;
+    readonly animations: readonly MotionAnimation[];
+  };
 }
 
 export type SceneCommand =
-  | AddLayerCommand | RemoveLayerCommand | MoveLayerCommand
-  | SetLayerTransformCommand | SetLayerPropertyCommand
-  | SetLayerTypographyCommand | SetLayerTextCommand
-  | SetLayerFillsCommand | SetLayerStrokesCommand | SetLayerShadowsCommand
-  | SetLayerBorderRadiusCommand | SetLayerVisibilityCommand | SetLayerLockedCommand
-  | SetSceneBackgroundCommand | SetDocumentDimensionsCommand | SetDocumentDurationCommand
+  | AddLayerCommand
+  | RemoveLayerCommand
+  | MoveLayerCommand
+  | SetLayerTransformCommand
+  | SetLayerPropertyCommand
+  | SetLayerTypographyCommand
+  | SetLayerTextCommand
+  | SetLayerFillsCommand
+  | SetLayerStrokesCommand
+  | SetLayerShadowsCommand
+  | SetLayerBorderRadiusCommand
+  | SetLayerVisibilityCommand
+  | SetLayerLockedCommand
+  | SetSceneBackgroundCommand
+  | SetDocumentDimensionsCommand
+  | SetDocumentDurationCommand
   | SetLayerAnimationsCommand;
-
 
 export interface SceneCommandResult {
   readonly document: MotionSceneDocument;
@@ -174,7 +202,10 @@ export function applySceneCommand(
       const oldT = { ...old.transform };
       const next = { ...old.transform, ...transform };
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, transform: next })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, transform: next })),
+        },
         inverse: { type: 'scene.setLayerTransform', payload: { layerId, transform: oldT } },
       };
     }
@@ -184,7 +215,14 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldVal = (old as unknown as Record<string, unknown>)[property];
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, [property]: value } as MotionLayer)) },
+        document: {
+          ...document,
+          layers: updateLayer(
+            document.layers,
+            layerId,
+            (l) => ({ ...l, [property]: value }) as MotionLayer,
+          ),
+        },
         inverse: { type: 'scene.setLayerProperty', payload: { layerId, property, value: oldVal } },
       };
     }
@@ -195,8 +233,14 @@ export function applySceneCommand(
       const oldTypo = old.typography;
       const next = { ...(old.typography ?? {}), ...typography } as MotionTypography;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, typography: next })) },
-        inverse: { type: 'scene.setLayerTypography', payload: { layerId, typography: (oldTypo ?? {}) as Partial<MotionTypography> } },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, typography: next })),
+        },
+        inverse: {
+          type: 'scene.setLayerTypography',
+          payload: { layerId, typography: (oldTypo ?? {}) as Partial<MotionTypography> },
+        },
       };
     }
     case 'scene.setLayerText': {
@@ -205,7 +249,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldText = old.text;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, text })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, text })),
+        },
         inverse: { type: 'scene.setLayerText', payload: { layerId, text: oldText ?? '' } },
       };
     }
@@ -215,7 +262,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldFills = old.fills;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, fills })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, fills })),
+        },
         inverse: { type: 'scene.setLayerFills', payload: { layerId, fills: oldFills } },
       };
     }
@@ -225,7 +275,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldStrokes = old.strokes;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, strokes })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, strokes })),
+        },
         inverse: { type: 'scene.setLayerStrokes', payload: { layerId, strokes: oldStrokes } },
       };
     }
@@ -235,7 +288,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldShadows = old.shadows;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, shadows })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, shadows })),
+        },
         inverse: { type: 'scene.setLayerShadows', payload: { layerId, shadows: oldShadows } },
       };
     }
@@ -245,7 +301,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldR = old.borderRadius;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, borderRadius })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, borderRadius })),
+        },
         inverse: { type: 'scene.setLayerBorderRadius', payload: { layerId, borderRadius: oldR } },
       };
     }
@@ -255,7 +314,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldV = old.visible;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, visible })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, visible })),
+        },
         inverse: { type: 'scene.setLayerVisibility', payload: { layerId, visible: oldV } },
       };
     }
@@ -265,7 +327,10 @@ export function applySceneCommand(
       if (!old) return { document, inverse: command };
       const oldL = old.locked;
       return {
-        document: { ...document, layers: updateLayer(document.layers, layerId, (l) => ({ ...l, locked })) },
+        document: {
+          ...document,
+          layers: updateLayer(document.layers, layerId, (l) => ({ ...l, locked })),
+        },
         inverse: { type: 'scene.setLayerLocked', payload: { layerId, locked: oldL } },
       };
     }
@@ -303,7 +368,10 @@ export function applySceneCommand(
             layer.id === layerId ? { ...layer, animations } : layer,
           ),
         },
-        inverse: { type: 'scene.setLayerAnimations', payload: { layerId, animations: oldAnimations } },
+        inverse: {
+          type: 'scene.setLayerAnimations',
+          payload: { layerId, animations: oldAnimations },
+        },
       };
     }
     default:

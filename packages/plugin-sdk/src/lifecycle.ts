@@ -87,7 +87,10 @@ export class PluginLifecycle {
    * Registers a first-party bundled plugin without package signature verification.
    * Host trust replaces Ed25519 for shipped JOY contributions (browser-safe path).
    */
-  registerFirstParty(manifest: PluginManifestV1, packageSha256 = 'first-party'): PluginUpdateResult {
+  registerFirstParty(
+    manifest: PluginManifestV1,
+    packageSha256 = 'first-party',
+  ): PluginUpdateResult {
     if (this.#installed.has(manifest.id)) {
       return { state: 'rejected', issues: ['plugin/already-installed'] };
     }

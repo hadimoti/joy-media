@@ -43,7 +43,9 @@ export function validateAgentHostManifest(manifest: unknown): AgentHostManifestV
   }
   if (!value.settings || !Array.isArray(value.settings.secretReferences)) {
     errors.push('settings.secretReferences must be an array');
-  } else if (value.settings.secretReferences.some((reference) => reference.scope !== 'server-only')) {
+  } else if (
+    value.settings.secretReferences.some((reference) => reference.scope !== 'server-only')
+  ) {
     errors.push('all secret references must be server-only');
   }
 

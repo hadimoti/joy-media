@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildPixiTransitionFragment, getTransitionShader, listTransitionShaders } from './index.js';
+import {
+  buildPixiTransitionFragment,
+  getTransitionShader,
+  listTransitionShaders,
+} from './index.js';
 
 /** Software sample of gl-transitions `fade` — proves A↔B blend math (not an overlay plate). */
 function sampleFade(

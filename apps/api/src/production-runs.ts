@@ -456,6 +456,7 @@ function applyApprovalResponse(
   const nodes = record.nodes.map((candidate) => {
     if (candidate.pendingApprovalId !== approval.approvalId) return candidate;
     const { pendingApprovalId: _pendingApprovalId, ...withoutPendingApproval } = candidate;
+    void _pendingApprovalId;
     return withoutPendingApproval;
   });
   return {

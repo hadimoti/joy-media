@@ -1,6 +1,11 @@
 dist/
 node_modules/
 coverage/
+.pytest_cache/
 pnpm-lock.yaml
+.agent/
+.superpowers/
+test-output/
+apps/editor-web/public/assets/
 # Generated workflow artifacts: canonical format is workflowToJson (pinned by test).
 packages/workflow-engine/workflows/

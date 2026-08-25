@@ -300,7 +300,15 @@ function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
   ];
   return commands.map(([id, args]) => {
     const started = Date.now();
-    const result = spawnSync(pnpm, args, { cwd: root, stdio: 'ignore', shell: false });
+    // On Windows, pnpm is exposed as a .cmd shim and Node cannot spawn that
+    // file directly with shell:false (it returns EINVAL before the command
+    // starts). Use the platform shell only for this package-manager shim so
+    // release evidence reflects the real command results on every platform.
+    const result = spawnSync(pnpm, args, {
+      cwd: root,
+      stdio: 'ignore',
+      shell: process.platform === 'win32',
+    });
     return {
       id,
       command: [pnpm, ...args].join(' '),

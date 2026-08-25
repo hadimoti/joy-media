@@ -56,13 +56,16 @@ function duplicateLayer(layer: MotionLayer, idMap: Map<string, string>): MotionL
     animations: [...layer.animations],
   } as MotionLayer;
   if (layer.parentId) {
-    (copy as unknown as { parentId: string }).parentId = idMap.get(layer.parentId) ?? layer.parentId;
+    (copy as unknown as { parentId: string }).parentId =
+      idMap.get(layer.parentId) ?? layer.parentId;
   }
   return copy;
 }
 
 export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEditorState {
-  const documentRef = useRef<MotionSceneDocument>(initialDocument ?? createBlankScene('Untitled Motion'));
+  const documentRef = useRef<MotionSceneDocument>(
+    initialDocument ?? createBlankScene('Untitled Motion'),
+  );
   const [document, setDocumentState] = useState<MotionSceneDocument>(documentRef.current);
   const [selectedLayerIds, setSelectedLayerIds] = useState<readonly MotionLayerId[]>([]);
   const undoStackRef = useRef<HistoryEntry[]>([]);
@@ -211,7 +214,10 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
       clones.push(duplicateLayer(layer, idMap));
     }
     if (clones.length === 0) return;
-    const commands = clones.map<SceneCommand>((layer) => ({ type: 'scene.addLayer', payload: { layer } }));
+    const commands = clones.map<SceneCommand>((layer) => ({
+      type: 'scene.addLayer',
+      payload: { layer },
+    }));
     dispatch('Duplicate layers', ...commands);
     setSelectedLayerIds(clones.map((l) => l.id));
   }, [dispatch, selectedLayerIds]);
@@ -221,7 +227,10 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
     if (selected.length === 0) return;
     dispatch(
       'Delete layers',
-      ...selected.map<SceneCommand>((layerId) => ({ type: 'scene.removeLayer', payload: { layerId } })),
+      ...selected.map<SceneCommand>((layerId) => ({
+        type: 'scene.removeLayer',
+        payload: { layerId },
+      })),
     );
     setSelectedLayerIds([]);
   }, [dispatch, selectedLayerIds]);
@@ -231,7 +240,10 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
     if (selected.length === 0) return;
     const topId = selected[selected.length - 1];
     if (!topId) return;
-    dispatch('Bring to front', { type: 'scene.moveLayer', payload: { layerId: topId, newIndex: documentRef.current.layers.length - 1 } });
+    dispatch('Bring to front', {
+      type: 'scene.moveLayer',
+      payload: { layerId: topId, newIndex: documentRef.current.layers.length - 1 },
+    });
   }, [dispatch, selectedLayerIds]);
 
   const sendToBack = useCallback(() => {
@@ -239,7 +251,10 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
     if (selected.length === 0) return;
     const bottomId = selected[0];
     if (!bottomId) return;
-    dispatch('Send to back', { type: 'scene.moveLayer', payload: { layerId: bottomId, newIndex: 0 } });
+    dispatch('Send to back', {
+      type: 'scene.moveLayer',
+      payload: { layerId: bottomId, newIndex: 0 },
+    });
   }, [dispatch, selectedLayerIds]);
 
   const groupSelected = useCallback(() => {
@@ -270,17 +285,36 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
       id: groupId,
       type: 'group',
       name: 'Group',
-      transform: { ...layers[0]!.transform, x: centerX - width / 2, y: centerY - height / 2, width, height },
+      transform: {
+        ...layers[0]!.transform,
+        x: centerX - width / 2,
+        y: centerY - height / 2,
+        width,
+        height,
+      },
       fills: [],
       strokes: [],
       shadows: [],
       children: layers.map((l) => l.id),
       animations: [],
     } as MotionLayer;
-    const firstIndex = Math.min(...selected.map((id) => documentRef.current.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0));
+    const firstIndex = Math.min(
+      ...selected
+        .map((id) => documentRef.current.layers.findIndex((l) => l.id === id))
+        .filter((i) => i >= 0),
+    );
     const commands: SceneCommand[] = [
-      { type: 'scene.addLayer', payload: { layer: groupLayer, index: firstIndex >= 0 ? firstIndex : documentRef.current.layers.length } },
-      ...layers.map<SceneCommand>((layer) => ({ type: 'scene.setLayerProperty', payload: { layerId: layer.id, property: 'parentId', value: groupId } })),
+      {
+        type: 'scene.addLayer',
+        payload: {
+          layer: groupLayer,
+          index: firstIndex >= 0 ? firstIndex : documentRef.current.layers.length,
+        },
+      },
+      ...layers.map<SceneCommand>((layer) => ({
+        type: 'scene.setLayerProperty',
+        payload: { layerId: layer.id, property: 'parentId', value: groupId },
+      })),
     ];
     dispatch('Group layers', ...commands);
     setSelectedLayerIds([groupId]);
@@ -294,7 +328,10 @@ export function useSceneEditor(initialDocument?: MotionSceneDocument): SceneEdit
     const childrenIds = group.children;
     const commands: SceneCommand[] = [
       { type: 'scene.removeLayer', payload: { layerId: group.id } },
-      ...childrenIds.map<SceneCommand>((layerId) => ({ type: 'scene.setLayerProperty', payload: { layerId, property: 'parentId', value: undefined } })),
+      ...childrenIds.map<SceneCommand>((layerId) => ({
+        type: 'scene.setLayerProperty',
+        payload: { layerId, property: 'parentId', value: undefined },
+      })),
     ];
     dispatch('Ungroup layers', ...commands);
     setSelectedLayerIds(childrenIds.length > 0 ? [...childrenIds] : []);

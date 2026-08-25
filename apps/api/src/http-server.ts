@@ -38,6 +38,8 @@ import {
   type ProviderApprovalGrant,
 } from '@joy-media/provider-sdk';
 
+const MAX_RENDER_ARTIFACT_BYTES = 512 * 1024 * 1024;
+
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
 }
@@ -138,6 +140,9 @@ async function route(
   const workerDerivativeUploadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/derivative$/.exec(
     url.pathname,
   );
+  const workerRenderArtifactUploadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/artifact$/.exec(
+    url.pathname,
+  );
   if (
     request.method === 'POST' &&
     (workerLeaseMatch !== null ||
@@ -145,7 +150,8 @@ async function route(
       workerHeartbeatMatch !== null ||
       workerCompleteMatch !== null ||
       workerFailMatch !== null ||
-      workerDerivativeUploadMatch !== null)
+      workerDerivativeUploadMatch !== null ||
+      workerRenderArtifactUploadMatch !== null)
   ) {
     const workerId =
       workerLeaseMatch?.[1] ??
@@ -153,7 +159,8 @@ async function route(
       workerHeartbeatMatch?.[1] ??
       workerCompleteMatch?.[1] ??
       workerFailMatch?.[1] ??
-      workerDerivativeUploadMatch?.[1];
+      workerDerivativeUploadMatch?.[1] ??
+      workerRenderArtifactUploadMatch?.[1];
     const sessionWorkerId = await options.controlPlane.authenticateWorker(
       workerSessionHash(request),
     );
@@ -244,6 +251,48 @@ async function route(
           },
         );
         respondJson(response, 201, { data: derivative });
+      } catch (error) {
+        await store.remove(ref).catch(() => undefined);
+        throw error;
+      }
+      return;
+    }
+    if (workerRenderArtifactUploadMatch !== null) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const headers = workerRenderArtifactHeaders(request);
+      const bytes = await readBytes(request, MAX_RENDER_ARTIFACT_BYTES);
+      if (bytes.byteLength !== headers.bytes)
+        throw new ControlPlaneError(
+          'REQUEST_INVALID',
+          'artifact byte length does not match receipt',
+        );
+      if (createHash('sha256').update(bytes).digest('hex') !== headers.sha256)
+        throw new ControlPlaneError('REQUEST_INVALID', 'artifact hash does not match receipt');
+      const jobId = decodeURIComponent(workerRenderArtifactUploadMatch[2]!);
+      const ref = `render-${jobId}-${headers.sha256.slice(0, 16)}`;
+      await store.put(
+        { ref, sha256: headers.sha256, bytes: headers.bytes, mimeType: 'video/mp4' },
+        bytes,
+      );
+      try {
+        const artifact = await options.controlPlane.registerWorkerRenderArtifact(
+          decodeURIComponent(workerId),
+          jobId,
+          {
+            id: `artifact-${jobId}-${headers.sha256.slice(0, 16)}`,
+            outputRef: headers.outputRef,
+            sha256: headers.sha256,
+            bytes: headers.bytes,
+            descriptor: { mimeType: 'video/mp4' },
+            location: { kind: 'private-object', ref },
+          },
+        );
+        respondJson(response, 201, { data: artifact });
       } catch (error) {
         await store.remove(ref).catch(() => undefined);
         throw error;
@@ -437,6 +486,43 @@ async function route(
       'x-content-type-options': 'nosniff',
     });
     response.end(bytes);
+    return;
+  }
+
+  const renderArtifactContentMatch =
+    /^\/v1\/projects\/([^/]+)\/render-artifacts\/([^/]+)\/content$/.exec(url.pathname);
+  if (request.method === 'GET' && renderArtifactContentMatch !== null) {
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const artifact = await options.controlPlane.renderArtifactForOwner(
+      actor,
+      decodeURIComponent(renderArtifactContentMatch[1]!),
+      decodeURIComponent(renderArtifactContentMatch[2]!),
+    );
+    const bytes = await store.get({
+      ref: artifact.location.ref,
+      sha256: artifact.sha256,
+      bytes: artifact.bytes,
+      mimeType: artifact.descriptor.mimeType,
+    });
+    if (
+      bytes.byteLength !== artifact.bytes ||
+      createHash('sha256').update(bytes).digest('hex') !== artifact.sha256
+    )
+      throw new ControlPlaneError('ARTIFACT_UNAVAILABLE', artifact.id);
+    response.writeHead(200, {
+      'content-type': artifact.descriptor.mimeType,
+      'content-length': String(bytes.byteLength),
+      'cache-control': 'private, no-store',
+      'content-disposition': `attachment; filename="${artifact.outputRef}.mp4"`,
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(Buffer.from(bytes));
     return;
   }
 
@@ -1625,6 +1711,27 @@ function workerThumbnailHeaders(request: IncomingMessage): {
   )
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
   return { assetId, sha256, bytes, descriptor: { mimeType: 'image/jpeg', width, height } };
+}
+
+function workerRenderArtifactHeaders(request: IncomingMessage): {
+  readonly outputRef: string;
+  readonly sha256: string;
+  readonly bytes: number;
+} {
+  const outputRef = requiredHeader(request, 'x-joy-output-ref');
+  const sha256 = requiredHeader(request, 'x-joy-sha256');
+  const bytes = Number(requiredHeader(request, 'x-joy-bytes'));
+  const mimeType = requiredHeader(request, 'content-type');
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(outputRef) ||
+    !/^[a-f0-9]{64}$/.test(sha256) ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    bytes > MAX_RENDER_ARTIFACT_BYTES ||
+    mimeType !== 'video/mp4'
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'render artifact upload headers are invalid');
+  return { outputRef, sha256, bytes };
 }
 
 function requiredHeader(request: IncomingMessage, name: string): string {

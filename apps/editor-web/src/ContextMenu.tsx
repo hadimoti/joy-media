@@ -43,7 +43,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       } else if (event.key === 'ArrowUp') {
         event.preventDefault();
         const currentIdx = focusedIndexRef.current;
-        const prevIdx = [...enabledItems].reverse().find((i) => i < currentIdx) ?? enabledItems[enabledItems.length - 1]!;
+        const prevIdx =
+          [...enabledItems].reverse().find((i) => i < currentIdx) ??
+          enabledItems[enabledItems.length - 1]!;
         focusedIndexRef.current = prevIdx;
         (menuRef.current?.querySelectorAll('[data-menu-index]')[prevIdx] as HTMLElement)?.focus?.();
       } else if (event.key === 'Enter' || event.key === ' ') {
@@ -91,13 +93,22 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             key={index}
             className={`context-menu-item ${item.disabled ? 'disabled' : ''}`}
             disabled={item.disabled}
-            onClick={() => { item.action?.(); onClose(); }}
+            onClick={() => {
+              item.action?.();
+              onClose();
+            }}
             data-menu-index={index}
             tabIndex={-1}
             role="menuitem"
-            onFocus={() => { focusedIndexRef.current = index; }}
+            onFocus={() => {
+              focusedIndexRef.current = index;
+            }}
           >
-            {item.icon && <span className="context-menu-icon"><item.icon className="icon" /></span>}
+            {item.icon && (
+              <span className="context-menu-icon">
+                <item.icon className="icon" />
+              </span>
+            )}
             <span className="context-menu-label">{item.label}</span>
             {item.shortcut && <span className="context-menu-shortcut">{item.shortcut}</span>}
           </button>

@@ -16,10 +16,7 @@ import {
   type MotionSceneDocument,
 } from '@joy-media/motion-core';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import {
-  getPublishedMotionScene,
-  type MotionSceneCatalogEntry,
-} from './motion-scene-catalog.js';
+import { getPublishedMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
 import type { PlannedMotionSceneCaptureTarget } from './render-plan-capture-targets.js';
 
 export interface MotionSceneSurfaceDiagnostic {
@@ -172,7 +169,8 @@ async function hydrateLayerMedia(
   let element = media.get(layer.assetId);
   if (element === undefined) {
     const url = `/v1/library/cloud-assets/${encodeURIComponent(layer.assetId)}/content`;
-    element = layer.type === 'video' ? document.createElement('video') : document.createElement('img');
+    element =
+      layer.type === 'video' ? document.createElement('video') : document.createElement('img');
     element.crossOrigin = 'anonymous';
     element.src = url;
     if (element instanceof HTMLVideoElement) {
@@ -191,8 +189,10 @@ async function hydrateLayerMedia(
   }
 }
 
-function waitForMedia(element: HTMLImageElement | HTMLVideoElement, event: 'load' | 'loadeddata'):
-  Promise<void> {
+function waitForMedia(
+  element: HTMLImageElement | HTMLVideoElement,
+  event: 'load' | 'loadeddata',
+): Promise<void> {
   if (element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0) {
     return Promise.resolve();
   }

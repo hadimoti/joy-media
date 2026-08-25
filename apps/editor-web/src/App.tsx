@@ -55,6 +55,7 @@ import {
 } from '@joy-media/renderer-pixi/browser';
 import {
   downloadBrowserMp4,
+  BROWSER_MP4_MIME_TYPE,
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
@@ -101,6 +102,7 @@ import {
   type BrowserAsset,
   type BrowserAssetRegistration,
   type BrowserDerivative,
+  type BrowserWorker,
 } from './control-plane-client.js';
 import { AudioPanel } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -212,6 +214,15 @@ import {
 import { DeliveryReportPanel } from './DeliveryReportPanel.js';
 import { createMonoAudioBuffer } from './export-audio.js';
 import { nextVideoClipAtOrAfter } from './timeline-playback.js';
+import { useAuthLocked } from './LoginGate.js';
+import {
+  deliveryMediaStateFromEvidence,
+  deliveryPreflight,
+  type DeliveryCapability,
+  type DeliveryMediaState,
+  type DeliveryTimelineClip,
+} from './delivery-preflight.js';
+import { workerPresence } from './jobs-panel-state.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
@@ -522,6 +533,7 @@ function EditorWorkspace({
   readonly projectId: string;
   readonly onBackToLibrary: () => void;
 }) {
+  const authLocked = useAuthLocked();
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   /** Shared by Timeline + Dual Lens Time View so clip widths stay one layout. */
   const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({
@@ -618,13 +630,12 @@ function EditorWorkspace({
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
-  const previewMixerSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const previewMixerBufferRef = useRef<Float32Array | null>(null);
   const mediaClient = useMemo(() => new BrowserControlPlaneClient(), []);
   const [monitorAssetCatalog, setMonitorAssetCatalog] = useState<{
     readonly assets: Readonly<Record<string, BrowserAsset>>;
     readonly derivativesByAssetId: Readonly<Record<string, readonly BrowserDerivative[]>>;
   }>(() => ({ assets: {}, derivativesByAssetId: {} }));
+  const [deliveryWorkers, setDeliveryWorkers] = useState<readonly BrowserWorker[]>([]);
 
   useAccessibleDialog({
     open: keyboardShortcutsOpen,
@@ -751,6 +762,26 @@ function EditorWorkspace({
       cancelled = true;
     };
   }, [controlPlaneProject.controlPlaneProjectId, mediaClient]);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshWorkers = (): void => {
+      void mediaClient
+        .workers()
+        .then((workers) => {
+          if (!cancelled) setDeliveryWorkers(workers);
+        })
+        .catch(() => {
+          // A failed capability probe is intentionally treated as unavailable.
+          if (!cancelled) setDeliveryWorkers([]);
+        });
+    };
+    refreshWorkers();
+    const interval = window.setInterval(refreshWorkers, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [mediaClient]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -1743,6 +1774,94 @@ function EditorWorkspace({
     () => exportHistory.find((entry) => deliveryGate(entry).status === 'blocked'),
     [exportHistory],
   );
+  const deliveryVideoClips = useMemo<readonly VideoClip[]>(
+    () =>
+      session.timelineProject.compositions.root?.tracks.flatMap((track) =>
+        track.clips.flatMap((clip) => (clip.kind === 'video' ? [clip] : [])),
+      ) ?? [],
+    [session.timelineProject],
+  );
+  const deliveryTimelineClips = useMemo<readonly DeliveryTimelineClip[]>(
+    () =>
+      deliveryVideoClips.map((clip) => ({
+        id: clip.id,
+        assetId: clip.assetId,
+        durationUs: clip.durationUs,
+      })),
+    [deliveryVideoClips],
+  );
+  const [deliveryMediaStates, setDeliveryMediaStates] = useState<
+    ReadonlyMap<string, DeliveryMediaState>
+  >(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    if (deliveryVideoClips.length === 0) {
+      setDeliveryMediaStates(new Map());
+      return () => {
+        cancelled = true;
+      };
+    }
+    void Promise.all(
+      deliveryVideoClips.map(async (clip) => {
+        try {
+          const source = await resolveClipMonitorMediaSource(clip);
+          const state: DeliveryMediaState = deliveryMediaStateFromEvidence(source);
+          if (source.state === 'ready') source.release();
+          return { id: clip.id, state };
+        } catch {
+          return { id: clip.id, state: 'unavailable' as const };
+        }
+      }),
+    ).then((resolved) => {
+      if (cancelled) return;
+      setDeliveryMediaStates(new Map(resolved.map(({ id, state }) => [id, state])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [deliveryVideoClips, resolveClipMonitorMediaSource]);
+  const deliveryCapabilities = useMemo<readonly DeliveryCapability[]>(() => {
+    const capabilities: DeliveryCapability[] = [];
+    if (
+      typeof MediaRecorder !== 'undefined' &&
+      MediaRecorder.isTypeSupported(BROWSER_MP4_MIME_TYPE)
+    ) {
+      capabilities.push('browser-mp4');
+    }
+    const connectedRenderWorker = deliveryWorkers.some(
+      (worker) =>
+        workerPresence(worker) === 'connected' && worker.capabilities.includes('render.export'),
+    );
+    if (connectedRenderWorker) capabilities.push('worker-render-export');
+    return capabilities;
+  }, [deliveryWorkers]);
+  const quickExportPreflight = useMemo(
+    () =>
+      deliveryPreflight({
+        channel: 'quick-browser-export',
+        clips: deliveryTimelineClips,
+        mediaStates: deliveryMediaStates,
+        capabilities: deliveryCapabilities,
+      }),
+    [deliveryCapabilities, deliveryMediaStates, deliveryTimelineClips],
+  );
+  const verifiedDeliveryPreflight = useMemo(
+    () =>
+      deliveryPreflight({
+        channel: 'verified-delivery',
+        clips: deliveryTimelineClips,
+        mediaStates: deliveryMediaStates,
+        capabilities: deliveryCapabilities,
+      }),
+    [deliveryCapabilities, deliveryMediaStates, deliveryTimelineClips],
+  );
+  const deliverBlockedReason = exporting
+    ? 'Deliver is unavailable while another export is running.'
+    : blockedDeliveryEntry !== undefined
+      ? `Deliver blocked: ${blockedDeliveryEntry.filename} has failing inspection evidence without a waiver.`
+      : verifiedDeliveryPreflight.allowed
+        ? undefined
+        : `Deliver blocked: ${verifiedDeliveryPreflight.reason}`;
   const deliveryHistoryNeedsReconcile = useMemo(
     () => exportHistory.some((entry) => deliveryGate(entry).status === 'pending'),
     [exportHistory],
@@ -1769,6 +1888,7 @@ function EditorWorkspace({
   }, [deliveryHistoryNeedsReconcile, reconcileDeliveryHistory]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (authLocked) return;
       const action = resolveShortcut(event);
       if (action === undefined) return;
       // Escape must close the palette even while its search input has focus.
@@ -1884,7 +2004,7 @@ function EditorWorkspace({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dispatchTimeline, redo, seek, session, togglePlayback, undo]);
+  }, [authLocked, dispatchTimeline, redo, seek, session, togglePlayback, undo]);
 
   const runSelectedClipAction = useCallback(
     (kind: 'split' | 'duplicate' | 'delete') => {
@@ -1956,6 +2076,13 @@ function EditorWorkspace({
 
   const handleExport = useCallback(async () => {
     if (exporting) return;
+    if (!quickExportPreflight.allowed) {
+      setExportStatus(
+        `Quick export blocked: ${quickExportPreflight.reason ?? 'Delivery is unavailable.'}`,
+      );
+      setExportProgress(undefined);
+      return;
+    }
     setExporting(true);
     window.clearTimeout(exportToastTimerRef.current);
     setExportStatus('Building render manifest…');
@@ -2300,6 +2427,7 @@ function EditorWorkspace({
       setExporting(false);
     }
   }, [
+    quickExportPreflight,
     exportPreset,
     exporting,
     recordExportEntry,
@@ -2310,6 +2438,13 @@ function EditorWorkspace({
 
   const handleVerifiedDelivery = useCallback(async () => {
     if (exporting) return;
+    if (!verifiedDeliveryPreflight.allowed) {
+      setExportStatus(
+        `Deliver blocked: ${verifiedDeliveryPreflight.reason ?? 'Delivery is unavailable.'}`,
+      );
+      setExportProgress(undefined);
+      return;
+    }
     if (blockedDeliveryEntry !== undefined) {
       setExportStatus(
         `Deliver blocked: ${blockedDeliveryEntry.filename} has failing inspection evidence without a waiver.`,
@@ -2414,6 +2549,7 @@ function EditorWorkspace({
     projectId,
     recordExportEntry,
     session,
+    verifiedDeliveryPreflight,
   ]);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
     setAgentPanelCommand((current) => ({
@@ -2780,7 +2916,7 @@ function EditorWorkspace({
           }
           onOpenAssetLibrary={() => context.activatePanel('media')}
           onImportFiles={importTimelineFiles}
-          onEffectDrop={(effectId, clipId, trackId) => {
+          onEffectDrop={(effectId, clipId, _trackId) => {
             context.selectClips([clipId]);
             const objectId = resolveObjectIdForSelection(visualProject, [clipId]);
             if (!objectId) {
@@ -3221,8 +3357,17 @@ function EditorWorkspace({
             type="button"
             className="header-export-btn"
             onClick={handleExport}
-            disabled={exporting}
-            aria-label={exporting ? 'Exporting…' : 'Quick browser export MP4'}
+            disabled={exporting || !quickExportPreflight.allowed}
+            aria-describedby={
+              quickExportPreflight.allowed ? undefined : 'quick-export-blocked-reason'
+            }
+            aria-label={
+              exporting
+                ? 'Exporting…'
+                : quickExportPreflight.allowed
+                  ? 'Quick browser export MP4'
+                  : `Quick export blocked: ${quickExportPreflight.reason}`
+            }
             data-guide={exporting ? 'Exporting…' : 'Quick export'}
             aria-busy={exporting}
           >
@@ -3232,22 +3377,33 @@ function EditorWorkspace({
             type="button"
             className="header-deliver-btn"
             onClick={handleVerifiedDelivery}
-            disabled={exporting || blockedDeliveryEntry !== undefined}
-            aria-label={
-              blockedDeliveryEntry === undefined
-                ? 'Deliver verified render'
-                : 'Deliver blocked by failing report'
+            disabled={
+              exporting || blockedDeliveryEntry !== undefined || !verifiedDeliveryPreflight.allowed
             }
-            title={
-              blockedDeliveryEntry === undefined
-                ? 'Deliver verified render'
-                : `Blocked by ${blockedDeliveryEntry.filename}`
-            }
+            aria-describedby="verified-delivery-blocked-reason"
+            aria-label={deliverBlockedReason ?? 'Deliver verified render'}
+            title={deliverBlockedReason ?? 'Deliver verified render'}
             data-guide="Deliver"
             aria-busy={exporting}
           >
             Deliver
           </button>
+          {!quickExportPreflight.allowed && (
+            <span
+              id="quick-export-blocked-reason"
+              className="delivery-blocked-reason"
+              role="status"
+            >
+              Quick export blocked: {quickExportPreflight.reason}
+            </span>
+          )}
+          <span
+            id="verified-delivery-blocked-reason"
+            className="delivery-blocked-reason"
+            role="status"
+          >
+            {deliverBlockedReason ?? 'Deliver is ready.'}
+          </span>
           <div className="header-menu">
             <button
               className="icon-button"
@@ -3341,10 +3497,6 @@ function EditorWorkspace({
                 {joySession.kind === 'ready' && (
                   <>
                     <div className="account-card">
-                      {(() => {
-                        const label = joySession.displayName ?? joySession.subject;
-                        return null;
-                      })()}
                       <div className="account-card-avatar" aria-hidden="true">
                         {joySession.avatarObjectUrl !== undefined ? (
                           <img

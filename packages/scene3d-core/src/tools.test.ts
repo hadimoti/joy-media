@@ -167,7 +167,9 @@ describe('scene3d structured tools', () => {
       signature: scene3DApprovalSignature(approval, 'secret'),
     };
     const ledger = new Scene3DApprovalLedger();
-    expect(ledger.apply(session(), 'scene3d.add', input, signedApproval, 100).document).toBeDefined();
+    expect(
+      ledger.apply(session(), 'scene3d.add', input, signedApproval, 100).document,
+    ).toBeDefined();
     expect(ledger.apply(session(), 'scene3d.add', input, signedApproval, 100).error).toContain(
       'consumed',
     );

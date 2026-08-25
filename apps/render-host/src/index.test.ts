@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CAPTION_BURN_IN_KEY, createRenderBundle } from '@joy-media/render-planner';
 import type {
   JoyProjectV1,
@@ -16,7 +17,6 @@ import {
   renderHostAudioPcmForTest,
   type RenderHostMediaResolver,
 } from './index.js';
-import * as renderPage from './render-page.js';
 
 const SECOND = 1_000_000;
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -223,23 +223,9 @@ describe('render-host media execution', () => {
     ).rejects.toThrow(/resolved media content is unavailable/);
   });
 
-  it('default driver creates an offline page and paints frames through it before export', async () => {
-    const calls: string[] = [];
-    const pageEvents: string[] = [];
+  it('fails closed instead of verifying a synthetic export for unsupported scene inputs', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-driver-'));
     const outputPath = join(directory, 'driver-output.mp4');
-    const spy = vi.spyOn(renderPage, 'createOfflineRenderHostTransport');
-    const pageSpy = vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
-      paint(input) {
-        pageEvents.push(`paint:${input.plan.frame.timeUs}`);
-        return new Uint8Array(
-          input.plan.frame.viewport.width * input.plan.frame.viewport.height * 4,
-        ).fill(0x40);
-      },
-      destroy() {
-        pageEvents.push('destroy');
-      },
-    });
     const driver = createPinnedOfflineRenderHostDriver();
     const request = {
       protocolVersion: 1 as const,
@@ -247,7 +233,6 @@ describe('render-host media execution', () => {
       outputPath,
       mediaResolver: {
         require(opaqueRef: string) {
-          calls.push(opaqueRef);
           if (opaqueRef.startsWith('html-scene:'))
             return { kind: 'html-scene' as const, packageId: 'joy.firstparty.title' };
           return { kind: 'file' as const, path: THIS_FILE };
@@ -256,17 +241,81 @@ describe('render-host media execution', () => {
           return { opaqueRef };
         },
       },
-      frameLimit: 1,
     };
 
-    const result = await driver.export(request);
+    await expect(driver.export(request)).rejects.toThrow(/source-backed export is unavailable/);
+    expect(() => readFileSync(outputPath)).toThrow();
+  });
 
-    expect(spy).toHaveBeenCalled();
-    expect(pageSpy).toHaveBeenCalled();
-    expect(pageEvents).toEqual(['paint:0', 'destroy']);
-    expect(result).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
-    expect(JSON.stringify(result)).not.toContain(outputPath);
-    expect(calls).toEqual(expect.arrayContaining(['asset:video-a', 'asset:image-a']));
+  it('decodes a contiguous file-backed clip and preserves its source picture', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-render-host-source-'));
+    const sourcePath = join(directory, 'source.mp4');
+    const outputPath = join(directory, 'source-output.mp4');
+    const generated = spawnSync(
+      'ffmpeg',
+      [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=red:s=64x36:r=30',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=880:sample_rate=48000',
+        '-t',
+        '1',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        sourcePath,
+      ],
+      { shell: false, encoding: 'utf8' },
+    );
+    expect(generated.status).toBe(0);
+    const driver = createPinnedOfflineRenderHostDriver();
+    const result = await driver.export({
+      protocolVersion: 1,
+      bundle: sourceBackedBundle(),
+      outputPath,
+      mediaResolver: {
+        require() {
+          return { kind: 'file' as const, path: sourcePath };
+        },
+        describe(opaqueRef) {
+          return { opaqueRef };
+        },
+      },
+    });
+    expect(result).toMatchObject({ frames: 30, videoCodec: 'h264', audioCodec: 'aac' });
+    const frame = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        outputPath,
+        '-frames:v',
+        '1',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { shell: false },
+    );
+    expect(frame.status).toBe(0);
+    const pixels = frame.stdout as Buffer;
+    const red = pixels.reduce((sum, value, index) => (index % 3 === 0 ? sum + value : sum), 0);
+    const green = pixels.reduce((sum, value, index) => (index % 3 === 1 ? sum + value : sum), 0);
+    expect(red / (pixels.length / 3)).toBeGreaterThan(180);
+    expect(green / (pixels.length / 3)).toBeLessThan(80);
   });
 });
 
@@ -283,6 +332,38 @@ function renderBundle() {
     outputPreset: 'social-h264-aac',
     seed: 'render-host-test',
   });
+}
+
+function sourceBackedBundle() {
+  const bundle = renderBundle();
+  const timeline = bundle.timelineProject.compositions.root!;
+  const visual = bundle.visualProject.compositions.root!;
+  return {
+    ...bundle,
+    timelineProject: {
+      ...bundle.timelineProject,
+      compositions: {
+        root: {
+          ...timeline,
+          durationUs: SECOND,
+          tracks: timeline.tracks.map((track) => ({
+            ...track,
+            clips: track.clips.map((clip) => ({ ...clip, durationUs: SECOND, sourceInUs: 0 })),
+          })),
+        },
+      },
+    },
+    visualProject: {
+      ...bundle.visualProject,
+      compositions: {
+        root: { ...visual, durationUs: SECOND },
+      },
+      visualObjects: {},
+      captionDocuments: {},
+      pluginData: {},
+      transitions: [],
+    },
+  };
 }
 
 function timelineProject(): SpikeProject {

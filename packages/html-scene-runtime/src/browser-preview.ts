@@ -11,6 +11,7 @@ import {
   validateScenePreviewEvent,
 } from './preview-protocol.js';
 import type { ScenePreviewSurface } from './preview-protocol.js';
+import type { ScenePreviewMessage } from './preview-protocol.js';
 import { resolveSceneVariables } from './variables.js';
 
 export interface SceneSurfaceBitmap {
@@ -24,10 +25,7 @@ export interface ScenePreviewHost {
   readonly iframe: HTMLIFrameElement;
   readonly session: ScenePreviewSession;
   readonly ready: Promise<void>;
-  update(
-    timeUs: number,
-    variables: Readonly<Record<string, string | number | boolean>>,
-  ): boolean;
+  update(timeUs: number, variables: Readonly<Record<string, string | number | boolean>>): boolean;
   capture(width: number, height: number, timeoutMs?: number): Promise<SceneSurfaceBitmap>;
   destroy(): void;
 }
@@ -152,7 +150,7 @@ export function createScenePreviewHost(options: {
   parent.appendChild(iframe);
 
   const sessionEndpoint = {
-    postMessage(message: import('./preview-protocol.js').ScenePreviewMessage, _targetOrigin: '*'): void {
+    postMessage(message: ScenePreviewMessage, _targetOrigin: '*'): void {
       iframe.contentWindow?.postMessage(message, '*');
     },
   };
@@ -270,8 +268,4 @@ export function viewportForScene(scenePackageId: string): { width: number; heigh
   return scene?.manifest.viewport ?? { width: 1080, height: 1920 };
 }
 
-export {
-  findFirstPartyScene,
-  resolveFirstPartySceneInstance,
-  type FirstPartyScenePackage,
-};
+export { findFirstPartyScene, resolveFirstPartySceneInstance, type FirstPartyScenePackage };

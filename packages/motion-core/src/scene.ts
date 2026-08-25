@@ -5,8 +5,6 @@
  * into DOM/CSS at render time (not stored as raw HTML).
  */
 
-import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
-
 /* ─── Basic units ─── */
 
 export type MotionLayerId = string;
@@ -103,10 +101,22 @@ export type MotionFilter =
 /* ─── Blend mode ─── */
 
 export type BlendMode =
-  | 'normal' | 'multiply' | 'screen' | 'overlay'
-  | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
-  | 'hard-light' | 'soft-light' | 'difference' | 'exclusion'
-  | 'hue' | 'saturation' | 'color' | 'luminosity';
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion'
+  | 'hue'
+  | 'saturation'
+  | 'color'
+  | 'luminosity';
 
 /* ─── Transform ─── */
 
@@ -130,12 +140,20 @@ export interface MotionTransform {
 }
 
 export const DEFAULT_TRANSFORM: MotionTransform = {
-  x: 0, y: 0, z: 0,
-  width: 0, height: 0,
-  scaleX: 1, scaleY: 1,
-  rotationDeg: 0, rotationXDeg: 0, rotationYDeg: 0,
-  skewX: 0, skewY: 0,
-  transformOriginX: '50%', transformOriginY: '50%',
+  x: 0,
+  y: 0,
+  z: 0,
+  width: 0,
+  height: 0,
+  scaleX: 1,
+  scaleY: 1,
+  rotationDeg: 0,
+  rotationXDeg: 0,
+  rotationYDeg: 0,
+  skewX: 0,
+  skewY: 0,
+  transformOriginX: '50%',
+  transformOriginY: '50%',
   perspective: 0,
   opacity: 1,
 };
@@ -145,7 +163,8 @@ export const DEFAULT_TRANSFORM: MotionTransform = {
 export type FlexDirection = 'row' | 'column';
 export type FlexWrap = 'nowrap' | 'wrap';
 export type FlexAlign = 'flex-start' | 'center' | 'flex-end' | 'stretch' | 'baseline';
-export type FlexJustify = 'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around' | 'space-evenly';
+export type FlexJustify =
+  'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around' | 'space-evenly';
 
 export interface FlexLayout {
   readonly direction: FlexDirection;
@@ -221,10 +240,20 @@ export const DEFAULT_TYPOGRAPHY: MotionTypography = {
 /* ─── Easing ─── */
 
 export type MotionEasingName =
-  | 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
-  | 'cubic' | 'quart' | 'quint' | 'expo'
-  | 'back' | 'bounce' | 'elastic'
-  | 'steps' | 'spring';
+  | 'linear'
+  | 'ease'
+  | 'ease-in'
+  | 'ease-out'
+  | 'ease-in-out'
+  | 'cubic'
+  | 'quart'
+  | 'quint'
+  | 'expo'
+  | 'back'
+  | 'bounce'
+  | 'elastic'
+  | 'steps'
+  | 'spring';
 
 export interface CubicBezierEasing {
   readonly kind: 'cubic-bezier';
@@ -235,8 +264,7 @@ export interface CubicBezierEasing {
 }
 
 export type MotionEasing =
-  | { readonly kind: 'builtin'; readonly name: MotionEasingName }
-  | CubicBezierEasing;
+  { readonly kind: 'builtin'; readonly name: MotionEasingName } | CubicBezierEasing;
 
 /* ─── Keyframe ─── */
 
@@ -279,7 +307,11 @@ export interface MotionLayer {
   readonly borderRadius: readonly [number, number, number, number];
   readonly mask?: MotionMask;
   readonly overflow: 'visible' | 'hidden';
-  readonly layout: { readonly mode: LayoutMode; readonly flex?: FlexLayout; readonly grid?: GridLayout };
+  readonly layout: {
+    readonly mode: LayoutMode;
+    readonly flex?: FlexLayout;
+    readonly grid?: GridLayout;
+  };
   readonly typography?: MotionTypography;
   readonly text?: string;
   readonly assetId?: string;
@@ -295,7 +327,15 @@ export interface MotionLayer {
 /* ─── Scene background ─── */
 
 export interface SceneBackground {
-  readonly kind: 'transparent' | 'solid' | 'gradient' | 'image' | 'video' | 'animated-gradient' | 'noise' | 'particles';
+  readonly kind:
+    | 'transparent'
+    | 'solid'
+    | 'gradient'
+    | 'image'
+    | 'video'
+    | 'animated-gradient'
+    | 'noise'
+    | 'particles';
   readonly color?: string;
   readonly gradient?: GradientFill;
   readonly assetId?: string;
@@ -310,9 +350,16 @@ export interface SceneBackground {
 /* ─── Variable ─── */
 
 export type MotionVariableType =
-  | 'color' | 'number' | 'string' | 'boolean'
-  | 'font' | 'duration' | 'easing' | 'gradient'
-  | 'shadow' | 'spacing';
+  | 'color'
+  | 'number'
+  | 'string'
+  | 'boolean'
+  | 'font'
+  | 'duration'
+  | 'easing'
+  | 'gradient'
+  | 'shadow'
+  | 'spacing';
 
 export interface MotionVariable {
   readonly id: MotionVariableId;

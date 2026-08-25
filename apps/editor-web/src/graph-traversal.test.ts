@@ -7,12 +7,7 @@ import { isTraversalKey, traverseGraph, type TraversalGraph } from './graph-trav
  */
 function forkGraph(): TraversalGraph {
   return {
-    nodes: [
-      { id: 'source' },
-      { id: 'colour' },
-      { id: 'audio' },
-      { id: 'gate' },
-    ],
+    nodes: [{ id: 'source' }, { id: 'colour' }, { id: 'audio' }, { id: 'gate' }],
     edges: [
       { from: 'source', to: 'colour' },
       { from: 'source', to: 'audio' },

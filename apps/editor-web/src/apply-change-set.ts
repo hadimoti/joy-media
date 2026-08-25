@@ -215,10 +215,7 @@ export function buildTimelineChangeSet(
   } catch (error) {
     return {
       applied: [],
-      unapplied: [
-        ...unapplied,
-        { targetId: '(timeline)', reason: (error as Error).message },
-      ],
+      unapplied: [...unapplied, { targetId: '(timeline)', reason: (error as Error).message }],
     };
   }
   return { transaction, applied, unapplied };
@@ -271,18 +268,13 @@ export function planChangeSet(
 
   return {
     document: documentResult.document,
-    ...(timelineResult.transaction === undefined
-      ? {}
-      : { timeline: timelineResult.transaction }),
+    ...(timelineResult.transaction === undefined ? {} : { timeline: timelineResult.transaction }),
     applied: [...documentResult.applied, ...timelineResult.applied],
     unapplied: [...documentResult.unapplied, ...timelineResult.unapplied],
   };
 }
 
-function applyCaptionTiming(
-  document: JoyProjectV1,
-  edit: ProposedEdit,
-): JoyProjectV1 | undefined {
+function applyCaptionTiming(document: JoyProjectV1, edit: ProposedEdit): JoyProjectV1 | undefined {
   const durationUs = numberParam(edit, 'durationUs');
   const startUs = numberParam(edit, 'startUs');
   if (durationUs === undefined && startUs === undefined) return undefined;

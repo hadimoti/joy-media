@@ -284,11 +284,7 @@ export async function registerPsdAssets(
     displayName: string,
   ): Promise<void> => {
     registeredIds.push(assetId);
-    try {
-      await registerBlob(options, assetId, blob, mimeType, displayName);
-    } catch (error) {
-      throw error;
-    }
+    await registerBlob(options, assetId, blob, mimeType, displayName);
   };
   const cleanup = async (): Promise<void> => {
     for (const assetId of [...registeredIds].reverse()) {

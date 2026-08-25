@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS media_assets (id text primary key, project_id text no
 ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS sort_name text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS media_derivatives (id text primary key, project_id text not null, asset_id text not null, kind text not null, profile text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, availability text not null, locations jsonb not null, verified_at timestamptz not null);
+CREATE TABLE IF NOT EXISTS render_artifacts (id text primary key, project_id text not null, job_id text not null unique, output_ref text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, location jsonb not null, verified_at timestamptz not null);
 CREATE TABLE IF NOT EXISTS production_runs (id text primary key, project_id text not null, run_key text not null, workflow_id text not null, workflow_version text not null, project_revision text not null, state text not null, checkpoint_revision integer not null, record jsonb not null, created_at timestamptz not null, updated_at timestamptz not null);
 CREATE TABLE IF NOT EXISTS production_run_events (id bigserial primary key, run_id text not null, project_id text not null, seq integer not null, type text not null, state text not null, event jsonb not null, created_at timestamptz not null);
 CREATE TABLE IF NOT EXISTS production_approvals (id bigserial primary key, run_id text not null, project_id text not null, approval_id text not null, node_id text not null, state text not null, approval jsonb not null, requested_seq integer not null, responded_seq integer, expires_at timestamptz);
@@ -43,6 +44,7 @@ CREATE INDEX IF NOT EXISTS jobs_lease_queue_idx ON jobs (state, lease_expires_at
 CREATE INDEX IF NOT EXISTS jobs_project_idx ON jobs (project_id, id);
 CREATE INDEX IF NOT EXISTS media_assets_project_idx ON media_assets (project_id, id);
 CREATE INDEX IF NOT EXISTS media_derivatives_asset_idx ON media_derivatives (project_id, asset_id, id);
+CREATE INDEX IF NOT EXISTS render_artifacts_project_idx ON render_artifacts (project_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS production_runs_project_run_key_idx ON production_runs (project_id, run_key);
 CREATE INDEX IF NOT EXISTS production_runs_project_state_idx ON production_runs (project_id, state, id);
 CREATE INDEX IF NOT EXISTS production_runs_project_id_idx ON production_runs (project_id, id);

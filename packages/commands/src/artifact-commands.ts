@@ -40,7 +40,10 @@ export interface ArtifactStore {
 export const EMPTY_ARTIFACT_STORE: ArtifactStore = { artifacts: {}, versions: {} };
 
 export type ArtifactCommand =
-  | { readonly type: 'artifact.create'; readonly payload: { readonly artifact: CreativeArtifactV2 } }
+  | {
+      readonly type: 'artifact.create';
+      readonly payload: { readonly artifact: CreativeArtifactV2 };
+    }
   | { readonly type: 'artifact.delete'; readonly payload: { readonly artifactId: string } }
   | {
       readonly type: 'artifact.update';

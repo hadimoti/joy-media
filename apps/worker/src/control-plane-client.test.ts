@@ -95,6 +95,49 @@ describe('WorkerControlPlaneClient', () => {
     expect(saved).toBe(false);
   });
 
+  it('uploads render.export bytes on the artifact route with receipt-bound headers', async () => {
+    const requests: Array<{
+      readonly pathname: string;
+      readonly headers: Headers;
+      readonly body: Uint8Array;
+    }> = [];
+    let session: string | undefined = 'worker-session';
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir/api',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => session,
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => {
+          session = undefined;
+        },
+      },
+      fetch: async (input, init) => {
+        requests.push({
+          pathname: new URL(String(input)).pathname,
+          headers: new Headers(init?.headers),
+          body: new Uint8Array((init?.body as Uint8Array) ?? []),
+        });
+        return response(201, { data: {} });
+      },
+    });
+    const bytes = new Uint8Array([1, 2, 3]);
+    await client.uploadRenderArtifact(
+      'job-1',
+      {
+        kind: 'render.export',
+        outputRef: 'render-job-1-aaaaaaaaaaaaaaaa',
+        sha256: 'a'.repeat(64),
+        bytes: bytes.length,
+      },
+      bytes,
+    );
+    expect(requests[0]?.pathname).toBe('/api/v1/workers/worker-1/jobs/job-1/artifact');
+    expect(requests[0]?.headers.get('content-type')).toBe('video/mp4');
+    expect(requests[0]?.headers.get('x-joy-output-ref')).toBe('render-job-1-aaaaaaaaaaaaaaaa');
+    expect(requests[0]?.body).toEqual(bytes);
+  });
+
   it('clears a revoked Worker session after a 401 response', async () => {
     let session: string | undefined = 'revoked-session';
     const client = new WorkerControlPlaneClient({

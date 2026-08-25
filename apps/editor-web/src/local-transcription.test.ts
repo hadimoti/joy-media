@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderUnavailableError } from '@joy-media/provider-sdk';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
+import type { BrowserControlPlaneClient } from './control-plane-client.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 
-describe('transcribeReferenceCaption (live + fixture fallback)', () => {
+describe('transcribeReferenceCaption (live, fail-closed)', () => {
   it('uses the live API result when transcription succeeds', async () => {
     const client = {
       async transcribeSpeech() {
@@ -33,49 +33,29 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
     expect(Object.values(document.words).map((word) => word.text)).toEqual(['زنده']);
   });
 
-  it('falls back to the Persian fixture when the live API fails', async () => {
+  it('fails closed when the live API is unavailable instead of returning fixture words', async () => {
     const client = {
       async transcribeSpeech() {
         throw new Error('AUTH_REQUIRED');
       },
     } as unknown as BrowserControlPlaneClient;
 
-    const document = await transcribeReferenceCaption('caption-fa', 'fa-IR', client);
-    expect(document.language).toBe('fa-IR');
-    expect(document.segments).toHaveLength(1);
-    expect(Object.values(document.words).map((word) => word.text)).toEqual([
-      'سلام',
-      'به',
-      'استودیوی',
-      'جوی',
-      'خوش',
-      'آمدید',
-    ]);
-    expect(document.provenance).toMatchObject({
-      providerId: 'joy.local-whisper',
-      modelId: 'fixture-whisper-fa-v1',
+    await expect(transcribeReferenceCaption('caption-fa', 'fa-IR', client)).rejects.toMatchObject({
+      name: 'ProviderUnavailableError',
+      message: expect.stringContaining('Live transcription is unavailable'),
     });
   });
 
-  it('falls back to the English fixture when the live API fails', async () => {
+  it('preserves the provider error class for an English failure', async () => {
     const client = {
       async transcribeSpeech() {
         throw new Error('offline');
       },
     } as unknown as BrowserControlPlaneClient;
 
-    const document = await transcribeReferenceCaption('caption-en', 'en-US', client);
-    expect(document.language).toBe('en-US');
-    expect(Object.values(document.words).map((word) => word.text)).toEqual([
-      'Welcome',
-      'to',
-      'the',
-      'JOY',
-      'Media',
-      'studio',
-    ]);
-    expect(document.provenance).toMatchObject({
-      modelId: 'fixture-whisper-en-v1',
+    await expect(transcribeReferenceCaption('caption-en', 'en-US', client)).rejects.toMatchObject({
+      name: 'ProviderUnavailableError',
+      message: expect.stringContaining('Live transcription is unavailable'),
     });
   });
 

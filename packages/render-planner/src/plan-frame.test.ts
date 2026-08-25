@@ -89,6 +89,7 @@ describe('planRenderFrame', () => {
       seed: 'missing',
     }).assets;
     const { ['video-a']: _removed, ...withoutVideo } = descriptors;
+    void _removed;
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject: timelineProject(),

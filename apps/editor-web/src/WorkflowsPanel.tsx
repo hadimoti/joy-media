@@ -13,6 +13,7 @@ import {
   getFirstPartyWorkflowVersion,
   detectDerivedFrom,
 } from './first-party-workflows.js';
+import { getProductionFirstPartyLibraryStatus } from './first-party-handlers.js';
 import type { WorkflowRunOutcome } from './workflow-runner.js';
 import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon, CloseIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
@@ -163,6 +164,7 @@ export function WorkflowsPanel({
 
   const systemWorkflows = loadFirstPartyWorkflows();
   const systemWorkflowVersion = getFirstPartyWorkflowVersion();
+  const systemLibraryStatus = getProductionFirstPartyLibraryStatus();
 
   function applyOutcome(outcome: WorkflowRunOutcome): void {
     if (outcome.status === 'waiting_for_input') {
@@ -313,17 +315,27 @@ export function WorkflowsPanel({
             {entry.label} · v{entry.workflow.version} · {entry.requiredPorts.length} required ports
           </span>
           <span title={entry.approvals.join(', ')}>{entry.summary}</span>
+          {!systemLibraryStatus.available && (
+            <span className="workflow-status-hint">
+              {systemLibraryStatus.label}: {systemLibraryStatus.reason}
+            </span>
+          )}
         </div>
         <div className="workflow-row-actions">
           <button
             className="icon-button"
+            disabled={!systemLibraryStatus.available}
             onClick={() =>
               hasInputs
                 ? openRunModal(entry.workflow.id)
                 : void onRun(entry.workflow.id, {}).then(applyOutcome)
             }
             aria-label={`Run ${entry.workflow.name}`}
-            title="Start production workflow run"
+            title={
+              systemLibraryStatus.available
+                ? 'Start production workflow run'
+                : `${systemLibraryStatus.label}: ${systemLibraryStatus.recovery}`
+            }
           >
             <PlayIcon />
           </button>
@@ -435,6 +447,12 @@ export function WorkflowsPanel({
               v{systemWorkflowVersion}
             </span>
           </div>
+          {!systemLibraryStatus.available && (
+            <p className="workflow-status-hint" role="status">
+              {systemLibraryStatus.label}: {systemLibraryStatus.reason}{' '}
+              {systemLibraryStatus.recovery}
+            </p>
+          )}
           <ul className="workflow-list">{systemWorkflows.map((wf) => renderSystemRow(wf))}</ul>
         </>
       )}

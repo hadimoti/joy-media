@@ -25,6 +25,23 @@ export function hasAiCapability(worker: BrowserWorker): boolean {
   return AI_CAPS.some((cap) => worker.capabilities.includes(cap));
 }
 
+export function workerSummary(
+  workers: readonly BrowserWorker[],
+  now = Date.now(),
+): {
+  readonly connected: number;
+  readonly paired: number;
+  readonly revoked: number;
+} {
+  return {
+    connected: workers.filter((worker) => workerPresence(worker, now) === 'connected').length,
+    // Paired means visible/non-revoked; connectivity is reported separately
+    // because a paired Worker can be disconnected while still actionable.
+    paired: workers.filter((worker) => !worker.revoked).length,
+    revoked: workers.filter((worker) => workerPresence(worker, now) === 'revoked').length,
+  };
+}
+
 export function projectJobStatus(
   projectMissing: boolean,
   workers: readonly BrowserWorker[],

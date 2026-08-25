@@ -129,7 +129,7 @@ export function ContactSheetApproval({
   function submitDecision(action: ContactSheetApprovalAction): void {
     const result = contactSheetApprovalDecisionFor(action, {
       kind: request.kind,
-      approvalId,
+      ...(approvalId === undefined ? {} : { approvalId }),
       selectedItems,
       rejectionReason,
     });

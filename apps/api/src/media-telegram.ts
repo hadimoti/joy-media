@@ -9,8 +9,7 @@ export interface MediaTelegramSenderLike {
 }
 
 /** Logo sticker from owner; file_id is per-bot — failures are non-fatal. */
-const OTP_LOGO_STICKER_FILE_ID =
-  'CAACAgQAAxkBAAFQhQ1qawkzrgwBMqsn8vR8GSLNjwJpugACKR8AAmEkWFM';
+const OTP_LOGO_STICKER_FILE_ID = 'CAACAgQAAxkBAAFQhQ1qawkzrgwBMqsn8vR8GSLNjwJpugACKR8AAmEkWFM';
 const OTP_PREMIUM_EMOJI_ID = '6003380332865262018';
 
 /**

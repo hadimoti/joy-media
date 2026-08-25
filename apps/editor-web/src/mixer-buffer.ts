@@ -11,7 +11,12 @@ export interface MixerClipSource {
   readonly samples: Float32Array;
 }
 
-function applyFade(samples: Float32Array, fadeInUs: number, fadeOutUs: number, sampleRate: number): Float32Array {
+function applyFade(
+  samples: Float32Array,
+  fadeInUs: number,
+  fadeOutUs: number,
+  sampleRate: number,
+): Float32Array {
   const result = new Float32Array(samples);
   const fadeInSamples = Math.floor((fadeInUs * sampleRate) / 1_000_000);
   const fadeOutSamples = Math.floor((fadeOutUs * sampleRate) / 1_000_000);
@@ -60,7 +65,12 @@ export function buildMixerBuffer(
       readonly fadeOutUs?: number;
     }
   >,
-  buses: readonly { readonly id: string; readonly gain: number; readonly pan: number; readonly mute: boolean }[],
+  buses: readonly {
+    readonly id: string;
+    readonly gain: number;
+    readonly pan: number;
+    readonly mute: boolean;
+  }[],
   durationUs: number,
   sampleRate: number,
 ): Float32Array {

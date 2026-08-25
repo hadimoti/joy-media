@@ -25,7 +25,11 @@ import type { SpikeCommand } from '@joy-media/commands';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { loadWorkflow, resolveParameterizedValue } from './workflow-recorder.js';
 import { getFirstPartyWorkflow } from './first-party-workflows.js';
-import { createProductionFirstPartyLibrary } from './first-party-handlers.js';
+import {
+  createProductionFirstPartyLibrary,
+  getProductionFirstPartyLibraryStatus,
+  isProductionFirstPartyLibrary,
+} from './first-party-handlers.js';
 
 interface NodeRunResult {
   readonly nodeId: string;
@@ -459,6 +463,16 @@ async function runFirstPartyWorkflow(
   options: WorkflowRunnerOptions = {},
 ): Promise<WorkflowRunOutcome> {
   const runId = newRunId(workflow.id);
+  const library = productionLibraryFor(options);
+  const libraryStatus = getProductionFirstPartyLibraryStatus();
+  if (isProductionFirstPartyLibrary(library) && !libraryStatus.available) {
+    return {
+      status: 'failed',
+      workflowId: workflow.id,
+      runId,
+      error: `${libraryStatus.label}: ${libraryStatus.reason} ${libraryStatus.recovery}`,
+    };
+  }
   const store = options.productionRunStore;
   if (store === undefined) {
     return {
@@ -491,7 +505,7 @@ async function runFirstPartyWorkflow(
     workflowInputs,
     store,
     authority,
-    { expectedRevision: 0, library: productionLibraryFor(options) },
+    { expectedRevision: 0, library },
   );
 }
 
@@ -553,6 +567,19 @@ export async function resumeWorkflow(
       runId,
       error: `Workflow run is not parked: ${record.state}`,
     };
+  }
+
+  const library = productionLibraryFor(options);
+  if (isProductionFirstPartyLibrary(library)) {
+    const status = getProductionFirstPartyLibraryStatus();
+    if (!status.available) {
+      return {
+        status: 'failed',
+        workflowId: record.workflowId,
+        runId,
+        error: `${status.label}: ${status.reason} ${status.recovery}`,
+      };
+    }
   }
 
   const workflow = resolveWorkflow(session, record.workflowId);
@@ -642,7 +669,7 @@ export async function resumeWorkflow(
     authority,
     {
       expectedRevision: record.checkpointRevision,
-      library: productionLibraryFor(options),
+      library,
       resumeFrom: record.checkpoint,
       humanInputs,
     },

@@ -4,7 +4,12 @@ import {
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
-import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import {
+  jobStateLabel,
+  projectJobStatus,
+  workerPresence,
+  workerSummary,
+} from './jobs-panel-state.js';
 import { CloseIcon, PlusIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -81,10 +86,10 @@ export function JobsPanel({
     });
   }, [workers]);
 
-  const activeWorkers = sortedWorkers.filter((w) => !w.revoked);
+  const nonRevokedWorkers = sortedWorkers.filter((w) => !w.revoked);
   const revokedWorkers = sortedWorkers.filter((w) => w.revoked);
-  const visibleWorkers = showRevoked ? sortedWorkers : activeWorkers;
-  const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
+  const visibleWorkers = showRevoked ? sortedWorkers : nonRevokedWorkers;
+  const summary = workerSummary(workers);
 
   const pair = async () => {
     try {
@@ -192,7 +197,7 @@ export function JobsPanel({
           <div className="jobs-section-head">
             <h3>Workers</h3>
             <span className="jobs-section-meta">
-              {connectedCount} connected · {activeWorkers.length} active
+              {summary.connected} connected · {summary.paired} paired
             </span>
           </div>
           {visibleWorkers.length === 0 ? (
@@ -262,6 +267,13 @@ export function JobsPanel({
             <ul className="jobs-list">
               {jobs.map((job) => {
                 const reportRef = job.derivative?.reportRef ?? job.payload?.reportRef;
+                const renderArtifactId =
+                  job.type === 'render.export' &&
+                  job.state === 'completed' &&
+                  job.derivative?.kind === 'render.export' &&
+                  job.derivative.sha256 !== undefined
+                    ? `artifact-${job.id}-${job.derivative.sha256.slice(0, 16)}`
+                    : undefined;
                 return (
                   <li key={job.id} className={`job-${job.state}`}>
                     <div className="jobs-worker-row">
@@ -288,6 +300,21 @@ export function JobsPanel({
                         {job.error !== undefined && <p className="jobs-error">{job.error}</p>}
                       </div>
                       <div className="jobs-inline-actions">
+                        {renderArtifactId !== undefined && (
+                          <button
+                            type="button"
+                            className="jobs-download-action"
+                            aria-label={`Download MP4 for job ${job.id}`}
+                            onClick={() =>
+                              void client
+                                .renderArtifactBytes(projectId, renderArtifactId)
+                                .then((blob) => downloadBlob(blob, `${job.id}.mp4`))
+                                .catch(report)
+                            }
+                          >
+                            Download MP4
+                          </button>
+                        )}
                         {(job.state === 'queued' || job.state === 'leased') && (
                           <button
                             type="button"
@@ -399,4 +426,15 @@ function jobLabel(type: string): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  // Let the browser resolve the download navigation before releasing the
+  // object URL. Revoking synchronously can cancel downloads in Chromium.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

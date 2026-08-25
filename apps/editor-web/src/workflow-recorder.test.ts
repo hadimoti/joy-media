@@ -91,7 +91,9 @@ describe('workflow-recorder', () => {
     const node = workflow.nodes[0];
     expect(node).toBeDefined();
 
-    const commands = (node!.params.commands as Readonly<{ readonly tool: string; readonly arguments: Record<string, unknown> }[]> | undefined);
+    const commands = node!.params.commands as
+      | Readonly<{ readonly tool: string; readonly arguments: Record<string, unknown> }[]>
+      | undefined;
     expect(commands).toHaveLength(1);
     const args = commands![0]!.arguments;
 

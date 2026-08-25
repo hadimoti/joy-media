@@ -148,7 +148,7 @@ export function productionBoardNextRunId(
 }
 
 export function productionBoardPrimaryRunId(
-  model: Pick<ProductionBoardModel, 'runs'>,
+  model: { readonly runs: readonly Pick<ProductionBoardRunProjection, 'runId'>[] },
   selectedRunId?: string,
 ): string | undefined {
   if (model.runs.length === 0) return undefined;

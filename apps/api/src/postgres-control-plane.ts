@@ -22,6 +22,8 @@ import {
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDerivativeRecord,
+  type RenderArtifactRecord,
+  type WorkerRenderArtifactRegistration,
   type Job,
   type JobEvent,
   type LocalGpuWorkerReceipt,
@@ -36,6 +38,7 @@ import {
   validateCloudDerivativeRegistration,
   validateLocalDerivativeRegistration,
   validateSortName,
+  validateWorkerRenderArtifactRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 import {
@@ -133,6 +136,18 @@ interface MediaDerivativeRow {
   readonly descriptor: unknown;
   readonly availability: MediaDerivativeRecord['availability'];
   readonly locations: unknown;
+  readonly verified_at: Date;
+}
+
+interface RenderArtifactRow {
+  readonly id: string;
+  readonly project_id: string;
+  readonly job_id: string;
+  readonly output_ref: string;
+  readonly sha256: string;
+  readonly byte_length: string | number;
+  readonly descriptor: unknown;
+  readonly location: unknown;
   readonly verified_at: Date;
 }
 
@@ -503,6 +518,76 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     return derivative;
   }
 
+  async registerWorkerRenderArtifact(
+    workerId: string,
+    jobId: string,
+    artifact: WorkerRenderArtifactRegistration,
+    now = Date.now(),
+  ): Promise<RenderArtifactRecord> {
+    validateWorkerRenderArtifactRegistration(artifact);
+    return this.transaction(async (client) => {
+      const lease = await client.query<{
+        readonly project_id: string;
+        readonly type: string;
+        readonly owner_id: string;
+        readonly revoked_at: Date | null;
+      }>(
+        `SELECT jobs.project_id, jobs.type, workers.owner_id, workers.revoked_at
+         FROM jobs JOIN workers ON workers.id = jobs.lease_owner
+         JOIN projects ON projects.id = jobs.project_id AND projects.owner_id = workers.owner_id
+         WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
+           AND jobs.lease_expires_at > $3`,
+        [jobId, workerId, new Date(now)],
+      );
+      const row = lease.rows[0];
+      if (row === undefined || row.type !== 'render.export' || row.revoked_at !== null)
+        throw new ControlPlaneError('ARTIFACT_UPLOAD_DENIED', jobId);
+      try {
+        const inserted = await client.query<RenderArtifactRow>(
+          `INSERT INTO render_artifacts
+             (id, project_id, job_id, output_ref, sha256, byte_length, descriptor, location, verified_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
+           RETURNING *`,
+          [
+            artifact.id,
+            row.project_id,
+            jobId,
+            artifact.outputRef,
+            artifact.sha256,
+            artifact.bytes,
+            JSON.stringify(artifact.descriptor),
+            JSON.stringify(artifact.location),
+            new Date(now),
+          ],
+        );
+        return renderArtifactOf(requiredRow(inserted.rows[0], 'ARTIFACT_CREATE_FAILED'));
+      } catch (error) {
+        throw databaseError(error, 'ARTIFACT_EXISTS', artifact.id);
+      }
+    });
+  }
+
+  async renderArtifactForOwner(
+    actor: Actor,
+    projectId: string,
+    artifactId: string,
+  ): Promise<RenderArtifactRecord> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<RenderArtifactRow>(
+      `SELECT artifacts.* FROM render_artifacts AS artifacts
+       JOIN jobs ON jobs.id = artifacts.job_id
+       WHERE artifacts.id = $1 AND artifacts.project_id = $2
+         AND jobs.state = 'completed' AND jobs.type = 'render.export'
+         AND jobs.result_sha256 = artifacts.sha256
+         AND jobs.result_bytes = artifacts.byte_length
+         AND jobs.result_receipt->>'outputRef' = artifacts.output_ref`,
+      [artifactId, projectId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ARTIFACT_NOT_FOUND', artifactId);
+    return renderArtifactOf(row);
+  }
+
   async pairWorker(actor: Actor, workerId: string): Promise<WorkerRecord> {
     assertActor(actor);
     const result = await this.pool.query<WorkerRow>(
@@ -816,6 +901,16 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     }
     if (receipt !== undefined && !isWorkerReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (leasedJob?.type === 'render.export') {
+      if (receipt === undefined || !isRenderExportReceipt(receipt))
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+      const artifact = await this.pool.query<{ readonly id: string }>(
+        `SELECT id FROM render_artifacts
+         WHERE job_id = $1 AND output_ref = $2 AND sha256 = $3 AND byte_length = $4`,
+        [jobId, receipt.outputRef, receipt.sha256, receipt.bytes],
+      );
+      if (artifact.rows[0] === undefined) throw new ControlPlaneError('RESULT_INVALID', jobId);
+    }
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const isMediaAi = receipt?.kind === 'video.runway' || receipt?.kind === 'edit.higgsfield';
@@ -921,6 +1016,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
         [jobId, projectId],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+      await client.query('DELETE FROM render_artifacts WHERE job_id = $1', [jobId]);
       await this.event(client, jobId, 'retried', now);
       return jobOf(result.rows[0]);
     });
@@ -1241,6 +1337,26 @@ function mediaDerivativeOf(row: MediaDerivativeRow): MediaDerivativeRecord {
   };
 }
 
+function renderArtifactOf(row: RenderArtifactRow): RenderArtifactRecord {
+  const descriptor = jsonObject(row.descriptor);
+  if (descriptor.mimeType !== 'video/mp4')
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored render artifact MIME is invalid');
+  const location = jsonObject(row.location);
+  if (location.kind !== 'private-object' || typeof location.ref !== 'string')
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored render artifact location is invalid');
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    jobId: row.job_id,
+    outputRef: row.output_ref,
+    sha256: row.sha256,
+    bytes: safeByteLength(row.byte_length),
+    descriptor: { mimeType: 'video/mp4' },
+    location: { kind: 'private-object', ref: location.ref },
+    verifiedAt: row.verified_at.getTime(),
+  };
+}
+
 function safeByteLength(value: string | number): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result < 1)
@@ -1390,6 +1506,19 @@ function isRenderReceipt(value: WorkerResultReceipt): boolean {
     /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
     Number.isSafeInteger(value.findings) &&
     value.findings >= 0
+  );
+}
+
+function isRenderExportReceipt(
+  value: WorkerResultReceipt,
+): value is Extract<WorkerResultReceipt, { readonly kind: 'render.export' }> {
+  return (
+    value.kind === 'render.export' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.outputRef) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0
   );
 }
 

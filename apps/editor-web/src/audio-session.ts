@@ -4,7 +4,7 @@
  */
 
 import type { AudioState } from '@joy-media/commands';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, JsonValue } from '@joy-media/project-schema';
 
 const KEY = (projectId: string) => `joy-media.audio-graph.v1.${projectId}`;
 
@@ -55,7 +55,7 @@ export function withProjectAudio(project: JoyProjectV1, state: AudioState): JoyP
       effects: state.effects.map((effect) => ({
         id: effect.id,
         targetId: effect.targetId,
-        effect: effect.effect as unknown as import('@joy-media/project-schema').JsonValue,
+        effect: effect.effect as unknown as JsonValue,
       })),
     },
     updatedAt: new Date().toISOString(),

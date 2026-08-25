@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TransitionShaderEntry } from '@joy-media/transition-shaders';
-import { getTransitionShader } from '@joy-media/transition-shaders';
 
 const TRANSITION_A = '/transitions/preview/transition1.png';
 const TRANSITION_B = '/transitions/preview/transition2.png';
@@ -11,17 +10,16 @@ let loadPromise: Promise<readonly [HTMLImageElement, HTMLImageElement]> | null =
 
 function loadSharedImages(): Promise<readonly [HTMLImageElement, HTMLImageElement]> {
   if (loadPromise !== null) return loadPromise;
-  loadPromise = Promise.all([
-    loadImage(TRANSITION_A),
-    loadImage(TRANSITION_B),
-  ]).then(([a, b]) => {
-    sharedImageA = a;
-    sharedImageB = b;
-    return [a, b] as const;
-  }).catch((error) => {
-    loadPromise = null;
-    throw error;
-  });
+  loadPromise = Promise.all([loadImage(TRANSITION_A), loadImage(TRANSITION_B)])
+    .then(([a, b]) => {
+      sharedImageA = a;
+      sharedImageB = b;
+      return [a, b] as const;
+    })
+    .catch((error) => {
+      loadPromise = null;
+      throw error;
+    });
   return loadPromise;
 }
 
@@ -54,29 +52,34 @@ export function TransitionPreviewCard({ entry, isActive }: TransitionPreviewCard
         setLoaded(true);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const paint = useCallback((time: number) => {
-    const canvas = canvasRef.current;
-    if (canvas === null || sharedImageA === null || sharedImageB === null) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx === null) return;
-    const w = canvas.width;
-    const h = canvas.height;
+  const paint = useCallback(
+    (time: number) => {
+      const canvas = canvasRef.current;
+      if (canvas === null || sharedImageA === null || sharedImageB === null) return;
+      const ctx = canvas.getContext('2d');
+      if (ctx === null) return;
+      const w = canvas.width;
+      const h = canvas.height;
 
-    if (startRef.current === 0) startRef.current = time;
-    const elapsed = time - startRef.current;
-    const DURATION = 2400;
-    const progress = (elapsed % DURATION) / DURATION;
+      if (startRef.current === 0) startRef.current = time;
+      const elapsed = time - startRef.current;
+      const DURATION = 2400;
+      const progress = (elapsed % DURATION) / DURATION;
 
-    ctx.clearRect(0, 0, w, h);
-    drawTransition(ctx, entry.id, sharedImageA, sharedImageB, progress, w, h);
+      ctx.clearRect(0, 0, w, h);
+      drawTransition(ctx, entry.id, sharedImageA, sharedImageB, progress, w, h);
 
-    if (isActive) {
-      rafRef.current = requestAnimationFrame(paint);
-    }
-  }, [entry.id, isActive]);
+      if (isActive) {
+        rafRef.current = requestAnimationFrame(paint);
+      }
+    },
+    [entry.id, isActive],
+  );
 
   useEffect(() => {
     if (!loaded || !isActive) return;
@@ -122,10 +125,16 @@ function drawTransition(
   w: number,
   h: number,
 ) {
-  const t = progress < 0.19 ? 0 :
-    progress < 0.50 ? (progress - 0.19) / 0.31 :
-    progress < 0.69 ? 1 :
-    progress < 1.0 ? (1.0 - progress) / 0.31 : 0;
+  const t =
+    progress < 0.19
+      ? 0
+      : progress < 0.5
+        ? (progress - 0.19) / 0.31
+        : progress < 0.69
+          ? 1
+          : progress < 1.0
+            ? (1.0 - progress) / 0.31
+            : 0;
 
   const forward = progress < 0.69;
 
@@ -199,7 +208,6 @@ function drawTransition(
   }
 
   if (id === 'gl:CrossZoom') {
-    const scale = 1 + t * 0.5;
     ctx.globalAlpha = 1 - t;
     ctx.save();
     ctx.translate(w / 2, h / 2);

@@ -38,6 +38,7 @@ template → one undoable unit."
 ## How `addHtmlSceneToSelectedClip` maps to template apply
 
 The existing pattern (App.tsx:1162–1273) is a three-step compound operation:
+
 1. `dispatchVisualObjects` with `htmlScene.create` — creates a
    `VisualObjectV1` of `kind: 'html-scene'`
 2. `dispatchTimeline` with `timeline.insertClip` (+ optionally
@@ -45,6 +46,7 @@ The existing pattern (App.tsx:1162–1273) is a three-step compound operation:
 3. `bindClipToObject` — binds clip → object in `pluginData['joy.clipObjects']`
 
 A content template's `html-scene` action mirrors this exactly, but:
+
 - IDs are derived from the seed (deterministic), not `Date.now()`
 - Duration is a fixed 5 seconds, not bound to the selected clip
 - Placement cascades (offset by 40px per scene) with non-overlapping time
@@ -63,6 +65,7 @@ A content template's `html-scene` action mirrors this exactly, but:
 ## Validation plan
 
 `apps/editor-web/src/content-template-transaction.test.ts` asserts:
+
 - Each html-scene action produces one visual object + one timeline clip + one binding
 - Multiple actions in one template batch into single dispatch calls
 - Seed determinism: same seed → same IDs

@@ -69,7 +69,7 @@ export async function executeLeasedExport(
 ): Promise<RenderExportReceiptV1> {
   const outputDirectory = options.outputDirectory ?? join(tmpdir(), 'joy-media-worker-exports');
   mkdirSync(outputDirectory, { recursive: true });
-  const outputPath = join(outputDirectory, `${opaqueSegment(jobId)}.mp4`);
+  const outputPath = renderExportOutputPath(outputDirectory, jobId);
   const renderHostDriver = options.renderHostDriver ?? createPinnedOfflineRenderHostDriver();
   try {
     const result = await renderHostDriver.export({
@@ -109,6 +109,11 @@ export async function executeLeasedExport(
     if (existsSync(outputPath)) rmSync(outputPath, { force: true });
     throw error;
   }
+}
+
+/** Returns the Worker-local retained path without exposing it to the API. */
+export function renderExportOutputPath(outputDirectory: string, jobId: string): string {
+  return join(outputDirectory, `${opaqueSegment(jobId)}.mp4`);
 }
 
 function rejectFailedDelivery(report: RenderReportV1): void {

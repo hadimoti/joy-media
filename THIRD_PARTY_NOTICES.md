@@ -14,8 +14,8 @@
 - Use: JOY Media text-object content fonts, selectable via the Motion Studio
   "Font Family" picker (`apps/editor-web/src/motion-studio/MotionStudioInspector.tsx`)
 - Files: `apps/editor-web/public/assets/fonts/{yekanbakh,vazin,tajrid,pulad,damoon,
-  bon,bonyadekoodak,shoor,aviny,katibeh,tahrir,stencil-898,radio,falsafeh,edameh,
-  paradox,gramophone,emkan-inline}/`, aggregated by `content-fonts.css`
+bon,bonyadekoodak,shoor,aviny,katibeh,tahrir,stencil-898,radio,falsafeh,edameh,
+paradox,gramophone,emkan-inline}/`, aggregated by `content-fonts.css`
 - Families: YekanBakh, Vazin, Tajrid, Pulad, Damoon Pro, Bon, Bonyade Koodak,
   Shoor Pro, Aviny, Katibeh, Tahrir, 898 Stencil, Radio, Falsafeh, Edameh Pro,
   Paradox, Gramophone, Emkan Inline

@@ -74,10 +74,7 @@ export function useAccessibleDialog(args: {
     if (!args.open) return;
     const container = args.containerRef.current;
     if (container === null) return;
-    const initialTarget = resolveDialogInitialFocusTarget(
-      container,
-      args.initialFocusSelector,
-    );
+    const initialTarget = resolveDialogInitialFocusTarget(container, args.initialFocusSelector);
     const frame = window.requestAnimationFrame(() => initialTarget.focus());
     const onKeyDown = (event: KeyboardEvent) => {
       const nodes = dialogFocusableElements(container);

@@ -490,6 +490,19 @@ export class BrowserControlPlaneClient {
     return response.blob();
   }
 
+  /** Fetches a verified Worker render artifact only from the authenticated Media API. */
+  async renderArtifactBytes(projectId: string, artifactId: string): Promise<Blob> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/render-artifacts/${encodeURIComponent(artifactId)}/content`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    );
+    if (response.status === 401 || response.status === 403)
+      throw new DerivativeAuthorityRevokedError();
+    if (!response.ok) throw new Error(`render artifact request failed (${response.status})`);
+    return response.blob();
+  }
+
   /** Live faster-whisper transcription (authenticated). Falls back is caller's job. */
   async transcribeSpeech(
     language: string,

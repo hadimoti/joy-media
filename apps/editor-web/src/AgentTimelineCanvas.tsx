@@ -135,12 +135,5 @@ export function AgentTimelineCanvas({
     ctx.fillRect(playheadX - PLAYHEAD_WIDTH / 2, 0, PLAYHEAD_WIDTH, height);
   }, [project, playheadUs, highlightedClipIds, pendingChanges, width, height]);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className="agent-timeline-canvas"
-    />
-  );
+  return <canvas ref={canvasRef} width={width} height={height} className="agent-timeline-canvas" />;
 }

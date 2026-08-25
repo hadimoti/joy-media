@@ -175,8 +175,10 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
         <ThreeDStudioHierarchy
           document={editor.document}
           assets={assets}
-          selectedObjectId={editor.selectedObjectId}
-          onSelect={editor.selectObject}
+          {...(editor.selectedObjectId === undefined
+            ? {}
+            : { selectedObjectId: editor.selectedObjectId })}
+          onSelect={(objectId) => editor.selectObject(objectId)}
           onAdd={addObject}
           onRemove={removeSelected}
         />
@@ -184,13 +186,17 @@ export function ThreeDStudioShell({ sceneId, assets = [], onClose }: ThreeDStudi
           <ThreeDStudioCanvas
             document={editor.document}
             assets={assets}
-            selectedObjectId={editor.selectedObjectId}
+            {...(editor.selectedObjectId === undefined
+              ? {}
+              : { selectedObjectId: editor.selectedObjectId })}
             onSelect={editor.selectObject}
           />
         </main>
         <ThreeDStudioInspector
           document={editor.document}
-          selectedObjectId={editor.selectedObjectId}
+          {...(editor.selectedObjectId === undefined
+            ? {}
+            : { selectedObjectId: editor.selectedObjectId })}
           onCommand={command}
         />
         <ThreeDStudioChat sceneId={sceneId} />

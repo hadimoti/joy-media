@@ -113,7 +113,7 @@ describe('validateIntelligenceFinding', () => {
   it('should reject finding with invalid category', () => {
     const finding: IntelligenceFindingV1 = {
       ...validFinding,
-      category: 'invalid-category' as any,
+      category: 'invalid-category' as unknown as IntelligenceFindingV1['category'],
     };
     const errors = validateIntelligenceFinding(finding);
     expect(errors.some((e) => e.includes('category'))).toBe(true);
@@ -122,7 +122,7 @@ describe('validateIntelligenceFinding', () => {
   it('should reject finding with invalid severity', () => {
     const finding: IntelligenceFindingV1 = {
       ...validFinding,
-      severity: 'invalid-severity' as any,
+      severity: 'invalid-severity' as unknown as IntelligenceFindingV1['severity'],
     };
     const errors = validateIntelligenceFinding(finding);
     expect(errors.some((e) => e.includes('severity'))).toBe(true);
@@ -252,7 +252,7 @@ describe('validateIntelligenceRule', () => {
   it('should reject rule with invalid category', () => {
     const rule: IntelligenceRuleV1 = {
       ...validRule,
-      category: 'invalid-category' as any,
+      category: 'invalid-category' as unknown as IntelligenceRuleV1['category'],
     };
     const errors = validateIntelligenceRule(rule);
     expect(errors.some((e) => e.includes('category'))).toBe(true);
@@ -261,7 +261,7 @@ describe('validateIntelligenceRule', () => {
   it('should reject rule with invalid severity', () => {
     const rule: IntelligenceRuleV1 = {
       ...validRule,
-      defaultSeverity: 'invalid-severity' as any,
+      defaultSeverity: 'invalid-severity' as unknown as IntelligenceRuleV1['defaultSeverity'],
     };
     const errors = validateIntelligenceRule(rule);
     expect(errors.some((e) => e.includes('defaultSeverity'))).toBe(true);
@@ -270,7 +270,7 @@ describe('validateIntelligenceRule', () => {
   it('should reject rule with enabled not boolean', () => {
     const rule: IntelligenceRuleV1 = {
       ...validRule,
-      enabled: 'yes' as any,
+      enabled: 'yes' as unknown as IntelligenceRuleV1['enabled'],
     };
     const errors = validateIntelligenceRule(rule);
     expect(errors.some((e) => e.includes('enabled'))).toBe(true);
@@ -279,7 +279,7 @@ describe('validateIntelligenceRule', () => {
   it('should reject rule with invalid appliesTo', () => {
     const rule: IntelligenceRuleV1 = {
       ...validRule,
-      appliesTo: 'not an array' as any,
+      appliesTo: 'not an array' as unknown as IntelligenceRuleV1['appliesTo'],
     };
     const errors = validateIntelligenceRule(rule);
     expect(errors.some((e) => e.includes('appliesTo'))).toBe(true);
@@ -288,7 +288,7 @@ describe('validateIntelligenceRule', () => {
   it('should reject rule with unknown evidence kinds in appliesTo', () => {
     const rule: IntelligenceRuleV1 = {
       ...validRule,
-      appliesTo: ['clip', 'not-a-kind' as any],
+      appliesTo: ['clip', 'not-a-kind' as unknown as IntelligenceRuleV1['appliesTo'][number]],
     };
 
     const errors = validateIntelligenceRule(rule);
@@ -460,7 +460,7 @@ describe('validateSemanticIntelligenceV1', () => {
       createdBy: 'test-user',
       contentHash: 'abc123',
     });
-    (intelligence as any).schemaVersion = 2;
+    Object.assign(intelligence, { schemaVersion: 2 });
 
     const result = validateSemanticIntelligenceV1(intelligence);
     expect(result.valid).toBe(false);

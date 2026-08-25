@@ -208,6 +208,35 @@ export class WorkerControlPlaneClient {
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
 
+  async uploadRenderArtifact(
+    jobId: string,
+    result: WorkerJobResult,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    if (result.kind !== 'render.export' || result.outputRef === undefined)
+      throw new Error('render artifact upload requires a render.export result');
+    const sessionToken = this.options.sessionStore.loadWorkerSession();
+    if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${sessionToken}`,
+      accept: 'application/json',
+      'content-type': 'video/mp4',
+      'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
+      'x-joy-output-ref': result.outputRef,
+      'x-joy-sha256': result.sha256 ?? '',
+      'x-joy-bytes': String(result.bytes ?? 0),
+    };
+    const response = await this.#fetch(
+      `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/artifact`,
+      { method: 'POST', headers, body: bytes },
+    );
+    if (response.status === 401) {
+      this.options.sessionStore.clearWorkerSession();
+      throw new Error('Worker session expired or was revoked');
+    }
+    if (!response.ok) throw new Error(`Worker render artifact upload failed (${response.status})`);
+  }
+
   async fail(jobId: string, error: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,

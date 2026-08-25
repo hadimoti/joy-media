@@ -12,7 +12,6 @@ import type {
   SceneBackground,
   BlendMode,
   MotionAnimation,
-  MotionEasing,
 } from '@joy-media/motion-core';
 import { setKeyframeAt, removeKeyframeAt, hasKeyframeAtMotion } from '@joy-media/motion-core';
 import type { SceneCommand } from './state/sceneCommands.js';
@@ -22,7 +21,6 @@ import {
   layerCapabilities,
   commonCapabilities,
   MOTION_BLEND_MODES,
-  type CapabilitySection,
 } from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
 
@@ -97,16 +95,6 @@ function mixedBoolean(values: readonly boolean[]): boolean | 'mixed' {
   if (values.length === 0) return false;
   const first = values[0];
   return values.some((v) => v !== first) ? 'mixed' : first!;
-}
-
-function isMixedNumber(value: number | string): value is string {
-  return typeof value === 'string';
-}
-
-function parseNumber(value: number | string): number | undefined {
-  if (typeof value === 'number') return value;
-  const n = parseFloat(value);
-  return isNaN(n) ? undefined : n;
 }
 
 function isMixedString(value: string | number): value is string {
@@ -420,13 +408,11 @@ function SceneInspector({
 function TransformSection({
   selected,
   dispatch,
-  isMulti,
   showDiamonds,
   playheadMs,
 }: {
   readonly selected: readonly MotionLayer[];
   readonly dispatch: (label: string, ...commands: SceneCommand[]) => void;
-  readonly isMulti: boolean;
   readonly showDiamonds: boolean;
   readonly playheadMs: number;
 }) {
@@ -1118,7 +1104,6 @@ function LayerInspector({
           <TransformSection
             selected={selected}
             dispatch={dispatch}
-            isMulti={isMulti}
             showDiamonds={showDiamonds}
             playheadMs={playheadMs}
           />

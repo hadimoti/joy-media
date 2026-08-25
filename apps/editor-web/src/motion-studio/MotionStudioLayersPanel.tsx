@@ -1,6 +1,12 @@
 import { useCallback } from 'react';
 import type { MotionSceneDocument, MotionLayer, MotionLayerId } from '@joy-media/motion-core';
-import { createTextLayer, createRectangleLayer, createEllipseLayer, createImageLayer, createVideoLayer } from './state/layerFactory.js';
+import {
+  createTextLayer,
+  createRectangleLayer,
+  createEllipseLayer,
+  createImageLayer,
+  createVideoLayer,
+} from './state/layerFactory.js';
 import {
   EyeIcon,
   EyeOffIcon,
@@ -143,9 +149,7 @@ export function MotionStudioLayersPanel({
       </div>
       <div className="ms-panel-body ms-layer-list">
         {reversedLayers.length === 0 ? (
-          <div className="ms-empty-state">
-            No layers yet. Add a shape, text, or image.
-          </div>
+          <div className="ms-empty-state">No layers yet. Add a shape, text, or image.</div>
         ) : (
           reversedLayers.map((layer, idx) => {
             const selected = selectedLayerIds.includes(layer.id);
@@ -235,7 +239,11 @@ export function MotionStudioLayersPanel({
               </button>
             )}
             {onDeleteSelected && (
-              <button type="button" className="ms-layer-bulk-btn ms-layer-bulk-btn-danger" onClick={onDeleteSelected}>
+              <button
+                type="button"
+                className="ms-layer-bulk-btn ms-layer-bulk-btn-danger"
+                onClick={onDeleteSelected}
+              >
                 Delete
               </button>
             )}

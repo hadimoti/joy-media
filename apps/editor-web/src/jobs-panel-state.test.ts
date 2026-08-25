@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import {
+  jobStateLabel,
+  projectJobStatus,
+  workerPresence,
+  workerSummary,
+} from './jobs-panel-state.js';
 import { jobsPanelToolbarActions } from './JobsPanel.js';
 
 const NOW = 1_000_000;
@@ -19,6 +24,16 @@ describe('project Jobs panel state', () => {
     expect(projectJobStatus(false, [worker({ lastSeenAt: NOW - 1 })], NOW)).toContain(
       'Worker متصل است',
     );
+    expect(
+      workerSummary(
+        [
+          worker({ lastSeenAt: NOW - 1 }),
+          worker({ lastSeenAt: NOW - 35_000 }),
+          worker({ revoked: true, lastSeenAt: NOW - 1 }),
+        ],
+        NOW,
+      ),
+    ).toEqual({ connected: 1, paired: 2, revoked: 1 });
   });
 
   it('gives queued, running, canceled, failed, and completed jobs distinct labels', () => {

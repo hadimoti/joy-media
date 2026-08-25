@@ -30,10 +30,7 @@ export interface ScenePreviewCapture {
   readonly height: number;
 }
 
-export type ScenePreviewMessage =
-  | ScenePreviewUpdate
-  | ScenePreviewLifecycle
-  | ScenePreviewCapture;
+export type ScenePreviewMessage = ScenePreviewUpdate | ScenePreviewLifecycle | ScenePreviewCapture;
 
 export interface ScenePreviewReady {
   readonly type: 'joy.scene.ready.v1';
@@ -56,10 +53,7 @@ export interface ScenePreviewSurface {
   readonly rgba: ArrayBuffer;
 }
 
-export type ScenePreviewEvent =
-  | ScenePreviewReady
-  | ScenePreviewFailure
-  | ScenePreviewSurface;
+export type ScenePreviewEvent = ScenePreviewReady | ScenePreviewFailure | ScenePreviewSurface;
 
 export interface SandboxedIframeDescriptor {
   readonly sandbox: 'allow-scripts';

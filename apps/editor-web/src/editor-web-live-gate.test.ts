@@ -121,6 +121,7 @@ describe('WP-15 live gate: agent edit → history → undo/redo', () => {
       assetId: clip.assetId,
       action: { kind: 'reconnect' },
     });
+    if (source.state === 'ready') throw new Error('expected unavailable monitor state');
     expect(source.message).not.toContain('/media/reference/');
   });
 });

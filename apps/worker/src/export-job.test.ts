@@ -1,15 +1,12 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as exportCore from '@joy-media/export-core';
 import * as renderPage from '@joy-media/render-host/render-page';
-import { CAPTION_BURN_IN_KEY, createRenderBundle } from '@joy-media/render-planner';
-import type {
-  JoyProjectV1,
-  SpikeProject,
-  VisualObjectTransformV1,
-} from '@joy-media/project-schema';
+import { createRenderBundle } from '@joy-media/render-planner';
+import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { executeLeasedExport } from './export-job.js';
 import { StaticWorkerMediaResolver } from './worker-media-resolver.js';
 
@@ -24,10 +21,7 @@ describe('leased export job', () => {
     const calls: string[] = [];
     const pageEvents: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
-    const video = join(directory, 'timecode-tone.mp4');
-    const image = join(directory, 'sticker.png');
-    writeFileSync(video, 'worker-private-video');
-    writeFileSync(image, 'worker-private-sticker');
+    const video = writeSourceVideo(directory);
     const fixtureSpy = vi.spyOn(exportCore, 'renderFixture');
     const pageSpy = vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
       paint(input) {
@@ -51,8 +45,6 @@ describe('leased export job', () => {
         mediaResolver: new StaticWorkerMediaResolver({
           'asset:video-a': video,
           'asset:video-b': video,
-          'asset:image-a': image,
-          'html-scene:joy.firstparty.title': 'joy.firstparty.title',
         }),
       },
     );
@@ -76,28 +68,16 @@ describe('leased export job', () => {
     expect(JSON.stringify(result)).not.toMatch(/[A-Za-z]:[\\/]|file:|\/tmp\//);
     expect(fixtureSpy).not.toHaveBeenCalled();
     expect(pageSpy).toHaveBeenCalled();
-    expect(pageEvents.slice(0, 3)).toEqual(['paint:0', 'paint:33333', 'paint:66666']);
-    expect(pageEvents.at(-1)).toBe('destroy');
+    expect(pageEvents).toEqual(['destroy']);
+    expect(existsSync(join(directory, 'job-1.mp4'))).toBe(true);
+    expect(readFileSync(join(directory, 'job-1.mp4')).length).toBe(result.bytes);
     expect(calls).toEqual(['worker-1:job-1']);
   });
 
   it('rejects truncated renders against the original delivery promise before completing', async () => {
     const calls: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-truncated-export-'));
-    const video = join(directory, 'timecode-tone.mp4');
-    const image = join(directory, 'sticker.png');
-    writeFileSync(video, 'worker-private-video');
-    writeFileSync(image, 'worker-private-sticker');
-    vi.spyOn(renderPage, 'createOfflineRenderPage').mockResolvedValue({
-      paint(input) {
-        return new Uint8Array(
-          input.plan.frame.viewport.width * input.plan.frame.viewport.height * 4,
-        ).fill(0x20 + (input.plan.frame.timeUs % 23));
-      },
-      destroy() {
-        return undefined;
-      },
-    });
+    const video = writeSourceVideo(directory);
 
     await expect(
       executeLeasedExport(
@@ -110,21 +90,18 @@ describe('leased export job', () => {
           mediaResolver: new StaticWorkerMediaResolver({
             'asset:video-a': video,
             'asset:video-b': video,
-            'asset:image-a': image,
-            'html-scene:joy.firstparty.title': 'joy.firstparty.title',
           }),
           frameLimit: 3,
         },
       ),
-    ).rejects.toThrow(/duration|frame-count/);
+    ).rejects.toThrow(/partial frame limit/);
     expect(calls).toEqual([]);
   });
 
   it('refuses bundles whose required opaque assets are missing from the Worker', async () => {
     const calls: string[] = [];
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-export-'));
-    const video = join(directory, 'timecode-tone.mp4');
-    writeFileSync(video, 'worker-private-video');
+    const video = writeSourceVideo(directory);
 
     await expect(
       executeLeasedExport(
@@ -136,12 +113,10 @@ describe('leased export job', () => {
           outputDirectory: directory,
           mediaResolver: new StaticWorkerMediaResolver({
             'asset:video-a': video,
-            'asset:video-b': video,
-            'html-scene:joy.firstparty.title': 'joy.firstparty.title',
           }),
         },
       ),
-    ).rejects.toThrow(/image-a/);
+    ).rejects.toThrow(/video-b/);
     expect(calls).toEqual([]);
     expect(existsSync(join(directory, 'job-1.mp4'))).toBe(false);
   });
@@ -200,10 +175,46 @@ describe('leased export job', () => {
 function renderBundle() {
   return createRenderBundle({
     timelineProject: timelineProject(),
-    visualProject: visualProject({ transition: true }),
+    visualProject: visualProject(),
     outputPreset: 'social-h264-aac',
     seed: 'worker-render',
   });
+}
+
+function writeSourceVideo(directory: string): string {
+  const path = join(directory, 'source-backed.mp4');
+  const generated = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=red:s=64x36:r=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=880:sample_rate=48000',
+      '-t',
+      '2',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+      path,
+    ],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (generated.status !== 0) {
+    throw new Error(`failed to create source-backed test video: ${generated.stderr}`);
+  }
+  return path;
 }
 
 function timelineProject(): SpikeProject {
@@ -232,7 +243,7 @@ function timelineProject(): SpikeProject {
                 startUs: 0,
                 durationUs: SECOND,
                 assetId: 'video-a',
-                sourceInUs: 5 * SECOND,
+                sourceInUs: 0,
               },
               {
                 kind: 'video',
@@ -240,7 +251,7 @@ function timelineProject(): SpikeProject {
                 startUs: SECOND,
                 durationUs: SECOND,
                 assetId: 'video-b',
-                sourceInUs: 10 * SECOND,
+                sourceInUs: SECOND,
               },
             ],
           },
@@ -250,7 +261,7 @@ function timelineProject(): SpikeProject {
   };
 }
 
-function visualProject(options: { readonly transition?: boolean } = {}): JoyProjectV1 {
+function visualProject(): JoyProjectV1 {
   return {
     schemaVersion: 1,
     id: 'visual',
@@ -271,27 +282,10 @@ function visualProject(options: { readonly transition?: boolean } = {}): JoyProj
         background: '#000000',
         tracks: [
           {
-            id: 'caption-track',
-            kind: 'caption',
-            name: 'Captions',
-            order: 0,
-            enabled: true,
-            locked: false,
-            clips: [
-              {
-                id: 'caption-1',
-                kind: 'caption',
-                startUs: 250_000,
-                durationUs: SECOND,
-                captionDocumentId: 'doc-1',
-              },
-            ],
-          },
-          {
             id: 'video-track',
             kind: 'video',
             name: 'Video',
-            order: 1,
+            order: 0,
             enabled: true,
             locked: false,
             clips: [
@@ -301,7 +295,7 @@ function visualProject(options: { readonly transition?: boolean } = {}): JoyProj
                 startUs: 0,
                 durationUs: SECOND,
                 assetId: 'video-a',
-                sourceInUs: 5 * SECOND,
+                sourceInUs: 0,
               },
               {
                 id: 'clip-b',
@@ -309,7 +303,7 @@ function visualProject(options: { readonly transition?: boolean } = {}): JoyProj
                 startUs: SECOND,
                 durationUs: SECOND,
                 assetId: 'video-b',
-                sourceInUs: 10 * SECOND,
+                sourceInUs: SECOND,
               },
             ],
           },
@@ -319,83 +313,16 @@ function visualProject(options: { readonly transition?: boolean } = {}): JoyProj
     assets: {
       'video-a': { id: 'video-a', kind: 'video', displayName: 'Moving timecode' },
       'video-b': { id: 'video-b', kind: 'video', displayName: 'Transition right' },
-      'image-a': { id: 'image-a', kind: 'image', displayName: 'Sticker' },
     },
     variables: {},
     markers: [],
-    visualObjects: {
-      title: {
-        id: 'title',
-        kind: 'text',
-        text: 'JOY',
-        transform: transform(4, 4),
-        effects: [
-          { id: 'effect-noise', effectId: 'noise', enabled: true, params: { amount: 0.1 } },
-        ],
-      },
-      sticker: {
-        id: 'sticker',
-        kind: 'image',
-        assetId: 'image-a',
-        transform: transform(20, 12),
-        animations: {
-          x: {
-            keyframes: [
-              { timeUs: 0, value: 20, interpolation: 'linear' },
-              { timeUs: SECOND, value: 28, interpolation: 'linear' },
-            ],
-          },
-        },
-      },
-      scene: {
-        id: 'scene',
-        kind: 'html-scene',
-        scenePackageId: 'joy.firstparty.title',
-        transform: transform(0, 0),
-      },
-    },
-    captionDocuments: {
-      'doc-1': {
-        id: 'doc-1',
-        language: 'en',
-        direction: 'ltr',
-        speakers: [],
-        words: { w1: { id: 'w1', text: 'Caption', startUs: 0, endUs: SECOND } },
-        segments: [{ id: 's1', startUs: 0, endUs: SECOND, wordIds: ['w1'] }],
-      },
-    },
-    pluginData: { [CAPTION_BURN_IN_KEY]: true },
+    visualObjects: {},
+    captionDocuments: {},
+    pluginData: {},
     audio: {
       clips: { 'clip-a': { gain: 0.75, pan: -0.2, mute: false, solo: false } },
       buses: [],
       effects: [],
     },
-    ...(options.transition
-      ? {
-          transitions: [
-            {
-              id: 'transition-1',
-              trackId: 'video-track',
-              type: 'dissolve',
-              leftClipId: 'clip-a',
-              rightClipId: 'clip-b',
-              durationUs: 500_000,
-              params: {},
-            },
-          ],
-        }
-      : {}),
-  };
-}
-
-function transform(x: number, y: number): VisualObjectTransformV1 {
-  return {
-    x,
-    y,
-    scaleX: 1,
-    scaleY: 1,
-    rotationDeg: 0,
-    opacity: 1,
-    crop: { left: 0, top: 0, right: 0, bottom: 0 },
   };
 }

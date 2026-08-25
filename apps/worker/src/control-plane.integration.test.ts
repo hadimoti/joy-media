@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,7 +20,17 @@ describe('Worker/control-plane export integration', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-integration-'));
     await executeLeasedExport(
       {
-        complete: (workerId, jobId, receipt) => api.complete(workerId, jobId, Date.now(), receipt),
+        complete: (workerId, jobId, receipt) => {
+          api.registerWorkerRenderArtifact(workerId, jobId, {
+            id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
+            outputRef: receipt.outputRef,
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: { mimeType: 'video/mp4' },
+            location: { kind: 'private-object', ref: `render-${jobId}` },
+          });
+          return api.complete(workerId, jobId, Date.now(), receipt);
+        },
       },
       'worker',
       'job',
@@ -29,7 +40,7 @@ describe('Worker/control-plane export integration', () => {
         outputPreset: 'social-h264-aac',
         seed: 'integration',
       }),
-      { outputDirectory: directory, mediaResolver: resolver(directory), frameLimit: 2 },
+      { outputDirectory: directory, mediaResolver: resolver(directory) },
     );
     expect(api.eventsAfter(owner, 'project', 0).map((event) => event.type)).toEqual([
       'queued',
@@ -55,7 +66,17 @@ describe('Worker/control-plane export integration', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-recovered-export-'));
     await executeLeasedExport(
       {
-        complete: (workerId, jobId, receipt) => api.complete(workerId, jobId, Date.now(), receipt),
+        complete: (workerId, jobId, receipt) => {
+          api.registerWorkerRenderArtifact(workerId, jobId, {
+            id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
+            outputRef: receipt.outputRef,
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: { mimeType: 'video/mp4' },
+            location: { kind: 'private-object', ref: `render-${jobId}` },
+          });
+          return api.complete(workerId, jobId, Date.now(), receipt);
+        },
       },
       'worker-new',
       'job',
@@ -65,7 +86,7 @@ describe('Worker/control-plane export integration', () => {
         outputPreset: 'social-h264-aac',
         seed: 'recovered',
       }),
-      { outputDirectory: directory, mediaResolver: resolver(directory), frameLimit: 2 },
+      { outputDirectory: directory, mediaResolver: resolver(directory) },
     );
     expect(api.eventsAfter(owner, 'project', 0).at(-1)?.type).toBe('completed');
   });
@@ -73,7 +94,35 @@ describe('Worker/control-plane export integration', () => {
 
 function resolver(directory: string): StaticWorkerMediaResolver {
   const mediaPath = join(directory, 'private.mp4');
-  writeFileSync(mediaPath, 'private media');
+  const generated = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=blue:s=64x36:r=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000',
+      '-t',
+      '0.2',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+      mediaPath,
+    ],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (generated.status !== 0) throw new Error(`failed to create test media: ${generated.stderr}`);
   return new StaticWorkerMediaResolver({ 'asset:clip': mediaPath });
 }
 

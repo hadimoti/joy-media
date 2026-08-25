@@ -129,7 +129,10 @@ export class Scene3DMcpServer {
         id: request.id,
         error: { code: -32602, message: 'tool arguments must be an object' },
       };
-    const schemaError = validateMcpInput(definition.inputSchema, input as Readonly<Record<string, unknown>>);
+    const schemaError = validateMcpInput(
+      definition.inputSchema,
+      input as Readonly<Record<string, unknown>>,
+    );
     if (schemaError !== undefined)
       return { jsonrpc: '2.0', id: request.id, error: { code: -32602, message: schemaError } };
     if (definition.category === 'query')
@@ -192,11 +195,18 @@ function validateMcpInput(
   if (properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
     for (const [key, value] of Object.entries(input)) {
       const propertySchema = (properties as Record<string, unknown>)[key];
-      if (propertySchema === null || typeof propertySchema !== 'object' || Array.isArray(propertySchema))
+      if (
+        propertySchema === null ||
+        typeof propertySchema !== 'object' ||
+        Array.isArray(propertySchema)
+      )
         continue;
       const expectedType = (propertySchema as Record<string, unknown>).type;
       if (expectedType === 'string' && typeof value !== 'string') return `${key} must be a string`;
-      if (expectedType === 'object' && (value === null || typeof value !== 'object' || Array.isArray(value)))
+      if (
+        expectedType === 'object' &&
+        (value === null || typeof value !== 'object' || Array.isArray(value))
+      )
         return `${key} must be an object`;
       const minLength = (propertySchema as Record<string, unknown>).minLength;
       if (typeof minLength === 'number' && typeof value === 'string' && value.length < minLength)

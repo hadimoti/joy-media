@@ -1,5 +1,5 @@
 import type { Composition, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
-import type { SpikeCommand } from '@joy-media/commands';
+import type { AudioState, SpikeCommand } from '@joy-media/commands';
 import type {
   AnyProvider,
   CapabilityId,
@@ -42,7 +42,7 @@ export interface EditorContext {
   readonly captions?: CaptionContext;
   readonly audio: AudioContext;
   /** Live mixer graph when the editor binds one (Phase 3). */
-  readonly liveAudio?: import('@joy-media/commands').AudioState;
+  readonly liveAudio?: AudioState;
   readonly providers: ProviderContext;
   readonly availableTools: readonly string[];
   readonly recentHistory: readonly string[];
@@ -145,7 +145,7 @@ export function buildEditorContext(
   options?: ContextOptions,
   dispatch?: CommandDispatcher,
   extras?: {
-    readonly liveAudio?: import('@joy-media/commands').AudioState;
+    readonly liveAudio?: AudioState;
     readonly providers?: readonly AnyProvider[];
   },
 ): EditorContext {

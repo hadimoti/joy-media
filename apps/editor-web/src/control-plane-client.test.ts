@@ -73,7 +73,8 @@ describe('BrowserControlPlaneClient', () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const authorization = new Headers(init?.headers).get('authorization');
-      requests.push({ url, ...(authorization === null ? {} : { authorization }) });
+      if (authorization === null) requests.push({ url });
+      else requests.push({ url, authorization });
       return new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg' } });
     };
     try {
@@ -92,6 +93,36 @@ describe('BrowserControlPlaneClient', () => {
     expect(requests).toEqual([
       {
         url: 'https://media.joyteam.ir/api/v1/projects/project-1/assets/asset-1/derivatives/derivative-1/content',
+        authorization: 'Bearer joy-session-token',
+      },
+    ]);
+  });
+
+  it('fetches render artifact bytes only from the authenticated Media API', async () => {
+    const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const authorization = new Headers(init?.headers).get('authorization');
+      requests.push({ url, ...(authorization === null ? {} : { authorization }) });
+      return new Response('mp4', { status: 200, headers: { 'content-type': 'video/mp4' } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(
+        client.renderArtifactBytes('project-1', 'artifact-job-1-aaaaaaaaaaaaaaaa'),
+      ).resolves.toMatchObject({
+        type: 'video/mp4',
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/project-1/render-artifacts/artifact-job-1-aaaaaaaaaaaaaaaa/content',
         authorization: 'Bearer joy-session-token',
       },
     ]);

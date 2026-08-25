@@ -75,4 +75,46 @@ describe('WorkerDaemon', () => {
       rmSync(derivativeDirectory, { recursive: true, force: true });
     }
   });
+
+  it('uploads a completed render artifact before posting the render receipt', async () => {
+    const calls: string[] = [];
+    let stop = false;
+    let leased = false;
+    const client = {
+      hello: async () => calls.push('hello'),
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'render-job', projectId: 'project-1', type: 'render.export' };
+      },
+      heartbeat: async () => ({ cancelRequested: false }),
+      uploadRenderArtifact: async (_jobId: string, _result: unknown, bytes: Uint8Array) => {
+        expect(bytes).toEqual(new Uint8Array([7, 8]));
+        calls.push('artifact');
+      },
+      complete: async () => {
+        calls.push('complete');
+        stop = true;
+      },
+      fail: async () => calls.push('fail'),
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: ['render.export'] }),
+      localAssetIds: () => [],
+      run: async () => ({
+        state: 'completed' as const,
+        result: {
+          kind: 'render.export' as const,
+          outputRef: 'render-render-job-aaaaaaaaaaaaaaaa',
+          reportRef: 'report-render-job',
+          sha256: 'a'.repeat(64),
+          bytes: 2,
+        },
+      }),
+      readRenderArtifact: () => new Uint8Array([7, 8]),
+      log: { write: () => undefined },
+    } as never;
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
+    expect(calls).toEqual(['hello', 'artifact', 'complete']);
+  });
 });

@@ -1,5 +1,5 @@
 import { ProjectHistory } from '@joy-media/commands';
-import type { CommandTransaction, HistoryMutation } from '@joy-media/commands';
+import type { CommandTransaction, HistoryMutation, TransactionRecord } from '@joy-media/commands';
 import type { SpikeProject } from '@joy-media/project-schema';
 export class EditorCommandController {
   readonly #history: ProjectHistory;
@@ -15,10 +15,10 @@ export class EditorCommandController {
   get redoLabel(): string | undefined {
     return this.#history.redoLabel;
   }
-  get undoRecords(): readonly import('@joy-media/commands').TransactionRecord[] {
+  get undoRecords(): readonly TransactionRecord[] {
     return this.#history.undoRecords;
   }
-  get redoRecords(): readonly import('@joy-media/commands').TransactionRecord[] {
+  get redoRecords(): readonly TransactionRecord[] {
     return this.#history.redoRecords;
   }
   get canUndo(): boolean {

@@ -13,6 +13,8 @@ export type {
   MediaDerivativeRecord,
   MediaDescriptor,
   ProjectMetadata,
+  RenderArtifactRecord,
+  WorkerRenderArtifactRegistration,
   WorkerRecord,
 } from './control-plane.js';
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';

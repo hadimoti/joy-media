@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
@@ -7,6 +7,7 @@ import { emptySpikeProject } from '@joy-media/test-fixtures';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import type { SeededContentTemplate } from './content-template-types.js';
 import { EditorSession } from './editor-session.js';
+import type { EditorSession as EditorSessionType } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 
 function memoryStorage() {
@@ -71,7 +72,7 @@ function makeMockSession(timelineProject: SpikeProject, visualProject: JoyProjec
       dispatchTimeline,
       dispatchVisualObjects,
       replaceVisualProject,
-    } as unknown as import('./editor-session.js').EditorSession,
+    } as unknown as EditorSessionType,
   };
 }
 

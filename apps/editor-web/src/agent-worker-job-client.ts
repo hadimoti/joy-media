@@ -1,7 +1,13 @@
 import type { AgentJobClient, AgentJobRequest, AgentJobSnapshot } from '@joy-media/job-protocol';
 import type { BrowserControlPlaneClient, BrowserJob } from './control-plane-client.js';
 
-type WorkerGenerationType = 'image.comfy' | 'audio.ml-denoise' | 'text.lm-studio' | 'text.openrouter' | 'video.runway' | 'edit.higgsfield';
+type WorkerGenerationType =
+  | 'image.comfy'
+  | 'audio.ml-denoise'
+  | 'text.lm-studio'
+  | 'text.openrouter'
+  | 'video.runway'
+  | 'edit.higgsfield';
 
 /**
  * Adapts the existing browser -> control plane -> outbound Worker lifecycle to
@@ -103,9 +109,14 @@ export class AgentWorkerJobClient implements AgentJobClient {
 }
 
 function isWorkerGenerationType(value: string): value is WorkerGenerationType {
-  return value === 'image.comfy' || value === 'audio.ml-denoise' ||
-         value === 'text.lm-studio' || value === 'text.openrouter' ||
-         value === 'video.runway' || value === 'edit.higgsfield';
+  return (
+    value === 'image.comfy' ||
+    value === 'audio.ml-denoise' ||
+    value === 'text.lm-studio' ||
+    value === 'text.openrouter' ||
+    value === 'video.runway' ||
+    value === 'edit.higgsfield'
+  );
 }
 
 function delay(durationMs: number): Promise<void> {

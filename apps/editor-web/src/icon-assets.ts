@@ -12,10 +12,11 @@
  * automatic: drop a PNG in `panel-icons/` and it is available here.
  */
 
-const ICON_URLS: Readonly<Record<string, string>> = import.meta.glob(
-  './panel-icons/**/*.png',
-  { eager: true, query: '?url', import: 'default' },
-);
+const ICON_URLS: Readonly<Record<string, string>> = import.meta.glob('./panel-icons/**/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
 
 /**
  * @param relative path under `src/panel-icons/`, e.g. `ui/motion_24x24.png`.

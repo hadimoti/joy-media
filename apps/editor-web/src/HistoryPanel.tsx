@@ -21,9 +21,7 @@ export function HistoryPanel({ entries, onJumpTo }: HistoryPanelProps) {
       title="History"
       iconUrl={panelTabIconUrl('history')}
       className="history-panel"
-      {...(isFresh
-        ? { note: 'No edits yet; restore points will appear here.' }
-        : {})}
+      {...(isFresh ? { note: 'No edits yet; restore points will appear here.' } : {})}
     >
       <ol className="history-list" aria-label="History restore points">
         {entries.map((entry) => (

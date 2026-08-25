@@ -34,14 +34,8 @@ const MAX_ID_LENGTH = 256;
 /** Maximum length for labels and titles */
 const MAX_LABEL_LENGTH = 500;
 
-/** Maximum length for descriptions */
-const MAX_DESCRIPTION_LENGTH = 2000;
-
 /** Maximum length for content summaries */
 const MAX_SUMMARY_LENGTH = 5000;
-
-/** Maximum number of items in any snapshot array */
-const MAX_ARRAY_LENGTH = 1000;
 
 /** Maximum supported temporal range in microseconds (24 hours) */
 const MAX_TIME_US = 24 * 60 * 60 * 1_000_000;
@@ -56,10 +50,6 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isStringMaxLength(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length <= max;
-}
-
-function isReadonlyArray<T>(value: unknown, guard: (v: unknown) => v is T): value is readonly T[] {
-  return Array.isArray(value) && value.length <= MAX_ARRAY_LENGTH && value.every(guard);
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

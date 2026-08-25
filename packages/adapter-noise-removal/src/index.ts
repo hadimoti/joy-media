@@ -213,9 +213,7 @@ export function createNoiseRemovalAdapter(config: NoiseRemovalConfig): ProviderV
     secretFields: [],
     privacy: {
       dataLeavesDevice: !isLocal,
-      ...(!isLocal
-        ? { retentionDisclosure: 'Audio sent to remote API for processing' }
-        : {}),
+      ...(!isLocal ? { retentionDisclosure: 'Audio sent to remote API for processing' } : {}),
     },
   };
 

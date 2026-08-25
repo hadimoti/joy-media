@@ -15,6 +15,7 @@ import type {
   VisualObjectTransformV1,
   ColorGradeV1,
   EffectInstanceV1,
+  EffectParamValue,
 } from '@joy-media/project-schema';
 import type {
   RenderNode,
@@ -293,7 +294,7 @@ function normalizeEffects(
 }
 
 function mapParamsToNumbers(
-  params: Readonly<Record<string, import('@joy-media/project-schema').EffectParamValue>>,
+  params: Readonly<Record<string, EffectParamValue>>,
 ): Readonly<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(params)) {
@@ -302,10 +303,6 @@ function mapParamsToNumbers(
     }
   }
   return out;
-}
-
-function isEffectKind(kind: string): kind is EffectInstanceIR['kind'] {
-  return true;
 }
 
 function normalizeColorGrade(grade: ColorGradeV1 | ColorGradeIR): ColorGradeIR {

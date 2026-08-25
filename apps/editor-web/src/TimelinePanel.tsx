@@ -75,7 +75,6 @@ import { polishMediaLabel } from './media-label.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
-const DEFAULT_PPS = 20;
 /** Height of a virtual (not-yet-created) empty lane. */
 const EMPTY_LANE_HEIGHT_PX = 44;
 /** Extra empty lanes rendered below the visible viewport during scrolling. */
@@ -400,14 +399,13 @@ function TimelineClip({
 
 export const JOY_MEDIA_ASSET_DND = 'application/x-joy-media-asset';
 
-function defaultTrackView(trackId: string, order: number, enabled = true): TimelineTrackView {
+function defaultTrackView(trackId: string, enabled = true): TimelineTrackView {
   return {
     id: trackId,
     heightPx: 44,
     locked: false,
     muted: !enabled,
     solo: false,
-    order,
   };
 }
 
@@ -515,13 +513,12 @@ function pickTimelineImportTrackId(
       track,
       view:
         trackFlags.find((item) => item.id === track.id) ??
-        defaultTrackView(track.id, track.order ?? index, track.enabled),
+        defaultTrackView(track.id, track.enabled),
       fallbackOrder: index,
     }))
     .sort(
       (left, right) =>
-        (left.view.order ?? left.track.order ?? left.fallbackOrder) -
-        (right.view.order ?? right.track.order ?? right.fallbackOrder),
+        (left.track.order ?? left.fallbackOrder) - (right.track.order ?? right.fallbackOrder),
     );
   return ordered.find(
     (entry) => !entry.view.locked && timelineTrackKind(entry.track) === wantedKind,
@@ -681,9 +678,9 @@ export function TimelinePanel({
   const composition = project.compositions[project.rootCompositionId];
   if (composition === undefined) throw new Error('timeline root composition is unavailable');
 
-  const tracks = composition.tracks.map((track, index) => {
+  const tracks = composition.tracks.map((track, _index) => {
     const saved = trackFlags.find((item) => item.id === track.id);
-    return saved ?? defaultTrackView(track.id, index, track.enabled);
+    return saved ?? defaultTrackView(track.id, track.enabled);
   });
 
   const visible = useMemo(
@@ -722,7 +719,6 @@ export function TimelinePanel({
     });
     observer.observe(root);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer; viewport is output
   }, [autoFit, composition.durationUs, onViewportChange]);
 
   useEffect(() => {
@@ -734,7 +730,6 @@ export function TimelinePanel({
       ...viewport,
       pixelsPerSecond: fitPixelsPerSecond(composition.durationUs, width),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
   }, [autoFit, composition.durationUs, onViewportChange]);
 
   const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {

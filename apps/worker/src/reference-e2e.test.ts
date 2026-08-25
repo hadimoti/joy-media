@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -89,18 +90,27 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     expect(
       await executeLeasedExport(
         {
-          complete: (workerId, jobId, receipt) =>
-            api.complete(workerId, jobId, Date.now(), receipt),
+          complete: (workerId, jobId, receipt) => {
+            api.registerWorkerRenderArtifact(workerId, jobId, {
+              id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
+              outputRef: receipt.outputRef,
+              sha256: receipt.sha256,
+              bytes: receipt.bytes,
+              descriptor: { mimeType: 'video/mp4' },
+              location: { kind: 'private-object', ref: `render-${jobId}` },
+            });
+            return api.complete(workerId, jobId, Date.now(), receipt);
+          },
         },
         'recovery-worker',
         'landscape',
         createRenderBundle({
-          timelineProject: edited,
+          timelineProject: sourceBackedReferenceTimeline(),
           visualProject: referenceVisualProject(64, 36),
           outputPreset: 'social-h264-aac',
           seed: 'reference-landscape',
         }),
-        { outputDirectory, mediaResolver: resolver, frameLimit: 3 },
+        { outputDirectory, mediaResolver: resolver },
       ),
     ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
 
@@ -109,18 +119,27 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     expect(
       await executeLeasedExport(
         {
-          complete: (workerId, jobId, receipt) =>
-            api.complete(workerId, jobId, Date.now(), receipt),
+          complete: (workerId, jobId, receipt) => {
+            api.registerWorkerRenderArtifact(workerId, jobId, {
+              id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
+              outputRef: receipt.outputRef,
+              sha256: receipt.sha256,
+              bytes: receipt.bytes,
+              descriptor: { mimeType: 'video/mp4' },
+              location: { kind: 'private-object', ref: `render-${jobId}` },
+            });
+            return api.complete(workerId, jobId, Date.now(), receipt);
+          },
         },
         'recovery-worker',
         'vertical',
         createRenderBundle({
-          timelineProject: edited,
+          timelineProject: sourceBackedReferenceTimeline(),
           visualProject: referenceVisualProject(36, 64),
           outputPreset: 'social-h264-aac',
           seed: 'reference-vertical',
         }),
-        { outputDirectory, mediaResolver: resolver, frameLimit: 3 },
+        { outputDirectory, mediaResolver: resolver },
       ),
     ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(api.eventsAfter(owner, REFERENCE_PROJECT.id, 0).map((event) => event.type)).toEqual([
@@ -137,7 +156,35 @@ describe('P02 reference social-edit end-to-end workflow', () => {
 
 function referenceResolver(directory: string): StaticWorkerMediaResolver {
   const path = join(directory, 'reference-private.mp4');
-  writeFileSync(path, 'worker-private-reference-media');
+  const generated = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=green:s=64x36:r=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=660:sample_rate=48000',
+      '-t',
+      '0.2',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+      path,
+    ],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (generated.status !== 0) throw new Error(`failed to create test media: ${generated.stderr}`);
   return new StaticWorkerMediaResolver({
     'asset:asset-intro': path,
     'asset:asset-product': path,
@@ -145,6 +192,42 @@ function referenceResolver(directory: string): StaticWorkerMediaResolver {
     'asset:asset-b-roll-a': path,
     'asset:asset-b-roll-b': path,
   });
+}
+
+function sourceBackedReferenceTimeline(): SpikeProject {
+  return {
+    schemaVersion: 0,
+    id: 'reference-render-timeline',
+    rootCompositionId: 'root',
+    compositions: {
+      root: {
+        id: 'root',
+        name: 'Reference render',
+        width: 64,
+        height: 36,
+        frameRate: { num: 30, den: 1 },
+        durationUs: 100_000,
+        tracks: [
+          {
+            id: 'track',
+            kind: 'video',
+            order: 0,
+            enabled: true,
+            clips: [
+              {
+                kind: 'video',
+                id: 'intro',
+                startUs: 0,
+                durationUs: 100_000,
+                assetId: 'asset-intro',
+                sourceInUs: 0,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
 }
 
 function referenceVisualProject(width: number, height: number): JoyProjectV1 {

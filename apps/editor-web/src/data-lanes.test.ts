@@ -25,7 +25,11 @@ function artifact(
     label: id,
     contentRef: { type: 'inline', value: 'content' },
     binding: { type: 'none' },
-    provenance: { sourceArtifactIds: [], inputHashes: [], createdBy: { type: 'human', id: 'hadi' } },
+    provenance: {
+      sourceArtifactIds: [],
+      inputHashes: [],
+      createdBy: { type: 'human', id: 'hadi' },
+    },
     createdAt: '2026-07-27T00:00:00.000Z',
     updatedAt: '2026-07-27T00:00:00.000Z',
     ...overrides,

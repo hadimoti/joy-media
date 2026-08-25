@@ -73,10 +73,6 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === 'number' && !Number.isNaN(value) && value >= 0;
-}
-
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }

@@ -261,6 +261,8 @@ function motionSceneLayerStyle(
 function MotionSceneThumbnailLayer({
   scene,
   layer,
+  evaluated,
+  layersById,
 }: {
   readonly scene: MotionSceneDocument;
   readonly layer: MotionLayer;

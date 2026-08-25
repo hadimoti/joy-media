@@ -1,0 +1,107 @@
+{
+  "journeyId": "authenticated-editor-1.0",
+  "status": "verified",
+  "verifiedAt": "2026-08-25T16:47:51.501Z",
+  "assertions": {
+    "login": "token login UI completed and authenticated session was probed",
+    "asset": {
+      "id": "real-media-loop",
+      "bytes": 146012,
+      "sha256": "904080fda237ac3b2c8a29d16b440860d0ae545d0fb2aba483c67f19b4ad40d1"
+    },
+    "timelineEdit": [
+      {
+        "label": "Real-media-loop-1787676407035",
+        "title": "Real-media-loop-1787676407035 · 0.5s–5.5s"
+      }
+    ],
+    "mediaPlayback": {
+      "frameProbe": {
+        "firstHash": "6c42809b",
+        "secondHash": "4d88257f",
+        "firstMean": 125.30112268518519,
+        "secondMean": 124.86521990740741,
+        "changedPixels": 14604,
+        "width": 320,
+        "height": 180,
+        "readyState": 4,
+        "duration": 3,
+        "currentSrcScheme": "blob"
+      },
+      "audioProbe": {
+        "readyState": 4,
+        "duration": 3,
+        "audioTracks": 0,
+        "captureStreamAudioTracks": 1,
+        "webkitAudioDecodedByteCount": 41832
+      }
+    },
+    "verifiedExport": {
+      "id": "export-1787676408719",
+      "filename": "joy-media-export-1787676408719.mp4",
+      "status": "completed",
+      "startedAt": "2026-08-25T16:46:48.719Z",
+      "finishedAt": "2026-08-25T16:47:48.868Z",
+      "totalBytes": 1701218,
+      "frameCount": 1800,
+      "channel": "quick-browser-export",
+      "inspection": {
+        "state": "not-requested"
+      }
+    },
+    "motionStudio": {
+      "title": "Untitled Motion 1",
+      "publishedAt": "2026-08-25T16:47:49.526Z",
+      "layerCount": 1,
+      "preview": "played",
+      "undoRedo": "passed"
+    },
+    "motionPlacement": [
+      {
+        "label": "Real-media-loop-1787676407035",
+        "title": "Real-media-loop-1787676407035 · 0.5s–5.5s"
+      },
+      {
+        "label": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q",
+        "title": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q · 0.5s–5.5s"
+      }
+    ],
+    "undoRedo": {
+      "afterUndo": [
+        {
+          "label": "Real-media-loop-1787676407035",
+          "title": "Real-media-loop-1787676407035 · 0.5s–5.5s"
+        }
+      ],
+      "afterRedo": [
+        {
+          "label": "Real-media-loop-1787676407035",
+          "title": "Real-media-loop-1787676407035 · 0.5s–5.5s"
+        },
+        {
+          "label": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q",
+          "title": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q · 0.5s–5.5s"
+        }
+      ]
+    },
+    "reopen": [
+      {
+        "label": "Real-media-loop-1787676407035",
+        "title": "Real-media-loop-1787676407035 · 0.5s–5.5s"
+      },
+      {
+        "label": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q",
+        "title": "Motion-scene-97129851-e4b0-4551-a7ac-f9df71520c96-mt8wew3q · 0.5s–5.5s"
+      }
+    ],
+    "undoRedoAfterReopen": "reopened persisted timeline after the verified undo/redo cycle"
+  },
+  "screenshots": [
+    "test-output\\browser\\authenticated-editor-1.0\\01-authenticated.png",
+    "test-output\\browser\\authenticated-editor-1.0\\02-project-timeline.png",
+    "test-output\\browser\\authenticated-editor-1.0\\03-real-mp4-export.png",
+    "test-output\\browser\\authenticated-editor-1.0\\04-motion-studio-published.png",
+    "test-output\\browser\\authenticated-editor-1.0\\05-motion-placed.png",
+    "test-output\\browser\\authenticated-editor-1.0\\06-reopen-undo-redo.png"
+  ]
+}

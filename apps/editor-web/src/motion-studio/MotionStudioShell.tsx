@@ -140,7 +140,7 @@ export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) 
   const [rightWidth, setRightWidth] = useState(RIGHT_WIDTH_DEFAULT);
   const [bottomHeight, setBottomHeight] = useState(BOTTOM_HEIGHT_DEFAULT);
   const [resizing, setResizing] = useState<MsResizeEdge | null>(null);
-  const [canvasScale, setCanvasScale] = useState(0.5);
+  const [canvasScale] = useState(0.5);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
   const rafRef = useRef<number | undefined>(undefined);

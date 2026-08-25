@@ -107,22 +107,26 @@ describe('monitor media source resolution', () => {
     ['pending', 'wait'],
     ['unavailable', 'reconnect'],
     ['revoked', 'sign-in'],
-  ] as const)('returns an actionable %s state instead of a blank monitor', async (state, action) => {
-    const source = await resolveMonitorMediaSource({
-      projectId: 'project-1',
-      clip: CLIP,
-      asset: ASSET,
-      resolver: resolverReturning(async () => ({ state })),
-    });
+  ] as const)(
+    'returns an actionable %s state instead of a blank monitor',
+    async (state, action) => {
+      const source = await resolveMonitorMediaSource({
+        projectId: 'project-1',
+        clip: CLIP,
+        asset: ASSET,
+        resolver: resolverReturning(async () => ({ state })),
+      });
 
-    expect(source.state).toBe(state);
-    expect(source).toMatchObject({
-      clipId: 'clip-1',
-      assetId: 'client-footage.2026',
-      action: { kind: action },
-    });
-    expect(source.message).toMatch(/\S/);
-  });
+      expect(source.state).toBe(state);
+      expect(source).toMatchObject({
+        clipId: 'clip-1',
+        assetId: 'client-footage.2026',
+        action: { kind: action },
+      });
+      if (source.state === 'ready') throw new Error('expected an actionable monitor state');
+      expect(source.message).toMatch(/\S/);
+    },
+  );
 
   it('releases stale handles and detaches stale element sources before applying the next source', () => {
     const firstRelease = vi.fn();
@@ -218,24 +222,25 @@ function fakeVideoElement(): HTMLVideoElement & {
   loadCalls: number;
   removedAttributes: string[];
 } {
-  return {
+  const video = {
     src: '',
     pauseCalls: 0,
     loadCalls: 0,
     removedAttributes: [],
-    pause() {
-      this.pauseCalls++;
+    pause: () => {
+      video.pauseCalls++;
     },
-    load() {
-      this.loadCalls++;
+    load: () => {
+      video.loadCalls++;
     },
-    removeAttribute(name: string) {
-      this.removedAttributes.push(name);
-      if (name === 'src') this.src = '';
+    removeAttribute: (name: string) => {
+      video.removedAttributes.push(name);
+      if (name === 'src') video.src = '';
     },
-  } as HTMLVideoElement & {
+  } as unknown as HTMLVideoElement & {
     pauseCalls: number;
     loadCalls: number;
     removedAttributes: string[];
   };
+  return video;
 }

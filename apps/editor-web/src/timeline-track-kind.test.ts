@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, Track } from '@joy-media/project-schema';
-import { timelineTrackKind, timelineTrackCode, timelineTrackDisplayName } from './timeline-track-kind.js';
+import {
+  timelineTrackKind,
+  timelineTrackCode,
+  timelineTrackDisplayName,
+} from './timeline-track-kind.js';
 
 function videoClip(id: string, assetId: string): Clip {
   return {

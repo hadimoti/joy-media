@@ -4,13 +4,14 @@ import type {
   MotionLayer,
   MotionLayerId,
   MotionSceneDocument,
+  LayerEvaluation,
+  LayerWorldEvaluation,
 } from '@joy-media/motion-core';
 import {
   evaluateMotionScene,
   resolveLayerWorld,
   resolvedLayerOpacity,
   resolvedLayerTransform,
-  type LayerWorldEvaluation,
 } from '@joy-media/motion-core';
 import { JOY_COLORS } from '../theme.js';
 import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
@@ -18,8 +19,8 @@ import type { SceneCommand } from './state/sceneCommands.js';
 
 interface LayerElementProps {
   readonly layer: MotionLayer;
-  readonly evaluation: import('@joy-media/motion-core').LayerEvaluation | undefined;
-  readonly world: import('@joy-media/motion-core').LayerWorldEvaluation | undefined;
+  readonly evaluation: LayerEvaluation | undefined;
+  readonly world: LayerWorldEvaluation | undefined;
   readonly isSelected: boolean;
   readonly editingText: boolean;
   readonly onPointerDown: (e: React.PointerEvent, layerId: MotionLayerId) => void;
@@ -356,13 +357,6 @@ function rotatedAxes(deg: number): { axisX: Point; axisY: Point } {
   };
 }
 
-function worldToLocal(point: Point, center: Point, deg: number): Point {
-  const { axisX, axisY } = rotatedAxes(deg);
-  const dx = point.x - center.x;
-  const dy = point.y - center.y;
-  return { x: dx * axisX.x + dy * axisX.y, y: dx * axisY.x + dy * axisY.y };
-}
-
 function localToWorld(local: Point, center: Point, deg: number): Point {
   const { axisX, axisY } = rotatedAxes(deg);
   return {
@@ -399,6 +393,8 @@ export function MotionStudioCanvas({
   playheadMs = 0,
   playing = false,
 }: MotionStudioCanvasProps) {
+  void onUpdateTransaction;
+  void onCancelTransaction;
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [editingTextLayerId, setEditingTextLayerId] = useState<MotionLayerId | null>(null);
   const evaluated = useMemo(
@@ -447,21 +443,6 @@ export function MotionStudioCanvas({
     canvasScale: 1,
   });
 
-  const sceneToScreen = useCallback(
-    (p: Point): Point => {
-      const stage = stageRef.current;
-      if (!stage) return p;
-      const rect = stage.getBoundingClientRect();
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
-      return {
-        x: centerX + (p.x - document.width / 2) * canvasScale,
-        y: centerY + (p.y - document.height / 2) * canvasScale,
-      };
-    },
-    [canvasScale, document.width, document.height],
-  );
-
   const screenToScene = useCallback(
     (clientX: number, clientY: number): Point => {
       const stage = stageRef.current;
@@ -487,31 +468,6 @@ export function MotionStudioCanvas({
   const selectedLayers = useMemo(
     () => document.layers.filter((l) => selectedLayerIds.includes(l.id)),
     [document.layers, selectedLayerIds],
-  );
-
-  const commitLayerTransforms = useCallback(
-    (
-      layerIds: readonly MotionLayerId[],
-      transformMap: Map<MotionLayerId, MotionLayer['transform']>,
-    ) => {
-      const commands: SceneCommand[] = [];
-      for (const id of layerIds) {
-        const layer = document.layers.find((l) => l.id === id);
-        const base = transformMap.get(id);
-        if (!layer || !base) continue;
-        const next = layer.transform;
-        if (next !== base) {
-          commands.push({
-            type: 'scene.setLayerTransform',
-            payload: { layerId: id, transform: next },
-          });
-        }
-      }
-      if (commands.length > 0) {
-        onUpdateTransaction(...commands);
-      }
-    },
-    [document.layers, onUpdateTransaction],
   );
 
   const computeSnap = useCallback(
@@ -773,9 +729,6 @@ export function MotionStudioCanvas({
       const h = t.height;
       const deg = t.rotationDeg;
       const { axisX, axisY } = rotatedAxes(deg);
-      const anchorLocal = { x: 0, y: 0 };
-      const pointerLocal = worldToLocal(pointer, initialCenter, deg);
-
       const handleMap: Record<string, { anchor: Point; sign: Point }> = {
         nw: { anchor: { x: w / 2, y: h / 2 }, sign: { x: -1, y: -1 } },
         n: { anchor: { x: 0, y: h / 2 }, sign: { x: 0, y: -1 } },
@@ -795,17 +748,10 @@ export function MotionStudioCanvas({
 
       let newW = w;
       let newH = h;
-      let newLocalX = 0;
-      let newLocalY = 0;
-
       if (handle === 'n' || handle === 's') {
         newH = Math.max(10, cfg.sign.y * localV.y);
-        newLocalX = 0;
-        newLocalY = cfg.sign.y > 0 ? newH / 2 - h / 2 : -newH / 2 + h / 2;
       } else if (handle === 'e' || handle === 'w') {
         newW = Math.max(10, cfg.sign.x * localV.x);
-        newLocalX = cfg.sign.x > 0 ? newW / 2 - w / 2 : -newW / 2 + w / 2;
-        newLocalY = 0;
       } else {
         newW = Math.max(10, cfg.sign.x * localV.x);
         newH = Math.max(10, cfg.sign.y * localV.y);

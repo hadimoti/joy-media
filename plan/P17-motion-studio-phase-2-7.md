@@ -59,7 +59,7 @@ since every continuous drag interaction must use the same pattern or it will
 reintroduce the flooded-undo-stack bug.
 
 **Load-bearing gotcha found via live testing, not typecheck**: `useSceneEditor`
-keeps a `documentRef` that must be the *synchronous* source of truth for every
+keeps a `documentRef` that must be the _synchronous_ source of truth for every
 mutation path (`dispatch`/`undo`/`redo`/`updateTransaction`). A version that only
 updated the ref at render time (`documentRef.current = document` in the component
 body) went stale whenever two native `pointermove`/`pointerup` listeners fired
@@ -83,7 +83,7 @@ at `:117-125`/`:326-357`), and a render branch in
 `packages/visual-object-renderer/src/index.ts` (mirror the `'html-scene'` branch
 at `:86`). The "place on timeline" data flow to copy is
 `addHtmlSceneToSelectedClip` in `apps/editor-web/src/App.tsx:1123-1234`. This is
-naturally Phase 2/3 adjacent work (a clip needs *something* renderable before
+naturally Phase 2/3 adjacent work (a clip needs _something_ renderable before
 placing it is useful) — pick it up whenever it fits, it doesn't have to be first.
 
 **Icon library**: a Canva icon set was added to
@@ -110,6 +110,7 @@ Copied from the owner's plan, §19, with file pointers added. Check off as you g
 this doc is meant to survive multiple agent sessions.
 
 ### Phase 2 — Canvas Direct Manipulation
+
 - [ ] Real resize from corner/edge handles (`MotionStudioCanvas.tsx`'s
       `SelectionOverlay` currently wires **all 8 handles to the same move-drag** —
       grep `startDrag` there; every handle calls it identically, so "resize" today
@@ -133,6 +134,7 @@ this doc is meant to survive multiple agent sessions.
       Phase 0, or you'll reintroduce one-undo-entry-per-pointermove.
 
 ### Phase 3 — Capability-Based Inspector
+
 - [ ] Define a `LayerCapabilities` registry (transform/typography/fill/stroke/
       cornerRadius/shadow/glow/blur/blendMode/crop/mask/filters/editableText per
       `MotionLayerType`) and drive `MotionStudioInspector.tsx`,
@@ -151,8 +153,9 @@ this doc is meant to survive multiple agent sessions.
       animated-but-no-keyframe-here), wired to Phase 4's evaluator once it exists.
 
 ### Phase 4 — Animation Engine
+
 - [ ] Build the **evaluator**: `MotionSceneDocument → currentTimeMs → resolved
-      per-layer property values`, pure and independent of React (so it's reusable
+per-layer property values`, pure and independent of React (so it's reusable
       for export/thumbnails later). `MotionLayer.animations: MotionAnimation[]`
       and `MotionKeyframeCurve`/`MotionKeyframe` already exist in `scene.ts` with
       bezier/hold/ease interpolation kinds — there is no reader for them yet.
@@ -165,6 +168,7 @@ this doc is meant to survive multiple agent sessions.
       updates a keyframe at the current time; decide the project-wide toggle.
 
 ### Phase 5 — Timeline Property Editor
+
 - [ ] Expandable per-layer property rows (Transform/Style/Text sub-groups) in
       `MotionStudioTimeline.tsx` — it currently renders layer lanes only
       (play/seek/zoom/mute/lock), no property or keyframe rows.
@@ -173,6 +177,7 @@ this doc is meant to survive multiple agent sessions.
 - [ ] Layer trim (in/out point drag), timeline snapping, scene-duration bound.
 
 ### Phase 6 — Media & Group Layers
+
 - [ ] Image layer already has a type + `layerFactory.createImageLayer` +
       canvas rendering (`MotionStudioCanvas.tsx`'s `LayerElement`,
       `layer.type === 'image'` branch) — **but there's no "Add Image" button in
@@ -193,12 +198,13 @@ this doc is meant to survive multiple agent sessions.
 - [ ] SVG layer: import, scale, fill override, preserve-colors mode.
 
 ### Phase 7 — Advanced Authoring
+
 - [ ] Editable Code Mode: today `MotionStudioShell.tsx`'s code-mode branch is a
       `readOnly` placeholder `<textarea>` with static placeholder text — no
       document serialization to text, no parse/apply, no sync with Visual Mode.
 - [ ] Graph Editor (bezier handle drag for keyframe easing) — motion-core's
       sibling "Motion Presets" system already has one at
-      `apps/editor-web/src/GraphEditor.tsx`, built for the *other* animation
+      `apps/editor-web/src/GraphEditor.tsx`, built for the _other_ animation
       model (`AnimationCurveV1` on `VisualObjectV1`). Decide whether to adapt it
       or write a Motion-Studio-native one against `MotionKeyframeCurve`; the
       visual/interaction logic (drag handles, snapping) is reusable even though

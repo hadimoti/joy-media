@@ -9,7 +9,11 @@
  * shape so the rest of App.tsx didn't need to change.
  */
 
-import { clearStoredMediaToken, getStoredMediaToken, type MediaSessionStorage } from './media-session.js';
+import {
+  clearStoredMediaToken,
+  getStoredMediaToken,
+  type MediaSessionStorage,
+} from './media-session.js';
 
 export type JoySessionState =
   | { readonly kind: 'unknown' }

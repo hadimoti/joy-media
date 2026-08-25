@@ -293,7 +293,8 @@ export function applyMotionProjectCommand(
     if (curve !== undefined) {
       const diagnostics: ProjectDiagnostic[] = [];
       validateAnimationCurve(curve, `${objectId}.animations.${property}`, diagnostics);
-      if (diagnostics.length > 0) throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
+      if (diagnostics.length > 0)
+        throw new MotionCommandError(diagnostics[0]!.message, diagnostics);
     }
     const previous = object.animations?.[property];
     const inverse: MotionCommand = {
@@ -310,7 +311,10 @@ export function applyMotionProjectCommand(
     return obj.effects ?? [];
   }
 
-  function setEffectsArray(obj: VisualObjectV1, effects: readonly EffectInstanceV1[]): VisualObjectV1 {
+  function setEffectsArray(
+    obj: VisualObjectV1,
+    effects: readonly EffectInstanceV1[],
+  ): VisualObjectV1 {
     const next = { ...obj };
     if (effects.length === 0) delete (next as Record<string, unknown>).effects;
     else next.effects = effects;
@@ -319,10 +323,6 @@ export function applyMotionProjectCommand(
 
   function findEffectIndex(effects: readonly EffectInstanceV1[], instanceId: string): number {
     return effects.findIndex((e) => e.id === instanceId);
-  }
-
-  function getEffect(effects: readonly EffectInstanceV1[], instanceId: string): EffectInstanceV1 | undefined {
-    return effects.find((e) => e.id === instanceId);
   }
 
   if (command.type === 'effect.add') {
@@ -401,7 +401,7 @@ export function applyMotionProjectCommand(
     const current = effects[idx]!;
     const prevValue = current.params[paramKey];
     const nextEffects = effects.map((e, i) =>
-      i === idx ? { ...e, params: { ...e.params, [paramKey]: value } } : e
+      i === idx ? { ...e, params: { ...e.params, [paramKey]: value } } : e,
     );
     const nextObject = setEffectsArray(object, nextEffects);
     const inverse: MotionCommand = {
@@ -442,12 +442,17 @@ export function applyMotionProjectCommand(
     if (idx === -1) throw new MotionCommandError(`unknown effect instance ${effectInstanceId}`);
     const current = effects[idx]!;
     const nextEffects = effects.map((e, i) =>
-      i === idx ? { ...e, effectId: newEffectId, params: params ?? {} } : e
+      i === idx ? { ...e, effectId: newEffectId, params: params ?? {} } : e,
     );
     const nextObject = setEffectsArray(object, nextEffects);
     const inverse: MotionCommand = {
       type: 'effect.replace',
-      payload: { objectId, effectInstanceId, newEffectId: current.effectId, params: current.params },
+      payload: {
+        objectId,
+        effectInstanceId,
+        newEffectId: current.effectId,
+        params: current.params,
+      },
     };
     return commit(project, objectId, nextObject, inverse);
   }

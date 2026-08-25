@@ -200,6 +200,26 @@ describe('workflow-runner', () => {
     });
     expect(serialized).toContain('"workflowInputs"');
 
+    const blockedResume = await resumeWorkflow(
+      session,
+      first.runId,
+      { 'confirm-cost': { approved: true, approvalRef: 'cost-ok' } },
+      {
+        productionRunStore: revivedStore,
+        authority: owner,
+        firstPartyLibrary: createProductionFirstPartyLibrary(),
+        ...approvalResumeOptions(first),
+      },
+    );
+    expect(blockedResume).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('Connect the approved provider/Worker adapters'),
+    });
+    await expect(revivedStore.load(first.runId)).resolves.toMatchObject({
+      state: 'parked',
+      checkpointRevision: 1,
+    });
+
     const secondCounts: Record<string, number> = {};
     const second = await resumeWorkflow(
       session,
@@ -419,7 +439,7 @@ describe('workflow-runner', () => {
     });
   });
 
-  it('uses production first-party ports by default and fails unsupported ports without fixture success', async () => {
+  it('fails closed when production first-party ports are unavailable without fixture success', async () => {
     const storage = memoryStorage();
     const session = new EditorSession(
       storage,
@@ -439,21 +459,10 @@ describe('workflow-runner', () => {
     );
     expect(result).toMatchObject({
       status: 'failed',
-      error: expect.stringContaining('workflow/port-unavailable:analysis.researchBrief'),
+      error: expect.stringContaining('no connected first-party production ports'),
     });
     const record = await store.load(result.runId);
-    expect(record?.state).toBe('failed');
-    expect(record?.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ nodeId: 'brief', state: 'succeeded' }),
-        expect.objectContaining({ nodeId: 'selected-media', state: 'succeeded' }),
-        expect.objectContaining({
-          nodeId: 'research',
-          state: 'failed',
-          failureCode: 'workflow/port-unavailable:analysis.researchBrief',
-        }),
-      ]),
-    );
+    expect(record).toBeUndefined();
 
     const library = createProductionFirstPartyLibrary();
     const portUnavailableCases = [

@@ -85,11 +85,11 @@ The result should feel like a professional editor with a transparent creative op
 
 The timeline area receives a compact view switch:
 
-| View | Purpose | Default audience |
-| --- | --- | --- |
-| **Time** | Familiar track-based editing | Every editor |
-| **Flow** | Full dependency and workflow graph | Automation and AI workflows |
-| **Split** | Timeline and graph synchronized | Advanced users |
+| View      | Purpose                            | Default audience            |
+| --------- | ---------------------------------- | --------------------------- |
+| **Time**  | Familiar track-based editing       | Every editor                |
+| **Flow**  | Full dependency and workflow graph | Automation and AI workflows |
+| **Split** | Timeline and graph synchronized    | Advanced users              |
 
 Use familiar labels. Do not rename clips, tracks, sequences, bins, markers, keyframes, effects, or nested sequences with artificial AI terminology.
 
@@ -234,18 +234,18 @@ Use JOY Media’s existing dark professional visual language.
 
 Recommended semantic accents:
 
-| Semantic type | Visual treatment |
-| --- | --- |
-| Source media | Neutral blue-gray |
-| Text, script, transcript, captions | Violet |
-| Audio | Green |
-| Deterministic transform | Blue |
-| Analysis | Amber |
-| Generative provider | Magenta |
-| Specialist agent | Cyan outline/badge |
-| Review or approval gate | Gold |
-| Output/export | Bright neutral |
-| Error | Existing destructive red |
+| Semantic type                      | Visual treatment         |
+| ---------------------------------- | ------------------------ |
+| Source media                       | Neutral blue-gray        |
+| Text, script, transcript, captions | Violet                   |
+| Audio                              | Green                    |
+| Deterministic transform            | Blue                     |
+| Analysis                           | Amber                    |
+| Generative provider                | Magenta                  |
+| Specialist agent                   | Cyan outline/badge       |
+| Review or approval gate            | Gold                     |
+| Output/export                      | Bright neutral           |
+| Error                              | Existing destructive red |
 
 Color must never be the only status signal. Use icons, labels, patterns, and accessible contrast.
 
@@ -280,17 +280,17 @@ The graph adds power; it does not replace these concepts.
 
 ### 4.2 Familiar actions gain optional graph meaning
 
-| Familiar action | Unified-data behavior |
-| --- | --- |
-| Import media | Creates a source artifact and timeline item |
-| Add captions | Creates caption artifacts linked to transcript/source timing |
-| Apply effect | Creates or updates a transform relationship |
-| Nest sequence | Creates a reusable composition boundary |
-| Render and replace | Creates a versioned derived artifact with provenance |
-| Replace footage | Rebinds the source while preserving allowed downstream operations |
-| Duplicate sequence | Offers linked workflow or independent workflow copy |
-| Add marker | Marker may carry semantic data or workflow trigger metadata |
-| Export | Creates an output job and version record |
+| Familiar action    | Unified-data behavior                                             |
+| ------------------ | ----------------------------------------------------------------- |
+| Import media       | Creates a source artifact and timeline item                       |
+| Add captions       | Creates caption artifacts linked to transcript/source timing      |
+| Apply effect       | Creates or updates a transform relationship                       |
+| Nest sequence      | Creates a reusable composition boundary                           |
+| Render and replace | Creates a versioned derived artifact with provenance              |
+| Replace footage    | Rebinds the source while preserving allowed downstream operations |
+| Duplicate sequence | Offers linked workflow or independent workflow copy               |
+| Add marker         | Marker may carry semantic data or workflow trigger metadata       |
+| Export             | Creates an output job and version record                          |
 
 Users should not need to know these internal details during ordinary editing.
 
@@ -349,20 +349,20 @@ The unification occurs through:
 
 ```ts
 type CreativeArtifactKind =
-  | "video"
-  | "audio"
-  | "image"
-  | "text"
-  | "script"
-  | "transcript"
-  | "captionDocument"
-  | "htmlScene"
-  | "analysis"
-  | "prompt"
-  | "generatedMedia"
-  | "changeSet"
-  | "renderOutput"
-  | "metadata";
+  | 'video'
+  | 'audio'
+  | 'image'
+  | 'text'
+  | 'script'
+  | 'transcript'
+  | 'captionDocument'
+  | 'htmlScene'
+  | 'analysis'
+  | 'prompt'
+  | 'generatedMedia'
+  | 'changeSet'
+  | 'renderOutput'
+  | 'metadata';
 
 interface CreativeArtifact {
   id: string;
@@ -377,13 +377,13 @@ interface CreativeArtifact {
 }
 
 type TemporalBinding =
-  | { type: "global" }
-  | { type: "point"; timeUs: number }
-  | { type: "range"; startUs: number; durationUs: number }
-  | { type: "track"; trackId: string }
-  | { type: "item"; itemId: string }
-  | { type: "selection"; selectionId: string }
-  | { type: "none" };
+  | { type: 'global' }
+  | { type: 'point'; timeUs: number }
+  | { type: 'range'; startUs: number; durationUs: number }
+  | { type: 'track'; trackId: string }
+  | { type: 'item'; itemId: string }
+  | { type: 'selection'; selectionId: string }
+  | { type: 'none' };
 
 interface ArtifactProvenance {
   sourceArtifactIds: string[];
@@ -476,17 +476,17 @@ When expanded:
 
 ### 6.3 Recommended item treatments
 
-| Data item | Timeline representation |
-| --- | --- |
-| Script segment | Paragraph block with scene/section label |
-| Transcript | Word or phrase segments with speaker metadata |
-| Caption | Familiar subtitle blocks |
-| Prompt | Compact prompt chip bound to range/selection |
-| Generated output | Version stack with thumbnail or waveform |
-| Analysis | Thin semantic overlay or collapsible lane |
-| Agent change set | Dashed proposal range until committed |
-| Workflow run | Compact execution bar with node progress |
-| Approval gate | Gold gate marker with status |
+| Data item        | Timeline representation                       |
+| ---------------- | --------------------------------------------- |
+| Script segment   | Paragraph block with scene/section label      |
+| Transcript       | Word or phrase segments with speaker metadata |
+| Caption          | Familiar subtitle blocks                      |
+| Prompt           | Compact prompt chip bound to range/selection  |
+| Generated output | Version stack with thumbnail or waveform      |
+| Analysis         | Thin semantic overlay or collapsible lane     |
+| Agent change set | Dashed proposal range until committed         |
+| Workflow run     | Compact execution bar with node progress      |
+| Approval gate    | Gold gate marker with status                  |
 
 Do not show every internal node as a full timeline block.
 
@@ -527,17 +527,17 @@ It is not merely a compositing graph and not merely a chatbot visualization.
 
 ### 7.2 Node categories
 
-| Category | Examples |
-| --- | --- |
-| Source | Camera media, audio recording, script, brand kit |
-| Selection | Sequence, track, clip group, time range |
-| Analysis | Transcription, silence detection, beat detection, shot detection |
-| Transform | Trim plan, color stack, crop, denoise, caption style |
-| Generative | Image, video, voice, music, HTML motion generation |
-| Specialist Agent | Color, audio, caption, pacing, continuity, brand review |
-| Review | Human approval, budget approval, quality gate |
-| Composition | Merge, version selector, nested workflow |
-| Output | Timeline insertion, sequence update, render, export |
+| Category         | Examples                                                         |
+| ---------------- | ---------------------------------------------------------------- |
+| Source           | Camera media, audio recording, script, brand kit                 |
+| Selection        | Sequence, track, clip group, time range                          |
+| Analysis         | Transcription, silence detection, beat detection, shot detection |
+| Transform        | Trim plan, color stack, crop, denoise, caption style             |
+| Generative       | Image, video, voice, music, HTML motion generation               |
+| Specialist Agent | Color, audio, caption, pacing, continuity, brand review          |
+| Review           | Human approval, budget approval, quality gate                    |
+| Composition      | Merge, version selector, nested workflow                         |
+| Output           | Timeline insertion, sequence update, render, export              |
 
 ### 7.3 Typed ports
 
@@ -571,16 +571,16 @@ The normal workflow graph is a directed acyclic graph.
 
 ```ts
 type WorkflowNodeStatus =
-  | "idle"
-  | "ready"
-  | "blocked"
-  | "awaitingApproval"
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "stale";
+  | 'idle'
+  | 'ready'
+  | 'blocked'
+  | 'awaitingApproval'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'stale';
 
 interface WorkflowNode {
   id: string;
@@ -1017,22 +1017,22 @@ Graph navigation includes:
 
 ## 13. Architecture integration
 
-| Existing JOY area | Required extension |
-| --- | --- |
-| `project-schema` | Artifacts, temporal bindings, provenance, graph references, versions, migrations |
-| `timeline-engine` | Data lanes, artifact-linked items, selection synchronization |
-| `workflow-engine` | Typed DAG, validation, caching, node execution, gates |
-| `commands` | Graph/artifact commands, inversion, transactions, stale revision checks |
-| `agent-tools` | Queries and safe graph/artifact tools generated from commands |
-| `provider-sdk` | Capability-based generative and analysis node adapters |
-| `job-protocol` | Node progress, cancellation, retries, local/remote execution |
-| `render-ir` | Accept only evaluated renderable artifacts |
-| `captions-core` | Transcript/caption artifact linkage and partial invalidation |
-| `audio-core` | Analysis/mix artifacts and editable parameter change sets |
-| `motion-core` | Motion artifacts, time bindings, and graph-driven parameters |
-| `editor-web` | Time/Flow/Split views, Flow Trace, Data Lane Drawer |
-| Local Worker | Heavy node execution, hashes, caches, model/provider adapters |
-| JOY VPS | Coordination, metadata, audit, permissions, optional sync—not heavy rendering |
+| Existing JOY area | Required extension                                                               |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `project-schema`  | Artifacts, temporal bindings, provenance, graph references, versions, migrations |
+| `timeline-engine` | Data lanes, artifact-linked items, selection synchronization                     |
+| `workflow-engine` | Typed DAG, validation, caching, node execution, gates                            |
+| `commands`        | Graph/artifact commands, inversion, transactions, stale revision checks          |
+| `agent-tools`     | Queries and safe graph/artifact tools generated from commands                    |
+| `provider-sdk`    | Capability-based generative and analysis node adapters                           |
+| `job-protocol`    | Node progress, cancellation, retries, local/remote execution                     |
+| `render-ir`       | Accept only evaluated renderable artifacts                                       |
+| `captions-core`   | Transcript/caption artifact linkage and partial invalidation                     |
+| `audio-core`      | Analysis/mix artifacts and editable parameter change sets                        |
+| `motion-core`     | Motion artifacts, time bindings, and graph-driven parameters                     |
+| `editor-web`      | Time/Flow/Split views, Flow Trace, Data Lane Drawer                              |
+| Local Worker      | Heavy node execution, hashes, caches, model/provider adapters                    |
+| JOY VPS           | Coordination, metadata, audit, permissions, optional sync—not heavy rendering    |
 
 ### 13.1 Dependency direction
 

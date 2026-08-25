@@ -33,15 +33,7 @@ import {
 } from './icons.js';
 
 export type TimelineCanvasIcon =
-  | 'video'
-  | 'audio'
-  | 'text'
-  | 'caption'
-  | 'script'
-  | 'prompt'
-  | 'generation'
-  | 'agent'
-  | 'generic';
+  'video' | 'audio' | 'text' | 'caption' | 'script' | 'prompt' | 'generation' | 'agent' | 'generic';
 
 export interface TimelineCanvasItem {
   readonly id: string;
@@ -320,10 +312,7 @@ export function TimelineCanvas({
   });
   const safeDurationUs = Math.max(1, durationUs);
 
-  const laneWidthPx = Math.max(
-    64,
-    timeToPixel(safeDurationUs, { ...viewport, originUs: 0 }),
-  );
+  const laneWidthPx = Math.max(64, timeToPixel(safeDurationUs, { ...viewport, originUs: 0 }));
   const rulerTicks = useMemo(
     () =>
       buildRulerTicks({
@@ -352,16 +341,12 @@ export function TimelineCanvas({
     observer.observe(root);
     return () => observer.disconnect();
     // Intentionally depend on duration/autoFit; viewport is written, not read for equality.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fit writer
   }, [autoFit, safeDurationUs, onViewportChange]);
 
   const playheadLeft = `calc(9.5rem + ${timeToPixel(playheadUs, { ...viewport, originUs: 0 })}px)`;
 
   return (
-    <div
-      className={['timeline-tracks', className].filter(Boolean).join(' ')}
-      ref={scrollRef}
-    >
+    <div className={['timeline-tracks', className].filter(Boolean).join(' ')} ref={scrollRef}>
       <div className="timeline-scrub-row" style={{ minWidth: `calc(9.5rem + ${laneWidthPx}px)` }}>
         <div className="timeline-scrub-gutter">
           <output className="timeline-timecode" aria-live="polite">
@@ -459,9 +444,7 @@ export function TimelineCanvas({
                   );
                 })}
               {track.items.length === 0 ? (
-                <span className="timeline-lane-empty">
-                  No data
-                </span>
+                <span className="timeline-lane-empty">No data</span>
               ) : (
                 track.items.map((item) => {
                   if (item.unplaced === true) {
@@ -484,8 +467,7 @@ export function TimelineCanvas({
                       </button>
                     );
                   }
-                  const selected =
-                    item.clipId !== undefined && selectedClipIds.has(item.clipId);
+                  const selected = item.clipId !== undefined && selectedClipIds.has(item.clipId);
                   return (
                     <InspectClip
                       key={item.id}

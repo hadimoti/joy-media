@@ -47,11 +47,7 @@ export type {
   GraphApplyResult,
   NodeUiStateV2,
 } from './graph-commands.js';
-export {
-  applyGraphCommand,
-  GraphCommandError,
-  GRAPH_COMMAND_REGISTRY,
-} from './graph-commands.js';
+export { applyGraphCommand, GraphCommandError, GRAPH_COMMAND_REGISTRY } from './graph-commands.js';
 
 export type {
   GraphTransaction,

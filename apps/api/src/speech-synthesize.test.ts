@@ -6,7 +6,9 @@ let edgettsAvailable = false;
 try {
   execSync('which edge-tts', { stdio: 'ignore' });
   edgettsAvailable = true;
-} catch { /* edge-tts not installed */ }
+} catch {
+  /* edge-tts not installed */
+}
 
 describe('resolveEdgeVoice', () => {
   it('maps FA/EN languages to neural voices', () => {

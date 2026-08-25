@@ -5,6 +5,23 @@ import { applyGate } from '@joy-media/audio-core/effects';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
 
+export interface FirstPartyLibraryStatus {
+  readonly available: boolean;
+  readonly label: 'Unavailable' | 'Available';
+  readonly reason: string;
+  readonly recovery: string;
+}
+
+const PRODUCTION_LIBRARY_MARKER = '__joyMediaProductionFirstParty' as const;
+type MarkedProductionLibrary = NodeLibrary & { readonly [PRODUCTION_LIBRARY_MARKER]: true };
+
+const PRODUCTION_LIBRARY_STATUS: FirstPartyLibraryStatus = {
+  available: false,
+  label: 'Unavailable',
+  reason: 'The browser has no connected first-party production ports yet.',
+  recovery: 'Connect the approved provider/Worker adapters before running a system workflow.',
+};
+
 /**
  * Browser-side libraries for first-party workflows (WP-17.2 / WP-19 / WP-22 / P14.6).
  *
@@ -64,8 +81,16 @@ function generateNoisyFixturePcm(sampleRate: number, durationSec = 1): Float32Ar
  * through `workflow/port-unavailable:*` until a real media/provider adapter is
  * injected.
  */
-export function createProductionFirstPartyLibrary(): NodeLibrary {
-  return buildNodeLibrary();
+export function createProductionFirstPartyLibrary(): MarkedProductionLibrary {
+  return Object.assign(buildNodeLibrary(), { [PRODUCTION_LIBRARY_MARKER]: true as const });
+}
+
+export function getProductionFirstPartyLibraryStatus(): FirstPartyLibraryStatus {
+  return PRODUCTION_LIBRARY_STATUS;
+}
+
+export function isProductionFirstPartyLibrary(library: NodeLibrary): boolean {
+  return (library as Partial<MarkedProductionLibrary>)[PRODUCTION_LIBRARY_MARKER] === true;
 }
 
 /** Build a NodeLibrary whose ports are deterministic fixtures suitable for tests. */

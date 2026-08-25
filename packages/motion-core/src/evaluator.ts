@@ -9,7 +9,6 @@ import type {
   MotionAnimation,
   MotionEasing,
   MotionEasingName,
-  MotionKeyframe,
   MotionKeyframeCurve,
   MotionLayer,
   MotionLayerId,
@@ -166,7 +165,10 @@ function evaluateLayer(layer: MotionLayer, timeMs: number): LayerEvaluation {
   return { transform: transformPatch as EvaluatedTransform };
 }
 
-export function evaluateMotionScene(document: MotionSceneDocument, timeMs: number): SceneEvaluation {
+export function evaluateMotionScene(
+  document: MotionSceneDocument,
+  timeMs: number,
+): SceneEvaluation {
   const result = new Map<MotionLayerId, LayerEvaluation>();
   const clampedTime = Math.max(0, timeMs);
   for (const layer of document.layers) {
@@ -181,12 +183,18 @@ export function evaluateMotionScene(document: MotionSceneDocument, timeMs: numbe
 /**
  * Merge a layer's static transform with evaluated overrides.
  */
-export function resolvedLayerTransform(layer: MotionLayer, evaluation: LayerEvaluation | undefined): MotionTransform {
+export function resolvedLayerTransform(
+  layer: MotionLayer,
+  evaluation: LayerEvaluation | undefined,
+): MotionTransform {
   if (!evaluation?.transform) return layer.transform;
   return { ...layer.transform, ...evaluation.transform };
 }
 
-export function resolvedLayerOpacity(layer: MotionLayer, evaluation: LayerEvaluation | undefined): number {
+export function resolvedLayerOpacity(
+  layer: MotionLayer,
+  evaluation: LayerEvaluation | undefined,
+): number {
   if (evaluation?.opacity !== undefined) return evaluation.opacity;
   return layer.transform.opacity;
 }
@@ -210,9 +218,7 @@ export function setKeyframeAt(
       {
         property,
         curve: {
-          keyframes: [
-            { id: crypto.randomUUID(), timeMs: Math.max(0, timeMs), value, easing },
-          ],
+          keyframes: [{ id: crypto.randomUUID(), timeMs: Math.max(0, timeMs), value, easing }],
         },
       },
     ];

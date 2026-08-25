@@ -29,13 +29,16 @@ import {
   type LocalGpuReceipt,
 } from './local-gpu.js';
 import {
-  loadAiProviderConfigs,
   runAiJob,
   getConfiguredProviders,
   type LocalAiReceipt,
   type AiProvider,
 } from './local-ai.js';
-import { executeLeasedExport, type RenderExportReceiptV1 } from './export-job.js';
+import {
+  executeLeasedExport,
+  renderExportOutputPath,
+  type RenderExportReceiptV1,
+} from './export-job.js';
 import { mediaResolverFromAssetSourceRegistry } from './worker-media-resolver.js';
 import { analyzeReferenceVideo, type ReferenceAnalysisError } from './reference-analysis.js';
 import { buildSemanticBrollIndex, createMediaSemanticIndexReceipt } from './semantic-index.js';
@@ -620,6 +623,19 @@ export class WorkerRuntime {
       createHash('sha256').update(bytes).digest('hex') !== result.sha256
     )
       throw new Error('retained derivative integrity check failed');
+    return bytes;
+  }
+
+  /** Reads a verified Worker-local MP4 export; its path never leaves this process. */
+  readRenderArtifact(jobId: string, result: RenderExportReceiptV1): Uint8Array {
+    const directory =
+      this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+    const bytes = readFileSync(renderExportOutputPath(directory, jobId));
+    if (
+      bytes.length !== result.bytes ||
+      createHash('sha256').update(bytes).digest('hex') !== result.sha256
+    )
+      throw new Error('retained render artifact integrity check failed');
     return bytes;
   }
 }

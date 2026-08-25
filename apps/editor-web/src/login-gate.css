@@ -52,7 +52,7 @@
 }
 
 @property --joy-ang {
-  syntax: "<angle>";
+  syntax: '<angle>';
   initial-value: 0deg;
   inherits: false;
 }
@@ -76,7 +76,8 @@
   --muted: #777;
   --danger: #f87171;
   --border: rgba(255, 255, 255, 0.06);
-  --shadow: 3px 5px 14px rgba(0, 0, 0, 0.55), -1px -2px 5px rgba(255, 255, 255, 0.05),
+  --shadow:
+    3px 5px 14px rgba(0, 0, 0, 0.55), -1px -2px 5px rgba(255, 255, 255, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --glow: #f9731628;
   --glow-strong: #f9731644;
@@ -141,7 +142,9 @@
   max-width: 360px;
   position: relative;
   z-index: 2;
-  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 32px 64px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   text-align: left;
 }
 
@@ -175,9 +178,13 @@
     rgba(255, 157, 77, 0) 180deg,
     rgba(255, 157, 77, 0) 360deg
   );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   mask-composite: exclude;
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -261,7 +268,9 @@
   border-radius: 0;
   box-shadow: none;
   transform-origin: 50% 65%;
-  animation: jm-logo-glow 3s ease-in-out infinite, jm-logo-wiggle 2.4s ease-in-out infinite;
+  animation:
+    jm-logo-glow 3s ease-in-out infinite,
+    jm-logo-wiggle 2.4s ease-in-out infinite;
 }
 
 @keyframes jm-logo-glow {
@@ -418,7 +427,13 @@
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 0.78rem;
   letter-spacing: -0.01em;
 }
@@ -457,7 +472,13 @@
   margin-bottom: 24px;
   text-align: center;
   width: 100%;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-weight: 700;
 }
 
@@ -477,10 +498,18 @@
   outline: none;
   background: rgba(209, 209, 209, 0.25);
   color: #ffffff;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
-  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.14), inset -4px -4px 8px rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 4px 4px 8px rgba(0, 0, 0, 0.14),
+    inset -4px -4px 8px rgba(255, 255, 255, 0.18);
   transition: all 0.3s ease;
   text-align: center;
   direction: ltr;
@@ -533,7 +562,9 @@
 
 .auth-input:focus {
   border-color: #ffc94f;
-  box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.14), inset -4px -4px 8px rgba(255, 255, 255, 0.18),
+  box-shadow:
+    inset 4px 4px 8px rgba(0, 0, 0, 0.14),
+    inset -4px -4px 8px rgba(255, 255, 255, 0.18),
     0 0 0 3px rgba(244, 183, 47, 0.22);
 }
 
@@ -544,7 +575,9 @@
   border-radius: 12px;
   border: 1.5px solid #f4b72f;
   background: linear-gradient(165deg, #1c1a1d 0%, #111012 100%);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38), inset 4px 4px 8px #080809,
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.38),
+    inset 4px 4px 8px #080809,
     inset -4px -4px 8px #252327;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -555,7 +588,10 @@
 
 .login-btn:active {
   transform: translateY(1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42), inset 5px 5px 10px #060607, inset -3px -3px 7px #1c1a1e;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.42),
+    inset 5px 5px 10px #060607,
+    inset -3px -3px 7px #1c1a1e;
 }
 
 .login-btn:disabled {
@@ -570,7 +606,13 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: #f4b72f;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   letter-spacing: -0.01em;
 }
 
@@ -586,7 +628,13 @@
   margin: 0 0 14px;
   padding: 0 8px;
   text-align: center;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.45;
@@ -612,7 +660,13 @@
   border: 1.5px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   text-align: center;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 1.2rem;
   font-weight: 600;
   color: #fff;
@@ -635,7 +689,13 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 0.8rem;
   display: block;
   width: 100%;
@@ -652,7 +712,13 @@
   margin-top: 10px;
   text-align: center;
   width: 100%;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
 }
 
 .hidden {

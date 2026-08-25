@@ -190,6 +190,53 @@ describe('PostgresControlPlane', () => {
     ]);
     await pool.end();
   });
+
+  it('durably persists a leased render artifact and enforces owner binding', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const first = new PostgresControlPlane(pool, { skipLocked: false });
+    await first.initialize();
+    const owner = { id: 'joy-user-1' };
+    await first.createProject(owner, 'project-1', 'Reference');
+    await first.pairWorker(owner, 'worker-render');
+    await first.helloWorker('worker-render', ['render.export'], [], 100);
+    await first.enqueue(owner, 'render-job-1', 'project-1', 'render.export', 100);
+    await first.lease('worker-render', 101, 30_000);
+    const artifact = await first.registerWorkerRenderArtifact(
+      'worker-render',
+      'render-job-1',
+      {
+        id: 'artifact-render-job-1',
+        outputRef: 'render-render-job-1-aaaaaaaaaaaaaaaa',
+        sha256: 'a'.repeat(64),
+        bytes: 1234,
+        descriptor: { mimeType: 'video/mp4' },
+        location: { kind: 'private-object', ref: 'render-render-job-1-aaaaaaaaaaaaaaaa' },
+      },
+      102,
+    );
+    await first.complete('worker-render', 'render-job-1', 103, {
+      kind: 'render.export',
+      reportRef: 'report-render-job-1',
+      outputRef: artifact.outputRef,
+      sha256: artifact.sha256,
+      bytes: artifact.bytes,
+    });
+    const restarted = new PostgresControlPlane(pool, { skipLocked: false });
+    await expect(
+      restarted.renderArtifactForOwner(owner, 'project-1', artifact.id),
+    ).resolves.toMatchObject({
+      id: artifact.id,
+      jobId: 'render-job-1',
+      descriptor: { mimeType: 'video/mp4' },
+      location: { kind: 'private-object', ref: 'render-render-job-1-aaaaaaaaaaaaaaaa' },
+    });
+    await expect(
+      restarted.renderArtifactForOwner({ id: 'other-owner' }, 'project-1', artifact.id),
+    ).rejects.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
+    await pool.end();
+  });
 });
 
 function realThumbnailReceipt() {

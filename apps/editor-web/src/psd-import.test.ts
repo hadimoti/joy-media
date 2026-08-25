@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { PsdImportError } from './psd-import.js';
 import {
-  PsdImportError,
   buildPsdDocumentSnapshot,
   parsePsdFile,
   registerPsdAssets,

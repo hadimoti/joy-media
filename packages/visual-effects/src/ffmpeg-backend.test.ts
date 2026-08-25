@@ -4,16 +4,28 @@ import { effectToFfmpegFilter, effectStackToFfmpegFiltergraph } from './ffmpeg-b
 describe('ffmpeg-backend', () => {
   it('brightness-contrast produces eq filter', () => {
     const result = effectToFfmpegFilter(
-      { id: 'e1', effectId: 'brightness-contrast', enabled: true, params: { brightness: 0, contrast: 0 } },
-      '0:v', 'e1',
+      {
+        id: 'e1',
+        effectId: 'brightness-contrast',
+        enabled: true,
+        params: { brightness: 0, contrast: 0 },
+      },
+      '0:v',
+      'e1',
     );
     expect(result).toBe('[0:v]eq=brightness=0.00:contrast=1.00[e1]');
   });
 
   it('brightness-contrast with non-zero params', () => {
     const result = effectToFfmpegFilter(
-      { id: 'e1', effectId: 'brightness-contrast', enabled: true, params: { brightness: 0.1, contrast: 0.2 } },
-      '0:v', 'e1',
+      {
+        id: 'e1',
+        effectId: 'brightness-contrast',
+        enabled: true,
+        params: { brightness: 0.1, contrast: 0.2 },
+      },
+      '0:v',
+      'e1',
     );
     expect(result).toContain('brightness=25.50');
     expect(result).toContain('contrast=1.20');
@@ -22,7 +34,8 @@ describe('ffmpeg-backend', () => {
   it('sepia produces colorchannelmixer filter', () => {
     const result = effectToFfmpegFilter(
       { id: 'e1', effectId: 'sepia', enabled: true, params: { amount: 0.5 } },
-      'in', 'out',
+      'in',
+      'out',
     );
     expect(result).toContain('colorchannelmixer');
     expect(result).toContain('[in]');
@@ -32,15 +45,22 @@ describe('ffmpeg-backend', () => {
   it('gaussian-blur produces gblur filter', () => {
     const result = effectToFfmpegFilter(
       { id: 'e1', effectId: 'gaussian-blur', enabled: true, params: { amount: 4 } },
-      '0:v', 'blurred',
+      '0:v',
+      'blurred',
     );
     expect(result).toBe('[0:v]gblur=sigma=4.0[blurred]');
   });
 
   it('hue-saturation produces hue filter', () => {
     const result = effectToFfmpegFilter(
-      { id: 'e1', effectId: 'hue-saturation', enabled: true, params: { hue: 0.1, saturation: 0.3 } },
-      '0:v', 'out',
+      {
+        id: 'e1',
+        effectId: 'hue-saturation',
+        enabled: true,
+        params: { hue: 0.1, saturation: 0.3 },
+      },
+      '0:v',
+      'out',
     );
     expect(result).toContain('hue=');
     expect(result).toContain('h=18.0');
@@ -50,22 +70,34 @@ describe('ffmpeg-backend', () => {
   it('unknown effect returns undefined', () => {
     const result = effectToFfmpegFilter(
       { id: 'e1', effectId: 'nonexistent-effect', enabled: true, params: {} },
-      '0:v', 'e1',
+      '0:v',
+      'e1',
     );
     expect(result).toBeUndefined();
   });
 
   it('disabled effect returns undefined', () => {
     const result = effectToFfmpegFilter(
-      { id: 'e1', effectId: 'brightness-contrast', enabled: false, params: { brightness: 0.5, contrast: 0.5 } },
-      '0:v', 'e1',
+      {
+        id: 'e1',
+        effectId: 'brightness-contrast',
+        enabled: false,
+        params: { brightness: 0.5, contrast: 0.5 },
+      },
+      '0:v',
+      'e1',
     );
     expect(result).toBeUndefined();
   });
 
   it('effectStackToFfmpegFiltergraph chains multiple filters', () => {
     const result = effectStackToFfmpegFiltergraph([
-      { id: 'e1', effectId: 'brightness-contrast', enabled: true, params: { brightness: 0.05, contrast: 0.1 } },
+      {
+        id: 'e1',
+        effectId: 'brightness-contrast',
+        enabled: true,
+        params: { brightness: 0.05, contrast: 0.1 },
+      },
       { id: 'e2', effectId: 'gaussian-blur', enabled: true, params: { amount: 3 } },
     ]);
     expect(result).toBeDefined();
@@ -75,6 +107,10 @@ describe('ffmpeg-backend', () => {
 
   it('effectStackToFfmpegFiltergraph handles empty input', () => {
     expect(effectStackToFfmpegFiltergraph([])).toBeUndefined();
-    expect(effectStackToFfmpegFiltergraph([{ id: 'e1', effectId: 'brightness-contrast', enabled: false, params: {} }])).toBeUndefined();
+    expect(
+      effectStackToFfmpegFiltergraph([
+        { id: 'e1', effectId: 'brightness-contrast', enabled: false, params: {} },
+      ]),
+    ).toBeUndefined();
   });
 });

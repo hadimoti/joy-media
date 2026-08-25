@@ -57,7 +57,6 @@ const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: str
 export function TemplatesPanel({
   session,
   selectedClipIds,
-  playheadUs,
   onApplyTemplate,
   showToast,
 }: TemplatesPanelProps) {

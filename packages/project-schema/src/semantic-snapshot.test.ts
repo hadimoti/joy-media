@@ -193,7 +193,7 @@ describe('validateSnapshotEvidence', () => {
   it('should reject evidence with invalid kind', () => {
     const evidence: SnapshotEvidenceV1 = {
       ...validClipEvidence,
-      kind: 'invalid-kind' as any,
+      kind: 'invalid-kind' as unknown as SnapshotEvidenceV1['kind'],
     };
     const errors = validateSnapshotEvidence(evidence);
     expect(errors.some((e) => e.includes('kind'))).toBe(true);
@@ -475,7 +475,7 @@ describe('validateSemanticSnapshotV1', () => {
       schemaVersion: 1,
       contentHash: 'abc123',
     });
-    (snapshot as any).schemaVersion = 2;
+    Object.assign(snapshot, { schemaVersion: 2 });
 
     const result = validateSemanticSnapshotV1(snapshot);
     expect(result.valid).toBe(false);

@@ -10,10 +10,12 @@ Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `w
 ## Standing rules
 
 ### UI
+
 - Actions = **SVG only** + `aria-label` + `title` + `data-guide`.
 - No toolbar text labels (`icon-button-labeled` with visible words).
 
 ### Git (every STEP)
+
 ```bash
 cd /opt/joy-media/repo
 git add <step paths>
@@ -23,10 +25,12 @@ joy-media(P14.<step>): <why>
 EOF
 )"
 ```
+
 - No push unless owner asks. No `--force`, no `--no-verify`, no secrets.
 - Prefix: `joy-media(P14.n):`.
 
 ### Review before commit
+
 1. `pnpm --filter @joy-media/editor-web exec tsc --noEmit`
 2. Rebuild touched packages (`pnpm --filter @joy-media/<pkg> build`)
 3. Targeted vitest
@@ -34,6 +38,7 @@ EOF
 5. Tick checkbox here + STATE handoff line if user-visible
 
 ### Deploy (when STEP says yes)
+
 ```bash
 pnpm --filter @joy-media/editor-web build
 SHA=$(git rev-parse --short HEAD)
@@ -60,9 +65,11 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8790/health
 Related: [P11](P11-pro-nle.md) · [P12](P12-expert-motion.md) · [P13](P13-color-effects.md)
 
 ## Exit
+
 Each STEP leaves typecheck green, one reviewable commit, and (when required) live symlink on the new SHA. Full P14 exit = P14.0–P14.7 checked with no fabricated agent diffs and transitions/FX/grade visible in Monitor. **Met 2026-07-24** (tip `2d67808` + P14.7 docs sync).
 
 ## Hermes prompt
+
 ```text
 P14 is complete. Prefer STATE.md handoff + joy-media-monorepo-work skill live facts.
 Do not re-open P14 STEPs unless owner reports a regression.

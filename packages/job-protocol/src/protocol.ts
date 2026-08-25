@@ -6,8 +6,6 @@ import type {
   MediaSemanticIndexReceipt,
   ReferenceAnalysisEvidence,
   ReferenceAnalysisFinding,
-  VideoReferenceAnalyzeJob,
-  VideoReferenceAnalyzeReceipt,
 } from './media-analysis-jobs.js';
 import {
   assertValidMediaSemanticIndexPayload,

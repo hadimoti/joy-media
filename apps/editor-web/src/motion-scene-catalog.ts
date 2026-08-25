@@ -6,7 +6,11 @@
  */
 
 import type { BrowserKeyValueStore, PersistenceAdapter } from '@joy-media/project-persistence';
-import { BrowserProjectStore, LocalProjectPersistence, PersistenceError } from '@joy-media/project-persistence';
+import {
+  BrowserProjectStore,
+  LocalProjectPersistence,
+  PersistenceError,
+} from '@joy-media/project-persistence';
 import type { MotionSceneDocument } from '@joy-media/motion-core';
 import { createBlankScene, validateMotionSceneDocument } from '@joy-media/motion-core';
 import { applySceneCommand, type SceneCommand } from './motion-studio/state/sceneCommands.js';
@@ -39,7 +43,9 @@ interface PublishedDatabase {
 
 /* ─── Catalog (metadata index) ─── */
 
-export function listCatalogScenes(storage: BrowserKeyValueStore): readonly MotionSceneCatalogEntry[] {
+export function listCatalogScenes(
+  storage: BrowserKeyValueStore,
+): readonly MotionSceneCatalogEntry[] {
   return Object.values(readCatalog(storage).scenes).sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
@@ -168,7 +174,11 @@ export function duplicateMotionScene(
   return duplicate;
 }
 
-export function renameMotionScene(storage: BrowserKeyValueStore, sceneId: string, title: string): void {
+export function renameMotionScene(
+  storage: BrowserKeyValueStore,
+  sceneId: string,
+  title: string,
+): void {
   const document = loadMotionSceneDocument(storage, sceneId);
   if (document === undefined) return;
   saveMotionSceneDocument(storage, { ...document, name: title });
@@ -176,7 +186,10 @@ export function renameMotionScene(storage: BrowserKeyValueStore, sceneId: string
 
 /* ─── Publish: a finalized copy distinct from the live draft ─── */
 
-export function publishMotionScene(storage: BrowserKeyValueStore, document: MotionSceneDocument): void {
+export function publishMotionScene(
+  storage: BrowserKeyValueStore,
+  document: MotionSceneDocument,
+): void {
   saveMotionSceneDocument(storage, document);
   const published = readPublished(storage);
   writePublished(storage, {

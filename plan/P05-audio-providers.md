@@ -17,14 +17,14 @@
 
 Package-level P05 was marked done earlier; **editor/API live seams** landed later:
 
-| Capability | Live status | Notes |
-| --- | --- | --- |
-| `transform.normalizeAudio` | Real DSP | `audio-core.normalizeDialogue` (WP-19) |
-| `analysis.silence` / loudness | Real DSP | `audio-core` browser exports (WP-22) |
-| `transform.denoise` | Real gate + spectral | Browser `applyGate`; ffmpeg `afftdn` via API/adapter (WP-22/23) — **not** ML |
-| Captions `speech.transcribe` | Live + fixture fallback | `faster-whisper` API; fixtures when unsigned (WP-20/23) |
-| `generation.speech` / TTS | Live edge-tts API | Remote Microsoft Edge TTS; data leaves device (WP-23) |
-| ComfyUI adapter | Real HTTP, fail-closed | No mock PNG; needs Worker endpoint for success (WP-23) |
+| Capability                    | Live status             | Notes                                                                        |
+| ----------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `transform.normalizeAudio`    | Real DSP                | `audio-core.normalizeDialogue` (WP-19)                                       |
+| `analysis.silence` / loudness | Real DSP                | `audio-core` browser exports (WP-22)                                         |
+| `transform.denoise`           | Real gate + spectral    | Browser `applyGate`; ffmpeg `afftdn` via API/adapter (WP-22/23) — **not** ML |
+| Captions `speech.transcribe`  | Live + fixture fallback | `faster-whisper` API; fixtures when unsigned (WP-20/23)                      |
+| `generation.speech` / TTS     | Live edge-tts API       | Remote Microsoft Edge TTS; data leaves device (WP-23)                        |
+| ComfyUI adapter               | Real HTTP, fail-closed  | No mock PNG; needs Worker endpoint for success (WP-23)                       |
 
 ## Exit criteria (§36 Phase 5)
 

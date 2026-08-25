@@ -10,7 +10,7 @@ import { playableAssetDescriptorFromBrowserAsset } from './asset-card-preview.js
 export interface MonitorPlayableAsset {
   readonly id: string;
   readonly projectId?: string;
-  readonly kind: 'video' | 'audio' | 'image' | 'other';
+  readonly kind: 'video' | 'audio' | 'image' | 'model' | 'other';
   readonly sha256?: string;
   readonly bytes?: number;
   readonly descriptor?: { readonly mimeType?: string };
@@ -69,7 +69,9 @@ export async function resolveMonitorMediaSource(options: {
   const resolution = await resolver.resolve({
     projectId: asset?.projectId || projectId,
     asset: descriptor,
-    ...(proxyDerivative(derivatives) === undefined ? {} : { derivative: proxyDerivative(derivatives)! }),
+    ...(proxyDerivative(derivatives) === undefined
+      ? {}
+      : { derivative: proxyDerivative(derivatives)! }),
   });
 
   if (resolution.state === 'ready') {
@@ -100,13 +102,15 @@ export async function resolveMonitorMediaSource(options: {
       action: { kind: 'sign-in', label: 'Sign in again' },
     };
   }
-  return unavailable(clip, `No playable media is available for ${asset?.displayName ?? clip.assetId}.`);
+  return unavailable(
+    clip,
+    `No playable media is available for ${asset?.displayName ?? clip.assetId}.`,
+  );
 }
 
 export class MonitorMediaElementBinding {
   private current:
-    | { readonly clipId: string; readonly url: string; readonly release: () => void }
-    | undefined;
+    { readonly clipId: string; readonly url: string; readonly release: () => void } | undefined;
 
   apply(video: HTMLVideoElement, source: MonitorMediaSource): boolean {
     if (source.state !== 'ready') {
@@ -201,8 +205,7 @@ function proxyDerivative(
   const proxy = [...derivatives]
     .filter((derivative) => derivative.kind === 'proxy')
     .sort((left, right) => {
-      const state =
-        availabilityRank(right.availability) - availabilityRank(left.availability);
+      const state = availabilityRank(right.availability) - availabilityRank(left.availability);
       return state === 0 ? (right.verifiedAt ?? 0) - (left.verifiedAt ?? 0) : state;
     })[0];
   if (proxy === undefined) return undefined;

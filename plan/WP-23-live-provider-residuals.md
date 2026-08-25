@@ -8,12 +8,12 @@ Close the honest residuals after WP-17–22: fixture-only Whisper, sine-stub TTS
 
 ## Defaults used
 
-| Topic | Choice |
-| --- | --- |
+| Topic          | Choice                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------- |
 | Inference host | VPS API for Captions Whisper + edge-tts now (`faster-whisper`, `edge-tts` already on host). |
-| Identity | Fail-closed; unsigned 401 → `signed-out`; no test tokens. |
-| ComfyUI | Real HTTP; fail with `COMFYUI_UNAVAILABLE` when endpoint missing/down. |
-| Denoise | Keep browser noise-gate; add ffmpeg `afftdn` spectral path (not ML). |
+| Identity       | Fail-closed; unsigned 401 → `signed-out`; no test tokens.                                   |
+| ComfyUI        | Real HTTP; fail with `COMFYUI_UNAVAILABLE` when endpoint missing/down.                      |
+| Denoise        | Keep browser noise-gate; add ffmpeg `afftdn` spectral path (not ML).                        |
 
 ## Exit checklist
 

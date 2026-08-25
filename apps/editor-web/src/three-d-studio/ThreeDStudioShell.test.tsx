@@ -31,7 +31,6 @@ describe('3D studio surfaces', () => {
       <ThreeDStudioHierarchy
         document={emptyScene3D('scene-1')}
         assets={[MODEL]}
-        selectedObjectId={undefined}
         onSelect={() => undefined}
         onAdd={() => undefined}
         onRemove={() => undefined}

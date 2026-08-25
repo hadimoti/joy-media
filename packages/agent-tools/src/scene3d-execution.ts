@@ -127,10 +127,7 @@ export class Scene3DPlanExecutor {
     }
     if (!verifyScene3DApprovalSignature(request.approval, this.approvalSecret))
       return this.fail(request, 'scene approval signature is invalid');
-    if (
-      request.approval.planId !== request.planId ||
-      request.approval.stepId !== request.stepId
-    )
+    if (request.approval.planId !== request.planId || request.approval.stepId !== request.stepId)
       return this.fail(request, 'scene approval receipt is bound to a different plan step');
     if (this.approvals.hasConsumed(request.approval.approvalId))
       return this.fail(request, 'scene approval has already been consumed');
@@ -184,10 +181,7 @@ export class Scene3DPlanExecutor {
       });
     } catch (cause) {
       this.approvals.markConsumed(request.approval.approvalId);
-      return this.ambiguousFailure(
-        request,
-        cause instanceof Error ? cause.message : String(cause),
-      );
+      return this.ambiguousFailure(request, cause instanceof Error ? cause.message : String(cause));
     }
     if (!commitResult.accepted) {
       this.approvals.release(request.approval.approvalId);

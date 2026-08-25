@@ -13,11 +13,7 @@ import type { EffectInstanceV1 } from './types.js';
  * both failed to typecheck and would have emitted `NaN` into a filtergraph had
  * a non-numeric value ever reached here.
  */
-function numParam(
-  params: EffectInstanceV1['params'],
-  key: string,
-  fallback: number,
-): number {
+function numParam(params: EffectInstanceV1['params'], key: string, fallback: number): number {
   const raw = params[key];
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback;
 }

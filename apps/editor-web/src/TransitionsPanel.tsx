@@ -102,8 +102,10 @@ export function TransitionsPanel({
   onUpdateTransition,
   showToast,
 }: TransitionsPanelProps) {
+  void onRemoveTransition;
+  void onUpdateTransition;
   const rootComp = project.compositions[project.rootCompositionId];
-  const transitions = project.transitions ?? [];
+  void project.transitions;
   const [pendingType, setPendingType] = useState('dissolve');
   const [selectedTransition] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -118,13 +120,6 @@ export function TransitionsPanel({
       return next;
     });
   }, []);
-
-  const relevantTransitions = useMemo(() => {
-    if (selectedClipIds.length === 0) return transitions;
-    return transitions.filter(
-      (t) => selectedClipIds.includes(t.leftClipId) || selectedClipIds.includes(t.rightClipId),
-    );
-  }, [transitions, selectedClipIds]);
 
   const availableJunctions = useMemo(() => {
     if (!rootComp || selectedClipIds.length === 0) return [];
@@ -205,34 +200,6 @@ export function TransitionsPanel({
     event.dataTransfer.setData('application/x-joy-transition', JSON.stringify(payload));
     event.dataTransfer.effectAllowed = 'copy';
   }, []);
-
-  const handleDurationChange = (transitionId: string, durationUs: number) => {
-    onUpdateTransition(transitionId, {
-      durationUs: Math.max(50_000, Math.min(5_000_000, durationUs)),
-    });
-  };
-
-  const handleTypeChange = (transitionId: string, type: string) => {
-    const entry = SHADER_CATALOG.find((item) => item.id === type);
-    const params: Record<string, number> = {};
-    if (entry !== undefined) {
-      for (const [key, value] of Object.entries(entry.defaultParams)) {
-        if (typeof value === 'number') params[key] = value;
-      }
-    }
-    onUpdateTransition(transitionId, {
-      type,
-      ...(Object.keys(params).length > 0 ? { params } : { params: {} }),
-    });
-  };
-
-  const handleParamChange = (transitionId: string, key: string, value: number) => {
-    const current = transitions.find((t) => t.id === transitionId);
-    if (current === undefined) return;
-    onUpdateTransition(transitionId, {
-      params: { ...(current.params ?? {}), [key]: value },
-    });
-  };
 
   const hasFavorites = favorites.size > 0;
   const favItems = hasFavorites ? SHADER_CATALOG.filter((e) => favorites.has(e.id)) : [];

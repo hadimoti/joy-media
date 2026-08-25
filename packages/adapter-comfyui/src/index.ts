@@ -343,7 +343,8 @@ function collectComfyImages(
   if (outputs === null || typeof outputs !== 'object' || Array.isArray(outputs)) return [];
   const images: { filename: string; subfolder: string; type: string }[] = [];
   for (const nodeOutput of Object.values(outputs as Record<string, unknown>)) {
-    if (nodeOutput === null || typeof nodeOutput !== 'object' || Array.isArray(nodeOutput)) continue;
+    if (nodeOutput === null || typeof nodeOutput !== 'object' || Array.isArray(nodeOutput))
+      continue;
     const maybeImages = (nodeOutput as Record<string, unknown>).images;
     if (!Array.isArray(maybeImages)) continue;
     for (const image of maybeImages) {

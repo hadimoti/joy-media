@@ -1,11 +1,13 @@
 <!doctype html>
 <html>
-  <head><meta charset="utf-8" /><title>thumb repro</title></head>
+  <head>
+    <meta charset="utf-8" />
+    <title>thumb repro</title>
+  </head>
   <body>
     <pre id="out">running…</pre>
     <script type="module">
-      const ENDPOINT =
-        'http://localhost:7636/ingest/9749fbc8-ce98-4e3a-872e-85151b33994b';
+      const ENDPOINT = 'http://localhost:7636/ingest/9749fbc8-ce98-4e3a-872e-85151b33994b';
       const log = (message, data, hypothesisId = 'R') =>
         fetch(ENDPOINT, {
           method: 'POST',
@@ -167,7 +169,12 @@ window.parent.postMessage({ type: 'joy.scene.module-ready.v1', instanceId: 'repr
             if (!data || typeof data !== 'object') return;
             if (data.type === 'joy.scene.ready.v1') {
               iframe.contentWindow.postMessage(
-                { type: 'joy.scene.update.v1', instanceId: 'repro', timeUs: 2_250_000, variables: {} },
+                {
+                  type: 'joy.scene.update.v1',
+                  instanceId: 'repro',
+                  timeUs: 2_250_000,
+                  variables: {},
+                },
                 '*',
               );
               setTimeout(() => {
@@ -217,7 +224,11 @@ window.parent.postMessage({ type: 'joy.scene.module-ready.v1', instanceId: 'repr
       results.push(await runVariant('sandbox-scripts-module', 'allow-scripts', true));
       results.push(await runVariant('sandbox-scripts-inline', 'allow-scripts', false));
       results.push(
-        await runVariant('sandbox-scripts-sameorigin-module', 'allow-scripts allow-same-origin', true),
+        await runVariant(
+          'sandbox-scripts-sameorigin-module',
+          'allow-scripts allow-same-origin',
+          true,
+        ),
       );
       await log('all variants done', { results }, 'R');
       line('done');

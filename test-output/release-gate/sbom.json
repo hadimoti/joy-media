@@ -1,0 +1,11 @@
+{
+  "bomFormat": "cyclonedx",
+  "specVersion": "1.5",
+  "components": [
+    {
+      "type": "application",
+      "name": "joy-media",
+      "version": "1.0.0"
+    }
+  ]
+}

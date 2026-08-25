@@ -5,11 +5,7 @@ import {
   type CapabilityRequest,
   type ProviderApprovalGrant,
 } from '@joy-media/provider-sdk';
-import {
-  MemoryProviderApprovalStore,
-  ProviderApprovalError,
-  ProviderApprovalService,
-} from './provider-approval.js';
+import { MemoryProviderApprovalStore, ProviderApprovalService } from './provider-approval.js';
 
 describe('ProviderApprovalService', () => {
   it('denies no-egress policy before approval can allow remote processing', async () => {

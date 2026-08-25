@@ -35,13 +35,18 @@ export class WorkerDaemon {
           },
         });
         if (result.state === 'completed') {
-          // Cloud derivative upload remains thumbnail-only (requires job.assetId).
-          // GPU receipts complete with a verified localRef; no VPS private-object upload.
           if (result.result.kind === 'asset.thumbnail') {
             await this.client.uploadDerivative(
               job.id,
               result.result,
               this.runtime.readDerivative(result.result),
+            );
+          }
+          if (result.result.kind === 'render.export') {
+            await this.client.uploadRenderArtifact(
+              job.id,
+              result.result,
+              this.runtime.readRenderArtifact(job.id, result.result),
             );
           }
           const completionResult =

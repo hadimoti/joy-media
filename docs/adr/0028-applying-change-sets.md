@@ -12,7 +12,7 @@ what should change and then not change it. §17's demo depends on the other
 half — approve once, and the picture updates.
 
 The obstacle was structural. Applying an approved change set touches the
-creative document *and* records the change set as an artifact. Those live on
+creative document _and_ records the change set as an artifact. Those live on
 different buses, each with its own history, and the session's history stack held
 exactly one operation per entry. Dispatching both would put two entries on the
 stack, so one Undo would leave the project holding a record of a change that was
@@ -34,7 +34,7 @@ inventing a synthetic command that would have to be inverted anyway.
 **Replacement persists as a snapshot, not an empty transaction.** This surfaced
 a real pre-existing bug: `replaceVisualProject` was calling `saveTransaction`
 with `commands: []`, which the object adapter rejects outright — and even if it
-had not, an empty transaction replays to the *previous* document, so the change
+had not, an empty transaction replays to the _previous_ document, so the change
 would have been lost on reload. `LocalProjectPersistence.saveSnapshot` is the
 durable path for changes that have no command form, and `replaceVisualProject`
 now uses it too.
@@ -52,7 +52,7 @@ id set, an edit naming a clip that does not exist silently created an orphan
 audio config instead of being reported.
 
 **`Create Workflow from Selection`** is closed alongside this: templates take
-the selection's label and bind their *source* nodes to its range. Downstream
+the selection's label and bind their _source_ nodes to its range. Downstream
 nodes are left unbound because they derive their time from what they receive,
 and binding them would assert a range the workflow has not established.
 
@@ -102,7 +102,7 @@ another, which is worth recording rather than quietly fixing in ADR-0030.
 
 `LocalProjectPersistence.latestRevision()` counted **transaction** revisions
 only. A snapshot writes no transaction, so two consecutive document
-replacements were assigned the *same* revision — and `recover()` picks the
+replacements were assigned the _same_ revision — and `recover()` picks the
 first of a tie, so the second replacement was silently lost on reload. A
 `saveTransaction` written after a `saveSnapshot` collided the same way and was
 skipped during replay. Nothing surfaced this: the write succeeded, the in-memory

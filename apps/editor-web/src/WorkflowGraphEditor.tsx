@@ -315,7 +315,11 @@ export function WorkflowGraphEditor({
         </ul>
       )}
 
-      <div className="workflow-templates" role="group" aria-label="Create a workflow from a template">
+      <div
+        className="workflow-templates"
+        role="group"
+        aria-label="Create a workflow from a template"
+      >
         <span className="workflow-templates-label">Templates</span>
         {WORKFLOW_TEMPLATES.map((template) => (
           <button

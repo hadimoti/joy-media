@@ -1398,7 +1398,12 @@ export function AgentPanel({
           </section>
         )}
 
-        {tab === '3d' && <JoyCode3DViewer assets={assets} onOpenStudio={onOpen3DStudio} />}
+        {tab === '3d' && (
+          <JoyCode3DViewer
+            assets={assets}
+            {...(onOpen3DStudio === undefined ? {} : { onOpenStudio: onOpen3DStudio })}
+          />
+        )}
       </div>
     </PanelShell>
   );

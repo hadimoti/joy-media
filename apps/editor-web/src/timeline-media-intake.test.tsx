@@ -17,8 +17,8 @@ describe('timeline media intake', () => {
     const transactions = buildTimelineFileImportTransactions({
       composition,
       trackFlags: [
-        { id: 'track-0', order: 0, heightPx: 44, locked: false, muted: false, solo: false },
-        { id: 'track-1', order: 1, heightPx: 44, locked: true, muted: false, solo: false },
+        { id: 'track-0', heightPx: 44, locked: false, muted: false, solo: false },
+        { id: 'track-1', heightPx: 44, locked: true, muted: false, solo: false },
       ],
       playheadUs: 1_000_000,
       files: [new File(['video'], 'intro.mp4', { type: 'video/mp4' })],
@@ -67,7 +67,7 @@ describe('timeline media intake', () => {
         0: droppedFile,
         length: 1,
         item: () => droppedFile,
-      } as FileList,
+      } as unknown as FileList,
     });
 
     expect(files).toEqual([droppedFile]);
@@ -81,15 +81,15 @@ describe('timeline media intake', () => {
     const composition = {
       ...project.compositions[project.rootCompositionId]!,
       tracks: [
-        { id: 'V1', kind: 'video', order: 0, enabled: true, clips: [] },
-        { id: 'A1-voice', kind: 'video', order: 1, enabled: true, clips: [] },
+        { id: 'V1', kind: 'video' as const, order: 0, enabled: true, clips: [] },
+        { id: 'A1-voice', kind: 'video' as const, order: 1, enabled: true, clips: [] },
       ],
     };
     const transactions = buildTimelineFileImportTransactions({
       composition,
       trackFlags: [
-        { id: 'V1', order: 0, heightPx: 44, locked: false, muted: false, solo: false },
-        { id: 'A1-voice', order: 1, heightPx: 44, locked: false, muted: false, solo: false },
+        { id: 'V1', heightPx: 44, locked: false, muted: false, solo: false },
+        { id: 'A1-voice', heightPx: 44, locked: false, muted: false, solo: false },
       ],
       playheadUs: 2_000_000,
       files: [new File(['audio'], 'voice.mp3', { type: 'audio/mpeg' })],
@@ -114,11 +114,11 @@ describe('timeline media intake', () => {
     const project = emptySpikeProject({ trackCount: 0, durationUs: 30_000_000 });
     const composition = {
       ...project.compositions[project.rootCompositionId]!,
-      tracks: [{ id: 'V1', kind: 'video', order: 0, enabled: true, clips: [] }],
+      tracks: [{ id: 'V1', kind: 'video' as const, order: 0, enabled: true, clips: [] }],
     };
     const transactions = buildTimelineFileImportTransactions({
       composition,
-      trackFlags: [{ id: 'V1', order: 0, heightPx: 44, locked: false, muted: false, solo: false }],
+      trackFlags: [{ id: 'V1', heightPx: 44, locked: false, muted: false, solo: false }],
       playheadUs: 3_000_000,
       files: [new File(['audio'], 'music.wav', { type: 'audio/wav' })],
       createAssetId: () => 'asset-music',

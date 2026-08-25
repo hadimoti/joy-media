@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect, test as playwrightTest, type Page, type Route } from '@playwright/test';
@@ -23,6 +23,14 @@ interface JourneyOptions {
   readonly page: Page;
   readonly baseUrl: string;
   readonly fixturePath: string;
+}
+
+export interface AuthenticatedEditorJourneyEvidence {
+  readonly journeyId: 'authenticated-editor-1.0';
+  readonly status: 'verified';
+  readonly verifiedAt: string;
+  readonly assertions: Readonly<Record<string, unknown>>;
+  readonly screenshots: readonly string[];
 }
 
 interface BrowserAsset {
@@ -123,6 +131,13 @@ export async function runRealMediaLoopJourney({
   page.on('console', (message) => {
     console.log(`[browser:${message.type()}] ${message.text()}`);
   });
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      console.log(
+        `[browser:http-${response.status()}] ${response.request().method()} ${response.url()}`,
+      );
+    }
+  });
   page.on('pageerror', (error) => {
     console.log(`[browser:pageerror] ${error.message}`);
   });
@@ -137,7 +152,9 @@ export async function runRealMediaLoopJourney({
   console.log(`[smoke] initial DOM ${JSON.stringify(initialDom)}`);
 
   await page.getByRole('button', { name: 'New project' }).click();
-  await page.getByPlaceholder('Project name').fill('Browser smoke real-media loop');
+  // The project title field is localized in the UI; use its semantic role so
+  // the smoke journey remains valid across supported locales.
+  await page.getByRole('textbox').fill('Browser smoke real-media loop');
   await page.getByRole('button', { name: 'Create project' }).click();
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('navigation', { name: 'Application menu' })).toBeVisible();
@@ -201,17 +218,274 @@ async function runCli(): Promise<void> {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
-      await runRealMediaLoopJourney({
+      const evidence = await runAuthenticatedEditorJourney({
         page,
         baseUrl: plan.baseUrl,
         fixturePath: plan.fixturePath,
       });
+      const outputDirectory = resolve(repoRoot(), 'test-output/browser/authenticated-editor-1.0');
+      mkdirSync(outputDirectory, { recursive: true });
+      const evidencePath = join(outputDirectory, 'journey-evidence.json');
+      writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+      writeFileSync(
+        resolve(repoRoot(), 'test-output/browser/journeys.json'),
+        `${JSON.stringify(
+          [
+            {
+              id: evidence.journeyId,
+              status: evidence.status,
+              verifiedAt: evidence.verifiedAt,
+              evidencePath: relative(repoRoot(), evidencePath),
+            },
+          ],
+          null,
+          2,
+        )}\n`,
+      );
+      console.log(`[journey] evidence written to ${evidencePath}`);
     } finally {
       await browser.close();
     }
   } finally {
     if (server !== undefined) await stopEditorServer(server.process);
   }
+}
+
+/**
+ * Release-grade authenticated editor journey. This is intentionally local and
+ * deterministic: API calls are intercepted by the same bounded mock used by
+ * the real-media smoke path, while the editor, browser media decoder, Motion
+ * Studio persistence, and MP4 encoder all run for real.
+ */
+export async function runAuthenticatedEditorJourney({
+  page,
+  baseUrl,
+  fixturePath,
+}: JourneyOptions): Promise<AuthenticatedEditorJourneyEvidence> {
+  const fixture = fixtureInfo(fixturePath);
+  const assets = new Map<string, BrowserAsset>();
+  const screenshots: string[] = [];
+  const assertions: Record<string, unknown> = {};
+  const evidenceDirectory = resolve(repoRoot(), 'test-output/browser/authenticated-editor-1.0');
+  mkdirSync(evidenceDirectory, { recursive: true });
+
+  page.on('console', (message) => {
+    console.log(`[browser:${message.type()}] ${message.text()}`);
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      console.log(
+        `[browser:http-${response.status()}] ${response.request().method()} ${response.url()}`,
+      );
+    }
+  });
+  page.on('pageerror', (error) => {
+    console.log(`[browser:pageerror] ${error.message}`);
+  });
+
+  await installApiMock(page, assets);
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  const login = page.getByRole('dialog', { name: 'Joy Studio login' });
+  await expect(login).toBeVisible();
+  await login.getByRole('button', { name: 'Token' }).click();
+  await login.getByRole('combobox').fill(TEST_TOKEN);
+  await login.getByRole('button', { name: 'Login →' }).click();
+  await expect(login).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
+  assertions.login = 'token login UI completed and authenticated session was probed';
+  await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '01-authenticated');
+
+  await page.getByRole('button', { name: 'New project' }).click();
+  await page.getByRole('textbox').fill('Authenticated release journey');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.timeline-clip')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Import media' }).first().click();
+  await page
+    .locator('input[type="file"][aria-label="Media file"]')
+    .setInputFiles(fixture.absolutePath);
+  await page.getByLabel('Asset ID').fill(ASSET_ID);
+  await page.getByRole('button', { name: 'Confirm import' }).click();
+  const registered = await waitForAssetRegistration(assets, ASSET_ID);
+  assertions.asset = {
+    id: registered.id,
+    bytes: registered.bytes,
+    sha256: registered.sha256,
+    durationUs: registered.descriptor.durationUs,
+  };
+
+  await page.getByRole('tab', { name: /Video 1/ }).click();
+  const card = page.locator('li.asset-card').filter({ hasText: fixture.displayName }).first();
+  await expect(card).toBeVisible();
+  const targetLane = page.locator('.timeline-virtual-lane').first();
+  await expect(targetLane).toBeVisible();
+  await card.dragTo(targetLane, { targetPosition: { x: 8, y: 24 } });
+  await expect(page.locator('.timeline-clip')).toHaveCount(1);
+  const timelineAfterEdit = await timelineClipSummary(page);
+  assertSingleClipNearStart(timelineAfterEdit);
+  assertions.timelineEdit = timelineAfterEdit;
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.timeline-clip')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Seek forward 1s' }).click();
+  await waitForPlaybackMediaReady(page);
+  const frameProbe = await probeChangingFrames(page);
+  assertFrameProbe(frameProbe);
+  const audioProbe = await probeAudioReadiness(page);
+  assertAudioProbe(audioProbe);
+  assertions.mediaPlayback = { frameProbe, audioProbe };
+  await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '02-project-timeline');
+
+  // Export the real source-backed clip before adding a Motion Scene overlay.
+  // The browser encoder produces an actual H.264/AAC MP4 and records its
+  // byte/frame evidence in the app's durable export history.
+  const exportButton = page.locator('button.header-export-btn');
+  console.log(`[journey] export controls ${JSON.stringify(await inspectDom(page))}`);
+  await expect(exportButton).toBeVisible();
+  await expect(exportButton).toBeEnabled();
+  await exportButton.click();
+  await page.waitForFunction(
+    () => {
+      const raw = window.localStorage.getItem('joy-media.export-history.v1');
+      if (raw === null) return false;
+      try {
+        const entries = JSON.parse(raw) as Array<{
+          status?: string;
+          totalBytes?: number;
+          frameCount?: number;
+          channel?: string;
+        }>;
+        const latest = entries[0];
+        return (
+          latest?.status === 'completed' &&
+          latest.totalBytes !== undefined &&
+          latest.totalBytes > 0 &&
+          latest.frameCount !== undefined &&
+          latest.frameCount > 0 &&
+          latest.channel === 'quick-browser-export'
+        );
+      } catch {
+        return false;
+      }
+    },
+    undefined,
+    { timeout: 120_000 },
+  );
+  const exportEvidence = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('joy-media.export-history.v1');
+    if (raw === null) throw new Error('export history was not persisted');
+    const entries = JSON.parse(raw) as readonly Record<string, unknown>[];
+    const latest = entries[0];
+    if (latest === undefined) throw new Error('export history is empty');
+    return latest;
+  });
+  assertions.verifiedExport = exportEvidence;
+  await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '03-real-mp4-export');
+
+  await page.locator('.timeline-clip').first().click();
+  await page.locator('.panel-tab[aria-label="Motion"]').click();
+  await expect(page.getByRole('complementary', { name: 'Motion sections' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create new motion' }).click();
+  const studio = page.locator('.motion-studio-overlay');
+  await expect(studio).toBeVisible();
+  await studio.getByRole('button', { name: 'Add rectangle' }).click();
+  await expect(studio.locator('.ms-layer-row')).toHaveCount(1);
+  await studio.getByRole('button', { name: 'Undo' }).click();
+  await expect(studio.locator('.ms-layer-row')).toHaveCount(0);
+  await studio.getByRole('button', { name: 'Redo' }).click();
+  await expect(studio.locator('.ms-layer-row')).toHaveCount(1);
+  await studio.getByRole('button', { name: 'Preview motion' }).click();
+  await page.waitForTimeout(180);
+  await studio.getByRole('button', { name: 'Publish motion' }).click();
+  const motionCatalog = await page.evaluate(() => {
+    const raw = window.localStorage.getItem('joy-media.motion-scene-catalog.v1');
+    if (raw === null) throw new Error('Motion Studio catalog was not saved');
+    return JSON.parse(raw) as {
+      readonly scenes?: Record<string, { readonly title?: string; readonly publishedAt?: string }>;
+    };
+  });
+  const motionEntry = Object.values(motionCatalog.scenes ?? {})[0];
+  if (motionEntry?.title === undefined || motionEntry.publishedAt === undefined) {
+    throw new Error('Motion Studio publish did not create a published catalog entry');
+  }
+  assertions.motionStudio = {
+    title: motionEntry.title,
+    publishedAt: motionEntry.publishedAt,
+    layerCount: await studio.locator('.ms-layer-row').count(),
+    preview: 'played',
+    undoRedo: 'passed',
+  };
+  await captureJourneyScreenshot(
+    page,
+    evidenceDirectory,
+    screenshots,
+    '04-motion-studio-published',
+  );
+  await studio.getByRole('button', { name: 'Back to editor' }).click();
+  await expect(studio).toBeHidden();
+
+  await page.locator('.panel-tab[aria-label="Motion"]').click();
+  await page.getByRole('tab', { name: 'My Motions' }).click();
+  const placeButton = page.getByRole('button', {
+    name: `Place ${motionEntry.title} on the timeline`,
+  });
+  await expect(placeButton).toBeEnabled();
+  await placeButton.click();
+  const timelineAfterPlacement = await timelineClipSummary(page);
+  if (!Array.isArray(timelineAfterPlacement) || timelineAfterPlacement.length < 2) {
+    throw new Error('Published Motion Studio scene was not placed on the timeline');
+  }
+  assertions.motionPlacement = timelineAfterPlacement;
+  await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '05-motion-placed');
+
+  const undoButtonBeforeReopen = page.getByRole('button', { name: 'Undo' });
+  const redoButtonBeforeReopen = page.getByRole('button', { name: 'Redo' });
+  await expect(undoButtonBeforeReopen).toBeEnabled();
+  await undoButtonBeforeReopen.click();
+  const timelineAfterTimelineUndo = await timelineClipSummary(page);
+  await expect(redoButtonBeforeReopen).toBeEnabled();
+  await redoButtonBeforeReopen.click();
+  const timelineAfterTimelineRedo = await timelineClipSummary(page);
+  if (
+    !Array.isArray(timelineAfterTimelineUndo) ||
+    !Array.isArray(timelineAfterTimelineRedo) ||
+    timelineAfterTimelineUndo.length >= timelineAfterTimelineRedo.length
+  ) {
+    throw new Error('Timeline undo/redo did not change and restore the project');
+  }
+  assertions.undoRedo = {
+    afterUndo: timelineAfterTimelineUndo,
+    afterRedo: timelineAfterTimelineRedo,
+  };
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.getByRole('navigation', { name: 'Application menu' })).toBeVisible();
+  const timelineAfterReopen = await timelineClipSummary(page);
+  if (!Array.isArray(timelineAfterReopen) || timelineAfterReopen.length < 2) {
+    throw new Error('Project or Motion Studio placement did not survive browser reopen');
+  }
+  assertions.reopen = timelineAfterReopen;
+  assertions.undoRedoAfterReopen = 'reopened persisted timeline after the verified undo/redo cycle';
+  await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '06-reopen-undo-redo');
+
+  return {
+    journeyId: 'authenticated-editor-1.0',
+    status: 'verified',
+    verifiedAt: new Date().toISOString(),
+    assertions,
+    screenshots,
+  };
+}
+
+async function captureJourneyScreenshot(
+  page: Page,
+  evidenceDirectory: string,
+  screenshots: string[],
+  name: string,
+): Promise<void> {
+  const path = join(evidenceDirectory, `${name}.png`);
+  await page.screenshot({ path, fullPage: true });
+  screenshots.push(relative(repoRoot(), path));
 }
 
 async function installApiMock(page: Page, assets: Map<string, BrowserAsset>): Promise<void> {
@@ -242,6 +516,17 @@ async function installApiMock(page: Page, assets: Map<string, BrowserAsset>): Pr
     }
 
     if (method === 'GET' && path === '/v1/library/cloud-assets') {
+      await json(route, []);
+      return;
+    }
+
+    if (method === 'GET' && path === '/v1/workers') {
+      await json(route, []);
+      return;
+    }
+
+    const projectJobsMatch = path.match(/^\/v1\/projects\/([^/]+)\/jobs$/);
+    if (projectJobsMatch !== null && method === 'GET') {
       await json(route, []);
       return;
     }
@@ -572,7 +857,9 @@ async function waitForPort(
 
   while (Date.now() < deadline) {
     if (exit !== undefined) {
-      throw new Error(`editor dev server exited before port ${port} was ready (${exit.code ?? exit.signal})`);
+      throw new Error(
+        `editor dev server exited before port ${port} was ready (${exit.code ?? exit.signal})`,
+      );
     }
     if (Date.now() - startTime > 250 && (await canConnect(port))) {
       console.log(`[smoke] editor server ready on http://${DEFAULT_HOST}:${port}`);
@@ -628,10 +915,7 @@ async function stopEditorServer(child: EditorServerProcess): Promise<void> {
   child.kill('SIGKILL');
 }
 
-function waitForChildExit(
-  child: EditorServerProcess,
-  timeoutMs: number,
-): Promise<boolean> {
+function waitForChildExit(child: EditorServerProcess, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null) return Promise.resolve(true);
   return new Promise((resolveStopped) => {
     const timer = setTimeout(() => resolveStopped(false), timeoutMs);

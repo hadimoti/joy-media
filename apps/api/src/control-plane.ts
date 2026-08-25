@@ -72,6 +72,33 @@ export interface MediaDerivativeRecord {
   readonly verifiedAt: number;
 }
 
+/** Owner-visible metadata for a verified Worker render export. */
+export interface RenderArtifactRecord {
+  readonly id: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly outputRef: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: {
+    readonly mimeType: 'video/mp4';
+  };
+  readonly location: AssetLocationRecord & { readonly kind: 'private-object' };
+  readonly verifiedAt: number;
+}
+
+/** API-owned registration; it contains only opaque storage metadata. */
+export interface WorkerRenderArtifactRegistration {
+  readonly id: string;
+  readonly outputRef: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly descriptor: {
+    readonly mimeType: 'video/mp4';
+  };
+  readonly location: AssetLocationRecord & { readonly kind: 'private-object' };
+}
+
 export interface AssetRegistration {
   readonly id: string;
   readonly kind: MediaAssetKind;
@@ -327,6 +354,17 @@ export interface ControlPlane {
     assetId: string,
     derivativeId: string,
   ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
+  registerWorkerRenderArtifact(
+    workerId: string,
+    jobId: string,
+    artifact: WorkerRenderArtifactRegistration,
+    now?: number,
+  ): RenderArtifactRecord | Promise<RenderArtifactRecord>;
+  renderArtifactForOwner(
+    actor: Actor,
+    projectId: string,
+    artifactId: string,
+  ): RenderArtifactRecord | Promise<RenderArtifactRecord>;
   pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   createPairingOffer(
     workerId: string,
@@ -427,6 +465,7 @@ export class LocalControlPlane implements ControlPlane {
   readonly #jobs = new Map<string, Job>();
   readonly #assets = new Map<string, MediaAssetRecord>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
+  readonly #renderArtifacts = new Map<string, RenderArtifactRecord>();
   readonly #events: JobEvent[] = [];
   readonly #pairingOffers = new Map<
     string,
@@ -664,6 +703,50 @@ export class LocalControlPlane implements ControlPlane {
     if (!derivative.locations.some((location) => location.kind === 'private-object'))
       throw new ControlPlaneError('DERIVATIVE_UNAVAILABLE', derivativeId);
     return derivative;
+  }
+  registerWorkerRenderArtifact(
+    workerId: string,
+    jobId: string,
+    artifact: WorkerRenderArtifactRegistration,
+    now = Date.now(),
+  ): RenderArtifactRecord {
+    validateWorkerRenderArtifactRegistration(artifact);
+    const job = this.ownedLease(workerId, jobId, now);
+    const worker = this.#workers.get(workerId);
+    if (worker === undefined || job.type !== 'render.export')
+      throw new ControlPlaneError('ARTIFACT_UPLOAD_DENIED', jobId);
+    this.project({ id: worker.ownerId }, job.projectId);
+    if (this.#renderArtifacts.has(artifact.id))
+      throw new ControlPlaneError('ARTIFACT_EXISTS', artifact.id);
+    const record: RenderArtifactRecord = {
+      ...cloneWorkerRenderArtifactRegistration(artifact),
+      projectId: job.projectId,
+      jobId,
+      verifiedAt: now,
+    };
+    this.#renderArtifacts.set(record.id, record);
+    return cloneRenderArtifact(record);
+  }
+  renderArtifactForOwner(
+    actor: Actor,
+    projectId: string,
+    artifactId: string,
+  ): RenderArtifactRecord {
+    this.project(actor, projectId);
+    const artifact = this.#renderArtifacts.get(artifactId);
+    const job = artifact === undefined ? undefined : this.#jobs.get(artifact.jobId);
+    if (
+      artifact === undefined ||
+      artifact.projectId !== projectId ||
+      job === undefined ||
+      job.state !== 'completed' ||
+      !isRenderExportReceipt(job.derivative) ||
+      job.derivative.outputRef !== artifact.outputRef ||
+      job.derivative.sha256 !== artifact.sha256 ||
+      job.derivative.bytes !== artifact.bytes
+    )
+      throw new ControlPlaneError('ARTIFACT_NOT_FOUND', artifactId);
+    return cloneRenderArtifact(artifact);
   }
   pairWorker(actor: Actor, workerId: string): WorkerRecord {
     this.auth(actor);
@@ -910,6 +993,19 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (job.type === 'media.semantic-index' && !isSemanticIndexReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (job.type === 'render.export') {
+      const artifact = [...this.#renderArtifacts.values()].find(
+        (candidate) => candidate.jobId === jobId,
+      );
+      if (
+        !isRenderExportReceipt(receipt) ||
+        artifact === undefined ||
+        artifact.outputRef !== receipt.outputRef ||
+        artifact.sha256 !== receipt.sha256 ||
+        artifact.bytes !== receipt.bytes
+      )
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+    }
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
     const done: Job = {
@@ -960,6 +1056,9 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('JOB_NOT_FOUND', jobId);
     if (job.state === 'leased' || job.state === 'queued')
       throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+    for (const [artifactId, artifact] of this.#renderArtifacts) {
+      if (artifact.jobId === jobId) this.#renderArtifacts.delete(artifactId);
+    }
     const retried: Job = {
       id: job.id,
       projectId: job.projectId,
@@ -1066,6 +1165,19 @@ function isAssetThumbnailReceipt(
   );
 }
 
+function isRenderExportReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is RenderExportReceipt {
+  return (
+    value?.kind === 'render.export' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.outputRef) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0
+  );
+}
+
 function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is LocalGpuWorkerReceipt {
   return (
     (value?.kind === 'image.comfy' || value?.kind === 'audio.ml-denoise') &&
@@ -1076,31 +1188,6 @@ function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is Loc
     /^gpu-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
     typeof value.descriptor.mimeType === 'string' &&
     value.descriptor.mimeType.length > 0
-  );
-}
-
-function isTextAiReceipt(value: WorkerResultReceipt | undefined): value is TextAiWorkerReceipt {
-  return (
-    (value?.kind === 'text.lm-studio' || value?.kind === 'text.openrouter') &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.resultRef) &&
-    /^[a-f0-9]{64}$/.test(value.sha256) &&
-    Number.isSafeInteger(value.bytes) &&
-    value.bytes > 0 &&
-    (value.model === undefined || typeof value.model === 'string')
-  );
-}
-
-function isMediaAiReceipt(value: WorkerResultReceipt | undefined): value is MediaAiWorkerReceipt {
-  return (
-    (value?.kind === 'video.runway' || value?.kind === 'edit.higgsfield') &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
-    /^[a-f0-9]{64}$/.test(value.sha256) &&
-    Number.isSafeInteger(value.bytes) &&
-    value.bytes > 0 &&
-    /^ai-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
-    typeof value.descriptor.mimeType === 'string' &&
-    value.descriptor.mimeType.length > 0 &&
-    (value.model === undefined || typeof value.model === 'string')
   );
 }
 
@@ -1309,6 +1396,21 @@ export function validateCloudDerivativeRegistration(value: CloudDerivativeRegist
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'cloud derivative requires a private object');
 }
 
+export function validateWorkerRenderArtifactRegistration(
+  value: WorkerRenderArtifactRegistration,
+): void {
+  validateOpaqueId(value.id, 'artifact id');
+  validateOpaqueId(value.outputRef, 'output reference');
+  validateHashAndBytes(value.sha256, value.bytes, 'artifact');
+  if (value.descriptor.mimeType !== 'video/mp4')
+    throw new ControlPlaneError('ARTIFACT_INVALID', 'render artifact MIME type is invalid');
+  if (
+    value.location.kind !== 'private-object' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.location.ref)
+  )
+    throw new ControlPlaneError('ARTIFACT_INVALID', 'render artifact location is invalid');
+}
+
 function validateDerivativeRegistration(
   value: LocalDerivativeRegistration | CloudDerivativeRegistration,
 ): void {
@@ -1420,6 +1522,16 @@ function cloneDerivative(value: MediaDerivativeRecord): MediaDerivativeRecord {
     descriptor: { ...value.descriptor },
     locations: cloneLocations(value.locations),
   };
+}
+
+function cloneWorkerRenderArtifactRegistration(
+  value: WorkerRenderArtifactRegistration,
+): WorkerRenderArtifactRegistration {
+  return { ...value, descriptor: { ...value.descriptor }, location: { ...value.location } };
+}
+
+function cloneRenderArtifact(value: RenderArtifactRecord): RenderArtifactRecord {
+  return { ...value, descriptor: { ...value.descriptor }, location: { ...value.location } };
 }
 
 function cloneLocations(value: readonly AssetLocationRecord[]): readonly AssetLocationRecord[] {

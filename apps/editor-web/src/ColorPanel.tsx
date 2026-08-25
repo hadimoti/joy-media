@@ -92,70 +92,70 @@ export function ColorPanel({ project, onChange }: ColorPanelProps) {
     >
       {tab === 'grade' && (
         <>
-      <div className="control-row">
-        <span className="icon-tool" data-guide="Lift" aria-hidden="true">
-          <LiftIcon />
-        </span>
-        <input
-          type="range"
-          min={-0.5}
-          max={0.5}
-          step={0.01}
-          value={grade.lift}
-          aria-label="Lift"
-          title="Lift"
-          onChange={(event) => set({ lift: event.currentTarget.valueAsNumber })}
-        />
-        <span className="value">{grade.lift.toFixed(2)}</span>
-      </div>
-      <div className="control-row">
-        <span className="icon-tool" data-guide="Gamma" aria-hidden="true">
-          <GammaIcon />
-        </span>
-        <input
-          type="range"
-          min={0.5}
-          max={1.5}
-          step={0.01}
-          value={grade.gamma}
-          aria-label="Gamma"
-          title="Gamma"
-          onChange={(event) => set({ gamma: event.currentTarget.valueAsNumber })}
-        />
-        <span className="value">{grade.gamma.toFixed(2)}</span>
-      </div>
-      <div className="control-row">
-        <span className="icon-tool" data-guide="Gain" aria-hidden="true">
-          <GainIcon />
-        </span>
-        <input
-          type="range"
-          min={0.5}
-          max={1.5}
-          step={0.01}
-          value={grade.gain}
-          aria-label="Gain"
-          title="Gain"
-          onChange={(event) => set({ gain: event.currentTarget.valueAsNumber })}
-        />
-        <span className="value">{grade.gain.toFixed(2)}</span>
-      </div>
-      <div className="control-row">
-        <span className="icon-tool" data-guide="Saturation" aria-hidden="true">
-          <SaturationIcon />
-        </span>
-        <input
-          type="range"
-          min={0}
-          max={2}
-          step={0.01}
-          value={grade.saturation}
-          aria-label="Saturation"
-          title="Saturation"
-          onChange={(event) => set({ saturation: event.currentTarget.valueAsNumber })}
-        />
-        <span className="value">{grade.saturation.toFixed(2)}</span>
-      </div>
+          <div className="control-row">
+            <span className="icon-tool" data-guide="Lift" aria-hidden="true">
+              <LiftIcon />
+            </span>
+            <input
+              type="range"
+              min={-0.5}
+              max={0.5}
+              step={0.01}
+              value={grade.lift}
+              aria-label="Lift"
+              title="Lift"
+              onChange={(event) => set({ lift: event.currentTarget.valueAsNumber })}
+            />
+            <span className="value">{grade.lift.toFixed(2)}</span>
+          </div>
+          <div className="control-row">
+            <span className="icon-tool" data-guide="Gamma" aria-hidden="true">
+              <GammaIcon />
+            </span>
+            <input
+              type="range"
+              min={0.5}
+              max={1.5}
+              step={0.01}
+              value={grade.gamma}
+              aria-label="Gamma"
+              title="Gamma"
+              onChange={(event) => set({ gamma: event.currentTarget.valueAsNumber })}
+            />
+            <span className="value">{grade.gamma.toFixed(2)}</span>
+          </div>
+          <div className="control-row">
+            <span className="icon-tool" data-guide="Gain" aria-hidden="true">
+              <GainIcon />
+            </span>
+            <input
+              type="range"
+              min={0.5}
+              max={1.5}
+              step={0.01}
+              value={grade.gain}
+              aria-label="Gain"
+              title="Gain"
+              onChange={(event) => set({ gain: event.currentTarget.valueAsNumber })}
+            />
+            <span className="value">{grade.gain.toFixed(2)}</span>
+          </div>
+          <div className="control-row">
+            <span className="icon-tool" data-guide="Saturation" aria-hidden="true">
+              <SaturationIcon />
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.01}
+              value={grade.saturation}
+              aria-label="Saturation"
+              title="Saturation"
+              onChange={(event) => set({ saturation: event.currentTarget.valueAsNumber })}
+            />
+            <span className="value">{grade.saturation.toFixed(2)}</span>
+          </div>
         </>
       )}
 

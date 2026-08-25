@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import {
   analyzeReferenceVideo,
-  ReferenceAnalysisError,
   runReferenceTool,
   validateReferenceAnalysisModelFindings,
 } from './reference-analysis.js';

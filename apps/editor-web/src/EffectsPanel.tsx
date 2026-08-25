@@ -104,10 +104,7 @@ export function EffectsPanel({
     wasStudioOpen.current = effectStudioOpen;
   }, [effectStudioOpen]);
 
-  const descriptors = useMemo(
-    () => effectsInCategory(category, favorites),
-    [category, favorites],
-  );
+  const descriptors = useMemo(() => effectsInCategory(category, favorites), [category, favorites]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { recipes: recipes.length };
@@ -159,18 +156,15 @@ export function EffectsPanel({
     [canApplyEffects, objectId, onDispatch, showToast],
   );
 
-  const handleDragStart = useCallback(
-    (effectId: string, event: React.DragEvent) => {
-      const payload: EffectDragPayload = {
-        kind: 'joy/effect',
-        effectId,
-        source: 'effects-panel',
-      };
-      event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
-      event.dataTransfer.effectAllowed = 'copy';
-    },
-    [],
-  );
+  const handleDragStart = useCallback((effectId: string, event: React.DragEvent) => {
+    const payload: EffectDragPayload = {
+      kind: 'joy/effect',
+      effectId,
+      source: 'effects-panel',
+    };
+    event.dataTransfer.setData('application/x-joy-effect', JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'copy';
+  }, []);
 
   const handleCreateRecipe = useCallback(() => {
     const selectedEffects =
@@ -216,11 +210,7 @@ export function EffectsPanel({
       <div className="effects-panel-content">
         <aside className="effects-panel-sidebar" aria-label="Effect categories">
           <span className="effects-panel-sidebar-title">Categories</span>
-          <div
-            className="effects-panel-categories"
-            role="tablist"
-            aria-label="Effect categories"
-          >
+          <div className="effects-panel-categories" role="tablist" aria-label="Effect categories">
             {CATEGORIES.map((entry) => {
               const iconUrl = effectCategoryIconUrl(entry.id);
               return (
@@ -292,9 +282,7 @@ export function EffectsPanel({
           ) : (
             <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
               {filtered.length === 0 ? (
-                <p className="empty-hint">
-                  {emptyHint}
-                </p>
+                <p className="empty-hint">{emptyHint}</p>
               ) : (
                 filtered.map((desc) => (
                   <EffectCard

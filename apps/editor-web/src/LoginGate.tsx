@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { probeJoySession } from './identity.js';
 import {
   loadLoginContactHistory,
@@ -19,15 +27,35 @@ import './login-gate.css';
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
 type Method = MediaAuthMethod | 'token';
 
-const METHOD_CONFIG: Record<Method, { sub: string; placeholder: string; type: string; btn: string }> = {
-  gmail: { sub: 'Enter your Gmail address', placeholder: 'your@gmail.com', type: 'email', btn: 'Send Code →' },
+/** Auth state is inherited by the mounted editor so global handlers can fail closed. */
+export const AuthLockContext = createContext(true);
+
+export function useAuthLocked(): boolean {
+  return useContext(AuthLockContext);
+}
+
+const METHOD_CONFIG: Record<
+  Method,
+  { sub: string; placeholder: string; type: string; btn: string }
+> = {
+  gmail: {
+    sub: 'Enter your Gmail address',
+    placeholder: 'your@gmail.com',
+    type: 'email',
+    btn: 'Send Code →',
+  },
   telegram: {
     sub: 'Enter your Telegram username or ID',
     placeholder: 'username',
     type: 'text',
     btn: 'Send Code →',
   },
-  token: { sub: 'Paste your access token', placeholder: 'paste token here...', type: 'text', btn: 'Login →' },
+  token: {
+    sub: 'Paste your access token',
+    placeholder: 'paste token here...',
+    type: 'text',
+    btn: 'Login →',
+  },
 };
 
 /**
@@ -42,7 +70,9 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   const [step, setStep] = useState<Step>('checking');
   const [method, setMethod] = useState<Method>('gmail');
   const [history, setHistory] = useState<LoginContactHistory>(() =>
-    typeof window === 'undefined' ? { gmail: [], telegram: [] } : loadLoginContactHistory(window.localStorage),
+    typeof window === 'undefined'
+      ? { gmail: [], telegram: [] }
+      : loadLoginContactHistory(window.localStorage),
   );
   const [contact, setContact] = useState(() => {
     if (typeof window === 'undefined') return '';
@@ -96,7 +126,10 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
         },
       );
     };
-    void probeSession(() => setStep('unlocked'), () => setStep('contact'));
+    void probeSession(
+      () => setStep('unlocked'),
+      () => setStep('contact'),
+    );
     window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSessionChange);
     return () => {
       cancelled = true;
@@ -190,7 +223,10 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   };
 
   const onOtpChange = (index: number, raw: string): void => {
-    const digits = raw.replace(/\D/g, '').slice(0, 6 - index).split('');
+    const digits = raw
+      .replace(/\D/g, '')
+      .slice(0, 6 - index)
+      .split('');
     if (digits.length > 1) {
       digits.forEach((digit, offset) => {
         const target = otpRefs.current[index + offset];
@@ -241,206 +277,228 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
   const locked = step !== 'unlocked';
 
   return (
-    <>
-      <div className={`login-gate-app${locked ? ' login-gate-locked' : ''}`} aria-hidden={locked}>
-        {children}
-      </div>
-      {locked && step !== 'checking' && (
-        <div className="login-screen">
-          <div
-            className={`login-card rotating-glow${successGlow ? ' login-success-glow' : ''}${failBuzz ? ' login-fail-buzz' : ''}`}
-            onAnimationEnd={() => setFailBuzz(false)}
-          >
-            <div className="lcard-logo-wrap">
-              <img
-                src="/assets/JoyCodeNew_128x128.png"
-                className="login-logo"
-                alt="Joy Studio"
-                width={80}
-                height={80}
-                decoding="async"
-              />
-            </div>
-
-            <h1 className="login-title" lang="en" dir="ltr" aria-label="Joy Studio.">
-              <span className="login-title-joy">
-                {Array.from('Joy').map((ch, index) => (
-                  <MatrixTitleChar
-                    key={`matrix-${ch}-${index}`}
-                    finalChar={ch}
-                    delayMs={index * 80}
-                    cascadeDelayMs={index * 45}
-                  />
-                ))}
-              </span>
-              {Array.from(' Studio').map((ch, index) => (
-                <span
-                  key={`${ch}-${index + 3}`}
-                  className="login-title-char"
-                  style={{ animationDelay: `${(index + 3) * 45}ms` }}
-                >
-                  {ch === ' ' ? '\u00A0' : ch}
-                </span>
-              ))}
-              <span
-                className="login-title-char login-title-dot"
-                style={{
-                  animationDelay: `${'Joy Studio'.length * 45}ms, ${'Joy Studio'.length * 45 + 550}ms`,
-                }}
-                aria-hidden="true"
-              >
-                .
-              </span>
-            </h1>
-
-            <div className="lmethods" data-active={method}>
-              <button
-                type="button"
-                className={`lmethod-btn${method === 'gmail' ? ' active' : ''}`}
-                onClick={() => switchMethod('gmail')}
-                disabled={step === 'otp'}
-              >
-                <img src="/assets/icons-login/gmail-64.png" className="lmethod-icon" alt="Gmail" />
-                <span>Gmail</span>
-              </button>
-              <button
-                type="button"
-                className={`lmethod-btn${method === 'telegram' ? ' active' : ''}`}
-                onClick={() => switchMethod('telegram')}
-                disabled={step === 'otp'}
-              >
-                <img src="/assets/icons-login/telegram-64.png" className="lmethod-icon" alt="Telegram" />
-                <span>Telegram</span>
-              </button>
-              <button
-                type="button"
-                className={`lmethod-btn${method === 'token' ? ' active' : ''}`}
-                onClick={() => switchMethod('token')}
-                disabled={step === 'otp'}
-              >
-                <span className="lmethod-icon lmethod-key">🔑</span>
-                <span>Token</span>
-              </button>
-            </div>
-
-            <div className="login-panels">
-              {step === 'contact' && (
-                <form onSubmit={(event) => void submitContact(event)} autoComplete="off">
-                  <p className="login-sub">{cfg.sub}</p>
-                  <div className="auth-input-wrap">
-                    <input
-                      className="auth-input"
-                      type={cfg.type === 'email' ? 'text' : cfg.type}
-                      inputMode={method === 'gmail' ? 'email' : 'text'}
-                      placeholder={cfg.placeholder}
-                      value={contact}
-                      onChange={(event) => {
-                        setContact(event.target.value);
-                        setSuggestOpen(true);
-                      }}
-                      onFocus={() => setSuggestOpen(true)}
-                      onBlur={() => {
-                        blurTimerRef.current = window.setTimeout(() => setSuggestOpen(false), 120);
-                      }}
-                      autoCorrect="off"
-                      spellCheck={false}
-                      autoComplete="off"
-                      autoCapitalize="off"
-                      autoFocus
-                      role="combobox"
-                      aria-autocomplete="list"
-                      aria-expanded={suggestions.length > 0}
-                      aria-controls="login-contact-suggest"
-                    />
-                    {suggestions.length > 0 && (
-                      <ul id="login-contact-suggest" className="auth-suggest" role="listbox">
-                        {suggestions.map((entry) => (
-                          <li key={entry} role="option">
-                            <button
-                              type="button"
-                              className="auth-suggest-item"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                setContact(entry);
-                                setSuggestOpen(false);
-                              }}
-                            >
-                              {entry}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <button type="submit" className="login-btn" disabled={busy}>
-                    <span className="login-btn-gradient">{busy ? 'Sending…' : cfg.btn}</span>
-                  </button>
-                </form>
-              )}
-              {step === 'otp' && (
-                <div>
-                  <p className="login-sub">{hint ?? 'Enter the code we sent you'}</p>
-                  <div className="otp-row">
-                    {Array.from({ length: 6 }, (_, index) => (
-                      <span className="otp-glow-wrap" key={index}>
-                        <input
-                          ref={(el) => {
-                            otpRefs.current[index] = el;
-                          }}
-                          className="otp-box"
-                          maxLength={1}
-                          inputMode="numeric"
-                          pattern="[0-9]"
-                          autoComplete="one-time-code"
-                          onChange={(event) => onOtpChange(index, event.target.value)}
-                          onKeyDown={(event) => onOtpKeyDown(index, event)}
-                          onPaste={onOtpPaste}
-                          autoFocus={index === 0}
-                        />
-                      </span>
-                    ))}
-                  </div>
-                  {method === 'telegram' && (
-                    <p className="login-tg-hint">
-                      Make sure you’ve sent{' '}
-                      <a
-                        className="login-tg-hint-link"
-                        href="https://t.me/joyserver_bot?start="
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        /start
-                      </a>{' '}
-                      to{' '}
-                      <a
-                        className="login-tg-hint-link"
-                        href="https://t.me/joyserver_bot?start="
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        @joyserver_bot
-                      </a>
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="login-back"
-                    onClick={() => {
-                      setError(undefined);
-                      otpSubmittingRef.current = false;
-                      setStep('contact');
-                    }}
-                  >
-                    ← back
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {error !== undefined && <p className="login-error">{error}</p>}
-          </div>
+    <AuthLockContext.Provider value={locked}>
+      <>
+        <div
+          className={`login-gate-app${locked ? ' login-gate-locked' : ''}`}
+          aria-hidden={locked}
+          inert={locked}
+        >
+          {children}
         </div>
-      )}
-    </>
+        {locked && step !== 'checking' && (
+          <div
+            className="login-screen"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Joy Studio login"
+          >
+            <div
+              className={`login-card rotating-glow${successGlow ? ' login-success-glow' : ''}${failBuzz ? ' login-fail-buzz' : ''}`}
+              onAnimationEnd={() => setFailBuzz(false)}
+            >
+              <div className="lcard-logo-wrap">
+                <img
+                  src="/assets/JoyCodeNew_128x128.png"
+                  className="login-logo"
+                  alt="Joy Studio"
+                  width={80}
+                  height={80}
+                  decoding="async"
+                />
+              </div>
+
+              <h1 className="login-title" lang="en" dir="ltr" aria-label="Joy Studio.">
+                <span className="login-title-joy">
+                  {Array.from('Joy').map((ch, index) => (
+                    <MatrixTitleChar
+                      key={`matrix-${ch}-${index}`}
+                      finalChar={ch}
+                      delayMs={index * 80}
+                      cascadeDelayMs={index * 45}
+                    />
+                  ))}
+                </span>
+                {Array.from(' Studio').map((ch, index) => (
+                  <span
+                    key={`${ch}-${index + 3}`}
+                    className="login-title-char"
+                    style={{ animationDelay: `${(index + 3) * 45}ms` }}
+                  >
+                    {ch === ' ' ? '\u00A0' : ch}
+                  </span>
+                ))}
+                <span
+                  className="login-title-char login-title-dot"
+                  style={{
+                    animationDelay: `${'Joy Studio'.length * 45}ms, ${'Joy Studio'.length * 45 + 550}ms`,
+                  }}
+                  aria-hidden="true"
+                >
+                  .
+                </span>
+              </h1>
+
+              <div className="lmethods" data-active={method}>
+                <button
+                  type="button"
+                  className={`lmethod-btn${method === 'gmail' ? ' active' : ''}`}
+                  onClick={() => switchMethod('gmail')}
+                  disabled={step === 'otp'}
+                >
+                  <img
+                    src="/assets/icons-login/gmail-64.png"
+                    className="lmethod-icon"
+                    alt="Gmail"
+                  />
+                  <span>Gmail</span>
+                </button>
+                <button
+                  type="button"
+                  className={`lmethod-btn${method === 'telegram' ? ' active' : ''}`}
+                  onClick={() => switchMethod('telegram')}
+                  disabled={step === 'otp'}
+                >
+                  <img
+                    src="/assets/icons-login/telegram-64.png"
+                    className="lmethod-icon"
+                    alt="Telegram"
+                  />
+                  <span>Telegram</span>
+                </button>
+                <button
+                  type="button"
+                  className={`lmethod-btn${method === 'token' ? ' active' : ''}`}
+                  onClick={() => switchMethod('token')}
+                  disabled={step === 'otp'}
+                >
+                  <span className="lmethod-icon lmethod-key">🔑</span>
+                  <span>Token</span>
+                </button>
+              </div>
+
+              <div className="login-panels">
+                {step === 'contact' && (
+                  <form onSubmit={(event) => void submitContact(event)} autoComplete="off">
+                    <p className="login-sub">{cfg.sub}</p>
+                    <div className="auth-input-wrap">
+                      <input
+                        className="auth-input"
+                        type={cfg.type === 'email' ? 'text' : cfg.type}
+                        inputMode={method === 'gmail' ? 'email' : 'text'}
+                        placeholder={cfg.placeholder}
+                        value={contact}
+                        onChange={(event) => {
+                          setContact(event.target.value);
+                          setSuggestOpen(true);
+                        }}
+                        onFocus={() => setSuggestOpen(true)}
+                        onBlur={() => {
+                          blurTimerRef.current = window.setTimeout(
+                            () => setSuggestOpen(false),
+                            120,
+                          );
+                        }}
+                        autoCorrect="off"
+                        spellCheck={false}
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        autoFocus
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={suggestions.length > 0}
+                        aria-controls="login-contact-suggest"
+                      />
+                      {suggestions.length > 0 && (
+                        <ul id="login-contact-suggest" className="auth-suggest" role="listbox">
+                          {suggestions.map((entry) => (
+                            <li key={entry} role="option">
+                              <button
+                                type="button"
+                                className="auth-suggest-item"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  setContact(entry);
+                                  setSuggestOpen(false);
+                                }}
+                              >
+                                {entry}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <button type="submit" className="login-btn" disabled={busy}>
+                      <span className="login-btn-gradient">{busy ? 'Sending…' : cfg.btn}</span>
+                    </button>
+                  </form>
+                )}
+                {step === 'otp' && (
+                  <div>
+                    <p className="login-sub">{hint ?? 'Enter the code we sent you'}</p>
+                    <div className="otp-row">
+                      {Array.from({ length: 6 }, (_, index) => (
+                        <span className="otp-glow-wrap" key={index}>
+                          <input
+                            ref={(el) => {
+                              otpRefs.current[index] = el;
+                            }}
+                            className="otp-box"
+                            maxLength={1}
+                            inputMode="numeric"
+                            pattern="[0-9]"
+                            autoComplete="one-time-code"
+                            onChange={(event) => onOtpChange(index, event.target.value)}
+                            onKeyDown={(event) => onOtpKeyDown(index, event)}
+                            onPaste={onOtpPaste}
+                            autoFocus={index === 0}
+                          />
+                        </span>
+                      ))}
+                    </div>
+                    {method === 'telegram' && (
+                      <p className="login-tg-hint">
+                        Make sure you’ve sent{' '}
+                        <a
+                          className="login-tg-hint-link"
+                          href="https://t.me/joyserver_bot?start="
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          /start
+                        </a>{' '}
+                        to{' '}
+                        <a
+                          className="login-tg-hint-link"
+                          href="https://t.me/joyserver_bot?start="
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          @joyserver_bot
+                        </a>
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      className="login-back"
+                      onClick={() => {
+                        setError(undefined);
+                        otpSubmittingRef.current = false;
+                        setStep('contact');
+                      }}
+                    >
+                      ← back
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {error !== undefined && <p className="login-error">{error}</p>}
+            </div>
+          </div>
+        )}
+      </>
+    </AuthLockContext.Provider>
   );
 }

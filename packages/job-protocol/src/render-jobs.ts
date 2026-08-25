@@ -1,4 +1,5 @@
-import { WORKER_PROTOCOL_VERSION, type WorkerCapability } from './protocol.js';
+import type { WORKER_PROTOCOL_VERSION } from './protocol.js';
+import { type WorkerCapability } from './protocol.js';
 
 export type RenderJobType = 'render.export' | 'render.inspect';
 export type RenderCapability = RenderJobType;

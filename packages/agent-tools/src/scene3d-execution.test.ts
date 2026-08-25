@@ -78,7 +78,12 @@ describe('Scene3DPlanExecutor', () => {
         commit: (value) => {
           saved.push(value);
           approvalStore.markConsumed(value.approval.approvalId);
-          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
+          idempotency.recordExecution(
+            value.idempotencyKey,
+            value.planId,
+            value.stepId,
+            value.result,
+          );
           return { accepted: true };
         },
       },
@@ -106,7 +111,12 @@ describe('Scene3DPlanExecutor', () => {
         commit: (value) => {
           saved.push(value);
           approvalStore.markConsumed(value.approval.approvalId);
-          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
+          idempotency.recordExecution(
+            value.idempotencyKey,
+            value.planId,
+            value.stepId,
+            value.result,
+          );
           return { accepted: true };
         },
       },
@@ -146,7 +156,12 @@ describe('Scene3DPlanExecutor', () => {
       commit: {
         commit: (value) => {
           approvalStore.markConsumed(value.approval.approvalId);
-          idempotency.recordExecution(value.idempotencyKey, value.planId, value.stepId, value.result);
+          idempotency.recordExecution(
+            value.idempotencyKey,
+            value.planId,
+            value.stepId,
+            value.result,
+          );
           return { accepted: true };
         },
       },

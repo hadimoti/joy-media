@@ -140,7 +140,11 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
             path,
           });
         }
-        if (clip.kind === 'video' && clip.playbackRate !== undefined && !isValidPlaybackRate(clip.playbackRate)) {
+        if (
+          clip.kind === 'video' &&
+          clip.playbackRate !== undefined &&
+          !isValidPlaybackRate(clip.playbackRate)
+        ) {
           diagnostics.push({
             code: 'PROJECT_SCHEMA_BAD_PLAYBACK_RATE',
             message: `playbackRate ${clip.playbackRate} must be 0 (freeze) or in [${MIN_PLAYBACK_RATE}, ${MAX_PLAYBACK_RATE}]`,

@@ -68,9 +68,6 @@ export function projectWithoutDualLens(project: AnyJoyProject): JoyProjectV1 {
  * document — so a disabled Dual Lens cannot observe, render, or persist graph
  * state even if some earlier session wrote it.
  */
-export function applyDualLensFlags(
-  project: AnyJoyProject,
-  flags: DualLensFlags,
-): AnyJoyProject {
+export function applyDualLensFlags(project: AnyJoyProject, flags: DualLensFlags): AnyJoyProject {
   return flags.graphEnabled ? project : projectWithoutDualLens(project);
 }

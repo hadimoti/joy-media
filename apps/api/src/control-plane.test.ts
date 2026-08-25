@@ -12,6 +12,19 @@ describe('local control plane', () => {
     api.helloWorker('w', ['render.export'], [], 100);
     api.enqueue(owner, 'j', 'p', 'render.export', 100);
     expect(api.lease('w', 101, 10)).toMatchObject({ id: 'j', state: 'leased' });
+    api.registerWorkerRenderArtifact(
+      'w',
+      'j',
+      {
+        id: 'artifact-j',
+        outputRef: 'export-j',
+        sha256: 'a'.repeat(64),
+        bytes: 1024,
+        descriptor: { mimeType: 'video/mp4' },
+        location: { kind: 'private-object', ref: 'render-j-aaaaaaaaaaaaaaaa' },
+      },
+      101,
+    );
     api.complete('w', 'j', 102, {
       kind: 'render.export',
       reportRef: 'report-j',
