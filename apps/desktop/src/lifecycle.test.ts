@@ -152,6 +152,76 @@ describe('worker lifecycle', () => {
     });
     await controller.start();
     await expect(controller.dispose()).resolves.toBeUndefined();
+    expect(controller.status().state).toBe('stopping');
+    expect(controller.status().message).toMatch(/waiting for process exit/);
+  });
+
+  it('does not spawn a second Worker while a timed-out shutdown is still pending', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-desktop-shutdown-race-'));
+    const worker = join(directory, 'worker.js');
+    writeFileSync(worker, 'console.log("worker");');
+    const child = fakeChild();
+    let spawnCount = 0;
+    const controller = new WorkerController({
+      config: { apiUrl: 'https://media.example.test' },
+      userDataPath: directory,
+      workerEntry: worker,
+      platform: 'win32',
+      shutdownTimeoutMs: 10,
+      discoverMediaTools: () => ({
+        ready: true,
+        ffmpegPath: 'ffmpeg.exe',
+        ffprobePath: 'ffprobe.exe',
+      }),
+      spawnWorker: ((_file: string, _args: readonly string[], _options: unknown) => {
+        spawnCount += 1;
+        return child as never;
+      }) as never,
+      terminateProcessTree: async () => undefined,
+    });
+
+    await controller.start();
+    await controller.stop();
+    expect(controller.status().state).toBe('stopping');
+    expect((await controller.start()).state).toBe('stopping');
+    expect((await controller.restart()).state).toBe('stopping');
+    expect(spawnCount).toBe(1);
+
+    child.emit('exit', 0, null);
     expect(controller.status().state).toBe('stopped');
+    expect(controller.status().message).toBeUndefined();
+    expect((await controller.start()).state).toBe('starting');
+    expect(spawnCount).toBe(2);
+  });
+
+  it('supports normal stop and restart after the Worker exits', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-desktop-restart-'));
+    const worker = join(directory, 'worker.js');
+    writeFileSync(worker, 'console.log("worker");');
+    const firstChild = fakeChild();
+    const secondChild = fakeChild();
+    const children = [firstChild, secondChild];
+    let spawnCount = 0;
+    const controller = new WorkerController({
+      config: { apiUrl: 'https://media.example.test' },
+      userDataPath: directory,
+      workerEntry: worker,
+      platform: 'win32',
+      discoverMediaTools: () => ({
+        ready: true,
+        ffmpegPath: 'ffmpeg.exe',
+        ffprobePath: 'ffprobe.exe',
+      }),
+      spawnWorker: ((_file: string, _args: readonly string[], _options: unknown) =>
+        children[spawnCount++] as never) as never,
+      terminateProcessTree: async () => {
+        firstChild.emit('exit', 0, null);
+      },
+    });
+
+    await controller.start();
+    const status = await controller.restart();
+    expect(status.state).toBe('starting');
+    expect(spawnCount).toBe(2);
   });
 });

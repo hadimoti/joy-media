@@ -140,12 +140,15 @@ export class WorkerController {
       if (this.#child !== child) return;
       this.#child = undefined;
       if (this.#status.state !== 'stopping')
-        this.update({
-          state: code === 0 ? 'stopped' : 'failed',
-          mediaTools: tools,
-          exitCode: code,
-        });
-      else this.update({ state: 'stopped', mediaTools: tools, exitCode: code });
+        this.update(
+          {
+            state: code === 0 ? 'stopped' : 'failed',
+            mediaTools: tools,
+            exitCode: code,
+          },
+          true,
+        );
+      else this.update({ state: 'stopped', mediaTools: tools, exitCode: code }, true);
     });
     return this.status();
   }
@@ -170,11 +173,13 @@ export class WorkerController {
       new Promise<void>((resolvePromise) => setTimeout(resolvePromise, timeout)),
     ]);
     if (this.#child === child) {
-      this.#child = undefined;
+      // A timeout only bounds this call; it does not prove that the process
+      // tree is gone. Keep the child owned by the controller until its exit is
+      // observed so start/restart cannot create a second Worker alongside it.
       this.update({
-        state: 'stopped',
+        state: 'stopping',
         mediaTools: this.#status.mediaTools,
-        message: 'Worker shutdown timed out; process-tree termination was requested',
+        message: 'Worker shutdown timed out; waiting for process exit before allowing restart',
       });
     }
     return this.status();
@@ -208,8 +213,13 @@ export class WorkerController {
     this.#status = { ...this.#status, logs: [...this.#logs] };
     this.#onStatus?.(this.status());
   }
-  private update(patch: Partial<WorkerStatus>): WorkerStatus {
+  private update(patch: Partial<WorkerStatus>, clearMessage = false): WorkerStatus {
     this.#status = { ...this.#status, ...patch, logs: [...this.#logs] };
+    if (clearMessage) {
+      const statusWithoutMessage = { ...this.#status };
+      delete statusWithoutMessage.message;
+      this.#status = statusWithoutMessage;
+    }
     this.#onStatus?.(this.status());
     return this.status();
   }
