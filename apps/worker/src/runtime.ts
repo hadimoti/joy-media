@@ -225,9 +225,13 @@ export function localAssetSourcesFromEnvironment(
 }
 export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolAvailability {
   const comfyUrl = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim();
+  // Desktop hosts may provide an explicit bundled/owner-installed executable.
+  // Keep the default command names for development and existing tests.
+  const ffmpeg = (process.env.JOY_MEDIA_FFMPEG_PATH ?? '').trim() || 'ffmpeg';
+  const ffprobe = (process.env.JOY_MEDIA_FFPROBE_PATH ?? '').trim() || 'ffprobe';
   return {
-    ffmpeg: run('ffmpeg'),
-    ffprobe: run('ffprobe'),
+    ffmpeg: run(ffmpeg),
+    ffprobe: run(ffprobe),
     // Opt-in: owner PC has ComfyUI listening locally (never the VPS).
     comfy: comfyUrl.length > 0,
     // Opt-in: owner PC has ML denoise tooling installed.

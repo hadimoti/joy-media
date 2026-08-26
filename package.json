@@ -16,6 +16,9 @@
     "test:release": "pnpm test:unit && pnpm test:editor && pnpm test:api && pnpm test:worker",
     "release:gate": "pnpm --filter @joy-media/release gate",
     "release:gate:test": "pnpm --filter @joy-media/release test",
+    "desktop:build": "pnpm --filter @joy-media/desktop build",
+    "desktop:package": "pnpm --filter @joy-media/desktop package:win",
+    "desktop:package:signed": "pnpm --filter @joy-media/desktop package:win && node apps/desktop/scripts/sign-windows-installer.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -31,6 +34,7 @@
     "prettier": "^3.6.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.36.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "esbuild": "^0.28.1"
   }
 }

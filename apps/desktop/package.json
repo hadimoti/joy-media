@@ -1,0 +1,24 @@
+{
+  "name": "@joy-media/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JOY Media Windows Worker Companion",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "pnpm build && electron .",
+    "prepare-runtime": "node scripts/prepare-runtime.mjs",
+    "package:win": "pnpm build && pnpm prepare-runtime && electron-builder --config electron-builder.yml --win nsis",
+    "test": "pnpm exec vitest run --root ../.. apps/desktop/src"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.joymedia.worker-companion",
+    "productName": "JOY Media Worker Companion"
+  }
+}

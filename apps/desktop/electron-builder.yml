@@ -1,0 +1,24 @@
+appId: com.joymedia.worker-companion
+productName: JOY Media Worker Companion
+asar: true
+directories:
+  output: dist-installer
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: .runtime
+    to: worker-runtime
+    filter:
+      - worker.js
+      - worker.js.map
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: JOY-Media-Worker-Companion-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
