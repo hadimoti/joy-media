@@ -86,6 +86,11 @@ const categories: readonly {
   { id: 'model', label: '3D Models' },
 ];
 
+/** Return the only asset kinds supported by the explicit timeline action. */
+export function timelineAssetKind(kind: BrowserAsset['kind']): 'audio' | 'video' | undefined {
+  return kind === 'audio' || kind === 'video' ? kind : undefined;
+}
+
 interface Preview {
   readonly derivativeId: string;
   readonly displayName: string;
@@ -1371,6 +1376,10 @@ export function AssetLibraryPanel({
                     (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
                   const cloudBacked = cloudAssetIds.has(asset.id);
                   const selected = selectedAssetIds.has(asset.id);
+                  // Keep the callback contract honest across the nested click handler. JSX
+                  // narrowing does not carry into closures, and images/models are not valid
+                  // timeline clips for this action.
+                  const insertableTimelineAssetKind = timelineAssetKind(asset.kind);
                   const assetCollection = assetCollectionLabel(assetCollectionId(asset));
                   const detailHint = [
                     asset.kind,
@@ -1436,7 +1445,7 @@ export function AssetLibraryPanel({
                       </span>
                       <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
                       <div className="asset-card-actions">
-                        {(asset.kind === 'video' || asset.kind === 'audio') &&
+                        {insertableTimelineAssetKind !== undefined &&
                           onInsertToTimeline !== undefined && (
                             <button
                               type="button"
@@ -1447,7 +1456,7 @@ export function AssetLibraryPanel({
                               onClick={() =>
                                 onInsertToTimeline({
                                   assetId: asset.id,
-                                  kind: asset.kind,
+                                  kind: insertableTimelineAssetKind,
                                   displayName: asset.displayName,
                                 })
                               }
