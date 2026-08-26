@@ -149,6 +149,8 @@ export interface ProjectDocumentSyncCoordinatorOptions {
     readonly title?: string;
     readonly now: Date;
   }) => string;
+  /** Receives remote failures without exposing them to rendered UI. */
+  readonly onFailure?: (error: unknown) => void;
 }
 
 interface PendingBatch {
@@ -180,6 +182,7 @@ export class ProjectDocumentSyncCoordinator {
   readonly #createRecoveredName: NonNullable<
     ProjectDocumentSyncCoordinatorOptions['createRecoveredName']
   >;
+  readonly #onFailure: ProjectDocumentSyncCoordinatorOptions['onFailure'];
   readonly #listeners = new Set<Listener>();
 
   #document: ProjectDocumentV2;
@@ -203,6 +206,7 @@ export class ProjectDocumentSyncCoordinator {
     this.#scheduler = options.scheduler ?? browserProjectDocumentSyncScheduler;
     this.#createIdempotencyKey = options.createIdempotencyKey ?? defaultIdempotencyKey;
     this.#createRecoveredName = options.createRecoveredName ?? defaultRecoveredName;
+    this.#onFailure = options.onFailure;
   }
 
   getSnapshot(): ProjectDocumentSyncSnapshot {
@@ -359,6 +363,7 @@ export class ProjectDocumentSyncCoordinator {
       return { kind: 'restored', checkpoint, revision, snapshot: this.getSnapshot() };
     } catch (error) {
       if (!isRevisionConflict(error)) {
+        this.#onFailure?.(error);
         this.#retryRestore = attempt;
         this.#state = 'server-unavailable';
         this.#notify();
@@ -408,6 +413,7 @@ export class ProjectDocumentSyncCoordinator {
       return { kind: 'synced', checkpoint, revision, snapshot: this.getSnapshot() };
     } catch (error) {
       if (!isRevisionConflict(error)) {
+        this.#onFailure?.(error);
         this.#retryAppend = attempt;
         this.#state = 'server-unavailable';
         this.#notify();
@@ -471,6 +477,7 @@ export class ProjectDocumentSyncCoordinator {
         snapshot: this.getSnapshot(),
       };
     } catch (recoveryError) {
+      this.#onFailure?.(recoveryError);
       this.#state = 'server-unavailable';
       this.#notify();
       return {

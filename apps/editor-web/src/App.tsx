@@ -367,6 +367,10 @@ import type {
 } from './project-document-sync-coordinator.js';
 import type { ProjectDocumentBrowserJournal } from './project-document-browser-journal.js';
 import {
+  classifyProjectDocumentSyncFailure,
+  type ProjectDocumentSyncFailure,
+} from './project-document-sync-diagnostics.js';
+import {
   prepareCaptionTranscriptionSource,
   selectedOrCurrentTranscriptionCandidate,
   type CaptionTranscriptionAvailability,
@@ -929,6 +933,7 @@ function EditorWorkspace({
   const [documentSyncState, setDocumentSyncState] = useState<
     'local' | 'syncing' | 'server-unavailable' | 'conflict-recovered'
   >('local');
+  const [documentSyncFailure, setDocumentSyncFailure] = useState<ProjectDocumentSyncFailure>();
   const [recoveredCopy, setRecoveredCopy] = useState<ProjectDocumentRecoveredCopy>();
   const [legacyBackupAvailable, setLegacyBackupAvailable] = useState(false);
   const legacyBackupJournalRef = useRef<ProjectDocumentBrowserJournal | null>(null);
@@ -1022,7 +1027,13 @@ function EditorWorkspace({
     };
     const reportFailure = (failure: ProjectDocumentSpineFailure) => {
       if (cancelled) return;
-      setDocumentSyncState(failure.stage === 'remote-queue' ? 'server-unavailable' : 'local');
+      if (failure.stage === 'remote-queue') {
+        setDocumentSyncFailure(classifyProjectDocumentSyncFailure(failure.error));
+        setDocumentSyncState('server-unavailable');
+      } else {
+        setDocumentSyncFailure(undefined);
+        setDocumentSyncState('local');
+      }
       if (failure.stage === 'remote-queue') {
         showToast(
           'Saved locally; cloud sync is unavailable. Your live project remains intact.',
@@ -1202,6 +1213,8 @@ function EditorWorkspace({
           }
           coordinator = new SyncCoordinator({
             initialSnapshot: remoteSnapshot,
+            onFailure: (error) =>
+              reportFailure({ stage: 'remote-queue', error, recoverable: true }),
             remote: {
               loadDocument: (id) => mediaClient.projectDocument(id),
               appendRevision: (id, input) => mediaClient.appendProjectRevision(id, input),
@@ -1218,6 +1231,7 @@ function EditorWorkspace({
           unsubscribeCoordinator = coordinator.subscribe((snapshot) => {
             if (cancelled) return;
             setDocumentSyncState(snapshot.state);
+            if (snapshot.state !== 'server-unavailable') setDocumentSyncFailure(undefined);
             setRecoveredCopy(snapshot.lastRecoveredCopy);
           });
           // The browser creative id and control-plane record id are distinct.
@@ -1232,8 +1246,15 @@ function EditorWorkspace({
           };
         } else {
           if (!cancelled) {
+            setDocumentSyncFailure({
+              reason: bootstrap.reason,
+              recoveryHint: bootstrap.recoveryHint,
+            });
             setDocumentSyncState('server-unavailable');
-            showToast('Saved locally; cloud sync is unavailable.', 'info');
+            showToast(
+              `Saved locally; cloud sync is unavailable. ${bootstrap.recoveryHint}`,
+              'info',
+            );
           }
         }
       }
@@ -1244,6 +1265,7 @@ function EditorWorkspace({
         return;
       }
       if (coordinator === undefined && (joySession.kind !== 'ready' || localRecoveryBlocked)) {
+        setDocumentSyncFailure(undefined);
         setDocumentSyncState('local');
       }
       spine = createProjectDocumentSpine({
@@ -1280,11 +1302,10 @@ function EditorWorkspace({
     void attach().catch((error: unknown) => {
       if (!cancelled) {
         hydrationReadyRef.current = true;
+        const diagnostic = classifyProjectDocumentSyncFailure(error);
+        setDocumentSyncFailure(diagnostic);
         setDocumentSyncState('local');
-        showToast(
-          `Project saved locally only: ${error instanceof Error ? error.message : String(error)}`,
-          'info',
-        );
+        showToast(`Project saved locally only. ${diagnostic.recoveryHint}`, 'info');
       }
     });
     return () => {
@@ -4230,7 +4251,11 @@ function EditorWorkspace({
   const dockviewComponents = dockviewComponentsRef.current;
 
   return (
-    <main data-document-sync-state={documentSyncState}>
+    <main
+      data-document-sync-state={documentSyncState}
+      data-document-sync-reason={documentSyncFailure?.reason}
+      data-document-sync-recovery-hint={documentSyncFailure?.recoveryHint}
+    >
       {legacyBackupAvailable && (
         <p className="local-recovery-banner" role="status" aria-live="polite">
           A local recovery backup is available.
@@ -4241,7 +4266,8 @@ function EditorWorkspace({
       )}
       {documentSyncState === 'server-unavailable' && (
         <p className="export-toast" role="status" aria-live="polite">
-          Saved locally; cloud sync is unavailable.
+          Saved locally; cloud sync is unavailable.{' '}
+          {documentSyncFailure?.recoveryHint ?? 'Try again shortly; your local work is safe.'}
         </p>
       )}
       {documentSyncState === 'conflict-recovered' && recoveredCopy !== undefined && (

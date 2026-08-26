@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ProjectDocumentV2 } from '@joy-media/project-schema';
 import {
   BrowserControlPlaneError,
@@ -111,11 +111,13 @@ describe('ProjectDocumentSyncCoordinator', () => {
         throw new Error('backend offline');
       },
     });
+    const onFailure = vi.fn();
     const coordinator = new ProjectDocumentSyncCoordinator({
       initialSnapshot: remote.snapshot(),
       remote,
       scheduler,
       createIdempotencyKey: nextKey,
+      onFailure,
     });
 
     coordinator.queueLocalDocument(documentAt(1, 'offline copy'));
@@ -128,6 +130,7 @@ describe('ProjectDocumentSyncCoordinator', () => {
       remoteRevision: 1,
       pendingOperations: 1,
     });
+    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ message: 'backend offline' }));
   });
 
   it('returns a recovered copy payload instead of overwriting on stale revision conflict', async () => {
